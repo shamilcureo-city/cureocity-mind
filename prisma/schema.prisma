@@ -503,6 +503,11 @@ model JournalEntry {
   mood       Int?
   recordedAt DateTime
 
+  // When true, the entry is visible in the therapist briefing; when false
+  // (default), it stays private to the client. Added Sprint 8 PR 2 for
+  // the journal share/private toggle the patient PWA exposes.
+  sharedWithTherapist Boolean @default(false)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

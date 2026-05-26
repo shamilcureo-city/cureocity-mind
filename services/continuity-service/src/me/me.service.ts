@@ -13,6 +13,7 @@ import type {
   ExerciseAssignment,
   JournalEntry,
   MoodLog,
+  NextSessionSummary,
   RecordCompletionInput,
 } from '@cureocity/contracts';
 import { PrismaService } from '../prisma/prisma.service';
@@ -131,6 +132,7 @@ export class MeService {
           clientId,
           content: dto.content,
           mood: dto.mood ?? null,
+          sharedWithTherapist: dto.sharedWithTherapist ?? false,
           recordedAt: dto.recordedAt ? new Date(dto.recordedAt) : new Date(),
         },
       });
@@ -145,6 +147,7 @@ export class MeService {
             clientId,
             contentLength: dto.content.length,
             hasMood: dto.mood !== undefined,
+            sharedWithTherapist: dto.sharedWithTherapist ?? false,
           },
         },
         tx,
@@ -152,6 +155,26 @@ export class MeService {
       return row;
     });
     return toJournalEntry(created);
+  }
+
+  async getNextSession(clientId: string): Promise<NextSessionSummary | null> {
+    const now = new Date();
+    const row = await this.prisma.session.findFirst({
+      where: {
+        clientId,
+        status: 'SCHEDULED',
+        scheduledAt: { gte: now },
+      },
+      orderBy: { scheduledAt: 'asc' },
+      include: { psychologist: { select: { fullName: true } } },
+    });
+    if (!row) return null;
+    return {
+      sessionId: row.id,
+      scheduledAt: row.scheduledAt.toISOString(),
+      modality: row.modality,
+      psychologistFullName: row.psychologist.fullName,
+    };
   }
 
   async listJournals(clientId: string, limit = 50): Promise<JournalEntry[]> {
@@ -187,6 +210,7 @@ function toJournalEntry(row: {
   clientId: string;
   content: string;
   mood: number | null;
+  sharedWithTherapist: boolean;
   recordedAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -196,6 +220,7 @@ function toJournalEntry(row: {
     clientId: row.clientId,
     content: row.content,
     mood: row.mood,
+    sharedWithTherapist: row.sharedWithTherapist,
     recordedAt: row.recordedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

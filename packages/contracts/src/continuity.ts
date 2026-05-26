@@ -64,6 +64,8 @@ export const CreateJournalEntryInputSchema = z.object({
   content: z.string().min(1).max(20_000),
   mood: z.number().int().min(0).max(10).optional(),
   recordedAt: IsoDateTimeSchema.optional(),
+  /** Default false — entry stays private to the client. */
+  sharedWithTherapist: z.boolean().optional(),
 });
 export type CreateJournalEntryInput = z.infer<typeof CreateJournalEntryInputSchema>;
 
@@ -72,11 +74,25 @@ export const JournalEntrySchema = z.object({
   clientId: CuidSchema,
   content: z.string(),
   mood: z.number().int().min(0).max(10).nullable(),
+  sharedWithTherapist: z.boolean(),
   recordedAt: IsoDateTimeSchema,
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
 export type JournalEntry = z.infer<typeof JournalEntrySchema>;
+
+// ============================================================================
+// Next-session reminder for the patient PWA home. Returns the next
+// SCHEDULED session for the logged-in client, or null if none. Sprint 8 PR 2.
+// ============================================================================
+
+export const NextSessionSummarySchema = z.object({
+  sessionId: CuidSchema,
+  scheduledAt: IsoDateTimeSchema,
+  modality: z.enum(['CBT', 'EMDR', 'OTHER']),
+  psychologistFullName: z.string(),
+});
+export type NextSessionSummary = z.infer<typeof NextSessionSummarySchema>;
 
 export const AdherenceSummarySchema = z.object({
   clientId: CuidSchema,

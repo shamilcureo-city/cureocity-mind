@@ -11,6 +11,7 @@ function makeDeps(opts: {
   exerciseList?: unknown[];
   moodList?: unknown[];
   journalList?: unknown[];
+  nextSession?: unknown | null;
 }) {
   const update = vi.fn().mockImplementation(async ({ data, where }) => ({
     id: where.id,
@@ -33,6 +34,7 @@ function makeDeps(opts: {
     content: data.content ?? null,
     mood: data.mood ?? null,
     notes: data.notes ?? null,
+    sharedWithTherapist: data.sharedWithTherapist ?? false,
     createdAt: new Date(),
     updatedAt: new Date(),
   }));
@@ -49,14 +51,18 @@ function makeDeps(opts: {
     journalEntry: { create },
   };
   const transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(txClient));
+  const sessionFindFirst = vi
+    .fn()
+    .mockResolvedValue(opts.nextSession === undefined ? null : opts.nextSession);
   const prisma = {
     exerciseAssignment: { findUnique, findMany },
     moodLog: { findMany: vi.fn().mockResolvedValue(opts.moodList ?? []) },
     journalEntry: { findMany: vi.fn().mockResolvedValue(opts.journalList ?? []) },
+    session: { findFirst: sessionFindFirst },
     $transaction: transaction,
   } as unknown as PrismaService;
   const audit = { log: vi.fn() } as unknown as AuditService;
-  return { prisma, audit, update, create, findUnique };
+  return { prisma, audit, update, create, findUnique, sessionFindFirst };
 }
 
 describe('MeService.recordCompletion', () => {
@@ -143,10 +149,73 @@ describe('MeService.createJournal', () => {
     );
     expect(res.content).toMatch(/thought record/);
     expect(res.mood).toBe(4);
+    expect(res.sharedWithTherapist).toBe(false);
     expect(deps.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({ actorType: 'CLIENT', action: 'JOURNAL_ENTRY_CREATED' }),
       expect.anything(),
     );
+  });
+
+  it('honours sharedWithTherapist when set + propagates to audit metadata', async () => {
+    const deps = makeDeps({});
+    const svc = new MeService(deps.prisma, deps.audit);
+    const res = await svc.createJournal(
+      CLIENT,
+      { content: 'Open to discuss next time', sharedWithTherapist: true },
+      {},
+    );
+    expect(res.sharedWithTherapist).toBe(true);
+    expect(deps.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ sharedWithTherapist: true }),
+      }),
+    );
+    expect(deps.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ sharedWithTherapist: true }),
+      }),
+      expect.anything(),
+    );
+  });
+});
+
+describe('MeService.getNextSession', () => {
+  it('returns the next SCHEDULED session with psychologist name', async () => {
+    const scheduledAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const deps = makeDeps({
+      nextSession: {
+        id: 'csess11111111111111111111',
+        scheduledAt,
+        modality: 'CBT',
+        psychologist: { fullName: 'Dr. Priya Menon' },
+      },
+    });
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    const res = await svc.getNextSession(CLIENT);
+
+    expect(res).not.toBeNull();
+    expect(res?.sessionId).toBe('csess11111111111111111111');
+    expect(res?.modality).toBe('CBT');
+    expect(res?.psychologistFullName).toBe('Dr. Priya Menon');
+    expect(deps.sessionFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          clientId: CLIENT,
+          status: 'SCHEDULED',
+        }),
+        orderBy: { scheduledAt: 'asc' },
+      }),
+    );
+  });
+
+  it('returns null when no scheduled session exists', async () => {
+    const deps = makeDeps({ nextSession: null });
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    const res = await svc.getNextSession(CLIENT);
+
+    expect(res).toBeNull();
   });
 });
 

@@ -75,4 +75,9 @@ export class MeController {
     const n = limit ? Number(limit) : undefined;
     return this.service.listJournals(client.clientId, n);
   }
+
+  @Get('next-session')
+  async nextSession(@CurrentClient() client: AuthenticatedClient) {
+    return this.service.getNextSession(client.clientId);
+  }
 }
