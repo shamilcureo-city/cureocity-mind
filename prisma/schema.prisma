@@ -54,6 +54,7 @@ model Psychologist {
   auditLogs     AuditLog[]
   consentsTaken Consent[]
   modalityStates ModalityState[]
+  exerciseAssignments ExerciseAssignment[]
 
   @@index([status])
   @@map("psychologists")
@@ -75,6 +76,11 @@ model Client {
   id             String @id @default(cuid())
   psychologistId String
 
+  // Firebase UID for the CLIENT user (separate from Psychologist.firebaseUid).
+  // Set when the client claims their account via QR/link (Sprint 8). Until then
+  // null, and the patient-app side of continuity endpoints is unreachable.
+  clientFirebaseUid String? @unique
+
   // PII — slated for pgcrypto + KMS encryption in Sprint 9 (gap G10).
   // Stored as plaintext in V1 dev; production migration adds encrypted columns.
   fullName     String
@@ -92,10 +98,13 @@ model Client {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
-  consents     Consent[]
-  sessions     Session[]
-  modalityState ModalityState?
+  psychologist        Psychologist         @relation(fields: [psychologistId], references: [id])
+  consents            Consent[]
+  sessions            Session[]
+  modalityState       ModalityState?
+  exerciseAssignments ExerciseAssignment[]
+  moodLogs            MoodLog[]
+  journalEntries      JournalEntry[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -356,6 +365,85 @@ model TherapyNote {
 }
 
 // ============================================================================
+// ExerciseAssignment / MoodLog / JournalEntry — continuity-service tables.
+// Sprint 5 PR 1.
+// ============================================================================
+
+enum ExerciseAssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+  EXPIRED
+}
+
+model ExerciseAssignment {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  // Catalog id like 'cbt_thought_record_5col' or 'emdr_safe_place_installation'.
+  // Validated against @cureocity/clinical at the service layer.
+  exerciseId String
+
+  assignedAt DateTime @default(now())
+  dueAt      DateTime?
+
+  status      ExerciseAssignmentStatus @default(PENDING)
+  completedAt DateTime?
+  // Structured per the exercise's responseSchema.
+  response Json?
+
+  // Free-text note from therapist when assigning.
+  therapistNote String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@index([clientId, status])
+  @@index([psychologistId, assignedAt])
+  @@index([clientId, exerciseId, assignedAt])
+  @@map("exercise_assignments")
+}
+
+model MoodLog {
+  id         String   @id @default(cuid())
+  clientId   String
+  // 0..10 valence-style mood rating.
+  rating     Int
+  notes      String?  @db.Text
+  recordedAt DateTime
+
+  createdAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, recordedAt])
+  @@map("mood_logs")
+}
+
+model JournalEntry {
+  id         String   @id @default(cuid())
+  clientId   String
+  // PII — encrypted in Sprint 9 (gap G10).
+  content    String   @db.Text
+  // Optional 0..10 mood tag.
+  mood       Int?
+  recordedAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, recordedAt])
+  @@map("journal_entries")
+}
+
+// ============================================================================
 // ModalityState — one active workflow per client. Tracks current phase in the
 // modality state machine (CBT 5-phase, EMDR 8-phase, ...) plus opaque
 // modality-specific state validated by packages/clinical. Sprint 3 PR 1.
@@ -521,6 +609,16 @@ enum AuditAction {
   // Affect engine (affect-engine-service, Sprint 4)
   AFFECT_BASELINE_VIEWED
   AFFECT_TREND_VIEWED
+
+  // Continuity (continuity-service, Sprint 5)
+  EXERCISE_ASSIGNED
+  EXERCISE_COMPLETION_RECORDED
+  EXERCISE_SKIPPED
+  MOOD_LOGGED
+  JOURNAL_ENTRY_CREATED
+  JOURNAL_ENTRY_UPDATED
+  CLIENT_FIREBASE_LINKED
+  AUDIO_RETENTION_PURGED
 }
 
 enum AuditActorType {

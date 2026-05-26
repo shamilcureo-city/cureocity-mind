@@ -10,3 +10,4 @@ export * from './workflow';
 export * from './prescription';
 export * from './emdr';
 export * from './affect';
+export * from './continuity';
