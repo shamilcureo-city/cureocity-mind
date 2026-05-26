@@ -26,6 +26,9 @@ export const AuditActionSchema = z.enum([
   'WORKFLOW_PHASE_TRANSITIONED',
   'WORKFLOW_COMPLETED',
   'EXERCISE_PRESCRIBED',
+  'EMDR_PREPARATION_COMPLETED',
+  'EMDR_TARGET_ADDED',
+  'EMDR_TARGET_UPDATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

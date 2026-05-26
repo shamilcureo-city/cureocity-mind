@@ -388,6 +388,7 @@ model ModalityState {
   client       Client               @relation(fields: [clientId], references: [id])
   psychologist Psychologist         @relation(fields: [psychologistId], references: [id])
   transitions  ModalityTransition[]
+  emdrTargets  EmdrTarget[]
 
   @@index([psychologistId, modality])
   @@map("modality_states")
@@ -417,6 +418,53 @@ model ModalityTransition {
 
   @@index([stateId, occurredAt])
   @@map("modality_transitions")
+}
+
+// ============================================================================
+// EmdrTarget — one target memory inside an EMDR workflow. Sprint 4 PR 2.
+// Stored separately from ModalityState.state because SUDS/VOC trend over
+// time is queryable and indexable per-target.
+// ============================================================================
+
+enum EmdrTargetStatus {
+  identified
+  assessed
+  in_desensitization
+  desensitized
+  installed
+  body_scan_clear
+  closed
+}
+
+model EmdrTarget {
+  id      String @id @default(cuid())
+  stateId String
+
+  label             String
+  image             String  @db.Text
+  negativeCognition String  @db.Text
+  positiveCognition String  @db.Text
+
+  vocStart    Int
+  vocCurrent  Int?
+  sudsStart   Int
+  sudsCurrent Int?
+
+  emotion      String
+  bodyLocation String
+
+  status             EmdrTargetStatus @default(identified)
+  bilateralSetsTotal Int              @default(0)
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  state ModalityState @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@index([stateId, status])
+  @@map("emdr_targets")
 }
 
 // ============================================================================
@@ -464,6 +512,11 @@ enum AuditAction {
   WORKFLOW_PHASE_TRANSITIONED
   WORKFLOW_COMPLETED
   EXERCISE_PRESCRIBED
+
+  // EMDR (modality-workflow-service, Sprint 4)
+  EMDR_PREPARATION_COMPLETED
+  EMDR_TARGET_ADDED
+  EMDR_TARGET_UPDATED
 }
 
 enum AuditActorType {

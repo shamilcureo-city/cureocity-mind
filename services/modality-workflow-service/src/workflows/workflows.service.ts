@@ -20,6 +20,7 @@ import type {
 } from '@cureocity/contracts';
 import {
   checkCbtTransition,
+  checkEmdrTransition,
   evaluateCbtAdvancement,
   recommendCbtExercises,
   type RecentNote,
@@ -136,8 +137,19 @@ export class WorkflowsService {
       if (!check.allowed) {
         throw new BadRequestException(`Invalid CBT transition: ${check.reason}`);
       }
+    } else if (state.modality === 'EMDR') {
+      const stateObj = (state.state ?? {}) as Record<string, unknown>;
+      const preparationComplete = stateObj['preparationComplete'] === true;
+      const targetCount = await this.prisma.emdrTarget.count({ where: { stateId: workflowId } });
+      const check = checkEmdrTransition(state.currentPhase, dto.toPhase, {
+        preparationComplete,
+        hasTargets: targetCount > 0,
+      });
+      if (!check.allowed) {
+        throw new BadRequestException(`Invalid EMDR transition: ${check.reason}`);
+      }
     }
-    // EMDR machine ships in Sprint 4; other modalities skip validation.
+    // Other modalities skip validation.
 
     const result = await this.prisma.$transaction(async (tx) => {
       const transition = await tx.modalityTransition.create({
