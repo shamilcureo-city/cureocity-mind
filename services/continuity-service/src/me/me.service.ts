@@ -37,6 +37,14 @@ export class MeService {
     return rows.map(toExerciseAssignment);
   }
 
+  async getExercise(clientId: string, assignmentId: string): Promise<ExerciseAssignment> {
+    const row = await this.prisma.exerciseAssignment.findUnique({ where: { id: assignmentId } });
+    if (!row || row.clientId !== clientId) {
+      throw new NotFoundException('Assignment not found');
+    }
+    return toExerciseAssignment(row);
+  }
+
   async recordCompletion(
     clientId: string,
     assignmentId: string,

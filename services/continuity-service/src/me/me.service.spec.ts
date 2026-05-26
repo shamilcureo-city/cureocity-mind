@@ -179,6 +179,57 @@ describe('MeService.createJournal', () => {
   });
 });
 
+describe('MeService.getExercise', () => {
+  function fullAssignmentRow(overrides: { clientId: string; exerciseId: string }) {
+    return {
+      id: 'a1',
+      clientId: overrides.clientId,
+      psychologistId: 'p',
+      exerciseId: overrides.exerciseId,
+      assignedAt: new Date('2026-05-20T10:00:00Z'),
+      dueAt: null,
+      status: 'PENDING' as const,
+      completedAt: null,
+      response: null,
+      therapistNote: null,
+      createdAt: new Date('2026-05-20T10:00:00Z'),
+      updatedAt: new Date('2026-05-20T10:00:00Z'),
+    };
+  }
+
+  it('returns the assignment when it belongs to the client', async () => {
+    const row = fullAssignmentRow({ clientId: CLIENT, exerciseId: 'cbt_thought_record_5col' });
+    const deps = makeDeps({});
+    (deps.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(row);
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    const res = await svc.getExercise(CLIENT, 'a1');
+
+    expect(res.id).toBe('a1');
+    expect(res.exerciseId).toBe('cbt_thought_record_5col');
+  });
+
+  it('rejects 404 for an assignment belonging to another client', async () => {
+    const row = fullAssignmentRow({
+      clientId: 'other_client',
+      exerciseId: 'cbt_thought_record_5col',
+    });
+    const deps = makeDeps({});
+    (deps.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(row);
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    await expect(svc.getExercise(CLIENT, 'a1')).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('rejects 404 when the assignment does not exist', async () => {
+    const deps = makeDeps({});
+    (deps.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    await expect(svc.getExercise(CLIENT, 'nope')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
 describe('MeService.getNextSession', () => {
   it('returns the next SCHEDULED session with psychologist name', async () => {
     const scheduledAt = new Date(Date.now() + 24 * 60 * 60 * 1000);

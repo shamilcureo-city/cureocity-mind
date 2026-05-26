@@ -33,6 +33,11 @@ export class MeController {
     return this.service.listExercises(client.clientId);
   }
 
+  @Get('exercises/:id')
+  async exercise(@CurrentClient() client: AuthenticatedClient, @Param('id') id: string) {
+    return this.service.getExercise(client.clientId, id);
+  }
+
   @Post('exercises/:id/completions')
   @HttpCode(200)
   async complete(

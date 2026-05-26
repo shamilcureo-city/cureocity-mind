@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { EMDR_EXERCISE_CATALOG, getEmdrExerciseById } from './emdr-catalog';
+import { EMDR_EXERCISE_CATALOG, getEmdrExerciseById, getExerciseById } from './emdr-catalog';
 
 describe('EMDR_EXERCISE_CATALOG', () => {
   it('has exactly 20 entries', () => {
@@ -28,5 +28,11 @@ describe('EMDR_EXERCISE_CATALOG', () => {
   it('getEmdrExerciseById finds by id; throws on miss', () => {
     expect(getEmdrExerciseById('emdr_safe_place_installation').title).toMatch(/safe/i);
     expect(() => getEmdrExerciseById('nope')).toThrow(/Unknown EMDR/);
+  });
+
+  it('getExerciseById resolves from BOTH catalogs', () => {
+    expect(getExerciseById('emdr_safe_place_installation').title).toMatch(/safe/i);
+    expect(getExerciseById('cbt_thought_record_5col').title).toMatch(/thought record/i);
+    expect(() => getExerciseById('mystery_box')).toThrow(/Unknown exercise/);
   });
 });

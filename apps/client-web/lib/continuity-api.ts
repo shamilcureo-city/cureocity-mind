@@ -40,6 +40,12 @@ export const ContinuityApi = {
   exercises(idToken: string): Promise<ExerciseAssignment[]> {
     return http<ExerciseAssignment[]>('/me/exercises', { method: 'GET', idToken });
   },
+  exercise(idToken: string, assignmentId: string): Promise<ExerciseAssignment> {
+    return http<ExerciseAssignment>(`/me/exercises/${encodeURIComponent(assignmentId)}`, {
+      method: 'GET',
+      idToken,
+    });
+  },
   recordCompletion(
     idToken: string,
     assignmentId: string,

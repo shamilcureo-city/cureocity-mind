@@ -1,4 +1,5 @@
 import type { CbtExerciseDefinition } from './types';
+import { CBT_EXERCISE_CATALOG } from './catalog';
 
 /**
  * 20 EMDR exercises. Same shape as CBT catalog so the prescription engine
@@ -300,4 +301,17 @@ export function getEmdrExerciseById(id: string): CbtExerciseDefinition {
   const found = EMDR_EXERCISE_CATALOG.find((e) => e.id === id);
   if (!found) throw new Error(`Unknown EMDR exercise id: ${id}`);
   return found;
+}
+
+/**
+ * Resolves an exerciseId to its catalog entry across BOTH the CBT and
+ * EMDR catalogs. Useful for the patient PWA's renderer dispatcher
+ * where we don't know the modality at the URL level. Sprint 8 PR 3.
+ */
+export function getExerciseById(id: string): CbtExerciseDefinition {
+  const fromCbt = CBT_EXERCISE_CATALOG.find((e) => e.id === id);
+  if (fromCbt) return fromCbt;
+  const fromEmdr = EMDR_EXERCISE_CATALOG.find((e) => e.id === id);
+  if (fromEmdr) return fromEmdr;
+  throw new Error(`Unknown exercise id: ${id}`);
 }
