@@ -49,7 +49,10 @@
       "@prisma/client",
       "prisma",
       "@prisma/engines",
-      "esbuild"
+      "esbuild",
+      "@firebase/util",
+      "@nestjs/core",
+      "protobufjs"
     ]
   }
 }

@@ -44,14 +44,30 @@ jobs:
           restore-keys: |
             nx-${{ runner.os }}-
 
+      - name: Generate Prisma Client
+        env:
+          DATABASE_URL: postgresql://x:x@x:5432/x
+        run: pnpm db:generate
+
+      - name: Validate Prisma schema
+        env:
+          DATABASE_URL: postgresql://x:x@x:5432/x
+        run: pnpm db:validate
+
       - name: Check formatting
         run: pnpm format:check
 
       - name: Lint
+        env:
+          NX_DAEMON: false
         run: pnpm lint
 
       - name: Typecheck
+        env:
+          NX_DAEMON: false
         run: pnpm typecheck
 
       - name: Test
+        env:
+          NX_DAEMON: false
         run: pnpm test
