@@ -116,3 +116,27 @@ export const AdherenceSummarySchema = z.object({
   computedAt: IsoDateTimeSchema,
 });
 export type AdherenceSummary = z.infer<typeof AdherenceSummarySchema>;
+
+// ============================================================================
+// Push subscriptions — patient PWA registers a Web Push endpoint after
+// the user grants notification permission. Sprint 8 PR 4.
+// ============================================================================
+
+export const RegisterPushSubscriptionInputSchema = z.object({
+  endpoint: z.string().url().max(2048),
+  keys: z.object({
+    p256dh: z.string().min(1).max(256),
+    auth: z.string().min(1).max(256),
+  }),
+  userAgent: z.string().max(512).optional(),
+});
+export type RegisterPushSubscriptionInput = z.infer<typeof RegisterPushSubscriptionInputSchema>;
+
+export const PushSubscriptionRecordSchema = z.object({
+  id: CuidSchema,
+  endpoint: z.string(),
+  userAgent: z.string().nullable(),
+  revokedAt: IsoDateTimeSchema.nullable(),
+  createdAt: IsoDateTimeSchema,
+});
+export type PushSubscriptionRecord = z.infer<typeof PushSubscriptionRecordSchema>;

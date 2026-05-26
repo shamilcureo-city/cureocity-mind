@@ -7,6 +7,8 @@ import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { RendererModule } from './renderer/renderer.module';
 import { PdfsModule } from './pdfs/pdfs.module';
+import { DeliveryModule } from './delivery/delivery.module';
+import { WhatsAppModule } from './delivery/whatsapp.module';
 
 @Module({
   imports: [
@@ -17,6 +19,8 @@ import { PdfsModule } from './pdfs/pdfs.module';
     HealthModule,
     RendererModule,
     PdfsModule,
+    DeliveryModule,
+    WhatsAppModule,
   ],
 })
 export class AppModule {}

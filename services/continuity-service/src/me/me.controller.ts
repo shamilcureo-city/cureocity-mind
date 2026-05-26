@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -14,9 +15,11 @@ import {
   CreateJournalEntryInputSchema,
   CreateMoodLogInputSchema,
   RecordCompletionInputSchema,
+  RegisterPushSubscriptionInputSchema,
   type CreateJournalEntryInput,
   type CreateMoodLogInput,
   type RecordCompletionInput,
+  type RegisterPushSubscriptionInput,
 } from '@cureocity/contracts';
 import { ZodValidationPipe } from '../common/zod-validation.pipe';
 import { auditMetadataFromRequest } from '../common/request-context';
@@ -84,5 +87,30 @@ export class MeController {
   @Get('next-session')
   async nextSession(@CurrentClient() client: AuthenticatedClient) {
     return this.service.getNextSession(client.clientId);
+  }
+
+  @Post('push-subscriptions')
+  @HttpCode(201)
+  async registerPush(
+    @CurrentClient() client: AuthenticatedClient,
+    @Body(new ZodValidationPipe(RegisterPushSubscriptionInputSchema))
+    dto: RegisterPushSubscriptionInput,
+    @Req() req: Request,
+  ) {
+    return this.service.registerPushSubscription(
+      client.clientId,
+      dto,
+      auditMetadataFromRequest(req),
+    );
+  }
+
+  @Delete('push-subscriptions/:id')
+  @HttpCode(204)
+  async revokePush(
+    @CurrentClient() client: AuthenticatedClient,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ): Promise<void> {
+    await this.service.revokePushSubscription(client.clientId, id, auditMetadataFromRequest(req));
   }
 }

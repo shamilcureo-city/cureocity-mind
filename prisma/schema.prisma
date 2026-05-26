@@ -106,10 +106,48 @@ model Client {
   moodLogs            MoodLog[]
   journalEntries      JournalEntry[]
   claimTokens         ClientClaimToken[]
+  pushSubscriptions   ClientPushSubscription[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
   @@map("clients")
+}
+
+// ============================================================================
+// ClientPushSubscription — one row per (client, device) Web Push
+// endpoint. The patient PWA POSTs a fresh subscription when the user
+// grants notification permission; we use it to fan-out adherence
+// reminders. Sprint 8 PR 4.
+// ============================================================================
+
+model ClientPushSubscription {
+  id       String @id @default(cuid())
+  clientId String
+
+  // The endpoint URL is unique across all push services (Mozilla,
+  // Google, Apple). Use it as the natural key for upserts on re-grant.
+  endpoint String @unique
+
+  /// base64url p256dh key
+  p256dh String
+  /// base64url auth secret
+  auth   String
+
+  /// Best-effort device label from the UA at subscribe time.
+  userAgent String?
+
+  /// 410 (Gone) / 404 from the push service marks the row revoked;
+  /// scheduler skips revoked rows. Re-subscribing on the same endpoint
+  /// resets revokedAt to null via upsert.
+  revokedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, revokedAt])
+  @@map("client_push_subscriptions")
 }
 
 // ============================================================================
@@ -697,6 +735,12 @@ enum AuditAction {
   // Client claim flow (patient-model-service, Sprint 8)
   CLIENT_CLAIM_TOKEN_ISSUED
   CLIENT_CLAIM_TOKEN_REDEEMED
+
+  // Notifications (Sprint 8 PR 4)
+  PUSH_SUBSCRIPTION_REGISTERED
+  PUSH_SUBSCRIPTION_REVOKED
+  NOTIFICATION_DISPATCHED
+  TREATMENT_PLAN_WHATSAPP_SENT
 }
 
 enum AuditActorType {

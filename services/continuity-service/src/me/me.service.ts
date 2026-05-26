@@ -14,7 +14,9 @@ import type {
   JournalEntry,
   MoodLog,
   NextSessionSummary,
+  PushSubscriptionRecord,
   RecordCompletionInput,
+  RegisterPushSubscriptionInput,
 } from '@cureocity/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
@@ -163,6 +165,87 @@ export class MeService {
       return row;
     });
     return toJournalEntry(created);
+  }
+
+  async registerPushSubscription(
+    clientId: string,
+    dto: RegisterPushSubscriptionInput,
+    auditMeta: AuditMetadata,
+  ): Promise<PushSubscriptionRecord> {
+    const row = await this.prisma.$transaction(async (tx) => {
+      // Upsert by endpoint: re-subscribing on the same endpoint
+      // rotates keys + clears any prior revoke.
+      const upserted = await tx.clientPushSubscription.upsert({
+        where: { endpoint: dto.endpoint },
+        create: {
+          clientId,
+          endpoint: dto.endpoint,
+          p256dh: dto.keys.p256dh,
+          auth: dto.keys.auth,
+          userAgent: dto.userAgent ?? null,
+        },
+        update: {
+          clientId,
+          p256dh: dto.keys.p256dh,
+          auth: dto.keys.auth,
+          userAgent: dto.userAgent ?? null,
+          revokedAt: null,
+        },
+      });
+      await this.audit.log(
+        {
+          actorType: 'CLIENT',
+          action: 'PUSH_SUBSCRIPTION_REGISTERED',
+          targetType: 'ClientPushSubscription',
+          targetId: upserted.id,
+          metadata: {
+            ...auditMeta,
+            clientId,
+            ...(dto.userAgent !== undefined && { userAgent: dto.userAgent }),
+          },
+        },
+        tx,
+      );
+      return upserted;
+    });
+
+    return {
+      id: row.id,
+      endpoint: row.endpoint,
+      userAgent: row.userAgent,
+      revokedAt: row.revokedAt ? row.revokedAt.toISOString() : null,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  async revokePushSubscription(
+    clientId: string,
+    subscriptionId: string,
+    auditMeta: AuditMetadata,
+  ): Promise<void> {
+    const row = await this.prisma.clientPushSubscription.findUnique({
+      where: { id: subscriptionId },
+      select: { id: true, clientId: true },
+    });
+    if (!row || row.clientId !== clientId) {
+      throw new NotFoundException('Subscription not found');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.clientPushSubscription.update({
+        where: { id: subscriptionId },
+        data: { revokedAt: new Date() },
+      });
+      await this.audit.log(
+        {
+          actorType: 'CLIENT',
+          action: 'PUSH_SUBSCRIPTION_REVOKED',
+          targetType: 'ClientPushSubscription',
+          targetId: subscriptionId,
+          metadata: { ...auditMeta, clientId },
+        },
+        tx,
+      );
+    });
   }
 
   async getNextSession(clientId: string): Promise<NextSessionSummary | null> {

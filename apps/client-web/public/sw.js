@@ -58,7 +58,46 @@ self.addEventListener('fetch', (event) => {
   );
 });
 
-// Sprint 8 PR 4 will fill in 'push' to surface FCM web push notifications.
 self.addEventListener('message', (event) => {
   if (event.data === 'ping') event.source && event.source.postMessage('pong');
+});
+
+/**
+ * Push handler — payload format matches PushPayload in
+ * @cureocity/notifications (title, body, url, tag).
+ */
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let payload = {};
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: 'Cureocity Mind', body: event.data.text() || 'Reminder' };
+  }
+  const { title = 'Cureocity Mind', body = '', url = '/', tag } = payload;
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      tag,
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      data: { url },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.navigate(target);
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(target);
+    }),
+  );
 });

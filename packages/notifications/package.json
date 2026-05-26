@@ -1,0 +1,23 @@
+{
+  "name": "@cureocity/notifications",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pluggable notification backends: Web Push, FCM, SendGrid, Twilio, WATI",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src --max-warnings 0 --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/web-push": "^3.6.4",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

@@ -10,6 +10,8 @@ import type {
 } from '@cureocity/contracts';
 import { useAuthState } from '@/lib/auth';
 import { ContinuityApi } from '@/lib/continuity-api';
+import { ensurePushSubscription } from '@/lib/push';
+import { PwaInstallPrompt } from '@/lib/pwa-install';
 
 interface HomeData {
   exercises: ExerciseAssignment[];
@@ -49,6 +51,11 @@ export default function HomePage() {
         if (!cancelled) {
           setData({ exercises, recentMoods, recentJournals, nextSession });
         }
+        // Fire-and-forget push registration. Permission prompt is
+        // shown on first call; subsequent calls are idempotent
+        // (subscription upsert server-side). Don't await — never block
+        // the home render on the notification dialog.
+        void ensurePushSubscription(auth.user);
       } catch (e) {
         if (!cancelled) setError((e as Error).message);
       }
@@ -79,6 +86,7 @@ export default function HomePage() {
 
   return (
     <Shell>
+      <PwaInstallPrompt />
       {data?.nextSession && <NextSessionCard session={data.nextSession} />}
 
       <section className="mb-6">

@@ -54,15 +54,59 @@ function makeDeps(opts: {
   const sessionFindFirst = vi
     .fn()
     .mockResolvedValue(opts.nextSession === undefined ? null : opts.nextSession);
+  const pushUpsert = vi
+    .fn()
+    .mockImplementation(
+      async ({
+        create,
+        update,
+        where,
+      }: {
+        create: Record<string, unknown>;
+        update: Record<string, unknown>;
+        where: { endpoint: string };
+      }) => ({
+        id: 'cpush111111111111111111111',
+        endpoint: where.endpoint,
+        ...create,
+        ...update,
+        revokedAt: null,
+        createdAt: new Date('2026-05-26T00:00:00Z'),
+        updatedAt: new Date('2026-05-26T00:00:00Z'),
+      }),
+    );
+  const pushUpdate = vi.fn();
+  const pushFindUnique = vi.fn();
   const prisma = {
     exerciseAssignment: { findUnique, findMany },
     moodLog: { findMany: vi.fn().mockResolvedValue(opts.moodList ?? []) },
     journalEntry: { findMany: vi.fn().mockResolvedValue(opts.journalList ?? []) },
     session: { findFirst: sessionFindFirst },
+    clientPushSubscription: {
+      upsert: pushUpsert,
+      update: pushUpdate,
+      findUnique: pushFindUnique,
+    },
     $transaction: transaction,
   } as unknown as PrismaService;
+  // The tx client shares the same upsert + update so tests assert
+  // through the same vi.fn.
+  (txClient as unknown as Record<string, unknown>)['clientPushSubscription'] = {
+    upsert: pushUpsert,
+    update: pushUpdate,
+  };
   const audit = { log: vi.fn() } as unknown as AuditService;
-  return { prisma, audit, update, create, findUnique, sessionFindFirst };
+  return {
+    prisma,
+    audit,
+    update,
+    create,
+    findUnique,
+    sessionFindFirst,
+    pushUpsert,
+    pushUpdate,
+    pushFindUnique,
+  };
 }
 
 describe('MeService.recordCompletion', () => {
@@ -227,6 +271,77 @@ describe('MeService.getExercise', () => {
     const svc = new MeService(deps.prisma, deps.audit);
 
     await expect(svc.getExercise(CLIENT, 'nope')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('MeService.registerPushSubscription', () => {
+  it('upserts the subscription and writes PUSH_SUBSCRIPTION_REGISTERED audit', async () => {
+    const deps = makeDeps({});
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    const res = await svc.registerPushSubscription(
+      CLIENT,
+      {
+        endpoint: 'https://fcm.googleapis.com/abc',
+        keys: { p256dh: 'p', auth: 'a' },
+        userAgent: 'iPhone',
+      },
+      { requestId: 'r1' },
+    );
+
+    expect(res.endpoint).toBe('https://fcm.googleapis.com/abc');
+    expect(res.userAgent).toBe('iPhone');
+    expect(deps.pushUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { endpoint: 'https://fcm.googleapis.com/abc' },
+        create: expect.objectContaining({
+          clientId: CLIENT,
+          p256dh: 'p',
+          auth: 'a',
+        }),
+        update: expect.objectContaining({ revokedAt: null }),
+      }),
+    );
+    expect(deps.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PUSH_SUBSCRIPTION_REGISTERED' }),
+      expect.anything(),
+    );
+  });
+});
+
+describe('MeService.revokePushSubscription', () => {
+  it('marks the row revoked and audits', async () => {
+    const deps = makeDeps({});
+    (deps.pushFindUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 'cpush111111111111111111111',
+      clientId: CLIENT,
+    });
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    await svc.revokePushSubscription(CLIENT, 'cpush111111111111111111111', {});
+
+    expect(deps.pushUpdate).toHaveBeenCalledWith({
+      where: { id: 'cpush111111111111111111111' },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(deps.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'PUSH_SUBSCRIPTION_REVOKED' }),
+      expect.anything(),
+    );
+  });
+
+  it('rejects 404 for cross-client revoke', async () => {
+    const deps = makeDeps({});
+    (deps.pushFindUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: 'cpush111111111111111111111',
+      clientId: 'someone-else',
+    });
+    const svc = new MeService(deps.prisma, deps.audit);
+
+    await expect(
+      svc.revokePushSubscription(CLIENT, 'cpush111111111111111111111', {}),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(deps.pushUpdate).not.toHaveBeenCalled();
   });
 });
 
