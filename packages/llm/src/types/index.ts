@@ -1,31 +1,34 @@
 import { z } from 'zod';
-import { SessionModalitySchema } from '@cureocity/contracts';
+import {
+  AffectFeatureSchema,
+  type SessionModality,
+  SpeakerSegmentSchema,
+  type SpeakerSegment,
+  TherapyNoteV1Schema,
+} from '@cureocity/contracts';
+
+// Re-export the cross-service schemas so existing imports from
+// @cureocity/llm keep working.
+export {
+  SpeakerSchema,
+  SpeakerSegmentSchema,
+  AffectFeatureSchema,
+  RiskSeveritySchema,
+  TherapyNoteV1Schema,
+} from '@cureocity/contracts';
+export type {
+  Speaker,
+  SpeakerSegment,
+  AffectFeature,
+  RiskSeverity,
+  TherapyNoteV1,
+} from '@cureocity/contracts';
 
 // ============================================================================
 // Pass 1: Transcribe + analyse. Audio → transcript + speaker segments + affect.
 // Runs in asia-south1 (Gemini 1.5 Flash) — keeps raw audio inside India for
 // DPDP residency. See execution plan § 6.1.
 // ============================================================================
-
-export const SpeakerSchema = z.enum(['therapist', 'client', 'unknown']);
-export type Speaker = z.infer<typeof SpeakerSchema>;
-
-export const SpeakerSegmentSchema = z.object({
-  speaker: SpeakerSchema,
-  startMs: z.number().int().nonnegative(),
-  endMs: z.number().int().positive(),
-  text: z.string(),
-});
-export type SpeakerSegment = z.infer<typeof SpeakerSegmentSchema>;
-
-export const AffectFeatureSchema = z.object({
-  startMs: z.number().int().nonnegative(),
-  endMs: z.number().int().positive(),
-  valence: z.number().min(-1).max(1),
-  arousal: z.number().min(0).max(1),
-  notes: z.string().optional(),
-});
-export type AffectFeature = z.infer<typeof AffectFeatureSchema>;
 
 export const Pass1OutputSchema = z.object({
   transcript: z.string(),
@@ -49,46 +52,14 @@ export interface Pass1Input {
 // only de-identified transcript text — cross-border consent required).
 // ============================================================================
 
-export const RiskSeveritySchema = z.enum(['none', 'low', 'medium', 'high', 'critical']);
-export type RiskSeverity = z.infer<typeof RiskSeveritySchema>;
-
-export const TherapyNoteV1Schema = z.object({
-  version: z.literal('V1'),
-  modality: SessionModalitySchema,
-  /** SOAP-ish — clinician can edit before signing. */
-  subjective: z.string().min(1),
-  objective: z.string().min(1),
-  assessment: z.string().min(1),
-  plan: z.string().min(1),
-  /** Risk flags drive crisis escalation (gap G3). */
-  riskFlags: z.object({
-    severity: RiskSeveritySchema,
-    indicators: z.array(z.string()).default([]),
-    details: z.string().optional(),
-  }),
-  /** Modality-specific structured output (CBT thought records, EMDR SUDS, etc.). */
-  modalitySpecific: z.record(z.unknown()).optional(),
-  /** Phase progression hints consumed by modality-workflow-service (Sprint 3). */
-  phaseHints: z
-    .array(
-      z.object({
-        phase: z.string(),
-        confidence: z.number().min(0).max(1),
-        rationale: z.string().optional(),
-      }),
-    )
-    .default([]),
-});
-export type TherapyNoteV1 = z.infer<typeof TherapyNoteV1Schema>;
-
 export interface Pass2Input {
   sessionId: string;
   transcript: string;
   speakerSegments: SpeakerSegment[];
-  modality: z.infer<typeof SessionModalitySchema>;
+  modality: SessionModality;
   clientContext: {
     presentingConcerns?: string;
-    preferredModality?: z.infer<typeof SessionModalitySchema>;
+    preferredModality?: SessionModality;
   };
 }
 

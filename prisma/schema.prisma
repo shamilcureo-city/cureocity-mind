@@ -198,6 +198,8 @@ model Session {
   psychologist   Psychologist    @relation(fields: [psychologistId], references: [id])
   audioChunks    AudioChunk[]
   geminiCallLogs GeminiCallLog[]
+  noteDraft      NoteDraft?
+  therapyNote    TherapyNote?
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -275,6 +277,80 @@ model GeminiCallLog {
   @@index([createdAt])
   @@index([status, createdAt])
   @@map("gemini_call_logs")
+}
+
+// ============================================================================
+// NoteDraft — server-side row tracking one note-generation pipeline run.
+// One per Session (unique). Populated by the note-generation worker
+// in scribe-service. Sprint 2 PR 4.
+// ============================================================================
+
+enum NoteDraftStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+}
+
+enum NoteRiskSeverity {
+  NONE
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model NoteDraft {
+  id        String          @id @default(cuid())
+  sessionId String          @unique
+  status    NoteDraftStatus @default(PENDING)
+
+  // Pass 1 outputs
+  transcript      String? @db.Text
+  speakerSegments Json?
+  affectFeatures  Json?
+
+  // Pass 2 output (validated TherapyNoteV1)
+  content      Json?
+  riskSeverity NoteRiskSeverity?
+
+  // Cost rollup across Pass 1 + Pass 2 (and any retries).
+  totalCostInr Decimal @default(0) @db.Decimal(10, 4)
+
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session     Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  therapyNote TherapyNote?
+
+  @@index([status, createdAt])
+  @@map("note_drafts")
+}
+
+// ============================================================================
+// TherapyNote — clinician-signed final note. Created from a completed
+// NoteDraft when the therapist signs (Sprint 7).
+// ============================================================================
+
+model TherapyNote {
+  id        String @id @default(cuid())
+  sessionId String @unique
+  draftId   String @unique
+
+  version String
+  content Json
+
+  signedAt DateTime
+  signedBy String
+
+  createdAt DateTime @default(now())
+
+  session Session   @relation(fields: [sessionId], references: [id])
+  draft   NoteDraft @relation(fields: [draftId], references: [id])
+
+  @@map("therapy_notes")
 }
 
 // ============================================================================

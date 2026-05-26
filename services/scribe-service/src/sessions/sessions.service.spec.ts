@@ -3,6 +3,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { SessionsService } from './sessions.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
+import type { NotesService } from '../notes/notes.service';
 import type { CreateSessionInput, SessionConsentAckInput } from '@cureocity/contracts';
 
 const PSY_ID = 'cpsyaaaaaaaaaaaaaaaaaaaaa';
@@ -53,8 +54,20 @@ function makeDeps(overrides?: {
     $transaction: transaction,
   } as unknown as PrismaService;
   const audit = { log: vi.fn() } as unknown as AuditService;
+  const notes = {
+    enqueueGeneration: vi.fn().mockResolvedValue(undefined),
+    getDraftForSession: vi.fn(),
+  } as unknown as NotesService;
 
-  return { prisma, audit, clientFindUnique, sessionFindUnique, sessionCreate, sessionUpdate };
+  return {
+    prisma,
+    audit,
+    notes,
+    clientFindUnique,
+    sessionFindUnique,
+    sessionCreate,
+    sessionUpdate,
+  };
 }
 
 const validCreate: CreateSessionInput = {
@@ -71,7 +84,7 @@ describe('SessionsService.create', () => {
       clientFindUnique: vi.fn().mockResolvedValue(baseClient),
       sessionCreate: vi.fn().mockResolvedValue(baseSession),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     const result = await svc.create(PSY_ID, validCreate, {});
     expect(result.id).toBe(SESSION_ID);
     expect(deps.audit.log).toHaveBeenCalledWith(
@@ -84,7 +97,7 @@ describe('SessionsService.create', () => {
     const deps = makeDeps({
       clientFindUnique: vi.fn().mockResolvedValue({ ...baseClient, psychologistId: OTHER_PSY_ID }),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     await expect(svc.create(PSY_ID, validCreate, {})).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -92,7 +105,7 @@ describe('SessionsService.create', () => {
     const deps = makeDeps({
       clientFindUnique: vi.fn().mockResolvedValue({ ...baseClient, deletedAt: new Date() }),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     await expect(svc.create(PSY_ID, validCreate, {})).rejects.toBeInstanceOf(NotFoundException);
   });
 });
@@ -110,7 +123,7 @@ describe('SessionsService.recordConsent', () => {
       sessionFindUnique: vi.fn().mockResolvedValue(baseSession),
       sessionUpdate: vi.fn().mockImplementation(async ({ data }) => ({ ...baseSession, ...data })),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     const result = await svc.recordConsent(PSY_ID, SESSION_ID, validAck, {});
     expect(result.consentSnapshot?.entries).toHaveLength(2);
     expect(result.consentSnapshot?.entries[0]!.scope).toBe('AUDIO_RECORDING');
@@ -124,7 +137,7 @@ describe('SessionsService.recordConsent', () => {
     const deps = makeDeps({
       sessionFindUnique: vi.fn().mockResolvedValue({ ...baseSession, status: 'IN_PROGRESS' }),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     await expect(svc.recordConsent(PSY_ID, SESSION_ID, validAck, {})).rejects.toBeInstanceOf(
       BadRequestException,
     );
@@ -136,7 +149,7 @@ describe('SessionsService.recordConsent', () => {
         .fn()
         .mockResolvedValue({ ...baseSession, psychologistId: OTHER_PSY_ID }),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     await expect(svc.recordConsent(PSY_ID, SESSION_ID, validAck, {})).rejects.toBeInstanceOf(
       NotFoundException,
     );
@@ -154,7 +167,7 @@ describe('SessionsService.start', () => {
       }),
       sessionUpdate: vi.fn().mockImplementation(async ({ data }) => ({ ...baseSession, ...data })),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     const result = await svc.start(PSY_ID, SESSION_ID, {});
     expect(result.status).toBe('IN_PROGRESS');
     expect(result.startedAt).not.toBeNull();
@@ -168,7 +181,7 @@ describe('SessionsService.start', () => {
     const deps = makeDeps({
       sessionFindUnique: vi.fn().mockResolvedValue({ ...baseSession, consentSnapshot: null }),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     await expect(svc.start(PSY_ID, SESSION_ID, {})).rejects.toThrow(/consent must be recorded/i);
   });
 
@@ -180,7 +193,7 @@ describe('SessionsService.start', () => {
         consentSnapshot: { entries: [], notes: null },
       }),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     await expect(svc.start(PSY_ID, SESSION_ID, {})).rejects.toBeInstanceOf(BadRequestException);
   });
 });
@@ -197,7 +210,7 @@ describe('SessionsService.end', () => {
         ...data,
       })),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     const result = await svc.end(PSY_ID, SESSION_ID, {});
     expect(result.status).toBe('COMPLETED');
     expect(result.endedAt).not.toBeNull();
@@ -211,7 +224,7 @@ describe('SessionsService.end', () => {
     const deps = makeDeps({
       sessionFindUnique: vi.fn().mockResolvedValue(baseSession),
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
     await expect(svc.end(PSY_ID, SESSION_ID, {})).rejects.toBeInstanceOf(BadRequestException);
   });
 });
@@ -219,13 +232,50 @@ describe('SessionsService.end', () => {
 describe('SessionsService.getNoteDraft', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns 404 always (worker ships in Sprint 2 PR 4)', async () => {
-    const deps = makeDeps({
-      sessionFindUnique: vi.fn().mockResolvedValue(baseSession),
+  it('delegates to NotesService.getDraftForSession', async () => {
+    const deps = makeDeps({});
+    const mockDraft = { id: 'd1', sessionId: SESSION_ID, status: 'COMPLETED' as const };
+    (deps.notes.getDraftForSession as ReturnType<typeof vi.fn>).mockResolvedValue(mockDraft);
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
+    const result = await svc.getNoteDraft(PSY_ID, SESSION_ID, { ip: '1.1.1.1' });
+    expect(result).toBe(mockDraft);
+    expect(deps.notes.getDraftForSession).toHaveBeenCalledWith(PSY_ID, SESSION_ID, {
+      ip: '1.1.1.1',
     });
-    const svc = new SessionsService(deps.prisma, deps.audit);
-    await expect(svc.getNoteDraft(PSY_ID, SESSION_ID, {})).rejects.toBeInstanceOf(
-      NotFoundException,
+  });
+});
+
+describe('SessionsService.end', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('enqueues note generation after transitioning to COMPLETED', async () => {
+    const deps = makeDeps({
+      sessionFindUnique: vi.fn().mockResolvedValue({ ...baseSession, status: 'IN_PROGRESS' }),
+      sessionUpdate: vi.fn().mockImplementation(async ({ data }) => ({
+        ...baseSession,
+        status: 'IN_PROGRESS',
+        ...data,
+      })),
+    });
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
+    await svc.end(PSY_ID, SESSION_ID, {});
+    expect(deps.notes.enqueueGeneration).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it('still returns the completed session when enqueue fails (non-fatal)', async () => {
+    const deps = makeDeps({
+      sessionFindUnique: vi.fn().mockResolvedValue({ ...baseSession, status: 'IN_PROGRESS' }),
+      sessionUpdate: vi.fn().mockImplementation(async ({ data }) => ({
+        ...baseSession,
+        status: 'IN_PROGRESS',
+        ...data,
+      })),
+    });
+    (deps.notes.enqueueGeneration as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('redis down'),
     );
+    const svc = new SessionsService(deps.prisma, deps.audit, deps.notes);
+    const result = await svc.end(PSY_ID, SESSION_ID, {});
+    expect(result.status).toBe('COMPLETED');
   });
 });

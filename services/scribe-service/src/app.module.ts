@@ -5,6 +5,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditModule } from './audit/audit.module';
 import { StorageModule } from './storage/storage.module';
+import { LlmModule } from './llm/llm.module';
 import { HealthModule } from './health/health.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { AudioModule } from './audio/audio.module';
@@ -19,6 +20,7 @@ import { AudioModule } from './audio/audio.module';
     AuthModule,
     AuditModule,
     StorageModule,
+    LlmModule,
     HealthModule,
     SessionsModule,
     AudioModule,

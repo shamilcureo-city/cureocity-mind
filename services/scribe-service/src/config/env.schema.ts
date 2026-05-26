@@ -36,6 +36,19 @@ const EnvSchema = z.object({
     .default(15 * 1024 * 1024),
   AUDIO_ACCEPTED_MIME: z.string().default('audio/pcm'),
   AUDIO_ACCEPTED_SAMPLE_RATE: z.coerce.number().int().positive().default(16000),
+
+  // BullMQ note-generation queue (Sprint 2 PR 4).
+  REDIS_URL: z.string().default('redis://localhost:6379'),
+  NOTE_QUEUE_NAME: z.string().default('note-generation'),
+  NOTE_QUEUE_BACKEND: z.enum(['bullmq', 'sync']).default('bullmq'),
+
+  // Vertex Gemini. Unset => MockGeminiBackend (dev/tests).
+  GCP_PROJECT_ID: z.string().optional(),
+  GCP_SA_KEY_PATH: z.string().optional(),
+  GEMINI_FLASH_REGION: z.string().default('asia-south1'),
+  GEMINI_PRO_REGION: z.string().default('us-central1'),
+  GEMINI_FLASH_MODEL: z.string().default('gemini-1.5-flash-002'),
+  GEMINI_PRO_MODEL: z.string().default('gemini-1.5-pro-002'),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

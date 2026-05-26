@@ -5,3 +5,4 @@ export * from './client';
 export * from './briefing';
 export * from './audit';
 export * from './session';
+export * from './note';

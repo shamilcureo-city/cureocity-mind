@@ -2,12 +2,14 @@ import { BadRequestException, Injectable, Logger, NotFoundException } from '@nes
 import type {
   AuditMetadata,
   CreateSessionInput,
+  NoteDraft,
   Session,
   SessionConsentAckInput,
   SessionConsentSnapshot,
 } from '@cureocity/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { NotesService } from '../notes/notes.service';
 import { toSession } from './session.mappers';
 
 @Injectable()
@@ -17,6 +19,7 @@ export class SessionsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly notes: NotesService,
   ) {}
 
   async create(
@@ -179,21 +182,24 @@ export class SessionsService {
       return row;
     });
 
-    // Note-generation enqueue happens here in Sprint 2 PR 4.
-    this.logger.log(
-      `Session ${sessionId} ended; note-generation queue trigger not yet wired (Sprint 2 PR 4)`,
-    );
+    // Trigger note-generation pipeline. Errors here are non-fatal — the
+    // session is still marked COMPLETED and the worker can be re-kicked.
+    try {
+      await this.notes.enqueueGeneration(sessionId);
+    } catch (e) {
+      this.logger.error(
+        `Failed to enqueue note generation for session=${sessionId}: ${(e as Error).message}`,
+      );
+    }
     return toSession(updated);
   }
 
   async getNoteDraft(
     psychologistId: string,
     sessionId: string,
-    _auditMeta: AuditMetadata,
-  ): Promise<never> {
-    await this.fetchOwnedSession(psychologistId, sessionId);
-    // NoteDraft table + worker land in Sprint 2 PR 4. For now, always 404.
-    throw new NotFoundException('Note draft not yet available (worker ships in Sprint 2 PR 4)');
+    auditMeta: AuditMetadata,
+  ): Promise<NoteDraft> {
+    return this.notes.getDraftForSession(psychologistId, sessionId, auditMeta);
   }
 
   private async fetchOwnedSession(psychologistId: string, sessionId: string) {
