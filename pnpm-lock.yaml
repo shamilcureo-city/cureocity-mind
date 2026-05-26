@@ -42,6 +42,9 @@ importers:
 
   apps/therapist-web:
     dependencies:
+      '@cureocity/audio':
+        specifier: workspace:*
+        version: link:../../packages/audio
       '@cureocity/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
