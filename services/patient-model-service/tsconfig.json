@@ -4,7 +4,6 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "outDir": "./dist",
-    "rootDir": "./src",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "incremental": true,
@@ -13,6 +12,6 @@
     "noUncheckedIndexedAccess": false,
     "types": ["node"]
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "test/**/*"],
   "exclude": ["node_modules", "dist"]
 }

@@ -10,11 +10,14 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NX_DAEMON: 'false'
+
 jobs:
-  ci:
-    name: Lint, Typecheck, Test
+  static-checks:
+    name: Format + Lint + Typecheck
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -58,16 +61,62 @@ jobs:
         run: pnpm format:check
 
       - name: Lint
-        env:
-          NX_DAEMON: false
         run: pnpm lint
 
       - name: Typecheck
-        env:
-          NX_DAEMON: false
         run: pnpm typecheck
 
-      - name: Test
+  test:
+    name: Unit + Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
         env:
-          NX_DAEMON: false
+          POSTGRES_USER: cureocity
+          POSTGRES_PASSWORD: cureocity
+          POSTGRES_DB: cureocity_mind_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cureocity -d cureocity_mind_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://cureocity:cureocity@localhost:5432/cureocity_mind_test
+      AUTH_BYPASS: 'true'
+      RUN_INTEGRATION_TESTS: '1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Apply Prisma migrations
+        run: pnpm db:migrate:deploy
+
+      - name: Build contracts (dependency of patient-model-service)
+        run: pnpm nx run contracts:build
+
+      - name: Run all tests (unit + integration)
         run: pnpm test

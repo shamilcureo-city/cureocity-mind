@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
@@ -9,13 +9,8 @@ async function bootstrap() {
   });
 
   app.setGlobalPrefix('api/v1');
-  app.useGlobalPipes(
-    new ValidationPipe({
-      transform: true,
-      whitelist: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
+  // Per-endpoint validation via ZodValidationPipe (see src/common/zod-validation.pipe.ts).
+  // No global Nest ValidationPipe — we don't use class-validator decorators.
   app.enableShutdownHooks();
 
   const port = Number(process.env['PORT'] ?? 3001);

@@ -52,7 +52,8 @@
       "esbuild",
       "@firebase/util",
       "@nestjs/core",
-      "protobufjs"
+      "protobufjs",
+      "@swc/core"
     ]
   }
 }
