@@ -90,6 +90,9 @@ jobs:
       DATABASE_URL: postgresql://cureocity:cureocity@localhost:5432/cureocity_mind_test
       AUTH_BYPASS: 'true'
       RUN_INTEGRATION_TESTS: '1'
+      # scribe-service integration: avoid MinIO / Redis dependencies in CI.
+      STORAGE_BACKEND: memory
+      NOTE_QUEUE_BACKEND: sync
 
     steps:
       - name: Checkout
