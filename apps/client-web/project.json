@@ -1,0 +1,43 @@
+{
+  "name": "client-web",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/client-web",
+  "projectType": "application",
+  "tags": ["scope:frontend", "type:app"],
+  "targets": {
+    "build": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "outputs": ["{projectRoot}/.next"],
+      "options": {
+        "command": "next build",
+        "cwd": "apps/client-web"
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": { "command": "tsc --noEmit", "cwd": "apps/client-web" }
+    },
+    "lint": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": {
+        "command": "eslint app lib --max-warnings 0 --no-error-on-unmatched-pattern",
+        "cwd": "apps/client-web"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "cache": true,
+      "options": {
+        "command": "echo 'No web tests yet (component + e2e in Sprint 9)'",
+        "cwd": "apps/client-web"
+      }
+    },
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": { "command": "next dev --port 3200", "cwd": "apps/client-web" }
+    }
+  }
+}

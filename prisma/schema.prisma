@@ -105,10 +105,39 @@ model Client {
   exerciseAssignments ExerciseAssignment[]
   moodLogs            MoodLog[]
   journalEntries      JournalEntry[]
+  claimTokens         ClientClaimToken[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
   @@map("clients")
+}
+
+// ============================================================================
+// ClientClaimToken — single-use, short-lived token issued by a psychologist
+// so a client can pair their Firebase phone OTP account to a Client row.
+// Generated after the first session, surfaced as a QR (printed handout) or
+// shareable link. Sprint 8 PR 1.
+// ============================================================================
+
+model ClientClaimToken {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  // 22-char base64url of 16 random bytes (~128 bits of entropy). Unique
+  // across all rows; the redeem endpoint looks up by token directly.
+  token String @unique
+
+  issuedAt  DateTime @default(now())
+  expiresAt DateTime
+
+  redeemedAt           DateTime?
+  redeemedByFirebaseUid String?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, expiresAt])
+  @@map("client_claim_tokens")
 }
 
 // ============================================================================
@@ -659,6 +688,10 @@ enum AuditAction {
   JOURNAL_ENTRY_UPDATED
   CLIENT_FIREBASE_LINKED
   AUDIO_RETENTION_PURGED
+
+  // Client claim flow (patient-model-service, Sprint 8)
+  CLIENT_CLAIM_TOKEN_ISSUED
+  CLIENT_CLAIM_TOKEN_REDEEMED
 }
 
 enum AuditActorType {

@@ -70,3 +70,38 @@ export type ClientStatus = z.infer<typeof ClientStatusSchema>;
 export type SessionModality = z.infer<typeof SessionModalitySchema>;
 export type ListClientsQuery = z.infer<typeof ListClientsQuerySchema>;
 export type ListClientsResponse = z.infer<typeof ListClientsResponseSchema>;
+
+// ============================================================================
+// Client claim flow — Sprint 8 PR 1.
+// Psychologist issues a single-use, short-lived token; client redeems it
+// after Firebase phone OTP to bind clientFirebaseUid to a Client row.
+// ============================================================================
+
+export const ClientClaimTokenSchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{22}$/, 'must be 22-char base64url'),
+  clientId: CuidSchema,
+  psychologistId: CuidSchema,
+  expiresAt: IsoDateTimeSchema,
+});
+export type ClientClaimToken = z.infer<typeof ClientClaimTokenSchema>;
+
+/**
+ * Surfaced on the redeem screen before the user logs in — confirms which
+ * therapist + which client name this QR belongs to so the patient doesn't
+ * accidentally claim someone else's pairing.
+ */
+export const ClaimTokenPreviewSchema = z.object({
+  clientFirstName: z.string(),
+  psychologistFullName: z.string(),
+  expiresAt: IsoDateTimeSchema,
+  redeemed: z.boolean(),
+});
+export type ClaimTokenPreview = z.infer<typeof ClaimTokenPreviewSchema>;
+
+export const ClaimTokenRedeemResultSchema = z.object({
+  clientId: CuidSchema,
+  clientFirstName: z.string(),
+  psychologistFullName: z.string(),
+  redeemedAt: IsoDateTimeSchema,
+});
+export type ClaimTokenRedeemResult = z.infer<typeof ClaimTokenRedeemResultSchema>;

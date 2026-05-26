@@ -39,6 +39,8 @@ export const AuditActionSchema = z.enum([
   'JOURNAL_ENTRY_UPDATED',
   'CLIENT_FIREBASE_LINKED',
   'AUDIO_RETENTION_PURGED',
+  'CLIENT_CLAIM_TOKEN_ISSUED',
+  'CLIENT_CLAIM_TOKEN_REDEEMED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
