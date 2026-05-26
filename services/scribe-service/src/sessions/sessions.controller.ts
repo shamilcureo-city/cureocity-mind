@@ -13,8 +13,10 @@ import type { Request } from 'express';
 import {
   CreateSessionInputSchema,
   SessionConsentAckInputSchema,
+  SignNoteInputSchema,
   type CreateSessionInput,
   type SessionConsentAckInput,
+  type SignNoteInput,
 } from '@cureocity/contracts';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
@@ -83,6 +85,22 @@ export class SessionsController {
     return this.service.getNoteDraft(
       requirePsychologistId(user),
       id,
+      auditMetadataFromRequest(req),
+    );
+  }
+
+  @Post(':id/sign')
+  @HttpCode(201)
+  async sign(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(SignNoteInputSchema)) dto: SignNoteInput,
+    @Req() req: Request,
+  ) {
+    return this.service.signNote(
+      requirePsychologistId(user),
+      id,
+      dto,
       auditMetadataFromRequest(req),
     );
   }

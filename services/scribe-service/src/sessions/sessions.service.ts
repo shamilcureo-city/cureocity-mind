@@ -6,10 +6,13 @@ import type {
   Session,
   SessionConsentAckInput,
   SessionConsentSnapshot,
+  SignNoteInput,
+  TherapyNote,
 } from '@cureocity/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { NotesService } from '../notes/notes.service';
+import { SignService } from '../notes/sign.service';
 import { toSession } from './session.mappers';
 
 @Injectable()
@@ -20,6 +23,7 @@ export class SessionsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly notes: NotesService,
+    private readonly signer: SignService,
   ) {}
 
   async create(
@@ -200,6 +204,15 @@ export class SessionsService {
     auditMeta: AuditMetadata,
   ): Promise<NoteDraft> {
     return this.notes.getDraftForSession(psychologistId, sessionId, auditMeta);
+  }
+
+  async signNote(
+    psychologistId: string,
+    sessionId: string,
+    input: SignNoteInput,
+    auditMeta: AuditMetadata,
+  ): Promise<TherapyNote> {
+    return this.signer.sign(psychologistId, sessionId, input, auditMeta);
   }
 
   private async fetchOwnedSession(psychologistId: string, sessionId: string) {

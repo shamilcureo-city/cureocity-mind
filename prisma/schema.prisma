@@ -356,12 +356,52 @@ model TherapyNote {
   signedAt DateTime
   signedBy String
 
+  // Non-repudiation proof — WebAuthn assertion captured at sign time.
+  // The challenge bound into the assertion is sha256Hex(payload); the
+  // server re-computed that hash on receipt and compared. Stored so an
+  // auditor can independently verify months later. (gap G6/G11, Sprint 7 PR 4)
+  signCredentialId        String?
+  signClientDataJsonB64u  String?
+  signAuthenticatorDataB64u String?
+  signSignatureB64u       String?
+  signChallengeHashHex    String?
+
   createdAt DateTime @default(now())
 
-  session Session   @relation(fields: [sessionId], references: [id])
-  draft   NoteDraft @relation(fields: [draftId], references: [id])
+  session Session    @relation(fields: [sessionId], references: [id])
+  draft   NoteDraft  @relation(fields: [draftId], references: [id])
+  edits   NoteEdit[]
 
   @@map("therapy_notes")
+}
+
+// ============================================================================
+// NoteEdit — one row per field the clinician changed between draft.content
+// and the signed note. Captures the editorial trail required for clinical
+// audit / regulator review (gap G11). Sprint 7 PR 4.
+// ============================================================================
+
+enum NoteEditField {
+  subjective
+  objective
+  assessment
+  plan
+}
+
+model NoteEdit {
+  id            String @id @default(cuid())
+  therapyNoteId String
+
+  field   NoteEditField
+  before  String        @db.Text
+  after   String        @db.Text
+
+  createdAt DateTime @default(now())
+
+  therapyNote TherapyNote @relation(fields: [therapyNoteId], references: [id], onDelete: Cascade)
+
+  @@index([therapyNoteId, createdAt])
+  @@map("note_edits")
 }
 
 // ============================================================================

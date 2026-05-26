@@ -6,6 +6,7 @@ import { CostModule } from '../cost/cost.module';
 import { NoteOrchestrator } from './note-orchestrator';
 import { NoteGenerationProcessor } from './note-generation.processor';
 import { NotesService } from './notes.service';
+import { SignService } from './sign.service';
 
 /**
  * Configurable module — when NOTE_QUEUE_BACKEND=sync, the BullMQ
@@ -25,8 +26,8 @@ export class NotesModule {
       return {
         module: NotesModule,
         imports: [LlmModule, CostModule],
-        providers: [NoteOrchestrator, NotesService],
-        exports: [NotesService],
+        providers: [NoteOrchestrator, NotesService, SignService],
+        exports: [NotesService, SignService],
       };
     }
 
@@ -46,8 +47,8 @@ export class NotesModule {
         }),
         BullModule.registerQueue({ name: queueName }),
       ],
-      providers: [NoteOrchestrator, NoteGenerationProcessor, NotesService],
-      exports: [NotesService],
+      providers: [NoteOrchestrator, NoteGenerationProcessor, NotesService, SignService],
+      exports: [NotesService, SignService],
     };
   }
 }

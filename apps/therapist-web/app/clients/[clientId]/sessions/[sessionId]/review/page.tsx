@@ -67,32 +67,70 @@ export default function ReviewPage() {
   const riskHigh = note.riskFlags.severity === 'high' || note.riskFlags.severity === 'critical';
 
   async function sign(): Promise<void> {
+    if (!draft || !draft.content) return;
+    const draftContent = draft.content;
     setBusy(true);
     setError(null);
     try {
       if (riskHigh && !riskAcked) {
         throw new Error('Risk acknowledgement required for high / critical severity');
       }
+      // Build the explicit edit list — only fields that actually changed.
+      const editList = (Object.keys(edits) as (keyof TherapyNoteV1)[])
+        .filter((field): field is 'subjective' | 'objective' | 'assessment' | 'plan' =>
+          ['subjective', 'objective', 'assessment', 'plan'].includes(field as string),
+        )
+        .map((field) => ({
+          field,
+          before: draftContent[field],
+          after: note[field],
+        }));
+      const signedAt = new Date().toISOString();
       const payload = JSON.stringify({
         sessionId: params.sessionId,
         note,
-        edits,
-        signedAt: new Date().toISOString(),
+        edits: editList,
+        signedAt,
       });
-      const hashHex = await sha256Hex(payload);
-      // V1: WebAuthn assertion bound to the note hash. Degrade gracefully
-      // if the browser lacks the API (testing on older Firefox); Sprint 7
-      // PR 4 makes it strictly required.
+      const payloadHashHex = await sha256Hex(payload);
+      // V1: attempt WebAuthn but degrade gracefully if the browser lacks
+      // the API. The server records the proof when present; full
+      // signature-vs-public-key verification lands in Sprint 9 once the
+      // registration endpoint exists.
       let assertion: Awaited<ReturnType<typeof authenticateWithChallenge>> | null = null;
       try {
         assertion = await authenticateWithChallenge(payload);
       } catch (e) {
         if (!/WebAuthn not supported/.test((e as Error).message)) throw e;
       }
-      // TODO(Sprint 7 PR 4): POST to scribe-service /sessions/:id/sign
-      // with { payload, hashHex, edits, assertion }.
-      void hashHex;
-      void assertion;
+      const body: Record<string, unknown> = {
+        payload,
+        payloadHashHex,
+        note,
+        edits: editList,
+        signedAt,
+      };
+      if (assertion) {
+        body.assertion = {
+          credentialId: assertion.credentialId,
+          clientDataJSON: assertion.clientDataJSON,
+          authenticatorData: assertion.authenticatorData,
+          signature: assertion.signature,
+          challengeHashHex: assertion.challengeHashHex,
+        };
+      }
+      const res = await fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/sign`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: 'Bearer dev-bypass',
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Sign failed: ${res.status} ${text}`);
+      }
       setSigned(true);
     } catch (e) {
       setError((e as Error).message);

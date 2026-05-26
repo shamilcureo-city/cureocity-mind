@@ -87,3 +87,89 @@ export const NoteDraftSchema = z.object({
   updatedAt: IsoDateTimeSchema,
 });
 export type NoteDraft = z.infer<typeof NoteDraftSchema>;
+
+// ============================================================================
+// Note sign-off — therapist-web POSTs the edited note, the hash they bound
+// into the WebAuthn challenge, the WebAuthn assertion, and the field-level
+// edit list. Server re-hashes, verifies, and creates a TherapyNote + NoteEdit
+// rows. Sprint 7 PR 4.
+//
+// V1 verification is hash + challenge-binding only — full WebAuthn
+// signature validation against a registered credential public key lands in
+// Sprint 9 when the registration flow exists. The proof is still persisted
+// so it can be retro-verified once registration is in place.
+// ============================================================================
+
+export const NoteEditFieldSchema = z.enum(['subjective', 'objective', 'assessment', 'plan']);
+export type NoteEditField = z.infer<typeof NoteEditFieldSchema>;
+
+export const NoteEditEntrySchema = z.object({
+  field: NoteEditFieldSchema,
+  before: z.string(),
+  after: z.string(),
+});
+export type NoteEditEntry = z.infer<typeof NoteEditEntrySchema>;
+
+const Base64UrlSchema = z
+  .string()
+  .min(1)
+  .regex(/^[A-Za-z0-9_-]+$/, 'must be base64url (no padding)');
+
+export const WebAuthnAssertionSchema = z.object({
+  credentialId: Base64UrlSchema,
+  clientDataJSON: Base64UrlSchema,
+  authenticatorData: Base64UrlSchema,
+  signature: Base64UrlSchema,
+  challengeHashHex: z.string().regex(/^[0-9a-f]{64}$/, 'must be 64 lowercase hex chars'),
+});
+export type WebAuthnAssertion = z.infer<typeof WebAuthnAssertionSchema>;
+
+/**
+ * The payload the client built and hashed. The server re-stringifies an
+ * equivalent canonical structure to verify, so this carries the trusted
+ * fields: the final note text + edits + signedAt. The client's payload
+ * string is also passed verbatim for hash recomputation.
+ */
+export const SignNoteInputSchema = z.object({
+  /**
+   * The exact JSON string the client SHA-256'd. Server hashes it again,
+   * compares against payloadHashHex AND assertion.challengeHashHex.
+   */
+  payload: z
+    .string()
+    .min(1)
+    .max(64 * 1024),
+  payloadHashHex: z.string().regex(/^[0-9a-f]{64}$/, 'must be 64 lowercase hex chars'),
+  note: TherapyNoteV1Schema,
+  edits: z.array(NoteEditEntrySchema).default([]),
+  signedAt: IsoDateTimeSchema,
+  /**
+   * Optional in V1 — see header comment. When present, the proof is
+   * persisted on the TherapyNote row.
+   */
+  assertion: WebAuthnAssertionSchema.optional(),
+});
+export type SignNoteInput = z.infer<typeof SignNoteInputSchema>;
+
+export const TherapyNoteSchema = z.object({
+  id: CuidSchema,
+  sessionId: CuidSchema,
+  draftId: CuidSchema,
+  version: z.literal('V1'),
+  content: TherapyNoteV1Schema,
+  signedAt: IsoDateTimeSchema,
+  signedBy: CuidSchema,
+  edits: z.array(
+    z.object({
+      id: CuidSchema,
+      field: NoteEditFieldSchema,
+      before: z.string(),
+      after: z.string(),
+      createdAt: IsoDateTimeSchema,
+    }),
+  ),
+  signCredentialId: z.string().nullable(),
+  signChallengeHashHex: z.string().nullable(),
+  createdAt: IsoDateTimeSchema,
+});
+export type TherapyNote = z.infer<typeof TherapyNoteSchema>;
