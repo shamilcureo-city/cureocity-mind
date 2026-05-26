@@ -2,6 +2,7 @@ import { DynamicModule, Logger, Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { LlmModule } from '../llm/llm.module';
+import { CostModule } from '../cost/cost.module';
 import { NoteOrchestrator } from './note-orchestrator';
 import { NoteGenerationProcessor } from './note-generation.processor';
 import { NotesService } from './notes.service';
@@ -23,7 +24,7 @@ export class NotesModule {
       logger.warn('NOTE_QUEUE_BACKEND=sync; BullMQ not registered (note generation runs inline)');
       return {
         module: NotesModule,
-        imports: [LlmModule],
+        imports: [LlmModule, CostModule],
         providers: [NoteOrchestrator, NotesService],
         exports: [NotesService],
       };
@@ -33,6 +34,7 @@ export class NotesModule {
       module: NotesModule,
       imports: [
         LlmModule,
+        CostModule,
         BullModule.forRootAsync({
           imports: [ConfigModule],
           inject: [ConfigService],

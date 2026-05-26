@@ -6,6 +6,7 @@ import type { IModelRouter, TherapyNoteV1 } from '@cureocity/llm';
 import { NoteOrchestrator } from './note-orchestrator';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
+import { CostCircuitOpenError, type CostGuardService } from '../cost/cost-guard.service';
 
 const SESSION_ID = 'csess11111111111111111111';
 const PSY_ID = 'cpsyaaaaaaaaaaaaaaaaaaaaa';
@@ -117,15 +118,18 @@ function makePass1Output() {
 function makeDeps(opts: {
   audioChunks?: Array<{ chunkIndex: number; s3Key: string; durationMs: number }>;
   router?: IModelRouter;
+  costGuard?: CostGuardService;
 }) {
   const sessionFindUnique = vi.fn().mockResolvedValue(baseSession);
   const noteDraftUpsert = vi.fn().mockResolvedValue(baseDraft);
   const noteDraftUpdate = vi.fn().mockResolvedValue(baseDraft);
   const audioChunkFindMany = vi.fn().mockResolvedValue(opts.audioChunks ?? []);
+  const geminiCallLogCreate = vi.fn();
   const prisma = {
     session: { findUnique: sessionFindUnique },
     noteDraft: { upsert: noteDraftUpsert, update: noteDraftUpdate },
     audioChunk: { findMany: audioChunkFindMany },
+    geminiCallLog: { create: geminiCallLogCreate },
   } as unknown as PrismaService;
   const audit = { log: vi.fn() } as unknown as AuditService;
   const config = {
@@ -133,16 +137,21 @@ function makeDeps(opts: {
   } as ConfigService;
   const storage = new InMemoryStorageClient();
   const router = opts.router ?? makeRouter({});
+  const costGuard =
+    opts.costGuard ??
+    ({ checkBeforeCall: vi.fn().mockResolvedValue(undefined) } as unknown as CostGuardService);
   return {
     prisma,
     audit,
     config,
     storage,
     router,
+    costGuard,
     sessionFindUnique,
     noteDraftUpsert,
     noteDraftUpdate,
     audioChunkFindMany,
+    geminiCallLogCreate,
   };
 }
 
@@ -163,6 +172,7 @@ describe('NoteOrchestrator', () => {
       deps.prisma,
       deps.audit,
       deps.config,
+      deps.costGuard,
       deps.storage,
       deps.router,
     );
@@ -197,6 +207,7 @@ describe('NoteOrchestrator', () => {
       deps.prisma,
       deps.audit,
       deps.config,
+      deps.costGuard,
       deps.storage,
       deps.router,
     );
@@ -215,6 +226,7 @@ describe('NoteOrchestrator', () => {
       deps.prisma,
       deps.audit,
       deps.config,
+      deps.costGuard,
       deps.storage,
       deps.router,
     );
@@ -236,6 +248,7 @@ describe('NoteOrchestrator', () => {
       deps.prisma,
       deps.audit,
       deps.config,
+      deps.costGuard,
       deps.storage,
       deps.router,
     );
@@ -255,10 +268,53 @@ describe('NoteOrchestrator', () => {
       deps.prisma,
       deps.audit,
       deps.config,
+      deps.costGuard,
       deps.storage,
       deps.router,
     );
     await orch.run('missing-session');
     expect(deps.noteDraftUpsert).not.toHaveBeenCalled();
+  });
+
+  it('halts before Pass 1 and writes COST_CIRCUIT_TRIPPED audit when cost guard rejects', async () => {
+    const tripError = new CostCircuitOpenError('over the session cap', {
+      scope: 'session',
+      sessionId: SESSION_ID,
+      currentInr: 499,
+      projectedInr: 502,
+      capInr: 500,
+    });
+    const costGuard = {
+      checkBeforeCall: vi.fn().mockRejectedValue(tripError),
+    } as unknown as CostGuardService;
+    const deps = makeDeps({
+      audioChunks: [{ chunkIndex: 0, s3Key: 'a/0.pcm', durationMs: 5_000 }],
+      costGuard,
+    });
+    await deps.storage.put({ bucket: BUCKET, key: 'a/0.pcm', body: Buffer.alloc(100, 1) });
+    const orch = new NoteOrchestrator(
+      deps.prisma,
+      deps.audit,
+      deps.config,
+      deps.costGuard,
+      deps.storage,
+      deps.router,
+    );
+    await orch.run(SESSION_ID);
+
+    expect(deps.router.pass1).not.toHaveBeenCalled();
+    const lastUpdate = (deps.noteDraftUpdate as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect((lastUpdate[0] as { data: { status: string } }).data.status).toBe('FAILED');
+
+    const auditActions = (deps.audit.log as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => (c[0] as { action: string }).action,
+    );
+    expect(auditActions).toContain('COST_CIRCUIT_TRIPPED');
+
+    expect(deps.geminiCallLogCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'CIRCUIT_OPEN' }),
+      }),
+    );
   });
 });

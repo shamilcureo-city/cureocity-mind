@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { AuditModule } from './audit/audit.module';
 import { StorageModule } from './storage/storage.module';
 import { LlmModule } from './llm/llm.module';
+import { CostModule } from './cost/cost.module';
 import { HealthModule } from './health/health.module';
 import { SessionsModule } from './sessions/sessions.module';
 import { AudioModule } from './audio/audio.module';
@@ -21,6 +22,7 @@ import { AudioModule } from './audio/audio.module';
     AuditModule,
     StorageModule,
     LlmModule,
+    CostModule,
     HealthModule,
     SessionsModule,
     AudioModule,

@@ -1,12 +1,21 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma, type NoteRiskSeverity as PrismaRiskSeverity } from '@prisma/client';
-import { type IModelRouter, type Pass1Output, type Pass2Output } from '@cureocity/llm';
+import {
+  type IModelRouter,
+  type Pass1Output,
+  type Pass2Output,
+  computeCostInr,
+  estimateAudioInputTokens,
+  FLASH_PRICING,
+  PRO_PRICING,
+} from '@cureocity/llm';
 import type { IStorageClient } from '@cureocity/storage';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { STORAGE_CLIENT } from '../storage/storage.module';
 import { MODEL_ROUTER } from '../llm/llm.module';
+import { CostCircuitOpenError, CostGuardService } from '../cost/cost-guard.service';
 
 /**
  * Drives the two-pass note-generation pipeline for one Session.
@@ -36,6 +45,7 @@ export class NoteOrchestrator {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly config: ConfigService,
+    private readonly costGuard: CostGuardService,
     @Inject(STORAGE_CLIENT) private readonly storage: IStorageClient,
     @Inject(MODEL_ROUTER) private readonly router: IModelRouter,
   ) {}
@@ -66,7 +76,20 @@ export class NoteOrchestrator {
         throw new Error('No audio chunks uploaded for session');
       }
 
-      // 3. Pass 1
+      // 3a. Cost circuit-breaker pre-check for Pass 1 (gap G6).
+      // Estimate cost = audio tokens * Flash input + small output buffer.
+      const pass1Estimate = computeCostInr(
+        estimateAudioInputTokens(durationMs),
+        1_000,
+        FLASH_PRICING,
+      );
+      await this.costGuard.checkBeforeCall({
+        sessionId,
+        psychologistId: session.psychologistId,
+        estimatedCostInr: pass1Estimate,
+      });
+
+      // 3b. Pass 1
       const pass1 = await this.router.pass1({ sessionId, audioBytes, durationMs });
       const pass1Cost = new Prisma.Decimal(pass1.callLog.costInr);
 
@@ -79,6 +102,18 @@ export class NoteOrchestrator {
           affectFeatures: pass1.output.affectFeatures as unknown as Prisma.InputJsonValue,
           totalCostInr: pass1Cost,
         },
+      });
+
+      // 4b. Cost circuit-breaker pre-check for Pass 2.
+      const pass2Estimate = computeCostInr(
+        Math.ceil(pass1.output.transcript.length / 4),
+        1_500,
+        PRO_PRICING,
+      );
+      await this.costGuard.checkBeforeCall({
+        sessionId,
+        psychologistId: session.psychologistId,
+        estimatedCostInr: pass2Estimate,
       });
 
       // 5. Pass 2
@@ -154,6 +189,40 @@ export class NoteOrchestrator {
         where: { id: draft.id },
         data: { status: 'FAILED', errorMessage: message },
       });
+
+      // Cost-trip audit + CIRCUIT_OPEN GeminiCallLog so the breaker state
+      // shows up in cost reports next to the calls that actually ran.
+      if (e instanceof CostCircuitOpenError) {
+        await this.audit.log({
+          actorType: 'SYSTEM',
+          action: 'COST_CIRCUIT_TRIPPED',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: {
+            scope: e.meta.scope,
+            capInr: e.meta.capInr,
+            currentInr: e.meta.currentInr,
+            projectedInr: e.meta.projectedInr,
+            psychologistId: session.psychologistId,
+            clientId: session.clientId,
+          },
+        });
+        await this.prisma.geminiCallLog.create({
+          data: {
+            sessionId,
+            pass: 'PASS_1_TRANSCRIBE_AND_ANALYSE',
+            model: 'circuit-open',
+            region: 'n/a',
+            promptVersion: 'n/a',
+            inputTokens: 0,
+            outputTokens: 0,
+            costInr: 0,
+            latencyMs: 0,
+            status: 'CIRCUIT_OPEN',
+            errorMessage: message,
+          },
+        });
+      }
     }
   }
 

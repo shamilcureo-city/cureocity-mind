@@ -49,6 +49,10 @@ const EnvSchema = z.object({
   GEMINI_PRO_REGION: z.string().default('us-central1'),
   GEMINI_FLASH_MODEL: z.string().default('gemini-1.5-flash-002'),
   GEMINI_PRO_MODEL: z.string().default('gemini-1.5-pro-002'),
+
+  // Cost circuit breaker (Sprint 2 PR 5, gap G6).
+  COST_CAP_PER_SESSION_INR: z.coerce.number().positive().default(500),
+  COST_CAP_PER_THERAPIST_MONTHLY_INR: z.coerce.number().positive().default(15_000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
