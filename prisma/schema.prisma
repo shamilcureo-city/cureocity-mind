@@ -186,6 +186,11 @@ model Session {
   // Phase snapshot — opaque JSON, populated by modality-workflow-service (Sprint 3).
   phaseSnapshot Json?
 
+  // Consent ack captured at /sessions/:id/consent — array of { scope, scriptVersion, ackedAt }.
+  // Snapshot at session start, separate from client-level Consent rows so we
+  // have an audit trail even if client consents change later. (Sprint 2)
+  consentSnapshot Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -221,11 +226,22 @@ enum AuditAction {
   CONSENT_WITHDRAWN
   CONSENT_EXPIRED
 
-  // Sessions (used by scribe-service in Sprint 2)
+  // Sessions (scribe-service, Sprint 2)
   SESSION_CREATED
+  SESSION_CONSENT_RECORDED
   SESSION_STARTED
   SESSION_ENDED
   SESSION_CANCELLED
+
+  // Audio + notes (scribe-service, Sprint 2)
+  AUDIO_CHUNK_UPLOADED
+  NOTE_DRAFT_CREATED
+  NOTE_DRAFT_VIEWED
+  NOTE_SIGNED
+
+  // Cost + risk (scribe-service, Sprint 2)
+  COST_CIRCUIT_TRIPPED
+  CRISIS_FLAG_RAISED
 }
 
 enum AuditActorType {

@@ -4,3 +4,4 @@ export * from './consent';
 export * from './client';
 export * from './briefing';
 export * from './audit';
+export * from './session';
