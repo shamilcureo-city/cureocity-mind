@@ -194,9 +194,10 @@ model Session {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client       Client       @relation(fields: [clientId], references: [id])
-  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
-  audioChunks  AudioChunk[]
+  client         Client          @relation(fields: [clientId], references: [id])
+  psychologist   Psychologist    @relation(fields: [psychologistId], references: [id])
+  audioChunks    AudioChunk[]
+  geminiCallLogs GeminiCallLog[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -227,6 +228,53 @@ model AudioChunk {
   @@unique([sessionId, chunkIndex])
   @@index([sessionId, uploadedAt])
   @@map("audio_chunks")
+}
+
+// ============================================================================
+// Gemini call log — one row per Gemini API call. Persisted by packages/llm
+// so the worker (Sprint 2 PR 4) and cost circuit breaker (PR 5) can roll up
+// usage per session and per therapist. PRD Part 2 requires a `region` field.
+// Sprint 2 PR 3.
+// ============================================================================
+
+enum GeminiPass {
+  PASS_1_TRANSCRIBE_AND_ANALYSE
+  PASS_2_NOTE_GENERATION
+  PASS_3_MISSED_THEMES
+}
+
+enum GeminiCallStatus {
+  SUCCESS
+  ERROR
+  TIMEOUT
+  CIRCUIT_OPEN
+}
+
+model GeminiCallLog {
+  id        String  @id @default(cuid())
+  sessionId String?
+
+  pass          GeminiPass
+  model         String
+  region        String
+  promptVersion String
+
+  inputTokens  Int
+  outputTokens Int
+  costInr      Decimal @db.Decimal(10, 4)
+  latencyMs    Int
+
+  status       GeminiCallStatus
+  errorMessage String?
+
+  createdAt DateTime @default(now())
+
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, createdAt])
+  @@index([createdAt])
+  @@index([status, createdAt])
+  @@map("gemini_call_logs")
 }
 
 // ============================================================================
