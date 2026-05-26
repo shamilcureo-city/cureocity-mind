@@ -13,6 +13,29 @@ const EnvSchema = z.object({
   FIREBASE_PROJECT_ID: z.string().optional(),
   FIREBASE_CLIENT_EMAIL: z.string().email().optional(),
   FIREBASE_PRIVATE_KEY: z.string().optional(),
+
+  // Object storage (MinIO in dev, GCS/S3 in prod). Audio chunks land here.
+  S3_ENDPOINT: z.string().default('http://localhost:9000'),
+  S3_REGION: z.string().default('us-east-1'),
+  S3_ACCESS_KEY: z.string().default('cureocity'),
+  S3_SECRET_KEY: z.string().default('cureocity-dev-secret'),
+  S3_BUCKET_AUDIO: z.string().default('cureocity-mind-audio'),
+  S3_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+
+  // In-memory storage backend for tests (set to 'memory'); otherwise S3.
+  STORAGE_BACKEND: z.enum(['s3', 'memory']).default('s3'),
+
+  // Audio chunk policy.
+  AUDIO_MAX_CHUNK_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(15 * 1024 * 1024),
+  AUDIO_ACCEPTED_MIME: z.string().default('audio/pcm'),
+  AUDIO_ACCEPTED_SAMPLE_RATE: z.coerce.number().int().positive().default(16000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

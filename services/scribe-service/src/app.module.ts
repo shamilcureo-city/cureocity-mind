@@ -4,8 +4,10 @@ import { validateEnv } from './config/env.schema';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { AuditModule } from './audit/audit.module';
+import { StorageModule } from './storage/storage.module';
 import { HealthModule } from './health/health.module';
 import { SessionsModule } from './sessions/sessions.module';
+import { AudioModule } from './audio/audio.module';
 
 @Module({
   imports: [
@@ -16,8 +18,10 @@ import { SessionsModule } from './sessions/sessions.module';
     PrismaModule,
     AuthModule,
     AuditModule,
+    StorageModule,
     HealthModule,
     SessionsModule,
+    AudioModule,
   ],
 })
 export class AppModule {}

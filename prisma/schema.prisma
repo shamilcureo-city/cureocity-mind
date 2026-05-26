@@ -196,11 +196,37 @@ model Session {
 
   client       Client       @relation(fields: [clientId], references: [id])
   psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  audioChunks  AudioChunk[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
   @@index([psychologistId, status, scheduledAt])
   @@map("sessions")
+}
+
+// ============================================================================
+// AudioChunk — one row per uploaded chunk during a recording.
+// Body lives in S3/MinIO under s3Key; this row is metadata only.
+// Sprint 2 PR 2.
+// ============================================================================
+
+model AudioChunk {
+  id         String   @id @default(cuid())
+  sessionId  String
+  chunkIndex Int
+  mimeType   String
+  sampleRate Int
+  sizeBytes  Int
+  durationMs Int
+  s3Key      String
+
+  uploadedAt DateTime @default(now())
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, chunkIndex])
+  @@index([sessionId, uploadedAt])
+  @@map("audio_chunks")
 }
 
 // ============================================================================
