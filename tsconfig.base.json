@@ -20,21 +20,7 @@
     "sourceMap": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "baseUrl": ".",
-    "paths": {
-      "@cureocity/types": ["packages/types/src/index.ts"],
-      "@cureocity/types/*": ["packages/types/src/*"],
-      "@cureocity/contracts": ["packages/contracts/src/index.ts"],
-      "@cureocity/contracts/*": ["packages/contracts/src/*"],
-      "@cureocity/llm": ["packages/llm/src/index.ts"],
-      "@cureocity/llm/*": ["packages/llm/src/*"],
-      "@cureocity/audio": ["packages/audio/src/index.ts"],
-      "@cureocity/audio/*": ["packages/audio/src/*"],
-      "@cureocity/clinical": ["packages/clinical/src/index.ts"],
-      "@cureocity/clinical/*": ["packages/clinical/src/*"],
-      "@cureocity/ui": ["packages/ui/src/index.ts"],
-      "@cureocity/ui/*": ["packages/ui/src/*"]
-    }
+    "baseUrl": "."
   },
   "exclude": ["node_modules", "**/dist", "**/.next", "**/.nx"]
 }

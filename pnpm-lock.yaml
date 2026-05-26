@@ -40,8 +40,21 @@ importers:
         specifier: ^8.15.0
         version: 8.60.0(eslint@9.39.4)(typescript@5.9.3)
 
+  packages/contracts:
+    dependencies:
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)
+
   services/patient-model-service:
     dependencies:
+      '@cureocity/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@nestjs/common':
         specifier: ^10.4.15
         version: 10.4.22(reflect-metadata@0.2.2)(rxjs@7.8.2)
