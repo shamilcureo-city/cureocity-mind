@@ -53,6 +53,7 @@ model Psychologist {
   sessions      Session[]
   auditLogs     AuditLog[]
   consentsTaken Consent[]
+  modalityStates ModalityState[]
 
   @@index([status])
   @@map("psychologists")
@@ -94,6 +95,7 @@ model Client {
   psychologist Psychologist @relation(fields: [psychologistId], references: [id])
   consents     Consent[]
   sessions     Session[]
+  modalityState ModalityState?
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -354,6 +356,70 @@ model TherapyNote {
 }
 
 // ============================================================================
+// ModalityState — one active workflow per client. Tracks current phase in the
+// modality state machine (CBT 5-phase, EMDR 8-phase, ...) plus opaque
+// modality-specific state validated by packages/clinical. Sprint 3 PR 1.
+// ============================================================================
+
+model ModalityState {
+  id             String @id @default(cuid())
+  clientId       String @unique
+  psychologistId String
+
+  modality SessionModality
+  // Phase string is validated against the modality's allowed phases by
+  // @cureocity/clinical at the service layer — not enforced at DB level
+  // because different modalities have different phase sets.
+  currentPhase String
+
+  // Modality-specific state (e.g. CBT thought-record corpus, EMDR target list).
+  state Json @default("{}")
+
+  // Goals defined at intake. Shape:
+  // [{ id, description, targetSessionCount?, achieved, achievedAt?, evidence? }]
+  goals Json @default("[]")
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client               @relation(fields: [clientId], references: [id])
+  psychologist Psychologist         @relation(fields: [psychologistId], references: [id])
+  transitions  ModalityTransition[]
+
+  @@index([psychologistId, modality])
+  @@map("modality_states")
+}
+
+enum ModalityTransitionTrigger {
+  PSYCHOLOGIST_MANUAL
+  SYSTEM_SUGGESTION_ACCEPTED
+  SYSTEM_AUTO
+}
+
+model ModalityTransition {
+  id        String @id @default(cuid())
+  stateId   String
+  fromPhase String
+  toPhase   String
+
+  trigger        ModalityTransitionTrigger
+  reason         String
+  psychologistId String?
+  // Evidence at transition time — adherence stats, note phaseHints, etc.
+  evidence Json?
+
+  occurredAt DateTime @default(now())
+
+  state ModalityState @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@index([stateId, occurredAt])
+  @@map("modality_transitions")
+}
+
+// ============================================================================
 // AuditLog — append-only. Polymorphic target via (targetType, targetId).
 // Every state-changing endpoint writes one row. Read access surface added in
 // Sprint 9 with admin role (gap G9).
@@ -392,6 +458,12 @@ enum AuditAction {
   // Cost + risk (scribe-service, Sprint 2)
   COST_CIRCUIT_TRIPPED
   CRISIS_FLAG_RAISED
+
+  // Workflows (modality-workflow-service, Sprint 3)
+  WORKFLOW_CREATED
+  WORKFLOW_PHASE_TRANSITIONED
+  WORKFLOW_COMPLETED
+  EXERCISE_PRESCRIBED
 }
 
 enum AuditActorType {

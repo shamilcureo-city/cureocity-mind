@@ -22,6 +22,10 @@ export const AuditActionSchema = z.enum([
   'NOTE_SIGNED',
   'COST_CIRCUIT_TRIPPED',
   'CRISIS_FLAG_RAISED',
+  'WORKFLOW_CREATED',
+  'WORKFLOW_PHASE_TRANSITIONED',
+  'WORKFLOW_COMPLETED',
+  'EXERCISE_PRESCRIBED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
