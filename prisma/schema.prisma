@@ -1,0 +1,263 @@
+// Cureocity Mind — Prisma schema
+//
+// Scope: Sprint 1 models only. Each subsequent service adds its own models
+// via its own migration as the sprint lands. The plan (§ 5) ships:
+//   Sprint 1 (this file): Psychologist, Client, Consent, Session, AuditLog
+//   Sprint 2: TherapyNote, NoteDraft, AudioChunk, GeminiCallLog
+//   Sprint 3: ModalityState, ModalityTransition
+//   Sprint 4: AffectFeature
+//   Sprint 5: ExerciseAssignment, ExerciseResponse, JournalEntry, MoodLog
+//   Sprint 7: NoteEdit (per gap G11)
+//   Sprint 9: encryption columns (per gap G10), admin role (per gap G9)
+//
+// PRD gap resolutions applied here:
+//   G5: Session.status enum extended with CANCELLED, NO_SHOW, RESCHEDULED
+//   G7: no supervisor/co-signature workflow in V1 (pilot uses senior RCI therapists only)
+//   G13: ConsentScope.CROSS_BORDER_PROCESSING covers Gemini Pro global pass
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// Psychologist — the therapist tenant. Authenticated via Firebase phone OTP.
+// ============================================================================
+
+enum PsychologistStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  OFFBOARDED
+}
+
+model Psychologist {
+  id            String             @id @default(cuid())
+  firebaseUid   String             @unique
+  email         String             @unique
+  fullName      String
+  phone         String             @unique
+  rciNumber     String             @unique
+  rciVerifiedAt DateTime?
+  status        PsychologistStatus @default(PENDING_VERIFICATION)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  clients       Client[]
+  sessions      Session[]
+  auditLogs     AuditLog[]
+  consentsTaken Consent[]
+
+  @@index([status])
+  @@map("psychologists")
+}
+
+// ============================================================================
+// Client — the patient under care. Strictly owned by one Psychologist; row-level
+// isolation enforced at the service layer via psychologistId filter.
+// ============================================================================
+
+enum ClientStatus {
+  ACTIVE
+  PAUSED
+  DISCHARGED
+  TRANSFERRED
+}
+
+model Client {
+  id             String @id @default(cuid())
+  psychologistId String
+
+  // PII — slated for pgcrypto + KMS encryption in Sprint 9 (gap G10).
+  // Stored as plaintext in V1 dev; production migration adds encrypted columns.
+  fullName     String
+  contactPhone String
+  contactEmail String?
+  dateOfBirth  DateTime? @db.Date
+
+  // Clinical context (free text in V1; structured assessment in Sprint 5)
+  presentingConcerns String?
+  preferredModality  String?
+
+  status ClientStatus @default(ACTIVE)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  consents     Consent[]
+  sessions     Session[]
+
+  @@index([psychologistId, status])
+  @@index([psychologistId, deletedAt])
+  @@map("clients")
+}
+
+// ============================================================================
+// Consent — granular, scoped, versioned. Audit log writes on every state change.
+// ============================================================================
+
+enum ConsentScope {
+  AUDIO_RECORDING
+  AI_NOTE_GENERATION
+  CROSS_BORDER_PROCESSING
+  DATA_RETENTION_EXTENDED
+}
+
+enum ConsentStatus {
+  GRANTED
+  WITHDRAWN
+  EXPIRED
+}
+
+enum ConsentCaptureChannel {
+  IN_PERSON
+  REMOTE_LINK
+  EMAIL
+}
+
+model Consent {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  scope         ConsentScope
+  status        ConsentStatus
+  scriptVersion String
+  capturedVia   ConsentCaptureChannel
+
+  grantedAt   DateTime
+  withdrawnAt DateTime?
+  expiresAt   DateTime?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id])
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@index([clientId, scope, status])
+  @@index([psychologistId, createdAt])
+  @@map("consents")
+}
+
+// ============================================================================
+// Session — created in Sprint 1, populated with audio/transcript/notes by
+// scribe-service in Sprint 2. Phase tracking added by modality-workflow in
+// Sprint 3. Transcript field is added by scribe-service migration.
+// ============================================================================
+
+enum SessionStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED // gap G5
+  NO_SHOW // gap G5
+  RESCHEDULED // gap G5
+}
+
+enum SessionModality {
+  CBT
+  EMDR
+  OTHER
+}
+
+model Session {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  modality SessionModality
+  status   SessionStatus   @default(SCHEDULED)
+
+  scheduledAt DateTime
+  startedAt   DateTime?
+  endedAt     DateTime?
+
+  // Phase snapshot — opaque JSON, populated by modality-workflow-service (Sprint 3).
+  phaseSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id])
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@index([clientId, status])
+  @@index([psychologistId, scheduledAt])
+  @@index([psychologistId, status, scheduledAt])
+  @@map("sessions")
+}
+
+// ============================================================================
+// AuditLog — append-only. Polymorphic target via (targetType, targetId).
+// Every state-changing endpoint writes one row. Read access surface added in
+// Sprint 9 with admin role (gap G9).
+// ============================================================================
+
+enum AuditAction {
+  // Psychologist
+  PSYCHOLOGIST_REGISTERED
+  PSYCHOLOGIST_UPDATED
+
+  // Client
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  CLIENT_VIEWED
+  CLIENT_BRIEFING_VIEWED
+  CLIENT_SOFT_DELETED
+
+  // Consent
+  CONSENT_GRANTED
+  CONSENT_WITHDRAWN
+  CONSENT_EXPIRED
+
+  // Sessions (used by scribe-service in Sprint 2)
+  SESSION_CREATED
+  SESSION_STARTED
+  SESSION_ENDED
+  SESSION_CANCELLED
+}
+
+enum AuditActorType {
+  PSYCHOLOGIST
+  SYSTEM
+  CLIENT
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  actorType           AuditActorType
+  actorPsychologistId String?
+
+  action AuditAction
+
+  // Polymorphic target. (targetType, targetId) form the natural FK; not
+  // enforced at the DB layer because the target may be soft-deleted.
+  targetType String
+  targetId   String
+
+  // Free-form context: { ip, userAgent, requestId, before, after, ... }.
+  // Validated at the service layer against AuditMetadataSchema (Sprint 1 PR 4).
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  actorPsychologist Psychologist? @relation(fields: [actorPsychologistId], references: [id])
+
+  @@index([targetType, targetId, createdAt])
+  @@index([actorPsychologistId, createdAt])
+  @@index([action, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
