@@ -17,7 +17,7 @@ const baseState = {
   clientId: CLIENT_ID,
   psychologistId: PSY_ID,
   modality: 'CBT' as const,
-  currentPhase: 'engagement',
+  currentPhase: 'engagement_assessment',
   state: {} as Prisma.JsonValue,
   goals: [] as Prisma.JsonValue,
   startedAt: new Date('2026-05-01T00:00:00Z'),
@@ -29,7 +29,7 @@ const baseState = {
 const validCreate: CreateWorkflowInput = {
   clientId: CLIENT_ID,
   modality: 'CBT',
-  initialPhase: 'engagement',
+  initialPhase: 'engagement_assessment',
   goals: [{ id: 'g1', description: 'Reduce work-related anxiety' }],
 };
 
@@ -82,7 +82,7 @@ describe('WorkflowsService.create', () => {
     const svc = new WorkflowsService(deps.prisma, deps.audit);
     const result = await svc.create(PSY_ID, validCreate, {});
     expect(result.id).toBe(WORKFLOW_ID);
-    expect(result.currentPhase).toBe('engagement');
+    expect(result.currentPhase).toBe('engagement_assessment');
     expect(deps.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'WORKFLOW_CREATED', targetId: WORKFLOW_ID }),
       expect.anything(),
@@ -122,27 +122,25 @@ describe('WorkflowsService.recordTransition', () => {
       transitionCreate: vi.fn().mockResolvedValue({
         id: 't1',
         stateId: WORKFLOW_ID,
-        fromPhase: 'engagement',
-        toPhase: 'cognitive_restructuring',
+        fromPhase: 'engagement_assessment',
+        toPhase: 'psychoeducation',
         trigger: 'PSYCHOLOGIST_MANUAL',
         reason: 'goals achieved',
         psychologistId: PSY_ID,
         evidence: null,
         occurredAt: new Date(),
       }),
-      stateUpdate: vi
-        .fn()
-        .mockResolvedValue({ ...baseState, currentPhase: 'cognitive_restructuring' }),
+      stateUpdate: vi.fn().mockResolvedValue({ ...baseState, currentPhase: 'psychoeducation' }),
       transitionFindMany: vi.fn().mockResolvedValue([]),
     });
     const svc = new WorkflowsService(deps.prisma, deps.audit);
     const result = await svc.recordTransition(
       PSY_ID,
       WORKFLOW_ID,
-      { toPhase: 'cognitive_restructuring', reason: 'goals achieved' },
+      { toPhase: 'psychoeducation', reason: 'goals achieved' },
       {},
     );
-    expect(result.currentPhase).toBe('cognitive_restructuring');
+    expect(result.currentPhase).toBe('psychoeducation');
     expect(deps.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'WORKFLOW_PHASE_TRANSITIONED',
@@ -152,11 +150,24 @@ describe('WorkflowsService.recordTransition', () => {
     );
   });
 
+  it('rejects an invalid CBT transition (unknown phase)', async () => {
+    const deps = makeDeps({ stateFindUnique: vi.fn().mockResolvedValue(baseState) });
+    const svc = new WorkflowsService(deps.prisma, deps.audit);
+    await expect(
+      svc.recordTransition(PSY_ID, WORKFLOW_ID, { toPhase: 'not_a_phase', reason: 'oops' }, {}),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('rejects transition to the same phase', async () => {
     const deps = makeDeps({ stateFindUnique: vi.fn().mockResolvedValue(baseState) });
     const svc = new WorkflowsService(deps.prisma, deps.audit);
     await expect(
-      svc.recordTransition(PSY_ID, WORKFLOW_ID, { toPhase: 'engagement', reason: 'noop' }, {}),
+      svc.recordTransition(
+        PSY_ID,
+        WORKFLOW_ID,
+        { toPhase: 'engagement_assessment', reason: 'noop' },
+        {},
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
@@ -181,23 +192,73 @@ describe('WorkflowsService.recordTransition', () => {
     });
     const svc = new WorkflowsService(deps.prisma, deps.audit);
     await expect(
-      svc.recordTransition(
-        PSY_ID,
-        WORKFLOW_ID,
-        { toPhase: 'cognitive_restructuring', reason: 'x' },
-        {},
-      ),
+      svc.recordTransition(PSY_ID, WORKFLOW_ID, { toPhase: 'psychoeducation', reason: 'x' }, {}),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 
 describe('WorkflowsService.getAdvancementSuggestion', () => {
-  it('returns a null suggestion in PR 1 (real implementation in PR 2)', async () => {
-    const deps = makeDeps({ stateFindUnique: vi.fn().mockResolvedValue(baseState) });
+  it('returns a real suggestion via @cureocity/clinical evaluator', async () => {
+    const sessionFindMany = vi.fn().mockResolvedValue([]);
+    const transitionFindFirst = vi.fn().mockResolvedValue(null);
+    const stateFindUnique = vi.fn().mockResolvedValue(baseState);
+    const prisma = {
+      modalityState: { findUnique: stateFindUnique },
+      modalityTransition: {
+        findFirst: transitionFindFirst,
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      session: { findMany: sessionFindMany },
+    } as unknown as Parameters<typeof WorkflowsService.prototype.create>[0] extends never
+      ? never
+      : never;
+    const audit = { log: vi.fn() };
+    const svc = new WorkflowsService(prisma as never, audit as never);
+    const sug = await svc.getAdvancementSuggestion(PSY_ID, WORKFLOW_ID, {});
+    expect(sug.currentPhase).toBe('engagement_assessment');
+    // 0 sessions, min-floor=1 not met → stay
+    expect(sug.suggestedPhase).toBeNull();
+    expect(sug.rationale).toMatch(/minimum-sessions/i);
+  });
+
+  it('returns a non-CBT advisory message for other modalities', async () => {
+    const deps = makeDeps({
+      stateFindUnique: vi.fn().mockResolvedValue({ ...baseState, modality: 'OTHER' }),
+    });
     const svc = new WorkflowsService(deps.prisma, deps.audit);
     const sug = await svc.getAdvancementSuggestion(PSY_ID, WORKFLOW_ID, {});
     expect(sug.suggestedPhase).toBeNull();
-    expect(sug.confidence).toBe(0);
-    expect(sug.rationale).toMatch(/Sprint 3 PR 2/);
+    expect(sug.rationale).toMatch(/ships in a later sprint/i);
+  });
+});
+
+describe('WorkflowsService.prescribe', () => {
+  it('returns recommendations and audits one EXERCISE_PRESCRIBED per item', async () => {
+    const deps = makeDeps({ stateFindUnique: vi.fn().mockResolvedValue(baseState) });
+    const svc = new WorkflowsService(deps.prisma, deps.audit);
+    const res = await svc.prescribe(
+      PSY_ID,
+      WORKFLOW_ID,
+      { recentRiskSeverity: 'none', maxRecommendations: 3 },
+      {},
+    );
+    expect(res.currentPhase).toBe('engagement_assessment');
+    expect(res.recommendations.length).toBeGreaterThan(0);
+    expect(res.recommendations.length).toBeLessThanOrEqual(3);
+    expect(deps.audit.log).toHaveBeenCalled();
+    const auditActions = (deps.audit.log as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c) => (c[0] as { action: string }).action,
+    );
+    expect(auditActions.every((a) => a === 'EXERCISE_PRESCRIBED')).toBe(true);
+  });
+
+  it('rejects for non-CBT modalities', async () => {
+    const deps = makeDeps({
+      stateFindUnique: vi.fn().mockResolvedValue({ ...baseState, modality: 'OTHER' }),
+    });
+    const svc = new WorkflowsService(deps.prisma, deps.audit);
+    await expect(
+      svc.prescribe(PSY_ID, WORKFLOW_ID, { recentRiskSeverity: 'none', maxRecommendations: 5 }, {}),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 });

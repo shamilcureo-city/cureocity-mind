@@ -13,7 +13,17 @@ import type {
   CreateWorkflowInput,
   ModalityState,
   ModalityStateWithHistory,
+  PrescriptionRequest,
+  PrescriptionResponse,
+  TherapyNoteV1,
+  WorkflowGoal,
 } from '@cureocity/contracts';
+import {
+  checkCbtTransition,
+  evaluateCbtAdvancement,
+  recommendCbtExercises,
+  type RecentNote,
+} from '@cureocity/clinical';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import {
@@ -121,6 +131,14 @@ export class WorkflowsService {
       throw new BadRequestException(`Workflow is already in phase "${state.currentPhase}"`);
     }
 
+    if (state.modality === 'CBT') {
+      const check = checkCbtTransition(state.currentPhase, dto.toPhase);
+      if (!check.allowed) {
+        throw new BadRequestException(`Invalid CBT transition: ${check.reason}`);
+      }
+    }
+    // EMDR machine ships in Sprint 4; other modalities skip validation.
+
     const result = await this.prisma.$transaction(async (tx) => {
       const transition = await tx.modalityTransition.create({
         data: {
@@ -166,9 +184,10 @@ export class WorkflowsService {
   }
 
   /**
-   * Phase advancement suggestion — proper implementation lands in Sprint 3 PR 2
-   * once @cureocity/clinical ships. Here we return a null suggestion so the
-   * endpoint contract is in place.
+   * Phase-advancement suggestion. Counts sessions completed since the latest
+   * transition (or workflow.startedAt), joins their NoteDrafts, and hands the
+   * lot to @cureocity/clinical's evaluator. Always advisory — the therapist
+   * either accepts via POST /transitions or ignores.
    */
   async getAdvancementSuggestion(
     psychologistId: string,
@@ -176,13 +195,112 @@ export class WorkflowsService {
     _auditMeta: AuditMetadata,
   ): Promise<AdvancementSuggestion> {
     const state = await this.fetchOwned(psychologistId, workflowId);
+
+    if (state.modality !== 'CBT') {
+      return {
+        workflowId: state.id,
+        currentPhase: state.currentPhase,
+        suggestedPhase: null,
+        confidence: 0,
+        rationale: `Advancement evaluator for ${state.modality} ships in a later sprint.`,
+        signals: {},
+      };
+    }
+
+    const latestTransition = await this.prisma.modalityTransition.findFirst({
+      where: { stateId: workflowId },
+      orderBy: { occurredAt: 'desc' },
+    });
+    const phaseStartedAt = latestTransition?.occurredAt ?? state.startedAt;
+
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        clientId: state.clientId,
+        status: 'COMPLETED',
+        endedAt: { gte: phaseStartedAt, not: null },
+      },
+      include: { noteDraft: true },
+      orderBy: { endedAt: 'desc' },
+    });
+
+    const recentNotes: RecentNote[] = sessions.slice(0, 5).map((s) => ({
+      content:
+        s.noteDraft?.content == null ? null : (s.noteDraft.content as unknown as TherapyNoteV1),
+      endedAt: s.endedAt!,
+    }));
+
+    const goals = (state.goals as unknown as WorkflowGoal[]) ?? [];
+
+    const decision = evaluateCbtAdvancement({
+      currentPhase: state.currentPhase,
+      recentNotes,
+      goals,
+      sessionsInCurrentPhase: sessions.length,
+    });
+
     return {
       workflowId: state.id,
       currentPhase: state.currentPhase,
-      suggestedPhase: null,
-      confidence: 0,
-      rationale: 'Advancement evaluator ships in Sprint 3 PR 2 (@cureocity/clinical).',
-      signals: {},
+      suggestedPhase: decision.suggestedPhase,
+      confidence: decision.confidence,
+      rationale: decision.rationale,
+      signals: decision.signals as unknown as Record<string, unknown>,
+    };
+  }
+
+  /**
+   * Prescription: pick CBT exercises for the current phase given recent risk
+   * severity (caller-provided; default 'none'). Adherence is empty for now —
+   * Sprint 5's continuity-service will own ExerciseAssignment rows and feed
+   * adherence stats back here. Each recommendation writes one
+   * EXERCISE_PRESCRIBED audit row.
+   */
+  async prescribe(
+    psychologistId: string,
+    workflowId: string,
+    dto: PrescriptionRequest,
+    auditMeta: AuditMetadata,
+  ): Promise<PrescriptionResponse> {
+    const state = await this.fetchOwned(psychologistId, workflowId);
+
+    if (state.modality !== 'CBT') {
+      throw new BadRequestException(
+        `Prescription engine for ${state.modality} ships in a later sprint.`,
+      );
+    }
+
+    const recommendations = recommendCbtExercises({
+      currentPhase: state.currentPhase,
+      recentRiskSeverity: dto.recentRiskSeverity,
+      adherence: new Map(),
+      maxRecommendations: dto.maxRecommendations,
+    });
+
+    for (const rec of recommendations) {
+      await this.audit.log({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: psychologistId,
+        action: 'EXERCISE_PRESCRIBED',
+        targetType: 'ModalityState',
+        targetId: workflowId,
+        metadata: {
+          ...auditMeta,
+          exerciseId: rec.exerciseId,
+          score: rec.score,
+          rationale: rec.rationale,
+          phase: state.currentPhase,
+        },
+      });
+    }
+
+    return {
+      workflowId: state.id,
+      currentPhase: state.currentPhase,
+      recommendations,
+      signalsUsed: {
+        recentRiskSeverity: dto.recentRiskSeverity,
+        adherenceEntries: 0,
+      },
     };
   }
 

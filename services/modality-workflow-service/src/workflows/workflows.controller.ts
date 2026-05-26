@@ -13,8 +13,10 @@ import type { Request } from 'express';
 import {
   CreateTransitionInputSchema,
   CreateWorkflowInputSchema,
+  PrescriptionRequestSchema,
   type CreateTransitionInput,
   type CreateWorkflowInput,
+  type PrescriptionRequest,
 } from '@cureocity/contracts';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { FirebaseAuthGuard } from '../auth/firebase-auth.guard';
@@ -64,6 +66,17 @@ export class WorkflowsController {
       id,
       auditMetadataFromRequest(req),
     );
+  }
+
+  @Post(':id/prescriptions')
+  @HttpCode(200)
+  async prescribe(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(PrescriptionRequestSchema)) dto: PrescriptionRequest,
+    @Req() req: Request,
+  ) {
+    return this.service.prescribe(requirePsy(user), id, dto, auditMetadataFromRequest(req));
   }
 }
 

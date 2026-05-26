@@ -94,6 +94,9 @@ importers:
 
   services/modality-workflow-service:
     dependencies:
+      '@cureocity/clinical':
+        specifier: workspace:*
+        version: link:../../packages/clinical
       '@cureocity/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
