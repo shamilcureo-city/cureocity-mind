@@ -8,3 +8,4 @@ export * from './session';
 export * from './note';
 export * from './workflow';
 export * from './prescription';
+export * from './emdr';
