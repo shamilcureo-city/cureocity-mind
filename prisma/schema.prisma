@@ -517,6 +517,10 @@ enum AuditAction {
   EMDR_PREPARATION_COMPLETED
   EMDR_TARGET_ADDED
   EMDR_TARGET_UPDATED
+
+  // Affect engine (affect-engine-service, Sprint 4)
+  AFFECT_BASELINE_VIEWED
+  AFFECT_TREND_VIEWED
 }
 
 enum AuditActorType {

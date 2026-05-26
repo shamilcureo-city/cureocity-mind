@@ -29,6 +29,8 @@ export const AuditActionSchema = z.enum([
   'EMDR_PREPARATION_COMPLETED',
   'EMDR_TARGET_ADDED',
   'EMDR_TARGET_UPDATED',
+  'AFFECT_BASELINE_VIEWED',
+  'AFFECT_TREND_VIEWED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
