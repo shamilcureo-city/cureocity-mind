@@ -7,6 +7,12 @@ export interface AuthenticatedUser {
    * `POST /psychologists` registration.
    */
   psychologistId?: string;
+  /**
+   * Role of the resolved Psychologist row, if any. THERAPIST is the
+   * default; ADMIN unlocks /api/v1/admin/* routes. Set alongside
+   * psychologistId.
+   */
+  role?: 'THERAPIST' | 'ADMIN';
 }
 
 declare module 'express-serve-static-core' {

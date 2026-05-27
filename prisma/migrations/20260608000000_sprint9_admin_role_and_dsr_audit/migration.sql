@@ -1,0 +1,24 @@
+-- Sprint 9 PR 1 — admin role (gap G9) + DSR audit actions.
+
+-- CreateEnum
+CREATE TYPE "PsychologistRole" AS ENUM ('THERAPIST', 'ADMIN');
+
+-- AlterTable
+ALTER TABLE "psychologists"
+  ADD COLUMN "role" "PsychologistRole" NOT NULL DEFAULT 'THERAPIST';
+
+-- CreateIndex
+CREATE INDEX "psychologists_role_idx" ON "psychologists"("role");
+
+-- AlterEnum — DSR + admin actions
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_AUDIT_LOG_READ';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_ROLE_GRANTED';
+ALTER TYPE "AuditAction" ADD VALUE 'ADMIN_ROLE_REVOKED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_ACCESS_REQUESTED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_ACCESS_FULFILLED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_CORRECTION_REQUESTED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_ERASURE_REQUESTED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_ERASURE_FULFILLED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_NOMINATION_RECORDED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_GRIEVANCE_FILED';
+ALTER TYPE "AuditAction" ADD VALUE 'DSR_CONSENT_WITHDRAWN';

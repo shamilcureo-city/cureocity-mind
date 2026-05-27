@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module';
 import { PsychologistsModule } from './psychologists/psychologists.module';
 import { ClientsModule } from './clients/clients.module';
 import { ClaimTokensModule } from './claim-tokens/claim-tokens.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { ClaimTokensModule } from './claim-tokens/claim-tokens.module';
     PsychologistsModule,
     ClientsModule,
     ClaimTokensModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

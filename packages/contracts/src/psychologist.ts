@@ -8,6 +8,9 @@ export const PsychologistStatusSchema = z.enum([
   'OFFBOARDED',
 ]);
 
+export const PsychologistRoleSchema = z.enum(['THERAPIST', 'ADMIN']);
+export type PsychologistRole = z.infer<typeof PsychologistRoleSchema>;
+
 export const RciNumberSchema = z
   .string()
   .regex(/^[A-Z]\d+$/, 'RCI number format: leading letter + digits (e.g. A12345)');
@@ -28,6 +31,7 @@ export const PsychologistSchema = z.object({
   rciNumber: z.string(),
   rciVerifiedAt: IsoDateTimeSchema.nullable(),
   status: PsychologistStatusSchema,
+  role: PsychologistRoleSchema,
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

@@ -35,6 +35,15 @@ enum PsychologistStatus {
   OFFBOARDED
 }
 
+// Role gates access to /api/v1/admin/* endpoints. THERAPIST is the
+// default (all clinical surfaces). ADMIN can read audit logs and
+// trigger DSR fulfilment. There is no "super admin" tier in V1; admin
+// is granted out-of-band by direct DB update + audit row. Gap G9, Sprint 9.
+enum PsychologistRole {
+  THERAPIST
+  ADMIN
+}
+
 model Psychologist {
   id            String             @id @default(cuid())
   firebaseUid   String             @unique
@@ -44,6 +53,7 @@ model Psychologist {
   rciNumber     String             @unique
   rciVerifiedAt DateTime?
   status        PsychologistStatus @default(PENDING_VERIFICATION)
+  role          PsychologistRole   @default(THERAPIST)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -57,6 +67,7 @@ model Psychologist {
   exerciseAssignments ExerciseAssignment[]
 
   @@index([status])
+  @@index([role])
   @@map("psychologists")
 }
 
@@ -741,6 +752,19 @@ enum AuditAction {
   PUSH_SUBSCRIPTION_REVOKED
   NOTIFICATION_DISPATCHED
   TREATMENT_PLAN_WHATSAPP_SENT
+
+  // Admin + DSR (Sprint 9 PR 1/2)
+  ADMIN_AUDIT_LOG_READ
+  ADMIN_ROLE_GRANTED
+  ADMIN_ROLE_REVOKED
+  DSR_ACCESS_REQUESTED
+  DSR_ACCESS_FULFILLED
+  DSR_CORRECTION_REQUESTED
+  DSR_ERASURE_REQUESTED
+  DSR_ERASURE_FULFILLED
+  DSR_NOMINATION_RECORDED
+  DSR_GRIEVANCE_FILED
+  DSR_CONSENT_WITHDRAWN
 }
 
 enum AuditActorType {

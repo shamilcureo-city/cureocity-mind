@@ -35,9 +35,12 @@ export class FirebaseAuthGuard implements CanActivate {
       };
       const psy = await this.prisma.psychologist.findUnique({
         where: { firebaseUid: user.firebaseUid },
-        select: { id: true },
+        select: { id: true, role: true },
       });
-      if (psy) user.psychologistId = psy.id;
+      if (psy) {
+        user.psychologistId = psy.id;
+        user.role = psy.role;
+      }
       req.user = user;
       return true;
     }
@@ -56,12 +59,12 @@ export class FirebaseAuthGuard implements CanActivate {
       const decoded = await this.firebase.auth().verifyIdToken(token);
       const psy = await this.prisma.psychologist.findUnique({
         where: { firebaseUid: decoded.uid },
-        select: { id: true },
+        select: { id: true, role: true },
       });
       const user: AuthenticatedUser = {
         firebaseUid: decoded.uid,
         ...(decoded.email !== undefined && { email: decoded.email }),
-        ...(psy && { psychologistId: psy.id }),
+        ...(psy && { psychologistId: psy.id, role: psy.role }),
       };
       req.user = user;
       return true;
