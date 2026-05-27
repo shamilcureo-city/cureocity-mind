@@ -118,10 +118,111 @@ model Client {
   journalEntries      JournalEntry[]
   claimTokens         ClientClaimToken[]
   pushSubscriptions   ClientPushSubscription[]
+  nominations         ClientNomination[]
+  erasureRequests     ClientErasureRequest[]
+  grievances          ClientGrievance[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
   @@map("clients")
+}
+
+// ============================================================================
+// DSR rows — Sprint 9 PR 2.
+// One row per client request under DPDP Act Section 14 (right to
+// nomination), Section 15 (erasure), and Section 16 (grievance). All
+// are append-only; the admin fulfilment side updates status/resolvedAt
+// rather than mutating the original payload.
+// ============================================================================
+
+enum DsrErasureStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  FULFILLED
+}
+
+enum DsrGrievanceStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+  CLOSED
+}
+
+model ClientNomination {
+  id        String @id @default(cuid())
+  clientId  String
+
+  /// Nominee's display name (the trusted person who can act on the
+  /// client's data rights if the client is unable to).
+  nomineeName     String
+  nomineeRelation String
+  nomineePhone    String
+  nomineeEmail    String?
+
+  /// Optional clause the client wants to attach (e.g. "only in case
+  /// of medical incapacity").
+  notes String? @db.Text
+
+  /// Marking superseded=true when the client files a new nomination
+  /// keeps the historical record without deleting it.
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, supersededAt])
+  @@map("client_nominations")
+}
+
+model ClientErasureRequest {
+  id       String           @id @default(cuid())
+  clientId String
+  status   DsrErasureStatus @default(PENDING)
+
+  /// Free-text reason the client supplied.
+  reason String? @db.Text
+
+  /// Admin who acted on it (null until reviewed). FK kept loose
+  /// because admins may be soft-deleted later.
+  resolvedByPsychologistId String?
+  resolvedAt               DateTime?
+  resolutionNotes          String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, status])
+  @@index([status, createdAt])
+  @@map("client_erasure_requests")
+}
+
+model ClientGrievance {
+  id       String             @id @default(cuid())
+  clientId String
+  status   DsrGrievanceStatus @default(OPEN)
+
+  /// Subject + free-text body. PII is possible here; treated as
+  /// sensitive same as JournalEntry.content (Sprint 9 PR 3 encryption).
+  subject String
+  body    String @db.Text
+
+  acknowledgedAt DateTime?
+  resolvedAt     DateTime?
+  resolutionNotes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, status])
+  @@index([status, createdAt])
+  @@map("client_grievances")
 }
 
 // ============================================================================

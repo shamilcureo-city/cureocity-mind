@@ -9,6 +9,7 @@ import { PsychologistsModule } from './psychologists/psychologists.module';
 import { ClientsModule } from './clients/clients.module';
 import { ClaimTokensModule } from './claim-tokens/claim-tokens.module';
 import { AdminModule } from './admin/admin.module';
+import { DsrModule } from './dsr/dsr.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AdminModule } from './admin/admin.module';
     ClientsModule,
     ClaimTokensModule,
     AdminModule,
+    DsrModule,
   ],
 })
 export class AppModule {}
