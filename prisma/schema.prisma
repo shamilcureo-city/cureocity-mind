@@ -65,10 +65,40 @@ model Psychologist {
   consentsTaken Consent[]
   modalityStates ModalityState[]
   exerciseAssignments ExerciseAssignment[]
+  tenantKeys    PsychologistTenantKey[]
 
   @@index([status])
   @@index([role])
   @@map("psychologists")
+}
+
+// ============================================================================
+// PsychologistTenantKey — wrapped Data Encryption Key, one active row per
+// psychologist tenant. Per § 6.6 of the execution plan: 90-day rotation.
+// Older rows are kept (not deleted) so historical ciphertext can still be
+// decrypted on read until those rows are rotated forward in a background
+// task. Gap G10, Sprint 9 PR 3.
+// ============================================================================
+
+model PsychologistTenantKey {
+  id             String @id @default(cuid())
+  psychologistId String
+
+  /// KMS-side identifier (AWS KMS CMK id, or 'local-dev-kms-v1' for dev).
+  kmsKeyId String
+  /// Base64-encoded wrapped DEK as returned by IKmsProvider.generateDataKey.
+  wrappedKey String @db.Text
+  /// Active rows are used for new writes; old rows are used for decrypt only.
+  /// On rotation, the previous active row's retiredAt is set.
+  retiredAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId, retiredAt])
+  @@map("psychologist_tenant_keys")
 }
 
 // ============================================================================
@@ -92,12 +122,19 @@ model Client {
   // null, and the patient-app side of continuity endpoints is unreachable.
   clientFirebaseUid String? @unique
 
-  // PII — slated for pgcrypto + KMS encryption in Sprint 9 (gap G10).
-  // Stored as plaintext in V1 dev; production migration adds encrypted columns.
+  // PII — Sprint 9 PR 3 (gap G10).
+  // Plaintext columns retained for the V1 transition window; encrypted
+  // companions populated whenever the writing service has access to a
+  // TenantDataKey. Sprint 10 hardens the cutover (data copy + plaintext drop).
   fullName     String
   contactPhone String
   contactEmail String?
   dateOfBirth  DateTime? @db.Date
+
+  /// Envelope-encrypted contactPhone — format documented in
+  /// @cureocity/crypto. Nullable until backfilled.
+  contactPhoneEncrypted String?
+  contactEmailEncrypted String?
 
   // Clinical context (free text in V1; structured assessment in Sprint 5)
   presentingConcerns String?
@@ -496,9 +533,13 @@ model NoteDraft {
   status    NoteDraftStatus @default(PENDING)
 
   // Pass 1 outputs
-  transcript      String? @db.Text
-  speakerSegments Json?
-  affectFeatures  Json?
+  /// V1 plaintext column — retained during the encryption rollout window.
+  /// Sprint 10 hardens cutover. Gap G10.
+  transcript           String? @db.Text
+  /// Envelope-encrypted transcript per @cureocity/crypto.
+  transcriptEncrypted  String? @db.Text
+  speakerSegments      Json?
+  affectFeatures       Json?
 
   // Pass 2 output (validated TherapyNoteV1)
   content      Json?
@@ -647,8 +688,14 @@ model MoodLog {
 model JournalEntry {
   id         String   @id @default(cuid())
   clientId   String
-  // PII — encrypted in Sprint 9 (gap G10).
+  /// V1 plaintext column — retained during the encryption rollout window.
+  /// Continuity-service writes BOTH `content` and `contentEncrypted` when a
+  /// TenantDataKey is available; reads prefer `contentEncrypted` and fall
+  /// back to `content`. Sprint 10 hardening drops this column. Gap G10.
   content    String   @db.Text
+  /// Envelope-encrypted form per @cureocity/crypto. Populated from
+  /// Sprint 9 PR 3 onward.
+  contentEncrypted String? @db.Text
   // Optional 0..10 mood tag.
   mood       Int?
   recordedAt DateTime

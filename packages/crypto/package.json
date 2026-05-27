@@ -1,0 +1,20 @@
+{
+  "name": "@cureocity/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Envelope encryption + per-tenant data keys (pgcrypto + KMS, gap G10)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src --max-warnings 0 --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.9"
+  }
+}

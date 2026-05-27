@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
-import type { NoteDraft, TherapyNoteV1 } from '@cureocity/contracts';
+import type { NoteDraft, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
 import { tUi, type UiLocale } from '@/lib/i18n';
 import { authenticateWithChallenge, sha256Hex } from '@/lib/webauthn';
 
@@ -26,18 +26,30 @@ export default function ReviewPage() {
   const [edits, setEdits] = useState<Partial<TherapyNoteV1>>({});
   const [riskAcked, setRiskAcked] = useState(false);
   const [signed, setSigned] = useState(false);
+  const [signedNote, setSignedNote] = useState<TherapyNote | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     async function load(): Promise<void> {
       try {
-        const res = await fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/note-draft`, {
-          headers: { Authorization: 'Bearer dev-bypass' },
-        });
-        if (!res.ok) throw new Error(`Draft fetch failed: ${res.status}`);
-        const json = (await res.json()) as NoteDraft;
-        setDraft(json);
+        const [draftRes, signedRes] = await Promise.all([
+          fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/note-draft`, {
+            headers: { Authorization: 'Bearer dev-bypass' },
+          }),
+          fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/therapy-note`, {
+            headers: { Authorization: 'Bearer dev-bypass' },
+          }),
+        ]);
+        if (!draftRes.ok) throw new Error(`Draft fetch failed: ${draftRes.status}`);
+        setDraft((await draftRes.json()) as NoteDraft);
+        if (signedRes.ok) {
+          const json = (await signedRes.json()) as TherapyNote | null;
+          if (json !== null) {
+            setSignedNote(json);
+            setSigned(true);
+          }
+        }
       } catch (e) {
         setError((e as Error).message);
       }
@@ -131,6 +143,8 @@ export default function ReviewPage() {
         const text = await res.text();
         throw new Error(`Sign failed: ${res.status} ${text}`);
       }
+      const signedJson = (await res.json()) as TherapyNote;
+      setSignedNote(signedJson);
       setSigned(true);
     } catch (e) {
       setError((e as Error).message);
@@ -208,6 +222,37 @@ export default function ReviewPage() {
             ? 'Signing…'
             : `${tUi(locale, 'review.sign')}${dirty ? ` (${Object.keys(edits).length} edits)` : ''}`}
         </button>
+      )}
+
+      {signedNote && signedNote.edits.length > 0 && (
+        <section className="mt-6 rounded-lg border border-[var(--color-slate-200)] bg-white p-4">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-slate-500)]">
+            Revision history ({signedNote.edits.length})
+          </h2>
+          <p className="mb-3 text-xs text-[var(--color-slate-500)]">
+            Signed {new Date(signedNote.signedAt).toLocaleString()} by{' '}
+            <code className="text-[var(--color-slate-900)]">{signedNote.signedBy}</code>
+          </p>
+          <ul className="space-y-3">
+            {signedNote.edits.map((e) => (
+              <li key={e.id} className="rounded-md border border-[var(--color-slate-200)] p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-slate-500)]">
+                  {e.field}
+                </p>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="rounded-md bg-red-50 p-2 text-xs text-red-900">
+                    <p className="mb-1 font-semibold">Before</p>
+                    <p className="whitespace-pre-wrap">{e.before}</p>
+                  </div>
+                  <div className="rounded-md bg-emerald-50 p-2 text-xs text-emerald-900">
+                    <p className="mb-1 font-semibold">After</p>
+                    <p className="whitespace-pre-wrap">{e.after}</p>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {error && (

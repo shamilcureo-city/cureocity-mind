@@ -178,6 +178,41 @@ export class SignService {
     };
   }
 
+  async getTherapyNote(psychologistId: string, sessionId: string): Promise<TherapyNote | null> {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { psychologistId: true },
+    });
+    if (!session || session.psychologistId !== psychologistId) {
+      throw new NotFoundException('Session not found');
+    }
+    const note = await this.prisma.therapyNote.findUnique({
+      where: { sessionId },
+      include: { edits: { orderBy: { createdAt: 'asc' } } },
+    });
+    if (!note) return null;
+    const content = TherapyNoteV1Schema.parse(note.content);
+    return {
+      id: note.id,
+      sessionId: note.sessionId,
+      draftId: note.draftId,
+      version: 'V1',
+      content,
+      signedAt: note.signedAt.toISOString(),
+      signedBy: note.signedBy,
+      edits: note.edits.map((e) => ({
+        id: e.id,
+        field: e.field,
+        before: e.before,
+        after: e.after,
+        createdAt: e.createdAt.toISOString(),
+      })),
+      signCredentialId: note.signCredentialId,
+      signChallengeHashHex: note.signChallengeHashHex,
+      createdAt: note.createdAt.toISOString(),
+    };
+  }
+
   /**
    * Each edit must (a) target one of the four SOAP fields, (b) have
    * `before` equal to the draft's current value, and (c) have `after`

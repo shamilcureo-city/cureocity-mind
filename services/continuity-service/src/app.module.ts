@@ -8,6 +8,7 @@ import { HealthModule } from './health/health.module';
 import { AssignmentsModule } from './assignments/assignments.module';
 import { MeModule } from './me/me.module';
 import { RetentionModule } from './retention/retention.module';
+import { EncryptionModule } from './encryption/encryption.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { RetentionModule } from './retention/retention.module';
     AuthModule,
     AuditModule,
     HealthModule,
+    EncryptionModule,
     AssignmentsModule,
     MeModule,
     RetentionModule,

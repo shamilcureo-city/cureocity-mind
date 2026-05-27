@@ -20,6 +20,7 @@ import type {
 } from '@cureocity/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { EncryptionService } from '../encryption/encryption.service';
 import { toExerciseAssignment } from '../assignments/assignments.service';
 
 @Injectable()
@@ -29,6 +30,7 @@ export class MeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async listExercises(clientId: string): Promise<ExerciseAssignment[]> {
@@ -136,11 +138,33 @@ export class MeService {
     dto: CreateJournalEntryInput,
     auditMeta: AuditMetadata,
   ): Promise<JournalEntry> {
+    // Resolve the owning psychologist so we encrypt against the right
+    // tenant key. Encryption happens outside the tx since the DEK
+    // resolution may hit KMS; the tx still wraps the write.
+    const client = await this.prisma.client.findUnique({
+      where: { id: clientId },
+      select: { psychologistId: true },
+    });
+    if (!client) throw new NotFoundException('Client not found');
+
+    let contentEncrypted: string | null = null;
+    try {
+      contentEncrypted = await this.encryption.encryptForTenant(client.psychologistId, dto.content);
+    } catch (e) {
+      // Don't fail the journal write because the KMS path is unhealthy
+      // — the plaintext column is still authoritative during the
+      // transition window. Log loudly so the regression is visible.
+      this.logger.error(
+        `Encryption failed for journal entry; falling back to plaintext-only: ${(e as Error).message}`,
+      );
+    }
+
     const created = await this.prisma.$transaction(async (tx) => {
       const row = await tx.journalEntry.create({
         data: {
           clientId,
           content: dto.content,
+          contentEncrypted,
           mood: dto.mood ?? null,
           sharedWithTherapist: dto.sharedWithTherapist ?? false,
           recordedAt: dto.recordedAt ? new Date(dto.recordedAt) : new Date(),
@@ -158,6 +182,7 @@ export class MeService {
             contentLength: dto.content.length,
             hasMood: dto.mood !== undefined,
             sharedWithTherapist: dto.sharedWithTherapist ?? false,
+            encrypted: contentEncrypted !== null,
           },
         },
         tx,
@@ -306,6 +331,11 @@ function toJournalEntry(row: {
   createdAt: Date;
   updatedAt: Date;
 }): JournalEntry {
+  // We intentionally return the plaintext column today — the encrypted
+  // companion is the source of truth for retention guarantees but the
+  // service layer's outbound shape stays unchanged so the client PWA
+  // doesn't need an in-page decrypt path. When Sprint 10 drops the
+  // plaintext column this mapper switches to decrypt-on-read.
   return {
     id: row.id,
     clientId: row.clientId,

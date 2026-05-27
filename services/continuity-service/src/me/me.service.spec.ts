@@ -3,6 +3,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { MeService } from './me.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
+import type { EncryptionService } from '../encryption/encryption.service';
 
 const CLIENT = 'cclient11111111111111111x';
 
@@ -77,7 +78,11 @@ function makeDeps(opts: {
     );
   const pushUpdate = vi.fn();
   const pushFindUnique = vi.fn();
+  const clientFindUnique = vi
+    .fn()
+    .mockResolvedValue({ psychologistId: 'cpsy_test_for_journal_owner' });
   const prisma = {
+    client: { findUnique: clientFindUnique },
     exerciseAssignment: { findUnique, findMany },
     moodLog: { findMany: vi.fn().mockResolvedValue(opts.moodList ?? []) },
     journalEntry: { findMany: vi.fn().mockResolvedValue(opts.journalList ?? []) },
@@ -96,9 +101,15 @@ function makeDeps(opts: {
     update: pushUpdate,
   };
   const audit = { log: vi.fn() } as unknown as AuditService;
+  const encryption = {
+    encryptForTenant: vi.fn().mockResolvedValue('v1.k.iv.ct.tag'),
+    decrypt: vi.fn(),
+    rotate: vi.fn(),
+  } as unknown as EncryptionService;
   return {
     prisma,
     audit,
+    encryption,
     update,
     create,
     findUnique,
@@ -121,7 +132,7 @@ describe('MeService.recordCompletion', () => {
         exerciseId: 'cbt_thought_record_5col',
       },
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     const res = await svc.recordCompletion(CLIENT, 'a1', { response: { situation: 'x' } }, {});
     expect(res.status).toBe('COMPLETED');
     expect(deps.audit.log).toHaveBeenCalledWith(
@@ -142,7 +153,7 @@ describe('MeService.recordCompletion', () => {
         exerciseId: 'x',
       },
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     await expect(svc.recordCompletion(CLIENT, 'a1', { response: {} }, {})).rejects.toBeInstanceOf(
       NotFoundException,
     );
@@ -152,7 +163,7 @@ describe('MeService.recordCompletion', () => {
     const deps = makeDeps({
       assignment: { id: 'a1', clientId: CLIENT, status: 'COMPLETED', exerciseId: 'x' },
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     await expect(svc.recordCompletion(CLIENT, 'a1', { response: {} }, {})).rejects.toBeInstanceOf(
       ConflictException,
     );
@@ -162,7 +173,7 @@ describe('MeService.recordCompletion', () => {
     const deps = makeDeps({
       assignment: { id: 'a1', clientId: CLIENT, status: 'SKIPPED', exerciseId: 'x' },
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     await expect(svc.recordCompletion(CLIENT, 'a1', { response: {} }, {})).rejects.toBeInstanceOf(
       BadRequestException,
     );
@@ -172,7 +183,7 @@ describe('MeService.recordCompletion', () => {
 describe('MeService.logMood', () => {
   it('creates mood log + writes MOOD_LOGGED audit', async () => {
     const deps = makeDeps({});
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     const res = await svc.logMood(CLIENT, { rating: 7, notes: 'better' }, {});
     expect(res.rating).toBe(7);
     expect(deps.audit.log).toHaveBeenCalledWith(
@@ -183,9 +194,9 @@ describe('MeService.logMood', () => {
 });
 
 describe('MeService.createJournal', () => {
-  it('persists journal + writes JOURNAL_ENTRY_CREATED audit', async () => {
+  it('persists journal + encrypts content + writes JOURNAL_ENTRY_CREATED audit', async () => {
     const deps = makeDeps({});
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     const res = await svc.createJournal(
       CLIENT,
       { content: 'Today was difficult but I tried a thought record', mood: 4 },
@@ -194,15 +205,42 @@ describe('MeService.createJournal', () => {
     expect(res.content).toMatch(/thought record/);
     expect(res.mood).toBe(4);
     expect(res.sharedWithTherapist).toBe(false);
+    expect(deps.encryption.encryptForTenant).toHaveBeenCalledWith(
+      'cpsy_test_for_journal_owner',
+      'Today was difficult but I tried a thought record',
+    );
+    expect(deps.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contentEncrypted: 'v1.k.iv.ct.tag' }),
+      }),
+    );
     expect(deps.audit.log).toHaveBeenCalledWith(
-      expect.objectContaining({ actorType: 'CLIENT', action: 'JOURNAL_ENTRY_CREATED' }),
+      expect.objectContaining({
+        action: 'JOURNAL_ENTRY_CREATED',
+        metadata: expect.objectContaining({ encrypted: true }),
+      }),
       expect.anything(),
+    );
+  });
+
+  it('falls back to plaintext-only when encryption throws (transition safety)', async () => {
+    const deps = makeDeps({});
+    (deps.encryption.encryptForTenant as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('KMS unavailable'),
+    );
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
+    const res = await svc.createJournal(CLIENT, { content: 'still works' }, {});
+    expect(res.content).toBe('still works');
+    expect(deps.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ contentEncrypted: null }),
+      }),
     );
   });
 
   it('honours sharedWithTherapist when set + propagates to audit metadata', async () => {
     const deps = makeDeps({});
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     const res = await svc.createJournal(
       CLIENT,
       { content: 'Open to discuss next time', sharedWithTherapist: true },
@@ -245,7 +283,7 @@ describe('MeService.getExercise', () => {
     const row = fullAssignmentRow({ clientId: CLIENT, exerciseId: 'cbt_thought_record_5col' });
     const deps = makeDeps({});
     (deps.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(row);
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     const res = await svc.getExercise(CLIENT, 'a1');
 
@@ -260,7 +298,7 @@ describe('MeService.getExercise', () => {
     });
     const deps = makeDeps({});
     (deps.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(row);
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     await expect(svc.getExercise(CLIENT, 'a1')).rejects.toBeInstanceOf(NotFoundException);
   });
@@ -268,7 +306,7 @@ describe('MeService.getExercise', () => {
   it('rejects 404 when the assignment does not exist', async () => {
     const deps = makeDeps({});
     (deps.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     await expect(svc.getExercise(CLIENT, 'nope')).rejects.toBeInstanceOf(NotFoundException);
   });
@@ -277,7 +315,7 @@ describe('MeService.getExercise', () => {
 describe('MeService.registerPushSubscription', () => {
   it('upserts the subscription and writes PUSH_SUBSCRIPTION_REGISTERED audit', async () => {
     const deps = makeDeps({});
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     const res = await svc.registerPushSubscription(
       CLIENT,
@@ -316,7 +354,7 @@ describe('MeService.revokePushSubscription', () => {
       id: 'cpush111111111111111111111',
       clientId: CLIENT,
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     await svc.revokePushSubscription(CLIENT, 'cpush111111111111111111111', {});
 
@@ -336,7 +374,7 @@ describe('MeService.revokePushSubscription', () => {
       id: 'cpush111111111111111111111',
       clientId: 'someone-else',
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     await expect(
       svc.revokePushSubscription(CLIENT, 'cpush111111111111111111111', {}),
@@ -356,7 +394,7 @@ describe('MeService.getNextSession', () => {
         psychologist: { fullName: 'Dr. Priya Menon' },
       },
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     const res = await svc.getNextSession(CLIENT);
 
@@ -377,7 +415,7 @@ describe('MeService.getNextSession', () => {
 
   it('returns null when no scheduled session exists', async () => {
     const deps = makeDeps({ nextSession: null });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
 
     const res = await svc.getNextSession(CLIENT);
 
@@ -405,7 +443,7 @@ describe('MeService.listExercises', () => {
         },
       ],
     });
-    const svc = new MeService(deps.prisma, deps.audit);
+    const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
     const res = await svc.listExercises(CLIENT);
     expect(res).toHaveLength(1);
     expect(res[0]!.status).toBe('PENDING');

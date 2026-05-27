@@ -104,6 +104,11 @@ export class SessionsController {
       auditMetadataFromRequest(req),
     );
   }
+
+  @Get(':id/therapy-note')
+  async therapyNote(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {
+    return this.service.getTherapyNote(requirePsychologistId(user), id);
+  }
 }
 
 function requirePsychologistId(user: AuthenticatedUser): string {

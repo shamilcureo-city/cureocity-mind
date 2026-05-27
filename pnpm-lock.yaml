@@ -167,6 +167,18 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
 
+  packages/crypto:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.1
+        version: 22.19.19
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
+        version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
+
   packages/llm:
     dependencies:
       '@cureocity/contracts':
@@ -284,6 +296,9 @@ importers:
       '@cureocity/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@cureocity/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@cureocity/storage':
         specifier: workspace:*
         version: link:../../packages/storage

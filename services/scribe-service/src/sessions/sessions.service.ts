@@ -215,6 +215,10 @@ export class SessionsService {
     return this.signer.sign(psychologistId, sessionId, input, auditMeta);
   }
 
+  async getTherapyNote(psychologistId: string, sessionId: string): Promise<TherapyNote | null> {
+    return this.signer.getTherapyNote(psychologistId, sessionId);
+  }
+
   private async fetchOwnedSession(psychologistId: string, sessionId: string) {
     const row = await this.prisma.session.findUnique({ where: { id: sessionId } });
     if (!row) throw new NotFoundException('Session not found');

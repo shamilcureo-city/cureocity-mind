@@ -15,6 +15,7 @@
   "dependencies": {
     "@cureocity/clinical": "workspace:*",
     "@cureocity/contracts": "workspace:*",
+    "@cureocity/crypto": "workspace:*",
     "@cureocity/storage": "workspace:*",
     "@nestjs/common": "^10.4.15",
     "@nestjs/config": "^3.3.0",
