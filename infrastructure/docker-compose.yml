@@ -118,11 +118,73 @@ services:
       "
     restart: 'no'
 
+  # ----- Observability stack — Sprint 10 PR 2 ---------------------------
+  # OTLP collector for traces. Services emit OTLP/HTTP on :4318 and the
+  # collector dumps to stdout in dev. Metrics flow direct from each
+  # service to Prometheus (see below) — collector is trace-only in V1.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.0
+    container_name: cureocity-otel-collector
+    restart: unless-stopped
+    command: ['--config=/etc/otel-collector/config.yaml']
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel-collector/config.yaml:ro
+    ports:
+      - '4317:4317' # OTLP gRPC
+      - '4318:4318' # OTLP HTTP (what services target)
+      - '8889:8889' # Collector-exported Prometheus metrics
+    networks:
+      - cureocity-mind
+
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    container_name: cureocity-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '9090:9090'
+    extra_hosts:
+      # Lets Prometheus scrape services running on the host machine
+      # (the dev workflow runs services via `pnpm` outside Docker).
+      - 'host.docker.internal:host-gateway'
+    depends_on:
+      - otel-collector
+    networks:
+      - cureocity-mind
+
+  grafana:
+    image: grafana/grafana-oss:11.4.0
+    container_name: cureocity-grafana
+    restart: unless-stopped
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: 'true'
+      GF_AUTH_ANONYMOUS_ORG_ROLE: 'Viewer'
+      GF_USERS_DEFAULT_THEME: 'dark'
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '3030:3000' # Avoid the 3000-3006 service range
+    depends_on:
+      - prometheus
+    networks:
+      - cureocity-mind
+
 volumes:
   postgres-data:
   redis-data:
   kafka-data:
   minio-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   cureocity-mind:

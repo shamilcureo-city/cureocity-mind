@@ -1,0 +1,93 @@
+# Cureocity Mind alert rules — Sprint 10 PR 2.
+# Each alert maps to a runbook under docs/runbooks/. Severity values
+# map to: page = wake the on-call, ticket = next-business-day,
+# warn = log only.
+
+groups:
+  - name: cureocity-clinical
+    interval: 30s
+    rules:
+      - alert: CrisisFlagRaised
+        expr: increase(crisis_flags_raised_total[1m]) > 0
+        labels:
+          severity: page
+          team: clinical
+        annotations:
+          summary: 'Crisis severity raised on a session note'
+          description: |
+            A NoteDraft just landed with high or critical risk severity.
+            On-call clinician must review within 15 minutes per the
+            crisis escalation protocol.
+          runbook: 'docs/runbooks/crisis-flag-raised.md'
+
+      - alert: CostCircuitTripped
+        expr: increase(cost_circuit_trips_total[5m]) > 0
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: 'Cost circuit breaker tripped'
+          description: |
+            Per-session or monthly Gemini cost cap exceeded. New
+            note-generation requests will be rejected until either
+            the cap is raised or the alert is acknowledged.
+          runbook: 'docs/runbooks/cost-circuit-tripped.md'
+
+  - name: cureocity-platform
+    interval: 30s
+    rules:
+      - alert: HighHttpErrorRate
+        expr: |
+          (
+            sum by (service_name) (rate(http_server_duration_milliseconds_count{http_response_status_code=~"5.."}[5m]))
+            /
+            sum by (service_name) (rate(http_server_duration_milliseconds_count[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: page
+          team: platform
+        annotations:
+          summary: '{{ $labels.service_name }} 5xx rate > 5% for 5 minutes'
+          runbook: 'docs/runbooks/high-http-error-rate.md'
+
+      - alert: HighRequestLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, service_name) (rate(http_server_duration_milliseconds_bucket[5m]))
+          ) > 1500
+        for: 10m
+        labels:
+          severity: ticket
+          team: platform
+        annotations:
+          summary: '{{ $labels.service_name }} p95 latency > 1.5s for 10 minutes'
+          runbook: 'docs/runbooks/high-latency.md'
+
+      - alert: GeminiCallTimeouts
+        expr: rate(gemini_call_duration_ms_count{status="TIMEOUT"}[5m]) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+          team: platform
+        annotations:
+          summary: 'Gemini timeouts > 0.05/s for 10 minutes'
+          description: |
+            Two-pass note generation is failing. Check Vertex regional
+            health and the Pass 2 router.
+          runbook: 'docs/runbooks/gemini-timeouts.md'
+
+      - alert: AuditWritesStalled
+        expr: |
+          sum(rate(audit_writes_total[5m])) == 0
+          and sum(rate(http_server_duration_milliseconds_count[5m])) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          team: platform
+        annotations:
+          summary: 'Audit writes have stopped but HTTP traffic continues'
+          description: |
+            Either the DB write path is broken or audit instrumentation
+            has regressed — both are compliance-critical (DPDP § 16).
+          runbook: 'docs/runbooks/audit-writes-stalled.md'
