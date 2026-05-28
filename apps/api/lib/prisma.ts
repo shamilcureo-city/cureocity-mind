@@ -33,9 +33,18 @@ declare global {
 }
 
 function build(): PrismaClient {
-  const connectionString = process.env['DATABASE_URL'];
+  // Accept either the explicit DATABASE_URL or one of the env vars the
+  // Vercel-Neon integration injects automatically. Order is preference:
+  //   1. DATABASE_URL              — set manually
+  //   2. POSTGRES_PRISMA_URL       — Vercel-Neon Prisma-tagged variant
+  //   3. POSTGRES_URL              — Vercel-Neon default (pooled)
+  // All three accept the same Neon HTTP-pooled connection string format.
+  const connectionString =
+    process.env['DATABASE_URL'] ??
+    process.env['POSTGRES_PRISMA_URL'] ??
+    process.env['POSTGRES_URL'];
   if (!connectionString) {
-    throw new Error('DATABASE_URL is not set');
+    throw new Error('DATABASE_URL (or POSTGRES_URL / POSTGRES_PRISMA_URL) is not set');
   }
   const pool = new Pool({ connectionString });
   const adapter = new PrismaNeon(pool);
