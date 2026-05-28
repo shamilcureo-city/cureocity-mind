@@ -1,9 +1,20 @@
 import type {
   Client as ClientRow,
   Consent as ConsentRow,
+  NoteDraft as NoteDraftRow,
   Session as SessionRow,
 } from '@prisma/client';
-import type { BriefingSessionSummary, Client, Consent } from '@cureocity/contracts';
+import type {
+  AffectFeature,
+  BriefingSessionSummary,
+  Client,
+  Consent,
+  NoteDraft,
+  Session,
+  SessionConsentSnapshot,
+  SpeakerSegment,
+  TherapyNoteV1,
+} from '@cureocity/contracts';
 
 /**
  * Prisma row → contract DTO mappers, ported from the NestJS services.
@@ -57,5 +68,43 @@ export function toBriefingSessionSummary(row: SessionRow): BriefingSessionSummar
     scheduledAt: row.scheduledAt.toISOString(),
     startedAt: row.startedAt?.toISOString() ?? null,
     endedAt: row.endedAt?.toISOString() ?? null,
+  };
+}
+
+export function toSession(row: SessionRow): Session {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    psychologistId: row.psychologistId,
+    modality: row.modality,
+    status: row.status,
+    scheduledAt: row.scheduledAt.toISOString(),
+    startedAt: row.startedAt?.toISOString() ?? null,
+    endedAt: row.endedAt?.toISOString() ?? null,
+    consentSnapshot:
+      row.consentSnapshot === null
+        ? null
+        : (row.consentSnapshot as unknown as SessionConsentSnapshot),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toNoteDraft(row: NoteDraftRow): NoteDraft {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    status: row.status,
+    transcript: row.transcript,
+    speakerSegments:
+      row.speakerSegments === null ? null : (row.speakerSegments as unknown as SpeakerSegment[]),
+    affectFeatures:
+      row.affectFeatures === null ? null : (row.affectFeatures as unknown as AffectFeature[]),
+    content: row.content === null ? null : (row.content as unknown as TherapyNoteV1),
+    riskSeverity: row.riskSeverity,
+    totalCostInr: row.totalCostInr.toString(),
+    errorMessage: row.errorMessage,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
