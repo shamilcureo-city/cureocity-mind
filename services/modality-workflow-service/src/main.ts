@@ -1,7 +1,13 @@
 import 'reflect-metadata';
+import { initObservability } from '@cureocity/observability';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
+
+initObservability({
+  serviceName: 'modality-workflow-service',
+  prometheusPort: Number(process.env['OTEL_PROMETHEUS_PORT'] ?? 4003),
+});
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {

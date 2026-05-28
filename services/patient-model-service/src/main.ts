@@ -1,7 +1,15 @@
 import 'reflect-metadata';
+import { initObservability } from '@cureocity/observability';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
+
+// Bootstrap observability BEFORE NestFactory so auto-instrumentation
+// monkey-patches http/pg/redis before any imports use them.
+initObservability({
+  serviceName: 'patient-model-service',
+  prometheusPort: Number(process.env['OTEL_PROMETHEUS_PORT'] ?? 4001),
+});
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {

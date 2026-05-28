@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type { AuditAction, AuditActorType, AuditMetadata } from '@cureocity/contracts';
+import { recordAuditWrite } from '@cureocity/observability';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface AuditWrite {
@@ -35,5 +36,8 @@ export class AuditService {
             : (input.metadata as Prisma.InputJsonValue),
       },
     });
+    // Bump the Prometheus counter so audit throughput is observable
+    // per action. Sprint 10 PR 1.
+    recordAuditWrite(input.action, input.actorType);
   }
 }

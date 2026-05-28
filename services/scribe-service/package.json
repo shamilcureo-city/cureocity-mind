@@ -16,6 +16,7 @@
   "dependencies": {
     "@cureocity/contracts": "workspace:*",
     "@cureocity/llm": "workspace:*",
+    "@cureocity/observability": "workspace:*",
     "@cureocity/storage": "workspace:*",
     "@nestjs/bullmq": "^10.2.3",
     "@nestjs/common": "^10.4.15",
