@@ -1,6 +1,9 @@
 import type {
   Client as ClientRow,
   Consent as ConsentRow,
+  ExerciseAssignment as ExerciseAssignmentRow,
+  JournalEntry as JournalEntryRow,
+  MoodLog as MoodLogRow,
   NoteDraft as NoteDraftRow,
   Session as SessionRow,
 } from '@prisma/client';
@@ -9,6 +12,9 @@ import type {
   BriefingSessionSummary,
   Client,
   Consent,
+  ExerciseAssignment,
+  JournalEntry,
+  MoodLog,
   NoteDraft,
   Session,
   SessionConsentSnapshot,
@@ -104,6 +110,50 @@ export function toNoteDraft(row: NoteDraftRow): NoteDraft {
     riskSeverity: row.riskSeverity,
     totalCostInr: row.totalCostInr.toString(),
     errorMessage: row.errorMessage,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toExerciseAssignment(row: ExerciseAssignmentRow): ExerciseAssignment {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    psychologistId: row.psychologistId,
+    exerciseId: row.exerciseId,
+    assignedAt: row.assignedAt.toISOString(),
+    dueAt: row.dueAt?.toISOString() ?? null,
+    status: row.status,
+    completedAt: row.completedAt?.toISOString() ?? null,
+    response:
+      row.response === null || typeof row.response !== 'object' || Array.isArray(row.response)
+        ? null
+        : (row.response as Record<string, unknown>),
+    therapistNote: row.therapistNote,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toMoodLog(row: MoodLogRow): MoodLog {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    rating: row.rating,
+    notes: row.notes,
+    recordedAt: row.recordedAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+export function toJournalEntry(row: JournalEntryRow): JournalEntry {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    content: row.content,
+    mood: row.mood,
+    sharedWithTherapist: row.sharedWithTherapist,
+    recordedAt: row.recordedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
