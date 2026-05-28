@@ -1,0 +1,81 @@
+import { describe, it, expect, vi } from 'vitest';
+import { ModelRouter } from './model-router';
+import { MockGeminiPass1Backend, MockGeminiPass2Backend } from './backends/mock-gemini.backend';
+import { computeCostInr, FLASH_PRICING, PRO_PRICING, estimateAudioInputTokens } from './pricing';
+
+describe('ModelRouter', () => {
+  it('runs pass1 and pass2, invoking onCallLog for each', async () => {
+    const onCallLog = vi.fn();
+    const router = new ModelRouter({
+      pass1: new MockGeminiPass1Backend(),
+      pass2: new MockGeminiPass2Backend(),
+      onCallLog,
+    });
+
+    const p1 = await router.pass1({
+      sessionId: 's_1',
+      audioBytes: Buffer.alloc(1024),
+      durationMs: 30_000,
+    });
+    expect(p1.output.transcript).toContain('mock transcript');
+    expect(p1.callLog.pass).toBe('PASS_1_TRANSCRIBE_AND_ANALYSE');
+    expect(p1.callLog.region).toBe('mock-asia-south1');
+
+    const p2 = await router.pass2({
+      sessionId: 's_1',
+      transcript: p1.output.transcript,
+      speakerSegments: p1.output.speakerSegments,
+      modality: 'CBT',
+      clientContext: { presentingConcerns: 'anxiety' },
+    });
+    expect(p2.output.therapyNote.version).toBe('V1');
+    expect(p2.output.therapyNote.modality).toBe('CBT');
+
+    expect(onCallLog).toHaveBeenCalledTimes(2);
+  });
+
+  it('works without onCallLog callback', async () => {
+    const router = new ModelRouter({
+      pass1: new MockGeminiPass1Backend(),
+      pass2: new MockGeminiPass2Backend(),
+    });
+    const result = await router.pass1({
+      sessionId: 's_2',
+      audioBytes: Buffer.alloc(1024),
+      durationMs: 5_000,
+    });
+    expect(result.callLog.status).toBe('SUCCESS');
+  });
+});
+
+describe('pricing.computeCostInr', () => {
+  it('matches Flash pricing for a typical 50-minute session', () => {
+    // 50 min audio = 50 * 60 * 32 = 96000 input tokens; assume 5000 output tokens
+    const inr = computeCostInr(96_000, 5_000, FLASH_PRICING);
+    // (96000 * 0.075 + 5000 * 0.30) / 1e6 USD = 0.0072 + 0.0015 = 0.0087 USD
+    // ~0.72 INR — should be well under the ₹500/session cap
+    expect(inr).toBeGreaterThan(0.5);
+    expect(inr).toBeLessThan(2);
+  });
+
+  it('matches Pro pricing for a typical Pass 2', () => {
+    // 10k input text tokens, 2k output
+    const inr = computeCostInr(10_000, 2_000, PRO_PRICING);
+    // (10000 * 1.25 + 2000 * 5) / 1e6 USD = 0.0125 + 0.01 = 0.0225 USD = ~1.87 INR
+    expect(inr).toBeGreaterThan(1);
+    expect(inr).toBeLessThan(3);
+  });
+
+  it('rounds to 4 fractional digits', () => {
+    const inr = computeCostInr(100, 100, FLASH_PRICING);
+    const fractional = String(inr).split('.')[1] ?? '';
+    expect(fractional.length).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('pricing.estimateAudioInputTokens', () => {
+  it('returns ~32 tokens per second of audio', () => {
+    expect(estimateAudioInputTokens(1000)).toBe(32);
+    expect(estimateAudioInputTokens(60_000)).toBe(60 * 32);
+  });
+});

@@ -1,0 +1,22 @@
+{
+  "name": "@cureocity/llm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "ModelRouter + two-pass Gemini backends (Flash asia-south1, Pro global) + prompts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src --max-warnings 0 --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "@cureocity/contracts": "workspace:*",
+    "@google-cloud/vertexai": "^1.9.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

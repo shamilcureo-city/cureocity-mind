@@ -1,0 +1,42 @@
+{
+  "name": "@cureocity/pdf-generator-service",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Puppeteer-rendered PDFs for therapist session notes + client treatment plans",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:dev": "tsx watch src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint src test --max-warnings 0 --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "@cureocity/contracts": "workspace:*",
+    "@cureocity/notifications": "workspace:*",
+    "@cureocity/observability": "workspace:*",
+    "@cureocity/storage": "workspace:*",
+    "@nestjs/common": "^10.4.15",
+    "@nestjs/config": "^3.3.0",
+    "@nestjs/core": "^10.4.15",
+    "@nestjs/platform-express": "^10.4.15",
+    "@prisma/client": "^5.22.0",
+    "firebase-admin": "^13.0.2",
+    "puppeteer": "^23.10.4",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@nestjs/testing": "^10.4.15",
+    "@swc/core": "^1.10.1",
+    "@types/express": "^5.0.0",
+    "@types/express-serve-static-core": "^5.0.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
+    "unplugin-swc": "^1.5.1",
+    "vitest": "^2.1.8"
+  }
+}

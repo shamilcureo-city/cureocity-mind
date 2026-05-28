@@ -1,0 +1,33 @@
+# Prometheus scrape config — Sprint 10 PR 2.
+#
+# Targets each service's Prometheus exporter port (4001-4006) inside
+# the docker-compose network. Service hostnames are intentionally
+# `host.docker.internal` so dev services running on the host machine
+# (via `pnpm -F <svc> start:dev`) are reachable; CI / staging will
+# replace these with the real container hostnames.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  external_labels:
+    environment: dev
+    region: asia-south1
+
+scrape_configs:
+  - job_name: 'cureocity-services'
+    static_configs:
+      - targets:
+          - 'host.docker.internal:4001' # patient-model-service
+          - 'host.docker.internal:4002' # scribe-service
+          - 'host.docker.internal:4003' # modality-workflow-service
+          - 'host.docker.internal:4004' # affect-engine-service
+          - 'host.docker.internal:4005' # continuity-service
+          - 'host.docker.internal:4006' # pdf-generator-service
+
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8889']
+
+# Alert rules — these page the on-call SRE per docs/runbooks/.
+rule_files:
+  - '/etc/prometheus/alerts/*.yml'

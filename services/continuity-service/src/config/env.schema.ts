@@ -1,0 +1,48 @@
+import { z } from 'zod';
+
+const EnvSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+  PORT: z.coerce.number().int().positive().default(3005),
+  DATABASE_URL: z.string().min(1),
+
+  AUTH_BYPASS: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  FIREBASE_PROJECT_ID: z.string().optional(),
+  FIREBASE_CLIENT_EMAIL: z.string().email().optional(),
+  FIREBASE_PRIVATE_KEY: z.string().optional(),
+
+  ADHERENCE_WINDOW_DAYS: z.coerce.number().int().positive().default(30),
+
+  // Object storage (MinIO in dev, GCS/S3 in prod) — for the audio retention cron.
+  S3_ENDPOINT: z.string().default('http://localhost:9000'),
+  S3_REGION: z.string().default('us-east-1'),
+  S3_ACCESS_KEY: z.string().default('cureocity'),
+  S3_SECRET_KEY: z.string().default('cureocity-dev-secret'),
+  S3_BUCKET_AUDIO: z.string().default('cureocity-mind-audio'),
+  S3_FORCE_PATH_STYLE: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
+  STORAGE_BACKEND: z.enum(['s3', 'memory']).default('s3'),
+
+  // Audio retention policy.
+  AUDIO_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  RETENTION_DRY_RUN: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+});
+
+export type Env = z.infer<typeof EnvSchema>;
+
+export function validateEnv(config: Record<string, unknown>): Env {
+  const parsed = EnvSchema.safeParse(config);
+  if (!parsed.success) {
+    const flat = parsed.error.flatten();
+    throw new Error(`Invalid environment variables:\n${JSON.stringify(flat.fieldErrors, null, 2)}`);
+  }
+  return parsed.data;
+}

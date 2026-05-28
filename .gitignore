@@ -32,6 +32,10 @@ test-results/
 .env.staging
 !.env.example
 
+# Pilot roster — real file (therapists.json) contains PII; never
+# commit it. The .example.json template stays in git.
+pilot/therapists.json
+
 # Prisma — committed migrations stay; local dev artifacts don't
 prisma/migrations/dev-*/
 prisma/.env
