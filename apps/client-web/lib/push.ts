@@ -87,7 +87,11 @@ export async function ensurePushSubscription(user: User): Promise<PushRegistrati
 }
 
 function continuityBase(): string {
-  return process.env.NEXT_PUBLIC_CONTINUITY_SERVICE_BASE ?? 'http://localhost:3005/api/v1';
+  return (
+    process.env.NEXT_PUBLIC_API_BASE ??
+    process.env.NEXT_PUBLIC_CONTINUITY_SERVICE_BASE ??
+    'http://localhost:3005/api/v1'
+  );
 }
 
 function urlBase64ToUint8Array(b64: string): Uint8Array<ArrayBuffer> {

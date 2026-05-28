@@ -1,6 +1,9 @@
 import type { ClaimTokenPreview, ClaimTokenRedeemResult } from '@cureocity/contracts';
 
-const PATIENT_BASE = process.env.NEXT_PUBLIC_PATIENT_SERVICE_BASE ?? 'http://localhost:3001/api/v1';
+const PATIENT_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ??
+  process.env.NEXT_PUBLIC_PATIENT_SERVICE_BASE ??
+  'http://localhost:3001/api/v1';
 
 export async function fetchClaimPreview(token: string): Promise<ClaimTokenPreview> {
   const res = await fetch(`${PATIENT_BASE}/claim-tokens/${encodeURIComponent(token)}`, {

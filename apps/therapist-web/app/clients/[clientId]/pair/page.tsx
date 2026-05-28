@@ -5,7 +5,10 @@ import { useParams } from 'next/navigation';
 import QRCode from 'qrcode';
 import type { ClientClaimToken } from '@cureocity/contracts';
 
-const PATIENT_BASE = process.env.NEXT_PUBLIC_PATIENT_SERVICE_BASE ?? 'http://localhost:3001/api/v1';
+const PATIENT_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ??
+  process.env.NEXT_PUBLIC_PATIENT_SERVICE_BASE ??
+  'http://localhost:3001/api/v1';
 const CLIENT_WEB_BASE = process.env.NEXT_PUBLIC_CLIENT_WEB_BASE ?? 'http://localhost:3200';
 
 /**

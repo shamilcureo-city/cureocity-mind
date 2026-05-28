@@ -6,7 +6,10 @@ import type { NoteDraft, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts
 import { tUi, type UiLocale } from '@/lib/i18n';
 import { authenticateWithChallenge, sha256Hex } from '@/lib/webauthn';
 
-const SCRIBE_BASE = process.env.NEXT_PUBLIC_SCRIBE_SERVICE_BASE ?? 'http://localhost:3002/api/v1';
+const SCRIBE_BASE =
+  process.env.NEXT_PUBLIC_API_BASE ??
+  process.env.NEXT_PUBLIC_SCRIBE_SERVICE_BASE ??
+  'http://localhost:3002/api/v1';
 
 /**
  * ReviewScreen — inline note editing, risk acknowledgement, WebAuthn
