@@ -16,7 +16,11 @@
 //   G13: ConsentScope.CROSS_BORDER_PROCESSING covers Gemini Pro global pass
 
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // driverAdapters enables @prisma/adapter-neon for the Vercel BFF
+  // (apps/api). NestJS services still use the standard connection
+  // pool — the adapter is request-scoped + opt-in per client.
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
