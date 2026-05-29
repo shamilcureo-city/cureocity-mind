@@ -27,6 +27,12 @@ import ws from 'ws';
  */
 
 neonConfig.webSocketConstructor = ws;
+// Route Pool.query() through Neon's HTTP/fetch transport instead of
+// holding a WebSocket open. Vercel Functions are short-lived enough
+// that the WS lifecycle (handshake + idle + close) routinely produces
+// "Connection terminated unexpectedly" — fetch sidesteps that and
+// also wakes a suspended Neon endpoint correctly on cold starts.
+neonConfig.poolQueryViaFetch = true;
 
 declare global {
   var __cureocityPrisma: PrismaClient | undefined;
