@@ -1,20 +1,23 @@
 # Deploying Cureocity Mind to Vercel
 
-This is the **Vercel-only** deployment path. Three Vercel projects, one
+This is the **Vercel-only** deployment path. Two Vercel projects, one
 Neon Postgres database, one Vercel Blob store, one Firebase project per
 audience. No Railway, no Render, no separate container hosts.
 
-The backend lives in `apps/api` (a Next.js Functions app). The six
-NestJS services under `services/` are NOT deployed — they remain in the
-repo for local dev with `pnpm infra:up`, but Vercel hits `apps/api`
-exclusively.
+The backend lives in `apps/api` (a Next.js Functions app). The two PWAs
+(therapist + client) are merged into a single Next.js app at `apps/web`
+that role-routes under `/t/*` and `/c/*` — one installable PWA, one
+deployment, one set of env vars. The six NestJS services under
+`services/` are NOT deployed — they remain in the repo for local dev
+with `pnpm infra:up`, but Vercel hits `apps/api` exclusively.
 
 ## Architecture in one paragraph
 
 ```
-[therapist-web (Vercel)] ──┐
-                           ├──> [apps/api (Vercel Functions)] ──> [Neon Postgres]
-[client-web (Vercel)] ─────┘                                  └─> [Vercel Blob]
+[apps/web (Vercel)]
+  /t/* therapist routes  ──┐
+  /c/* client routes    ───┴─> [apps/api (Vercel Functions)] ──> [Neon Postgres]
+                                                              └─> [Vercel Blob]
                                                               └─> [Vertex AI]
                                                               └─> [Firebase Admin]
 ```
@@ -35,7 +38,7 @@ exclusively.
 2. Copy the **pooled connection string** (it ends in `-pooler.<region>.aws.neon.tech/...?sslmode=require`).
 3. Open the SQL editor and run nothing — Prisma will do the schema in step 4.
 
-## Step 2 — Create three Vercel projects from the GitHub repo
+## Step 2 — Create two Vercel projects from the GitHub repo
 
 In the Vercel dashboard, click **Add New → Project** three times. Each
 points at the same GitHub repo but at a different root directory.
@@ -49,21 +52,17 @@ points at the same GitHub repo but at a different root directory.
 | Node.js Version          | 22.x                                                   |
 | Build / Install / Output | leave defaults — `apps/api/vercel.json` overrides them |
 
-**Project B — `cureocity-therapist-web`**
+**Project B — `cureocity-mind-web`**
 
-| Setting          | Value                |
-| ---------------- | -------------------- |
-| Framework Preset | Next.js              |
-| Root Directory   | `apps/therapist-web` |
-| Node.js Version  | 22.x                 |
+| Setting          | Value       |
+| ---------------- | ----------- |
+| Framework Preset | Next.js     |
+| Root Directory   | `apps/web`  |
+| Node.js Version  | 22.x        |
 
-**Project C — `cureocity-client-web`**
-
-| Setting          | Value             |
-| ---------------- | ----------------- |
-| Framework Preset | Next.js           |
-| Root Directory   | `apps/client-web` |
-| Node.js Version  | 22.x              |
+The single web project hosts both the therapist UI (under `/t/*`) and
+the client PWA (under `/c/*`) — one installable Cureocity Mind app,
+role-routed at runtime via the Firebase auth claim.
 
 Each `vercel.json` already declares the build command stitching the
 pnpm workspace + Prisma generate + dependent packages. Vercel auto-
@@ -89,22 +88,21 @@ detects pnpm from the lockfile.
 | `COST_CAP_PER_SESSION_INR`           | `500`                                                                                        |
 | `COST_CAP_PER_THERAPIST_MONTHLY_INR` | `15000`                                                                                      |
 
-### Project B (`cureocity-therapist-web`)
+### Project B (`cureocity-mind-web`)
 
-| Var                                | Value                                        |
-| ---------------------------------- | -------------------------------------------- |
-| `NEXT_PUBLIC_API_BASE`             | `https://<cureocity-api-project-url>/api/v1` |
-| `NEXT_PUBLIC_CLIENT_WEB_BASE`      | `https://<cureocity-client-web-project-url>` |
-| `NEXT_PUBLIC_FIREBASE_API_KEY`     | therapist Firebase web-app config            |
-| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | therapist Firebase web-app config            |
-| `NEXT_PUBLIC_FIREBASE_PROJECT_ID`  | therapist Firebase web-app config            |
-| `NEXT_PUBLIC_FIREBASE_APP_ID`      | therapist Firebase web-app config            |
-
-### Project C (`cureocity-client-web`)
+Both audiences (therapists at `/t/*`, clients at `/c/*`) live in one
+Next.js app, so both Firebase configs go on the same project. The
+two `FIREBASE_*` sets are kept separate so a therapist and a client
+can never share a Firebase UID — the auth boundaries are enforced at
+the SDK level by which init is called from which route subtree.
 
 | Var                                       | Value                                        |
 | ----------------------------------------- | -------------------------------------------- |
 | `NEXT_PUBLIC_API_BASE`                    | `https://<cureocity-api-project-url>/api/v1` |
+| `NEXT_PUBLIC_FIREBASE_API_KEY`            | therapist Firebase web-app config            |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`        | therapist Firebase web-app config            |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID`         | therapist Firebase web-app config            |
+| `NEXT_PUBLIC_FIREBASE_APP_ID`             | therapist Firebase web-app config            |
 | `NEXT_PUBLIC_FIREBASE_CLIENT_API_KEY`     | patient Firebase web-app config              |
 | `NEXT_PUBLIC_FIREBASE_CLIENT_AUTH_DOMAIN` | patient Firebase web-app config              |
 | `NEXT_PUBLIC_FIREBASE_CLIENT_PROJECT_ID`  | patient Firebase web-app config              |
@@ -136,16 +134,17 @@ implicitly.
 
 ## Step 6 — Deploy
 
-Push your branch. All three Vercel projects auto-deploy. The first
+Push your branch. Both Vercel projects auto-deploy. The first
 build takes 3-5 min per project (pnpm workspace install + Prisma client
++ dependent package builds).
 
-- dependent package builds).
+You'll get two URLs:
 
-You'll get three URLs:
-
-- `https://cureocity-api.vercel.app` → backend API
-- `https://cureocity-therapist-web.vercel.app` → therapist PWA
-- `https://cureocity-client-web.vercel.app` → patient PWA
+- `https://cureocity-mind-api.vercel.app` → backend API
+- `https://cureocity-mind-web.vercel.app` → merged web app
+  - `/` — role selector ("I'm a therapist" / "I have a link from my therapist")
+  - `/t/*` — therapist UI
+  - `/c/*` — client PWA (installable)
 
 ## Step 7 — Smoke test
 

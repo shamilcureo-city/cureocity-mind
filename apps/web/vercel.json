@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm exec prisma generate && pnpm -r --filter \"@cureocity/web...\" build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "env": {
+    "NEXT_TELEMETRY_DISABLED": "1"
+  }
+}
