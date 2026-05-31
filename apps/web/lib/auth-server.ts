@@ -13,12 +13,22 @@ import { prisma } from './prisma';
  * right HTTP status. The route handler then either uses the resolved
  * value or returns the early response.
  *
- * AUTH_BYPASS=true short-circuits to the seeded dev fixtures so
- * preview deploys without Firebase still work.
+ * Bypass is engaged when EITHER:
+ *   - AUTH_BYPASS=true                (explicit opt-in), or
+ *   - Firebase Admin is unconfigured  (FIREBASE_PROJECT_ID /
+ *                                      CLIENT_EMAIL / PRIVATE_KEY missing).
+ * Both routes short-circuit to the seeded dev fixtures. Once real
+ * Firebase env vars land on Vercel, the bypass auto-disengages and
+ * Bearer-token verification becomes mandatory — no flag flip required.
  */
 
 const DEV_BYPASS_FIREBASE_UID = 'dev-firebase-uid-priya';
 const DEV_BYPASS_CLIENT_FIREBASE_UID = 'dev-client-firebase-uid-arjun';
+
+function shouldBypass(): boolean {
+  if (process.env['AUTH_BYPASS'] === 'true') return true;
+  return firebaseAuth() === null;
+}
 
 export interface AuthenticatedUser {
   firebaseUid: string;
@@ -35,7 +45,7 @@ export interface AuthenticatedClient {
 type Resolved<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
 
 async function verifyBearer(req: NextRequest): Promise<Resolved<string>> {
-  if (process.env['AUTH_BYPASS'] === 'true') {
+  if (shouldBypass()) {
     return { ok: true, value: DEV_BYPASS_FIREBASE_UID };
   }
   const header = req.headers.get('authorization');
@@ -45,13 +55,8 @@ async function verifyBearer(req: NextRequest): Promise<Resolved<string>> {
       response: NextResponse.json({ error: 'Missing Bearer token' }, { status: 401 }),
     };
   }
-  const auth = firebaseAuth();
-  if (!auth) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: 'Firebase Admin not configured' }, { status: 401 }),
-    };
-  }
+  // firebaseAuth() is non-null here — shouldBypass() returned false.
+  const auth = firebaseAuth()!;
   try {
     const decoded = await auth.verifyIdToken(header.substring('Bearer '.length));
     return { ok: true, value: decoded.uid };
@@ -116,7 +121,7 @@ export async function requireAdmin(
 }
 
 export async function resolveClient(req: NextRequest): Promise<Resolved<AuthenticatedClient>> {
-  if (process.env['AUTH_BYPASS'] === 'true') {
+  if (shouldBypass()) {
     const client = await prisma.client.findUnique({
       where: { clientFirebaseUid: DEV_BYPASS_CLIENT_FIREBASE_UID },
       select: { id: true, deletedAt: true, status: true },
