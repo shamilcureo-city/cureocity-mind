@@ -44,12 +44,7 @@ export default function ClientDetailPage() {
         modality,
         scheduledAt: new Date().toISOString(),
       });
-      router.push(
-        {
-          pathname: '/t/clients/[clientId]/sessions/[sessionId]/capture',
-          params: { clientId: params.clientId, sessionId: created.id },
-        } as never,
-      );
+      router.push(`/t/clients/${params.clientId}/sessions/${created.id}/capture`);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -125,28 +120,12 @@ export default function ClientDetailPage() {
         </h2>
         <ul className="mt-3 space-y-2 text-sm">
           <li>
-            <Link
-              href={
-                {
-                  pathname: '/t/clients/[clientId]/pair',
-                  params: { clientId: client.id },
-                } as never
-              }
-              className="underline"
-            >
+            <Link href={`/t/clients/${client.id}/pair`} className="underline">
               Pair client device (issue claim link / QR)
             </Link>
           </li>
           <li>
-            <Link
-              href={
-                {
-                  pathname: '/t/clients/[clientId]/consent',
-                  params: { clientId: client.id },
-                } as never
-              }
-              className="underline"
-            >
+            <Link href={`/t/clients/${client.id}/consent`} className="underline">
               Capture session consent (WebAuthn)
             </Link>
           </li>

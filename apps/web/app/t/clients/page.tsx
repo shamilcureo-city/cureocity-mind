@@ -72,10 +72,7 @@ export default function ClientsIndexPage() {
         <ul className="space-y-2">
           {clients.map((c) => (
             <li key={c.id} className="rounded-2xl border border-[var(--color-slate-200)] bg-white">
-              <Link
-                href={{ pathname: '/t/clients/[clientId]', params: { clientId: c.id } } as never}
-                className="block px-5 py-4"
-              >
+              <Link href={`/t/clients/${c.id}`} className="block px-5 py-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium text-[var(--color-navy-700)]">{c.fullName}</p>
