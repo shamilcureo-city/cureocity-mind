@@ -1,0 +1,57 @@
+import { NextResponse, type NextRequest } from 'next/server';
+import { requirePsychologistId } from '@/lib/auth-server';
+import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { prisma } from '@/lib/prisma';
+import { toSession } from '@/lib/mappers';
+import { fetchOwnedSession } from '@/lib/session-helpers';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+interface RouteContext {
+  params: Promise<{ id: string }>;
+}
+
+/**
+ * POST /api/v1/sessions/:id/start — transitions SCHEDULED → IN_PROGRESS.
+ * Refuses without a recorded consent snapshot.
+ */
+export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  const auth = await requirePsychologistId(req);
+  if (!auth.ok) return auth.response;
+  const { id: sessionId } = await ctx.params;
+  const existing = await fetchOwnedSession(auth.value.psychologistId, sessionId);
+  if (!existing) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  if (existing.status !== 'SCHEDULED') {
+    return NextResponse.json(
+      { error: `Cannot start a session in ${existing.status} state` },
+      { status: 400 },
+    );
+  }
+  if (existing.consentSnapshot === null) {
+    return NextResponse.json(
+      { error: 'Session consent must be recorded before starting' },
+      { status: 400 },
+    );
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.session.update({
+      where: { id: sessionId },
+      data: { status: 'IN_PROGRESS', startedAt: new Date() },
+    });
+    await writeAudit(
+      {
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: auth.value.psychologistId,
+        action: 'SESSION_STARTED',
+        targetType: 'Session',
+        targetId: sessionId,
+        metadata: auditMetadataFromRequest(req),
+      },
+      tx,
+    );
+    return row;
+  });
+  return NextResponse.json(toSession(updated));
+}

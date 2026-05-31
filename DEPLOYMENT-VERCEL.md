@@ -1,25 +1,27 @@
 # Deploying Cureocity Mind to Vercel
 
-This is the **Vercel-only** deployment path. Two Vercel projects, one
+This is the **Vercel-only** deployment path. One Vercel project, one
 Neon Postgres database, one Vercel Blob store, one Firebase project per
 audience. No Railway, no Render, no separate container hosts.
 
-The backend lives in `apps/api` (a Next.js Functions app). The two PWAs
-(therapist + client) are merged into a single Next.js app at `apps/web`
-that role-routes under `/t/*` and `/c/*` — one installable PWA, one
-deployment, one set of env vars. The six NestJS services under
-`services/` are NOT deployed — they remain in the repo for local dev
-with `pnpm infra:up`, but Vercel hits `apps/api` exclusively.
+The entire stack — backend API routes and both PWA frontends — lives
+in a single Next.js app at `apps/web`. UI routes serve under `/`,
+`/t/*` (therapist), `/c/*` (client); BFF routes serve under `/api/v1/*`
+from the same domain. The six NestJS services under `services/` are
+NOT deployed — they remain in the repo for local dev with
+`pnpm infra:up`.
 
 ## Architecture in one paragraph
 
 ```
-[apps/web (Vercel)]
-  /t/* therapist routes  ──┐
-  /c/* client routes    ───┴─> [apps/api (Vercel Functions)] ──> [Neon Postgres]
-                                                              └─> [Vercel Blob]
-                                                              └─> [Vertex AI]
-                                                              └─> [Firebase Admin]
+                       [apps/web (Vercel)]
+                         /               → role selector
+[browser/PWA] ─────────> /t/*            → therapist UI         ──┐
+                         /c/*            → client PWA            ─┤
+                         /api/v1/*       → backend functions    ──┴──> [Neon Postgres]
+                                                                 ├──> [Vercel Blob]
+                                                                 ├──> [Vertex AI]
+                                                                 └──> [Firebase Admin]
 ```
 
 ## Prerequisites
@@ -38,43 +40,47 @@ with `pnpm infra:up`, but Vercel hits `apps/api` exclusively.
 2. Copy the **pooled connection string** (it ends in `-pooler.<region>.aws.neon.tech/...?sslmode=require`).
 3. Open the SQL editor and run nothing — Prisma will do the schema in step 4.
 
-## Step 2 — Create two Vercel projects from the GitHub repo
+## Step 2 — Create one Vercel project from the GitHub repo
 
-In the Vercel dashboard, click **Add New → Project** three times. Each
-points at the same GitHub repo but at a different root directory.
+In the Vercel dashboard, click **Add New → Project** once.
 
-**Project A — `cureocity-api`**
+**`cureocity-mind-web`**
 
-| Setting                  | Value                                                  |
-| ------------------------ | ------------------------------------------------------ |
-| Framework Preset         | Next.js                                                |
-| Root Directory           | `apps/api`                                             |
-| Node.js Version          | 22.x                                                   |
-| Build / Install / Output | leave defaults — `apps/api/vercel.json` overrides them |
+| Setting                  | Value                                                 |
+| ------------------------ | ----------------------------------------------------- |
+| Framework Preset         | Next.js                                               |
+| Root Directory           | `apps/web`                                            |
+| Node.js Version          | 22.x                                                  |
+| Build / Install / Output | leave defaults — `apps/web/vercel.json` overrides them |
 
-**Project B — `cureocity-mind-web`**
+This single project hosts everything: role-selector at `/`, therapist
+UI at `/t/*`, client PWA at `/c/*`, and the BFF at `/api/v1/*` — all
+served from one domain so there's no CORS to configure.
 
-| Setting          | Value       |
-| ---------------- | ----------- |
-| Framework Preset | Next.js     |
-| Root Directory   | `apps/web`  |
-| Node.js Version  | 22.x        |
-
-The single web project hosts both the therapist UI (under `/t/*`) and
-the client PWA (under `/c/*`) — one installable Cureocity Mind app,
-role-routed at runtime via the Firebase auth claim.
-
-Each `vercel.json` already declares the build command stitching the
-pnpm workspace + Prisma generate + dependent packages. Vercel auto-
-detects pnpm from the lockfile.
+`apps/web/vercel.json` declares the build command — it runs
+`pnpm exec prisma migrate deploy` against `DATABASE_URL_UNPOOLED`
+before `next build`, so schema changes auto-apply on every deploy.
+Vercel auto-detects pnpm from the lockfile.
 
 ## Step 3 — Configure environment variables
 
-### Project A (`cureocity-api`)
+All vars live on the one `cureocity-mind-web` project. Server-side
+vars (no `NEXT_PUBLIC_` prefix) are only available to `/api/v1/*`
+route handlers; `NEXT_PUBLIC_*` vars are inlined into the client
+bundle at build time.
+
+The two `FIREBASE_*` web-config sets are kept separate so a therapist
+and a client can never share a Firebase UID — the boundary is enforced
+at the SDK level by which init module gets imported from which route
+subtree (`lib/firebase-therapist.ts` under `/t/*`, `lib/firebase-client.ts`
+under `/c/*`).
+
+### Backend (server-only)
 
 | Var                                  | Value                                                                                        |
 | ------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                       | Neon pooled connection string (from step 1)                                                  |
+| `DATABASE_URL`                       | Neon pooled connection string (auto-injected if you use the Vercel-Neon integration)         |
+| `DATABASE_URL_UNPOOLED`              | Neon direct (non-pooled) connection — used by build-time `prisma migrate deploy`             |
 | `AUTH_BYPASS`                        | `false` in Production, `true` in Preview if you want a working preview without real Firebase |
 | `FIREBASE_PROJECT_ID`                | from the therapist Firebase project                                                          |
 | `FIREBASE_CLIENT_EMAIL`              | service-account email                                                                        |
@@ -88,75 +94,67 @@ detects pnpm from the lockfile.
 | `COST_CAP_PER_SESSION_INR`           | `500`                                                                                        |
 | `COST_CAP_PER_THERAPIST_MONTHLY_INR` | `15000`                                                                                      |
 
-### Project B (`cureocity-mind-web`)
+### Frontend (`NEXT_PUBLIC_*`, inlined into client bundle)
 
-Both audiences (therapists at `/t/*`, clients at `/c/*`) live in one
-Next.js app, so both Firebase configs go on the same project. The
-two `FIREBASE_*` sets are kept separate so a therapist and a client
-can never share a Firebase UID — the auth boundaries are enforced at
-the SDK level by which init is called from which route subtree.
+| Var                                       | Value                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| `NEXT_PUBLIC_API_BASE`                    | `/api/v1` (same-origin — no scheme/host needed)                    |
+| `NEXT_PUBLIC_FIREBASE_API_KEY`            | therapist Firebase web-app config                                  |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`        | therapist Firebase web-app config                                  |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID`         | therapist Firebase web-app config                                  |
+| `NEXT_PUBLIC_FIREBASE_APP_ID`             | therapist Firebase web-app config                                  |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_API_KEY`     | patient Firebase web-app config                                    |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_AUTH_DOMAIN` | patient Firebase web-app config                                    |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_PROJECT_ID`  | patient Firebase web-app config                                    |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_APP_ID`      | patient Firebase web-app config                                    |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`            | from `npx web-push generate-vapid-keys`                            |
 
-| Var                                       | Value                                        |
-| ----------------------------------------- | -------------------------------------------- |
-| `NEXT_PUBLIC_API_BASE`                    | `https://<cureocity-api-project-url>/api/v1` |
-| `NEXT_PUBLIC_FIREBASE_API_KEY`            | therapist Firebase web-app config            |
-| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`        | therapist Firebase web-app config            |
-| `NEXT_PUBLIC_FIREBASE_PROJECT_ID`         | therapist Firebase web-app config            |
-| `NEXT_PUBLIC_FIREBASE_APP_ID`             | therapist Firebase web-app config            |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_API_KEY`     | patient Firebase web-app config              |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_AUTH_DOMAIN` | patient Firebase web-app config              |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_PROJECT_ID`  | patient Firebase web-app config              |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_APP_ID`      | patient Firebase web-app config              |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`            | from `npx web-push generate-vapid-keys`      |
+## Step 4 — Prisma migrations
 
-## Step 4 — Run Prisma migrations against Neon
+No manual step needed for production: `apps/web/vercel.json`'s
+`buildCommand` runs `DATABASE_URL=$DATABASE_URL_UNPOOLED pnpm exec
+prisma migrate deploy` before `next build` on every deploy.
+Idempotent — already-applied migrations are no-ops.
+
+For local dev:
 
 ```bash
-# Locally — only needed once after each schema change
 export DATABASE_URL="postgresql://...@neon...sslmode=require"
 pnpm exec prisma migrate deploy
 ```
 
-Migrations live in `prisma/migrations/`. The `migrate deploy` applies
-them all in order. Idempotent — re-running on an up-to-date DB is a
-no-op.
-
-Alternative: enable the **Vercel + Prisma Postgres integration** which
-auto-runs migrations on deploy. The current setup uses Neon directly so
-you have the migration runtime visible in your terminal.
-
 ## Step 5 — Create the Vercel Blob store
 
-In the `cureocity-api` Vercel project: **Storage → Create Database →
-Blob**. Vercel auto-injects `BLOB_READ_WRITE_TOKEN` into the project
-env. No code changes needed; `@vercel/blob`'s `put()` reads the token
-implicitly.
+In the `cureocity-mind-web` Vercel project: **Storage → Create
+Database → Blob**. Vercel auto-injects `BLOB_READ_WRITE_TOKEN` into
+the project env. No code changes needed; `@vercel/blob`'s `put()`
+reads the token implicitly.
 
 ## Step 6 — Deploy
 
-Push your branch. Both Vercel projects auto-deploy. The first
-build takes 3-5 min per project (pnpm workspace install + Prisma client
-+ dependent package builds).
+Push your branch. The Vercel project auto-deploys. First build takes
+3-5 min (pnpm workspace install + Prisma client + dependent package
+builds + migrate deploy + next build).
 
-You'll get two URLs:
+You'll get one URL:
 
-- `https://cureocity-mind-api.vercel.app` → backend API
-- `https://cureocity-mind-web.vercel.app` → merged web app
+- `https://cureocity-mind-web.vercel.app`
   - `/` — role selector ("I'm a therapist" / "I have a link from my therapist")
   - `/t/*` — therapist UI
   - `/c/*` — client PWA (installable)
+  - `/api/v1/*` — backend (same-origin from the frontends)
 
 ## Step 7 — Smoke test
 
 ```bash
 # Should return {"status":"ok","service":"cureocity-api"}
-curl https://cureocity-api.vercel.app/api/v1/health
+curl https://cureocity-mind-web.vercel.app/api/v1/health
 ```
 
-Open the therapist PWA, complete phone-OTP signup (real OTP via
-Firebase), hit `POST /api/v1/psychologists` automatically when you
-land on the home screen. Then create a client, walk through the
-session → end → generate-note → review → sign flow.
+Open `/` in a browser, pick "I'm a therapist", complete phone-OTP
+signup (real OTP via Firebase), and you'll land on the clients tree.
+Then create a client, generate a claim link, open it on a phone (or
+incognito) to walk through the patient pairing → home → exercise flow.
 
 ## What's working at Vercel right now (PRs 1–6)
 
@@ -185,7 +183,7 @@ session → end → generate-note → review → sign flow.
 | Affect-engine service                                  | `services/affect-engine-service`                                                                        | When the briefing dossier renders affect trends.                                                                                                              |
 | PDF generation (treatment plan PDFs)                   | `services/pdf-generator-service`                                                                        | Needs `@sparticuz/chromium` for Vercel (full Puppeteer Chromium exceeds Function limits).                                                                     |
 | Notifications fan-out (push send / WATI / SMS / email) | `packages/notifications` backends. Subscriptions persist; outbound dispatch isn't wired in the BFF yet. | When you want reminders to actually send.                                                                                                                     |
-| Field-level encryption on journal entries              | `services/continuity-service/src/encryption`                                                            | The BFF journal POST currently writes plaintext only (matches the pre-Sprint-9-PR-3 NestJS path). Port `@cureocity/crypto` into `apps/api/lib/encryption.ts`. |
+| Field-level encryption on journal entries              | `services/continuity-service/src/encryption`                                                            | The BFF journal POST currently writes plaintext only (matches the pre-Sprint-9-PR-3 NestJS path). Port `@cureocity/crypto` into `apps/web/lib/encryption.ts`. |
 
 None of these block the core demo loop (signup → session → note →
 exercise → adherence). They're the next sprint's work.
@@ -195,7 +193,7 @@ exercise → adherence). They're the next sprint's work.
 | Symptom                                    | Cause                                  | Fix                                                                                                 |
 | ------------------------------------------ | -------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | Build fails at `prisma generate`           | `DATABASE_URL` set to non-Neon URL     | Use pooled Neon string with `?sslmode=require`                                                      |
-| `404` on `/api/v1/<anything>`              | API project root-directory wrong       | Should be `apps/api`, not `apps/api/app`                                                            |
+| `404` on `/api/v1/<anything>`              | Project root-directory wrong           | Should be `apps/web`, not `apps/web/app`                                                            |
 | `500` with "Firebase Admin not configured" | Env vars not set on the API project    | Set FIREBASE_PROJECT_ID + FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY (with literal `\n` newlines) |
 | Function times out at 10s                  | Hobby plan                             | Upgrade to Pro (60s) for the `/generate-note` path                                                  |
 | Audio chunk uploads 413                    | `> 2 MB` body                          | Patient PWA's chunker should produce 1-s frames (~32 KB). Misconfigured `chunkDurationMs`?          |

@@ -1,9 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm exec prisma generate && pnpm -r --filter \"@cureocity/web...\" build",
+  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm exec prisma generate && DATABASE_URL=\"$DATABASE_URL_UNPOOLED\" pnpm exec prisma migrate deploy && pnpm -r --filter \"@cureocity/web...\" build",
   "outputDirectory": ".next",
   "framework": "nextjs",
+  "functions": {
+    "app/api/**/*.ts": {
+      "maxDuration": 60
+    }
+  },
   "env": {
     "NEXT_TELEMETRY_DISABLED": "1"
   }
