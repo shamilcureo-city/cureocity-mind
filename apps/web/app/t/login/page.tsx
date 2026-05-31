@@ -3,7 +3,11 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
-import { createRecaptchaVerifier, getFirebaseAuth } from '@/lib/firebase-therapist';
+import {
+  createRecaptchaVerifier,
+  getFirebaseAuth,
+  isFirebaseConfigured,
+} from '@/lib/firebase-therapist';
 
 const RECAPTCHA_ELEMENT_ID = 'recaptcha-anchor';
 
@@ -21,6 +25,14 @@ export default function LoginPage() {
     setError(null);
     if (!/^\+91\d{10}$/.test(phone)) {
       setError('Enter a 10-digit Indian mobile (+91XXXXXXXXXX)');
+      return;
+    }
+    // Demo bypass: when Firebase env vars aren't configured yet, skip
+    // the real OTP roundtrip and proceed straight to the clients tree.
+    // Production deploys with NEXT_PUBLIC_FIREBASE_API_KEY set hit the
+    // normal Firebase phone-auth path below.
+    if (!isFirebaseConfigured()) {
+      router.push('/t/clients' as never);
       return;
     }
     setBusy(true);

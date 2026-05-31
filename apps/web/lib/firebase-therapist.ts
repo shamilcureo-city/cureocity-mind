@@ -27,6 +27,10 @@ function readClientEnv(): {
   };
 }
 
+export function isFirebaseConfigured(): boolean {
+  return !!process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+}
+
 export function getFirebaseAuth(): Auth {
   if (typeof window === 'undefined') {
     throw new Error('getFirebaseAuth called server-side');
