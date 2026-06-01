@@ -51,7 +51,10 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
 
   try {
     const { audioBytes, durationMs } = await fetchAudio(sessionId);
-    if (audioBytes.byteLength === 0) throw new Error('No audio chunks uploaded for session');
+    const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
+    if (audioBytes.byteLength === 0 && llmBackend !== 'mock') {
+      throw new Error('No audio chunks uploaded for session');
+    }
 
     // Pass 1 cost-guard pre-check
     const pass1Estimate = computeCostInr(

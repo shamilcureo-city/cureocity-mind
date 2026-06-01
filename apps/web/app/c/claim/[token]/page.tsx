@@ -79,7 +79,7 @@ export default function ClaimPage() {
       setStage('redeeming');
       await redeemClaim(params.token, idToken);
       setStage('done');
-      setTimeout(() => router.push('/c' as never), 1500);
+      setTimeout(() => router.push('/c'), 1500);
     } catch (err) {
       setError((err as Error).message);
       setStage('preview');

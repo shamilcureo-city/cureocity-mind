@@ -1,10 +1,18 @@
 import type {
   Client,
+  ConsentScope,
   CreateClientInput,
   CreateSessionInput,
   ListClientsResponse,
   Session,
+  SessionConsentAckInput,
 } from '@cureocity/contracts';
+
+export interface GenerateNoteResult {
+  draftId: string;
+  status: 'COMPLETED' | 'FAILED';
+  errorMessage?: string;
+}
 
 /**
  * Therapist-side BFF calls. Same-origin (apps/web hosts both UI and
@@ -52,6 +60,24 @@ export const TherapistApi = {
     return http<Session>('/sessions', {
       method: 'POST',
       body: JSON.stringify(input),
+    });
+  },
+  ackSessionConsent(sessionId: string, scopes: ConsentScope[]): Promise<Session> {
+    const input: SessionConsentAckInput = { scopes, scriptVersion: 'v1.0' };
+    return http<Session>(`/sessions/${encodeURIComponent(sessionId)}/consent`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+  startSession(sessionId: string): Promise<Session> {
+    return http<Session>(`/sessions/${encodeURIComponent(sessionId)}/start`, { method: 'POST' });
+  },
+  endSession(sessionId: string): Promise<Session> {
+    return http<Session>(`/sessions/${encodeURIComponent(sessionId)}/end`, { method: 'POST' });
+  },
+  generateNote(sessionId: string): Promise<GenerateNoteResult> {
+    return http<GenerateNoteResult>(`/sessions/${encodeURIComponent(sessionId)}/generate-note`, {
+      method: 'POST',
     });
   },
 };

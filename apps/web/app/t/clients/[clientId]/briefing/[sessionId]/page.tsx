@@ -1,36 +1,33 @@
 import { notFound } from 'next/navigation';
-import type { ClientBriefing } from '@cureocity/contracts';
-import { fetchPatientModel } from '@/lib/api-server';
+import Link from 'next/link';
+import { fetchClientBriefing, fetchLastSignedNote } from '@/lib/api-server';
 
 interface PageProps {
   params: Promise<{ clientId: string; sessionId: string }>;
 }
 
 /**
- * Briefing dossier — React Server Component that fetches the full
- * patient briefing from patient-model-service for a given (clientId,
- * sessionId).
- *
- * NOTE: sessionId is in the route per the plan ("Briefing screen renders
- * all sections from patient-model-service via React Server Component").
- * We currently only display client + consents + most recent sessions
- * from the briefing payload; sessionId is captured for downstream PDF
- * + edit links in Sprint 7.
+ * Pre-session briefing dossier (React Server Component). Fetches client
+ * + consents + recent sessions directly from Prisma, plus the most
+ * recent signed therapy note (when present) so the therapist can carry
+ * context into the next session.
  */
 export default async function BriefingPage({ params }: PageProps) {
   const { clientId, sessionId } = await params;
 
-  let briefing: ClientBriefing | null = null;
-  try {
-    briefing = await fetchPatientModel<ClientBriefing>(`/clients/${clientId}/briefing`);
-  } catch {
-    notFound();
-  }
+  const [briefing, lastNote] = await Promise.all([
+    fetchClientBriefing(clientId),
+    fetchLastSignedNote(clientId),
+  ]);
   if (!briefing) notFound();
 
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
-      <header className="mb-8">
+      <Link href={`/t/clients/${clientId}`} className="text-xs underline">
+        ← Back to client
+      </Link>
+
+      <header className="mt-3 mb-8">
         <p className="text-xs uppercase tracking-wide text-[var(--color-slate-500)]">
           Briefing for session {sessionId}
         </p>
@@ -106,13 +103,26 @@ export default async function BriefingPage({ params }: PageProps) {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-slate-500)]">
           Last signed note
         </h2>
-        {briefing.lastNote === null ? (
+        {lastNote === null ? (
           <p className="text-sm text-[var(--color-slate-500)]">
-            No signed note yet — first note will appear here once the scribe pipeline runs and the
-            clinician signs off (Sprint 7).
+            No signed note yet — appears here once the scribe pipeline runs and the clinician signs
+            off.
           </p>
         ) : (
-          <p className="text-sm">(note rendered here in Sprint 7)</p>
+          <div className="space-y-4 rounded-lg border border-[var(--color-slate-200)] bg-white p-6 text-sm">
+            <p className="text-xs text-[var(--color-slate-500)]">
+              Signed {new Date(lastNote.signedAt).toLocaleString()} · session{' '}
+              <code>{lastNote.sessionId}</code>
+            </p>
+            {(['subjective', 'objective', 'assessment', 'plan'] as const).map((field) => (
+              <div key={field}>
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-slate-500)]">
+                  {field}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap">{lastNote.content[field]}</p>
+              </div>
+            ))}
+          </div>
         )}
       </section>
     </main>

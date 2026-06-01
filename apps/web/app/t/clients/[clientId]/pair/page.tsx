@@ -5,11 +5,7 @@ import { useParams } from 'next/navigation';
 import QRCode from 'qrcode';
 import type { ClientClaimToken } from '@cureocity/contracts';
 
-const PATIENT_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ??
-  process.env.NEXT_PUBLIC_PATIENT_SERVICE_BASE ??
-  'http://localhost:3001/api/v1';
-const CLIENT_WEB_BASE = process.env.NEXT_PUBLIC_CLIENT_WEB_BASE ?? 'http://localhost:3200';
+const PATIENT_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/api/v1';
 
 /**
  * PairPage — therapist-side QR generator. Issues a single-use claim
@@ -37,10 +33,7 @@ export default function PairPage() {
         `${PATIENT_BASE}/clients/${encodeURIComponent(params.clientId)}/claim-token`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: 'Bearer dev-bypass',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: '{}',
         },
       );
@@ -57,15 +50,16 @@ export default function PairPage() {
     }
   }
 
+  const claimUrl = token
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/c/claim/${token.token}`
+    : null;
+
   useEffect(() => {
-    if (!token) return;
-    const url = `${CLIENT_WEB_BASE}/claim/${token.token}`;
-    QRCode.toDataURL(url, { width: 320, margin: 1, errorCorrectionLevel: 'M' })
+    if (!claimUrl) return;
+    QRCode.toDataURL(claimUrl, { width: 320, margin: 1, errorCorrectionLevel: 'M' })
       .then((dataUrl) => setQrDataUrl(dataUrl))
       .catch((e: Error) => setError(`QR render failed: ${e.message}`));
-  }, [token]);
-
-  const claimUrl = token ? `${CLIENT_WEB_BASE}/claim/${token.token}` : null;
+  }, [claimUrl]);
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-10">

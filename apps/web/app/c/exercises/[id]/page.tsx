@@ -60,7 +60,7 @@ export default function ExercisePage() {
     try {
       const idToken = await auth.user.getIdToken();
       await ContinuityApi.recordCompletion(idToken, assignment.id, response, notes);
-      router.push('/c' as never);
+      router.push('/c');
     } catch (e) {
       setError((e as Error).message);
     } finally {

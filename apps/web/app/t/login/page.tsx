@@ -32,7 +32,7 @@ export default function LoginPage() {
     // Production deploys with NEXT_PUBLIC_FIREBASE_API_KEY set hit the
     // normal Firebase phone-auth path below.
     if (!isFirebaseConfigured()) {
-      router.push('/t/clients' as never);
+      router.push('/t/clients');
       return;
     }
     setBusy(true);
@@ -55,7 +55,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       await confirmation.confirm(otp);
-      router.push('/t/clients' as never);
+      router.push('/t/clients');
     } catch (err) {
       setError((err as Error).message);
     } finally {

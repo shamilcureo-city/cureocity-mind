@@ -7,10 +7,7 @@ import type {
   NextSessionSummary,
 } from '@cureocity/contracts';
 
-const CONTINUITY_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ??
-  process.env.NEXT_PUBLIC_CONTINUITY_SERVICE_BASE ??
-  'http://localhost:3005/api/v1';
+const CONTINUITY_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/api/v1';
 
 async function http<T>(path: string, init: RequestInit & { idToken: string }): Promise<T> {
   const { idToken, headers, ...rest } = init;

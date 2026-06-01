@@ -2,31 +2,30 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import type { Session } from '@cureocity/contracts';
 import { useSessionRecorder } from '@/lib/audio/use-session-recorder';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import { tUi, type UiLocale } from '@/lib/i18n';
 import { SessionStore } from '@/lib/audio/idb-chunk-store';
+import { TherapistApi } from '@/lib/therapist-api';
 
-// NEXT_PUBLIC_API_BASE points at the Vercel BFF (apps/api); when unset
-// we fall back to the per-service NestJS URL for local-dev.
-const SCRIBE_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ??
-  process.env.NEXT_PUBLIC_SCRIBE_SERVICE_BASE ??
-  'http://localhost:3002/api/v1';
+const SCRIBE_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/api/v1';
 
 /**
  * SessionScreen — live ambient capture.
  *
- * Composes:
- *   useSessionRecorder — getUserMedia + AudioWorklet + IDB + uploader
- *   useWakeLock — keeps the screen on while recording
+ * Wires the session lifecycle:
+ *   1. Start → ackSessionConsent (snapshot consents onto Session row)
+ *              → startSession    (SCHEDULED → IN_PROGRESS)
+ *              → begin local capture (audio worklet + chunk uploader)
+ *   2. Stop  → stop capture, drain queued chunks
+ *              → endSession      (IN_PROGRESS → COMPLETED, creates draft)
+ *              → generateNote    (runs orchestrator inline)
+ *              → navigate to /t/clients/.../review
  *
- * Shows: state badge, last chunk index, pending count, network drain
- * status, recovery banner if a saved cursor exists for this session.
- *
- * Session-resume (gap G2): on mount, if SessionStore.getCursor(sessionId)
- * returns a row, the page shows the recovery banner. start() reads
- * the cursor and resumes the chunkIndex.
+ * Session-resume (gap G2): if SessionStore.getCursor(sessionId) returns
+ * a row, we show a recovery banner. start() reads the cursor and
+ * resumes the chunkIndex without re-running the lifecycle setup.
  */
 export default function CapturePage() {
   const params = useParams<{ clientId: string; sessionId: string }>();
@@ -39,6 +38,9 @@ export default function CapturePage() {
   useWakeLock(recorder.state === 'recording');
 
   const [resumeCandidate, setResumeCandidate] = useState<{ nextChunkIndex: number } | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'idle' | 'opening' | 'closing'>('idle');
+  const [sessionStatus, setSessionStatus] = useState<Session['status'] | null>(null);
 
   useEffect(() => {
     void SessionStore.getCursor(params.sessionId).then((c) => {
@@ -46,7 +48,70 @@ export default function CapturePage() {
     });
   }, [params.sessionId]);
 
+  async function handleStart(): Promise<void> {
+    setLifecycleError(null);
+    setPhase('opening');
+    try {
+      // First start: ack consent + transition state. On resume, both
+      // are idempotent at the server (consent will 400 if non-SCHEDULED,
+      // start will 400 likewise) — swallow the no-op errors quietly.
+      if (sessionStatus !== 'IN_PROGRESS') {
+        try {
+          await TherapistApi.ackSessionConsent(params.sessionId, [
+            'AUDIO_RECORDING',
+            'AI_NOTE_GENERATION',
+          ]);
+        } catch (e) {
+          if (!/SCHEDULED state/.test((e as Error).message)) throw e;
+        }
+        try {
+          const updated = await TherapistApi.startSession(params.sessionId);
+          setSessionStatus(updated.status);
+        } catch (e) {
+          if (!/SCHEDULED state/.test((e as Error).message)) throw e;
+          setSessionStatus('IN_PROGRESS');
+        }
+      }
+      await recorder.start();
+    } catch (e) {
+      setLifecycleError((e as Error).message);
+    } finally {
+      setPhase('idle');
+    }
+  }
+
+  async function handleStop(): Promise<void> {
+    setLifecycleError(null);
+    setPhase('closing');
+    try {
+      await recorder.stop();
+      try {
+        await TherapistApi.endSession(params.sessionId);
+      } catch (e) {
+        // Allow re-entering this path if the session already ended
+        // (e.g. tab closed mid-flow then re-opened).
+        if (!/IN_PROGRESS state/.test((e as Error).message)) throw e;
+      }
+      // Fire generation but don't block the redirect — the review
+      // screen polls draft status and shows a "generating…" state.
+      void TherapistApi.generateNote(params.sessionId).catch(() => {
+        /* surfaced on the review screen */
+      });
+      router.push(`/t/clients/${params.clientId}/sessions/${params.sessionId}/review`);
+    } catch (e) {
+      setLifecycleError((e as Error).message);
+      setPhase('idle');
+    }
+  }
+
   const isRecording = recorder.state === 'recording';
+  const heading = isRecording
+    ? tUi(locale, 'session.recording')
+    : recorder.state === 'preparing' || phase === 'opening'
+      ? tUi(locale, 'session.preparing')
+      : recorder.state === 'finishing' || phase === 'closing'
+        ? tUi(locale, 'session.finishing')
+        : 'Ready to record';
 
   return (
     <main className="mx-auto max-w-2xl px-6 py-10">
@@ -54,15 +119,7 @@ export default function CapturePage() {
         <p className="text-xs uppercase tracking-wide text-[var(--color-slate-500)]">
           Session {params.sessionId}
         </p>
-        <h1 className="mt-1 text-3xl font-semibold text-[var(--color-navy-700)]">
-          {isRecording
-            ? tUi(locale, 'session.recording')
-            : recorder.state === 'preparing'
-              ? tUi(locale, 'session.preparing')
-              : recorder.state === 'finishing'
-                ? tUi(locale, 'session.finishing')
-                : 'Ready to record'}
-        </h1>
+        <h1 className="mt-1 text-3xl font-semibold text-[var(--color-navy-700)]">{heading}</h1>
       </header>
 
       {resumeCandidate && recorder.state === 'idle' && resumeCandidate.nextChunkIndex > 0 && (
@@ -111,28 +168,26 @@ export default function CapturePage() {
       {recorder.state === 'idle' || recorder.state === 'error' ? (
         <button
           type="button"
-          onClick={() => void recorder.start()}
-          className="w-full rounded-md bg-[var(--color-navy-700)] px-4 py-4 text-base font-medium text-white"
+          onClick={handleStart}
+          disabled={phase === 'opening'}
+          className="w-full rounded-md bg-[var(--color-navy-700)] px-4 py-4 text-base font-medium text-white disabled:opacity-50"
         >
-          {tUi(locale, 'session.start')}
+          {phase === 'opening' ? tUi(locale, 'session.preparing') : tUi(locale, 'session.start')}
         </button>
       ) : (
         <button
           type="button"
-          onClick={async () => {
-            await recorder.stop();
-            router.push(`/clients/${params.clientId}/sessions/${params.sessionId}/review` as never);
-          }}
-          disabled={recorder.state !== 'recording'}
+          onClick={handleStop}
+          disabled={recorder.state !== 'recording' || phase === 'closing'}
           className="w-full rounded-md bg-red-600 px-4 py-4 text-base font-medium text-white disabled:opacity-50"
         >
-          {tUi(locale, 'session.stop')}
+          {phase === 'closing' ? tUi(locale, 'session.finishing') : tUi(locale, 'session.stop')}
         </button>
       )}
 
-      {recorder.error && (
+      {(lifecycleError || recorder.error) && (
         <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {tUi(locale, 'session.error')}: {recorder.error}
+          {tUi(locale, 'session.error')}: {lifecycleError ?? recorder.error}
         </div>
       )}
     </main>

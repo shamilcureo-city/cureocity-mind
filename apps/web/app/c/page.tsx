@@ -108,10 +108,7 @@ export default function HomePage() {
                 key={a.id}
                 className="rounded-2xl border border-[var(--color-slate-200)] bg-white p-4"
               >
-                <Link
-                  href={{ pathname: '/c/exercises/[id]', params: { id: a.id } } as never}
-                  className="block"
-                >
+                <Link href={`/c/exercises/${a.id}`} className="block">
                   <p className="font-medium">{prettyExerciseId(a.exerciseId)}</p>
                   <p className="text-xs text-[var(--color-slate-500)]">
                     {a.dueAt

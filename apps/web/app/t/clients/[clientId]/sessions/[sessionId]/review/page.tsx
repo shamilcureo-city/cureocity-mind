@@ -6,10 +6,7 @@ import type { NoteDraft, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts
 import { tUi, type UiLocale } from '@/lib/i18n';
 import { authenticateWithChallenge, sha256Hex } from '@/lib/webauthn';
 
-const SCRIBE_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ??
-  process.env.NEXT_PUBLIC_SCRIBE_SERVICE_BASE ??
-  'http://localhost:3002/api/v1';
+const SCRIBE_BASE = process.env.NEXT_PUBLIC_API_BASE ?? '/api/v1';
 
 /**
  * ReviewScreen — inline note editing, risk acknowledgement, WebAuthn
@@ -34,18 +31,25 @@ export default function ReviewPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     async function load(): Promise<void> {
       try {
         const [draftRes, signedRes] = await Promise.all([
-          fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/note-draft`, {
-            headers: { Authorization: 'Bearer dev-bypass' },
-          }),
-          fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/therapy-note`, {
-            headers: { Authorization: 'Bearer dev-bypass' },
-          }),
+          fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/note-draft`, { cache: 'no-store' }),
+          fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/therapy-note`, { cache: 'no-store' }),
         ]);
+        if (cancelled) return;
+        // 404 on draft is expected while the orchestrator is still
+        // setting up — retry rather than surfacing an error.
+        if (draftRes.status === 404) {
+          timer = setTimeout(() => void load(), 2_000);
+          return;
+        }
         if (!draftRes.ok) throw new Error(`Draft fetch failed: ${draftRes.status}`);
-        setDraft((await draftRes.json()) as NoteDraft);
+        const draftJson = (await draftRes.json()) as NoteDraft;
+        setDraft(draftJson);
         if (signedRes.ok) {
           const json = (await signedRes.json()) as TherapyNote | null;
           if (json !== null) {
@@ -53,11 +57,20 @@ export default function ReviewPage() {
             setSigned(true);
           }
         }
+        // Keep polling while the orchestrator is still working.
+        if (draftJson.status === 'PENDING' || draftJson.status === 'IN_PROGRESS') {
+          timer = setTimeout(() => void load(), 2_000);
+        }
       } catch (e) {
-        setError((e as Error).message);
+        if (!cancelled) setError((e as Error).message);
       }
     }
+
     void load();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [params.sessionId]);
 
   if (!draft) {
@@ -67,12 +80,21 @@ export default function ReviewPage() {
       </main>
     );
   }
-  if (draft.status !== 'COMPLETED' || !draft.content) {
+  if (draft.status === 'PENDING' || draft.status === 'IN_PROGRESS') {
     return (
       <main className="mx-auto max-w-3xl px-6 py-10">
         <p className="text-sm text-[var(--color-slate-500)]">
-          Draft is in {draft.status} state. Refresh in a few seconds.
+          Generating note from the recording… this usually takes 10–30 seconds.
         </p>
+      </main>
+    );
+  }
+  if (draft.status === 'FAILED' || !draft.content) {
+    return (
+      <main className="mx-auto max-w-3xl px-6 py-10">
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Note generation failed: {draft.errorMessage ?? 'unknown error'}
+        </div>
       </main>
     );
   }
@@ -136,10 +158,7 @@ export default function ReviewPage() {
       }
       const res = await fetch(`${SCRIBE_BASE}/sessions/${params.sessionId}/sign`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer dev-bypass',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       if (!res.ok) {

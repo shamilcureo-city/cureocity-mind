@@ -10,20 +10,18 @@ type Scope = 'AUDIO_RECORDING' | 'AI_NOTE_GENERATION' | 'CROSS_BORDER_PROCESSING
 const SCRIPT_VERSION = 'v1.0';
 
 /**
- * ConsentScreen — bilingual (EN/HI) with scope toggles + WebAuthn
- * biometric capture for non-repudiation.
+ * ConsentScreen — bilingual (EN/HI) read-aloud script with scope
+ * toggles + WebAuthn biometric capture for non-repudiation.
  *
- * V1 flow:
- *   1. Therapist selects EN or HI to read aloud to the client
- *   2. Toggles scopes the client agrees to
- *   3. Press "Confirm with biometric" → WebAuthn platform authenticator
- *   4. POST to patient-model-service /clients/:id/consents (already exists)
- *      AND /workflows/:sessionId/consent on scribe-service for the
- *      session-level snapshot
+ * Per-CLIENT consents are persisted at client creation time (see the
+ * "Add client" form on /t/clients). Per-SESSION consent acks happen
+ * inside the capture screen (POST /sessions/:id/consent). This page
+ * is the read-aloud script the therapist walks through with the
+ * patient, with optional biometric proof for high-assurance flows.
  *
- * Backend integration for the WebAuthn payload lands in Sprint 7 PR 4.
- * This page captures the assertion + stages it; we'll POST once the
- * endpoint accepts the webauthn fields.
+ * Sprint 9 wires the captured assertion to a dedicated
+ * /clients/:id/consents/reaffirm endpoint; until then it's recorded
+ * client-side only and the "done" banner means "script completed."
  */
 export default function ConsentPage() {
   const params = useParams<{ clientId: string }>();
@@ -144,7 +142,7 @@ export default function ConsentPage() {
           ✓ {tUi(locale, 'consent.recorded')}
           <button
             type="button"
-            onClick={() => router.push(`/clients/${params.clientId}` as never)}
+            onClick={() => router.push(`/t/clients/${params.clientId}`)}
             className="ml-3 underline"
           >
             Continue
