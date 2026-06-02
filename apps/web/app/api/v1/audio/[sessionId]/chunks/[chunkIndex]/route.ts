@@ -38,21 +38,26 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const { sessionId, chunkIndex: chunkIndexStr } = await ctx.params;
   const chunkIndex = Number.parseInt(chunkIndexStr, 10);
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+    console.warn('[audio-chunk] 400 invalid-chunkIndex', { sessionId, chunkIndexStr });
     return NextResponse.json(
       { error: 'chunkIndex must be a non-negative integer' },
       { status: 400 },
     );
   }
 
-  if (req.headers.get('content-type')?.split(';')[0]?.trim() !== VALID_MIME) {
+  const contentType = req.headers.get('content-type')?.split(';')[0]?.trim();
+  if (contentType !== VALID_MIME) {
+    console.warn('[audio-chunk] 415 bad-content-type', { sessionId, chunkIndex, contentType });
     return NextResponse.json({ error: `Content-Type must be ${VALID_MIME}` }, { status: 415 });
   }
   const sampleRate = Number.parseInt(req.headers.get('x-sample-rate') ?? '0', 10);
   const durationMs = Number.parseInt(req.headers.get('x-duration-ms') ?? '0', 10);
   if (sampleRate !== 16000) {
+    console.warn('[audio-chunk] 400 sample-rate', { sessionId, chunkIndex, sampleRate });
     return NextResponse.json({ error: 'Sample rate must be 16000' }, { status: 400 });
   }
   if (durationMs <= 0 || durationMs > 60_000) {
+    console.warn('[audio-chunk] 400 duration', { sessionId, chunkIndex, durationMs });
     return NextResponse.json({ error: 'X-Duration-Ms must be > 0 and ≤ 60000' }, { status: 400 });
   }
 
@@ -61,9 +66,17 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
     select: { psychologistId: true, status: true },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
+    console.warn('[audio-chunk] 404 owned-session', {
+      sessionId,
+      chunkIndex,
+      sessionExists: !!session,
+      sessionPsychologistId: session?.psychologistId,
+      authPsychologistId: auth.value.psychologistId,
+    });
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
   if (session.status !== 'IN_PROGRESS') {
+    console.warn('[audio-chunk] 400 status', { sessionId, chunkIndex, status: session.status });
     return NextResponse.json(
       { error: `Cannot upload chunks for a session in ${session.status} state` },
       { status: 400 },
@@ -72,11 +85,14 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
 
   const buffer = Buffer.from(await req.arrayBuffer());
   if (buffer.length === 0) {
+    console.warn('[audio-chunk] 400 empty-body', { sessionId, chunkIndex });
     return NextResponse.json({ error: 'Empty body' }, { status: 400 });
   }
   if (buffer.length > MAX_CHUNK_BYTES) {
+    console.warn('[audio-chunk] 413 too-large', { sessionId, chunkIndex, length: buffer.length });
     return NextResponse.json({ error: `Chunk exceeds ${MAX_CHUNK_BYTES} bytes` }, { status: 413 });
   }
+  console.info('[audio-chunk] ok', { sessionId, chunkIndex, sampleRate, durationMs, bytes: buffer.length });
 
   // Upload to Vercel Blob; on idempotent retry the blob URL collides
   // harmlessly because Blob supports `addRandomSuffix: false`.
