@@ -1,31 +1,15 @@
 import type {
+  Booking as BookingRow,
   Client as ClientRow,
-  Consent as ConsentRow,
-  ExerciseAssignment as ExerciseAssignmentRow,
-  JournalEntry as JournalEntryRow,
-  MoodLog as MoodLogRow,
-  NoteDraft as NoteDraftRow,
+  IntakeSubmission as IntakeRow,
   Session as SessionRow,
 } from '@prisma/client';
-import type {
-  AffectFeature,
-  BriefingSessionSummary,
-  Client,
-  Consent,
-  ExerciseAssignment,
-  JournalEntry,
-  MoodLog,
-  NoteDraft,
-  Session,
-  SessionConsentSnapshot,
-  SpeakerSegment,
-  TherapyNoteV1,
-} from '@cureocity/contracts';
+import type { Client, Session } from '@cureocity/contracts';
 
 /**
- * Prisma row → contract DTO mappers, ported from the NestJS services.
- * Single source of truth for the BFF — adding a column to a Prisma
- * row that should NOT cross the wire means editing one mapper here.
+ * Prisma row → DTO mappers. Single source of truth for what crosses
+ * the API boundary; adding a column that should NOT be exposed means
+ * editing the mapper here.
  */
 
 function toIsoDate(d: Date | null): string | null {
@@ -48,35 +32,6 @@ export function toClient(row: ClientRow): Client {
   };
 }
 
-export function toConsent(row: ConsentRow): Consent {
-  return {
-    id: row.id,
-    clientId: row.clientId,
-    psychologistId: row.psychologistId,
-    scope: row.scope,
-    status: row.status,
-    scriptVersion: row.scriptVersion,
-    capturedVia: row.capturedVia,
-    grantedAt: row.grantedAt.toISOString(),
-    withdrawnAt: row.withdrawnAt?.toISOString() ?? null,
-    expiresAt: row.expiresAt?.toISOString() ?? null,
-    notes: row.notes,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  };
-}
-
-export function toBriefingSessionSummary(row: SessionRow): BriefingSessionSummary {
-  return {
-    id: row.id,
-    modality: row.modality,
-    status: row.status,
-    scheduledAt: row.scheduledAt.toISOString(),
-    startedAt: row.startedAt?.toISOString() ?? null,
-    endedAt: row.endedAt?.toISOString() ?? null,
-  };
-}
-
 export function toSession(row: SessionRow): Session {
   return {
     id: row.id,
@@ -90,71 +45,76 @@ export function toSession(row: SessionRow): Session {
     consentSnapshot:
       row.consentSnapshot === null
         ? null
-        : (row.consentSnapshot as unknown as SessionConsentSnapshot),
+        : (row.consentSnapshot as unknown as Session['consentSnapshot']),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
 
-export function toNoteDraft(row: NoteDraftRow): NoteDraft {
+export interface BookingDto {
+  id: string;
+  therapistId: string;
+  patientName: string;
+  patientEmail: string;
+  patientPhone: string;
+  preferredAt: string;
+  message: string | null;
+  status: BookingRow['status'];
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
+export function toBooking(row: BookingRow): BookingDto {
   return {
     id: row.id,
-    sessionId: row.sessionId,
+    therapistId: row.therapistId,
+    patientName: row.patientName,
+    patientEmail: row.patientEmail,
+    patientPhone: row.patientPhone,
+    preferredAt: row.preferredAt.toISOString(),
+    message: row.message,
     status: row.status,
-    transcript: row.transcript,
-    speakerSegments:
-      row.speakerSegments === null ? null : (row.speakerSegments as unknown as SpeakerSegment[]),
-    affectFeatures:
-      row.affectFeatures === null ? null : (row.affectFeatures as unknown as AffectFeature[]),
-    content: row.content === null ? null : (row.content as unknown as TherapyNoteV1),
-    riskSeverity: row.riskSeverity,
-    totalCostInr: row.totalCostInr.toString(),
-    errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    resolvedAt: row.resolvedAt?.toISOString() ?? null,
   };
 }
 
-export function toExerciseAssignment(row: ExerciseAssignmentRow): ExerciseAssignment {
-  return {
-    id: row.id,
-    clientId: row.clientId,
-    psychologistId: row.psychologistId,
-    exerciseId: row.exerciseId,
-    assignedAt: row.assignedAt.toISOString(),
-    dueAt: row.dueAt?.toISOString() ?? null,
-    status: row.status,
-    completedAt: row.completedAt?.toISOString() ?? null,
-    response:
-      row.response === null || typeof row.response !== 'object' || Array.isArray(row.response)
-        ? null
-        : (row.response as Record<string, unknown>),
-    therapistNote: row.therapistNote,
-    createdAt: row.createdAt.toISOString(),
-    updatedAt: row.updatedAt.toISOString(),
-  };
+export interface IntakeDto {
+  id: string;
+  patientName: string;
+  patientEmail: string;
+  patientPhone: string;
+  concerns: string[];
+  notes: string | null;
+  preferredModality: string | null;
+  preferredLanguage: string | null;
+  mode: IntakeRow['mode'];
+  urgency: IntakeRow['urgency'];
+  status: IntakeRow['status'];
+  assignedTherapistId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  matchedAt: string | null;
 }
 
-export function toMoodLog(row: MoodLogRow): MoodLog {
+export function toIntake(row: IntakeRow): IntakeDto {
   return {
     id: row.id,
-    clientId: row.clientId,
-    rating: row.rating,
+    patientName: row.patientName,
+    patientEmail: row.patientEmail,
+    patientPhone: row.patientPhone,
+    concerns: row.concerns,
     notes: row.notes,
-    recordedAt: row.recordedAt.toISOString(),
-    createdAt: row.createdAt.toISOString(),
-  };
-}
-
-export function toJournalEntry(row: JournalEntryRow): JournalEntry {
-  return {
-    id: row.id,
-    clientId: row.clientId,
-    content: row.content,
-    mood: row.mood,
-    sharedWithTherapist: row.sharedWithTherapist,
-    recordedAt: row.recordedAt.toISOString(),
+    preferredModality: row.preferredModality,
+    preferredLanguage: row.preferredLanguage,
+    mode: row.mode,
+    urgency: row.urgency,
+    status: row.status,
+    assignedTherapistId: row.assignedTherapistId,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    matchedAt: row.matchedAt?.toISOString() ?? null,
   };
 }

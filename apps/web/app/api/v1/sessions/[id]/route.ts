@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
+import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
-import { fetchOwnedSession } from '@/lib/session-helpers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,9 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
-  const row = await fetchOwnedSession(auth.value.psychologistId, id);
+  const row = await prisma.session.findFirst({
+    where: { id, psychologistId: auth.value.psychologistId },
+  });
   if (!row) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   return NextResponse.json(toSession(row));
 }
