@@ -1,20 +1,14 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import type { NoteDraft, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
-import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
+import { NotesTab } from '@/components/app/NotesTab';
 import { prisma } from '@/lib/prisma';
+import { toNoteDraft } from '@/lib/mappers';
 
 export const dynamic = 'force-dynamic';
-
-const TABS = [
-  { key: 'notes', label: 'Notes' },
-  { key: 'client', label: 'Client' },
-  { key: 'transcript', label: 'Transcript' },
-  { key: 'session-info', label: 'Session Information' },
-  { key: 'mindmap', label: 'Mindmap' },
-  { key: 'reflection', label: 'Reflection Questions' },
-] as const;
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -27,6 +21,37 @@ export default async function SessionPage({ params }: PageProps) {
     include: { client: { select: { fullName: true } } },
   });
   if (!session) notFound();
+
+  const [draftRow, signedRow] = await Promise.all([
+    prisma.noteDraft.findUnique({ where: { sessionId: id } }),
+    prisma.therapyNote.findUnique({
+      where: { sessionId: id },
+      include: { edits: { orderBy: { createdAt: 'asc' } } },
+    }),
+  ]);
+
+  const draft: NoteDraft | null = draftRow ? toNoteDraft(draftRow) : null;
+  const signedNote: TherapyNote | null = signedRow
+    ? {
+        id: signedRow.id,
+        sessionId: signedRow.sessionId,
+        draftId: signedRow.draftId,
+        version: 'V1',
+        content: signedRow.content as unknown as TherapyNoteV1,
+        signedAt: signedRow.signedAt.toISOString(),
+        signedBy: signedRow.signedBy,
+        edits: signedRow.edits.map((e) => ({
+          id: e.id,
+          field: e.field,
+          before: e.before,
+          after: e.after,
+          createdAt: e.createdAt.toISOString(),
+        })),
+        signCredentialId: signedRow.signCredentialId,
+        signChallengeHashHex: signedRow.signChallengeHashHex,
+        createdAt: signedRow.createdAt.toISOString(),
+      }
+    : null;
 
   return (
     <Container className="py-8">
@@ -44,33 +69,23 @@ export default async function SessionPage({ params }: PageProps) {
             {session.modality} · {session.scheduledAt.toLocaleString('en-US')}
           </p>
         </div>
-        <Badge tone={statusTone(session.status)}>{session.status.replace(/_/g, ' ').toLowerCase()}</Badge>
+        <Badge tone={statusTone(session.status)}>
+          {session.status.replace(/_/g, ' ').toLowerCase()}
+        </Badge>
       </header>
 
-      <nav className="mt-8 flex flex-wrap items-center gap-1 border-b border-[var(--color-line-soft)]" aria-label="Session sections">
-        {TABS.map((t, i) => (
-          <button
-            key={t.key}
-            type="button"
-            disabled
-            className={`border-b-2 px-3 py-2.5 text-sm ${
-              i === 0
-                ? 'border-[var(--color-ink)] font-medium text-[var(--color-ink)]'
-                : 'border-transparent text-[var(--color-ink-3)]'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <div className="mt-8">
+        <SessionWorkspaceTabs active="notes" />
+      </div>
 
-      <Card className="mt-6 p-12 text-center">
-        <p className="font-serif text-xl">Session workspace is in flight.</p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Notes, Transcript, Client, and Session Information ship in Sprint 3. Mindmap and
-          Reflection Questions ship in Sprint 5.
-        </p>
-      </Card>
+      <div className="mt-6">
+        <NotesTab
+          sessionId={id}
+          sessionStatus={session.status}
+          initialDraft={draft}
+          initialNote={signedNote}
+        />
+      </div>
     </Container>
   );
 }

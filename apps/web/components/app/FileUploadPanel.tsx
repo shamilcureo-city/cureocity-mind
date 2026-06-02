@@ -39,6 +39,13 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
         const body = (await end.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `End failed (${end.status})`);
       }
+      // Fire generation; the polling UI on the session page picks up the
+      // PENDING -> IN_PROGRESS -> COMPLETED progression.
+      void fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
+        method: 'POST',
+      }).catch(() => {
+        /* swallow — the polling UI surfaces real failures */
+      });
       setPhase('done');
     } catch (e) {
       setError((e as Error).message);

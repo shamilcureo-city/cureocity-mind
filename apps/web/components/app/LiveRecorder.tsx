@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -25,6 +26,7 @@ interface Props {
 }
 
 export function LiveRecorder({ sessionId, clientName, modality, source, onFinished }: Props) {
+  const router = useRouter();
   const recorder = useSessionRecorder({ sessionId, source });
   useWakeLock(recorder.state === 'recording');
 
@@ -57,6 +59,15 @@ export function LiveRecorder({ sessionId, clientName, modality, source, onFinish
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `End failed (${res.status})`);
       }
+      // Kick off note generation; don't block the redirect. The session
+      // detail page polls the draft status, so the user immediately sees
+      // "Generating note…" and watches it flip to COMPLETED.
+      void fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
+        method: 'POST',
+      }).catch(() => {
+        /* swallow — the polling UI surfaces real failures */
+      });
+      router.push(`/app/sessions/${sessionId}`);
       onFinished();
     } catch (e) {
       setEndError((e as Error).message);

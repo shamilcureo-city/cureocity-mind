@@ -8,6 +8,12 @@ import {
   type Pass1Output,
   type Pass2Output,
 } from '@cureocity/llm';
+import {
+  recordCostCircuitTrip,
+  recordCostInr,
+  recordCrisisFlag,
+  recordGeminiCall,
+} from '@cureocity/observability';
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { modelRouter } from './llm';
@@ -71,6 +77,17 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     const router = modelRouter();
     const pass1 = await router.pass1({ sessionId, audioBytes, durationMs });
     await persistCallLog(pass1.callLog);
+    recordGeminiCall({
+      pass: pass1.callLog.pass,
+      status: pass1.callLog.status,
+      region: pass1.callLog.region,
+      durationMs: pass1.callLog.latencyMs,
+    });
+    recordCostInr({
+      service: 'gemini-pass-1',
+      durationLabel: bucketDuration(durationMs),
+      inr: pass1.callLog.costInr,
+    });
     const pass1Cost = new Prisma.Decimal(pass1.callLog.costInr);
 
     await prisma.noteDraft.update({
@@ -111,6 +128,17 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       },
     });
     await persistCallLog(pass2.callLog);
+    recordGeminiCall({
+      pass: pass2.callLog.pass,
+      status: pass2.callLog.status,
+      region: pass2.callLog.region,
+      durationMs: pass2.callLog.latencyMs,
+    });
+    recordCostInr({
+      service: 'gemini-pass-2',
+      durationLabel: bucketDuration(durationMs),
+      inr: pass2.callLog.costInr,
+    });
     const pass2Cost = new Prisma.Decimal(pass2.callLog.costInr);
 
     const riskSeverity = mapRiskSeverity(pass2.output.therapyNote.riskFlags.severity);
@@ -139,6 +167,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     });
 
     if (riskSeverity === 'HIGH' || riskSeverity === 'CRITICAL') {
+      recordCrisisFlag(riskSeverity);
       await writeAudit({
         actorType: 'SYSTEM',
         action: 'CRISIS_FLAG_RAISED',
@@ -162,6 +191,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       data: { status: 'FAILED', errorMessage: message },
     });
     if (e instanceof CostCircuitOpenError) {
+      recordCostCircuitTrip(e.meta.scope);
       await writeAudit({
         actorType: 'SYSTEM',
         action: 'COST_CIRCUIT_TRIPPED',
@@ -246,4 +276,14 @@ function mapRiskSeverity(severity: Pass1Output extends never ? never : string): 
     default:
       return 'NONE';
   }
+}
+
+/** Bucket a session duration for low-cardinality metric labels. */
+function bucketDuration(ms: number): string {
+  const min = ms / 60_000;
+  if (min < 15) return 'lt_15m';
+  if (min < 30) return '15_30m';
+  if (min < 45) return '30_45m';
+  if (min < 60) return '45_60m';
+  return 'gt_60m';
 }
