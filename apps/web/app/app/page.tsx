@@ -2,30 +2,35 @@ import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { RecordingShell } from '@/components/app/RecordingShell';
 import { prisma } from '@/lib/prisma';
+import type { Session as SessionPrismaRow } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * Record page — the post-login landing surface. Sprint 0 is a static
- * scaffold: three capture-mode cards (the actual recording wiring lands
- * in Sprint 1) plus a real, query-backed session list grouped by date.
- */
 export default async function RecordPage() {
   const therapist = await prisma.psychologist.findUnique({
     where: { firebaseUid: 'dev-firebase-uid-priya' },
     select: { id: true, fullName: true },
   });
-  const sessions = therapist
-    ? await prisma.session.findMany({
-        where: { psychologistId: therapist.id },
-        orderBy: { scheduledAt: 'desc' },
-        take: 30,
-        include: { client: { select: { fullName: true } } },
-      })
-    : [];
 
-  const grouped = groupByDate(sessions);
+  const [sessions, clients] = therapist
+    ? await Promise.all([
+        prisma.session.findMany({
+          where: { psychologistId: therapist.id },
+          orderBy: { scheduledAt: 'desc' },
+          take: 30,
+          include: { client: { select: { fullName: true } } },
+        }),
+        prisma.client.findMany({
+          where: { psychologistId: therapist.id, deletedAt: null, status: 'ACTIVE' },
+          orderBy: { fullName: 'asc' },
+          select: { id: true, fullName: true, preferredModality: true },
+        }),
+      ])
+    : [[], []];
+
+  const grouped = groupByDate(sessions as SessionWithClient[]);
 
   return (
     <main>
@@ -39,50 +44,21 @@ export default async function RecordPage() {
           </h1>
         </header>
 
-        <section className="grid gap-4 sm:grid-cols-3">
-          <ModeCard
-            href="/app?mode=virtual"
-            title="Record virtual session"
-            body="For web-based platforms like Jane, Owl, and others."
-            tone="rose"
-            comingSoon
-          />
-          <ModeCard
-            href="/app?mode=in_person"
-            title="Record in-person"
-            body="Best for recording sessions in person from this device."
-            tone="sage"
-            comingSoon
-          />
-          <ModeCard
-            href="/app?mode=summary"
-            title="Record a summary"
-            body="Best for dictating key session notes after a session."
-            tone="mint"
-            comingSoon
-          />
-        </section>
+        <RecordingShell initialClients={clients} />
 
         <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="font-serif text-xl">Recent sessions</h2>
-            <div className="flex items-center gap-2">
-              <SearchStub />
-              <button
-                type="button"
-                disabled
-                className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm text-[var(--color-ink-3)]"
-              >
-                Upload
-              </button>
-            </div>
+            <p className="text-xs text-[var(--color-ink-3)]">
+              Showing the last {sessions.length} session{sessions.length === 1 ? '' : 's'}
+            </p>
           </div>
 
           {grouped.length === 0 ? (
             <Card className="p-10 text-center">
               <p className="font-serif text-xl">No sessions yet.</p>
               <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-                Recording lands in Sprint 1. For now, seed data is the only source.
+                Pick a capture mode above to start your first recording.
               </p>
             </Card>
           ) : (
@@ -146,92 +122,14 @@ export default async function RecordPage() {
   );
 }
 
-function ModeCard({
-  href,
-  title,
-  body,
-  tone,
-  comingSoon,
-}: {
-  href: string;
-  title: string;
-  body: string;
-  tone: 'rose' | 'sage' | 'mint';
-  comingSoon?: boolean;
-}) {
-  const swatch =
-    tone === 'rose'
-      ? 'bg-[#fce8e6] text-[#9f3a4a]'
-      : tone === 'sage'
-        ? 'bg-[#e6efe7] text-[#385e44]'
-        : 'bg-[#e6efe9] text-[#2d5f4d]';
-  const inner = (
-    <>
-      <div className="flex items-start gap-3">
-        <span aria-hidden className={`grid h-9 w-9 place-items-center rounded-full ${swatch}`}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </span>
-        <div className="flex-1">
-          <h3 className="font-medium">{title}</h3>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">{body}</p>
-        </div>
-      </div>
-      {comingSoon && (
-        <span className="absolute right-4 top-4 rounded-full bg-[var(--color-warn-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-warn)]">
-          Sprint 1
-        </span>
-      )}
-    </>
-  );
-  if (comingSoon) {
-    return (
-      <div
-        aria-disabled="true"
-        className="group relative cursor-not-allowed rounded-2xl border border-[var(--color-line)] bg-white p-5 opacity-90"
-      >
-        {inner}
-      </div>
-    );
-  }
-  return (
-    <Link
-      href={href}
-      className="group relative rounded-2xl border border-[var(--color-line)] bg-white p-5 transition-colors hover:border-[var(--color-ink-3)]"
-    >
-      {inner}
-    </Link>
-  );
-}
-
-function SearchStub() {
-  return (
-    <label className="hidden items-center gap-2 rounded-full border border-[var(--color-line)] bg-white px-3 py-1.5 text-sm text-[var(--color-ink-3)] sm:flex">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <circle cx="11" cy="11" r="7" />
-        <path d="M21 21l-4.3-4.3" strokeLinecap="round" />
-      </svg>
-      <input
-        type="search"
-        placeholder="Search by client name…"
-        disabled
-        className="w-40 bg-transparent outline-none"
-      />
-    </label>
-  );
-}
-
-type SessionRow = Awaited<
-  ReturnType<typeof prisma.session.findMany<{ include: { client: { select: { fullName: true } } } }>>
->[number];
+type SessionWithClient = SessionPrismaRow & { client: { fullName: string } };
 
 interface DateGroup {
   label: string;
-  rows: SessionRow[];
+  rows: SessionWithClient[];
 }
 
-function groupByDate(rows: SessionRow[]): DateGroup[] {
+function groupByDate(rows: SessionWithClient[]): DateGroup[] {
   const groups = new Map<string, DateGroup>();
   for (const r of rows) {
     const key = r.scheduledAt.toISOString().slice(0, 10);
@@ -248,7 +146,7 @@ function groupByDate(rows: SessionRow[]): DateGroup[] {
   return Array.from(groups.values());
 }
 
-function statusTone(status: SessionRow['status']): 'accent' | 'warn' | 'muted' | 'default' {
+function statusTone(status: SessionWithClient['status']): 'accent' | 'warn' | 'muted' | 'default' {
   switch (status) {
     case 'COMPLETED':
       return 'accent';
@@ -262,7 +160,7 @@ function statusTone(status: SessionRow['status']): 'accent' | 'warn' | 'muted' |
   }
 }
 
-function statusLabel(status: SessionRow['status']): string {
+function statusLabel(status: SessionWithClient['status']): string {
   return status.replace(/_/g, ' ').toLowerCase();
 }
 
