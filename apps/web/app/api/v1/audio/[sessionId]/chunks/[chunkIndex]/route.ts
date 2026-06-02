@@ -76,7 +76,9 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
   if (session.status !== 'IN_PROGRESS') {
-    console.warn('[audio-chunk] 400 status', { sessionId, chunkIndex, status: session.status });
+    console.warn(
+      `[audio-chunk] 400 status=${session.status} sessionId=${sessionId} chunkIndex=${chunkIndex}`,
+    );
     return NextResponse.json(
       { error: `Cannot upload chunks for a session in ${session.status} state` },
       { status: 400 },
