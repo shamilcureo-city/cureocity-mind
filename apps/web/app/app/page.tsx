@@ -165,15 +165,8 @@ function ModeCard({
       : tone === 'sage'
         ? 'bg-[#e6efe7] text-[#385e44]'
         : 'bg-[#e6efe9] text-[#2d5f4d]';
-  return (
-    <Link
-      href={href}
-      aria-disabled={comingSoon}
-      className={`group relative rounded-2xl border border-[var(--color-line)] bg-white p-5 transition-colors ${
-        comingSoon ? 'cursor-not-allowed opacity-90' : 'hover:border-[var(--color-ink-3)]'
-      }`}
-      onClick={comingSoon ? (e) => e.preventDefault() : undefined}
-    >
+  const inner = (
+    <>
       <div className="flex items-start gap-3">
         <span aria-hidden className={`grid h-9 w-9 place-items-center rounded-full ${swatch}`}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -190,6 +183,24 @@ function ModeCard({
           Sprint 1
         </span>
       )}
+    </>
+  );
+  if (comingSoon) {
+    return (
+      <div
+        aria-disabled="true"
+        className="group relative cursor-not-allowed rounded-2xl border border-[var(--color-line)] bg-white p-5 opacity-90"
+      >
+        {inner}
+      </div>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      className="group relative rounded-2xl border border-[var(--color-line)] bg-white p-5 transition-colors hover:border-[var(--color-ink-3)]"
+    >
+      {inner}
     </Link>
   );
 }
