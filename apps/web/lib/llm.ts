@@ -1,3 +1,4 @@
+import { existsSync, writeFileSync } from 'node:fs';
 import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
@@ -27,9 +28,33 @@ declare global {
   var __cureocityModelRouter: IModelRouter | undefined;
 }
 
+/**
+ * Vercel functions have no persistent filesystem and the Vertex SDK
+ * reads credentials from a file path (GOOGLE_APPLICATION_CREDENTIALS).
+ * We accept the full JSON in GOOGLE_APPLICATION_CREDENTIALS_JSON and
+ * materialise it to /tmp on cold start so the SDK can find it. /tmp
+ * survives for the warm lifetime of the function container and is
+ * recreated automatically on the next cold start.
+ *
+ * No-op if GOOGLE_APPLICATION_CREDENTIALS is already set (e.g. local
+ * dev with a real path) or if the JSON env var is absent (mock backend).
+ */
+const VERCEL_CREDS_PATH = '/tmp/gcp-credentials.json';
+
+function ensureGcpCreds(): void {
+  if (process.env['GOOGLE_APPLICATION_CREDENTIALS']) return;
+  const json = process.env['GOOGLE_APPLICATION_CREDENTIALS_JSON'];
+  if (!json) return;
+  if (!existsSync(VERCEL_CREDS_PATH)) {
+    writeFileSync(VERCEL_CREDS_PATH, json, { mode: 0o600 });
+  }
+  process.env['GOOGLE_APPLICATION_CREDENTIALS'] = VERCEL_CREDS_PATH;
+}
+
 function build(): IModelRouter {
   const backend = process.env['LLM_BACKEND'] ?? 'mock';
   if (backend === 'vertex') {
+    ensureGcpCreds();
     const project = process.env['VERTEX_PROJECT_ID'];
     if (!project) throw new Error('LLM_BACKEND=vertex requires VERTEX_PROJECT_ID');
     return new ModelRouter({
