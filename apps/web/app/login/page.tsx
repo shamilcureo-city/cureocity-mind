@@ -9,8 +9,6 @@ import {
   getFirebaseAuth,
   isFirebaseConfigured,
 } from '@/lib/firebase-therapist';
-import { Header } from '@/components/layout/Header';
-import { Footer } from '@/components/layout/Footer';
 import { Container } from '@/components/ui/Container';
 import { Button } from '@/components/ui/Button';
 import { Label, Input, FieldError } from '@/components/ui/Field';
@@ -29,12 +27,12 @@ export default function LoginPage() {
   async function sendOtp(e: FormEvent): Promise<void> {
     e.preventDefault();
     setError(null);
-    if (!/^\+91\d{10}$/.test(phone)) {
-      setError('Enter a 10-digit Indian mobile (+91XXXXXXXXXX).');
+    if (!isFirebaseConfigured()) {
+      router.push('/app');
       return;
     }
-    if (!isFirebaseConfigured()) {
-      router.push('/dashboard');
+    if (!/^\+\d{8,15}$/.test(phone)) {
+      setError('Enter your number in international format, like +91XXXXXXXXXX.');
       return;
     }
     setBusy(true);
@@ -57,7 +55,7 @@ export default function LoginPage() {
     setBusy(true);
     try {
       await confirmation.confirm(otp);
-      router.push('/dashboard');
+      router.push('/app');
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -66,110 +64,106 @@ export default function LoginPage() {
   }
 
   return (
-    <>
-      <Header />
-      <main className="pb-24">
-        <Container className="pt-16">
-          <div className="mx-auto grid max-w-5xl items-center gap-16 lg:grid-cols-[1.1fr_1fr]">
-            <section>
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
-                Therapist log in
-              </p>
-              <h1 className="mt-3 font-serif text-5xl leading-tight">Welcome back.</h1>
-              <p className="mt-3 text-[var(--color-ink-2)]">
-                Sign in to see today’s sessions, your matched intakes, and your client roster. We
-                use phone OTP — no passwords.
-              </p>
-              <ul className="mt-8 space-y-3 text-sm text-[var(--color-ink-2)]">
-                {[
-                  'Encrypted notes and audit logs by default',
-                  'Matched intakes delivered each morning',
-                  'Light-touch tools, designed by clinicians',
-                ].map((it) => (
-                  <li key={it} className="flex items-start gap-3">
-                    <span
-                      aria-hidden
-                      className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-                    />
-                    {it}
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-10 text-sm text-[var(--color-ink-3)]">
-                New to the practice?{' '}
-                <Link href="/for-therapists" className="text-[var(--color-accent)] underline">
-                  Apply to join
-                </Link>
-                .
-              </p>
-            </section>
+    <main className="grid min-h-screen place-items-center">
+      <Container className="py-16">
+        <div className="mx-auto grid max-w-5xl items-center gap-16 lg:grid-cols-[1.1fr_1fr]">
+          <section>
+            <Link href="/" className="inline-flex items-center gap-2">
+              <span
+                aria-hidden
+                className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] font-serif text-base text-white"
+              >
+                cm
+              </span>
+              <span className="font-serif text-lg tracking-tight">Cureocity Mind</span>
+            </Link>
+            <h1 className="mt-10 font-serif text-5xl leading-tight">Sign in to your practice.</h1>
+            <p className="mt-3 max-w-md text-[var(--color-ink-2)]">
+              Phone-OTP login — no passwords. The scribe, your clients, and your notes are one tap
+              away.
+            </p>
+            <ul className="mt-8 space-y-3 text-sm text-[var(--color-ink-2)]">
+              {[
+                'Encrypted at rest. Audit log on every action.',
+                'In-region AI processing for your clinic.',
+                'Cryptographic sign-off on every note.',
+              ].map((it) => (
+                <li key={it} className="flex items-start gap-3">
+                  <span
+                    aria-hidden
+                    className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                  />
+                  {it}
+                </li>
+              ))}
+            </ul>
+          </section>
 
-            <aside className="rounded-3xl border border-[var(--color-line)] bg-white p-8 shadow-[0_24px_60px_-32px_rgba(15,27,42,0.18)]">
-              {stage === 'phone' ? (
-                <form onSubmit={sendOtp} className="space-y-5">
-                  <div>
-                    <Label htmlFor="phone">Mobile number</Label>
-                    <Input
-                      id="phone"
-                      type="tel"
-                      value={phone}
-                      onChange={(e) => setPhone(e.target.value)}
-                      autoComplete="tel"
-                      placeholder="+91XXXXXXXXXX"
-                      required
-                    />
-                  </div>
-                  <Button type="submit" size="lg" disabled={busy} className="w-full">
-                    {busy ? 'Sending OTP…' : 'Send OTP'}
-                  </Button>
-                  <FieldError message={error} />
-                  <p className="text-center text-xs text-[var(--color-ink-3)]">
-                    Trouble signing in?{' '}
-                    <Link href="/for-therapists" className="underline">
-                      Reach our support
-                    </Link>
+          <aside className="rounded-3xl border border-[var(--color-line)] bg-white p-8 shadow-[0_24px_60px_-32px_rgba(15,27,42,0.18)]">
+            {stage === 'phone' ? (
+              <form onSubmit={sendOtp} className="space-y-5">
+                <div>
+                  <Label htmlFor="phone" hint="International format">
+                    Mobile number
+                  </Label>
+                  <Input
+                    id="phone"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    autoComplete="tel"
+                    placeholder="+91XXXXXXXXXX"
+                    required
+                  />
+                </div>
+                <Button type="submit" size="lg" disabled={busy} className="w-full">
+                  {busy ? 'Sending OTP…' : 'Send OTP'}
+                </Button>
+                <FieldError message={error} />
+                {!isFirebaseConfigured() && (
+                  <p className="rounded-xl bg-[var(--color-warn-soft)] px-3 py-2 text-xs text-[var(--color-warn)]">
+                    Demo mode — Firebase isn't configured. Tapping continue signs you in as the
+                    seeded demo therapist.
                   </p>
-                </form>
-              ) : (
-                <form onSubmit={verifyOtp} className="space-y-5">
-                  <p className="text-sm text-[var(--color-ink-2)]">
-                    Sent a 6-digit code to{' '}
-                    <span className="font-medium text-[var(--color-ink)]">{phone}</span>.
-                  </p>
-                  <div>
-                    <Label htmlFor="otp">OTP</Label>
-                    <Input
-                      id="otp"
-                      inputMode="numeric"
-                      value={otp}
-                      onChange={(e) => setOtp(e.target.value)}
-                      maxLength={6}
-                      className="tracking-[0.6em] text-center text-lg"
-                      required
-                    />
-                  </div>
-                  <Button type="submit" size="lg" disabled={busy} className="w-full">
-                    {busy ? 'Verifying…' : 'Verify and continue'}
-                  </Button>
-                  <FieldError message={error} />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setStage('phone');
-                      setOtp('');
-                    }}
-                    className="block w-full text-center text-xs text-[var(--color-ink-3)] underline"
-                  >
-                    Use a different number
-                  </button>
-                </form>
-              )}
-              <div id={RECAPTCHA_ELEMENT_ID} />
-            </aside>
-          </div>
-        </Container>
-      </main>
-      <Footer />
-    </>
+                )}
+              </form>
+            ) : (
+              <form onSubmit={verifyOtp} className="space-y-5">
+                <p className="text-sm text-[var(--color-ink-2)]">
+                  Code sent to <span className="font-medium text-[var(--color-ink)]">{phone}</span>.
+                </p>
+                <div>
+                  <Label htmlFor="otp">6-digit OTP</Label>
+                  <Input
+                    id="otp"
+                    inputMode="numeric"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    maxLength={6}
+                    className="tracking-[0.6em] text-center text-lg"
+                    required
+                  />
+                </div>
+                <Button type="submit" size="lg" disabled={busy} className="w-full">
+                  {busy ? 'Verifying…' : 'Verify and continue'}
+                </Button>
+                <FieldError message={error} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStage('phone');
+                    setOtp('');
+                  }}
+                  className="block w-full text-center text-xs text-[var(--color-ink-3)] underline"
+                >
+                  Use a different number
+                </button>
+              </form>
+            )}
+            <div id={RECAPTCHA_ELEMENT_ID} />
+          </aside>
+        </div>
+      </Container>
+    </main>
   );
 }

@@ -17,9 +17,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: 'Cureocity Mind — Talk to someone who gets it',
+  title: 'Cureocity Mind — AI scribe for your therapy practice',
   description:
-    'Find a vetted therapist who matches how you want to work. Book an introductory call, free.',
+    'Record sessions, generate clinical notes, edit by chat, and sign off — without leaving the room.',
 };
 
 export const viewport: Viewport = {

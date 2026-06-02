@@ -2,9 +2,17 @@ import type {
   Booking as BookingRow,
   Client as ClientRow,
   IntakeSubmission as IntakeRow,
+  NoteDraft as NoteDraftRow,
   Session as SessionRow,
 } from '@prisma/client';
-import type { Client, Session } from '@cureocity/contracts';
+import type {
+  AffectFeature,
+  Client,
+  NoteDraft,
+  Session,
+  SpeakerSegment,
+  TherapyNoteV1,
+} from '@cureocity/contracts';
 
 /**
  * Prisma row → DTO mappers. Single source of truth for what crosses
@@ -27,6 +35,27 @@ export function toClient(row: ClientRow): Client {
     presentingConcerns: row.presentingConcerns,
     preferredModality: row.preferredModality as Client['preferredModality'],
     status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toNoteDraft(row: NoteDraftRow): NoteDraft {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    status: row.status,
+    transcript: row.transcript,
+    speakerSegments:
+      row.speakerSegments === null
+        ? null
+        : (row.speakerSegments as unknown as SpeakerSegment[]),
+    affectFeatures:
+      row.affectFeatures === null ? null : (row.affectFeatures as unknown as AffectFeature[]),
+    content: row.content === null ? null : (row.content as unknown as TherapyNoteV1),
+    riskSeverity: row.riskSeverity,
+    totalCostInr: row.totalCostInr.toString(),
+    errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
