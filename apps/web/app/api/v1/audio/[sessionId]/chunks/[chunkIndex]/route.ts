@@ -99,11 +99,23 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
   // Upload to Vercel Blob; on idempotent retry the blob URL collides
   // harmlessly because Blob supports `addRandomSuffix: false`.
   const blobKey = `sessions/${sessionId}/${chunkIndex}.pcm`;
-  const blob = await put(blobKey, buffer, {
-    access: 'public',
-    contentType: VALID_MIME,
-    addRandomSuffix: false,
-  });
+  let blob: { url: string };
+  try {
+    blob = await put(blobKey, buffer, {
+      access: 'public',
+      contentType: VALID_MIME,
+      addRandomSuffix: false,
+    });
+  } catch (e) {
+    const err = e as { name?: string; message?: string };
+    console.error(
+      `[audio-chunk] 500 blob-put name=${err.name ?? 'unknown'} message=${err.message ?? String(e)} sessionId=${sessionId} chunkIndex=${chunkIndex}`,
+    );
+    return NextResponse.json(
+      { error: `Blob upload failed: ${err.message ?? String(e)}` },
+      { status: 500 },
+    );
+  }
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -140,7 +152,14 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
       // (sessionId, chunkIndex) collision — idempotent re-upload.
       return new NextResponse(null, { status: 200 });
     }
-    throw e;
+    const err = e as { name?: string; message?: string };
+    console.error(
+      `[audio-chunk] 500 db-write name=${err.name ?? 'unknown'} message=${err.message ?? String(e)} sessionId=${sessionId} chunkIndex=${chunkIndex}`,
+    );
+    return NextResponse.json(
+      { error: `Database write failed: ${err.message ?? String(e)}` },
+      { status: 500 },
+    );
   }
   return new NextResponse(null, { status: 201 });
 }
