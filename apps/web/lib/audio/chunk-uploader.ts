@@ -1,32 +1,40 @@
+'use client';
+
+import { upload } from '@vercel/blob/client';
 import { ChunkStore, type PersistedChunk } from './idb-chunk-store';
 
 /**
- * Uploads persisted PCM chunks to the audio chunk endpoint and drains
- * the IDB queue. Retries with exponential backoff on transient (5xx/
- * 408/429/network) failures; surfaces 4xx as permanent.
+ * Uploads persisted PCM chunks DIRECTLY from the browser to Vercel Blob
+ * storage using @vercel/blob/client.upload(). The Vercel function only
+ * hands out a short-lived client token (~500 ms) — the 30 s / 960 KB
+ * upload itself goes browser -> Blob edge, bypassing the function and
+ * dodging the Hobby plan's 10 s function timeout.
  *
- * Wire format matches PUT /api/v1/audio/:sessionId/chunks/:chunkIndex:
- *   - Method PUT, Content-Type audio/pcm
- *   - X-Sample-Rate: 16000
- *   - X-Duration-Ms: <chunk.durationMs>
- *   - Body: raw little-endian 16-bit PCM bytes
+ * Flow per chunk:
+ *   1. upload() POSTs handshake to /api/v1/audio/upload-token
+ *      (our handleUpload route validates session ownership + status
+ *       and returns a scoped token)
+ *   2. upload() streams the PCM body to Blob storage edge directly
+ *   3. Vercel Blob posts an upload-completed webhook back to our route
+ *      which writes the AudioChunk row + AUDIO_CHUNK_UPLOADED audit
+ *   4. upload() resolves with the blob URL on success
  *
- * Idempotency: (sessionId, chunkIndex) is uniquely indexed server-side;
- * a duplicate PUT returns 200 (not 409) so a retry after success is a
- * harmless no-op.
+ * Idempotency: (sessionId, chunkIndex) is uniquely indexed server-side
+ * via Prisma, so a retried upload re-uses the same pathname and the
+ * webhook's UNIQUE constraint short-circuits the second write.
  */
 
 export interface UploaderOptions {
   /** Endpoint base, e.g. '/api/v1'. */
   scribeBase: string;
-  /** Bearer token; if omitted, sends Bearer dev-bypass for AUTH_BYPASS mode. */
+  /** Bearer token; if omitted, request runs in the dev bypass path. */
   getAuthToken?: () => Promise<string | null>;
   /** Max attempts per chunk before treating it as a dead letter. */
   maxAttempts?: number;
 }
 
 export type UploadOutcome =
-  | { status: 'ok' }
+  | { status: 'ok'; url?: string }
   | { status: 'transient'; error: string; httpStatus?: number }
   | { status: 'permanent'; error: string; httpStatus: number };
 
@@ -43,38 +51,44 @@ export class ChunkUploader {
   }
 
   /**
-   * Upload a single chunk. Returns the outcome — never throws for
-   * transport-level failures so the caller can update IDB attempts +
-   * backoff intelligently.
+   * Uploads a single chunk via the client-direct path. Catches and
+   * classifies failures so the IDB queue can back off intelligently.
    */
   async uploadOne(chunk: PersistedChunk): Promise<UploadOutcome> {
-    const token = (await this.opts.getAuthToken?.()) ?? 'dev-bypass';
-    const headers: Record<string, string> = {
-      'Content-Type': chunk.mimeType,
-      'X-Sample-Rate': String(chunk.sampleRate),
-      'X-Duration-Ms': String(chunk.durationMs),
-      Authorization: `Bearer ${token}`,
-    };
-
-    let res: Response;
+    const pathname = `sessions/${chunk.sessionId}/${chunk.chunkIndex}.pcm`;
+    // PutBody accepts Blob | ReadableStream | File etc., but not raw
+    // Uint8Array — wrap it in a Blob so the SDK can stream it.
+    const body = new Blob([chunk.bytes as Uint8Array<ArrayBuffer>], { type: chunk.mimeType });
     try {
-      res = await fetch(
-        `${this.opts.scribeBase}/audio/${encodeURIComponent(chunk.sessionId)}/chunks/${chunk.chunkIndex}`,
-        {
-          method: 'PUT',
-          headers,
-          body: chunk.bytes as Uint8Array<ArrayBuffer>,
-        },
-      );
+      const blob = await upload(pathname, body, {
+        access: 'public',
+        handleUploadUrl: `${this.opts.scribeBase}/audio/upload-token`,
+        contentType: chunk.mimeType,
+        clientPayload: JSON.stringify({
+          durationMs: chunk.durationMs,
+          sampleRate: chunk.sampleRate,
+        }),
+      });
+      return { status: 'ok', url: blob.url };
     } catch (e) {
-      return { status: 'transient', error: (e as Error).message };
+      const err = e as { name?: string; message?: string };
+      const message = err.message ?? String(e);
+      // Permanent: server rejected the handshake (auth / state / validation).
+      // The handshake route returns 400 for these; the upload() SDK surfaces
+      // the response body verbatim as the error message.
+      const isPermanent =
+        message.includes('Unauthorized') ||
+        message.includes('not owned') ||
+        message.includes('IN_PROGRESS state') ||
+        message.includes('not found') ||
+        message.includes('Invalid pathname') ||
+        message.includes('Sample rate') ||
+        message.includes('durationMs');
+      if (isPermanent) {
+        return { status: 'permanent', error: message, httpStatus: 400 };
+      }
+      return { status: 'transient', error: message };
     }
-
-    if (res.ok) return { status: 'ok' };
-    if (res.status >= 500 || res.status === 408 || res.status === 429) {
-      return { status: 'transient', error: res.statusText, httpStatus: res.status };
-    }
-    return { status: 'permanent', error: res.statusText, httpStatus: res.status };
   }
 
   /**
