@@ -59,7 +59,9 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     const { audioBytes, durationMs } = await fetchAudio(sessionId);
     const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
     if (audioBytes.byteLength === 0 && llmBackend !== 'mock') {
-      throw new Error('No audio chunks uploaded for session');
+      throw new Error(
+        'No audio chunks reached storage for this session. Record at least one 30-second chunk and end the session again — the orchestrator skips empty sessions to avoid an unnecessary Gemini bill.',
+      );
     }
 
     // Pass 1 cost-guard pre-check
@@ -233,11 +235,18 @@ async function fetchAudio(sessionId: string): Promise<{ audioBytes: Buffer; dura
   });
   if (chunks.length === 0) return { audioBytes: Buffer.alloc(0), durationMs: 0 };
 
-  // Vercel Blob URLs stored in s3Key — fetch directly via HTTP.
+  // Private Vercel Blob URLs require the read-write token. The token is
+  // auto-injected by the Vercel-Blob integration as BLOB_READ_WRITE_TOKEN
+  // into every environment.
+  const blobToken = process.env['BLOB_READ_WRITE_TOKEN'];
+  const authHeader: Record<string, string> = blobToken
+    ? { Authorization: `Bearer ${blobToken}` }
+    : {};
+
   const buffers: Buffer[] = [];
   let totalDurationMs = 0;
   for (const chunk of chunks) {
-    const res = await fetch(chunk.s3Key);
+    const res = await fetch(chunk.s3Key, { headers: authHeader });
     if (!res.ok) throw new Error(`Failed to fetch chunk ${chunk.chunkIndex}: ${res.status}`);
     buffers.push(Buffer.from(await res.arrayBuffer()));
     totalDurationMs += chunk.durationMs;
