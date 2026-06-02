@@ -94,28 +94,45 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
     console.warn('[audio-chunk] 413 too-large', { sessionId, chunkIndex, length: buffer.length });
     return NextResponse.json({ error: `Chunk exceeds ${MAX_CHUNK_BYTES} bytes` }, { status: 413 });
   }
-  console.info('[audio-chunk] ok', { sessionId, chunkIndex, sampleRate, durationMs, bytes: buffer.length });
+  const blobToken = process.env['BLOB_READ_WRITE_TOKEN'];
+  console.info(
+    `[audio-chunk] ok bytes=${buffer.length} sampleRate=${sampleRate} durationMs=${durationMs} blobTokenPresent=${blobToken ? 'yes' : 'NO'} sessionId=${sessionId} chunkIndex=${chunkIndex}`,
+  );
+
+  if (!blobToken) {
+    console.error(
+      `[audio-chunk] 500 no-blob-token sessionId=${sessionId} chunkIndex=${chunkIndex}`,
+    );
+    return NextResponse.json(
+      { error: 'BLOB_READ_WRITE_TOKEN is not set on this deployment' },
+      { status: 500 },
+    );
+  }
 
   // Upload to Vercel Blob; on idempotent retry the blob URL collides
   // harmlessly because Blob supports `addRandomSuffix: false`.
   const blobKey = `sessions/${sessionId}/${chunkIndex}.pcm`;
+  console.info(`[audio-chunk] put-start key=${blobKey}`);
+  const putStartedAt = Date.now();
   let blob: { url: string };
   try {
     blob = await put(blobKey, buffer, {
       access: 'public',
       contentType: VALID_MIME,
       addRandomSuffix: false,
+      token: blobToken,
     });
   } catch (e) {
     const err = e as { name?: string; message?: string };
     console.error(
-      `[audio-chunk] 500 blob-put name=${err.name ?? 'unknown'} message=${err.message ?? String(e)} sessionId=${sessionId} chunkIndex=${chunkIndex}`,
+      `[audio-chunk] 500 blob-put-throw elapsedMs=${Date.now() - putStartedAt} name=${err.name ?? 'unknown'} message=${err.message ?? String(e)} sessionId=${sessionId} chunkIndex=${chunkIndex}`,
     );
     return NextResponse.json(
       { error: `Blob upload failed: ${err.message ?? String(e)}` },
       { status: 500 },
     );
   }
+  console.info(`[audio-chunk] put-done elapsedMs=${Date.now() - putStartedAt} url=${blob.url}`);
 
   try {
     await prisma.$transaction(async (tx) => {
