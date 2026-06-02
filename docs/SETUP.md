@@ -61,8 +61,8 @@ LLM_BACKEND=vertex
 VERTEX_PROJECT_ID=
 VERTEX_FLASH_REGION=asia-south1        # India clinics default
 VERTEX_PRO_REGION=us-central1          # Pro is global
-VERTEX_FLASH_MODEL=gemini-1.5-flash
-VERTEX_PRO_MODEL=gemini-1.5-pro
+VERTEX_FLASH_MODEL=gemini-2.5-flash      # default; pin to gemini-1.5-flash for cheaper, lower-quality
+VERTEX_PRO_MODEL=gemini-2.5-pro          # default; pin to gemini-1.5-pro for cheaper, lower-quality
 GOOGLE_APPLICATION_CREDENTIALS=        # path to service-account JSON
 
 # Cost guard (override defaults if needed)
@@ -132,8 +132,13 @@ NEXT_PUBLIC_APP_BASE_URL=https://app.cureocitymind.com   (public)
    JSON key. **Do not** commit it; paste the JSON into Vercel as the
    `GOOGLE_APPLICATION_CREDENTIALS_JSON` env (then write it to a tmp
    file on cold start, or use Workload Identity Federation in Sprint 12).
-4. In Vertex AI, ensure `gemini-1.5-flash` is enabled in
-   `asia-south1` and `gemini-1.5-pro` in your global region.
+4. In Vertex AI, ensure `gemini-2.5-flash` is enabled in
+   `asia-south1` (and `northamerica-northeast1` for Canada clinics),
+   and `gemini-2.5-pro` in your global region (or `us-central1`).
+   These are our defaults — 2.5 has materially better clinical-note
+   quality than 1.5 for a small cost bump. Override per-deploy via
+   `VERTEX_FLASH_MODEL` / `VERTEX_PRO_MODEL` if you ever need to
+   downgrade for cost or upgrade to a future model line.
 
 ### Firebase
 1. Create a Firebase project under the same GCP project.

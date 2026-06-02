@@ -15,6 +15,11 @@ import {
  *                          VERTEX_FLASH_REGION (default asia-south1),
  *                          Pass 2 in VERTEX_PRO_REGION (default global).
  *
+ * Defaults to Gemini 2.5 Flash + 2.5 Pro — best quality/cost balance
+ * for the scribe pipeline. Override via VERTEX_FLASH_MODEL /
+ * VERTEX_PRO_MODEL for A/B comparisons (e.g. 2.5 Pro on both passes
+ * for max-capability, or pinning to 1.5 for a cost floor).
+ *
  * Cached module-globally so warm function reuse skips re-init.
  */
 
@@ -31,12 +36,12 @@ function build(): IModelRouter {
       pass1: new VertexGeminiFlashIndiaBackend({
         projectId: project,
         location: process.env['VERTEX_FLASH_REGION'] ?? 'asia-south1',
-        model: process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-1.5-flash',
+        model: process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash',
       }),
       pass2: new VertexGeminiProGlobalBackend({
         projectId: project,
         location: process.env['VERTEX_PRO_REGION'] ?? 'global',
-        model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-1.5-pro',
+        model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
     });
   }
