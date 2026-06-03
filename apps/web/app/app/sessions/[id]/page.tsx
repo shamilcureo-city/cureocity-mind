@@ -1,31 +1,96 @@
+import type { SessionStatus } from '@prisma/client';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import type { NoteDraft, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
+import type {
+  NoteDraft,
+  SpeakerSegment,
+  TherapyNote,
+  TherapyNoteV1,
+} from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
-import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
+import { ClientTab } from '@/components/app/ClientTab';
 import { NotesTab } from '@/components/app/NotesTab';
+import { SessionInfoTab } from '@/components/app/SessionInfoTab';
+import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
+import { TranscriptTab } from '@/components/app/TranscriptTab';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 
 export const dynamic = 'force-dynamic';
 
+type TabKey = 'notes' | 'client' | 'transcript' | 'session-info';
+
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }
 
-export default async function SessionPage({ params }: PageProps) {
+const VALID_TABS: ReadonlySet<TabKey> = new Set(['notes', 'client', 'transcript', 'session-info']);
+
+function parseTab(raw: string | undefined): TabKey {
+  return raw && (VALID_TABS as ReadonlySet<string>).has(raw) ? (raw as TabKey) : 'notes';
+}
+
+export default async function SessionPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const { tab: rawTab } = await searchParams;
+  const tab = parseTab(rawTab);
+
   const session = await prisma.session.findUnique({
     where: { id },
     include: { client: { select: { fullName: true } } },
   });
   if (!session) notFound();
 
+  return (
+    <Container className="py-8">
+      <Link
+        href="/app"
+        className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+      >
+        ← All sessions
+      </Link>
+
+      <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-serif text-3xl">{session.client.fullName}</h1>
+          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+            {session.modality} · {session.scheduledAt.toLocaleString('en-US')}
+          </p>
+        </div>
+        <Badge tone={statusTone(session.status)}>
+          {session.status.replace(/_/g, ' ').toLowerCase()}
+        </Badge>
+      </header>
+
+      <div className="mt-8">
+        <SessionWorkspaceTabs sessionId={id} active={tab} />
+      </div>
+
+      <div className="mt-6">
+        {tab === 'notes' && (
+          <NotesTabPanel sessionId={id} sessionStatus={session.status} />
+        )}
+        {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
+        {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
+        {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
+      </div>
+    </Container>
+  );
+}
+
+async function NotesTabPanel({
+  sessionId,
+  sessionStatus,
+}: {
+  sessionId: string;
+  sessionStatus: SessionStatus;
+}) {
   const [draftRow, signedRow] = await Promise.all([
-    prisma.noteDraft.findUnique({ where: { sessionId: id } }),
+    prisma.noteDraft.findUnique({ where: { sessionId } }),
     prisma.therapyNote.findUnique({
-      where: { sessionId: id },
+      where: { sessionId },
       include: { edits: { orderBy: { createdAt: 'asc' } } },
     }),
   ]);
@@ -54,39 +119,186 @@ export default async function SessionPage({ params }: PageProps) {
     : null;
 
   return (
-    <Container className="py-8">
-      <Link
-        href="/app"
-        className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
-      >
-        ← All sessions
-      </Link>
+    <NotesTab
+      sessionId={sessionId}
+      sessionStatus={sessionStatus}
+      initialDraft={draft}
+      initialNote={signedNote}
+    />
+  );
+}
 
-      <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-serif text-3xl">{session.client.fullName}</h1>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {session.modality} · {session.scheduledAt.toLocaleString('en-US')}
-          </p>
-        </div>
-        <Badge tone={statusTone(session.status)}>
-          {session.status.replace(/_/g, ' ').toLowerCase()}
-        </Badge>
-      </header>
+async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessionId: string }) {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: {
+      fullName: true,
+      contactPhone: true,
+      contactEmail: true,
+      dateOfBirth: true,
+      presentingConcerns: true,
+      preferredModality: true,
+    },
+  });
+  if (!client) {
+    return <p className="text-sm text-[var(--color-ink-2)]">Client record not found.</p>;
+  }
 
-      <div className="mt-8">
-        <SessionWorkspaceTabs active="notes" />
-      </div>
+  // Past session count is "sessions other than this one for the same client",
+  // measured by COMPLETED status to match clinical sense (cancelled / no-shows
+  // shouldn't bump the count). Last session = most recent COMPLETED scheduledAt.
+  const [pastSessionCount, lastSession] = await Promise.all([
+    prisma.session.count({
+      where: {
+        clientId,
+        status: 'COMPLETED',
+        id: { not: sessionId },
+      },
+    }),
+    prisma.session.findFirst({
+      where: {
+        clientId,
+        status: 'COMPLETED',
+        id: { not: sessionId },
+      },
+      orderBy: { scheduledAt: 'desc' },
+      select: { scheduledAt: true },
+    }),
+  ]);
 
-      <div className="mt-6">
-        <NotesTab
-          sessionId={id}
-          sessionStatus={session.status}
-          initialDraft={draft}
-          initialNote={signedNote}
-        />
-      </div>
-    </Container>
+  return (
+    <ClientTab
+      data={{
+        fullName: client.fullName,
+        contactPhone: client.contactPhone,
+        contactEmail: client.contactEmail,
+        dateOfBirth: client.dateOfBirth,
+        presentingConcerns: client.presentingConcerns,
+        preferredModality: client.preferredModality,
+        pastSessionCount,
+        lastSessionAt: lastSession?.scheduledAt ?? null,
+      }}
+    />
+  );
+}
+
+async function TranscriptTabPanel({ sessionId }: { sessionId: string }) {
+  const [draftRow, lastCall] = await Promise.all([
+    prisma.noteDraft.findUnique({
+      where: { sessionId },
+      select: {
+        status: true,
+        transcript: true,
+        speakerSegments: true,
+        totalCostInr: true,
+        errorMessage: true,
+      },
+    }),
+    prisma.geminiCallLog.findFirst({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' },
+      select: { model: true, region: true },
+    }),
+  ]);
+
+  if (!draftRow) {
+    return (
+      <p className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
+        No note draft exists for this session yet. End the session from the Record screen to
+        trigger note generation.
+      </p>
+    );
+  }
+
+  const segments = (draftRow.speakerSegments as SpeakerSegment[] | null) ?? null;
+
+  return (
+    <TranscriptTab
+      data={{
+        status: draftRow.status,
+        segments,
+        transcript: draftRow.transcript,
+        totalCostInr: draftRow.totalCostInr.toString(),
+        backend: lastCall ? `${lastCall.model} (${lastCall.region})` : null,
+        errorMessage: draftRow.errorMessage,
+      }}
+    />
+  );
+}
+
+async function SessionInfoTabPanel({ sessionId }: { sessionId: string }) {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      modality: true,
+      status: true,
+      scheduledAt: true,
+      startedAt: true,
+      endedAt: true,
+      createdAt: true,
+      consentSnapshot: true,
+    },
+  });
+  if (!session) return null;
+
+  const [audioAgg, auditRows] = await Promise.all([
+    prisma.audioChunk.aggregate({
+      where: { sessionId },
+      _count: { _all: true },
+      _sum: { sizeBytes: true, durationMs: true },
+    }),
+    prisma.auditLog.findMany({
+      where: {
+        OR: [
+          { targetType: 'Session', targetId: sessionId },
+          { targetType: 'NoteDraft', metadata: { path: ['sessionId'], equals: sessionId } },
+          { targetType: 'AudioChunk', metadata: { path: ['sessionId'], equals: sessionId } },
+          { targetType: 'TherapyNote', metadata: { path: ['sessionId'], equals: sessionId } },
+          { targetType: 'Consent', metadata: { path: ['sessionId'], equals: sessionId } },
+        ],
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+      select: {
+        id: true,
+        action: true,
+        actorType: true,
+        createdAt: true,
+        metadata: true,
+      },
+    }),
+  ]);
+
+  const consentSnapshot = Array.isArray(session.consentSnapshot)
+    ? (session.consentSnapshot as Array<{ scope: string; scriptVersion: string; ackedAt: string }>)
+    : [];
+
+  return (
+    <SessionInfoTab
+      data={{
+        id: session.id,
+        modality: session.modality,
+        status: session.status,
+        scheduledAt: session.scheduledAt,
+        startedAt: session.startedAt,
+        endedAt: session.endedAt,
+        createdAt: session.createdAt,
+        consentSnapshot,
+        audio: {
+          chunkCount: audioAgg._count._all,
+          totalSizeBytes: audioAgg._sum.sizeBytes ?? 0,
+          totalDurationMs: audioAgg._sum.durationMs ?? 0,
+        },
+        auditTrail: auditRows.map((r) => ({
+          id: r.id,
+          action: r.action,
+          actorType: r.actorType,
+          createdAt: r.createdAt,
+          metadata: r.metadata as Record<string, unknown> | null,
+        })),
+      }}
+    />
   );
 }
 
