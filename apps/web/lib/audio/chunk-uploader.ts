@@ -59,8 +59,32 @@ export class ChunkUploader {
     // PutBody accepts Blob | ReadableStream | File etc., but not raw
     // Uint8Array — wrap it in a Blob so the SDK can stream it.
     const body = new Blob([chunk.bytes as Uint8Array<ArrayBuffer>], { type: chunk.mimeType });
+
+    const trace = (stage: string, extra?: Record<string, unknown>): void => {
+      // Fire-and-forget breadcrumb so we can see exactly where the flow
+      // dies on the browser side without devtools access. Includes a
+      // build marker so we can tell a cached old bundle from the new one.
+      void fetch(`${this.opts.scribeBase}/debug/audio-upload-error`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: chunk.sessionId,
+          chunkIndex: chunk.chunkIndex,
+          stage,
+          errorName: 'TRACE',
+          errorMessage: `build=v3-stage-trace`,
+          extra: { bodySize: chunk.bytes.byteLength, ...(extra ?? {}) },
+        }),
+      }).catch(() => {
+        /* swallow */
+      });
+    };
+
+    trace('enter');
+
     let blobUrl: string;
     try {
+      trace('calling-upload');
       const blob = await upload(pathname, body, {
         access: 'public',
         handleUploadUrl: `${this.opts.scribeBase}/audio/upload-token`,
@@ -71,18 +95,18 @@ export class ChunkUploader {
         }),
       });
       blobUrl = blob.url;
+      trace('upload-done', { blobUrl });
     } catch (e) {
       const err = e as { name?: string; message?: string };
       const message = err.message ?? String(e);
-      // Fire-and-forget: surface the browser-side error into server logs
-      // so we can diagnose without devtools access.
+      // Surface the actual error name + message to server logs.
       void fetch(`${this.opts.scribeBase}/debug/audio-upload-error`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           sessionId: chunk.sessionId,
           chunkIndex: chunk.chunkIndex,
-          stage: 'upload',
+          stage: 'upload-threw',
           errorName: err.name ?? 'unknown',
           errorMessage: message,
           extra: { bodySize: chunk.bytes.byteLength, mimeType: chunk.mimeType },
