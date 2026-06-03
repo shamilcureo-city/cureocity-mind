@@ -57,7 +57,12 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
 
       const text = res.response.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
       const parsed: unknown = JSON.parse(text);
-      const output = Pass2OutputSchema.parse(parsed);
+      // The Pass2 prompt asks Gemini to produce a TherapyNoteV1 JSON object
+      // directly (no wrapper key) — that matches PRD 22.1 Part 10.3. The
+      // Pass2OutputSchema, however, wraps the note under a `therapyNote`
+      // key. Wrap here so downstream consumers (orchestrator, NoteDraft)
+      // see the same shape as the mock backend.
+      const output = Pass2OutputSchema.parse({ therapyNote: parsed });
 
       const usage = res.response.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
