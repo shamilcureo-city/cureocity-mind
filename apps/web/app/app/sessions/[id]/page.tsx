@@ -169,6 +169,7 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
   return (
     <ClientTab
       data={{
+        id: clientId,
         fullName: client.fullName,
         contactPhone: client.contactPhone,
         contactEmail: client.contactEmail,

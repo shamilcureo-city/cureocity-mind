@@ -2,16 +2,22 @@ import type {
   Booking as BookingRow,
   Client as ClientRow,
   IntakeSubmission as IntakeRow,
+  ModalityState as ModalityStateRow,
+  ModalityTransition as ModalityTransitionRow,
   NoteDraft as NoteDraftRow,
   Session as SessionRow,
 } from '@prisma/client';
 import type {
   AffectFeature,
   Client,
+  ModalityState,
+  ModalityStateWithHistory,
+  ModalityTransition,
   NoteDraft,
   Session,
   SpeakerSegment,
   TherapyNoteV1,
+  WorkflowGoal,
 } from '@cureocity/contracts';
 
 /**
@@ -145,5 +151,44 @@ export function toIntake(row: IntakeRow): IntakeDto {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     matchedAt: row.matchedAt?.toISOString() ?? null,
+  };
+}
+
+export function toModalityTransition(row: ModalityTransitionRow): ModalityTransition {
+  return {
+    id: row.id,
+    stateId: row.stateId,
+    fromPhase: row.fromPhase,
+    toPhase: row.toPhase,
+    trigger: row.trigger,
+    reason: row.reason,
+    psychologistId: row.psychologistId,
+    evidence: (row.evidence as Record<string, unknown> | null) ?? null,
+    occurredAt: row.occurredAt.toISOString(),
+  };
+}
+
+export function toModalityState(row: ModalityStateRow): ModalityState {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    psychologistId: row.psychologistId,
+    modality: row.modality,
+    currentPhase: row.currentPhase,
+    state: (row.state as Record<string, unknown>) ?? {},
+    goals: (row.goals as WorkflowGoal[]) ?? [],
+    startedAt: row.startedAt.toISOString(),
+    completedAt: row.completedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toModalityStateWithHistory(
+  row: ModalityStateRow & { transitions: ModalityTransitionRow[] },
+): ModalityStateWithHistory {
+  return {
+    ...toModalityState(row),
+    transitions: row.transitions.map(toModalityTransition),
   };
 }

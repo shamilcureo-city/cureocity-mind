@@ -1,6 +1,8 @@
 import { Badge } from '../ui/Badge';
+import { WorkflowSection } from './WorkflowSection';
 
 interface ClientPanelData {
+  id: string;
   fullName: string;
   contactPhone: string;
   contactEmail: string | null;
@@ -65,6 +67,10 @@ export function ClientTab({ data }: { data: ClientPanelData }) {
             'No presenting concerns recorded yet. Add them from the Clients tab.'}
         </p>
       </section>
+
+      <div className="mt-6 border-t border-[var(--color-line-soft)] pt-6">
+        <WorkflowSection clientId={data.id} />
+      </div>
     </div>
   );
 }
