@@ -74,6 +74,22 @@ export class ChunkUploader {
     } catch (e) {
       const err = e as { name?: string; message?: string };
       const message = err.message ?? String(e);
+      // Fire-and-forget: surface the browser-side error into server logs
+      // so we can diagnose without devtools access.
+      void fetch(`${this.opts.scribeBase}/debug/audio-upload-error`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: chunk.sessionId,
+          chunkIndex: chunk.chunkIndex,
+          stage: 'upload',
+          errorName: err.name ?? 'unknown',
+          errorMessage: message,
+          extra: { bodySize: chunk.bytes.byteLength, mimeType: chunk.mimeType },
+        }),
+      }).catch(() => {
+        /* never let the report itself block the retry path */
+      });
       // Permanent: handshake or storage upload was rejected for a reason
       // a retry won't fix (auth / wrong session state / validation).
       const isPermanent =
