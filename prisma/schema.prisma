@@ -541,7 +541,12 @@ model AudioChunk {
   sampleRate Int
   sizeBytes  Int
   durationMs Int
-  s3Key      String
+  s3Key      String   @default("")
+  // Inline storage for PCM bytes. Used when the upload bypasses external
+  // object storage (Sprint 2 fallback after @vercel/blob/client.upload()
+  // hung silently in production). orchestrator.fetchAudio prefers
+  // `bytes` when non-null; falls back to s3Key fetch for legacy rows.
+  bytes      Bytes?
 
   uploadedAt DateTime @default(now())
 

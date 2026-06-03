@@ -1,40 +1,32 @@
 'use client';
 
-import { upload } from '@vercel/blob/client';
 import { ChunkStore, type PersistedChunk } from './idb-chunk-store';
 
 /**
- * Uploads persisted PCM chunks DIRECTLY from the browser to Vercel Blob
- * storage using @vercel/blob/client.upload(). The Vercel function only
- * hands out a short-lived client token (~500 ms) — the 30 s / 960 KB
- * upload itself goes browser -> Blob edge, bypassing the function and
- * dodging the Hobby plan's 10 s function timeout.
+ * Uploads persisted PCM chunks to the server's inline-storage endpoint
+ * (POST /audio/chunks/upload — body = raw bytes, metadata in headers).
+ * The route writes the chunk into Postgres BYTEA in a single Prisma
+ * transaction.
  *
- * Flow per chunk:
- *   1. upload() POSTs handshake to /api/v1/audio/upload-token
- *      (our handleUpload route validates session ownership + status
- *       and returns a scoped token)
- *   2. upload() streams the PCM body to Blob storage edge directly
- *   3. Vercel Blob posts an upload-completed webhook back to our route
- *      which writes the AudioChunk row + AUDIO_CHUNK_UPLOADED audit
- *   4. upload() resolves with the blob URL on success
- *
- * Idempotency: (sessionId, chunkIndex) is uniquely indexed server-side
- * via Prisma, so a retried upload re-uses the same pathname and the
- * webhook's UNIQUE constraint short-circuits the second write.
+ * Replaces the previous Vercel Blob client-direct path which was
+ * observed to hang silently in production after the handshake (the
+ * browser's PUT to Blob storage edge never resolved). Postgres inline
+ * storage has higher per-session storage cost but a deterministic,
+ * function-bounded request lifecycle — under 4 s even cold-started
+ * on Hobby for a ~960 KB chunk.
  */
 
 export interface UploaderOptions {
   /** Endpoint base, e.g. '/api/v1'. */
   scribeBase: string;
-  /** Bearer token; if omitted, request runs in the dev bypass path. */
+  /** Bearer token; if omitted, request runs in the dev-bypass path. */
   getAuthToken?: () => Promise<string | null>;
   /** Max attempts per chunk before treating it as a dead letter. */
   maxAttempts?: number;
 }
 
 export type UploadOutcome =
-  | { status: 'ok'; url?: string }
+  | { status: 'ok' }
   | { status: 'transient'; error: string; httpStatus?: number }
   | { status: 'permanent'; error: string; httpStatus: number };
 
@@ -50,109 +42,25 @@ export class ChunkUploader {
     };
   }
 
-  /**
-   * Uploads a single chunk via the client-direct path. Catches and
-   * classifies failures so the IDB queue can back off intelligently.
-   */
   async uploadOne(chunk: PersistedChunk): Promise<UploadOutcome> {
-    const pathname = `sessions/${chunk.sessionId}/${chunk.chunkIndex}.pcm`;
-    // PutBody accepts Blob | ReadableStream | File etc., but not raw
-    // Uint8Array — wrap it in a Blob so the SDK can stream it.
-    const body = new Blob([chunk.bytes as Uint8Array<ArrayBuffer>], { type: chunk.mimeType });
-
-    const trace = (stage: string, extra?: Record<string, unknown>): void => {
-      // Fire-and-forget breadcrumb so we can see exactly where the flow
-      // dies on the browser side without devtools access. Includes a
-      // build marker so we can tell a cached old bundle from the new one.
-      void fetch(`${this.opts.scribeBase}/debug/audio-upload-error`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: chunk.sessionId,
-          chunkIndex: chunk.chunkIndex,
-          stage,
-          errorName: 'TRACE',
-          errorMessage: `build=v3-stage-trace`,
-          extra: { bodySize: chunk.bytes.byteLength, ...(extra ?? {}) },
-        }),
-      }).catch(() => {
-        /* swallow */
-      });
+    const headers: Record<string, string> = {
+      'content-type': chunk.mimeType,
+      'x-session-id': chunk.sessionId,
+      'x-chunk-index': String(chunk.chunkIndex),
+      'x-duration-ms': String(chunk.durationMs),
+      'x-sample-rate': String(chunk.sampleRate),
     };
-
-    trace('enter');
-
-    let blobUrl: string;
-    try {
-      trace('calling-upload');
-      const blob = await upload(pathname, body, {
-        access: 'public',
-        handleUploadUrl: `${this.opts.scribeBase}/audio/upload-token`,
-        contentType: chunk.mimeType,
-        clientPayload: JSON.stringify({
-          durationMs: chunk.durationMs,
-          sampleRate: chunk.sampleRate,
-        }),
-      });
-      blobUrl = blob.url;
-      trace('upload-done', { blobUrl });
-    } catch (e) {
-      const err = e as { name?: string; message?: string };
-      const message = err.message ?? String(e);
-      // Surface the actual error name + message to server logs.
-      void fetch(`${this.opts.scribeBase}/debug/audio-upload-error`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: chunk.sessionId,
-          chunkIndex: chunk.chunkIndex,
-          stage: 'upload-threw',
-          errorName: err.name ?? 'unknown',
-          errorMessage: message,
-          extra: { bodySize: chunk.bytes.byteLength, mimeType: chunk.mimeType },
-        }),
-      }).catch(() => {
-        /* never let the report itself block the retry path */
-      });
-      // Permanent: handshake or storage upload was rejected for a reason
-      // a retry won't fix (auth / wrong session state / validation).
-      const isPermanent =
-        message.includes('Unauthorized') ||
-        message.includes('not owned') ||
-        message.includes('IN_PROGRESS state') ||
-        message.includes('not found') ||
-        message.includes('Invalid pathname') ||
-        message.includes('Sample rate') ||
-        message.includes('durationMs');
-      if (isPermanent) {
-        return { status: 'permanent', error: message, httpStatus: 400 };
-      }
-      return { status: 'transient', error: message };
-    }
-
-    // Step 2: record the upload in the DB. Vercel Blob's onUploadCompleted
-    // webhook is blocked by the preview's SSO wall, so the browser closes
-    // the loop directly with this fetch. Carries the SSO cookie + bearer
-    // automatically.
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.opts.getAuthToken) {
       const token = await this.opts.getAuthToken();
       if (token) headers.authorization = `Bearer ${token}`;
     }
     try {
-      const res = await fetch(`${this.opts.scribeBase}/audio/chunks/record`, {
+      const res = await fetch(`${this.opts.scribeBase}/audio/chunks/upload`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          sessionId: chunk.sessionId,
-          chunkIndex: chunk.chunkIndex,
-          blobUrl,
-          durationMs: chunk.durationMs,
-          sampleRate: chunk.sampleRate,
-          sizeBytes: chunk.bytes.byteLength,
-        }),
+        body: chunk.bytes as Uint8Array<ArrayBuffer>,
       });
-      if (res.ok) return { status: 'ok', url: blobUrl };
+      if (res.ok) return { status: 'ok' };
       const errorBody = await res.text().catch(() => '');
       if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
         return { status: 'permanent', error: errorBody || `HTTP ${res.status}`, httpStatus: res.status };
@@ -166,8 +74,8 @@ export class ChunkUploader {
 
   /**
    * Drains all pending chunks for a session from IDB, oldest-first.
-   * Chunks past maxAttempts are left in IDB so a future drain (or a UI
-   * recovery action) can surface them as a dead letter.
+   * Chunks past maxAttempts are left in IDB for a future drain or UI
+   * recovery action.
    */
   async drainSession(
     sessionId: string,

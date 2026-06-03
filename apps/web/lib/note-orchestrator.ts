@@ -235,9 +235,9 @@ async function fetchAudio(sessionId: string): Promise<{ audioBytes: Buffer; dura
   });
   if (chunks.length === 0) return { audioBytes: Buffer.alloc(0), durationMs: 0 };
 
-  // Private Vercel Blob URLs require the read-write token. The token is
-  // auto-injected by the Vercel-Blob integration as BLOB_READ_WRITE_TOKEN
-  // into every environment.
+  // Prefer inline BYTEA (Sprint 2 fallback storage). Fall back to fetching
+  // the external Blob URL for legacy rows that pre-date the inline path —
+  // a private Vercel Blob URL needs the read-write token via Authorization.
   const blobToken = process.env['BLOB_READ_WRITE_TOKEN'];
   const authHeader: Record<string, string> = blobToken
     ? { Authorization: `Bearer ${blobToken}` }
@@ -246,9 +246,17 @@ async function fetchAudio(sessionId: string): Promise<{ audioBytes: Buffer; dura
   const buffers: Buffer[] = [];
   let totalDurationMs = 0;
   for (const chunk of chunks) {
-    const res = await fetch(chunk.s3Key, { headers: authHeader });
-    if (!res.ok) throw new Error(`Failed to fetch chunk ${chunk.chunkIndex}: ${res.status}`);
-    buffers.push(Buffer.from(await res.arrayBuffer()));
+    if (chunk.bytes && chunk.bytes.byteLength > 0) {
+      buffers.push(Buffer.from(chunk.bytes));
+    } else if (chunk.s3Key) {
+      const res = await fetch(chunk.s3Key, { headers: authHeader });
+      if (!res.ok) throw new Error(`Failed to fetch chunk ${chunk.chunkIndex}: ${res.status}`);
+      buffers.push(Buffer.from(await res.arrayBuffer()));
+    } else {
+      throw new Error(
+        `Chunk ${chunk.chunkIndex} has neither inline bytes nor an s3Key — storage row is corrupt`,
+      );
+    }
     totalDurationMs += chunk.durationMs;
   }
   return { audioBytes: Buffer.concat(buffers), durationMs: totalDurationMs };
