@@ -57,19 +57,27 @@ function build(): IModelRouter {
     ensureGcpCreds();
     const project = process.env['VERTEX_PROJECT_ID'];
     if (!project) throw new Error('LLM_BACKEND=vertex requires VERTEX_PROJECT_ID');
+    const flashRegion = process.env['VERTEX_FLASH_REGION'] ?? 'asia-south1';
+    const proRegion = process.env['VERTEX_PRO_REGION'] ?? 'global';
+    console.info(
+      `[llm] backend=vertex project=${project} flashRegion=${flashRegion} proRegion=${proRegion} flashModel=${process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash'} proModel=${process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro'}`,
+    );
     return new ModelRouter({
       pass1: new VertexGeminiFlashIndiaBackend({
         projectId: project,
-        location: process.env['VERTEX_FLASH_REGION'] ?? 'asia-south1',
+        location: flashRegion,
         model: process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash',
       }),
       pass2: new VertexGeminiProGlobalBackend({
         projectId: project,
-        location: process.env['VERTEX_PRO_REGION'] ?? 'global',
+        location: proRegion,
         model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
     });
   }
+  console.info(
+    `[llm] backend=mock LLM_BACKEND_value='${process.env['LLM_BACKEND'] ?? '<unset>'}' — Vertex not selected; check env var spelling/case`,
+  );
   return new ModelRouter({
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
