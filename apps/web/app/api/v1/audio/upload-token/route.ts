@@ -1,8 +1,6 @@
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
-import { Prisma } from '@prisma/client';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
-import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -102,66 +100,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         };
       },
       onUploadCompleted: async ({ blob, tokenPayload }) => {
-        if (!tokenPayload) {
-          console.error('[audio-upload-token] onUploadCompleted missing tokenPayload');
-          return;
-        }
-        const payload = JSON.parse(tokenPayload) as {
-          sessionId: string;
-          chunkIndex: number;
-          psychologistId: string;
-          durationMs: number;
-          sampleRate: number;
-        };
-
-        try {
-          await prisma.$transaction(async (tx) => {
-            const row = await tx.audioChunk.create({
-              data: {
-                sessionId: payload.sessionId,
-                chunkIndex: payload.chunkIndex,
-                mimeType: VALID_MIME,
-                sampleRate: payload.sampleRate,
-                sizeBytes: 0, // server doesn't see the body; rely on Blob's metadata if needed
-                durationMs: payload.durationMs,
-                s3Key: blob.url,
-              },
-            });
-            await writeAudit(
-              {
-                actorType: 'PSYCHOLOGIST',
-                actorPsychologistId: payload.psychologistId,
-                action: 'AUDIO_CHUNK_UPLOADED',
-                targetType: 'AudioChunk',
-                targetId: row.id,
-                metadata: {
-                  ...auditMetadataFromRequest(request),
-                  sessionId: payload.sessionId,
-                  chunkIndex: payload.chunkIndex,
-                  blobUrl: blob.url,
-                  uploadedViaClientDirect: true,
-                },
-              },
-              tx,
-            );
-          });
-          console.info(
-            `[audio-upload-token] chunk recorded sessionId=${payload.sessionId} chunkIndex=${payload.chunkIndex} url=${blob.url}`,
-          );
-        } catch (e) {
-          if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-            // (sessionId, chunkIndex) unique collision — idempotent re-upload.
-            console.info(
-              `[audio-upload-token] duplicate chunk (idempotent) sessionId=${payload.sessionId} chunkIndex=${payload.chunkIndex}`,
-            );
-            return;
-          }
-          const err = e as { name?: string; message?: string };
-          console.error(
-            `[audio-upload-token] db-write failure name=${err.name ?? 'unknown'} message=${err.message ?? String(e)} sessionId=${payload.sessionId} chunkIndex=${payload.chunkIndex}`,
-          );
-          throw e;
-        }
+        // No-op. The DB write happens via the client-driven
+        // POST /audio/chunks/record path (see chunk-uploader.ts)
+        // because Vercel Blob's server-to-server webhook is blocked by
+        // the preview's Vercel Authentication SSO wall. The browser,
+        // which has the SSO cookie, closes the loop instead. Logged
+        // here in case the webhook DOES fire (production main domain
+        // without SSO) so we can confirm and switch back to the
+        // webhook path later.
+        console.info(
+          `[audio-upload-token] webhook fired url=${blob.url} tokenPayload=${tokenPayload ?? 'null'}`,
+        );
       },
     });
 

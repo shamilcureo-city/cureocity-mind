@@ -59,6 +59,7 @@ export class ChunkUploader {
     // PutBody accepts Blob | ReadableStream | File etc., but not raw
     // Uint8Array — wrap it in a Blob so the SDK can stream it.
     const body = new Blob([chunk.bytes as Uint8Array<ArrayBuffer>], { type: chunk.mimeType });
+    let blobUrl: string;
     try {
       const blob = await upload(pathname, body, {
         access: 'public',
@@ -69,13 +70,12 @@ export class ChunkUploader {
           sampleRate: chunk.sampleRate,
         }),
       });
-      return { status: 'ok', url: blob.url };
+      blobUrl = blob.url;
     } catch (e) {
       const err = e as { name?: string; message?: string };
       const message = err.message ?? String(e);
-      // Permanent: server rejected the handshake (auth / state / validation).
-      // The handshake route returns 400 for these; the upload() SDK surfaces
-      // the response body verbatim as the error message.
+      // Permanent: handshake or storage upload was rejected for a reason
+      // a retry won't fix (auth / wrong session state / validation).
       const isPermanent =
         message.includes('Unauthorized') ||
         message.includes('not owned') ||
@@ -88,6 +88,39 @@ export class ChunkUploader {
         return { status: 'permanent', error: message, httpStatus: 400 };
       }
       return { status: 'transient', error: message };
+    }
+
+    // Step 2: record the upload in the DB. Vercel Blob's onUploadCompleted
+    // webhook is blocked by the preview's SSO wall, so the browser closes
+    // the loop directly with this fetch. Carries the SSO cookie + bearer
+    // automatically.
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (this.opts.getAuthToken) {
+      const token = await this.opts.getAuthToken();
+      if (token) headers.authorization = `Bearer ${token}`;
+    }
+    try {
+      const res = await fetch(`${this.opts.scribeBase}/audio/chunks/record`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          sessionId: chunk.sessionId,
+          chunkIndex: chunk.chunkIndex,
+          blobUrl,
+          durationMs: chunk.durationMs,
+          sampleRate: chunk.sampleRate,
+          sizeBytes: chunk.bytes.byteLength,
+        }),
+      });
+      if (res.ok) return { status: 'ok', url: blobUrl };
+      const errorBody = await res.text().catch(() => '');
+      if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+        return { status: 'permanent', error: errorBody || `HTTP ${res.status}`, httpStatus: res.status };
+      }
+      return { status: 'transient', error: errorBody || `HTTP ${res.status}`, httpStatus: res.status };
+    } catch (e) {
+      const err = e as { message?: string };
+      return { status: 'transient', error: err.message ?? String(e) };
     }
   }
 
