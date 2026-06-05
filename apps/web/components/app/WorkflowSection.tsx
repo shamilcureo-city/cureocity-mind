@@ -7,6 +7,7 @@ import type {
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { CreateWorkflowForm } from './CreateWorkflowForm';
+import { EmdrPanel } from './EmdrPanel';
 
 interface ExerciseRecommendation {
   exerciseId: string;
@@ -303,13 +304,11 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
       )}
 
       {workflow.modality === 'EMDR' && (
-        <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
-          <p className="text-sm text-[var(--color-ink-2)]">
-            EMDR advancement-suggestion and exercise prescription ship in Sprint 4 alongside
-            the EMDR target tracking. For now, transitions can still be recorded manually
-            via <code className="rounded bg-[var(--color-surface-2)] px-1 py-0.5 font-mono text-[11px]">POST /api/v1/workflows/{workflow.id}/transitions</code>.
-          </p>
-        </div>
+        <EmdrPanel
+          workflow={workflow}
+          scribeBase={scribeBase}
+          onWorkflowChange={(next) => setWorkflow(next)}
+        />
       )}
 
       {error && (

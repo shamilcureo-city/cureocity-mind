@@ -1,4 +1,5 @@
 import { Badge } from '../ui/Badge';
+import { AffectCard } from './AffectCard';
 import { WorkflowSection } from './WorkflowSection';
 
 interface ClientPanelData {
@@ -70,6 +71,10 @@ export function ClientTab({ data }: { data: ClientPanelData }) {
 
       <div className="mt-6 border-t border-[var(--color-line-soft)] pt-6">
         <WorkflowSection clientId={data.id} />
+      </div>
+
+      <div className="mt-6">
+        <AffectCard clientId={data.id} />
       </div>
     </div>
   );
