@@ -78,9 +78,6 @@ export default async function ClientsPage() {
         )}
       </Card>
 
-      <p className="mt-4 text-xs text-[var(--color-ink-3)]">
-        Detail tabs (Details · Sessions · Files · Mind map · Diagnosis) ship in Sprint 6.
-      </p>
     </Container>
   );
 }
