@@ -9,6 +9,7 @@ import { Badge } from '../ui/Badge';
 import { NotePreview } from './NotePreview';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
+import { RevisionPanel } from './RevisionPanel';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -247,6 +248,16 @@ export function NotesTab({
               Download PDF
             </a>
           </div>
+          <RevisionPanel
+            sessionId={sessionId}
+            note={note}
+            onRevised={(nextContent) =>
+              setPhase({
+                kind: 'signed',
+                note: { ...note, content: nextContent },
+              })
+            }
+          />
           <NoteFooter
             costInr="—"
             chunkCount={0}
