@@ -238,6 +238,15 @@ export function NotesTab({
             signedAt={note.signedAt}
             signedBy={note.signedBy}
           />
+          <div className="mt-4 flex justify-end">
+            <a
+              href={`/api/v1/sessions/${sessionId}/note/pdf`}
+              download
+              className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+            >
+              Download PDF
+            </a>
+          </div>
           <NoteFooter
             costInr="—"
             chunkCount={0}
