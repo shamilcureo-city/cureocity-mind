@@ -83,10 +83,9 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   // WORKFLOW_PHASE_TRANSITIONED today; the terminal completion event
   // lands when Sprint 10 adds the discharge/transfer flows.
   'WORKFLOW_COMPLETED',
-  // EXERCISE_SKIPPED — reserved for the patient skip path (PWA's
-  // "skip for today" button). Sprint 8 PR 3 deferred skip; Sprint 10
-  // adds it.
-  'EXERCISE_SKIPPED',
+  // EXERCISE_SKIPPED is also written by PATCH /assignments/[id] when
+  // the therapist cancels an active assignment (Sprint 5). The
+  // patient-initiated skip path still belongs to Sprint 8 PWA work.
   // JOURNAL_ENTRY_UPDATED — reserved for the journal-edit flow
   // (patient can edit/redact a past entry). Sprint 10 surface.
   'JOURNAL_ENTRY_UPDATED',

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   AdvancementSuggestion,
+  ExerciseAssignment,
   ModalityStateWithHistory,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
@@ -40,6 +41,8 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
   const [workflow, setWorkflow] = useState<ModalityStateWithHistory | null>(null);
   const [advancement, setAdvancement] = useState<AdvancementSuggestion | null>(null);
   const [exercises, setExercises] = useState<PrescribedExercisesResponse | null>(null);
+  const [activeAssignments, setActiveAssignments] = useState<ExerciseAssignment[]>([]);
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const [transitionPending, setTransitionPending] = useState(false);
 
   const loadAll = useCallback(async () => {
@@ -68,6 +71,15 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         ]);
         if (advRes.ok) setAdvancement((await advRes.json()) as AdvancementSuggestion);
         if (exRes.ok) setExercises((await exRes.json()) as PrescribedExercisesResponse);
+      }
+
+      // Active assignments (PENDING + IN_PROGRESS) — therapist view.
+      const asRes = await fetch(
+        `${scribeBase}/clients/${clientId}/assignments?status=PENDING&status=IN_PROGRESS`,
+      );
+      if (asRes.ok) {
+        const body = (await asRes.json()) as { items: ExerciseAssignment[] };
+        setActiveAssignments(body.items);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -111,6 +123,52 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
       }
     },
     [scribeBase, workflow],
+  );
+
+  const assignExercise = useCallback(
+    async (exerciseId: string) => {
+      setAssigningId(exerciseId);
+      setError(null);
+      try {
+        const res = await fetch(`${scribeBase}/assignments`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ clientId, exerciseId }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${res.status}`);
+        }
+        const created = (await res.json()) as ExerciseAssignment;
+        setActiveAssignments((prev) => [created, ...prev]);
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setAssigningId(null);
+      }
+    },
+    [clientId, scribeBase],
+  );
+
+  const cancelAssignment = useCallback(
+    async (assignmentId: string) => {
+      setError(null);
+      try {
+        const res = await fetch(`${scribeBase}/assignments/${assignmentId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ status: 'SKIPPED' }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${res.status}`);
+        }
+        setActiveAssignments((prev) => prev.filter((a) => a.id !== assignmentId));
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [scribeBase],
   );
 
   const acceptSuggestion = useCallback(async () => {
@@ -275,30 +333,81 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         </div>
       )}
 
+      {activeAssignments.length > 0 && (
+        <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
+          <h4 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+            Active assignments
+          </h4>
+          <ul className="mt-3 space-y-2">
+            {activeAssignments.map((a) => (
+              <li
+                key={a.id}
+                className="flex items-baseline justify-between gap-3 border-b border-[var(--color-line-soft)] pb-2 last:border-b-0 last:pb-0"
+              >
+                <span className="text-sm text-[var(--color-ink)]">
+                  {humanExerciseId(a.exerciseId)}
+                </span>
+                <span className="flex items-center gap-3 text-xs text-[var(--color-ink-3)]">
+                  <Badge tone="muted">{a.status.replaceAll('_', ' ').toLowerCase()}</Badge>
+                  <span>
+                    assigned{' '}
+                    {new Date(a.assignedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void cancelAssignment(a.id)}
+                    className="text-[var(--color-accent)] hover:underline"
+                  >
+                    cancel
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {workflow.modality === 'CBT' && exercises && exercises.recommendations.length > 0 && (
         <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
           <h4 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
             Prescribed exercises
           </h4>
           <ol className="mt-3 space-y-3">
-            {exercises.recommendations.map((r) => (
-              <li
-                key={r.exerciseId}
-                className="border-b border-[var(--color-line-soft)] pb-3 last:border-b-0 last:pb-0"
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <span className="text-sm font-medium text-[var(--color-ink)]">{r.title}</span>
-                  <span className="text-xs text-[var(--color-ink-3)]">score {r.score}</span>
-                </div>
-                {r.rationale.length > 0 && (
-                  <ul className="mt-1 list-inside list-disc text-xs text-[var(--color-ink-3)]">
-                    {r.rationale.map((reason, i) => (
-                      <li key={i}>{reason}</li>
-                    ))}
-                  </ul>
-                )}
-              </li>
-            ))}
+            {exercises.recommendations.map((r) => {
+              const alreadyActive = activeAssignments.some((a) => a.exerciseId === r.exerciseId);
+              return (
+                <li
+                  key={r.exerciseId}
+                  className="border-b border-[var(--color-line-soft)] pb-3 last:border-b-0 last:pb-0"
+                >
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-medium text-[var(--color-ink)]">{r.title}</span>
+                    <span className="flex items-center gap-3 text-xs text-[var(--color-ink-3)]">
+                      <span>score {r.score}</span>
+                      <button
+                        type="button"
+                        onClick={() => void assignExercise(r.exerciseId)}
+                        disabled={alreadyActive || assigningId === r.exerciseId}
+                        className="rounded-full bg-[var(--color-ink)] px-3 py-1 text-xs font-medium text-[var(--color-surface)] hover:bg-[var(--color-ink-2)] disabled:opacity-40"
+                      >
+                        {alreadyActive
+                          ? 'assigned'
+                          : assigningId === r.exerciseId
+                            ? 'assigning…'
+                            : 'assign'}
+                      </button>
+                    </span>
+                  </div>
+                  {r.rationale.length > 0 && (
+                    <ul className="mt-1 list-inside list-disc text-xs text-[var(--color-ink-3)]">
+                      {r.rationale.map((reason, i) => (
+                        <li key={i}>{reason}</li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}
@@ -322,6 +431,16 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
 
 function phaseToLabel(phase: string): string {
   return phase
+    .split('_')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function humanExerciseId(exerciseId: string): string {
+  // Catalog ids look like 'cbt_thought_record_5col' — strip the leading
+  // modality prefix, replace underscores with spaces, capitalise.
+  return exerciseId
+    .replace(/^(cbt|emdr)_/, '')
     .split('_')
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');

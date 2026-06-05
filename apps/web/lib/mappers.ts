@@ -1,6 +1,7 @@
 import type {
   Booking as BookingRow,
   Client as ClientRow,
+  ExerciseAssignment as ExerciseAssignmentRow,
   IntakeSubmission as IntakeRow,
   ModalityState as ModalityStateRow,
   ModalityTransition as ModalityTransitionRow,
@@ -10,6 +11,7 @@ import type {
 import type {
   AffectFeature,
   Client,
+  ExerciseAssignment,
   ModalityState,
   ModalityStateWithHistory,
   ModalityTransition,
@@ -190,5 +192,22 @@ export function toModalityStateWithHistory(
   return {
     ...toModalityState(row),
     transitions: row.transitions.map(toModalityTransition),
+  };
+}
+
+export function toExerciseAssignment(row: ExerciseAssignmentRow): ExerciseAssignment {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    psychologistId: row.psychologistId,
+    exerciseId: row.exerciseId,
+    assignedAt: row.assignedAt.toISOString(),
+    dueAt: row.dueAt?.toISOString() ?? null,
+    status: row.status,
+    completedAt: row.completedAt?.toISOString() ?? null,
+    response: (row.response as Record<string, unknown> | null) ?? null,
+    therapistNote: row.therapistNote,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
