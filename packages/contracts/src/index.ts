@@ -12,3 +12,4 @@ export * from './emdr';
 export * from './affect';
 export * from './continuity';
 export * from './dsr';
+export * from './template';

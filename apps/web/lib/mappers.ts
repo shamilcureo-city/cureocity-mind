@@ -6,6 +6,7 @@ import type {
   ModalityState as ModalityStateRow,
   ModalityTransition as ModalityTransitionRow,
   NoteDraft as NoteDraftRow,
+  NoteTemplate as NoteTemplateRow,
   Session as SessionRow,
 } from '@prisma/client';
 import type {
@@ -16,8 +17,10 @@ import type {
   ModalityStateWithHistory,
   ModalityTransition,
   NoteDraft,
+  NoteTemplate,
   Session,
   SpeakerSegment,
+  TemplateSection,
   TherapyNoteV1,
   WorkflowGoal,
 } from '@cureocity/contracts';
@@ -207,6 +210,19 @@ export function toExerciseAssignment(row: ExerciseAssignmentRow): ExerciseAssign
     completedAt: row.completedAt?.toISOString() ?? null,
     response: (row.response as Record<string, unknown> | null) ?? null,
     therapistNote: row.therapistNote,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toNoteTemplate(row: NoteTemplateRow): NoteTemplate {
+  return {
+    id: row.id,
+    psychologistId: row.psychologistId,
+    name: row.name,
+    description: row.description,
+    sections: (row.sections as unknown as TemplateSection[]) ?? [],
+    isDefault: row.isDefault,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

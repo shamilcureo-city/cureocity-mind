@@ -86,6 +86,7 @@ model Psychologist {
   tenantKeys    PsychologistTenantKey[]
   bookings      Booking[]
   intakeMatches IntakeSubmission[]
+  noteTemplates NoteTemplate[]
 
   @@index([status])
   @@index([role])
@@ -723,6 +724,41 @@ model NoteEdit {
 }
 
 // ============================================================================
+// NoteTemplate — therapist-owned customizable note structures. Sprint 11.
+// Each template owns an ordered list of sections; downstream the Pass 2
+// system prompt is rewritten to ask the model to populate the named
+// sections from the transcript.
+// ============================================================================
+
+model NoteTemplate {
+  id             String @id @default(cuid())
+  psychologistId String
+
+  name        String
+  description String? @db.Text
+
+  /// Ordered list of { id, title, hint? } entries describing each
+  /// section the template emits. Stored as JSON so the schema can
+  /// evolve without migrations as section types grow (bullets,
+  /// checklists, plain prose, etc.).
+  sections Json @default("[]")
+
+  /// Exactly one template per psychologist may carry isDefault=true;
+  /// enforced at the application layer in apps/web/app/api/v1/templates.
+  /// Default templates are the one new notes start from when the
+  /// therapist hasn't picked another.
+  isDefault Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@index([psychologistId, updatedAt])
+  @@map("note_templates")
+}
+
+// ============================================================================
 // ExerciseAssignment / MoodLog / JournalEntry — continuity-service tables.
 // Sprint 5 PR 1.
 // ============================================================================
@@ -969,6 +1005,9 @@ enum AuditAction {
   WORKFLOW_PHASE_TRANSITIONED
   WORKFLOW_COMPLETED
   WORKFLOW_GOAL_UPDATED
+  TEMPLATE_CREATED
+  TEMPLATE_UPDATED
+  TEMPLATE_DELETED
   EXERCISE_PRESCRIBED
 
   // EMDR (modality-workflow-service, Sprint 4)
