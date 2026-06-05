@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { AffectCard } from '@/components/app/AffectCard';
+import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
 import { prisma } from '@/lib/prisma';
 
@@ -117,6 +118,10 @@ export default async function ClientDetailPage({ params }: PageProps) {
 
       <div className="mt-6">
         <AffectCard clientId={client.id} />
+      </div>
+
+      <div className="mt-6">
+        <DataRightsCard clientId={client.id} clientName={client.fullName} />
       </div>
 
       <div className="mt-6">
