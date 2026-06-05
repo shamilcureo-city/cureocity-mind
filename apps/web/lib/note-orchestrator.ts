@@ -43,9 +43,14 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
   });
   if (!session) throw new Error(`Session ${sessionId} not found`);
 
-  // Idempotency — already done.
+  // Idempotency — only short-circuit if the previous run produced
+  // substantive content. A COMPLETED draft with zero transcript chars
+  // is a hallucinated/silent failure (the model returned valid JSON
+  // satisfying the schema but with empty fields — observed when
+  // safety filters were on or audio decode failed). Re-running gets
+  // a fresh shot at the actual audio.
   const existing = await prisma.noteDraft.findUnique({ where: { sessionId } });
-  if (existing?.status === 'COMPLETED') {
+  if (existing?.status === 'COMPLETED' && (existing.transcript?.length ?? 0) > 0) {
     return { draftId: existing.id, status: 'COMPLETED' };
   }
 
