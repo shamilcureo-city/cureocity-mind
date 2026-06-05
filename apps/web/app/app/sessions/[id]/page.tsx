@@ -131,6 +131,7 @@ async function NotesTabPanel({
       initialDraft={draft}
       initialNote={signedNote}
       clientId={clientId}
+      llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
     />
   );
 }

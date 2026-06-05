@@ -9,6 +9,7 @@ import { Badge } from '../ui/Badge';
 import { NotePreview } from './NotePreview';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
+import { MockBackendBanner } from './MockBackendBanner';
 import { RevisionPanel } from './RevisionPanel';
 
 type SessionStatus =
@@ -25,6 +26,7 @@ interface Props {
   initialDraft: NoteDraft | null;
   initialNote: TherapyNote | null;
   clientId: string;
+  llmBackend: string;
 }
 
 type Phase =
@@ -44,6 +46,7 @@ export function NotesTab({
   initialDraft,
   initialNote,
   clientId,
+  llmBackend,
 }: Props) {
   const [phase, setPhase] = useState<Phase>(() => derivePhase(sessionStatus, initialDraft, initialNote));
   const [generating, setGenerating] = useState(false);
@@ -230,9 +233,11 @@ export function NotesTab({
   if (phase.kind === 'signed') {
     const note = phase.note;
     return (
-      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-        <Card className="p-7">
-          <AdvancementBanner clientId={clientId} />
+      <>
+        <MockBackendBanner llmBackend={llmBackend} />
+        <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+          <Card className="p-7">
+            <AdvancementBanner clientId={clientId} />
           <RiskBanner riskFlags={note.content.riskFlags} />
           <NotePreview
             note={note.content}
@@ -258,40 +263,44 @@ export function NotesTab({
               })
             }
           />
-          <NoteFooter
-            costInr="—"
-            chunkCount={0}
-            transcriptChars={0}
-            region="signed"
-          />
-        </Card>
-        <ModifyPanel disabled />
-      </div>
+            <NoteFooter
+              costInr="—"
+              chunkCount={0}
+              transcriptChars={0}
+              region="signed"
+            />
+          </Card>
+          <ModifyPanel disabled />
+        </div>
+      </>
     );
   }
 
   // completed
   const note = phase.draft.content as TherapyNoteV1;
   return (
-    <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
-      <Card className="p-7">
-        <RiskBanner riskFlags={note.riskFlags} />
-        <NotePreview note={note} />
-        <NoteFooter
-          costInr={phase.draft.totalCostInr}
-          chunkCount={phase.draft.speakerSegments?.length ?? 0}
-          transcriptChars={phase.draft.transcript?.length ?? 0}
-          region={process.env.NEXT_PUBLIC_LLM_BACKEND ?? 'mock'}
-        />
-        <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-          <Button disabled>Sign off (Sprint 4)</Button>
-          <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
-            Re-generate
-          </Button>
-        </div>
-      </Card>
-      <ModifyPanel disabled />
-    </div>
+    <>
+      <MockBackendBanner llmBackend={llmBackend} />
+      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <Card className="p-7">
+          <RiskBanner riskFlags={note.riskFlags} />
+          <NotePreview note={note} />
+          <NoteFooter
+            costInr={phase.draft.totalCostInr}
+            chunkCount={phase.draft.speakerSegments?.length ?? 0}
+            transcriptChars={phase.draft.transcript?.length ?? 0}
+            region={llmBackend}
+          />
+          <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
+            <Button disabled>Sign off (Sprint 4)</Button>
+            <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
+              Re-generate
+            </Button>
+          </div>
+        </Card>
+        <ModifyPanel disabled />
+      </div>
+    </>
   );
 }
 
