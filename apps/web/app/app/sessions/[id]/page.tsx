@@ -9,8 +9,11 @@ import type {
 } from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
+import { Card } from '@/components/ui/Card';
 import { ClientTab } from '@/components/app/ClientTab';
+import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
+import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
@@ -19,14 +22,21 @@ import { toNoteDraft } from '@/lib/mappers';
 
 export const dynamic = 'force-dynamic';
 
-type TabKey = 'notes' | 'client' | 'transcript' | 'session-info';
+type TabKey = 'notes' | 'client' | 'transcript' | 'session-info' | 'mindmap' | 'reflection';
 
 interface PageProps {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ tab?: string }>;
 }
 
-const VALID_TABS: ReadonlySet<TabKey> = new Set(['notes', 'client', 'transcript', 'session-info']);
+const VALID_TABS: ReadonlySet<TabKey> = new Set([
+  'notes',
+  'client',
+  'transcript',
+  'session-info',
+  'mindmap',
+  'reflection',
+]);
 
 function parseTab(raw: string | undefined): TabKey {
   return raw && (VALID_TABS as ReadonlySet<string>).has(raw) ? (raw as TabKey) : 'notes';
@@ -79,6 +89,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
         {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
+        {tab === 'mindmap' && <MindmapTabPanel sessionId={id} />}
+        {tab === 'reflection' && <ReflectionTabPanel sessionId={id} />}
       </div>
     </Container>
   );
@@ -316,4 +328,42 @@ function statusTone(status: string): 'accent' | 'warn' | 'muted' | 'default' {
   if (status === 'IN_PROGRESS') return 'warn';
   if (status === 'CANCELLED' || status === 'NO_SHOW') return 'muted';
   return 'default';
+}
+
+async function MindmapTabPanel({ sessionId }: { sessionId: string }) {
+  const [draft, signed] = await Promise.all([
+    prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
+    prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
+  ]);
+  const noteJson = signed?.content ?? draft?.content;
+  if (!noteJson) {
+    return (
+      <Card className="p-10 text-center">
+        <p className="font-serif text-xl">No note generated yet.</p>
+        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
+          End the session and generate the note — the mindmap renders from the note's structure.
+        </p>
+      </Card>
+    );
+  }
+  return <MindmapTab note={noteJson as unknown as TherapyNoteV1} />;
+}
+
+async function ReflectionTabPanel({ sessionId }: { sessionId: string }) {
+  const [draft, signed] = await Promise.all([
+    prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
+    prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
+  ]);
+  const noteJson = signed?.content ?? draft?.content;
+  if (!noteJson) {
+    return (
+      <Card className="p-10 text-center">
+        <p className="font-serif text-xl">No note generated yet.</p>
+        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
+          Reflection questions are generated from the note's themes. Generate the note first.
+        </p>
+      </Card>
+    );
+  }
+  return <ReflectionTab sessionId={sessionId} note={noteJson as unknown as TherapyNoteV1} />;
 }

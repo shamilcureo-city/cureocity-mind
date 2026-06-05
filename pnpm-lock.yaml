@@ -66,6 +66,9 @@ importers:
       '@cureocity/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@google/genai':
+        specifier: ^2.8.0
+        version: 2.8.0
       '@neondatabase/serverless':
         specifier: ^0.10.4
         version: 0.10.4

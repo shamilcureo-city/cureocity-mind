@@ -18,6 +18,7 @@
     "@cureocity/notifications": "workspace:*",
     "@cureocity/observability": "workspace:*",
     "@cureocity/storage": "workspace:*",
+    "@google/genai": "^2.8.0",
     "@neondatabase/serverless": "^0.10.4",
     "@prisma/adapter-neon": "^5.22.0",
     "@prisma/client": "^5.22.0",

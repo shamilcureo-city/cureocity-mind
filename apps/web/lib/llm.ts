@@ -41,7 +41,7 @@ declare global {
  */
 const VERCEL_CREDS_PATH = '/tmp/gcp-credentials.json';
 
-function ensureGcpCreds(): void {
+export function ensureGcpCreds(): void {
   if (process.env['GOOGLE_APPLICATION_CREDENTIALS']) return;
   const json = process.env['GOOGLE_APPLICATION_CREDENTIALS_JSON'];
   if (!json) return;

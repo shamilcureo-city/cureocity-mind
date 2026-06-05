@@ -8,8 +8,8 @@ const TABS: { key: TabKey; label: string; live: boolean; sprint?: string }[] = [
   { key: 'client', label: 'Client', live: true },
   { key: 'transcript', label: 'Transcript', live: true },
   { key: 'session-info', label: 'Session Information', live: true },
-  { key: 'mindmap', label: 'Mindmap', live: false, sprint: 'Sprint 5' },
-  { key: 'reflection', label: 'Reflection Questions', live: false, sprint: 'Sprint 5' },
+  { key: 'mindmap', label: 'Mindmap', live: true },
+  { key: 'reflection', label: 'Reflection Questions', live: true },
 ];
 
 interface Props {

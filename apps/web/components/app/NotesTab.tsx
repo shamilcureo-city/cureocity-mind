@@ -50,6 +50,8 @@ export function NotesTab({
 }: Props) {
   const [phase, setPhase] = useState<Phase>(() => derivePhase(sessionStatus, initialDraft, initialNote));
   const [generating, setGenerating] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -141,6 +143,43 @@ export function NotesTab({
       setGenerating(false);
     }
   }, [sessionId, pollOnce, phase.kind]);
+
+  const triggerSignOff = useCallback(async (): Promise<void> => {
+    if (phase.kind !== 'completed') return;
+    setSigning(true);
+    setSignError(null);
+    try {
+      const note = phase.draft.content as TherapyNoteV1;
+      const signedAt = new Date().toISOString();
+      // Payload is the canonical JSON the server will SHA-256 to verify.
+      // Stable ordering is left to the JSON.stringify defaults — the server
+      // re-hashes whatever we send, so any deterministic string works as
+      // long as the same bytes round-trip.
+      const payload = JSON.stringify({ note, signedAt });
+      const payloadHashHex = await sha256Hex(payload);
+      const res = await fetch(`/api/v1/sessions/${sessionId}/sign`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          payload,
+          payloadHashHex,
+          note,
+          edits: [],
+          signedAt,
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Sign failed (${res.status})`);
+      }
+      const signed = (await res.json()) as TherapyNote;
+      setPhase({ kind: 'signed', note: signed });
+    } catch (e) {
+      setSignError((e as Error).message);
+    } finally {
+      setSigning(false);
+    }
+  }, [phase, sessionId]);
 
   // ----- Render -----
 
@@ -292,10 +331,13 @@ export function NotesTab({
             region={llmBackend}
           />
           <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-            <Button disabled>Sign off (Sprint 4)</Button>
+            <Button onClick={triggerSignOff} disabled={signing}>
+              {signing ? 'Signing…' : 'Sign off'}
+            </Button>
             <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
               Re-generate
             </Button>
+            {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
           </div>
         </Card>
         <ModifyPanel disabled />
@@ -450,4 +492,12 @@ function derivePhase(
   }
   if (sessionStatus === 'COMPLETED') return { kind: 'ready-to-generate' };
   return { kind: 'awaiting-end', status: sessionStatus };
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
