@@ -1,6 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { RiskSeverity } from '@cureocity/contracts';
-import { recommendCbtExercises, type AdherenceStat } from '@cureocity/clinical';
+import {
+  recommendCbtExercises,
+  recommendEmdrExercises,
+  type AdherenceStat,
+} from '@cureocity/clinical';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 
@@ -37,12 +41,6 @@ export async function GET(
   });
   if (!state || state.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
-  }
-  if (state.modality !== 'CBT') {
-    return NextResponse.json(
-      { error: 'EMDR prescription engine ships in Sprint 4' },
-      { status: 501 },
-    );
   }
 
   // Recent risk severity — the most severe across the 3 most-recent
@@ -89,11 +87,15 @@ export async function GET(
     });
   }
 
-  const recommendations = recommendCbtExercises({
+  const engineInput = {
     currentPhase: state.currentPhase,
     recentRiskSeverity,
     adherence,
-  });
+  };
+  const recommendations =
+    state.modality === 'CBT'
+      ? recommendCbtExercises(engineInput)
+      : recommendEmdrExercises(engineInput);
 
   return NextResponse.json({
     workflowId: state.id,

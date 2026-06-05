@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { ClientsHeader } from '@/components/app/ClientsHeader';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -22,21 +23,7 @@ export default async function ClientsPage() {
 
   return (
     <Container className="py-10">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
-            Roster
-          </p>
-          <h1 className="mt-2 font-serif text-3xl">Clients</h1>
-        </div>
-        <button
-          type="button"
-          disabled
-          className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white opacity-60"
-        >
-          + Create New
-        </button>
-      </header>
+      <ClientsHeader />
 
       <Card className="overflow-hidden">
         <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr] gap-3 border-b border-[var(--color-line-soft)] px-5 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-3)]">

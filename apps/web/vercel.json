@@ -9,6 +9,12 @@
       "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/v1/cron/audio-retention",
+      "schedule": "0 3 * * *"
+    }
+  ],
   "env": {
     "NEXT_TELEMETRY_DISABLED": "1"
   }

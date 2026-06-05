@@ -3,6 +3,7 @@ export * from './modalities/cbt/state-machine';
 export * from './modalities/cbt/advancement-evaluator';
 export * from './modalities/emdr/phases';
 export * from './modalities/emdr/state-machine';
+export * from './modalities/emdr/advancement-evaluator';
 export * from './exercises/types';
 export * from './exercises/catalog';
 export * from './exercises/emdr-catalog';

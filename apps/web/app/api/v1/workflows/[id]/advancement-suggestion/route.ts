@@ -4,7 +4,7 @@ import type {
   TherapyNoteV1,
   WorkflowGoal,
 } from '@cureocity/contracts';
-import { evaluateCbtAdvancement } from '@cureocity/clinical';
+import { evaluateCbtAdvancement, evaluateEmdrAdvancement } from '@cureocity/clinical';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 
@@ -36,16 +36,6 @@ export async function GET(
   if (!state || state.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
   }
-  if (state.modality !== 'CBT') {
-    return NextResponse.json(
-      {
-        error:
-          'EMDR advancement-suggestion not yet implemented — Phase 2 preparation gate ships in Sprint 4',
-      },
-      { status: 501 },
-    );
-  }
-
   // "Sessions in the current phase" = sessions that ended after the most
   // recent transition (or since workflow start if no transitions yet).
   const phaseStartedAt =
@@ -78,12 +68,24 @@ export async function GET(
 
   const goals = (state.goals as WorkflowGoal[]) ?? [];
 
-  const decision = evaluateCbtAdvancement({
-    currentPhase: state.currentPhase,
-    recentNotes,
-    goals,
-    sessionsInCurrentPhase,
-  });
+  const decision =
+    state.modality === 'CBT'
+      ? evaluateCbtAdvancement({
+          currentPhase: state.currentPhase,
+          recentNotes,
+          goals,
+          sessionsInCurrentPhase,
+        })
+      : evaluateEmdrAdvancement({
+          currentPhase: state.currentPhase,
+          recentNotes,
+          goals,
+          sessionsInCurrentPhase,
+          preparationComplete: Boolean(
+            (state.state as Record<string, unknown> | null)?.['preparationComplete'],
+          ),
+          hasTargets: Boolean((state.state as Record<string, unknown> | null)?.['hasTargets']),
+        });
 
   const response: AdvancementSuggestion = {
     workflowId: state.id,

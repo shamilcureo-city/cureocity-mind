@@ -63,8 +63,8 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
       const wf = (await wfRes.json()) as ModalityStateWithHistory;
       setWorkflow(wf);
 
-      // Only CBT has advancement + prescription wired in Sprint 3b.
-      if (wf.modality === 'CBT') {
+      // Advancement + prescription run for both CBT and EMDR now.
+      {
         const [advRes, exRes] = await Promise.all([
           fetch(`${scribeBase}/workflows/${wf.id}/advancement-suggestion`),
           fetch(`${scribeBase}/workflows/${wf.id}/prescribed-exercises`),
@@ -111,8 +111,9 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         }
         const updated = (await res.json()) as ModalityStateWithHistory;
         setWorkflow(updated);
-        // Goal flips can change the advancement signal — refresh advice.
-        if (updated.modality === 'CBT') {
+        // Goal flips can change the advancement signal — refresh advice
+        // for both CBT and EMDR workflows.
+        {
           const advRes = await fetch(
             `${scribeBase}/workflows/${workflow.id}/advancement-suggestion`,
           );
@@ -294,7 +295,7 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         )}
       </div>
 
-      {workflow.modality === 'CBT' && advancement && (
+      {advancement && (
         <div
           className={`rounded-2xl border p-6 ${
             advancement.suggestedPhase
@@ -367,7 +368,7 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         </div>
       )}
 
-      {workflow.modality === 'CBT' && exercises && exercises.recommendations.length > 0 && (
+      {exercises && exercises.recommendations.length > 0 && (
         <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
           <h4 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
             Prescribed exercises

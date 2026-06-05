@@ -1,0 +1,107 @@
+import { NextResponse, type NextRequest } from 'next/server';
+import { writeAudit } from '@/lib/audit';
+import { prisma } from '@/lib/prisma';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
+
+const RETENTION_DAYS = Number(process.env['AUDIO_RETENTION_DAYS'] ?? 30);
+
+/**
+ * GET /api/v1/cron/audio-retention — daily audio purge per DPDP
+ * 30-day retention. Deletes AudioChunk rows whose session ended
+ * more than RETENTION_DAYS ago, UNLESS the session's client has a
+ * GRANTED Consent of scope DATA_RETENTION_EXTENDED in effect.
+ *
+ * Auth: requires X-Vercel-Cron header (auto-set by Vercel when
+ * invoked via vercel.json cron schedule) OR CRON_SECRET env var
+ * matching the Authorization Bearer header for manual / external
+ * invocations.
+ *
+ * Audits one AUDIO_RETENTION_PURGED row per session purged so the
+ * regulator can prove the purge happened on schedule. SYSTEM
+ * actor since no human triggered it.
+ */
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const extendedClientIds = new Set(
+    (
+      await prisma.consent.findMany({
+        where: { scope: 'DATA_RETENTION_EXTENDED', status: 'GRANTED', withdrawnAt: null },
+        select: { clientId: true },
+      })
+    ).map((c) => c.clientId),
+  );
+
+  // Find sessions whose audio is eligible for purge: ended before the
+  // cutoff, has at least one chunk with bytes present, and whose
+  // client is not on the extended-retention allowlist.
+  const sessions = await prisma.session.findMany({
+    where: {
+      status: 'COMPLETED',
+      endedAt: { not: null, lt: cutoff },
+    },
+    select: {
+      id: true,
+      clientId: true,
+      endedAt: true,
+      audioChunks: { select: { id: true, sizeBytes: true } },
+    },
+  });
+
+  const purgedSessions: Array<{ sessionId: string; clientId: string; bytes: number; chunks: number }> = [];
+  for (const s of sessions) {
+    if (extendedClientIds.has(s.clientId)) continue;
+    const chunkIds = s.audioChunks.map((c) => c.id).filter(Boolean);
+    if (chunkIds.length === 0) continue;
+    const bytes = s.audioChunks.reduce((a, c) => a + c.sizeBytes, 0);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.audioChunk.deleteMany({ where: { id: { in: chunkIds } } });
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'AUDIO_RETENTION_PURGED',
+          targetType: 'Session',
+          targetId: s.id,
+          metadata: {
+            clientId: s.clientId,
+            chunksDeleted: chunkIds.length,
+            bytesDeleted: bytes,
+            sessionEndedAt: s.endedAt?.toISOString() ?? null,
+            retentionDays: RETENTION_DAYS,
+          },
+        },
+        tx,
+      );
+    });
+    purgedSessions.push({ sessionId: s.id, clientId: s.clientId, bytes, chunks: chunkIds.length });
+  }
+
+  const totalBytes = purgedSessions.reduce((a, p) => a + p.bytes, 0);
+  const totalChunks = purgedSessions.reduce((a, p) => a + p.chunks, 0);
+
+  return NextResponse.json({
+    cutoff: cutoff.toISOString(),
+    retentionDays: RETENTION_DAYS,
+    extendedRetentionClients: extendedClientIds.size,
+    sessionsConsidered: sessions.length,
+    sessionsPurged: purgedSessions.length,
+    chunksDeleted: totalChunks,
+    bytesDeleted: totalBytes,
+  });
+}
+
+function isAuthorized(req: NextRequest): boolean {
+  // Vercel sets x-vercel-cron when invoked via vercel.json schedule.
+  if (req.headers.get('x-vercel-cron')) return true;
+  const secret = process.env['CRON_SECRET'];
+  if (!secret) return false;
+  const authHeader = req.headers.get('authorization');
+  return authHeader === `Bearer ${secret}`;
+}

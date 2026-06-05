@@ -155,3 +155,87 @@ function scoreExercise(
     rationale,
   };
 }
+
+import { EMDR_EXERCISE_CATALOG } from '../exercises/emdr-catalog';
+import type { EmdrPhase } from '../modalities/emdr/phases';
+
+/**
+ * EMDR equivalent of recommendCbtExercises — same scoring shape, but
+ * filters the EMDR catalog and tunes the phase-boundary bonus around
+ * EMDR's preparation / closure phases instead of CBT's
+ * engagement / consolidation.
+ *
+ * Sprint 9 add — ports the CBT engine pattern to EMDR so the
+ * /api/v1/workflows/[id]/prescribed-exercises route can serve EMDR
+ * workflows with the same UX as CBT (was 501 before).
+ */
+export function recommendEmdrExercises(input: PrescriptionEngineInput): ExerciseRecommendation[] {
+  const now = input.now ?? new Date();
+  const max = input.maxRecommendations ?? 5;
+  const phase = input.currentPhase;
+
+  const phaseAppropriate = EMDR_EXERCISE_CATALOG.filter((e) =>
+    (e.phaseTags as readonly string[]).includes(phase),
+  );
+
+  const afterRiskFilter = phaseAppropriate.filter((e) =>
+    isRiskGateOk(e.riskGate, input.recentRiskSeverity),
+  );
+
+  const afterCadenceFilter = afterRiskFilter.filter((e) =>
+    isCadenceOk(e, input.adherence.get(e.id), now),
+  );
+
+  const scored = afterCadenceFilter.map((e) => scoreEmdrExercise(e, phase as EmdrPhase, input));
+  scored.sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, max);
+}
+
+function scoreEmdrExercise(
+  exercise: CbtExerciseDefinition,
+  phase: EmdrPhase,
+  input: PrescriptionEngineInput,
+): ExerciseRecommendation {
+  let score = 0;
+  const rationale: string[] = [];
+
+  if (exercise.phaseTags.includes(phase as never)) {
+    score += 5;
+    rationale.push(`tagged for ${phase}`);
+  }
+
+  // Preparation + closure phases benefit from outcome-measure tracking
+  // (analogous to CBT's engagement / consolidation bookends).
+  if (
+    exercise.category === 'outcome_measure' &&
+    (phase === 'preparation' || phase === 'closure')
+  ) {
+    score += 3;
+    rationale.push('outcome measure at phase boundary');
+  }
+
+  const adherence = input.adherence.get(exercise.id);
+  if (!adherence || !adherence.lastPrescribedAt) {
+    score += 2;
+    rationale.push('never prescribed before');
+  } else if (adherence.completionRate < 0.5) {
+    score += 2;
+    rationale.push('previously-low adherence — worth re-emphasising');
+  }
+
+  if (
+    exercise.category === 'skill_building' &&
+    (phase === 'preparation' || phase === 'history_taking')
+  ) {
+    score += 1;
+    rationale.push('foundational skill in early EMDR phase');
+  }
+
+  return {
+    exerciseId: exercise.id,
+    title: exercise.title,
+    score,
+    rationale,
+  };
+}
