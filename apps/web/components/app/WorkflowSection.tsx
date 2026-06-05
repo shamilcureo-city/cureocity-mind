@@ -6,6 +6,7 @@ import type {
   ModalityStateWithHistory,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { CreateWorkflowForm } from './CreateWorkflowForm';
 
 interface ExerciseRecommendation {
   exerciseId: string;
@@ -78,6 +79,39 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
     void loadAll();
   }, [loadAll]);
 
+  const toggleGoal = useCallback(
+    async (goalId: string, achieved: boolean) => {
+      if (!workflow) return;
+      setError(null);
+      try {
+        const res = await fetch(
+          `${scribeBase}/workflows/${workflow.id}/goals/${goalId}`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ achieved }),
+          },
+        );
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${res.status}`);
+        }
+        const updated = (await res.json()) as ModalityStateWithHistory;
+        setWorkflow(updated);
+        // Goal flips can change the advancement signal — refresh advice.
+        if (updated.modality === 'CBT') {
+          const advRes = await fetch(
+            `${scribeBase}/workflows/${workflow.id}/advancement-suggestion`,
+          );
+          if (advRes.ok) setAdvancement((await advRes.json()) as AdvancementSuggestion);
+        }
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    },
+    [scribeBase, workflow],
+  );
+
   const acceptSuggestion = useCallback(async () => {
     if (!workflow || !advancement?.suggestedPhase) return;
     setTransitionPending(true);
@@ -131,17 +165,14 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
           EMDR phase progression, goal achievement, and exercise prescription. Starting one
           enables the advancement-suggestion engine on subsequent sessions.
         </p>
-        <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-          Workflow creation UI ships in Sprint 3b PR 2 — for now, start a workflow via
-          <code className="ml-1 rounded bg-[var(--color-surface-2)] px-1 py-0.5 font-mono text-[11px]">
-            POST /api/v1/workflows
-          </code>{' '}
-          with{' '}
-          <code className="rounded bg-[var(--color-surface-2)] px-1 py-0.5 font-mono text-[11px]">
-            {`{ clientId, modality, initialPhase, goals: [...] }`}
-          </code>
-          .
-        </p>
+        <CreateWorkflowForm
+          clientId={clientId}
+          scribeBase={scribeBase}
+          onCreated={(wf) => {
+            setWorkflow(wf);
+            void loadAll();
+          }}
+        />
         {error && <p className="mt-3 text-xs text-[var(--color-warn)]">{error}</p>}
       </section>
     );
@@ -169,6 +200,39 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
             </>
           )}
         </p>
+
+        {workflow.goals.length > 0 && (
+          <ul className="mt-4 space-y-2">
+            {workflow.goals.map((g) => (
+              <li key={g.id} className="flex items-start gap-3">
+                <input
+                  id={`goal-${g.id}`}
+                  type="checkbox"
+                  checked={g.achieved}
+                  onChange={(e) => void toggleGoal(g.id, e.target.checked)}
+                  className="mt-1 h-4 w-4 accent-[var(--color-accent)]"
+                />
+                <label htmlFor={`goal-${g.id}`} className="flex-1 cursor-pointer">
+                  <span
+                    className={`block text-sm ${
+                      g.achieved
+                        ? 'text-[var(--color-ink-3)] line-through'
+                        : 'text-[var(--color-ink)]'
+                    }`}
+                  >
+                    {g.description}
+                  </span>
+                  {g.achieved && g.achievedAt && (
+                    <span className="block text-[11px] text-[var(--color-ink-3)]">
+                      Achieved{' '}
+                      {new Date(g.achievedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                    </span>
+                  )}
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {workflow.modality === 'CBT' && advancement && (

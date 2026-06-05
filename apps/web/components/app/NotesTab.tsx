@@ -8,6 +8,7 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { NotePreview } from './NotePreview';
 import { RiskBanner } from './RiskBanner';
+import { AdvancementBanner } from './AdvancementBanner';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -22,6 +23,7 @@ interface Props {
   sessionStatus: SessionStatus;
   initialDraft: NoteDraft | null;
   initialNote: TherapyNote | null;
+  clientId: string;
 }
 
 type Phase =
@@ -35,7 +37,13 @@ type Phase =
 
 const POLL_MS = 2_000;
 
-export function NotesTab({ sessionId, sessionStatus, initialDraft, initialNote }: Props) {
+export function NotesTab({
+  sessionId,
+  sessionStatus,
+  initialDraft,
+  initialNote,
+  clientId,
+}: Props) {
   const [phase, setPhase] = useState<Phase>(() => derivePhase(sessionStatus, initialDraft, initialNote));
   const [generating, setGenerating] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -223,6 +231,7 @@ export function NotesTab({ sessionId, sessionStatus, initialDraft, initialNote }
     return (
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <Card className="p-7">
+          <AdvancementBanner clientId={clientId} />
           <RiskBanner riskFlags={note.content.riskFlags} />
           <NotePreview
             note={note.content}

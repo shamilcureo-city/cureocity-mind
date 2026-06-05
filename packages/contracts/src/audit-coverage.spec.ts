@@ -38,6 +38,11 @@ const SCAN_ROOTS = [
   'services/affect-engine-service/src',
   'services/modality-workflow-service/src',
   'services/pdf-generator-service/src',
+  // The web app's API routes are the authoritative writer sites for
+  // any feature wired directly under apps/web/app/api (Sprint 3 onward
+  // pivoted the monolith-mode app to write audits inline rather than
+  // proxy through the NestJS service stubs).
+  'apps/web/app/api',
 ];
 
 /**
@@ -85,6 +90,18 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   // JOURNAL_ENTRY_UPDATED — reserved for the journal-edit flow
   // (patient can edit/redact a past entry). Sprint 10 surface.
   'JOURNAL_ENTRY_UPDATED',
+  // BOOKING_* + INTAKE_* writer sites currently live in
+  // apps/web/_archive (the original therapist-directory + intake
+  // flow was archived when the app pivoted to scribe-first onboarding
+  // in Sprint 3). The enum stays so the audit shape is stable when
+  // the surface is revived; until then, no live writer.
+  'BOOKING_REQUESTED',
+  'BOOKING_ACCEPTED',
+  'BOOKING_DECLINED',
+  'BOOKING_CANCELLED',
+  'INTAKE_SUBMITTED',
+  'INTAKE_REVIEWED',
+  'INTAKE_MATCHED',
 ]);
 
 function listSourceFiles(dir: string): string[] {

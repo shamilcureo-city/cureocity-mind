@@ -70,7 +70,11 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
       <div className="mt-6">
         {tab === 'notes' && (
-          <NotesTabPanel sessionId={id} sessionStatus={session.status} />
+          <NotesTabPanel
+            sessionId={id}
+            sessionStatus={session.status}
+            clientId={session.clientId}
+          />
         )}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
@@ -83,9 +87,11 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 async function NotesTabPanel({
   sessionId,
   sessionStatus,
+  clientId,
 }: {
   sessionId: string;
   sessionStatus: SessionStatus;
+  clientId: string;
 }) {
   const [draftRow, signedRow] = await Promise.all([
     prisma.noteDraft.findUnique({ where: { sessionId } }),
@@ -124,6 +130,7 @@ async function NotesTabPanel({
       sessionStatus={sessionStatus}
       initialDraft={draft}
       initialNote={signedNote}
+      clientId={clientId}
     />
   );
 }

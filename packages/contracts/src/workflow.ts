@@ -41,6 +41,13 @@ export const CreateTransitionInputSchema = z.object({
 });
 export type CreateTransitionInput = z.infer<typeof CreateTransitionInputSchema>;
 
+/** PATCH /workflows/[id]/goals/[goalId] — mark a goal achieved/unachieved. */
+export const UpdateGoalInputSchema = z.object({
+  achieved: z.boolean(),
+  evidence: z.string().max(2000).optional(),
+});
+export type UpdateGoalInput = z.infer<typeof UpdateGoalInputSchema>;
+
 export const ModalityTransitionSchema = z.object({
   id: CuidSchema,
   stateId: CuidSchema,
