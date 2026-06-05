@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import {
   type GeminiCallLogData,
   type IPass2Backend,
@@ -55,10 +55,26 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
           responseMimeType: 'application/json',
           temperature: 0.2,
           maxOutputTokens: 8192,
+          // Same rationale as the Flash backend: therapy notes summarise
+          // sensitive content (trauma, crisis flags). Default safety
+          // settings would silently empty the response.
+          safetySettings: [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+          ],
         },
       });
 
       const text = res.text ?? '{}';
+      const finishReason = res.candidates?.[0]?.finishReason;
+      const blockReason = res.promptFeedback?.blockReason;
+      if (!text || text === '{}' || text === '') {
+        console.warn(
+          `[vertex-pro] sessionId=${input.sessionId} EMPTY response. finishReason=${finishReason} blockReason=${blockReason} textLen=${text?.length ?? 0}`,
+        );
+      }
       const parsed: unknown = JSON.parse(text);
       // The Pass2 prompt asks Gemini to produce a TherapyNoteV1 JSON
       // object directly (no wrapper key) — that matches PRD 22.1 Part

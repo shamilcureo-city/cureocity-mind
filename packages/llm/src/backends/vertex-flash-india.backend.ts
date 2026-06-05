@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import {
   type GeminiCallLogData,
   type IPass1Backend,
@@ -81,12 +81,36 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           responseMimeType: 'application/json',
           temperature: 0.1,
           maxOutputTokens: 8192,
+          // Therapy content legitimately includes distress, trauma, self-harm
+          // mentions, crisis content. Gemini's default BLOCK_MEDIUM_AND_ABOVE
+          // silently returns empty candidates for those — observed as
+          // transcriptChars=0 with no error and real Vertex cost. Relax to
+          // OFF for the scribe pipeline; the clinical surface still gates
+          // sensitive content via the riskFlags severity model.
+          safetySettings: [
+            { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
+            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+          ],
         },
       });
 
       const text = res.text ?? '{}';
+      const finishReason = res.candidates?.[0]?.finishReason;
+      const blockReason = res.promptFeedback?.blockReason;
+      if (!text || text === '{}' || text === '') {
+        console.warn(
+          `[vertex-flash] sessionId=${input.sessionId} EMPTY response. finishReason=${finishReason} blockReason=${blockReason} textLen=${text?.length ?? 0}`,
+        );
+      }
       const parsed: unknown = JSON.parse(text);
       const output = Pass1OutputSchema.parse(parsed);
+      if (output.transcript.length === 0) {
+        console.warn(
+          `[vertex-flash] sessionId=${input.sessionId} EMPTY transcript on validated response. finishReason=${finishReason} blockReason=${blockReason} rawTextPreview=${text.slice(0, 300)}`,
+        );
+      }
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? inputTokensEstimate;
