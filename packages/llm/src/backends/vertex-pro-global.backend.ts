@@ -1,4 +1,4 @@
-import { VertexAI, type GenerativeModel } from '@google-cloud/vertexai';
+import { GoogleGenAI } from '@google/genai';
 import {
   type GeminiCallLogData,
   type IPass2Backend,
@@ -19,30 +19,26 @@ export interface VertexGeminiProGlobalOptions {
 
 /**
  * Pass 2 backend: transcript text → TherapyNoteV1, in the global region.
- * Crosses the India residency boundary; cross-border consent must be
- * collected on the client (`CONSENT_SCOPE_CROSS_BORDER_PROCESSING`) and
- * snapshotted on each Session before this runs.
+ *
+ * Ported June 5 2026 from `@google-cloud/vertexai` (deprecated, removal
+ * scheduled June 24 2026) to `@google/genai`. Same prompt + same
+ * Pass2OutputSchema validation contract; only the SDK surface changed.
  */
 export class VertexGeminiProGlobalBackend implements IPass2Backend {
-  private readonly model: GenerativeModel;
+  private readonly ai: GoogleGenAI;
   private readonly modelName: string;
   private readonly region: string;
 
   constructor(opts: VertexGeminiProGlobalOptions) {
-    this.modelName = opts.model ?? 'gemini-1.5-pro-002';
-    this.region = opts.location ?? 'us-central1';
+    this.modelName = opts.model ?? 'gemini-2.5-pro';
+    this.region = opts.location ?? 'global';
     if (opts.saKeyPath) {
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] = opts.saKeyPath;
     }
-    const vertex = new VertexAI({ project: opts.projectId, location: this.region });
-    this.model = vertex.getGenerativeModel({
-      model: this.modelName,
-      systemInstruction: { role: 'system', parts: [{ text: THERAPY_NOTE_SYSTEM_PROMPT_V1 }] },
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.2,
-        maxOutputTokens: 8192,
-      },
+    this.ai = new GoogleGenAI({
+      vertexai: true,
+      project: opts.projectId,
+      location: this.region,
     });
   }
 
@@ -51,20 +47,27 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
     const userMessage = buildUserMessage(input);
 
     try {
-      const res = await this.model.generateContent({
+      const res = await this.ai.models.generateContent({
+        model: this.modelName,
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
+        config: {
+          systemInstruction: THERAPY_NOTE_SYSTEM_PROMPT_V1,
+          responseMimeType: 'application/json',
+          temperature: 0.2,
+          maxOutputTokens: 8192,
+        },
       });
 
-      const text = res.response.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const text = res.text ?? '{}';
       const parsed: unknown = JSON.parse(text);
-      // The Pass2 prompt asks Gemini to produce a TherapyNoteV1 JSON object
-      // directly (no wrapper key) — that matches PRD 22.1 Part 10.3. The
-      // Pass2OutputSchema, however, wraps the note under a `therapyNote`
-      // key. Wrap here so downstream consumers (orchestrator, NoteDraft)
-      // see the same shape as the mock backend.
+      // The Pass2 prompt asks Gemini to produce a TherapyNoteV1 JSON
+      // object directly (no wrapper key) — that matches PRD 22.1 Part
+      // 10.3. The Pass2OutputSchema, however, wraps the note under a
+      // `therapyNote` key. Wrap here so downstream consumers
+      // (orchestrator, NoteDraft) see the same shape as the mock backend.
       const output = Pass2OutputSchema.parse({ therapyNote: parsed });
 
-      const usage = res.response.usageMetadata;
+      const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
       const outputTokens = usage?.candidatesTokenCount ?? Math.ceil(text.length / 4);
 

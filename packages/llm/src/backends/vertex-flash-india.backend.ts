@@ -1,4 +1,4 @@
-import { VertexAI, type GenerativeModel } from '@google-cloud/vertexai';
+import { GoogleGenAI } from '@google/genai';
 import {
   type GeminiCallLogData,
   type IPass1Backend,
@@ -24,33 +24,29 @@ export interface VertexGeminiFlashIndiaOptions {
 /**
  * Pass 1 backend: audio → transcript + diarization + affect, in asia-south1.
  *
- * NOT VERIFIED end-to-end in CI — runs against real Vertex AI which needs
- * a GCP project with Gemini enabled. Unit tests exercise the request
- * shaping; the actual `generateContent` call is mockable.
+ * Ported June 5 2026 from `@google-cloud/vertexai` (the deprecated SDK
+ * that hits the v4 OAuth endpoint Google is winding down) to
+ * `@google/genai`, the current Google Gen AI SDK that supports both
+ * the Gemini API and Vertex AI via a unified surface. The wire
+ * payload shape is identical (Content[] with Part[] containing
+ * inlineData / text); only the SDK constructor + response accessors
+ * changed.
  */
 export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
-  private readonly model: GenerativeModel;
+  private readonly ai: GoogleGenAI;
   private readonly modelName: string;
   private readonly region: string;
 
   constructor(opts: VertexGeminiFlashIndiaOptions) {
-    this.modelName = opts.model ?? 'gemini-1.5-flash-002';
+    this.modelName = opts.model ?? 'gemini-2.5-flash';
     this.region = opts.location ?? 'asia-south1';
     if (opts.saKeyPath) {
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] = opts.saKeyPath;
     }
-    const vertex = new VertexAI({ project: opts.projectId, location: this.region });
-    this.model = vertex.getGenerativeModel({
-      model: this.modelName,
-      systemInstruction: {
-        role: 'system',
-        parts: [{ text: TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1 }],
-      },
-      generationConfig: {
-        responseMimeType: 'application/json',
-        temperature: 0.1,
-        maxOutputTokens: 8192,
-      },
+    this.ai = new GoogleGenAI({
+      vertexai: true,
+      project: opts.projectId,
+      location: this.region,
     });
   }
 
@@ -59,7 +55,8 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
     const inputTokensEstimate = estimateAudioInputTokens(input.durationMs);
 
     try {
-      const res = await this.model.generateContent({
+      const res = await this.ai.models.generateContent({
+        model: this.modelName,
         contents: [
           {
             role: 'user',
@@ -78,13 +75,19 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
             ],
           },
         ],
+        config: {
+          systemInstruction: TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
+          responseMimeType: 'application/json',
+          temperature: 0.1,
+          maxOutputTokens: 8192,
+        },
       });
 
-      const text = res.response.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+      const text = res.text ?? '{}';
       const parsed: unknown = JSON.parse(text);
       const output = Pass1OutputSchema.parse(parsed);
 
-      const usage = res.response.usageMetadata;
+      const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? inputTokensEstimate;
       const outputTokens = usage?.candidatesTokenCount ?? 0;
 
