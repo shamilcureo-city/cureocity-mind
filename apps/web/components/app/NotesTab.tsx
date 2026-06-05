@@ -309,7 +309,7 @@ export function NotesTab({
               region="signed"
             />
           </Card>
-          <ModifyPanel disabled />
+          <ModifyPanel disabled={true} sessionId={sessionId} note={phase.note.content} />
         </div>
       </>
     );
@@ -340,7 +340,7 @@ export function NotesTab({
             {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
           </div>
         </Card>
-        <ModifyPanel disabled />
+        <ModifyPanel disabled={false} sessionId={sessionId} note={phase.draft.content as TherapyNoteV1} onModified={(next) => setPhase({ kind: 'completed', draft: { ...phase.draft, content: next as unknown as NoteDraft['content'] } })} />
       </div>
     </>
   );
@@ -421,7 +421,57 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ModifyPanel({ disabled }: { disabled: boolean }) {
+const QUICK_INSTRUCTIONS = [
+  'Change to paragraph format',
+  'Remove all client names',
+  'Make more concise',
+  'Expand the plan with concrete steps',
+];
+
+function ModifyPanel({
+  disabled,
+  sessionId,
+  onModified,
+}: {
+  disabled: boolean;
+  sessionId: string;
+  note: TherapyNoteV1;
+  onModified?: (next: TherapyNoteV1) => void;
+}) {
+  const [instruction, setInstruction] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [lastChanged, setLastChanged] = useState<string[] | null>(null);
+
+  const submit = useCallback(
+    async (text: string) => {
+      if (!text.trim() || disabled || !onModified) return;
+      setPending(true);
+      setError(null);
+      setLastChanged(null);
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/note/modify`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ instruction: text }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${res.status}`);
+        }
+        const body = (await res.json()) as { note: TherapyNoteV1; changedFields: string[] };
+        onModified(body.note);
+        setLastChanged(body.changedFields);
+        setInstruction('');
+      } catch (e) {
+        setError((e as Error).message);
+      } finally {
+        setPending(false);
+      }
+    },
+    [disabled, onModified, sessionId],
+  );
+
   return (
     <Card className="flex h-full flex-col p-6">
       <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]">
@@ -429,17 +479,19 @@ function ModifyPanel({ disabled }: { disabled: boolean }) {
       </p>
       <h3 className="mt-1 font-serif text-2xl">Modify your note</h3>
       <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-        Tell the scribe what to change — “make it more concise”, “rewrite the plan as bullets”,
-        “remove client names”. Ships in Sprint 4.
+        {disabled
+          ? 'The note is signed — use the Revisions panel below to record an edit.'
+          : 'Tell the scribe what to change — “make it more concise”, “rewrite the plan as bullets”, “remove client names”.'}
       </p>
 
       <div className="mt-5 grid gap-2">
-        {['Change to paragraph format', 'Remove all names', 'Make more concise', 'Expand plan'].map((q) => (
+        {QUICK_INSTRUCTIONS.map((q) => (
           <button
             key={q}
             type="button"
-            disabled
-            className="flex items-center justify-between rounded-xl border border-[var(--color-line)] bg-white px-4 py-2.5 text-left text-sm text-[var(--color-ink-3)] opacity-70"
+            disabled={disabled || pending}
+            onClick={() => void submit(q)}
+            className="flex items-center justify-between rounded-xl border border-[var(--color-line)] bg-white px-4 py-2.5 text-left text-sm text-[var(--color-ink)] hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] disabled:cursor-not-allowed disabled:text-[var(--color-ink-3)] disabled:opacity-70 disabled:hover:border-[var(--color-line)] disabled:hover:bg-white"
           >
             {q}
             <span className="text-xs text-[var(--color-ink-3)]">→</span>
@@ -447,32 +499,53 @@ function ModifyPanel({ disabled }: { disabled: boolean }) {
         ))}
       </div>
 
+      {lastChanged && lastChanged.length > 0 && (
+        <p className="mt-3 text-xs text-[var(--color-accent)]">
+          Updated: {lastChanged.join(', ')}
+        </p>
+      )}
+      {lastChanged && lastChanged.length === 0 && (
+        <p className="mt-3 text-xs text-[var(--color-ink-3)]">
+          Model ran but no SOAP fields changed.
+        </p>
+      )}
+      {error && (
+        <p className="mt-3 text-xs text-[var(--color-warn)]">{error}</p>
+      )}
+
       <div className="mt-auto pt-6">
-        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-3 text-sm text-[var(--color-ink-3)]">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submit(instruction);
+          }}
+          className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-3 text-sm text-[var(--color-ink-3)]"
+        >
           <p>How would you like to modify your note?</p>
           <div className="mt-2 flex items-center gap-2 rounded-xl bg-white p-2">
             <input
               type="text"
-              placeholder="Enter modifications here"
-              disabled
-              className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--color-ink-3)]"
+              placeholder={pending ? 'Modifying…' : 'Enter modifications here'}
+              disabled={disabled || pending}
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              className="flex-1 bg-transparent text-sm text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-3)]"
             />
             <button
-              type="button"
-              disabled
+              type="submit"
+              disabled={disabled || pending || instruction.trim().length < 3}
               aria-label="Send"
-              className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] text-white opacity-60"
+              className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
             >
               ↑
             </button>
           </div>
-        </div>
+        </form>
       </div>
-      {disabled && (
-        <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-          Sprint 4 wires this panel + “Sign off” to the real LLM edit pipeline.
-        </p>
-      )}
+      <p className="mt-3 text-xs text-[var(--color-ink-3)]">
+        Word of warning: the model only rewrites — it won't invent new clinical content. Severity
+        + modality are preserved verbatim.
+      </p>
     </Card>
   );
 }
