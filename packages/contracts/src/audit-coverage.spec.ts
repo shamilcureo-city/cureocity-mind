@@ -55,10 +55,8 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   // emit today — every access call goes directly to FULFILLED because
   // the export is synchronous. Reserved for an async export flow.
   'DSR_ACCESS_REQUESTED',
-  // DSR_ERASURE_FULFILLED is written by the admin-side resolver,
-  // which Sprint 10 wires through the admin queue UI. Today only the
-  // REQUESTED path is reachable.
-  'DSR_ERASURE_FULFILLED',
+  // DSR_ERASURE_FULFILLED is now wired by the admin erasure-queue
+  // PATCH route (apps/web/app/api/v1/admin/erasure/[id]).
   // NOTIFICATION_DISPATCHED is reserved for the Sprint 10 fan-out
   // worker that pushes reminder notifications on a schedule. The
   // immediate-send path used in PR 4 doesn't emit it.
@@ -67,10 +65,8 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   // flow that Sprint 10 adds alongside the admin profile UI. Today
   // we only emit PSYCHOLOGIST_REGISTERED on signup.
   'PSYCHOLOGIST_UPDATED',
-  // CLIENT_SOFT_DELETED is wired into the schema (Client.deletedAt) but
-  // there's no endpoint that calls it; the admin erasure-resolver
-  // path in Sprint 10 will emit it.
-  'CLIENT_SOFT_DELETED',
+  // CLIENT_SOFT_DELETED is now emitted by the admin erasure-queue
+  // FULFILLED path (cause: DSR_ERASURE).
   // CONSENT_EXPIRED is reserved for the consent-expiry cron. Today
   // consents have nullable expiresAt and no enforcement job; Sprint 10
   // adds the cron alongside the retention sweeper.
