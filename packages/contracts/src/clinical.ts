@@ -184,6 +184,48 @@ export const ClinicalReportV1Schema = z.object({
 export type ClinicalReportV1 = z.infer<typeof ClinicalReportV1Schema>;
 
 // ============================================================================
+// Sprint 19 — Initial Assessment Brief.
+//
+// Produced by Pass 3 when SessionKind = INTAKE. Wider diagnostic
+// differential, more assessment gaps, first-line therapy
+// recommendations rather than next-step techniques. modality is
+// nullable because intakes don't have one yet — a treatment plan
+// hasn't been confirmed.
+//
+// Structurally similar to ClinicalReportV1 but distinct so the UI +
+// downstream consumers (PreSessionBrief, competency dashboard) can
+// branch on note shape.
+// ============================================================================
+
+export const InitialAssessmentBriefV1Schema = z.object({
+  version: z.literal('V1'),
+  language: ClinicalLocaleSchema.default('en'),
+  /// Working clinical hypothesis the AI is pursuing. Mirrors the
+  /// IntakeNoteV1.workingHypothesis field; surfaced here so the
+  /// therapist sees what the differential is built around.
+  workingHypothesis: z.string().min(1).max(4000),
+  /// 1-5 differential diagnoses with citations + confidence. Same
+  /// shape as ClinicalReportV1.diagnosisCandidates but typically
+  /// more candidates and lower confidence per candidate.
+  differential: z.array(ClinicalDiagnosisCandidateSchema).min(1).max(5),
+  /// Open assessment questions to ask in the next session(s) to
+  /// narrow the differential.
+  assessmentGaps: z.array(ClinicalAssessmentGapSchema).max(12).default([]),
+  /// Case formulation in INTAKE language — provisional, no plan yet.
+  formulation: z.string().min(1).max(4000),
+  /// First-line therapies for the most-likely differential entry.
+  /// Each ranked by evidence strength + fit for the working hypothesis.
+  recommendedTherapies: z.array(ClinicalRecommendedTherapySchema).min(0).max(8),
+  /// Recommended scored instruments to administer next session
+  /// (PHQ-9 / GAD-7 / etc.). Names map to the InstrumentKey enum.
+  recommendedInstruments: z.array(z.string().min(1).max(40)).max(6).default([]),
+  /// Crisis flags surface intake-specific safety concerns even when
+  /// the differential is wide open.
+  crisisFlags: z.array(ClinicalCrisisFlagSchema).default([]),
+});
+export type InitialAssessmentBriefV1 = z.infer<typeof InitialAssessmentBriefV1Schema>;
+
+// ============================================================================
 // Section confirmation — the therapist's accept/modify/reject decision
 // per section of a ClinicalReport. The whole confirmations object is
 // stored on the ClinicalReport row as JSONB.

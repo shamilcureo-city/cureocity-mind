@@ -4,7 +4,6 @@ import { Prisma, type NoteRiskSeverity as PrismaRiskSeverity } from '@prisma/cli
 import {
   type IModelRouter,
   type Pass1Output,
-  type Pass2Output,
   computeCostInr,
   estimateAudioInputTokens,
   FLASH_PRICING,
@@ -116,11 +115,12 @@ export class NoteOrchestrator {
         estimatedCostInr: pass2Estimate,
       });
 
-      // 5. Pass 2
+      // 5. Pass 2 — Sprint 19: kind drives the prompt branch.
       const pass2 = await this.router.pass2({
         sessionId,
         transcript: pass1.output.transcript,
         speakerSegments: pass1.output.speakerSegments,
+        kind: session.kind,
         modality: session.modality,
         clientContext: {
           ...(session.client.presentingConcerns !== null && {
@@ -128,18 +128,21 @@ export class NoteOrchestrator {
           }),
           ...(session.client.preferredModality !== null && {
             preferredModality: session.client
-              .preferredModality as Pass2Output['therapyNote']['modality'],
+              .preferredModality as Parameters<typeof this.router.pass2>[0]['clientContext']['preferredModality'],
           }),
         },
       });
       const pass2Cost = new Prisma.Decimal(pass2.callLog.costInr);
 
-      // 6. Persist Pass 2 + complete
-      const riskSeverity = mapRiskSeverity(pass2.output.therapyNote.riskFlags.severity);
+      // 6. Persist Pass 2 + complete. Sprint 19: branch on discriminator.
+      const pass2Body =
+        pass2.output.kind === 'INTAKE' ? pass2.output.intakeNote : pass2.output.therapyNote;
+      const pass2RiskFlags = pass2Body.riskFlags;
+      const riskSeverity = mapRiskSeverity(pass2RiskFlags.severity);
       await this.prisma.noteDraft.update({
         where: { id: draft.id },
         data: {
-          content: pass2.output.therapyNote as unknown as Prisma.InputJsonValue,
+          content: pass2Body as unknown as Prisma.InputJsonValue,
           riskSeverity,
           status: 'COMPLETED',
           totalCostInr: pass1Cost.plus(pass2Cost),
@@ -170,8 +173,8 @@ export class NoteOrchestrator {
           targetId: sessionId,
           metadata: {
             severity: riskSeverity,
-            indicators: pass2.output.therapyNote.riskFlags.indicators,
-            details: pass2.output.therapyNote.riskFlags.details ?? null,
+            indicators: pass2RiskFlags.indicators,
+            details: pass2RiskFlags.details ?? null,
             psychologistId: session.psychologistId,
             clientId: session.clientId,
             // NOTE: surface in therapist-web (Sprint 7). Auto-text iCall /

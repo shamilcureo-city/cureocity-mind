@@ -7,6 +7,7 @@ export function toSession(row: SessionRow): Session {
     clientId: row.clientId,
     psychologistId: row.psychologistId,
     modality: row.modality,
+    kind: row.kind,
     status: row.status,
     scheduledAt: row.scheduledAt.toISOString(),
     startedAt: row.startedAt?.toISOString() ?? null,

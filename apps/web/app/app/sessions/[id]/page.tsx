@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import type {
   NoteDraft,
+  SessionKind,
   SpeakerSegment,
   TherapyNote,
   TherapyNoteV1,
@@ -12,13 +13,14 @@ import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { ClientTab } from '@/components/app/ClientTab';
 import { ClinicalBriefTab } from '@/components/app/ClinicalBriefTab';
+import { InitialAssessmentTab } from '@/components/app/InitialAssessmentTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
 import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
-import { toClinicalReport } from '@/lib/clinical-mappers';
+import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 
@@ -63,12 +65,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   });
   if (!session) notFound();
 
+  const sessionKind: SessionKind = session.kind;
+  const isIntake = sessionKind === 'INTAKE';
+
   return (
     <Container className="py-8">
-      <Link
-        href="/app"
-        className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
-      >
+      <Link href="/app" className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]">
         ← All sessions
       </Link>
 
@@ -76,10 +78,11 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         <div>
           <h1 className="font-serif text-3xl">{session.client.fullName}</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {session.modality} · {session.scheduledAt.toLocaleString('en-US')}
+            {session.modality ?? session.kind} · {session.scheduledAt.toLocaleString('en-US')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {isIntake && <Badge tone="accent">intake session</Badge>}
           {session.spokenLanguages.length > 0 && (
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface)] px-3 py-1 text-xs text-[var(--color-ink-2)]">
               spoken: {session.spokenLanguages.join(' + ')}
@@ -92,7 +95,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       </header>
 
       <div className="mt-8">
-        <SessionWorkspaceTabs sessionId={id} active={tab} />
+        <SessionWorkspaceTabs sessionId={id} active={tab} sessionKind={sessionKind} />
       </div>
 
       <div className="mt-6">
@@ -100,19 +103,48 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
           <NotesTabPanel
             sessionId={id}
             sessionStatus={session.status}
+            sessionKind={sessionKind}
             clientId={session.clientId}
           />
         )}
-        {tab === 'clinical-brief' && <ClinicalBriefTabPanel sessionId={id} />}
+        {tab === 'clinical-brief' &&
+          (isIntake ? (
+            <InitialAssessmentTabPanel sessionId={id} />
+          ) : (
+            <ClinicalBriefTabPanel sessionId={id} />
+          ))}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
         {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
-        {tab === 'mindmap' && <MindmapTabPanel sessionId={id} />}
-        {tab === 'reflection' && (
-          <ReflectionTabPanel sessionId={id} clientId={session.clientId} />
-        )}
+        {/* Mindmap + reflection are TherapyNoteV1-shaped; the workspace
+            tabs hide them for INTAKE, but a deep-link tab=mindmap should
+            still render a friendly empty state instead of crashing. */}
+        {tab === 'mindmap' &&
+          (isIntake ? (
+            <IntakeUnavailable tabLabel="Mindmap" />
+          ) : (
+            <MindmapTabPanel sessionId={id} />
+          ))}
+        {tab === 'reflection' &&
+          (isIntake ? (
+            <IntakeUnavailable tabLabel="Reflection questions" />
+          ) : (
+            <ReflectionTabPanel sessionId={id} clientId={session.clientId} />
+          ))}
       </div>
     </Container>
+  );
+}
+
+function IntakeUnavailable({ tabLabel }: { tabLabel: string }) {
+  return (
+    <Card className="p-10 text-center">
+      <p className="font-serif text-xl">{tabLabel} aren’t generated for intake sessions.</p>
+      <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
+        These views read from a SOAP-shaped note. Intake notes use a different structure; the
+        Initial Assessment tab is the equivalent surface for intakes.
+      </p>
+    </Card>
   );
 }
 
@@ -122,13 +154,24 @@ async function ClinicalBriefTabPanel({ sessionId }: { sessionId: string }) {
   return <ClinicalBriefTab sessionId={sessionId} initialReport={initial} />;
 }
 
+async function InitialAssessmentTabPanel({ sessionId }: { sessionId: string }) {
+  const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
+  const envelope = row ? { status: row.status, errorMessage: row.errorMessage } : null;
+  const brief = row ? readInitialAssessmentBrief(row) : null;
+  return (
+    <InitialAssessmentTab sessionId={sessionId} reportEnvelope={envelope} initialBrief={brief} />
+  );
+}
+
 async function NotesTabPanel({
   sessionId,
   sessionStatus,
+  sessionKind,
   clientId,
 }: {
   sessionId: string;
   sessionStatus: SessionStatus;
+  sessionKind: SessionKind;
   clientId: string;
 }) {
   const [draftRow, signedRow] = await Promise.all([
@@ -166,6 +209,7 @@ async function NotesTabPanel({
     <NotesTab
       sessionId={sessionId}
       sessionStatus={sessionStatus}
+      sessionKind={sessionKind}
       initialDraft={draft}
       initialNote={signedNote}
       clientId={clientId}
@@ -251,8 +295,8 @@ async function TranscriptTabPanel({ sessionId }: { sessionId: string }) {
   if (!draftRow) {
     return (
       <p className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
-        No note draft exists for this session yet. End the session from the Record screen to
-        trigger note generation.
+        No note draft exists for this session yet. End the session from the Record screen to trigger
+        note generation.
       </p>
     );
   }
@@ -325,7 +369,9 @@ async function SessionInfoTabPanel({ sessionId }: { sessionId: string }) {
     <SessionInfoTab
       data={{
         id: session.id,
-        modality: session.modality,
+        // Sprint 19 — modality can be null (INTAKE sessions). Show a
+        // human-friendly fallback so the info tab still renders.
+        modality: session.modality ?? 'INTAKE',
         status: session.status,
         scheduledAt: session.scheduledAt,
         startedAt: session.startedAt,

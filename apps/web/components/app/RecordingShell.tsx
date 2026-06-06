@@ -3,11 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
-import {
-  PreRecordWizard,
-  type PreRecordClient,
-  type PreRecordResult,
-} from './PreRecordWizard';
+import { PreFlightPanel, type PreFlightClient, type PreFlightResult } from './PreFlightPanel';
 import { LiveRecorder } from './LiveRecorder';
 import { FileUploadPanel } from './FileUploadPanel';
 import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
@@ -15,14 +11,14 @@ import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-s
 export type WorkflowMode = CaptureSource | 'upload';
 
 interface Props {
-  initialClients: PreRecordClient[];
+  initialClients: PreFlightClient[];
 }
 
 type ShellState =
   | { kind: 'idle' }
-  | { kind: 'wizard'; source: WorkflowMode }
-  | { kind: 'recording'; ready: PreRecordResult; source: CaptureSource }
-  | { kind: 'uploading'; ready: PreRecordResult };
+  | { kind: 'preflight'; source: WorkflowMode }
+  | { kind: 'recording'; ready: PreFlightResult; source: CaptureSource }
+  | { kind: 'uploading'; ready: PreFlightResult };
 
 const MODE_CARDS: {
   mode: WorkflowMode;
@@ -72,11 +68,11 @@ export function RecordingShell({ initialClients }: Props) {
 
   function pickMode(mode: WorkflowMode): void {
     if (mode === 'display' && !displaySupported) return;
-    setShell({ kind: 'wizard', source: mode });
+    setShell({ kind: 'preflight', source: mode });
   }
 
-  function handleReady(result: PreRecordResult): void {
-    if (shell.kind !== 'wizard') return;
+  function handleReady(result: PreFlightResult): void {
+    if (shell.kind !== 'preflight') return;
     if (shell.source === 'upload') {
       setShell({ kind: 'uploading', ready: result });
     } else {
@@ -128,8 +124,8 @@ export function RecordingShell({ initialClients }: Props) {
         </section>
       )}
 
-      {shell.kind === 'wizard' && (
-        <PreRecordWizard
+      {shell.kind === 'preflight' && (
+        <PreFlightPanel
           source={shell.source === 'upload' ? 'dictation' : shell.source}
           initialClients={initialClients}
           onCancel={() => setShell({ kind: 'idle' })}

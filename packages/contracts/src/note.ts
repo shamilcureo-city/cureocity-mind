@@ -84,6 +84,56 @@ export const TherapyNoteV1Schema = z.object({
     )
     .default([]),
 });
+
+// ============================================================================
+// Sprint 19 — Intake note for first sessions.
+//
+// Produced by Pass 2 when SessionKind = INTAKE (no prior COMPLETED
+// session for this client AND no confirmed TreatmentPlan). Shape
+// follows standard clinical intake conventions — history of
+// presenting illness, past psychiatric history, family + social
+// history, mental status exam, working hypothesis, immediate plan.
+//
+// Distinct from TherapyNoteV1 (SOAP) because a SOAP note assumes a
+// known treatment plan; intakes are investigative and need different
+// structure to be clinically useful.
+// ============================================================================
+
+export const IntakeNoteV1Schema = z.object({
+  version: z.literal('V1'),
+  /// Presenting concerns — what brought the client in today.
+  presentingConcerns: z.string().min(1),
+  /// History of present illness — onset, course, severity, triggers,
+  /// alleviating factors. The "S" + most of "O" of a SOAP would
+  /// merge here for an intake.
+  historyOfPresentingIllness: z.string().min(1),
+  /// Past psychiatric history including prior diagnoses,
+  /// medications, hospitalizations, prior therapy attempts.
+  pastPsychiatricHistory: z.string(),
+  /// Family psychiatric / medical history relevant to the
+  /// presenting picture.
+  familyHistory: z.string(),
+  /// Social, educational, vocational, relational context.
+  socialHistory: z.string(),
+  /// Mental status exam — appearance, behaviour, speech, mood,
+  /// affect, thought process, thought content, perception,
+  /// cognition, insight, judgement.
+  mentalStatusExam: z.string().min(1),
+  /// Working clinical hypothesis (NOT a confirmed diagnosis).
+  /// Pass 3 produces an InitialAssessmentBrief with a differential
+  /// based on this hypothesis.
+  workingHypothesis: z.string().min(1),
+  /// Immediate plan — what was done at the end of this intake.
+  /// Usually: schedule assessment session, administer screeners,
+  /// referrals.
+  immediatePlan: z.string().min(1),
+  riskFlags: z.object({
+    severity: RiskSeveritySchema,
+    indicators: z.array(z.string()).default([]),
+    details: z.string().optional(),
+  }),
+});
+export type IntakeNoteV1 = z.infer<typeof IntakeNoteV1Schema>;
 export type TherapyNoteV1 = z.infer<typeof TherapyNoteV1Schema>;
 
 // ============================================================================

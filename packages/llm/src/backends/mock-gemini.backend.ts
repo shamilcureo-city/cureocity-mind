@@ -1,6 +1,7 @@
 import {
   type ClinicalReportV1,
   type GeminiCallLogData,
+  type InitialAssessmentBriefV1,
   type IPass1Backend,
   type IPass2Backend,
   type IPass3Backend,
@@ -17,7 +18,6 @@ import {
   type Pass5Input,
   type Pass5Output,
   type PreSessionBriefV1,
-  type TherapyNoteV1,
   type TherapyScriptV1,
 } from '../types';
 import {
@@ -127,22 +127,54 @@ export class MockGeminiPass1Backend implements IPass1Backend {
 export class MockGeminiPass2Backend implements IPass2Backend {
   async run(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
-    const note: TherapyNoteV1 = {
-      version: 'V1',
-      modality: input.modality,
-      subjective: '[mock] Client reports modest improvement; partial adherence to home practice.',
-      objective: '[mock] Mood appears euthymic. Engaged, oriented, appropriate affect.',
-      assessment:
-        '[mock] Continued progress on anxiety management; address avoidance of work meetings next session.',
-      plan: '[mock] Continue thought records; introduce graded exposure hierarchy.',
-      riskFlags: { severity: 'none', indicators: [] },
-      modalitySpecific: { mock: true },
-      phaseHints: [
-        { phase: 'middle', confidence: 0.75, rationale: 'Therapeutic alliance established' },
-      ],
-    };
+    // Sprint 19 — kind branches the output shape.
+    const output: Pass2Output =
+      input.kind === 'INTAKE'
+        ? {
+            kind: 'INTAKE',
+            intakeNote: {
+              version: 'V1',
+              presentingConcerns:
+                '[mock] Client presents with work-related anxiety, intermittent panic, sleep disturbance.',
+              historyOfPresentingIllness:
+                '[mock] Onset ~6 months ago following role change. Episodic anxiety attacks 2-3x/week, lasting 10-20 min. Avoidance of meetings developing in last month.',
+              pastPsychiatricHistory:
+                '[mock] No prior psychiatric history. No prior therapy. Not on psychotropic medication.',
+              familyHistory: '[mock] (Not elicited this session.)',
+              socialHistory:
+                '[mock] Lives with spouse. IT consultant role. Reports moderate alcohol use on weekends. Stable family support.',
+              mentalStatusExam:
+                '[mock] Appropriately groomed. Cooperative. Speech normal rate + tone. Mood "stressed", affect mildly anxious but congruent. Thought process linear. No SI/HI elicited. Insight + judgement good.',
+              workingHypothesis:
+                '[mock] Working hypothesis: panic disorder with anticipatory anxiety and developing avoidance. Rule out adjustment disorder + generalised anxiety. Substance use not contributory at present.',
+              immediatePlan:
+                '[mock] Schedule next session for structured assessment. Administer PHQ-9 + GAD-7 at next visit. Provide psychoeducation handout on panic cycle.',
+              riskFlags: { severity: 'none', indicators: [] },
+            },
+          }
+        : {
+            kind: input.kind,
+            therapyNote: {
+              version: 'V1',
+              // Modality fallback for TherapyNoteV1 (required) when
+              // null reaches here — orchestrator should have resolved
+              // this, but the mock is defensive.
+              modality: input.modality ?? 'SUPPORTIVE',
+              subjective:
+                '[mock] Client reports modest improvement; partial adherence to home practice.',
+              objective: '[mock] Mood appears euthymic. Engaged, oriented, appropriate affect.',
+              assessment:
+                '[mock] Continued progress on anxiety management; address avoidance of work meetings next session.',
+              plan: '[mock] Continue thought records; introduce graded exposure hierarchy.',
+              riskFlags: { severity: 'none', indicators: [] },
+              modalitySpecific: { mock: true },
+              phaseHints: [
+                { phase: 'middle', confidence: 0.75, rationale: 'Therapeutic alliance established' },
+              ],
+            },
+          };
     return {
-      output: { therapyNote: note },
+      output,
       callLog: {
         sessionId: input.sessionId,
         pass: 'PASS_2_NOTE_GENERATION',
@@ -181,80 +213,163 @@ export class MockGeminiPass3Backend implements IPass3Backend {
       speaker: firstClientSegment.speaker,
       startMs: firstClientSegment.startMs,
     };
-    const report: ClinicalReportV1 = {
-      version: 'V1',
-      language: input.language,
-      modality: input.modality,
-      diagnosisCandidates: [
-        {
-          icd11Code: '6B00',
-          icd11Label: 'Generalised anxiety disorder',
-          confidence: 0.55,
-          supportingEvidence: [supportingQuote],
-          gapsToFill: [
-            'Duration of worry over the past 6 months',
-            'Functional impairment in work or relationships',
+    // Sprint 19 — branch on kind. Intakes produce an
+    // InitialAssessmentBriefV1 with a wider differential and
+    // recommended instruments; treatment / review produce the
+    // standard ClinicalReportV1.
+    let output: Pass3Output;
+    if (input.kind === 'INTAKE') {
+      const intakeBrief: InitialAssessmentBriefV1 = {
+        version: 'V1',
+        language: input.language,
+        workingHypothesis:
+          '[mock] Working hypothesis: panic disorder with anticipatory anxiety and developing avoidance. Differential includes generalised anxiety disorder and adjustment disorder; insufficient duration data to confirm.',
+        differential: [
+          {
+            icd11Code: '6B01',
+            icd11Label: 'Panic disorder',
+            confidence: 0.45,
+            supportingEvidence: [supportingQuote],
+            gapsToFill: [
+              'Frequency of unexpected panic attacks vs. cued',
+              'Avoidance pattern mapped',
+              'Duration ≥ 1 month criterion',
+            ],
+          },
+          {
+            icd11Code: '6B00',
+            icd11Label: 'Generalised anxiety disorder',
+            confidence: 0.4,
+            supportingEvidence: [supportingQuote],
+            gapsToFill: [
+              'Duration of worry ≥ 6 months',
+              'Excessive worry across multiple domains',
+              'Functional impairment',
+            ],
+          },
+          {
+            icd11Code: '6B43',
+            icd11Label: 'Adjustment disorder',
+            confidence: 0.3,
+            supportingEvidence: [supportingQuote],
+            gapsToFill: ['Identifiable stressor onset', 'Symptoms < 6 months from stressor'],
+          },
+        ],
+        assessmentGaps: [
+          {
+            question: 'How many discrete panic attacks in the last month?',
+            rationale: 'Required to confirm ICD-11 6B01 frequency criterion.',
+          },
+          {
+            question: 'Has the worry been present most days for ≥ 6 months?',
+            rationale: 'Required to confirm ICD-11 6B00 duration criterion.',
+          },
+          {
+            question: 'What specific situations are being avoided?',
+            rationale: 'Maps avoidance pattern to differentiate panic vs. social anxiety.',
+          },
+        ],
+        formulation:
+          '[mock] Provisional formulation: client presents 6 months post role-change with somatic anxiety and emergent avoidance. More data needed on attack frequency + worry duration to distinguish panic disorder from GAD.',
+        recommendedTherapies: [
+          {
+            name: 'Psychoeducation about the panic cycle',
+            rationale:
+              '[mock] First-line for any anxiety presentation; clarifies the model and reduces fear-of-fear.',
+            evidenceSummary:
+              'Psychoeducation is recommended as step 1 in NICE guidelines for panic and GAD.',
+            whenInPlan: 'first',
+          },
+          {
+            name: 'Cognitive Restructuring',
+            rationale:
+              '[mock] Targets catastrophic appraisal of bodily sensations driving the panic cycle.',
+            evidenceSummary: 'CBT with cognitive restructuring is first-line for panic disorder.',
+            whenInPlan: 'after assessment',
+          },
+        ],
+        recommendedInstruments: ['PHQ9', 'GAD7'],
+        crisisFlags: [],
+      };
+      output = { kind: 'INTAKE', initialAssessmentBrief: intakeBrief };
+    } else {
+      const report: ClinicalReportV1 = {
+        version: 'V1',
+        language: input.language,
+        modality: input.modality ?? 'SUPPORTIVE',
+        diagnosisCandidates: [
+          {
+            icd11Code: '6B00',
+            icd11Label: 'Generalised anxiety disorder',
+            confidence: 0.55,
+            supportingEvidence: [supportingQuote],
+            gapsToFill: [
+              'Duration of worry over the past 6 months',
+              'Functional impairment in work or relationships',
+            ],
+          },
+          {
+            icd11Code: '6B01',
+            icd11Label: 'Panic disorder',
+            confidence: 0.4,
+            supportingEvidence: [supportingQuote],
+            gapsToFill: ['Frequency of unexpected panic attacks', 'Avoidance behaviour mapped'],
+          },
+        ],
+        primaryDiagnosisIndex: 0,
+        assessmentGaps: [
+          {
+            question: 'Has the worry been present most days for the last 6 months?',
+            rationale: 'Required to meet ICD-11 6B00 duration criterion.',
+          },
+        ],
+        formulation:
+          '[mock] Working hypothesis: client presents with persistent worry and somatic arousal triggered by work demands. Predisposing: high baseline conscientiousness. Precipitating: recent role change. Perpetuating: avoidance of meetings. Protective: stable family support.',
+        treatmentPlan: {
+          modality: 'CBT',
+          phaseSequence: [
+            'psychoeducation',
+            'cognitive restructuring',
+            'behavioural activation',
+            'exposure',
+            'relapse prevention',
           ],
+          goals: [
+            {
+              description: 'Reduce GAD-7 score by 4 points',
+              measure: 'GAD-7 administered at session 1 and every 4th session',
+            },
+            {
+              description: 'Attend one team meeting per week without avoidance',
+              measure: 'Self-report log shared at session start',
+            },
+          ],
+          expectedDurationSessions: 12,
         },
-        {
-          icd11Code: '6B01',
-          icd11Label: 'Panic disorder',
-          confidence: 0.4,
-          supportingEvidence: [supportingQuote],
-          gapsToFill: ['Frequency of unexpected panic attacks', 'Avoidance behaviour mapped'],
-        },
-      ],
-      primaryDiagnosisIndex: 0,
-      assessmentGaps: [
-        {
-          question: 'Has the worry been present most days for the last 6 months?',
-          rationale: 'Required to meet ICD-11 6B00 duration criterion.',
-        },
-      ],
-      formulation:
-        '[mock] Working hypothesis: client presents with persistent worry and somatic arousal triggered by work demands. Predisposing: high baseline conscientiousness. Precipitating: recent role change. Perpetuating: avoidance of meetings. Protective: stable family support.',
-      treatmentPlan: {
-        modality: 'CBT',
-        phaseSequence: [
-          'psychoeducation',
-          'cognitive restructuring',
-          'behavioural activation',
-          'exposure',
-          'relapse prevention',
-        ],
-        goals: [
+        recommendedTherapies: [
           {
-            description: 'Reduce GAD-7 score by 4 points',
-            measure: 'GAD-7 administered at session 1 and every 4th session',
+            name: 'Cognitive Restructuring',
+            rationale:
+              '[mock] Client describes catastrophic thoughts about being judged in meetings; restructuring targets the cognitive driver.',
+            evidenceSummary:
+              'Meta-analyses for GAD support CBT with cognitive restructuring as a core component.',
+            whenInPlan: 'cognitive restructuring',
           },
           {
-            description: 'Attend one team meeting per week without avoidance',
-            measure: 'Self-report log shared at session start',
+            name: 'Graded Exposure (work meetings)',
+            rationale:
+              '[mock] Avoidance is the chief perpetuating factor; hierarchical exposure reduces it.',
+            evidenceSummary:
+              'Exposure-based protocols are first-line for anxiety-driven avoidance.',
+            whenInPlan: 'exposure',
           },
         ],
-        expectedDurationSessions: 12,
-      },
-      recommendedTherapies: [
-        {
-          name: 'Cognitive Restructuring',
-          rationale:
-            '[mock] Client describes catastrophic thoughts about being judged in meetings; restructuring targets the cognitive driver.',
-          evidenceSummary:
-            'Meta-analyses for GAD support CBT with cognitive restructuring as a core component.',
-          whenInPlan: 'cognitive restructuring',
-        },
-        {
-          name: 'Graded Exposure (work meetings)',
-          rationale:
-            '[mock] Avoidance is the chief perpetuating factor; hierarchical exposure reduces it.',
-          evidenceSummary: 'Exposure-based protocols are first-line for anxiety-driven avoidance.',
-          whenInPlan: 'exposure',
-        },
-      ],
-      crisisFlags: [],
-    };
+        crisisFlags: [],
+      };
+      output = { kind: input.kind, clinicalReport: report };
+    }
     return {
-      output: { clinicalReport: report },
+      output,
       callLog: {
         sessionId: input.sessionId,
         pass: 'PASS_3_CLINICAL_ANALYSIS',

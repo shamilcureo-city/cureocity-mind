@@ -86,6 +86,8 @@ export function toSession(row: SessionRow): Session {
     clientId: row.clientId,
     psychologistId: row.psychologistId,
     modality: row.modality,
+    // Sprint 19 — session classification (INTAKE / TREATMENT / REVIEW).
+    kind: row.kind,
     status: row.status,
     scheduledAt: row.scheduledAt.toISOString(),
     startedAt: row.startedAt?.toISOString() ?? null,

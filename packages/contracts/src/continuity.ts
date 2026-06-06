@@ -89,7 +89,22 @@ export type JournalEntry = z.infer<typeof JournalEntrySchema>;
 export const NextSessionSummarySchema = z.object({
   sessionId: CuidSchema,
   scheduledAt: IsoDateTimeSchema,
-  modality: z.enum(['CBT', 'EMDR', 'OTHER']),
+  // Sprint 19 — expanded modality enum + nullable (INTAKE sessions
+  // can defer the choice).
+  modality: z
+    .enum([
+      'CBT',
+      'EMDR',
+      'ACT',
+      'IFS',
+      'PSYCHODYNAMIC',
+      'MI',
+      'MBCT',
+      'SUPPORTIVE',
+      'INTAKE',
+      'OTHER',
+    ])
+    .nullable(),
   psychologistFullName: z.string(),
 });
 export type NextSessionSummary = z.infer<typeof NextSessionSummarySchema>;

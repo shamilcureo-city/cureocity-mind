@@ -14,7 +14,8 @@ export const SessionStatusSchema = z.enum([
 
 export const BriefingSessionSummarySchema = z.object({
   id: CuidSchema,
-  modality: SessionModalitySchema,
+  /// Sprint 19 — nullable for INTAKE sessions.
+  modality: SessionModalitySchema.nullable(),
   status: SessionStatusSchema,
   scheduledAt: IsoDateTimeSchema,
   startedAt: IsoDateTimeSchema.nullable(),

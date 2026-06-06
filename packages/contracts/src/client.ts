@@ -10,7 +10,27 @@ import { ConsentInputSchema } from './consent';
 
 export const ClientStatusSchema = z.enum(['ACTIVE', 'PAUSED', 'DISCHARGED', 'TRANSFERRED']);
 
-export const SessionModalitySchema = z.enum(['CBT', 'EMDR', 'OTHER']);
+// Sprint 19 — expanded evidence-based modalities. Old V1 enum had
+// only CBT | EMDR | OTHER, collapsing ACT/IFS/MI/MBCT/psychodynamic/
+// supportive into a single "Other" bucket. INTAKE is a sentinel for
+// first-session investigative work; modality only becomes a treatment
+// choice after assessment + plan are confirmed.
+export const SessionModalitySchema = z.enum([
+  'CBT',
+  'EMDR',
+  'ACT',
+  'IFS',
+  'PSYCHODYNAMIC',
+  'MI',
+  'MBCT',
+  'SUPPORTIVE',
+  'INTAKE',
+  'OTHER',
+]);
+
+/// Sprint 19 — session classification driving Pass 2/3 prompt branches.
+export const SessionKindSchema = z.enum(['INTAKE', 'TREATMENT', 'REVIEW']);
+export type SessionKind = z.infer<typeof SessionKindSchema>;
 
 export const CreateClientInputSchema = z.object({
   fullName: z.string().min(1).max(200),

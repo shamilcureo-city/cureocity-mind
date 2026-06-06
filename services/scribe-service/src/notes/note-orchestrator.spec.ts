@@ -18,6 +18,7 @@ const baseSession = {
   psychologistId: PSY_ID,
   clientId: CLIENT_ID,
   modality: 'CBT' as const,
+  kind: 'TREATMENT' as const,
   status: 'COMPLETED' as const,
   scheduledAt: new Date(),
   startedAt: new Date(),
@@ -89,7 +90,9 @@ function makeRouter(opts: {
         ...opts.pass2NoteOverride,
       };
       return {
-        output: { therapyNote: note },
+        // Sprint 19 — Pass 2 output is a discriminated union; the
+        // orchestrator tests only cover TREATMENT-kind sessions.
+        output: { kind: 'TREATMENT' as const, therapyNote: note },
         callLog: {
           sessionId: SESSION_ID,
           pass: 'PASS_2_NOTE_GENERATION' as const,
@@ -104,14 +107,32 @@ function makeRouter(opts: {
         },
       };
     }),
+    // The note orchestrator only invokes Pass 1 + Pass 2; the rest of
+    // the IModelRouter surface (Pass 3 clinical, Pass 4 therapy script,
+    // Pass 5 pre-session brief) is unreachable here. Reject so any
+    // accidental call is loud.
+    pass3: vi.fn(async () => {
+      throw new Error('pass3 not used by note orchestrator');
+    }),
+    pass4: vi.fn(async () => {
+      throw new Error('pass4 not used by note orchestrator');
+    }),
+    pass5: vi.fn(async () => {
+      throw new Error('pass5 not used by note orchestrator');
+    }),
   };
 }
 
 function makePass1Output() {
   return {
     transcript: 'hello',
-    speakerSegments: [{ speaker: 'therapist' as const, startMs: 0, endMs: 1000, text: 'hi' }],
+    // Sprint 19 — speakerSegments grew a per-segment language hint;
+    // detectedLanguages is required on the Pass 1 output.
+    speakerSegments: [
+      { speaker: 'therapist' as const, startMs: 0, endMs: 1000, text: 'hi', language: 'en' },
+    ],
     affectFeatures: [{ startMs: 0, endMs: 1000, valence: 0, arousal: 0.5 }],
+    detectedLanguages: ['en'],
   };
 }
 

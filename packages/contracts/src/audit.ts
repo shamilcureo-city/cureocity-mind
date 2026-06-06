@@ -98,6 +98,11 @@ export const AuditActionSchema = z.enum([
   // Therapist settings + WebAuthn credentials — Sprint 18.
   'WEBAUTHN_CREDENTIAL_REGISTERED',
   'WEBAUTHN_CREDENTIAL_REVOKED',
+  // Scribing flow revamp — Sprint 19. INFERRED = session-defaults
+  // cascade picked the modality from history; OVERRIDDEN = therapist
+  // edited the cascade-picked value before submitting.
+  'SESSION_MODALITY_INFERRED',
+  'SESSION_MODALITY_OVERRIDDEN',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
