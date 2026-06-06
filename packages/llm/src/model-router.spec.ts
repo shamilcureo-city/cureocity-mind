@@ -1,14 +1,19 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ModelRouter } from './model-router';
-import { MockGeminiPass1Backend, MockGeminiPass2Backend } from './backends/mock-gemini.backend';
+import {
+  MockGeminiPass1Backend,
+  MockGeminiPass2Backend,
+  MockGeminiPass3Backend,
+} from './backends/mock-gemini.backend';
 import { computeCostInr, FLASH_PRICING, PRO_PRICING, estimateAudioInputTokens } from './pricing';
 
 describe('ModelRouter', () => {
-  it('runs pass1 and pass2, invoking onCallLog for each', async () => {
+  it('runs pass1, pass2, and pass3, invoking onCallLog for each', async () => {
     const onCallLog = vi.fn();
     const router = new ModelRouter({
       pass1: new MockGeminiPass1Backend(),
       pass2: new MockGeminiPass2Backend(),
+      pass3: new MockGeminiPass3Backend(),
       onCallLog,
     });
 
@@ -31,13 +36,27 @@ describe('ModelRouter', () => {
     expect(p2.output.therapyNote.version).toBe('V1');
     expect(p2.output.therapyNote.modality).toBe('CBT');
 
-    expect(onCallLog).toHaveBeenCalledTimes(2);
+    const p3 = await router.pass3({
+      sessionId: 's_1',
+      transcript: p1.output.transcript,
+      speakerSegments: p1.output.speakerSegments,
+      modality: 'CBT',
+      language: 'en',
+      note: p2.output.therapyNote,
+      clientContext: { presentingConcerns: 'anxiety' },
+    });
+    expect(p3.output.clinicalReport.version).toBe('V1');
+    expect(p3.output.clinicalReport.diagnosisCandidates.length).toBeGreaterThan(0);
+    expect(p3.callLog.pass).toBe('PASS_3_CLINICAL_ANALYSIS');
+
+    expect(onCallLog).toHaveBeenCalledTimes(3);
   });
 
   it('works without onCallLog callback', async () => {
     const router = new ModelRouter({
       pass1: new MockGeminiPass1Backend(),
       pass2: new MockGeminiPass2Backend(),
+      pass3: new MockGeminiPass3Backend(),
     });
     const result = await router.pass1({
       sessionId: 's_2',

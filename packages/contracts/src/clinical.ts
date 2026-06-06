@@ -1,0 +1,372 @@
+import { z } from 'zod';
+import { CuidSchema, IsoDateTimeSchema } from './common';
+import { SessionModalitySchema } from './client';
+
+/**
+ * Sprint 13 — Clinical Co-Pilot Pivot.
+ *
+ * After Pass 2 writes the TherapyNoteV1, Pass 3 (Clinical Analysis)
+ * produces a ClinicalReportV1 for the same session. The report is the
+ * decision-support surface for the therapist: it proposes diagnosis
+ * candidates with ICD-11 codes, the assessment data still needed, a
+ * case formulation, a treatment plan, recommended therapies, and any
+ * crisis flags. Each section carries the AI's confidence + citations
+ * back into the transcript so the therapist can verify.
+ *
+ * The therapist reviews each section in the Clinical Brief tab and
+ * marks it accepted / modified / rejected; confirmed diagnosis and
+ * plan sections persist to ClientDiagnosis and TreatmentPlan
+ * (cumulative across sessions).
+ *
+ * NOTE: ICD-11 codes (icd11Code / icd11Label) are kept in WHO English
+ * regardless of the report language — they are international identifiers.
+ */
+
+// ============================================================================
+// Locale — the ISO 639-1 of any narrative text in the report. V1 supports
+// English and Malayalam in the UI; Hindi/Tamil/Bengali are listed so the
+// schema doesn't have to change when those land.
+// ============================================================================
+
+export const ClinicalLocaleSchema = z.enum(['en', 'ml', 'hi', 'ta', 'bn']);
+export type ClinicalLocale = z.infer<typeof ClinicalLocaleSchema>;
+
+// ============================================================================
+// Supporting evidence — a verbatim quote from the transcript with its
+// timestamp. The Pass 3 prompt requires each diagnosis candidate and
+// each crisis flag to cite at least one quote so the therapist can
+// click through to the relevant moment in the session.
+// ============================================================================
+
+export const ClinicalSupportingQuoteSchema = z.object({
+  quote: z.string().min(1).max(4000),
+  speaker: z.enum(['client', 'therapist', 'unknown']),
+  /** Start time in ms from audio start; matches SpeakerSegment.startMs. */
+  startMs: z.number().int().nonnegative(),
+});
+export type ClinicalSupportingQuote = z.infer<typeof ClinicalSupportingQuoteSchema>;
+
+// ============================================================================
+// Diagnosis candidate — one possible ICD-11 diagnosis the AI is
+// suggesting for this client based on the session. The therapist
+// later picks one (or none) as primary.
+// ============================================================================
+
+export const Icd11CodeSchema = z
+  .string()
+  .min(2)
+  .max(16)
+  // ICD-11 codes are 2-7 chars: a digit + letter, then alphanumerics
+  // and dots. We don't try to validate chapter membership in Zod; the
+  // prompt enforces chapter 06 + post-confirmation we can build a
+  // small reference list. Loose regex keeps schema permissive of
+  // sub-codes like "6B01.0".
+  .regex(/^[0-9][A-Z][A-Z0-9.]*$/, 'must look like an ICD-11 code (e.g. 6B01 or 6B01.0)');
+export type Icd11Code = z.infer<typeof Icd11CodeSchema>;
+
+export const ClinicalDiagnosisCandidateSchema = z.object({
+  icd11Code: Icd11CodeSchema,
+  /** WHO's official English label. Stays English even when report.language != 'en'. */
+  icd11Label: z.string().min(1).max(400),
+  confidence: z.number().min(0).max(1),
+  supportingEvidence: z.array(ClinicalSupportingQuoteSchema).min(1).max(6),
+  /** Open questions / observations still needed to confirm this candidate. */
+  gapsToFill: z.array(z.string().min(1).max(400)).max(8).default([]),
+});
+export type ClinicalDiagnosisCandidate = z.infer<typeof ClinicalDiagnosisCandidateSchema>;
+
+// ============================================================================
+// Assessment gap — an open question the therapist should ask next
+// session. Distinct from gapsToFill on a single candidate because
+// some gaps apply across candidates.
+// ============================================================================
+
+export const ClinicalAssessmentGapSchema = z.object({
+  question: z.string().min(1).max(600),
+  rationale: z.string().min(1).max(600),
+});
+export type ClinicalAssessmentGap = z.infer<typeof ClinicalAssessmentGapSchema>;
+
+// ============================================================================
+// Treatment goal — measurable, with a measure the client + therapist
+// can use to check progress.
+// ============================================================================
+
+export const ClinicalGoalSchema = z.object({
+  description: z.string().min(1).max(400),
+  measure: z.string().min(1).max(400),
+});
+export type ClinicalGoal = z.infer<typeof ClinicalGoalSchema>;
+
+// ============================================================================
+// Treatment plan — proposed sequence of phases + measurable goals.
+// `modality` may extend beyond the SessionModality enum to include
+// "supportive" / "mixed" because the AI may recommend something the
+// session was not formally booked under.
+// ============================================================================
+
+export const ClinicalPlanModalitySchema = z.enum(['CBT', 'EMDR', 'supportive', 'mixed', 'other']);
+export type ClinicalPlanModality = z.infer<typeof ClinicalPlanModalitySchema>;
+
+export const ClinicalTreatmentPlanSchema = z.object({
+  modality: ClinicalPlanModalitySchema,
+  phaseSequence: z.array(z.string().min(1).max(120)).min(2).max(10),
+  goals: z.array(ClinicalGoalSchema).min(1).max(8),
+  expectedDurationSessions: z.number().int().min(1).max(60).nullable(),
+});
+export type ClinicalTreatmentPlan = z.infer<typeof ClinicalTreatmentPlanSchema>;
+
+// ============================================================================
+// Recommended therapy — a named technique the AI thinks fits this
+// client. Pass 4 (Sprint 14) generates an in-session script for any
+// chosen name; the rationale + when-in-plan help the therapist pick.
+// ============================================================================
+
+export const ClinicalRecommendedTherapySchema = z.object({
+  name: z.string().min(1).max(120),
+  rationale: z.string().min(1).max(800),
+  evidenceSummary: z.string().min(1).max(600),
+  /**
+   * Which phase of treatmentPlan.phaseSequence this therapy fits.
+   * Free-text label matching one of the phaseSequence entries.
+   */
+  whenInPlan: z.string().min(1).max(120),
+});
+export type ClinicalRecommendedTherapy = z.infer<typeof ClinicalRecommendedTherapySchema>;
+
+// ============================================================================
+// Crisis flag — separate from TherapyNoteV1.riskFlags because crisis
+// flagging needs structured kind + recommended action so the UI can
+// drive a hard-interrupt confirmation modal with hotline numbers.
+// ============================================================================
+
+export const ClinicalCrisisKindSchema = z.enum([
+  'suicidal_ideation',
+  'suicidal_plan',
+  'harm_to_others',
+  'child_safety',
+  'intimate_partner_violence',
+  'psychosis',
+  'substance_emergency',
+]);
+export type ClinicalCrisisKind = z.infer<typeof ClinicalCrisisKindSchema>;
+
+export const ClinicalCrisisSeveritySchema = z.enum(['low', 'medium', 'high', 'critical']);
+export type ClinicalCrisisSeverity = z.infer<typeof ClinicalCrisisSeveritySchema>;
+
+export const ClinicalCrisisFlagSchema = z.object({
+  kind: ClinicalCrisisKindSchema,
+  severity: ClinicalCrisisSeveritySchema,
+  indicators: z.array(ClinicalSupportingQuoteSchema).min(1).max(8),
+  recommendedAction: z.string().min(1).max(800),
+});
+export type ClinicalCrisisFlag = z.infer<typeof ClinicalCrisisFlagSchema>;
+
+// ============================================================================
+// ClinicalReportV1 — the full Pass 3 output. One per session.
+// ============================================================================
+
+export const ClinicalReportV1Schema = z.object({
+  version: z.literal('V1'),
+  /** ISO 639-1 of narrative text (formulation, gap rationales, plan goals). */
+  language: ClinicalLocaleSchema.default('en'),
+  modality: SessionModalitySchema,
+  diagnosisCandidates: z.array(ClinicalDiagnosisCandidateSchema).min(0).max(5),
+  /** Index into diagnosisCandidates, or null if the evidence is too thin. */
+  primaryDiagnosisIndex: z.number().int().nonnegative().nullable(),
+  assessmentGaps: z.array(ClinicalAssessmentGapSchema).max(8).default([]),
+  /** 3-6 sentence case-formulation narrative. */
+  formulation: z.string().min(1).max(4000),
+  treatmentPlan: ClinicalTreatmentPlanSchema,
+  recommendedTherapies: z.array(ClinicalRecommendedTherapySchema).min(0).max(8),
+  crisisFlags: z.array(ClinicalCrisisFlagSchema).default([]),
+});
+export type ClinicalReportV1 = z.infer<typeof ClinicalReportV1Schema>;
+
+// ============================================================================
+// Section confirmation — the therapist's accept/modify/reject decision
+// per section of a ClinicalReport. The whole confirmations object is
+// stored on the ClinicalReport row as JSONB.
+// ============================================================================
+
+export const ClinicalSectionKeySchema = z.enum([
+  'diagnosis',
+  'gaps',
+  'formulation',
+  'plan',
+  'therapies',
+  'crisis',
+]);
+export type ClinicalSectionKey = z.infer<typeof ClinicalSectionKeySchema>;
+
+export const ClinicalSectionStatusSchema = z.enum([
+  'PENDING',
+  'ACCEPTED',
+  'MODIFIED',
+  'REJECTED',
+]);
+export type ClinicalSectionStatus = z.infer<typeof ClinicalSectionStatusSchema>;
+
+export const ClinicalSectionConfirmationSchema = z.object({
+  status: ClinicalSectionStatusSchema,
+  confirmedAt: IsoDateTimeSchema.nullable(),
+  confirmedByPsychologistId: CuidSchema.nullable(),
+  /** Free-text rationale, required for MODIFIED + REJECTED. */
+  reason: z.string().max(2000).nullable(),
+  /**
+   * For MODIFIED: the therapist's edited version of the section body.
+   * Opaque shape varies by section — schema is enforced by the route
+   * handler against the matching section sub-schema before persist.
+   */
+  edits: z.unknown().nullable(),
+});
+export type ClinicalSectionConfirmation = z.infer<typeof ClinicalSectionConfirmationSchema>;
+
+export const ClinicalSectionConfirmationsSchema = z.object({
+  diagnosis: ClinicalSectionConfirmationSchema,
+  gaps: ClinicalSectionConfirmationSchema,
+  formulation: ClinicalSectionConfirmationSchema,
+  plan: ClinicalSectionConfirmationSchema,
+  therapies: ClinicalSectionConfirmationSchema,
+  crisis: ClinicalSectionConfirmationSchema,
+});
+export type ClinicalSectionConfirmations = z.infer<typeof ClinicalSectionConfirmationsSchema>;
+
+/** Default for a freshly-generated report: every section pending. */
+export const PENDING_SECTION_CONFIRMATIONS: ClinicalSectionConfirmations = {
+  diagnosis: {
+    status: 'PENDING',
+    confirmedAt: null,
+    confirmedByPsychologistId: null,
+    reason: null,
+    edits: null,
+  },
+  gaps: {
+    status: 'PENDING',
+    confirmedAt: null,
+    confirmedByPsychologistId: null,
+    reason: null,
+    edits: null,
+  },
+  formulation: {
+    status: 'PENDING',
+    confirmedAt: null,
+    confirmedByPsychologistId: null,
+    reason: null,
+    edits: null,
+  },
+  plan: {
+    status: 'PENDING',
+    confirmedAt: null,
+    confirmedByPsychologistId: null,
+    reason: null,
+    edits: null,
+  },
+  therapies: {
+    status: 'PENDING',
+    confirmedAt: null,
+    confirmedByPsychologistId: null,
+    reason: null,
+    edits: null,
+  },
+  crisis: {
+    status: 'PENDING',
+    confirmedAt: null,
+    confirmedByPsychologistId: null,
+    reason: null,
+    edits: null,
+  },
+};
+
+// ============================================================================
+// ClinicalReport — server-side row. One per Session.
+// ============================================================================
+
+export const ClinicalReportStatusSchema = z.enum(['PENDING', 'COMPLETED', 'FAILED']);
+export type ClinicalReportStatus = z.infer<typeof ClinicalReportStatusSchema>;
+
+export const ClinicalReportSchema = z.object({
+  id: CuidSchema,
+  sessionId: CuidSchema,
+  clientId: CuidSchema,
+  psychologistId: CuidSchema,
+  status: ClinicalReportStatusSchema,
+  body: ClinicalReportV1Schema.nullable(),
+  confirmations: ClinicalSectionConfirmationsSchema,
+  totalCostInr: z.string(),
+  errorMessage: z.string().nullable(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
+});
+export type ClinicalReport = z.infer<typeof ClinicalReportSchema>;
+
+// ============================================================================
+// Section-confirmation API — PATCH /api/v1/clinical-reports/[id]/sections/[section]
+// ============================================================================
+
+export const ClinicalSectionActionSchema = z.enum(['accept', 'modify', 'reject']);
+export type ClinicalSectionAction = z.infer<typeof ClinicalSectionActionSchema>;
+
+export const ConfirmClinicalSectionInputSchema = z
+  .object({
+    action: ClinicalSectionActionSchema,
+    reason: z.string().min(1).max(2000).optional(),
+    /** Per-section edited body; required for action=modify. */
+    edits: z.unknown().optional(),
+  })
+  .refine(
+    (d) => d.action !== 'modify' || d.edits !== undefined,
+    'edits is required when action=modify',
+  )
+  .refine(
+    (d) => (d.action === 'modify' || d.action === 'reject' ? d.reason !== undefined : true),
+    'reason is required when action=modify or action=reject',
+  );
+export type ConfirmClinicalSectionInput = z.infer<typeof ConfirmClinicalSectionInputSchema>;
+
+// ============================================================================
+// ClientDiagnosis — cumulative per-client diagnosis record. One row per
+// confirmed diagnosis decision; older entries are kept (supersededAt set)
+// when the therapist updates the diagnosis on a later session.
+// ============================================================================
+
+export const ClientDiagnosisSchema = z.object({
+  id: CuidSchema,
+  clientId: CuidSchema,
+  psychologistId: CuidSchema,
+  sessionId: CuidSchema,
+  clinicalReportId: CuidSchema,
+  icd11Code: Icd11CodeSchema,
+  icd11Label: z.string(),
+  confidence: z.number().min(0).max(1),
+  supportingEvidence: z.array(ClinicalSupportingQuoteSchema),
+  isPrimary: z.boolean(),
+  confirmedAt: IsoDateTimeSchema,
+  confirmedByPsychologistId: CuidSchema,
+  supersededAt: IsoDateTimeSchema.nullable(),
+  notes: z.string().nullable(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
+});
+export type ClientDiagnosis = z.infer<typeof ClientDiagnosisSchema>;
+
+// ============================================================================
+// TreatmentPlan — cumulative per-client plan. Versioned: each confirmation
+// of a new plan bumps the version and supersedes the previous active plan.
+// ============================================================================
+
+export const TreatmentPlanSchema = z.object({
+  id: CuidSchema,
+  clientId: CuidSchema,
+  psychologistId: CuidSchema,
+  sourceSessionId: CuidSchema,
+  sourceClinicalReportId: CuidSchema,
+  version: z.number().int().positive(),
+  body: ClinicalTreatmentPlanSchema,
+  confirmedAt: IsoDateTimeSchema,
+  confirmedByPsychologistId: CuidSchema,
+  supersededAt: IsoDateTimeSchema.nullable(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
+});
+export type TreatmentPlan = z.infer<typeof TreatmentPlanSchema>;

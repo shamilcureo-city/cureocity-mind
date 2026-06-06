@@ -4,10 +4,13 @@ import {
   type IModelRouter,
   type IPass1Backend,
   type IPass2Backend,
+  type IPass3Backend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
+  MockGeminiPass3Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
+  VertexGeminiProClinicalBackend,
   VertexGeminiProGlobalBackend,
 } from '@cureocity/llm';
 import { PrismaService } from '../prisma/prisma.service';
@@ -29,13 +32,15 @@ const modelRouterProvider: Provider = {
 
     let pass1: IPass1Backend;
     let pass2: IPass2Backend;
+    let pass3: IPass3Backend;
 
     if (!projectId) {
       logger.warn(
-        'GCP_PROJECT_ID is unset — using MockGeminiPass1Backend + MockGeminiPass2Backend. Do NOT ship to production like this.',
+        'GCP_PROJECT_ID is unset — using MockGeminiPass1Backend + MockGeminiPass2Backend + MockGeminiPass3Backend. Do NOT ship to production like this.',
       );
       pass1 = new MockGeminiPass1Backend();
       pass2 = new MockGeminiPass2Backend();
+      pass3 = new MockGeminiPass3Backend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -50,12 +55,22 @@ const modelRouterProvider: Provider = {
         model: config.get<string>('GEMINI_PRO_MODEL') ?? 'gemini-1.5-pro-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      pass3 = new VertexGeminiProClinicalBackend({
+        projectId,
+        location: config.get<string>('GEMINI_PRO_REGION') ?? 'us-central1',
+        model:
+          config.get<string>('GEMINI_CLINICAL_MODEL') ??
+          config.get<string>('GEMINI_PRO_MODEL') ??
+          'gemini-1.5-pro-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
     return new ModelRouter({
       pass1,
       pass2,
+      pass3,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

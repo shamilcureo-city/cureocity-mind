@@ -9,9 +9,9 @@ import { prisma } from './prisma';
  * Pass `tx` when the audit write must be atomic with a business write
  * (mirrors the original NestJS pattern).
  *
- * The chaos-audit coverage test (Sprint 9 PR 4) scans for
- * `action: 'X'` literals — those calls in this file count too, so
- * every action that flows through here is covered.
+ * The chaos-audit coverage test (Sprint 9 PR 4) scans for action
+ * literals in writer sites — calls that route through this helper
+ * count too, so every action that flows here is covered.
  */
 
 export interface AuditWrite {

@@ -11,18 +11,27 @@ import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { ClientTab } from '@/components/app/ClientTab';
+import { ClinicalBriefTab } from '@/components/app/ClinicalBriefTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
 import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
+import { toClinicalReport } from '@/lib/clinical-mappers';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 
 export const dynamic = 'force-dynamic';
 
-type TabKey = 'notes' | 'client' | 'transcript' | 'session-info' | 'mindmap' | 'reflection';
+type TabKey =
+  | 'notes'
+  | 'clinical-brief'
+  | 'client'
+  | 'transcript'
+  | 'session-info'
+  | 'mindmap'
+  | 'reflection';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -31,6 +40,7 @@ interface PageProps {
 
 const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'notes',
+  'clinical-brief',
   'client',
   'transcript',
   'session-info',
@@ -86,6 +96,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientId={session.clientId}
           />
         )}
+        {tab === 'clinical-brief' && <ClinicalBriefTabPanel sessionId={id} />}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
         {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
@@ -94,6 +105,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       </div>
     </Container>
   );
+}
+
+async function ClinicalBriefTabPanel({ sessionId }: { sessionId: string }) {
+  const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
+  const initial = row ? toClinicalReport(row) : null;
+  return <ClinicalBriefTab sessionId={sessionId} initialReport={initial} />;
 }
 
 async function NotesTabPanel({

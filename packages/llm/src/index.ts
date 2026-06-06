@@ -2,7 +2,11 @@ export * from './types';
 export * from './prompts';
 export * from './pricing';
 export * from './model-router';
-export { MockGeminiPass1Backend, MockGeminiPass2Backend } from './backends/mock-gemini.backend';
+export {
+  MockGeminiPass1Backend,
+  MockGeminiPass2Backend,
+  MockGeminiPass3Backend,
+} from './backends/mock-gemini.backend';
 export {
   VertexGeminiFlashIndiaBackend,
   type VertexGeminiFlashIndiaOptions,
@@ -12,3 +16,8 @@ export {
   Pass2BackendError,
   type VertexGeminiProGlobalOptions,
 } from './backends/vertex-pro-global.backend';
+export {
+  VertexGeminiProClinicalBackend,
+  Pass3BackendError,
+  type VertexGeminiProClinicalOptions,
+} from './backends/vertex-clinical.backend';

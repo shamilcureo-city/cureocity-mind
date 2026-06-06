@@ -43,6 +43,10 @@ const SCAN_ROOTS = [
   // pivoted the monolith-mode app to write audits inline rather than
   // proxy through the NestJS service stubs).
   'apps/web/app/api',
+  // Sprint 13 — note-orchestrator and any sibling helpers in
+  // apps/web/lib can also write audits (e.g. CLINICAL_REPORT_GENERATED
+  // emitted from runClinicalAnalysis as a SYSTEM actor).
+  'apps/web/lib',
 ];
 
 /**

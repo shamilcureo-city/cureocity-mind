@@ -1,10 +1,18 @@
 import Link from 'next/link';
 import { Badge } from '../ui/Badge';
 
-type TabKey = 'notes' | 'client' | 'transcript' | 'session-info' | 'mindmap' | 'reflection';
+type TabKey =
+  | 'notes'
+  | 'clinical-brief'
+  | 'client'
+  | 'transcript'
+  | 'session-info'
+  | 'mindmap'
+  | 'reflection';
 
 const TABS: { key: TabKey; label: string; live: boolean; sprint?: string }[] = [
   { key: 'notes', label: 'Notes', live: true },
+  { key: 'clinical-brief', label: 'Clinical Brief', live: true },
   { key: 'client', label: 'Client', live: true },
   { key: 'transcript', label: 'Transcript', live: true },
   { key: 'session-info', label: 'Session Information', live: true },

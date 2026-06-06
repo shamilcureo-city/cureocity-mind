@@ -68,6 +68,15 @@ export const AuditActionSchema = z.enum([
   'INTAKE_SUBMITTED',
   'INTAKE_REVIEWED',
   'INTAKE_MATCHED',
+  // Clinical co-pilot — Sprint 13.
+  // Pass 3 produces a ClinicalReport per session; the therapist
+  // accepts/modifies/rejects each section. Confirmed sections
+  // persist to ClientDiagnosis + TreatmentPlan.
+  'CLINICAL_REPORT_GENERATED',
+  'CLINICAL_SECTION_CONFIRMED',
+  'DIAGNOSIS_CONFIRMED',
+  'PLAN_CONFIRMED',
+  'CRISIS_ACKNOWLEDGED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

@@ -40,7 +40,11 @@ export function recordCrisisFlag(severity: string): void {
 
 let geminiCallDurationMs: Histogram | null = null;
 export function recordGeminiCall(opts: {
-  pass: 'PASS_1_TRANSCRIBE_AND_ANALYSE' | 'PASS_2_NOTE_GENERATION' | 'PASS_3_MISSED_THEMES';
+  pass:
+    | 'PASS_1_TRANSCRIBE_AND_ANALYSE'
+    | 'PASS_2_NOTE_GENERATION'
+    | 'PASS_3_CLINICAL_ANALYSIS'
+    | 'PASS_3_MISSED_THEMES';
   status: 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
   region: string;
   durationMs: number;

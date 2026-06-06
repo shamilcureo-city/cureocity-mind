@@ -2,8 +2,10 @@ import { existsSync, writeFileSync } from 'node:fs';
 import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
+  MockGeminiPass3Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
+  VertexGeminiProClinicalBackend,
   VertexGeminiProGlobalBackend,
   type IModelRouter,
 } from '@cureocity/llm';
@@ -73,6 +75,11 @@ function build(): IModelRouter {
         location: proRegion,
         model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
+      pass3: new VertexGeminiProClinicalBackend({
+        projectId: project,
+        location: proRegion,
+        model: process.env['VERTEX_CLINICAL_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
+      }),
     });
   }
   console.info(
@@ -81,6 +88,7 @@ function build(): IModelRouter {
   return new ModelRouter({
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
+    pass3: new MockGeminiPass3Backend(),
   });
 }
 
