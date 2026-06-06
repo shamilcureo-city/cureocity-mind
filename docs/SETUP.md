@@ -1,8 +1,14 @@
 # Cureocity Mind — production setup
 
-The scribe is a single Next.js app on Vercel against a Neon Postgres,
+The app is a single Next.js deployment on Vercel against a Neon Postgres,
 with a small set of third-party providers. This file lists every account
 and env var per sprint, so procurement runs in parallel with build.
+
+> **Status:** Clinical co-pilot (Sprints 13-17) is feature-complete. The
+> per-sprint env-var sections below include the new Pass 3 / Pass 4 /
+> Pass 5 model overrides and the patient-sharing WATI + SendGrid keys
+> added in Sprint 15. See `docs/CLINICAL_COPILOT.md` for the
+> architectural overview.
 
 ## Accounts at-a-glance
 
@@ -69,6 +75,28 @@ GOOGLE_APPLICATION_CREDENTIALS=        # path to service-account JSON
 COST_CAP_PER_SESSION_INR=500
 COST_CAP_PER_THERAPIST_MONTHLY_INR=15000
 ```
+
+### Sprint 13–17 — Clinical co-pilot (new Gemini passes + patient sharing)
+```
+# Optional per-pass model overrides — default to VERTEX_PRO_MODEL.
+VERTEX_CLINICAL_MODEL=gemini-2.5-pro       # Pass 3 (clinical analysis)
+VERTEX_THERAPY_SCRIPT_MODEL=gemini-2.5-pro # Pass 4 (in-session scripts)
+VERTEX_BRIEF_MODEL=gemini-2.5-pro          # Pass 5 (pre-session brief)
+
+# Patient sharing (Sprint 15) — WhatsApp + email channel adapters
+WATI_API_BASE=https://live-mt-server.wati.io/<tenant-id>
+WATI_BEARER_TOKEN=
+WATI_TEMPLATE_PATIENT_SHARE=patient_share  # WhatsApp template name; must be
+                                           # pre-approved by WhatsApp Business
+SENDGRID_API_KEY=
+SENDGRID_FROM_EMAIL=
+SENDGRID_FROM_NAME=Cureocity Mind
+```
+
+When `WATI_*` or `SENDGRID_*` env vars are unset the share-channel
+factory falls back to the `NoopBackend` so dev/CI still produces a
+coherent `PatientShare` row + provider message id. The `/p/<token>`
+patient portal works regardless.
 
 ### Sprint 9 — clinic regions + notifications
 ```

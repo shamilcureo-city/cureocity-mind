@@ -7,7 +7,9 @@ import type {
   ModalityTransition as ModalityTransitionRow,
   NoteDraft as NoteDraftRow,
   NoteTemplate as NoteTemplateRow,
+  Psychologist as PsychologistRow,
   Session as SessionRow,
+  WebAuthnCredential as WebAuthnCredentialRow,
 } from '@prisma/client';
 import type {
   AffectFeature,
@@ -18,10 +20,14 @@ import type {
   ModalityTransition,
   NoteDraft,
   NoteTemplate,
+  Psychologist,
   Session,
+  SessionModality,
   SpeakerSegment,
   TemplateSection,
   TherapyNoteV1,
+  WebAuthnCredential,
+  WebAuthnTransport,
   WorkflowGoal,
 } from '@cureocity/contracts';
 
@@ -45,6 +51,8 @@ export function toClient(row: ClientRow): Client {
     dateOfBirth: toIsoDate(row.dateOfBirth),
     presentingConcerns: row.presentingConcerns,
     preferredModality: row.preferredModality as Client['preferredModality'],
+    preferredLanguage: row.preferredLanguage,
+    spokenLanguages: row.spokenLanguages,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -223,6 +231,62 @@ export function toNoteTemplate(row: NoteTemplateRow): NoteTemplate {
     description: row.description,
     sections: (row.sections as unknown as TemplateSection[]) ?? [],
     isDefault: row.isDefault,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+const VALID_TRANSPORTS = new Set<WebAuthnTransport>([
+  'usb',
+  'nfc',
+  'ble',
+  'internal',
+  'hybrid',
+]);
+
+export function toPsychologist(row: PsychologistRow): Psychologist {
+  return {
+    id: row.id,
+    firebaseUid: row.firebaseUid,
+    email: row.email,
+    fullName: row.fullName,
+    phone: row.phone,
+    rciNumber: row.rciNumber,
+    rciVerifiedAt: row.rciVerifiedAt?.toISOString() ?? null,
+    status: row.status,
+    role: row.role,
+    headline: row.headline,
+    bio: row.bio,
+    photoUrl: row.photoUrl,
+    specialties: row.specialties,
+    languages: row.languages,
+    modalities: row.modalities,
+    yearsOfExperience: row.yearsOfExperience,
+    locationCity: row.locationCity,
+    locationProvince: row.locationProvince,
+    sessionFeeInr: row.sessionFeeInr,
+    isAcceptingNewClients: row.isAcceptingNewClients,
+    defaultOutputLanguage: row.defaultOutputLanguage,
+    defaultModality: (row.defaultModality as SessionModality | null) ?? null,
+    backupEmail: row.backupEmail,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function toWebAuthnCredential(row: WebAuthnCredentialRow): WebAuthnCredential {
+  return {
+    id: row.id,
+    psychologistId: row.psychologistId,
+    credentialId: row.credentialId,
+    publicKey: row.publicKey,
+    signCount: row.signCount,
+    transports: row.transports.filter((t): t is WebAuthnTransport =>
+      VALID_TRANSPORTS.has(t as WebAuthnTransport),
+    ),
+    label: row.label,
+    lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+    revokedAt: row.revokedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

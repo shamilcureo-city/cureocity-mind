@@ -34,6 +34,14 @@ Personal Data Protection Act, 2023 (India).
 | Consent records    | scope, script-version, granted/withdrawn | `consents`                                                           | Plaintext                               | Active + 10y (proof of lawful basis).                                                                |
 | Push subscriptions | Web Push endpoint + keys                 | `client_push_subscriptions`                                          | Plaintext (revocable)                   | Until revokedAt + 90d, then hard delete.                                                             |
 | DSR rows           | nominations, erasures, grievances        | `client_nominations`, `client_erasure_requests`, `client_grievances` | Plaintext (legal evidence)              | Active + 10y.                                                                                        |
+| Clinical brief     | Pass 3 output + per-section confirmation | `clinical_reports`                                                   | JSON column (transcript quotes inside)  | Same as therapy_notes (active + 7y).                                                                 |
+| Client diagnoses   | cumulative confirmed ICD-11 entries      | `client_diagnoses`                                                   | JSON supporting quotes                  | Active + 7y. Supersedable, never deleted.                                                            |
+| Treatment plans    | versioned confirmed plans                | `treatment_plans`                                                    | JSON                                    | Active + 7y. Supersedable.                                                                            |
+| Therapy scripts    | Pass 4 cached output                     | `therapy_scripts`                                                    | JSON                                    | Cache; can be safely deleted on regenerate.                                                          |
+| Patient shares     | snapshot at share time + delivery state  | `patient_shares`                                                     | JSON snapshot                           | Default 30d portal expiry; row retained for audit (active + 10y).                                    |
+| Pre-session briefs | Pass 5 cached output                     | `pre_session_briefs`                                                 | JSON                                    | Cache; regenerates per new session.                                                                  |
+| Instrument scores  | PHQ-9 / GAD-7 administrations            | `instrument_responses`                                               | JSON answer map                         | Active + 7y (clinical record).                                                                       |
+| Safety plans       | Stanley & Brown 5-step crisis plans      | `safety_plans`                                                       | JSON                                    | Active + 7y. Supersedable.                                                                            |
 
 ## 3. Data flow diagram (text form)
 
@@ -90,6 +98,10 @@ Therapist (PWA)            Client (PWA)              Backend (Mumbai)           
 - **WATI**: Mumbai-resident. WhatsApp Business templates do not include client identifiers in the template text; only first name + treatment plan URL.
 
 When the Central Government issues a § 16(1) jurisdiction list restricting outflow, the only adjustment needed is to swap Pass 2 to a regional Pro endpoint (planned). The architecture already separates Pass 1 and Pass 2 backends, so the swap is a single environment variable + circuit-breaker reroute.
+
+**Sprint 13-17 update — additional global passes:** Pass 3 (Clinical Analysis), Pass 4 (Therapy Script), and Pass 5 (Pre-Session Brief) all run on Gemini Pro in the same global region as Pass 2. Their inputs are de-identified text only (transcript + note + structured client history) — the same `CROSS_BORDER_PROCESSING` consent that covers Pass 2 covers them. Each pass is wired through `ModelRouter` as a distinct backend so a future regional swap can be done per-pass via `VERTEX_CLINICAL_MODEL` / `VERTEX_THERAPY_SCRIPT_MODEL` / `VERTEX_BRIEF_MODEL` env vars (see `docs/SETUP.md`).
+
+**Sprint 15 update — patient sharing:** outbound channels are WATI (WhatsApp, India-resident) and SendGrid (email). The `/p/<token>` patient portal is served from the same Vercel deployment as the therapist app; it has no external dependency. Snapshots are locked in `patient_shares.snapshot` at share time so the patient view is stable even if the source row is later edited or erased.
 
 ## 5. Data subject rights (DPDP §§ 11–15)
 

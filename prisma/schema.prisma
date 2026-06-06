@@ -61,37 +61,93 @@ model Psychologist {
 
   // Public directory profile fields. All optional so existing rows
   // continue to validate; the directory hides rows where bio is null.
-  headline               String?
-  bio                    String?  @db.Text
-  photoUrl               String?
-  specialties            String[] @default([])
-  languages              String[] @default([])
-  modalities             String[] @default([])
-  yearsOfExperience      Int?
-  locationCity           String?
-  locationProvince       String?
-  sessionFeeInr          Int?
-  isAcceptingNewClients  Boolean  @default(true)
+  headline              String?
+  bio                   String?  @db.Text
+  photoUrl              String?
+  specialties           String[] @default([])
+  languages             String[] @default([])
+  modalities            String[] @default([])
+  yearsOfExperience     Int?
+  locationCity          String?
+  locationProvince      String?
+  sessionFeeInr         Int?
+  isAcceptingNewClients Boolean  @default(true)
+
+  // Sprint 18 — therapist preferences.
+  /// ISO 639-1 default output language for new notes / briefs.
+  defaultOutputLanguage String  @default("en")
+  /// Default modality when creating a session for a client without a preferredModality.
+  defaultModality       String?
+  /// Secondary email for account recovery if phone-OTP fails. Verified separately.
+  backupEmail           String?
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  clients       Client[]
-  sessions      Session[]
-  auditLogs     AuditLog[]
-  consentsTaken Consent[]
-  modalityStates ModalityState[]
+  clients             Client[]
+  sessions            Session[]
+  auditLogs           AuditLog[]
+  consentsTaken       Consent[]
+  modalityStates      ModalityState[]
   exerciseAssignments ExerciseAssignment[]
-  tenantKeys    PsychologistTenantKey[]
-  bookings      Booking[]
-  intakeMatches IntakeSubmission[]
-  noteTemplates NoteTemplate[]
+  tenantKeys          PsychologistTenantKey[]
+  bookings            Booking[]
+  intakeMatches       IntakeSubmission[]
+  noteTemplates       NoteTemplate[]
+  clinicalReports     ClinicalReport[]
+  clientDiagnoses     ClientDiagnosis[]
+  treatmentPlans      TreatmentPlan[]
+  therapyScripts      TherapyScript[]
+  patientShares       PatientShare[]
+  preSessionBriefs    PreSessionBrief[]
+  instrumentResponses InstrumentResponse[]
+  safetyPlans         SafetyPlan[]
+  webauthnCredentials WebAuthnCredential[]
 
   @@index([status])
   @@index([role])
   @@index([isAcceptingNewClients])
   @@map("psychologists")
+}
+
+// ============================================================================
+// WebAuthnCredential — Sprint 18. One row per (psychologist, registered
+// platform authenticator). The presence of ≥1 non-revoked credential
+// flips the sign route from "assertion optional" to "assertion required".
+// Signature verification ladder documented in
+// packages/contracts/src/webauthn.ts.
+// ============================================================================
+
+model WebAuthnCredential {
+  id             String @id @default(cuid())
+  psychologistId String
+
+  /// base64url of cred.rawId — globally unique across all credentials.
+  credentialId String @unique
+  /// COSE public key bytes (base64url).
+  publicKey    String @db.Text
+
+  /// Counter the authenticator increments per use; rolling-back is replay.
+  signCount Int @default(0)
+
+  /// Comma-separated transport hints captured at registration.
+  /// Persisted as `String[]` since Postgres supports it natively.
+  transports String[] @default([])
+
+  /// User-friendly label ("MacBook Touch ID").
+  label String?
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId, revokedAt])
+  @@map("webauthn_credentials")
 }
 
 enum BookingStatus {
@@ -111,8 +167,8 @@ model Booking {
   message      String?       @db.Text
   status       BookingStatus @default(PENDING)
 
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
 
   therapist Psychologist @relation(fields: [therapistId], references: [id])
@@ -142,17 +198,17 @@ enum IntakeStatus {
 }
 
 model IntakeSubmission {
-  id           String       @id @default(cuid())
-  patientName  String
-  patientEmail String
-  patientPhone String
-  concerns     String[]     @default([])
-  notes        String?      @db.Text
-  preferredModality String?
-  preferredLanguage String?
-  mode         IntakeMode   @default(EITHER)
-  urgency      IntakeUrgency @default(MEDIUM)
-  status       IntakeStatus @default(NEW)
+  id                  String        @id @default(cuid())
+  patientName         String
+  patientEmail        String
+  patientPhone        String
+  concerns            String[]      @default([])
+  notes               String?       @db.Text
+  preferredModality   String?
+  preferredLanguage   String?
+  mode                IntakeMode    @default(EITHER)
+  urgency             IntakeUrgency @default(MEDIUM)
+  status              IntakeStatus  @default(NEW)
   assignedTherapistId String?
 
   createdAt DateTime  @default(now())
@@ -179,12 +235,12 @@ model PsychologistTenantKey {
   psychologistId String
 
   /// KMS-side identifier (AWS KMS CMK id, or 'local-dev-kms-v1' for dev).
-  kmsKeyId String
+  kmsKeyId   String
   /// Base64-encoded wrapped DEK as returned by IKmsProvider.generateDataKey.
-  wrappedKey String @db.Text
+  wrappedKey String    @db.Text
   /// Active rows are used for new writes; old rows are used for decrypt only.
   /// On rotation, the previous active row's retiredAt is set.
-  retiredAt DateTime?
+  retiredAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -240,7 +296,19 @@ model Client {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  psychologist        Psychologist         @relation(fields: [psychologistId], references: [id])
+  // Patient-facing language preference. Sprint 13 introduces this as
+  // ISO 639-1; defaults to "en". Patient portal + sent materials use
+  // this. Therapist UI session start picks up this value as default.
+  preferredLanguage String @default("en")
+
+  // Sprint 16 — the client's typical spoken languages. Therapist sets
+  // this when creating the client (optional). Pass 1 uses it as a
+  // soft hint for transcription; Pass 4 uses it to choose the
+  // verbatim "therapistSays" language so the therapist reads aloud
+  // in something the client understands. Empty when unset.
+  spokenLanguages String[] @default([])
+
+  psychologist        Psychologist             @relation(fields: [psychologistId], references: [id])
   consents            Consent[]
   sessions            Session[]
   modalityState       ModalityState?
@@ -252,6 +320,14 @@ model Client {
   nominations         ClientNomination[]
   erasureRequests     ClientErasureRequest[]
   grievances          ClientGrievance[]
+  clinicalReports     ClinicalReport[]
+  diagnoses           ClientDiagnosis[]
+  treatmentPlans      TreatmentPlan[]
+  therapyScripts      TherapyScript[]
+  patientShares       PatientShare[]
+  preSessionBriefs    PreSessionBrief[]
+  instrumentResponses InstrumentResponse[]
+  safetyPlans         SafetyPlan[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -281,8 +357,8 @@ enum DsrGrievanceStatus {
 }
 
 model ClientNomination {
-  id        String @id @default(cuid())
-  clientId  String
+  id       String @id @default(cuid())
+  clientId String
 
   /// Nominee's display name (the trusted person who can act on the
   /// client's data rights if the client is unable to).
@@ -320,7 +396,7 @@ model ClientErasureRequest {
   /// because admins may be soft-deleted later.
   resolvedByPsychologistId String?
   resolvedAt               DateTime?
-  resolutionNotes          String? @db.Text
+  resolutionNotes          String?   @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -342,9 +418,9 @@ model ClientGrievance {
   subject String
   body    String @db.Text
 
-  acknowledgedAt DateTime?
-  resolvedAt     DateTime?
-  resolutionNotes String? @db.Text
+  acknowledgedAt  DateTime?
+  resolvedAt      DateTime?
+  resolutionNotes String?   @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -412,7 +488,7 @@ model ClientClaimToken {
   issuedAt  DateTime @default(now())
   expiresAt DateTime
 
-  redeemedAt           DateTime?
+  redeemedAt            DateTime?
   redeemedByFirebaseUid String?
 
   client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -512,15 +588,35 @@ model Session {
   // have an audit trail even if client consents change later. (Sprint 2)
   consentSnapshot Json?
 
+  // Per-session output language for Pass 2/3/4 NARRATIVE text (notes,
+  // clinical brief, therapy-script rationale). Sprint 13 introduced
+  // the field as a single string; Sprint 16 keeps it as the OUTPUT
+  // (therapist-facing) language and adds spokenLanguages alongside.
+  // ISO 639-1; defaults to "en".
+  language String @default("en")
+
+  // Sprint 16 — spoken languages detected by Pass 1, sorted by
+  // prevalence. Empty until Pass 1 completes. Real Indian sessions
+  // are usually code-mixed (Manglish, Hinglish, etc.) so this is an
+  // ARRAY rather than a single value.
+  // Examples: ["en"], ["ml", "en"], ["hi", "en"], ["en", "ml", "hi"].
+  spokenLanguages String[] @default([])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client         Client          @relation(fields: [clientId], references: [id])
-  psychologist   Psychologist    @relation(fields: [psychologistId], references: [id])
-  audioChunks    AudioChunk[]
-  geminiCallLogs GeminiCallLog[]
-  noteDraft      NoteDraft?
-  therapyNote    TherapyNote?
+  client              Client               @relation(fields: [clientId], references: [id])
+  psychologist        Psychologist         @relation(fields: [psychologistId], references: [id])
+  audioChunks         AudioChunk[]
+  geminiCallLogs      GeminiCallLog[]
+  noteDraft           NoteDraft?
+  therapyNote         TherapyNote?
+  clinicalReport      ClinicalReport?
+  treatmentPlans      TreatmentPlan[]
+  clientDiagnoses     ClientDiagnosis[]
+  patientShares       PatientShare[]
+  instrumentResponses InstrumentResponse[]
+  safetyPlans         SafetyPlan[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -535,14 +631,14 @@ model Session {
 // ============================================================================
 
 model AudioChunk {
-  id         String   @id @default(cuid())
+  id         String @id @default(cuid())
   sessionId  String
   chunkIndex Int
   mimeType   String
   sampleRate Int
   sizeBytes  Int
   durationMs Int
-  s3Key      String   @default("")
+  s3Key      String @default("")
   // Inline storage for PCM bytes. Used when the upload bypasses external
   // object storage (Sprint 2 fallback after @vercel/blob/client.upload()
   // hung silently in production). orchestrator.fetchAudio prefers
@@ -568,7 +664,10 @@ model AudioChunk {
 enum GeminiPass {
   PASS_1_TRANSCRIBE_AND_ANALYSE
   PASS_2_NOTE_GENERATION
+  PASS_3_CLINICAL_ANALYSIS // Sprint 13 — Clinical Co-Pilot Pivot
   PASS_3_MISSED_THEMES
+  PASS_4_THERAPY_SCRIPT // Sprint 14 — Therapy Script Pass
+  PASS_5_PRE_SESSION_BRIEF // Sprint 17 — Pre-Session Brief
 }
 
 enum GeminiCallStatus {
@@ -634,11 +733,11 @@ model NoteDraft {
   // Pass 1 outputs
   /// V1 plaintext column — retained during the encryption rollout window.
   /// Sprint 10 hardens cutover. Gap G10.
-  transcript           String? @db.Text
+  transcript          String? @db.Text
   /// Envelope-encrypted transcript per @cureocity/crypto.
-  transcriptEncrypted  String? @db.Text
-  speakerSegments      Json?
-  affectFeatures       Json?
+  transcriptEncrypted String? @db.Text
+  speakerSegments     Json?
+  affectFeatures      Json?
 
   // Pass 2 output (validated TherapyNoteV1)
   content      Json?
@@ -679,11 +778,11 @@ model TherapyNote {
   // The challenge bound into the assertion is sha256Hex(payload); the
   // server re-computed that hash on receipt and compared. Stored so an
   // auditor can independently verify months later. (gap G6/G11, Sprint 7 PR 4)
-  signCredentialId        String?
-  signClientDataJsonB64u  String?
+  signCredentialId          String?
+  signClientDataJsonB64u    String?
   signAuthenticatorDataB64u String?
-  signSignatureB64u       String?
-  signChallengeHashHex    String?
+  signSignatureB64u         String?
+  signChallengeHashHex      String?
 
   createdAt DateTime @default(now())
 
@@ -711,9 +810,9 @@ model NoteEdit {
   id            String @id @default(cuid())
   therapyNoteId String
 
-  field   NoteEditField
-  before  String        @db.Text
-  after   String        @db.Text
+  field  NoteEditField
+  before String        @db.Text
+  after  String        @db.Text
 
   createdAt DateTime @default(now())
 
@@ -759,6 +858,429 @@ model NoteTemplate {
 }
 
 // ============================================================================
+// ClinicalReport — Sprint 13 (Clinical Co-Pilot Pivot). One per Session.
+// Pass 3 fills in `body` (a ClinicalReportV1 JSON object). The therapist
+// then reviews each section in the Clinical Brief UI; per-section
+// confirm state lives in `confirmations` JSONB. Confirmed diagnosis +
+// plan replicate to ClientDiagnosis + TreatmentPlan respectively for
+// cumulative cross-session view.
+// ============================================================================
+
+enum ClinicalReportStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model ClinicalReport {
+  id             String @id @default(cuid())
+  sessionId      String @unique
+  clientId       String
+  psychologistId String
+
+  status ClinicalReportStatus @default(PENDING)
+
+  /// Pass 3 output validated against ClinicalReportV1Schema. Nullable
+  /// until the orchestrator successfully writes the model output.
+  body Json?
+
+  /// Per-section confirmation state, shape:
+  /// {
+  ///   diagnosis|gaps|formulation|plan|therapies|crisis: {
+  ///     status, confirmedAt, confirmedByPsychologistId, reason, edits
+  ///   }
+  /// }
+  /// Defaults to every section PENDING; route handlers validate the
+  /// payload against ClinicalSectionConfirmationsSchema.
+  confirmations Json @default("{}")
+
+  totalCostInr Decimal @default(0) @db.Decimal(10, 4)
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session         Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  client          Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist    Psychologist      @relation(fields: [psychologistId], references: [id])
+  clientDiagnoses ClientDiagnosis[]
+  treatmentPlans  TreatmentPlan[]
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@index([status, createdAt])
+  @@map("clinical_reports")
+}
+
+// ============================================================================
+// ClientDiagnosis — cumulative per-client diagnosis record. One row per
+// confirmed diagnosis decision (from the Clinical Brief tab). Older
+// rows are kept (supersededAt set) when the therapist updates the
+// diagnosis on a later session so the historical record is reviewable.
+// ============================================================================
+
+model ClientDiagnosis {
+  id               String @id @default(cuid())
+  clientId         String
+  psychologistId   String
+  sessionId        String
+  clinicalReportId String
+
+  /// ICD-11 code (e.g. "6B00", "6B01.0"). Kept English per WHO.
+  icd11Code  String
+  icd11Label String
+
+  confidence Float
+
+  /// Array of { quote, speaker, startMs } supporting quotes drawn from
+  /// the source transcript. Schema enforced at route layer via
+  /// ClinicalSupportingQuoteSchema[].
+  supportingEvidence Json @default("[]")
+
+  /// Exactly one isPrimary=true per client at a time across non-
+  /// superseded rows; app layer enforces (route flips the previous
+  /// primary's supersededAt on conflict).
+  isPrimary Boolean @default(false)
+
+  /// When the therapist confirmed this diagnosis (= source row's
+  /// confirmedAt in the ClinicalReport.confirmations.diagnosis entry).
+  confirmedAt               DateTime
+  confirmedByPsychologistId String
+
+  /// Set when a later confirmation supersedes this row.
+  supersededAt DateTime?
+  notes        String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client         Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist   Psychologist    @relation(fields: [psychologistId], references: [id])
+  session        Session         @relation(fields: [sessionId], references: [id])
+  clinicalReport ClinicalReport  @relation(fields: [clinicalReportId], references: [id])
+  therapyScripts TherapyScript[]
+
+  @@index([clientId, supersededAt])
+  @@index([clientId, isPrimary, supersededAt])
+  @@index([psychologistId, createdAt])
+  @@map("client_diagnoses")
+}
+
+// ============================================================================
+// TreatmentPlan — cumulative per-client plan. Versioned: every
+// confirmed plan from a session's Clinical Brief bumps the version
+// and supersedes the previously active row. The Treatment Library
+// and pre-session brief (Sprint 17) read the active row.
+// ============================================================================
+
+model TreatmentPlan {
+  id                     String @id @default(cuid())
+  clientId               String
+  psychologistId         String
+  sourceSessionId        String
+  sourceClinicalReportId String
+
+  /// Auto-incrementing per client. Computed at insert by the route
+  /// (MAX(version)+1 within client scope).
+  version Int
+
+  /// Validated against ClinicalTreatmentPlanSchema before write.
+  body Json
+
+  confirmedAt               DateTime
+  confirmedByPsychologistId String
+
+  /// When the therapist confirms a new plan, the previous active
+  /// plan's supersededAt is set.
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client         Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist   Psychologist    @relation(fields: [psychologistId], references: [id])
+  session        Session         @relation(fields: [sourceSessionId], references: [id])
+  clinicalReport ClinicalReport  @relation(fields: [sourceClinicalReportId], references: [id])
+  therapyScripts TherapyScript[]
+
+  @@unique([clientId, version])
+  @@index([clientId, supersededAt])
+  @@index([psychologistId, createdAt])
+  @@map("treatment_plans")
+}
+
+// ============================================================================
+// TherapyScript — Sprint 14 cache row for Pass 4 output. Keyed by
+// (clientId, cacheKey) where cacheKey is a SHA-256 hash of the
+// normalised input tuple (therapyName, language, primaryDiagnosis,
+// active treatment plan, last-session summary). A re-view under the
+// same context returns the cached script — no second Vertex bill.
+// ============================================================================
+
+// ============================================================================
+// PatientShare — Sprint 15.
+// One row per (artefact, channel) Send-to-patient action. The
+// snapshot column locks in the artefact body at share time so the
+// patient always sees what was sent, even if the source row is
+// later edited or deleted. The shareToken opens a public read-only
+// portal at /p/<token>.
+// ============================================================================
+
+enum PatientShareArtefactType {
+  SIGNED_NOTE
+  REFLECTION_QUESTIONS
+  THERAPY_SCRIPT
+  TREATMENT_PLAN
+}
+
+enum PatientShareChannel {
+  WHATSAPP
+  EMAIL
+  PORTAL_LINK
+}
+
+enum PatientShareStatus {
+  PENDING
+  SENT
+  OPENED
+  TRANSIENT_FAILURE
+  PERMANENT_FAILURE
+}
+
+model PatientShare {
+  id             String  @id @default(cuid())
+  clientId       String
+  psychologistId String
+  sessionId      String?
+
+  artefactType PatientShareArtefactType
+  artefactId   String
+
+  channel PatientShareChannel
+  status  PatientShareStatus  @default(PENDING)
+
+  /// 22-char base64url. Unique across all shares; the portal route
+  /// looks up by this directly. Public — entropy is the only auth.
+  shareToken String @unique
+
+  /// Language the portal renders in (ISO 639-1).
+  language String @default("en")
+
+  /// Discriminated-union snapshot of the artefact body. Validated
+  /// at the route layer against PatientShareSnapshotSchema.
+  snapshot Json
+
+  /// Short title used in the channel message + portal page.
+  subject String
+
+  /// Contact at send time — phone for WhatsApp, email for email.
+  /// PORTAL_LINK rows have null toContact.
+  toContact String?
+
+  /// Provider message id, e.g. "wati:abc123", "sendgrid:xyz789".
+  providerMessageId String?
+
+  /// Set when the channel returns a failure outcome.
+  errorCode   String?
+  errorDetail String? @db.Text
+
+  /// When the channel adapter returned a non-error result.
+  sentAt DateTime?
+
+  /// First-opened timestamp on the portal. Repeat views are tracked
+  /// in the audit log, not here.
+  openedAt DateTime?
+
+  /// Token expiry. Defaults to 30 days from creation in the route.
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  session      Session?     @relation(fields: [sessionId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@index([status, createdAt])
+  @@index([sessionId])
+  @@map("patient_shares")
+}
+
+model TherapyScript {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  therapyName String
+  language    String
+
+  /// 64-char hex SHA-256 of the normalised input tuple.
+  cacheKey String
+
+  /// Validated against TherapyScriptV1Schema before write.
+  body Json
+
+  /// Optional grounding — the TreatmentPlan + primary ClientDiagnosis
+  /// the script was generated against. Nullable because both can be
+  /// absent at script-generation time (e.g. browse-only mode).
+  sourceTreatmentPlanId    String?
+  sourcePrimaryDiagnosisId String?
+
+  totalCostInr Decimal @default(0) @db.Decimal(10, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist     @relation(fields: [psychologistId], references: [id])
+  plan         TreatmentPlan?   @relation(fields: [sourceTreatmentPlanId], references: [id])
+  diagnosis    ClientDiagnosis? @relation(fields: [sourcePrimaryDiagnosisId], references: [id])
+
+  @@unique([clientId, cacheKey])
+  @@index([clientId, therapyName])
+  @@index([psychologistId, createdAt])
+  @@map("therapy_scripts")
+}
+
+// ============================================================================
+// PreSessionBrief — Sprint 17. Pass 5 output cached per
+// (clientId, lastSessionId, language). The therapist opens the
+// client and sees what to focus on today, grounded in the most
+// recent confirmed clinical record + therapy script + homework.
+// Cache invalidates whenever a new session lands.
+// ============================================================================
+
+enum PreSessionBriefStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model PreSessionBrief {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  /// Which session the brief is grounded against (the most recent
+  /// COMPLETED session at generation time). Null for "first session"
+  /// briefs.
+  lastSessionId String?
+
+  language String                @default("en")
+  status   PreSessionBriefStatus @default(PENDING)
+
+  /// Validated against PreSessionBriefV1Schema before write.
+  body Json?
+
+  totalCostInr Decimal @default(0) @db.Decimal(10, 4)
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@map("pre_session_briefs")
+}
+
+// ============================================================================
+// InstrumentResponse — Sprint 17. A single administration of a
+// scored clinical instrument (PHQ-9, GAD-7, ...). One row per
+// administration; trends are queryable per (clientId, instrumentKey).
+//
+// `responses` JSONB stores the item-id → integer-value map; `score`
+// and `severity` are denormalised for fast querying + display in the
+// pre-session brief.
+// ============================================================================
+
+model InstrumentResponse {
+  id             String  @id @default(cuid())
+  clientId       String
+  psychologistId String
+  sessionId      String?
+
+  /// Stable identifier from packages/clinical/src/instruments,
+  /// e.g. "PHQ9" | "GAD7" | "WHODAS2_12".
+  instrumentKey String
+
+  /// ISO 639-1 — language the items were presented in. Defaults to
+  /// "en"; non-English uses only ship once validated translations
+  /// are vetted by a clinician.
+  language String @default("en")
+
+  /// Item-id → integer answer map (1-based, matching the catalog).
+  responses Json
+
+  score    Int
+  /// Severity band label as defined by the instrument
+  /// (e.g. "minimal", "mild", "moderate", "severe").
+  severity String
+
+  /// When the instrument was administered. May predate createdAt for
+  /// backfilled rows.
+  administeredAt               DateTime
+  administeredByPsychologistId String
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  session      Session?     @relation(fields: [sessionId], references: [id])
+
+  @@index([clientId, instrumentKey, administeredAt])
+  @@index([psychologistId, createdAt])
+  @@map("instrument_responses")
+}
+
+// ============================================================================
+// SafetyPlan — Sprint 17. Stanley & Brown 5-step crisis safety plan
+// created when a Crisis section is confirmed at high/critical
+// severity. Cumulative per client (the most recent supersedes
+// earlier ones; old rows are kept with supersededAt set so the
+// audit trail is intact).
+// ============================================================================
+
+model SafetyPlan {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  /// Optional — the session where the crisis surfaced.
+  sourceSessionId String?
+
+  language String @default("en")
+
+  /// Validated against SafetyPlanV1Schema before write.
+  body Json
+
+  /// When the therapist confirmed this plan.
+  confirmedAt               DateTime
+  confirmedByPsychologistId String
+
+  /// Set when a later plan supersedes this one.
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  session      Session?     @relation(fields: [sourceSessionId], references: [id])
+
+  @@index([clientId, supersededAt])
+  @@index([psychologistId, createdAt])
+  @@map("safety_plans")
+}
+
+// ============================================================================
 // ExerciseAssignment / MoodLog / JournalEntry — continuity-service tables.
 // Sprint 5 PR 1.
 // ============================================================================
@@ -780,13 +1302,13 @@ model ExerciseAssignment {
   // Validated against @cureocity/clinical at the service layer.
   exerciseId String
 
-  assignedAt DateTime @default(now())
+  assignedAt DateTime  @default(now())
   dueAt      DateTime?
 
   status      ExerciseAssignmentStatus @default(PENDING)
   completedAt DateTime?
   // Structured per the exercise's responseSchema.
-  response Json?
+  response    Json?
 
   // Free-text note from therapist when assigning.
   therapistNote String? @db.Text
@@ -820,19 +1342,19 @@ model MoodLog {
 }
 
 model JournalEntry {
-  id         String   @id @default(cuid())
-  clientId   String
+  id               String   @id @default(cuid())
+  clientId         String
   /// V1 plaintext column — retained during the encryption rollout window.
   /// Continuity-service writes BOTH `content` and `contentEncrypted` when a
   /// TenantDataKey is available; reads prefer `contentEncrypted` and fall
   /// back to `content`. Sprint 10 hardening drops this column. Gap G10.
-  content    String   @db.Text
+  content          String   @db.Text
   /// Envelope-encrypted form per @cureocity/crypto. Populated from
   /// Sprint 9 PR 3 onward.
-  contentEncrypted String? @db.Text
+  contentEncrypted String?  @db.Text
   // Optional 0..10 mood tag.
-  mood       Int?
-  recordedAt DateTime
+  mood             Int?
+  recordedAt       DateTime
 
   // When true, the entry is visible in the therapist briefing; when false
   // (default), it stays private to the client. Added Sprint 8 PR 2 for
@@ -859,7 +1381,7 @@ model ModalityState {
   clientId       String @unique
   psychologistId String
 
-  modality SessionModality
+  modality     SessionModality
   // Phase string is validated against the modality's allowed phases by
   // @cureocity/clinical at the service layer — not enforced at DB level
   // because different modalities have different phase sets.
@@ -903,7 +1425,7 @@ model ModalityTransition {
   reason         String
   psychologistId String?
   // Evidence at transition time — adherence stats, note phaseHints, etc.
-  evidence Json?
+  evidence       Json?
 
   occurredAt DateTime @default(now())
 
@@ -934,9 +1456,9 @@ model EmdrTarget {
   stateId String
 
   label             String
-  image             String  @db.Text
-  negativeCognition String  @db.Text
-  positiveCognition String  @db.Text
+  image             String @db.Text
+  negativeCognition String @db.Text
+  positiveCognition String @db.Text
 
   vocStart    Int
   vocCurrent  Int?
@@ -1060,6 +1582,39 @@ enum AuditAction {
   INTAKE_REVIEWED
   INTAKE_MATCHED
   DSR_CONSENT_WITHDRAWN
+
+  // Clinical co-pilot — Sprint 13.
+  // Pass 3 writes a ClinicalReport per session; therapist confirms
+  // each section; confirmed diagnosis / plan persist cumulatively.
+  CLINICAL_REPORT_GENERATED
+  CLINICAL_SECTION_CONFIRMED
+  DIAGNOSIS_CONFIRMED
+  PLAN_CONFIRMED
+  CRISIS_ACKNOWLEDGED
+
+  // Therapy script — Sprint 14.
+  // Pass 4 generates a per-therapy script keyed by (client, therapy,
+  // language, inputs-hash); cached + audited.
+  THERAPY_SCRIPT_GENERATED
+  THERAPY_SCRIPT_VIEWED
+
+  // Patient CRM / sharing — Sprint 15. Every Send-to-patient click
+  // writes ARTEFACT_SHARED with the channel + outcome; portal opens
+  // write PORTAL_OPENED.
+  PATIENT_ARTEFACT_SHARED
+  PATIENT_PORTAL_OPENED
+
+  // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
+  PRE_SESSION_BRIEF_GENERATED
+  PRE_SESSION_BRIEF_VIEWED
+  INSTRUMENT_ADMINISTERED
+  INSTRUMENT_VIEWED
+  SAFETY_PLAN_CREATED
+  SAFETY_PLAN_UPDATED
+
+  // Therapist settings + WebAuthn credentials — Sprint 18.
+  WEBAUTHN_CREDENTIAL_REGISTERED
+  WEBAUTHN_CREDENTIAL_REVOKED
 }
 
 enum AuditActorType {

@@ -1,0 +1,281 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import type {
+  PatientShareChannel,
+  ShareArtefactRef,
+  ShareResponse,
+  ShareResultEntry,
+} from '@cureocity/contracts';
+import { Badge } from '../ui/Badge';
+import { Button } from '../ui/Button';
+
+interface ShareModalProps {
+  open: boolean;
+  onClose: () => void;
+  clientId: string;
+  /** Contact availability hints to grey out invalid channels. */
+  hasContactPhone: boolean;
+  hasContactEmail: boolean;
+  /** What's being shared — discriminator + ids. */
+  artefact: ShareArtefactRef;
+  /** Short label shown in the modal header. */
+  artefactLabel: string;
+}
+
+const ALL_CHANNELS: { key: PatientShareChannel; label: string; description: string }[] = [
+  {
+    key: 'WHATSAPP',
+    label: 'WhatsApp',
+    description: 'Short message + link, sent to the client\'s number on file.',
+  },
+  {
+    key: 'EMAIL',
+    label: 'Email',
+    description: 'Plain-text + link, sent to the client\'s email on file.',
+  },
+  {
+    key: 'PORTAL_LINK',
+    label: 'Portal link only',
+    description: 'No send — copy the URL and share manually.',
+  },
+];
+
+export function ShareModal({
+  open,
+  onClose,
+  clientId,
+  hasContactPhone,
+  hasContactEmail,
+  artefact,
+  artefactLabel,
+}: ShareModalProps) {
+  const [selected, setSelected] = useState<Record<PatientShareChannel, boolean>>({
+    WHATSAPP: hasContactPhone,
+    EMAIL: hasContactEmail,
+    PORTAL_LINK: !hasContactPhone && !hasContactEmail,
+  });
+  const [therapistMessage, setTherapistMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<ShareResultEntry[] | null>(null);
+
+  // Reset state when modal closes.
+  useEffect(() => {
+    if (!open) {
+      setError(null);
+      setResults(null);
+      setBusy(false);
+    }
+  }, [open]);
+
+  const toggle = useCallback((key: PatientShareChannel) => {
+    setSelected((s) => ({ ...s, [key]: !s[key] }));
+  }, []);
+
+  const selectedChannels = useMemo(
+    () => ALL_CHANNELS.filter((c) => selected[c.key]).map((c) => c.key),
+    [selected],
+  );
+
+  const submit = useCallback(async () => {
+    if (selectedChannels.length === 0) {
+      setError('Pick at least one channel.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/v1/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          channels: selectedChannels,
+          ...(therapistMessage.trim().length > 0 && { therapistMessage: therapistMessage.trim() }),
+          artefact,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as ShareResponse & { error?: string };
+      if (!res.ok) {
+        throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      setResults(data.results);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, [artefact, clientId, selectedChannels, therapistMessage]);
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="share-modal-title"
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="mb-4 flex items-baseline justify-between gap-3">
+          <h2 id="share-modal-title" className="font-serif text-2xl">
+            Send to patient
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="close"
+            className="text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
+          >
+            ✕
+          </button>
+        </header>
+        <p className="mb-4 text-sm text-[var(--color-ink-2)]">
+          Sharing: <strong className="text-[var(--color-ink)]">{artefactLabel}</strong>
+        </p>
+
+        {results ? (
+          <ResultsView results={results} onClose={onClose} />
+        ) : (
+          <>
+            <section className="space-y-3">
+              <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Channels</p>
+              {ALL_CHANNELS.map((c) => {
+                const disabled =
+                  (c.key === 'WHATSAPP' && !hasContactPhone) ||
+                  (c.key === 'EMAIL' && !hasContactEmail);
+                return (
+                  <label
+                    key={c.key}
+                    className={`flex items-start gap-3 rounded-xl border p-3 ${
+                      disabled
+                        ? 'cursor-not-allowed border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] opacity-50'
+                        : selected[c.key]
+                          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                          : 'border-[var(--color-line-soft)] bg-white/40 hover:border-[var(--color-ink)]'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selected[c.key]}
+                      disabled={disabled}
+                      onChange={() => toggle(c.key)}
+                      className="mt-1 h-4 w-4"
+                    />
+                    <span className="flex-1">
+                      <span className="text-sm font-medium text-[var(--color-ink)]">
+                        {c.label}
+                      </span>
+                      <span className="ml-2 text-xs text-[var(--color-ink-3)]">
+                        {disabled
+                          ? c.key === 'WHATSAPP'
+                            ? 'No phone on file.'
+                            : 'No email on file.'
+                          : c.description}
+                      </span>
+                    </span>
+                  </label>
+                );
+              })}
+            </section>
+
+            <section className="mt-4">
+              <label className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Personal note (optional)
+              </label>
+              <textarea
+                value={therapistMessage}
+                onChange={(e) => setTherapistMessage(e.target.value)}
+                rows={3}
+                placeholder="Optional. Shown to the patient above the artefact."
+                className="mt-2 w-full rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3 text-sm"
+              />
+            </section>
+
+            {error && (
+              <div className="mt-4 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-sm text-[var(--color-warn)]">
+                {error}
+              </div>
+            )}
+
+            <footer className="mt-5 flex items-center justify-end gap-2 border-t border-[var(--color-line-soft)] pt-4">
+              <Button variant="secondary" onClick={onClose} disabled={busy}>
+                Cancel
+              </Button>
+              <Button onClick={() => void submit()} disabled={busy}>
+                {busy ? 'Sending…' : 'Send'}
+              </Button>
+            </footer>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ResultsView({
+  results,
+  onClose,
+}: {
+  results: ShareResultEntry[];
+  onClose: () => void;
+}) {
+  return (
+    <div>
+      <ul className="space-y-2">
+        {results.map((r, i) => (
+          <li
+            key={`${r.channel}-${i}`}
+            className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-4"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <strong className="text-sm">{r.channel}</strong>
+              <Badge
+                tone={
+                  r.status === 'SENT' || r.status === 'OPENED'
+                    ? 'accent'
+                    : r.status === 'PENDING'
+                      ? 'muted'
+                      : 'warn'
+                }
+              >
+                {r.status.toLowerCase().replace(/_/g, ' ')}
+              </Badge>
+            </div>
+            {r.portalUrl && (
+              <p className="mt-2 break-all text-xs">
+                <span className="text-[var(--color-ink-3)]">Portal: </span>
+                <a
+                  href={r.portalUrl}
+                  className="text-[var(--color-accent)] underline"
+                  rel="noopener"
+                  target="_blank"
+                >
+                  {r.portalUrl}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => void navigator.clipboard.writeText(r.portalUrl)}
+                  className="ml-2 rounded-full px-2 py-0.5 text-xs text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+                >
+                  copy
+                </button>
+              </p>
+            )}
+            {r.errorDetail && (
+              <p className="mt-2 text-xs text-[var(--color-warn)]">{r.errorDetail}</p>
+            )}
+          </li>
+        ))}
+      </ul>
+      <footer className="mt-5 flex justify-end border-t border-[var(--color-line-soft)] pt-4">
+        <Button onClick={onClose}>Done</Button>
+      </footer>
+    </div>
+  );
+}

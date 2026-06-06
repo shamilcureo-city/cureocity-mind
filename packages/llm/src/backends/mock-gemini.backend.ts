@@ -1,14 +1,32 @@
 import {
+  type ClinicalReportV1,
   type GeminiCallLogData,
   type IPass1Backend,
   type IPass2Backend,
+  type IPass3Backend,
+  type IPass4Backend,
+  type IPass5Backend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
   type Pass2Output,
+  type Pass3Input,
+  type Pass3Output,
+  type Pass4Input,
+  type Pass4Output,
+  type Pass5Input,
+  type Pass5Output,
+  type PreSessionBriefV1,
   type TherapyNoteV1,
+  type TherapyScriptV1,
 } from '../types';
-import { TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION, THERAPY_NOTE_PROMPT_VERSION } from '../prompts';
+import {
+  CLINICAL_ANALYSIS_PROMPT_VERSION,
+  PRE_SESSION_BRIEF_PROMPT_VERSION,
+  TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
+  THERAPY_NOTE_PROMPT_VERSION,
+  THERAPY_SCRIPT_PROMPT_VERSION,
+} from '../prompts';
 
 /**
  * Returns deterministic canned responses. Used by tests and by dev
@@ -19,26 +37,74 @@ import { TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION, THERAPY_NOTE_PROMPT_VERSION } fr
 export class MockGeminiPass1Backend implements IPass1Backend {
   async run(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
+    // Pick a deterministic mock based on the spoken-language hint so
+    // dev / E2E tests can exercise the code-mixed transcript path.
+    // Defaults to a Manglish (Malayalam + English) mix when hints
+    // include "ml" — the most common Indian pilot case.
+    const hinted = input.hints?.spokenLanguageHints ?? [];
+    const manglish = hinted.includes('ml');
+    const hinglish = hinted.includes('hi') && !manglish;
     const output: Pass1Output = {
-      transcript: `[mock transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`,
-      speakerSegments: [
-        {
-          speaker: 'therapist',
-          startMs: 0,
-          endMs: 5_000,
-          text: 'Welcome. How have things been since last week?',
-        },
-        {
-          speaker: 'client',
-          startMs: 5_000,
-          endMs: 30_000,
-          text: 'A bit better. The breathing exercises helped on Tuesday.',
-        },
-      ],
+      transcript: manglish
+        ? `[mock manglish transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`
+        : hinglish
+          ? `[mock hinglish transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`
+          : `[mock transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`,
+      speakerSegments: manglish
+        ? [
+            {
+              speaker: 'therapist',
+              startMs: 0,
+              endMs: 5_000,
+              text: 'Welcome. How have things been since last week?',
+              language: 'en',
+            },
+            {
+              speaker: 'client',
+              startMs: 5_000,
+              endMs: 30_000,
+              text: 'കുറച്ച് better aanu. Breathing exercises help cheythu Tuesday-il.',
+              language: 'mixed',
+            },
+          ]
+        : hinglish
+          ? [
+              {
+                speaker: 'therapist',
+                startMs: 0,
+                endMs: 5_000,
+                text: 'Welcome. How have things been since last week?',
+                language: 'en',
+              },
+              {
+                speaker: 'client',
+                startMs: 5_000,
+                endMs: 30_000,
+                text: 'Thoda better hai. Breathing exercises ne help kiya Tuesday ko.',
+                language: 'mixed',
+              },
+            ]
+          : [
+              {
+                speaker: 'therapist',
+                startMs: 0,
+                endMs: 5_000,
+                text: 'Welcome. How have things been since last week?',
+                language: 'en',
+              },
+              {
+                speaker: 'client',
+                startMs: 5_000,
+                endMs: 30_000,
+                text: 'A bit better. The breathing exercises helped on Tuesday.',
+                language: 'en',
+              },
+            ],
       affectFeatures: [
         { startMs: 0, endMs: 30_000, valence: 0.1, arousal: 0.4 },
         { startMs: 30_000, endMs: 60_000, valence: 0.3, arousal: 0.3 },
       ],
+      detectedLanguages: manglish ? ['ml', 'en'] : hinglish ? ['hi', 'en'] : ['en'],
     };
     return {
       output,
@@ -85,6 +151,309 @@ export class MockGeminiPass2Backend implements IPass2Backend {
         promptVersion: THERAPY_NOTE_PROMPT_VERSION,
         inputTokens: input.transcript.length / 4,
         outputTokens: 400,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Mock Pass 3 (clinical analysis). Deterministic ClinicalReportV1 with
+ * representative shape (two diagnosis candidates, gaps, formulation,
+ * plan, recommended therapies, no crisis flags). Pulls the first
+ * speaker segment as supporting evidence so the citation surface
+ * works without a real Gemini call.
+ */
+export class MockGeminiPass3Backend implements IPass3Backend {
+  async run(input: Pass3Input): Promise<{ output: Pass3Output; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const firstClientSegment = input.speakerSegments.find((s) => s.speaker === 'client') ??
+      input.speakerSegments[0] ?? {
+        speaker: 'client' as const,
+        startMs: 0,
+        endMs: 1000,
+        text: '(no segments)',
+      };
+    const supportingQuote = {
+      quote: firstClientSegment.text.slice(0, 200),
+      speaker: firstClientSegment.speaker,
+      startMs: firstClientSegment.startMs,
+    };
+    const report: ClinicalReportV1 = {
+      version: 'V1',
+      language: input.language,
+      modality: input.modality,
+      diagnosisCandidates: [
+        {
+          icd11Code: '6B00',
+          icd11Label: 'Generalised anxiety disorder',
+          confidence: 0.55,
+          supportingEvidence: [supportingQuote],
+          gapsToFill: [
+            'Duration of worry over the past 6 months',
+            'Functional impairment in work or relationships',
+          ],
+        },
+        {
+          icd11Code: '6B01',
+          icd11Label: 'Panic disorder',
+          confidence: 0.4,
+          supportingEvidence: [supportingQuote],
+          gapsToFill: ['Frequency of unexpected panic attacks', 'Avoidance behaviour mapped'],
+        },
+      ],
+      primaryDiagnosisIndex: 0,
+      assessmentGaps: [
+        {
+          question: 'Has the worry been present most days for the last 6 months?',
+          rationale: 'Required to meet ICD-11 6B00 duration criterion.',
+        },
+      ],
+      formulation:
+        '[mock] Working hypothesis: client presents with persistent worry and somatic arousal triggered by work demands. Predisposing: high baseline conscientiousness. Precipitating: recent role change. Perpetuating: avoidance of meetings. Protective: stable family support.',
+      treatmentPlan: {
+        modality: 'CBT',
+        phaseSequence: [
+          'psychoeducation',
+          'cognitive restructuring',
+          'behavioural activation',
+          'exposure',
+          'relapse prevention',
+        ],
+        goals: [
+          {
+            description: 'Reduce GAD-7 score by 4 points',
+            measure: 'GAD-7 administered at session 1 and every 4th session',
+          },
+          {
+            description: 'Attend one team meeting per week without avoidance',
+            measure: 'Self-report log shared at session start',
+          },
+        ],
+        expectedDurationSessions: 12,
+      },
+      recommendedTherapies: [
+        {
+          name: 'Cognitive Restructuring',
+          rationale:
+            '[mock] Client describes catastrophic thoughts about being judged in meetings; restructuring targets the cognitive driver.',
+          evidenceSummary:
+            'Meta-analyses for GAD support CBT with cognitive restructuring as a core component.',
+          whenInPlan: 'cognitive restructuring',
+        },
+        {
+          name: 'Graded Exposure (work meetings)',
+          rationale:
+            '[mock] Avoidance is the chief perpetuating factor; hierarchical exposure reduces it.',
+          evidenceSummary: 'Exposure-based protocols are first-line for anxiety-driven avoidance.',
+          whenInPlan: 'exposure',
+        },
+      ],
+      crisisFlags: [],
+    };
+    return {
+      output: { clinicalReport: report },
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_3_CLINICAL_ANALYSIS',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: CLINICAL_ANALYSIS_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.transcript.length / 4),
+        outputTokens: 600,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Mock Pass 4 (therapy script). Deterministic TherapyScriptV1 with a
+ * representative shape: 4 steps with verbatim therapistSays, a couple
+ * of branches each, opening + closing + homework + risk watchpoints.
+ */
+export class MockGeminiPass4Backend implements IPass4Backend {
+  async run(input: Pass4Input): Promise<{ output: Pass4Output; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const script: TherapyScriptV1 = {
+      version: 'V1',
+      language: input.language,
+      therapyName: input.therapyName,
+      openingScript:
+        '[mock] Hi, good to see you. Today I want us to focus on something we touched on last time — those thoughts that show up when you feel anxious. Sound okay?',
+      mainExercise: {
+        steps: [
+          {
+            id: 'orient',
+            purpose: 'Orient the client to the technique and get consent.',
+            therapistSays:
+              "[mock] Today I'm going to teach you a tool called cognitive restructuring. It's a way of catching the unhelpful thoughts that fuel the anxiety and asking some specific questions of them. We'll try it together first, then you'll try one. Sound okay?",
+            listenFor:
+              "Look for cooperation vs. hesitation. If they seem unsure, slow down and check what's coming up.",
+            branches: [
+              {
+                ifClientSays: 'That sounds fine, let\'s try it',
+                thenDo:
+                  '[mock] Great. Take a moment and think of a time this week when the anxiety was strong. Don\'t pick the worst — just one that\'s recent.',
+              },
+              {
+                ifClientSays: "I don't know if that will work for me",
+                thenDo:
+                  "[mock] That hesitation makes sense — many people feel that way at first. What's the part that feels unsure?",
+              },
+            ],
+          },
+          {
+            id: 'elicit-thought',
+            purpose: 'Elicit a specific automatic thought from a recent situation.',
+            therapistSays:
+              '[mock] Picture the moment. Where were you, what were you doing? Now — what was going through your mind? Try to catch the words, not just the feeling.',
+            listenFor:
+              'A specific cognition, not a feeling. If they say "I felt scared", gently steer to the thought driving the feeling.',
+            branches: [
+              {
+                ifClientSays: 'I just felt scared, I don\'t know what I was thinking',
+                thenDo:
+                  '[mock] That\'s common — the thought can be quick. Let me ask differently: if the fear could speak, what would it say?',
+              },
+            ],
+          },
+          {
+            id: 'examine-evidence',
+            purpose: 'Examine evidence for and against the thought.',
+            therapistSays:
+              '[mock] Okay, so the thought was [restate]. Let\'s look at it like detectives. What evidence supports this thought? And then — what evidence doesn\'t support it?',
+            listenFor:
+              "Whether they can hold both columns. Strong attachment to the thought means more behavioural work is needed first.",
+            branches: [
+              {
+                ifClientSays: 'But it IS true, I really am going to fail',
+                thenDo:
+                  '[mock] You feel it strongly — that\'s real. The question isn\'t whether the thought feels true. It\'s whether all the evidence points one way. What\'s ONE piece that doesn\'t fit the thought?',
+              },
+            ],
+          },
+          {
+            id: 'reframe',
+            purpose: 'Generate a more balanced alternative.',
+            therapistSays:
+              "[mock] Given everything you said, what's a more balanced way to think about this? Not forced positivity — just what fits the full picture.",
+            listenFor: 'A reframe that retains some uncertainty but reduces catastrophising.',
+            branches: [],
+          },
+        ],
+      },
+      adaptationCues: [
+        '[mock] If the client identifies a trauma trigger, pause and stabilise before continuing.',
+        '[mock] If the client gets stuck in evidence-for, switch to behavioural experiment design instead.',
+      ],
+      closingScript:
+        '[mock] We did good work today. Notice the thought we examined, and over the week try to catch one more like it and write it down. We\'ll look at what you find next session.',
+      homework: {
+        description:
+          '[mock] Catch one anxious thought each day. Write it down with the situation, the thought, and the feeling. Bring the notes to next session.',
+        deliveryNotes:
+          '[mock] Give the client a small notebook or suggest the Notes app on their phone. Confirm they understand by asking them to repeat back the steps.',
+      },
+      riskWatchpoints: [
+        '[mock] Suicidal ideation surfaces — stop the technique and run a safety check.',
+        '[mock] Client dissociates or freezes — switch to grounding (5-4-3-2-1).',
+      ],
+      estimatedDurationMin: 50,
+    };
+    return {
+      output: { therapyScript: script },
+      callLog: {
+        sessionId: null,
+        pass: 'PASS_4_THERAPY_SCRIPT',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: THERAPY_SCRIPT_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.therapyName.length / 4) + 200,
+        outputTokens: 700,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Mock Pass 5 (pre-session brief). Deterministic PreSessionBriefV1
+ * with a coherent shape — context line, recap, focus, opening
+ * line, watchpoints. Passes through homework + crisis + instrument
+ * data from input so the route layer can exercise the full path
+ * in dev/CI without a real Gemini call.
+ */
+export class MockGeminiPass5Backend implements IPass5Backend {
+  async run(input: Pass5Input): Promise<{ output: Pass5Output; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const modality = input.treatmentPlan?.modality ?? 'CBT';
+    const dxLabel = input.primaryDiagnosis?.icd11Label ?? 'presenting concerns';
+    const sessionLine =
+      input.sessionNumber !== undefined && input.treatmentPlan?.expectedDurationSessions
+        ? `Session ${input.sessionNumber} of ${input.treatmentPlan.expectedDurationSessions}`
+        : input.sessionNumber !== undefined
+          ? `Session ${input.sessionNumber}`
+          : 'New session';
+    const brief: PreSessionBriefV1 = {
+      version: 'V1',
+      language: input.language,
+      contextLine: `${sessionLine} · ${modality} for ${dxLabel}.`,
+      lastSessionRecap: input.lastSessionSummary
+        ? `[mock] Last session: ${input.lastSessionSummary.slice(0, 220)}…`
+        : '',
+      todaysFocus: input.treatmentPlan?.phaseSequence?.length
+        ? `[mock] Per plan, today focus on: ${input.treatmentPlan.phaseSequence[0]}. Anchor to the active goal: ${input.treatmentPlan.goals[0]?.description ?? '(see plan)'}.`
+        : '[mock] No active plan yet — open with engagement and information gathering.',
+      openingLine: input.lastHomework
+        ? `"How did the ${input.lastHomework.description.slice(0, 80)} go this week?"`
+        : '"Good to see you again. Where would you like to start today?"',
+      riskWatchpoints:
+        input.openCrises && input.openCrises.length > 0
+          ? [
+              'Run a safety check before anything else — open crisis flag still on record.',
+              '[mock] Re-emergence of avoidance behaviour around the goal context.',
+            ]
+          : ['[mock] Watch for movement on the homework outcome.', '[mock] Listen for any new triggers.'],
+      homeworkStatus: input.lastHomework
+        ? {
+            description: input.lastHomework.description,
+            outcome:
+              (input.lastHomework.outcome as 'completed' | 'partial' | 'skipped' | 'unknown' | null) ??
+              'unknown',
+            notes: null,
+          }
+        : null,
+      carryoverCrisis:
+        input.openCrises?.map((c) => ({
+          kind: c.kind,
+          severity: c.severity,
+          lastSeenAt: c.lastSeenAt,
+        })) ?? [],
+      latestInstruments:
+        input.latestInstruments?.map((i) => ({
+          instrumentKey: i.instrumentKey,
+          score: i.score,
+          severity: i.severity,
+          administeredAt: i.administeredAt,
+        })) ?? [],
+    };
+    return {
+      output: { preSessionBrief: brief },
+      callLog: {
+        sessionId: null,
+        pass: 'PASS_5_PRE_SESSION_BRIEF',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: PRE_SESSION_BRIEF_PROMPT_VERSION,
+        inputTokens: 300,
+        outputTokens: 250,
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',

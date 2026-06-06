@@ -1,0 +1,286 @@
+import { headers } from 'next/headers';
+import { notFound } from 'next/navigation';
+import {
+  PatientShareSnapshotSchema,
+  PatientShareTokenSchema,
+  type PatientShareSnapshot,
+} from '@cureocity/contracts';
+import { writeAudit } from '@/lib/audit';
+import { prisma } from '@/lib/prisma';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+interface PageProps {
+  params: Promise<{ token: string }>;
+}
+
+/**
+ * Sprint 15 — Public patient portal at /p/<token>.
+ *
+ * No auth. The token (16 random bytes → 22 base64url chars) IS the
+ * authentication; ~128 bits of entropy is sufficient for an opaque
+ * unguessable URL. The page renders the artefact snapshot in the
+ * client's preferred language and records the open in the audit log.
+ *
+ * First view sets openedAt + writes PATIENT_PORTAL_OPENED; repeat
+ * views write a fresh audit row but leave openedAt at the first
+ * timestamp.
+ *
+ * Expired tokens render a friendly "link expired" message rather
+ * than a generic 404 so the patient knows to ask their therapist
+ * for a fresh link.
+ */
+export default async function PortalPage({ params }: PageProps) {
+  const { token: raw } = await params;
+  const tokenParse = PatientShareTokenSchema.safeParse(raw);
+  if (!tokenParse.success) {
+    notFound();
+  }
+  const token = tokenParse.data;
+
+  const row = await prisma.patientShare.findUnique({
+    where: { shareToken: token },
+    select: {
+      id: true,
+      clientId: true,
+      psychologistId: true,
+      subject: true,
+      snapshot: true,
+      language: true,
+      openedAt: true,
+      expiresAt: true,
+      status: true,
+      client: { select: { fullName: true } },
+      psychologist: { select: { fullName: true } },
+    },
+  });
+  if (!row) notFound();
+
+  const now = new Date();
+  const expired = row.expiresAt.getTime() < now.getTime();
+
+  const snapshotParse = PatientShareSnapshotSchema.safeParse(row.snapshot);
+  const snapshot: PatientShareSnapshot | null = snapshotParse.success ? snapshotParse.data : null;
+
+  // Best-effort metadata from headers — same shape as auditMetadataFromRequest
+  // but without access to NextRequest in the page component.
+  const hdrs = await headers();
+  const ip =
+    hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    hdrs.get('x-real-ip') ??
+    undefined;
+  const userAgent = hdrs.get('user-agent') ?? undefined;
+
+  if (!expired) {
+    // First open sets openedAt + flips status; later opens still audit.
+    const isFirstOpen = row.openedAt === null;
+    if (isFirstOpen) {
+      await prisma.patientShare.update({
+        where: { id: row.id },
+        data: {
+          openedAt: now,
+          ...(row.status === 'SENT' ? { status: 'OPENED' } : {}),
+        },
+      });
+    }
+    await writeAudit({
+      actorType: 'CLIENT',
+      action: 'PATIENT_PORTAL_OPENED',
+      targetType: 'PatientShare',
+      targetId: row.id,
+      metadata: {
+        ...(ip !== undefined && { ip }),
+        ...(userAgent !== undefined && { userAgent }),
+        clientId: row.clientId,
+        psychologistId: row.psychologistId,
+        repeat: !isFirstOpen,
+      },
+    });
+  }
+
+  return (
+    <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-12">
+      <header className="border-b border-[var(--color-line-soft)] pb-5">
+        <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+          From {row.psychologist.fullName}
+        </p>
+        <h1 className="mt-1 font-serif text-2xl">{row.subject}</h1>
+      </header>
+
+      {expired ? (
+        <section className="mt-8 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
+          <p className="font-medium text-[var(--color-ink)]">This link has expired.</p>
+          <p className="mt-2">
+            Ask {row.psychologist.fullName} to share a fresh link with you.
+          </p>
+        </section>
+      ) : snapshot ? (
+        <section className="mt-8">
+          <SnapshotView snapshot={snapshot} clientFirstName={firstName(row.client.fullName)} />
+        </section>
+      ) : (
+        <section className="mt-8 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
+          <p>This page could not be rendered. Ask your therapist to share it again.</p>
+        </section>
+      )}
+
+      <footer className="mt-10 border-t border-[var(--color-line-soft)] pt-5 text-xs text-[var(--color-ink-3)]">
+        <p>This page is private to you. Cureocity Mind does not share it with anyone else.</p>
+      </footer>
+    </main>
+  );
+}
+
+function SnapshotView({
+  snapshot,
+  clientFirstName,
+}: {
+  snapshot: PatientShareSnapshot;
+  clientFirstName: string;
+}) {
+  switch (snapshot.kind) {
+    case 'SIGNED_NOTE':
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, here is the note from our session.
+          </p>
+          <NoteSection title="What you shared" body={snapshot.subjective} />
+          <NoteSection title="What I observed" body={snapshot.objective} />
+          <NoteSection title="My thinking" body={snapshot.assessment} />
+          <NoteSection title="What we'll work on" body={snapshot.plan} />
+          {snapshot.pdfUrl && (
+            <p className="text-sm">
+              <a
+                href={snapshot.pdfUrl}
+                className="text-[var(--color-accent)] underline"
+                rel="noopener"
+              >
+                Download a PDF of this note
+              </a>
+            </p>
+          )}
+        </article>
+      );
+    case 'REFLECTION_QUESTIONS':
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, sit with these between now and our next session. No need to
+            write essays — short, honest notes are enough.
+          </p>
+          <ol className="space-y-3">
+            {snapshot.questions.map((q, i) => (
+              <li
+                key={i}
+                className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4"
+              >
+                <p className="text-sm leading-relaxed text-[var(--color-ink)]">
+                  <strong className="mr-2 text-[var(--color-ink-2)]">{i + 1}.</strong>
+                  {q}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </article>
+      );
+    case 'THERAPY_SCRIPT':
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, here's a summary of the technique we worked on:{' '}
+            <strong>{snapshot.therapyName}</strong>.
+          </p>
+          <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              In session
+            </h2>
+            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
+              {snapshot.patientSummary}
+            </p>
+          </section>
+          <section className="rounded-xl border-2 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-4">
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-accent)]">
+              Between sessions
+            </h2>
+            <p className="mt-2 text-sm text-[var(--color-ink)]">{snapshot.homework.description}</p>
+            <p className="mt-2 text-xs italic text-[var(--color-ink-3)]">
+              {snapshot.homework.deliveryNotes}
+            </p>
+          </section>
+        </article>
+      );
+    case 'TREATMENT_PLAN':
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, here's the plan we're working towards together.
+          </p>
+          <dl className="grid gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Approach
+              </dt>
+              <dd className="mt-1 capitalize text-[var(--color-ink)]">{snapshot.modality}</dd>
+            </div>
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Expected sessions
+              </dt>
+              <dd className="mt-1 text-[var(--color-ink)]">
+                {snapshot.expectedDurationSessions ?? 'we will reassess as we go'}
+              </dd>
+            </div>
+          </dl>
+          <section>
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Phases we'll move through
+            </h2>
+            <ol className="mt-2 flex flex-wrap gap-2 text-sm">
+              {snapshot.phaseSequence.map((p, i) => (
+                <li
+                  key={i}
+                  className="rounded-full bg-[var(--color-surface)] px-3 py-1 text-[var(--color-ink-2)]"
+                >
+                  {i + 1}. {p}
+                </li>
+              ))}
+            </ol>
+          </section>
+          <section>
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Goals</h2>
+            <ul className="mt-2 space-y-3">
+              {snapshot.goals.map((g, i) => (
+                <li
+                  key={i}
+                  className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4"
+                >
+                  <p className="text-sm font-medium text-[var(--color-ink)]">{g.description}</p>
+                  <p className="mt-1 text-xs text-[var(--color-ink-3)]">how we'll know: {g.measure}</p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </article>
+      );
+  }
+}
+
+function NoteSection({ title, body }: { title: string; body: string }) {
+  if (!body || body.trim().length === 0) return null;
+  return (
+    <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+      <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">{title}</h2>
+      <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
+        {body}
+      </p>
+    </section>
+  );
+}
+
+function firstName(fullName: string): string {
+  const trimmed = fullName.trim();
+  if (trimmed.length === 0) return 'there';
+  return trimmed.split(/\s+/)[0] ?? trimmed;
+}

@@ -69,9 +69,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
                 },
               },
               {
-                text: input.hints?.therapistFullName
-                  ? `Therapist's full name (use for diarization bias): ${input.hints.therapistFullName}`
-                  : 'No additional hints.',
+                text: buildHintsBlock(input.hints),
               },
             ],
           },
@@ -133,7 +131,12 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
       };
     } catch (e) {
       return {
-        output: { transcript: '', speakerSegments: [], affectFeatures: [] },
+        output: {
+          transcript: '',
+          speakerSegments: [],
+          affectFeatures: [],
+          detectedLanguages: [],
+        },
         callLog: {
           sessionId: input.sessionId,
           pass: 'PASS_1_TRANSCRIBE_AND_ANALYSE',
@@ -150,6 +153,19 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
       };
     }
   }
+}
+
+function buildHintsBlock(hints: Pass1Input['hints']): string {
+  const lines: string[] = [];
+  if (hints?.therapistFullName) {
+    lines.push(`Therapist's full name (use for diarization bias): ${hints.therapistFullName}`);
+  }
+  if (hints?.spokenLanguageHints && hints.spokenLanguageHints.length > 0) {
+    lines.push(
+      `Likely spoken languages (client's preference on file): ${hints.spokenLanguageHints.join(', ')}. Treat as a soft hint; let the actual audio decide.`,
+    );
+  }
+  return lines.length > 0 ? lines.join('\n') : 'No additional hints.';
 }
 
 /**

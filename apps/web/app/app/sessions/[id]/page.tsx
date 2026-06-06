@@ -11,18 +11,27 @@ import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { ClientTab } from '@/components/app/ClientTab';
+import { ClinicalBriefTab } from '@/components/app/ClinicalBriefTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
 import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
+import { toClinicalReport } from '@/lib/clinical-mappers';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 
 export const dynamic = 'force-dynamic';
 
-type TabKey = 'notes' | 'client' | 'transcript' | 'session-info' | 'mindmap' | 'reflection';
+type TabKey =
+  | 'notes'
+  | 'clinical-brief'
+  | 'client'
+  | 'transcript'
+  | 'session-info'
+  | 'mindmap'
+  | 'reflection';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -31,6 +40,7 @@ interface PageProps {
 
 const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'notes',
+  'clinical-brief',
   'client',
   'transcript',
   'session-info',
@@ -69,9 +79,16 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             {session.modality} · {session.scheduledAt.toLocaleString('en-US')}
           </p>
         </div>
-        <Badge tone={statusTone(session.status)}>
-          {session.status.replace(/_/g, ' ').toLowerCase()}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          {session.spokenLanguages.length > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface)] px-3 py-1 text-xs text-[var(--color-ink-2)]">
+              spoken: {session.spokenLanguages.join(' + ')}
+            </span>
+          )}
+          <Badge tone={statusTone(session.status)}>
+            {session.status.replace(/_/g, ' ').toLowerCase()}
+          </Badge>
+        </div>
       </header>
 
       <div className="mt-8">
@@ -86,14 +103,23 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientId={session.clientId}
           />
         )}
+        {tab === 'clinical-brief' && <ClinicalBriefTabPanel sessionId={id} />}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
         {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
         {tab === 'mindmap' && <MindmapTabPanel sessionId={id} />}
-        {tab === 'reflection' && <ReflectionTabPanel sessionId={id} />}
+        {tab === 'reflection' && (
+          <ReflectionTabPanel sessionId={id} clientId={session.clientId} />
+        )}
       </div>
     </Container>
   );
+}
+
+async function ClinicalBriefTabPanel({ sessionId }: { sessionId: string }) {
+  const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
+  const initial = row ? toClinicalReport(row) : null;
+  return <ClinicalBriefTab sessionId={sessionId} initialReport={initial} />;
 }
 
 async function NotesTabPanel({
@@ -349,7 +375,13 @@ async function MindmapTabPanel({ sessionId }: { sessionId: string }) {
   return <MindmapTab note={noteJson as unknown as TherapyNoteV1} />;
 }
 
-async function ReflectionTabPanel({ sessionId }: { sessionId: string }) {
+async function ReflectionTabPanel({
+  sessionId,
+  clientId,
+}: {
+  sessionId: string;
+  clientId: string;
+}) {
   const [draft, signed] = await Promise.all([
     prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
     prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
@@ -365,5 +397,11 @@ async function ReflectionTabPanel({ sessionId }: { sessionId: string }) {
       </Card>
     );
   }
-  return <ReflectionTab sessionId={sessionId} note={noteJson as unknown as TherapyNoteV1} />;
+  return (
+    <ReflectionTab
+      sessionId={sessionId}
+      clientId={clientId}
+      note={noteJson as unknown as TherapyNoteV1}
+    />
+  );
 }

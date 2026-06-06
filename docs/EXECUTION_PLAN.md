@@ -1,5 +1,17 @@
 # Cureocity Mind — Execution Plan (V1, web-only)
 
+> ## ⚠️ Historical document
+>
+> This is the **original 13-sprint AI-scribe plan** that drove Sprints
+> 0-12 of the codebase. It is preserved verbatim for traceability.
+>
+> **Superseded for Sprints 13+ by [`CLINICAL_COPILOT.md`](CLINICAL_COPILOT.md).**
+> At Sprint 13 the product pivoted from "AI scribe" to "clinical
+> co-pilot for under-skilled clinicians" — different premise, different
+> surfaces. The clinical co-pilot is feature-complete as of Sprint 17.
+> New work should read CLINICAL_COPILOT.md first and only consult this
+> document for context on the underlying scribe engine.
+
 **Status:** Draft for sign-off · **Version:** 1.0 · **Date:** May 2026
 **Parent specification:** PRD 22.1 — Cureocity Mind Engineering Specification (Installments 1 & 2)
 **Audience:** Engineering, Clinical, Compliance, Product, CEO

@@ -68,6 +68,36 @@ export const AuditActionSchema = z.enum([
   'INTAKE_SUBMITTED',
   'INTAKE_REVIEWED',
   'INTAKE_MATCHED',
+  // Clinical co-pilot — Sprint 13.
+  // Pass 3 produces a ClinicalReport per session; the therapist
+  // accepts/modifies/rejects each section. Confirmed sections
+  // persist to ClientDiagnosis + TreatmentPlan.
+  'CLINICAL_REPORT_GENERATED',
+  'CLINICAL_SECTION_CONFIRMED',
+  'DIAGNOSIS_CONFIRMED',
+  'PLAN_CONFIRMED',
+  'CRISIS_ACKNOWLEDGED',
+  // Therapy script — Sprint 14. Pass 4 generates a per-therapy
+  // script keyed by (client, therapy, language, inputs-hash);
+  // cached + audited so re-views don't re-bill and the regulator
+  // can replay what the therapist viewed.
+  'THERAPY_SCRIPT_GENERATED',
+  'THERAPY_SCRIPT_VIEWED',
+  // Patient CRM / sharing — Sprint 15.
+  // Every Send-to-patient click writes ARTEFACT_SHARED with the
+  // channel + outcome; portal opens write PORTAL_OPENED.
+  'PATIENT_ARTEFACT_SHARED',
+  'PATIENT_PORTAL_OPENED',
+  // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
+  'PRE_SESSION_BRIEF_GENERATED',
+  'PRE_SESSION_BRIEF_VIEWED',
+  'INSTRUMENT_ADMINISTERED',
+  'INSTRUMENT_VIEWED',
+  'SAFETY_PLAN_CREATED',
+  'SAFETY_PLAN_UPDATED',
+  // Therapist settings + WebAuthn credentials — Sprint 18.
+  'WEBAUTHN_CREDENTIAL_REGISTERED',
+  'WEBAUTHN_CREDENTIAL_REVOKED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

@@ -9,6 +9,10 @@ import {
   type Pass2Output,
 } from '@cureocity/llm';
 import {
+  PENDING_SECTION_CONFIRMATIONS,
+  type ClinicalLocale,
+} from '@cureocity/contracts';
+import {
   recordCostCircuitTrip,
   recordCostInr,
   recordCrisisFlag,
@@ -82,7 +86,18 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     });
 
     const router = modelRouter();
-    const pass1 = await router.pass1({ sessionId, audioBytes, durationMs });
+    const clientSpokenHints =
+      Array.isArray(session.client.spokenLanguages) && session.client.spokenLanguages.length > 0
+        ? session.client.spokenLanguages
+        : undefined;
+    const pass1 = await router.pass1({
+      sessionId,
+      audioBytes,
+      durationMs,
+      ...(clientSpokenHints && {
+        hints: { spokenLanguageHints: clientSpokenHints },
+      }),
+    });
     await persistCallLog(pass1.callLog);
     recordGeminiCall({
       pass: pass1.callLog.pass,
@@ -106,6 +121,17 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         totalCostInr: pass1Cost,
       },
     });
+
+    // Sprint 16 — persist the languages Pass 1 actually detected onto
+    // the Session row. Used by the UI to show language badges +
+    // by Pass 4 to choose the verbatim therapistSays language when
+    // the client has no spokenLanguages on file.
+    if (pass1.output.detectedLanguages.length > 0) {
+      await prisma.session.update({
+        where: { id: sessionId },
+        data: { spokenLanguages: pass1.output.detectedLanguages },
+      });
+    }
 
     // Pass 2 cost-guard pre-check
     const pass2Estimate = computeCostInr(
@@ -189,6 +215,22 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         },
       });
     }
+
+    // Pass 3 — Clinical Analysis. Best-effort: a Pass 3 failure does
+    // NOT fail note generation; the Clinical Brief tab surfaces the
+    // failure and offers a manual retry via POST /clinical-analysis.
+    // Sprint 13.
+    await runClinicalAnalysis({
+      sessionId,
+      clientId: session.clientId,
+      psychologistId: session.psychologistId,
+      language: (session.language as ClinicalLocale | undefined) ?? 'en',
+      modality: session.modality,
+      presentingConcerns: session.client.presentingConcerns,
+      transcript: pass1.output.transcript,
+      speakerSegments: pass1.output.speakerSegments,
+      note: pass2.output.therapyNote,
+    });
 
     return { draftId: draft.id, status: 'COMPLETED' };
   } catch (e) {
@@ -308,4 +350,170 @@ function bucketDuration(ms: number): string {
   if (min < 45) return '30_45m';
   if (min < 60) return '45_60m';
   return 'gt_60m';
+}
+
+// ============================================================================
+// Pass 3 — Clinical Analysis (Sprint 13).
+// Called inline after Pass 2 succeeds. Reads the client's prior
+// confirmed diagnoses + active treatment plan from the cumulative
+// tables so the report grounds itself in history. Failure is non-
+// fatal — the ClinicalReport row is marked FAILED + errorMessage set,
+// and the Clinical Brief tab surfaces a manual retry.
+// ============================================================================
+
+interface ClinicalAnalysisArgs {
+  sessionId: string;
+  clientId: string;
+  psychologistId: string;
+  language: ClinicalLocale;
+  modality: Pass2Output['therapyNote']['modality'];
+  presentingConcerns: string | null;
+  transcript: string;
+  speakerSegments: Pass1Output['speakerSegments'];
+  note: Pass2Output['therapyNote'];
+}
+
+export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<void> {
+  // Upsert the report row in PENDING so the UI can poll for it
+  // (matches NoteDraft IN_PROGRESS pattern).
+  const report = await prisma.clinicalReport.upsert({
+    where: { sessionId: args.sessionId },
+    update: {
+      status: 'PENDING',
+      errorMessage: null,
+      // Preserve confirmations across retries; a re-run shouldn't
+      // erase the therapist's accept/reject decisions.
+    },
+    create: {
+      sessionId: args.sessionId,
+      clientId: args.clientId,
+      psychologistId: args.psychologistId,
+      status: 'PENDING',
+      confirmations: PENDING_SECTION_CONFIRMATIONS as unknown as Prisma.InputJsonValue,
+    },
+  });
+
+  try {
+    // Cost-guard pre-check. Estimate ~ Pass 2 input + report output;
+    // Pass 3 reads the same transcript + a small JSON note + history.
+    const pass3Estimate = computeCostInr(
+      Math.ceil(args.transcript.length / 4) + 1_000,
+      2_000,
+      PRO_PRICING,
+    );
+    await checkCostCircuit({
+      sessionId: args.sessionId,
+      psychologistId: args.psychologistId,
+      estimatedCostInr: pass3Estimate,
+    });
+
+    // Pull cumulative history for the prompt.
+    const [activeDiagnoses, activePlan] = await Promise.all([
+      prisma.clientDiagnosis.findMany({
+        where: { clientId: args.clientId, supersededAt: null },
+        orderBy: [{ isPrimary: 'desc' }, { confirmedAt: 'desc' }],
+        take: 5,
+      }),
+      prisma.treatmentPlan.findFirst({
+        where: { clientId: args.clientId, supersededAt: null },
+        orderBy: { version: 'desc' },
+      }),
+    ]);
+
+    const priorDiagnoses = activeDiagnoses.map((d) => ({
+      icd11Code: d.icd11Code,
+      icd11Label: d.icd11Label,
+      confidence: d.confidence,
+      isPrimary: d.isPrimary,
+      confirmedAt: d.confirmedAt.toISOString(),
+    }));
+    const priorTreatmentPlan = activePlan
+      ? {
+          modality:
+            (activePlan.body as { modality?: string } | null)?.modality ?? 'unknown',
+          phaseSequence:
+            (activePlan.body as { phaseSequence?: string[] } | null)?.phaseSequence ?? [],
+          goals:
+            (activePlan.body as { goals?: { description: string; measure: string }[] } | null)
+              ?.goals ?? [],
+          expectedDurationSessions:
+            (activePlan.body as { expectedDurationSessions?: number | null } | null)
+              ?.expectedDurationSessions ?? null,
+          version: activePlan.version,
+          confirmedAt: activePlan.confirmedAt.toISOString(),
+        }
+      : null;
+
+    const router = modelRouter();
+    const pass3 = await router.pass3({
+      sessionId: args.sessionId,
+      transcript: args.transcript,
+      speakerSegments: args.speakerSegments,
+      modality: args.modality,
+      language: args.language,
+      note: args.note,
+      clientContext: {
+        ...(args.presentingConcerns !== null && {
+          presentingConcerns: args.presentingConcerns,
+        }),
+        ...(priorDiagnoses.length > 0 && { priorDiagnoses }),
+        ...(priorTreatmentPlan && { priorTreatmentPlan }),
+      },
+    });
+
+    await persistCallLog(pass3.callLog);
+    recordGeminiCall({
+      pass: pass3.callLog.pass,
+      status: pass3.callLog.status,
+      region: pass3.callLog.region,
+      durationMs: pass3.callLog.latencyMs,
+    });
+    recordCostInr({
+      service: 'gemini-pass-3',
+      durationLabel: 'clinical',
+      inr: pass3.callLog.costInr,
+    });
+
+    await prisma.clinicalReport.update({
+      where: { id: report.id },
+      data: {
+        status: 'COMPLETED',
+        body: pass3.output.clinicalReport as unknown as Prisma.InputJsonValue,
+        totalCostInr: new Prisma.Decimal(pass3.callLog.costInr),
+      },
+    });
+
+    await writeAudit({
+      actorType: 'SYSTEM',
+      action: 'CLINICAL_REPORT_GENERATED',
+      targetType: 'ClinicalReport',
+      targetId: report.id,
+      metadata: {
+        sessionId: args.sessionId,
+        clientId: args.clientId,
+        psychologistId: args.psychologistId,
+        diagnosisCandidateCount: pass3.output.clinicalReport.diagnosisCandidates.length,
+        crisisFlagCount: pass3.output.clinicalReport.crisisFlags.length,
+        costInr: pass3.callLog.costInr,
+      },
+    });
+  } catch (e) {
+    const message = (e as Error).message;
+    await prisma.clinicalReport
+      .update({
+        where: { id: report.id },
+        data: { status: 'FAILED', errorMessage: message },
+      })
+      .catch(() => {
+        // Swallow — primary failure already logged below.
+      });
+    if (e instanceof CostCircuitOpenError) {
+      recordCostCircuitTrip(e.meta.scope);
+    }
+    console.error(
+      `[clinical-analysis] sessionId=${args.sessionId} failed: ${message}`,
+    );
+    // Non-fatal: do NOT re-throw. Pass 3 failure must not unwind
+    // Pass 1/2 success.
+  }
 }

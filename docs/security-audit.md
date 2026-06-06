@@ -1,11 +1,34 @@
 # Security audit — pre-pilot gate
 
-Sprint 10 PR 4. This document is the pre-pilot security-audit
-checklist. The platform cannot go to pilot until every row is either
-**Pass** with evidence linked, or **Risk-accepted** with a sign-off
-and a Sprint-11+ remediation ticket.
+Sprint 10 PR 4 (extended through Sprint 17). This document is the
+pre-pilot security-audit checklist. The platform cannot go to pilot
+until every row is either **Pass** with evidence linked, or
+**Risk-accepted** with a sign-off and a remediation ticket.
 
 The audit is rerun before every subsequent major release.
+
+> **Sprint 13-17 surface added:** the clinical co-pilot pivot added
+> Pass 3 / Pass 4 / Pass 5 (same Gemini SDK + same safety-off config
+> as Pass 2), a patient-share flow with WATI + SendGrid outbound and a
+> `/p/<token>` portal route, and three new cumulative tables
+> (`client_diagnoses`, `treatment_plans`, `safety_plans`). Each
+> extension preserves the existing controls:
+>
+> - **Tenant isolation** — every list/get still filters by
+>   `psychologistId`; cross-tenant tests cover the new
+>   `clinical-reports`, `therapy-scripts`, `pre-session-brief`,
+>   `instruments`, `safety-plan`, and `share` routes.
+> - **Audit coverage** — 13 new `AuditAction` values added across
+>   Sprints 13-17 (see `docs/CLINICAL_COPILOT.md` § 8); the chaos
+>   coverage test in `packages/contracts/src/audit-coverage.spec.ts`
+>   enforces a live writer for each.
+> - **Portal authentication** — `/p/<token>` is gated by 22-char
+>   base64url tokens (~128 bits of entropy from 16 random bytes via
+>   `node:crypto.randomBytes`). The route is server-rendered and
+>   audits every `PATIENT_PORTAL_OPENED` event with IP + UA.
+> - **No new outbound vendors** — WATI and SendGrid were already on
+>   the allow-list from Sprint 9; Sprint 15 wired them up but didn't
+>   expand the surface.
 
 ## OWASP Top 10 (2021)
 

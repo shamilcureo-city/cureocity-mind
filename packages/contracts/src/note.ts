@@ -11,11 +11,36 @@ import { SessionModalitySchema } from './client';
 export const SpeakerSchema = z.enum(['therapist', 'client', 'unknown']);
 export type Speaker = z.infer<typeof SpeakerSchema>;
 
+/**
+ * Per-segment dominant-language tag added in Sprint 16.
+ *
+ * Values:
+ *   - An ISO 639-1 code ("en", "ml", "hi", "ta", "bn", "kn", "te", "mr", "gu", "pa")
+ *     when ≥80% of the segment is a single language
+ *   - "mixed" for true code-switching within the segment (Manglish,
+ *     Hinglish, Tanglish, etc.)
+ *   - "unknown" when language detection wasn't confident
+ *
+ * Optional / nullable on legacy rows that pre-date Sprint 16.
+ */
+export const SegmentLanguageSchema = z
+  .string()
+  .min(2)
+  .max(16)
+  .regex(/^[a-z]{2}(-[A-Z]{2})?$|^mixed$|^unknown$/);
+export type SegmentLanguage = z.infer<typeof SegmentLanguageSchema>;
+
 export const SpeakerSegmentSchema = z.object({
   speaker: SpeakerSchema,
   startMs: z.number().int().nonnegative(),
   endMs: z.number().int().positive(),
   text: z.string(),
+  /**
+   * Sprint 16: dominant language tag for this segment. Optional so
+   * legacy rows that pre-date the field still validate; new Pass 1
+   * runs always populate it.
+   */
+  language: SegmentLanguageSchema.optional(),
 });
 export type SpeakerSegment = z.infer<typeof SpeakerSegmentSchema>;
 
