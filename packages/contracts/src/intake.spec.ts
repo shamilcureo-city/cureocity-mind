@@ -105,6 +105,44 @@ describe('IntakeNoteV1Schema', () => {
       IntakeNoteV1Schema.safeParse({ ...valid, mentalStatusExam: '' }).success,
     ).toBe(false);
   });
+
+  // Regression: Gemini 2.5 Pro sometimes ignores the prompt's "single
+  // prose string" instruction for MSE and returns a structured object
+  // keyed by exam element. The preprocess flattens it to a string
+  // rather than failing the parse — Sprint 19 prod hit this on the
+  // first INTAKE-kind session.
+  it('coerces an MSE object to a flattened prose string', () => {
+    const parsed = IntakeNoteV1Schema.safeParse({
+      ...valid,
+      mentalStatusExam: {
+        appearance: 'Appropriately groomed, neat.',
+        behaviour: 'Cooperative, good eye contact.',
+        speech: 'Normal rate and tone.',
+        mood: '“Stressed”',
+        affect: 'Mildly anxious, congruent with mood.',
+        thoughtProcess: 'Linear, goal-directed.',
+        thoughtContent: 'No SI/HI.',
+        cognition: 'Alert and oriented x3.',
+        insight: 'Fair.',
+        judgement: 'Fair.',
+      },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(typeof parsed.data.mentalStatusExam).toBe('string');
+      expect(parsed.data.mentalStatusExam).toContain('Appearance:');
+      expect(parsed.data.mentalStatusExam).toContain('Thought Process:');
+      expect(parsed.data.mentalStatusExam).toContain('Cognition:');
+    }
+  });
+
+  it('rejects an empty MSE object (nothing to flatten)', () => {
+    const parsed = IntakeNoteV1Schema.safeParse({
+      ...valid,
+      mentalStatusExam: {},
+    });
+    expect(parsed.success).toBe(false);
+  });
 });
 
 describe('InitialAssessmentBriefV1Schema', () => {

@@ -99,6 +99,44 @@ export const TherapyNoteV1Schema = z.object({
 // structure to be clinically useful.
 // ============================================================================
 
+/**
+ * Mental Status Exam — accepts either a free-text string OR a structured
+ * object keyed by MSE element. The prompt asks for a prose string, but
+ * Gemini Pro sometimes interprets the "appearance, behaviour, speech,
+ * mood, …" list as a request for structured output and returns
+ * `{ appearance: "…", behaviour: "…", … }`. Both shapes are clinically
+ * fine; we flatten the object to a "key: value" prose block so
+ * downstream renderers + the IntakeNoteV1.mentalStatusExam string
+ * contract stay simple.
+ */
+const MentalStatusExamSchema = z.preprocess(
+  (val) => {
+    if (typeof val === 'string') return val;
+    if (val && typeof val === 'object') {
+      const entries = Object.entries(val as Record<string, unknown>);
+      if (entries.length === 0) return '';
+      return entries
+        .map(([k, v]) => {
+          const label = k
+            .replace(/([A-Z])/g, ' $1')
+            .replace(/^\s+/, '')
+            .replace(/^./, (c) => c.toUpperCase());
+          const text =
+            typeof v === 'string'
+              ? v.trim()
+              : v === null || v === undefined
+                ? ''
+                : JSON.stringify(v);
+          return text ? `${label}: ${text}` : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+    return val;
+  },
+  z.string().min(1),
+);
+
 export const IntakeNoteV1Schema = z.object({
   version: z.literal('V1'),
   /// Presenting concerns — what brought the client in today.
@@ -117,8 +155,9 @@ export const IntakeNoteV1Schema = z.object({
   socialHistory: z.string(),
   /// Mental status exam — appearance, behaviour, speech, mood,
   /// affect, thought process, thought content, perception,
-  /// cognition, insight, judgement.
-  mentalStatusExam: z.string().min(1),
+  /// cognition, insight, judgement. See MentalStatusExamSchema for
+  /// the object-tolerant preprocess.
+  mentalStatusExam: MentalStatusExamSchema,
   /// Working clinical hypothesis (NOT a confirmed diagnosis).
   /// Pass 3 produces an InitialAssessmentBrief with a differential
   /// based on this hypothesis.

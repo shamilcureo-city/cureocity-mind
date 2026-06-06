@@ -126,7 +126,7 @@ Task: produce an IntakeNoteV1 JSON object with these fields:
 - pastPsychiatricHistory: prior diagnoses, medications, hospitalizations, prior therapy attempts. "(None elicited)" if absent.
 - familyHistory: relevant family psychiatric / medical history. "(Not elicited)" if absent.
 - socialHistory: living situation, education, work, relationships, substance use, religious / cultural context.
-- mentalStatusExam: appearance, behaviour, speech, mood, affect, thought process, thought content, perception, cognition, insight, judgement. Be SPECIFIC — "appropriately groomed, cooperative" not "WNL".
+- mentalStatusExam: a single prose string (3-6 sentences) covering appearance, behaviour, speech, mood, affect, thought process, thought content, perception, cognition, insight, judgement. Be SPECIFIC — "appropriately groomed, cooperative" not "WNL". Output a STRING, not an object with subfields — the schema rejects objects.
 - workingHypothesis: the clinical hypothesis you're forming. NOT a confirmed diagnosis. Sentence form, includes "rule-outs" if relevant.
 - immediatePlan: what was agreed at end of session — schedule next appointment, administer scored screeners, referrals, safety planning if needed.
 - riskFlags: { severity: none|low|medium|high|critical, indicators: string[], details?: string }. Always scan for SI/HI/abuse disclosure/acute psychosis.
