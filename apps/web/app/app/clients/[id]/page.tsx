@@ -10,6 +10,8 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { AffectCard } from '@/components/app/AffectCard';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
+import { InstrumentRunner } from '@/components/app/InstrumentRunner';
+import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
 import { prisma } from '@/lib/prisma';
@@ -157,7 +159,15 @@ export default async function ClientDetailPage({ params }: PageProps) {
       </Card>
 
       <div className="mt-6">
+        <PreSessionBriefCard clientId={client.id} />
+      </div>
+
+      <div className="mt-6">
         <WorkflowSection clientId={client.id} />
+      </div>
+
+      <div className="mt-6">
+        <InstrumentRunner clientId={client.id} />
       </div>
 
       <div className="mt-6">

@@ -88,6 +88,13 @@ export const AuditActionSchema = z.enum([
   // channel + outcome; portal opens write PORTAL_OPENED.
   'PATIENT_ARTEFACT_SHARED',
   'PATIENT_PORTAL_OPENED',
+  // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
+  'PRE_SESSION_BRIEF_GENERATED',
+  'PRE_SESSION_BRIEF_VIEWED',
+  'INSTRUMENT_ADMINISTERED',
+  'INSTRUMENT_VIEWED',
+  'SAFETY_PLAN_CREATED',
+  'SAFETY_PLAN_UPDATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

@@ -5,6 +5,7 @@ import {
   type IPass2Backend,
   type IPass3Backend,
   type IPass4Backend,
+  type IPass5Backend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -13,11 +14,15 @@ import {
   type Pass3Output,
   type Pass4Input,
   type Pass4Output,
+  type Pass5Input,
+  type Pass5Output,
+  type PreSessionBriefV1,
   type TherapyNoteV1,
   type TherapyScriptV1,
 } from '../types';
 import {
   CLINICAL_ANALYSIS_PROMPT_VERSION,
+  PRE_SESSION_BRIEF_PROMPT_VERSION,
   TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
   THERAPY_NOTE_PROMPT_VERSION,
   THERAPY_SCRIPT_PROMPT_VERSION,
@@ -370,6 +375,85 @@ export class MockGeminiPass4Backend implements IPass4Backend {
         promptVersion: THERAPY_SCRIPT_PROMPT_VERSION,
         inputTokens: Math.ceil(input.therapyName.length / 4) + 200,
         outputTokens: 700,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Mock Pass 5 (pre-session brief). Deterministic PreSessionBriefV1
+ * with a coherent shape — context line, recap, focus, opening
+ * line, watchpoints. Passes through homework + crisis + instrument
+ * data from input so the route layer can exercise the full path
+ * in dev/CI without a real Gemini call.
+ */
+export class MockGeminiPass5Backend implements IPass5Backend {
+  async run(input: Pass5Input): Promise<{ output: Pass5Output; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const modality = input.treatmentPlan?.modality ?? 'CBT';
+    const dxLabel = input.primaryDiagnosis?.icd11Label ?? 'presenting concerns';
+    const sessionLine =
+      input.sessionNumber !== undefined && input.treatmentPlan?.expectedDurationSessions
+        ? `Session ${input.sessionNumber} of ${input.treatmentPlan.expectedDurationSessions}`
+        : input.sessionNumber !== undefined
+          ? `Session ${input.sessionNumber}`
+          : 'New session';
+    const brief: PreSessionBriefV1 = {
+      version: 'V1',
+      language: input.language,
+      contextLine: `${sessionLine} · ${modality} for ${dxLabel}.`,
+      lastSessionRecap: input.lastSessionSummary
+        ? `[mock] Last session: ${input.lastSessionSummary.slice(0, 220)}…`
+        : '',
+      todaysFocus: input.treatmentPlan?.phaseSequence?.length
+        ? `[mock] Per plan, today focus on: ${input.treatmentPlan.phaseSequence[0]}. Anchor to the active goal: ${input.treatmentPlan.goals[0]?.description ?? '(see plan)'}.`
+        : '[mock] No active plan yet — open with engagement and information gathering.',
+      openingLine: input.lastHomework
+        ? `"How did the ${input.lastHomework.description.slice(0, 80)} go this week?"`
+        : '"Good to see you again. Where would you like to start today?"',
+      riskWatchpoints:
+        input.openCrises && input.openCrises.length > 0
+          ? [
+              'Run a safety check before anything else — open crisis flag still on record.',
+              '[mock] Re-emergence of avoidance behaviour around the goal context.',
+            ]
+          : ['[mock] Watch for movement on the homework outcome.', '[mock] Listen for any new triggers.'],
+      homeworkStatus: input.lastHomework
+        ? {
+            description: input.lastHomework.description,
+            outcome:
+              (input.lastHomework.outcome as 'completed' | 'partial' | 'skipped' | 'unknown' | null) ??
+              'unknown',
+            notes: null,
+          }
+        : null,
+      carryoverCrisis:
+        input.openCrises?.map((c) => ({
+          kind: c.kind,
+          severity: c.severity,
+          lastSeenAt: c.lastSeenAt,
+        })) ?? [],
+      latestInstruments:
+        input.latestInstruments?.map((i) => ({
+          instrumentKey: i.instrumentKey,
+          score: i.score,
+          severity: i.severity,
+          administeredAt: i.administeredAt,
+        })) ?? [],
+    };
+    return {
+      output: { preSessionBrief: brief },
+      callLog: {
+        sessionId: null,
+        pass: 'PASS_5_PRE_SESSION_BRIEF',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: PRE_SESSION_BRIEF_PROMPT_VERSION,
+        inputTokens: 300,
+        outputTokens: 250,
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',

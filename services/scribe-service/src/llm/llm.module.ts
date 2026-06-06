@@ -6,12 +6,15 @@ import {
   type IPass2Backend,
   type IPass3Backend,
   type IPass4Backend,
+  type IPass5Backend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
   MockGeminiPass4Backend,
+  MockGeminiPass5Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
+  VertexGeminiProBriefBackend,
   VertexGeminiProClinicalBackend,
   VertexGeminiProGlobalBackend,
   VertexGeminiProTherapyScriptBackend,
@@ -37,15 +40,17 @@ const modelRouterProvider: Provider = {
     let pass2: IPass2Backend;
     let pass3: IPass3Backend;
     let pass4: IPass4Backend;
+    let pass5: IPass5Backend;
 
     if (!projectId) {
       logger.warn(
-        'GCP_PROJECT_ID is unset — using Mock backends for Pass 1-4. Do NOT ship to production like this.',
+        'GCP_PROJECT_ID is unset — using Mock backends for Pass 1-5. Do NOT ship to production like this.',
       );
       pass1 = new MockGeminiPass1Backend();
       pass2 = new MockGeminiPass2Backend();
       pass3 = new MockGeminiPass3Backend();
       pass4 = new MockGeminiPass4Backend();
+      pass5 = new MockGeminiPass5Backend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -78,6 +83,15 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-pro-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      pass5 = new VertexGeminiProBriefBackend({
+        projectId,
+        location: config.get<string>('GEMINI_PRO_REGION') ?? 'us-central1',
+        model:
+          config.get<string>('GEMINI_BRIEF_MODEL') ??
+          config.get<string>('GEMINI_PRO_MODEL') ??
+          'gemini-1.5-pro-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
@@ -86,6 +100,7 @@ const modelRouterProvider: Provider = {
       pass2,
       pass3,
       pass4,
+      pass5,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

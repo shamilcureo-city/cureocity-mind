@@ -4,8 +4,10 @@ import {
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
   MockGeminiPass4Backend,
+  MockGeminiPass5Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
+  VertexGeminiProBriefBackend,
   VertexGeminiProClinicalBackend,
   VertexGeminiProGlobalBackend,
   VertexGeminiProTherapyScriptBackend,
@@ -90,6 +92,14 @@ function build(): IModelRouter {
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
       }),
+      pass5: new VertexGeminiProBriefBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['VERTEX_BRIEF_MODEL'] ??
+          process.env['VERTEX_PRO_MODEL'] ??
+          'gemini-2.5-pro',
+      }),
     });
   }
   console.info(
@@ -100,6 +110,7 @@ function build(): IModelRouter {
     pass2: new MockGeminiPass2Backend(),
     pass3: new MockGeminiPass3Backend(),
     pass4: new MockGeminiPass4Backend(),
+    pass5: new MockGeminiPass5Backend(),
   });
 }
 

@@ -92,6 +92,9 @@ model Psychologist {
   treatmentPlans      TreatmentPlan[]
   therapyScripts      TherapyScript[]
   patientShares       PatientShare[]
+  preSessionBriefs    PreSessionBrief[]
+  instrumentResponses InstrumentResponse[]
+  safetyPlans         SafetyPlan[]
 
   @@index([status])
   @@index([role])
@@ -274,6 +277,9 @@ model Client {
   treatmentPlans      TreatmentPlan[]
   therapyScripts      TherapyScript[]
   patientShares       PatientShare[]
+  preSessionBriefs    PreSessionBrief[]
+  instrumentResponses InstrumentResponse[]
+  safetyPlans         SafetyPlan[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -551,16 +557,18 @@ model Session {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client          Client            @relation(fields: [clientId], references: [id])
-  psychologist    Psychologist      @relation(fields: [psychologistId], references: [id])
-  audioChunks     AudioChunk[]
-  geminiCallLogs  GeminiCallLog[]
-  noteDraft       NoteDraft?
-  therapyNote     TherapyNote?
-  clinicalReport  ClinicalReport?
-  treatmentPlans  TreatmentPlan[]
-  clientDiagnoses ClientDiagnosis[]
-  patientShares   PatientShare[]
+  client              Client               @relation(fields: [clientId], references: [id])
+  psychologist        Psychologist         @relation(fields: [psychologistId], references: [id])
+  audioChunks         AudioChunk[]
+  geminiCallLogs      GeminiCallLog[]
+  noteDraft           NoteDraft?
+  therapyNote         TherapyNote?
+  clinicalReport      ClinicalReport?
+  treatmentPlans      TreatmentPlan[]
+  clientDiagnoses     ClientDiagnosis[]
+  patientShares       PatientShare[]
+  instrumentResponses InstrumentResponse[]
+  safetyPlans         SafetyPlan[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -611,6 +619,7 @@ enum GeminiPass {
   PASS_3_CLINICAL_ANALYSIS // Sprint 13 — Clinical Co-Pilot Pivot
   PASS_3_MISSED_THEMES
   PASS_4_THERAPY_SCRIPT // Sprint 14 — Therapy Script Pass
+  PASS_5_PRE_SESSION_BRIEF // Sprint 17 — Pre-Session Brief
 }
 
 enum GeminiCallStatus {
@@ -1088,6 +1097,142 @@ model TherapyScript {
 }
 
 // ============================================================================
+// PreSessionBrief — Sprint 17. Pass 5 output cached per
+// (clientId, lastSessionId, language). The therapist opens the
+// client and sees what to focus on today, grounded in the most
+// recent confirmed clinical record + therapy script + homework.
+// Cache invalidates whenever a new session lands.
+// ============================================================================
+
+enum PreSessionBriefStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model PreSessionBrief {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  /// Which session the brief is grounded against (the most recent
+  /// COMPLETED session at generation time). Null for "first session"
+  /// briefs.
+  lastSessionId String?
+
+  language String                @default("en")
+  status   PreSessionBriefStatus @default(PENDING)
+
+  /// Validated against PreSessionBriefV1Schema before write.
+  body Json?
+
+  totalCostInr Decimal @default(0) @db.Decimal(10, 4)
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@map("pre_session_briefs")
+}
+
+// ============================================================================
+// InstrumentResponse — Sprint 17. A single administration of a
+// scored clinical instrument (PHQ-9, GAD-7, ...). One row per
+// administration; trends are queryable per (clientId, instrumentKey).
+//
+// `responses` JSONB stores the item-id → integer-value map; `score`
+// and `severity` are denormalised for fast querying + display in the
+// pre-session brief.
+// ============================================================================
+
+model InstrumentResponse {
+  id             String  @id @default(cuid())
+  clientId       String
+  psychologistId String
+  sessionId      String?
+
+  /// Stable identifier from packages/clinical/src/instruments,
+  /// e.g. "PHQ9" | "GAD7" | "WHODAS2_12".
+  instrumentKey String
+
+  /// ISO 639-1 — language the items were presented in. Defaults to
+  /// "en"; non-English uses only ship once validated translations
+  /// are vetted by a clinician.
+  language String @default("en")
+
+  /// Item-id → integer answer map (1-based, matching the catalog).
+  responses Json
+
+  score    Int
+  /// Severity band label as defined by the instrument
+  /// (e.g. "minimal", "mild", "moderate", "severe").
+  severity String
+
+  /// When the instrument was administered. May predate createdAt for
+  /// backfilled rows.
+  administeredAt               DateTime
+  administeredByPsychologistId String
+
+  notes String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  session      Session?     @relation(fields: [sessionId], references: [id])
+
+  @@index([clientId, instrumentKey, administeredAt])
+  @@index([psychologistId, createdAt])
+  @@map("instrument_responses")
+}
+
+// ============================================================================
+// SafetyPlan — Sprint 17. Stanley & Brown 5-step crisis safety plan
+// created when a Crisis section is confirmed at high/critical
+// severity. Cumulative per client (the most recent supersedes
+// earlier ones; old rows are kept with supersededAt set so the
+// audit trail is intact).
+// ============================================================================
+
+model SafetyPlan {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  /// Optional — the session where the crisis surfaced.
+  sourceSessionId String?
+
+  language String @default("en")
+
+  /// Validated against SafetyPlanV1Schema before write.
+  body Json
+
+  /// When the therapist confirmed this plan.
+  confirmedAt               DateTime
+  confirmedByPsychologistId String
+
+  /// Set when a later plan supersedes this one.
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  session      Session?     @relation(fields: [sourceSessionId], references: [id])
+
+  @@index([clientId, supersededAt])
+  @@index([psychologistId, createdAt])
+  @@map("safety_plans")
+}
+
+// ============================================================================
 // ExerciseAssignment / MoodLog / JournalEntry — continuity-service tables.
 // Sprint 5 PR 1.
 // ============================================================================
@@ -1410,6 +1555,14 @@ enum AuditAction {
   // write PORTAL_OPENED.
   PATIENT_ARTEFACT_SHARED
   PATIENT_PORTAL_OPENED
+
+  // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
+  PRE_SESSION_BRIEF_GENERATED
+  PRE_SESSION_BRIEF_VIEWED
+  INSTRUMENT_ADMINISTERED
+  INSTRUMENT_VIEWED
+  SAFETY_PLAN_CREATED
+  SAFETY_PLAN_UPDATED
 }
 
 enum AuditActorType {

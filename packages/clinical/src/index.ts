@@ -8,3 +8,5 @@ export * from './exercises/types';
 export * from './exercises/catalog';
 export * from './exercises/emdr-catalog';
 export * from './prescription/engine';
+export * from './instruments';
+export * from './crisis';
