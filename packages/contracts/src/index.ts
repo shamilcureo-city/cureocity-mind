@@ -14,3 +14,4 @@ export * from './continuity';
 export * from './dsr';
 export * from './template';
 export * from './clinical';
+export * from './share';

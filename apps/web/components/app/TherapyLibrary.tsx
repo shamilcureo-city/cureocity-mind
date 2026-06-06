@@ -9,6 +9,7 @@ import type {
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { ShareModal } from './ShareModal';
 
 interface TherapyLibraryProps {
   clientId: string;
@@ -17,6 +18,8 @@ interface TherapyLibraryProps {
   /** Always-available fallback list for browse mode. */
   libraryTherapies: string[];
   defaultLanguage: 'en' | 'ml' | 'hi' | 'ta' | 'bn';
+  /** Id of the client's currently active treatment plan, if any. */
+  activeTreatmentPlanId: string | null;
 }
 
 interface ScriptResponse {
@@ -38,11 +41,17 @@ export function TherapyLibrary({
   recommendedTherapies,
   libraryTherapies,
   defaultLanguage,
+  activeTreatmentPlanId,
 }: TherapyLibraryProps) {
   const [activeTherapy, setActiveTherapy] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shareTarget, setShareTarget] = useState<
+    | null
+    | { kind: 'therapy-script'; therapyScriptId: string; label: string }
+    | { kind: 'treatment-plan'; treatmentPlanId: string }
+  >(null);
 
   const loadScript = useCallback(
     async (therapyName: string, refresh = false) => {
@@ -94,7 +103,22 @@ export function TherapyLibrary({
             diagnosis + plan.
           </p>
         </div>
-        <Badge tone="muted">language: {defaultLanguage}</Badge>
+        <div className="flex items-center gap-2">
+          {activeTreatmentPlanId && (
+            <Button
+              variant="secondary"
+              onClick={() =>
+                setShareTarget({
+                  kind: 'treatment-plan',
+                  treatmentPlanId: activeTreatmentPlanId,
+                })
+              }
+            >
+              Share plan with patient
+            </Button>
+          )}
+          <Badge tone="muted">language: {defaultLanguage}</Badge>
+        </div>
       </header>
 
       {activeTherapy === null ? (
@@ -138,9 +162,41 @@ export function TherapyLibrary({
               source={scriptData.source}
               onRefresh={() => void loadScript(activeTherapy, true)}
               refreshing={loading}
+              onShare={() =>
+                setShareTarget({
+                  kind: 'therapy-script',
+                  therapyScriptId: scriptData.script.id,
+                  label: scriptData.script.therapyName,
+                })
+              }
             />
           )}
         </div>
+      )}
+      {shareTarget && (
+        <ShareModal
+          open={shareTarget !== null}
+          onClose={() => setShareTarget(null)}
+          clientId={clientId}
+          hasContactPhone={true}
+          hasContactEmail={true}
+          artefact={
+            shareTarget.kind === 'therapy-script'
+              ? {
+                  artefactType: 'THERAPY_SCRIPT',
+                  therapyScriptId: shareTarget.therapyScriptId,
+                }
+              : {
+                  artefactType: 'TREATMENT_PLAN',
+                  treatmentPlanId: shareTarget.treatmentPlanId,
+                }
+          }
+          artefactLabel={
+            shareTarget.kind === 'therapy-script'
+              ? `Therapy script · ${shareTarget.label}`
+              : 'Treatment plan'
+          }
+        />
       )}
     </Card>
   );
@@ -190,9 +246,10 @@ interface ScriptPlayerProps {
   source: 'cache' | 'fresh';
   onRefresh: () => void | Promise<void>;
   refreshing: boolean;
+  onShare: () => void;
 }
 
-function ScriptPlayer({ script, source, onRefresh, refreshing }: ScriptPlayerProps) {
+function ScriptPlayer({ script, source, onRefresh, refreshing, onShare }: ScriptPlayerProps) {
   const [completed, setCompleted] = useState<Record<string, boolean>>({});
   const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
 
@@ -233,6 +290,7 @@ function ScriptPlayer({ script, source, onRefresh, refreshing }: ScriptPlayerPro
           <Button variant="secondary" onClick={() => void onRefresh()} disabled={refreshing}>
             {refreshing ? 'Regenerating…' : 'Regenerate'}
           </Button>
+          <Button onClick={onShare}>Send to patient</Button>
         </div>
       </header>
 

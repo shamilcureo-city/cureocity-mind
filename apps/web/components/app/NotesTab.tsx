@@ -11,6 +11,7 @@ import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
 import { RevisionPanel } from './RevisionPanel';
+import { ShareModal } from './ShareModal';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -52,6 +53,7 @@ export function NotesTab({
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -283,7 +285,14 @@ export function NotesTab({
             signedAt={note.signedAt}
             signedBy={note.signedBy}
           />
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShareOpen(true)}
+              className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+            >
+              Send to patient
+            </button>
             <a
               href={`/api/v1/sessions/${sessionId}/note/pdf`}
               download
@@ -292,6 +301,15 @@ export function NotesTab({
               Download PDF
             </a>
           </div>
+          <ShareModal
+            open={shareOpen}
+            onClose={() => setShareOpen(false)}
+            clientId={clientId}
+            hasContactPhone={true}
+            hasContactEmail={true}
+            artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
+            artefactLabel="Signed session note"
+          />
           <RevisionPanel
             sessionId={sessionId}
             note={note}

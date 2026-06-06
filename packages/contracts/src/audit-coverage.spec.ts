@@ -47,6 +47,9 @@ const SCAN_ROOTS = [
   // apps/web/lib can also write audits (e.g. CLINICAL_REPORT_GENERATED
   // emitted from runClinicalAnalysis as a SYSTEM actor).
   'apps/web/lib',
+  // Sprint 15 — the public patient portal page at /p/[token] writes
+  // PATIENT_PORTAL_OPENED when the patient opens a shared artefact.
+  'apps/web/app/p',
 ];
 
 /**

@@ -1,6 +1,7 @@
 import type {
   ClientDiagnosis as ClientDiagnosisRow,
   ClinicalReport as ClinicalReportRow,
+  PatientShare as PatientShareRow,
   TherapyScript as TherapyScriptRow,
   TreatmentPlan as TreatmentPlanRow,
 } from '@prisma/client';
@@ -10,6 +11,7 @@ import {
   ClinicalSectionConfirmationsSchema,
   ClinicalSupportingQuoteSchema,
   ClinicalTreatmentPlanSchema,
+  PatientShareSnapshotSchema,
   PENDING_SECTION_CONFIRMATIONS,
   TherapyScriptV1Schema,
   type ClientDiagnosis,
@@ -19,6 +21,8 @@ import {
   type ClinicalSectionConfirmations,
   type ClinicalSupportingQuote,
   type ClinicalTreatmentPlan,
+  type PatientShare,
+  type PatientShareSnapshot,
   type TherapyScript,
   type TreatmentPlan,
 } from '@cureocity/contracts';
@@ -116,6 +120,41 @@ function parseSupportingQuotes(raw: unknown): ClinicalSupportingQuote[] {
     .map((q) => ClinicalSupportingQuoteSchema.safeParse(q))
     .filter((r): r is { success: true; data: ClinicalSupportingQuote } => r.success)
     .map((r) => r.data);
+}
+
+export function toPatientShare(row: PatientShareRow): PatientShare {
+  const snapshotParse = PatientShareSnapshotSchema.safeParse(row.snapshot);
+  const snapshot: PatientShareSnapshot = snapshotParse.success
+    ? snapshotParse.data
+    : {
+        kind: 'REFLECTION_QUESTIONS',
+        questions: ['(snapshot failed validation — open the source artefact)'],
+      };
+  const langParse = ClinicalLocaleSchema.safeParse(row.language);
+  const language: ClinicalLocale = langParse.success ? langParse.data : 'en';
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    psychologistId: row.psychologistId,
+    sessionId: row.sessionId,
+    artefactType: row.artefactType,
+    artefactId: row.artefactId,
+    channel: row.channel,
+    status: row.status,
+    shareToken: row.shareToken,
+    language,
+    snapshot,
+    subject: row.subject,
+    toContact: row.toContact,
+    providerMessageId: row.providerMessageId,
+    errorCode: row.errorCode,
+    errorDetail: row.errorDetail,
+    sentAt: row.sentAt?.toISOString() ?? null,
+    openedAt: row.openedAt?.toISOString() ?? null,
+    expiresAt: row.expiresAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 export function toTherapyScript(row: TherapyScriptRow): TherapyScript {

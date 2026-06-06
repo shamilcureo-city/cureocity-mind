@@ -91,6 +91,7 @@ model Psychologist {
   clientDiagnoses     ClientDiagnosis[]
   treatmentPlans      TreatmentPlan[]
   therapyScripts      TherapyScript[]
+  patientShares       PatientShare[]
 
   @@index([status])
   @@index([role])
@@ -265,6 +266,7 @@ model Client {
   diagnoses           ClientDiagnosis[]
   treatmentPlans      TreatmentPlan[]
   therapyScripts      TherapyScript[]
+  patientShares       PatientShare[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -542,6 +544,7 @@ model Session {
   clinicalReport  ClinicalReport?
   treatmentPlans  TreatmentPlan[]
   clientDiagnoses ClientDiagnosis[]
+  patientShares   PatientShare[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -941,6 +944,97 @@ model TreatmentPlan {
 // same context returns the cached script — no second Vertex bill.
 // ============================================================================
 
+// ============================================================================
+// PatientShare — Sprint 15.
+// One row per (artefact, channel) Send-to-patient action. The
+// snapshot column locks in the artefact body at share time so the
+// patient always sees what was sent, even if the source row is
+// later edited or deleted. The shareToken opens a public read-only
+// portal at /p/<token>.
+// ============================================================================
+
+enum PatientShareArtefactType {
+  SIGNED_NOTE
+  REFLECTION_QUESTIONS
+  THERAPY_SCRIPT
+  TREATMENT_PLAN
+}
+
+enum PatientShareChannel {
+  WHATSAPP
+  EMAIL
+  PORTAL_LINK
+}
+
+enum PatientShareStatus {
+  PENDING
+  SENT
+  OPENED
+  TRANSIENT_FAILURE
+  PERMANENT_FAILURE
+}
+
+model PatientShare {
+  id             String  @id @default(cuid())
+  clientId       String
+  psychologistId String
+  sessionId      String?
+
+  artefactType PatientShareArtefactType
+  artefactId   String
+
+  channel PatientShareChannel
+  status  PatientShareStatus  @default(PENDING)
+
+  /// 22-char base64url. Unique across all shares; the portal route
+  /// looks up by this directly. Public — entropy is the only auth.
+  shareToken String @unique
+
+  /// Language the portal renders in (ISO 639-1).
+  language String @default("en")
+
+  /// Discriminated-union snapshot of the artefact body. Validated
+  /// at the route layer against PatientShareSnapshotSchema.
+  snapshot Json
+
+  /// Short title used in the channel message + portal page.
+  subject String
+
+  /// Contact at send time — phone for WhatsApp, email for email.
+  /// PORTAL_LINK rows have null toContact.
+  toContact String?
+
+  /// Provider message id, e.g. "wati:abc123", "sendgrid:xyz789".
+  providerMessageId String?
+
+  /// Set when the channel returns a failure outcome.
+  errorCode   String?
+  errorDetail String? @db.Text
+
+  /// When the channel adapter returned a non-error result.
+  sentAt DateTime?
+
+  /// First-opened timestamp on the portal. Repeat views are tracked
+  /// in the audit log, not here.
+  openedAt DateTime?
+
+  /// Token expiry. Defaults to 30 days from creation in the route.
+  expiresAt DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  session      Session?     @relation(fields: [sessionId], references: [id])
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@index([status, createdAt])
+  @@index([sessionId])
+  @@map("patient_shares")
+}
+
 model TherapyScript {
   id             String @id @default(cuid())
   clientId       String
@@ -1294,6 +1388,12 @@ enum AuditAction {
   // language, inputs-hash); cached + audited.
   THERAPY_SCRIPT_GENERATED
   THERAPY_SCRIPT_VIEWED
+
+  // Patient CRM / sharing — Sprint 15. Every Send-to-patient click
+  // writes ARTEFACT_SHARED with the channel + outcome; portal opens
+  // write PORTAL_OPENED.
+  PATIENT_ARTEFACT_SHARED
+  PATIENT_PORTAL_OPENED
 }
 
 enum AuditActorType {

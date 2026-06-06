@@ -5,9 +5,11 @@ import type { TherapyNoteV1 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { ShareModal } from './ShareModal';
 
 interface Props {
   sessionId: string;
+  clientId: string;
   note: TherapyNoteV1;
 }
 
@@ -28,10 +30,11 @@ interface Response {
  * the therapist can hit "Regenerate" to spend on a fresh set if the
  * first batch doesn't feel right.
  */
-export function ReflectionTab({ sessionId, note }: Props) {
+export function ReflectionTab({ sessionId, clientId, note }: Props) {
   const [data, setData] = useState<Response | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -124,12 +127,30 @@ export function ReflectionTab({ sessionId, note }: Props) {
             {loading ? 'Generating…' : 'Regenerate'}
           </Button>
           {data && data.questions.length > 0 && (
-            <Button variant="secondary" onClick={copyAll}>
-              Copy all
-            </Button>
+            <>
+              <Button variant="secondary" onClick={copyAll}>
+                Copy all
+              </Button>
+              <Button onClick={() => setShareOpen(true)}>Send to patient</Button>
+            </>
           )}
         </div>
       </Card>
+      {data && data.questions.length > 0 && (
+        <ShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          clientId={clientId}
+          hasContactPhone={true}
+          hasContactEmail={true}
+          artefact={{
+            artefactType: 'REFLECTION_QUESTIONS',
+            sessionId,
+            questions: data.questions,
+          }}
+          artefactLabel="Reflection questions"
+        />
+      )}
     </div>
   );
 }

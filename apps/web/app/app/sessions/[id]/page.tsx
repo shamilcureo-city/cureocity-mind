@@ -101,7 +101,9 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
         {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
         {tab === 'mindmap' && <MindmapTabPanel sessionId={id} />}
-        {tab === 'reflection' && <ReflectionTabPanel sessionId={id} />}
+        {tab === 'reflection' && (
+          <ReflectionTabPanel sessionId={id} clientId={session.clientId} />
+        )}
       </div>
     </Container>
   );
@@ -366,7 +368,13 @@ async function MindmapTabPanel({ sessionId }: { sessionId: string }) {
   return <MindmapTab note={noteJson as unknown as TherapyNoteV1} />;
 }
 
-async function ReflectionTabPanel({ sessionId }: { sessionId: string }) {
+async function ReflectionTabPanel({
+  sessionId,
+  clientId,
+}: {
+  sessionId: string;
+  clientId: string;
+}) {
   const [draft, signed] = await Promise.all([
     prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
     prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
@@ -382,5 +390,11 @@ async function ReflectionTabPanel({ sessionId }: { sessionId: string }) {
       </Card>
     );
   }
-  return <ReflectionTab sessionId={sessionId} note={noteJson as unknown as TherapyNoteV1} />;
+  return (
+    <ReflectionTab
+      sessionId={sessionId}
+      clientId={clientId}
+      note={noteJson as unknown as TherapyNoteV1}
+    />
+  );
 }

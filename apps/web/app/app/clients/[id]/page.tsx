@@ -91,11 +91,18 @@ export default async function ClientDetailPage({ params }: PageProps) {
   // Surface recommended therapies from the most recent completed
   // ClinicalReport. If none exists yet, fall back to an empty list —
   // the LIBRARY_THERAPIES set is always available.
-  const latestReport = await prisma.clinicalReport.findFirst({
-    where: { clientId: client.id, status: 'COMPLETED' },
-    orderBy: { createdAt: 'desc' },
-    select: { body: true },
-  });
+  const [latestReport, activePlan] = await Promise.all([
+    prisma.clinicalReport.findFirst({
+      where: { clientId: client.id, status: 'COMPLETED' },
+      orderBy: { createdAt: 'desc' },
+      select: { body: true },
+    }),
+    prisma.treatmentPlan.findFirst({
+      where: { clientId: client.id, supersededAt: null },
+      orderBy: { version: 'desc' },
+      select: { id: true },
+    }),
+  ]);
   const recommendedTherapies = extractRecommended(latestReport?.body);
   const langParse = ClinicalLocaleSchema.safeParse(client.preferredLanguage);
   const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';
@@ -159,6 +166,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
           recommendedTherapies={recommendedTherapies}
           libraryTherapies={LIBRARY_THERAPIES}
           defaultLanguage={defaultLanguage}
+          activeTreatmentPlanId={activePlan?.id ?? null}
         />
       </div>
 
