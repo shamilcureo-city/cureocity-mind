@@ -48,6 +48,47 @@ describe('CreateClientInputSchema', () => {
     void _omitted;
     expect(() => CreateClientInputSchema.parse(rest)).not.toThrow();
   });
+
+  it('accepts preferredLanguage = "ml" and "en"', () => {
+    expect(
+      CreateClientInputSchema.safeParse({ ...valid, preferredLanguage: 'ml' }).success,
+    ).toBe(true);
+    expect(
+      CreateClientInputSchema.safeParse({ ...valid, preferredLanguage: 'en' }).success,
+    ).toBe(true);
+  });
+
+  it('rejects a malformed preferredLanguage', () => {
+    expect(
+      CreateClientInputSchema.safeParse({ ...valid, preferredLanguage: 'klingon' }).success,
+    ).toBe(false);
+  });
+
+  it('accepts spokenLanguages array (Manglish + Hindi mix)', () => {
+    const parsed = CreateClientInputSchema.safeParse({
+      ...valid,
+      spokenLanguages: ['ml', 'en', 'hi'],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('rejects > 5 spoken languages', () => {
+    expect(
+      CreateClientInputSchema.safeParse({
+        ...valid,
+        spokenLanguages: ['ml', 'en', 'hi', 'ta', 'bn', 'kn'],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects an entry that is not ISO 639-1', () => {
+    expect(
+      CreateClientInputSchema.safeParse({
+        ...valid,
+        spokenLanguages: ['ml', 'KLINGON'],
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('UpdateClientInputSchema', () => {

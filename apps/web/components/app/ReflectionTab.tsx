@@ -16,6 +16,7 @@ interface Props {
 interface Response {
   questions: string[];
   source: 'vertex' | 'mock';
+  language?: string;
   model?: string;
   error?: string;
 }
@@ -78,9 +79,14 @@ export function ReflectionTab({ sessionId, clientId, note }: Props) {
             </p>
           </div>
           {data && (
-            <Badge tone={data.source === 'vertex' ? 'accent' : 'muted'}>
-              {data.source === 'vertex' ? `Vertex · ${data.model ?? 'gemini'}` : 'Mock'}
-            </Badge>
+            <div className="flex items-center gap-2">
+              {data.language && data.language !== 'en' && (
+                <Badge tone="muted">language: {data.language}</Badge>
+              )}
+              <Badge tone={data.source === 'vertex' ? 'accent' : 'muted'}>
+                {data.source === 'vertex' ? `Vertex · ${data.model ?? 'gemini'}` : 'Mock'}
+              </Badge>
+            </div>
           )}
         </header>
 

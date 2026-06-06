@@ -32,26 +32,74 @@ import {
 export class MockGeminiPass1Backend implements IPass1Backend {
   async run(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
+    // Pick a deterministic mock based on the spoken-language hint so
+    // dev / E2E tests can exercise the code-mixed transcript path.
+    // Defaults to a Manglish (Malayalam + English) mix when hints
+    // include "ml" — the most common Indian pilot case.
+    const hinted = input.hints?.spokenLanguageHints ?? [];
+    const manglish = hinted.includes('ml');
+    const hinglish = hinted.includes('hi') && !manglish;
     const output: Pass1Output = {
-      transcript: `[mock transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`,
-      speakerSegments: [
-        {
-          speaker: 'therapist',
-          startMs: 0,
-          endMs: 5_000,
-          text: 'Welcome. How have things been since last week?',
-        },
-        {
-          speaker: 'client',
-          startMs: 5_000,
-          endMs: 30_000,
-          text: 'A bit better. The breathing exercises helped on Tuesday.',
-        },
-      ],
+      transcript: manglish
+        ? `[mock manglish transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`
+        : hinglish
+          ? `[mock hinglish transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`
+          : `[mock transcript for session ${input.sessionId} — ${input.durationMs}ms of audio]`,
+      speakerSegments: manglish
+        ? [
+            {
+              speaker: 'therapist',
+              startMs: 0,
+              endMs: 5_000,
+              text: 'Welcome. How have things been since last week?',
+              language: 'en',
+            },
+            {
+              speaker: 'client',
+              startMs: 5_000,
+              endMs: 30_000,
+              text: 'കുറച്ച് better aanu. Breathing exercises help cheythu Tuesday-il.',
+              language: 'mixed',
+            },
+          ]
+        : hinglish
+          ? [
+              {
+                speaker: 'therapist',
+                startMs: 0,
+                endMs: 5_000,
+                text: 'Welcome. How have things been since last week?',
+                language: 'en',
+              },
+              {
+                speaker: 'client',
+                startMs: 5_000,
+                endMs: 30_000,
+                text: 'Thoda better hai. Breathing exercises ne help kiya Tuesday ko.',
+                language: 'mixed',
+              },
+            ]
+          : [
+              {
+                speaker: 'therapist',
+                startMs: 0,
+                endMs: 5_000,
+                text: 'Welcome. How have things been since last week?',
+                language: 'en',
+              },
+              {
+                speaker: 'client',
+                startMs: 5_000,
+                endMs: 30_000,
+                text: 'A bit better. The breathing exercises helped on Tuesday.',
+                language: 'en',
+              },
+            ],
       affectFeatures: [
         { startMs: 0, endMs: 30_000, valence: 0.1, arousal: 0.4 },
         { startMs: 30_000, endMs: 60_000, valence: 0.3, arousal: 0.3 },
       ],
+      detectedLanguages: manglish ? ['ml', 'en'] : hinglish ? ['hi', 'en'] : ['en'],
     };
     return {
       output,

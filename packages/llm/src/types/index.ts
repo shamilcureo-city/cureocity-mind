@@ -45,6 +45,18 @@ export const Pass1OutputSchema = z.object({
   transcript: z.string(),
   speakerSegments: z.array(SpeakerSegmentSchema),
   affectFeatures: z.array(AffectFeatureSchema),
+  /**
+   * Sprint 16 — language detection. ISO 639-1 codes (or "mixed") of
+   * the languages Pass 1 detected in the audio, sorted by prevalence.
+   * Empty for legacy runs that pre-date the field.
+   *
+   * Examples:
+   *   ["en"] — English-only session
+   *   ["ml", "en"] — Manglish, mostly Malayalam
+   *   ["hi", "en"] — Hinglish, mostly Hindi
+   *   ["en", "ml"] — primarily English with Malayalam interjections
+   */
+  detectedLanguages: z.array(z.string().min(2).max(16)).default([]),
 });
 export type Pass1Output = z.infer<typeof Pass1OutputSchema>;
 
@@ -54,8 +66,17 @@ export interface Pass1Input {
   audioBytes: Buffer;
   /** Total duration of the audio, in milliseconds — used for cost estimation. */
   durationMs: number;
-  /** Optional clinical context to bias diarization (e.g. therapist name). */
-  hints?: { therapistFullName?: string };
+  /**
+   * Optional clinical context to bias diarization + language
+   * detection. Sprint 16: spokenLanguageHints is the client's
+   * known spoken languages (set by the therapist when creating the
+   * client) so the model leans into those when the audio is
+   * ambiguous.
+   */
+  hints?: {
+    therapistFullName?: string;
+    spokenLanguageHints?: string[];
+  };
 }
 
 // ============================================================================
@@ -137,8 +158,25 @@ export interface Pass4PriorPlanSummary {
 
 export interface Pass4Input {
   therapyName: string;
-  /** Output language hint (default "en"). */
+  /**
+   * Output language for narrative therapist-facing text (purpose,
+   * listenFor, adaptationCues, riskWatchpoints, homework
+   * deliveryNotes). Default "en". The therapist reads these
+   * silently — pick whatever they prefer to read.
+   */
   language: ClinicalLocale;
+  /**
+   * Sprint 16 — verbatim "therapistSays" + branches.thenDo language.
+   * The therapist reads these ALOUD to the client, so the language
+   * must match what the client speaks/understands.
+   *
+   * Defaults to `language` (output language) on the route layer when
+   * the client has no spokenLanguages on file. If the client speaks
+   * code-mixed (e.g. Manglish), use the dominant base language and
+   * include English clinical terms inline — the prompt explains
+   * this convention.
+   */
+  spokenLanguage?: ClinicalLocale;
   /** Optional context. Empty fields are rendered as "(none)" in the prompt. */
   primaryDiagnosis?: { icd11Code: string; icd11Label: string };
   treatmentPlan?: Pass4PriorPlanSummary;

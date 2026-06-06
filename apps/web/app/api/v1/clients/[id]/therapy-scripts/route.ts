@@ -52,6 +52,7 @@ export async function GET(
       id: true,
       psychologistId: true,
       preferredLanguage: true,
+      spokenLanguages: true,
       presentingConcerns: true,
     },
   });
@@ -64,6 +65,15 @@ export async function GET(
     (ClinicalLocaleSchema.safeParse(client.preferredLanguage).success
       ? (client.preferredLanguage as ClinicalLocale)
       : 'en');
+  // Sprint 16 — the spoken language for verbatim therapistSays text.
+  // Defaults to the dominant client.spokenLanguages entry (set by the
+  // therapist when creating the client) and falls back to the output
+  // language. The therapist reads "therapistSays" aloud to the
+  // client, so this needs to match what the client understands.
+  const spokenLanguage: ClinicalLocale = pickSpokenLanguage(
+    client.spokenLanguages,
+    language,
+  );
 
   // Pull grounding context: active primary diagnosis + active plan +
   // last-session summary. None are required; the prompt copes with
@@ -106,6 +116,7 @@ export async function GET(
   const cacheKey = computeCacheKey({
     therapy: query.value.therapy,
     language,
+    spokenLanguage,
     primaryDx: primaryDx ? `${primaryDx.icd11Code}:${primaryDx.icd11Label}` : null,
     plan: planSummary,
     lastSummary,
@@ -140,6 +151,7 @@ export async function GET(
   const pass4 = await router.pass4({
     therapyName: query.value.therapy,
     language,
+    spokenLanguage,
     ...(primaryDx && {
       primaryDiagnosis: {
         icd11Code: primaryDx.icd11Code,
@@ -271,6 +283,8 @@ function truncate(s: string, max: number): string {
 interface CacheKeyInputs {
   therapy: string;
   language: ClinicalLocale;
+  /** Sprint 16 — distinct from `language`; see route comment. */
+  spokenLanguage: ClinicalLocale;
   primaryDx: string | null;
   plan: {
     modality: string;
@@ -279,6 +293,24 @@ interface CacheKeyInputs {
     expectedDurationSessions: number | null;
   } | null;
   lastSummary: string | null;
+}
+
+/**
+ * Pick the verbatim-speech language for Pass 4. Prefer the client's
+ * first spokenLanguages entry when it's a known ClinicalLocale;
+ * otherwise fall back to the output language. The client's
+ * spokenLanguages can include "mixed" or non-ClinicalLocale codes —
+ * those fall through to the output language.
+ */
+function pickSpokenLanguage(
+  clientSpoken: string[],
+  outputLanguage: ClinicalLocale,
+): ClinicalLocale {
+  for (const code of clientSpoken) {
+    const parsed = ClinicalLocaleSchema.safeParse(code);
+    if (parsed.success) return parsed.data;
+  }
+  return outputLanguage;
 }
 
 /**
@@ -299,9 +331,10 @@ function computeCacheKey(input: CacheKeyInputs): string {
       }
     : null;
   const payload = JSON.stringify({
-    v: 1,
+    v: 2, // bumped in Sprint 16 — spokenLanguage now affects the script
     t: input.therapy.trim().toLowerCase(),
     l: input.language,
+    sl: input.spokenLanguage,
     d: input.primaryDx,
     p: normalisedPlan,
     s: input.lastSummary,

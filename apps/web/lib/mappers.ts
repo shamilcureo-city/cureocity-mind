@@ -45,6 +45,8 @@ export function toClient(row: ClientRow): Client {
     dateOfBirth: toIsoDate(row.dateOfBirth),
     presentingConcerns: row.presentingConcerns,
     preferredModality: row.preferredModality as Client['preferredModality'],
+    preferredLanguage: row.preferredLanguage,
+    spokenLanguages: row.spokenLanguages,
     status: row.status,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

@@ -250,6 +250,13 @@ model Client {
   // this. Therapist UI session start picks up this value as default.
   preferredLanguage String @default("en")
 
+  // Sprint 16 — the client's typical spoken languages. Therapist sets
+  // this when creating the client (optional). Pass 1 uses it as a
+  // soft hint for transcription; Pass 4 uses it to choose the
+  // verbatim "therapistSays" language so the therapist reads aloud
+  // in something the client understands. Empty when unset.
+  spokenLanguages String[] @default([])
+
   psychologist        Psychologist             @relation(fields: [psychologistId], references: [id])
   consents            Consent[]
   sessions            Session[]
@@ -527,10 +534,19 @@ model Session {
   // have an audit trail even if client consents change later. (Sprint 2)
   consentSnapshot Json?
 
-  // Per-session language for Pass 1/2/3 outputs. Sprint 13 introduces
-  // this as ISO 639-1; defaults to "en" for legacy rows. Sprint 16
-  // wires up a selector + Malayalam ("ml") support.
+  // Per-session output language for Pass 2/3/4 NARRATIVE text (notes,
+  // clinical brief, therapy-script rationale). Sprint 13 introduced
+  // the field as a single string; Sprint 16 keeps it as the OUTPUT
+  // (therapist-facing) language and adds spokenLanguages alongside.
+  // ISO 639-1; defaults to "en".
   language String @default("en")
+
+  // Sprint 16 — spoken languages detected by Pass 1, sorted by
+  // prevalence. Empty until Pass 1 completes. Real Indian sessions
+  // are usually code-mixed (Manglish, Hinglish, etc.) so this is an
+  // ARRAY rather than a single value.
+  // Examples: ["en"], ["ml", "en"], ["hi", "en"], ["en", "ml", "hi"].
+  spokenLanguages String[] @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

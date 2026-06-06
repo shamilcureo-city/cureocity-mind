@@ -32,6 +32,8 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [presentingConcerns, setPresentingConcerns] = useState('');
   const [preferredModality, setPreferredModality] = useState<'CBT' | 'EMDR' | 'OTHER' | ''>('');
+  const [preferredLanguage, setPreferredLanguage] = useState('en');
+  const [spokenLanguages, setSpokenLanguages] = useState<string[]>([]);
   const [retentionExtended, setRetentionExtended] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +70,10 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
       if (dateOfBirth) body['dateOfBirth'] = dateOfBirth;
       if (presentingConcerns.trim()) body['presentingConcerns'] = presentingConcerns.trim();
       if (preferredModality) body['preferredModality'] = preferredModality;
+      if (preferredLanguage && preferredLanguage !== 'en') {
+        body['preferredLanguage'] = preferredLanguage;
+      }
+      if (spokenLanguages.length > 0) body['spokenLanguages'] = spokenLanguages;
 
       const res = await fetch('/api/v1/clients', {
         method: 'POST',
@@ -168,6 +174,41 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
               </Select>
             </div>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label htmlFor="cc-pref-lang" hint="patient-facing">
+                Preferred language
+              </Label>
+              <Select
+                id="cc-pref-lang"
+                value={preferredLanguage}
+                onChange={(e) => setPreferredLanguage(e.target.value)}
+              >
+                <option value="en">English</option>
+                <option value="ml">Malayalam (മലയാളം)</option>
+                <option value="hi">Hindi (हिन्दी)</option>
+                <option value="ta">Tamil (தமிழ்)</option>
+                <option value="bn">Bengali (বাংলা)</option>
+              </Select>
+              <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                Reflection questions + portal messages use this language.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="cc-spoken-langs" hint="optional · multi-select">
+                Typical spoken languages
+              </Label>
+              <SpokenLanguageChips
+                value={spokenLanguages}
+                onChange={setSpokenLanguages}
+              />
+              <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                Used as a transcription hint. Pick more than one for code-mixed speakers
+                (Manglish: ml + en).
+              </p>
+            </div>
+          </div>
+
           <div>
             <Label htmlFor="cc-concerns" hint="optional · 0–2000 chars">
               Presenting concerns
@@ -216,6 +257,56 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
           </div>
         </form>
       </Card>
+    </div>
+  );
+}
+
+const SPOKEN_LANGUAGE_OPTIONS: { code: string; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'ml', label: 'Malayalam' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'ta', label: 'Tamil' },
+  { code: 'bn', label: 'Bengali' },
+  { code: 'kn', label: 'Kannada' },
+  { code: 'te', label: 'Telugu' },
+  { code: 'mr', label: 'Marathi' },
+  { code: 'gu', label: 'Gujarati' },
+  { code: 'pa', label: 'Punjabi' },
+];
+
+function SpokenLanguageChips({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  function toggle(code: string) {
+    if (value.includes(code)) {
+      onChange(value.filter((c) => c !== code));
+    } else {
+      onChange([...value, code]);
+    }
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {SPOKEN_LANGUAGE_OPTIONS.map((o) => {
+        const active = value.includes(o.code);
+        return (
+          <button
+            key={o.code}
+            type="button"
+            onClick={() => toggle(o.code)}
+            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+              active
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
+                : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink)]'
+            }`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -64,6 +64,57 @@ describe('ModelRouter', () => {
     expect(onCallLog).toHaveBeenCalledTimes(4);
   });
 
+  it('mock Pass 1 returns detected languages (empty for plain runs)', async () => {
+    const router = new ModelRouter({
+      pass1: new MockGeminiPass1Backend(),
+      pass2: new MockGeminiPass2Backend(),
+      pass3: new MockGeminiPass3Backend(),
+      pass4: new MockGeminiPass4Backend(),
+    });
+    const r = await router.pass1({
+      sessionId: 's_lang_default',
+      audioBytes: Buffer.alloc(1024),
+      durationMs: 30_000,
+    });
+    expect(r.output.detectedLanguages).toEqual(['en']);
+    expect(r.output.speakerSegments.every((s) => typeof s.language === 'string')).toBe(true);
+  });
+
+  it('mock Pass 1 emits a Manglish (ml + en) shape when hinted', async () => {
+    const router = new ModelRouter({
+      pass1: new MockGeminiPass1Backend(),
+      pass2: new MockGeminiPass2Backend(),
+      pass3: new MockGeminiPass3Backend(),
+      pass4: new MockGeminiPass4Backend(),
+    });
+    const r = await router.pass1({
+      sessionId: 's_lang_manglish',
+      audioBytes: Buffer.alloc(1024),
+      durationMs: 30_000,
+      hints: { spokenLanguageHints: ['ml', 'en'] },
+    });
+    expect(r.output.detectedLanguages).toEqual(['ml', 'en']);
+    const mixed = r.output.speakerSegments.find((s) => s.language === 'mixed');
+    expect(mixed).toBeDefined();
+  });
+
+  it('mock Pass 4 honours spokenLanguage in the prompt-input layer', async () => {
+    const router = new ModelRouter({
+      pass1: new MockGeminiPass1Backend(),
+      pass2: new MockGeminiPass2Backend(),
+      pass3: new MockGeminiPass3Backend(),
+      pass4: new MockGeminiPass4Backend(),
+    });
+    // The mock backend itself produces a deterministic English script,
+    // but the routing layer must accept the new field without errors.
+    const r = await router.pass4({
+      therapyName: 'Behavioural Activation',
+      language: 'en',
+      spokenLanguage: 'ml',
+    });
+    expect(r.output.therapyScript.therapyName).toBe('Behavioural Activation');
+  });
+
   it('works without onCallLog callback', async () => {
     const router = new ModelRouter({
       pass1: new MockGeminiPass1Backend(),

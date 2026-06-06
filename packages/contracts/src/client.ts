@@ -19,6 +19,28 @@ export const CreateClientInputSchema = z.object({
   dateOfBirth: IsoDateSchema.optional(),
   presentingConcerns: z.string().max(2000).optional(),
   preferredModality: SessionModalitySchema.optional(),
+  /**
+   * Sprint 16 — patient-facing language (ISO 639-1). Used for
+   * reflection questions, therapy-script patient summaries, and the
+   * /p/<token> portal view. Defaults to "en" at the DB layer.
+   */
+  preferredLanguage: z
+    .string()
+    .min(2)
+    .max(8)
+    .regex(/^[a-z]{2}(-[A-Z]{2})?$/)
+    .optional(),
+  /**
+   * Sprint 16 — the client's typical spoken languages, sorted by
+   * prevalence. Therapist-provided hint for Pass 1 transcription
+   * + Pass 4 verbatim-speech selection. Code-mixing is normal —
+   * include each base language separately (e.g. ["ml", "en"] for a
+   * Manglish speaker).
+   */
+  spokenLanguages: z
+    .array(z.string().min(2).max(8).regex(/^[a-z]{2}(-[A-Z]{2})?$/))
+    .max(5)
+    .optional(),
   consents: z
     .array(ConsentInputSchema)
     .min(1, 'At least one consent (typically AUDIO_RECORDING) is required when creating a client')
@@ -47,6 +69,10 @@ export const ClientSchema = z.object({
   dateOfBirth: IsoDateSchema.nullable(),
   presentingConcerns: z.string().nullable(),
   preferredModality: SessionModalitySchema.nullable(),
+  /** ISO 639-1 (default "en"). */
+  preferredLanguage: z.string().default('en'),
+  /** ISO 639-1 codes, may be empty. */
+  spokenLanguages: z.array(z.string()).default([]),
   status: ClientStatusSchema,
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

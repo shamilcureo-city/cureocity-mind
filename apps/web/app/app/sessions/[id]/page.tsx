@@ -79,9 +79,16 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             {session.modality} · {session.scheduledAt.toLocaleString('en-US')}
           </p>
         </div>
-        <Badge tone={statusTone(session.status)}>
-          {session.status.replace(/_/g, ' ').toLowerCase()}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          {session.spokenLanguages.length > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface)] px-3 py-1 text-xs text-[var(--color-ink-2)]">
+              spoken: {session.spokenLanguages.join(' + ')}
+            </span>
+          )}
+          <Badge tone={statusTone(session.status)}>
+            {session.status.replace(/_/g, ' ').toLowerCase()}
+          </Badge>
+        </div>
       </header>
 
       <div className="mt-8">

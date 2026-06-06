@@ -145,9 +145,11 @@ function buildUserMessage(input: Pass4Input): string {
         `  Expected duration: ${input.treatmentPlan.expectedDurationSessions ?? 'n/a'} sessions`,
       ].join('\n')
     : '  (no plan)';
+  const spoken = input.spokenLanguage ?? input.language;
   return [
     `Therapy name: ${input.therapyName}`,
     `Output language: ${input.language}`,
+    `Spoken language: ${spoken}`,
     `Primary diagnosis: ${dx}`,
     `Presenting concerns: ${input.presentingConcerns ?? '(none recorded)'}`,
     '',

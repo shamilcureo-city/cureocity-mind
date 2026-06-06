@@ -86,7 +86,18 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     });
 
     const router = modelRouter();
-    const pass1 = await router.pass1({ sessionId, audioBytes, durationMs });
+    const clientSpokenHints =
+      Array.isArray(session.client.spokenLanguages) && session.client.spokenLanguages.length > 0
+        ? session.client.spokenLanguages
+        : undefined;
+    const pass1 = await router.pass1({
+      sessionId,
+      audioBytes,
+      durationMs,
+      ...(clientSpokenHints && {
+        hints: { spokenLanguageHints: clientSpokenHints },
+      }),
+    });
     await persistCallLog(pass1.callLog);
     recordGeminiCall({
       pass: pass1.callLog.pass,
@@ -110,6 +121,17 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         totalCostInr: pass1Cost,
       },
     });
+
+    // Sprint 16 — persist the languages Pass 1 actually detected onto
+    // the Session row. Used by the UI to show language badges +
+    // by Pass 4 to choose the verbatim therapistSays language when
+    // the client has no spokenLanguages on file.
+    if (pass1.output.detectedLanguages.length > 0) {
+      await prisma.session.update({
+        where: { id: sessionId },
+        data: { spokenLanguages: pass1.output.detectedLanguages },
+      });
+    }
 
     // Pass 2 cost-guard pre-check
     const pass2Estimate = computeCostInr(

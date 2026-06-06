@@ -9,7 +9,8 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
 
-const SYSTEM_PROMPT = `You are an expert clinical scribe for an Indian psychotherapy practice.
+function buildSystemPrompt(language: string): string {
+  return `You are an expert clinical scribe for an Indian psychotherapy practice.
 Generate 5–7 short reflection questions for the CLIENT to consider before the next session.
 
 Constraints:
@@ -18,7 +19,9 @@ Constraints:
 - Avoid leading or judgemental phrasing.
 - Reflect the specific content of THIS session, not generic CBT/EMDR prompts.
 - Mix open-ended (e.g. "What did you notice...") with concrete (e.g. "When did you feel...").
+- Write the questions in language "${language}" (ISO 639-1). If "${language}" is "en", write in English. If it is "ml" / "hi" / "ta" / "bn", write in that language using its native script. It is acceptable to include established English clinical / everyday terms (e.g. "anxiety", "panic", "homework", "trigger") inline where it would feel natural for an Indian client — these are widely understood mid-sentence.
 - Output STRICT JSON: { "questions": ["...", "..."] } — no prose, no markdown.`;
+}
 
 /**
  * GET /api/v1/sessions/[id]/reflection-questions
@@ -44,6 +47,7 @@ export async function GET(
       psychologistId: true,
       therapyNote: { select: { content: true } },
       noteDraft: { select: { content: true } },
+      client: { select: { preferredLanguage: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
@@ -58,17 +62,13 @@ export async function GET(
     );
   }
   const note = noteJson as unknown as TherapyNoteV1;
+  const language = session.client.preferredLanguage || 'en';
 
   const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
   if (llmBackend !== 'vertex') {
     return NextResponse.json({
-      questions: [
-        'What stood out for you from this session?',
-        'When during the past week did you notice the pattern we discussed?',
-        'What is one small step you could try before our next session?',
-        'What support do you have to help you with that step?',
-        'How would you know that something is shifting for you?',
-      ],
+      questions: mockQuestionsForLanguage(language),
+      language,
       source: 'mock',
     });
   }
@@ -82,12 +82,12 @@ export async function GET(
   const proModel = process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro';
   const ai = new GoogleGenAI({ vertexai: true, project, location: proRegion });
 
-  const userMessage = buildUserMessage(note);
+  const userMessage = buildUserMessage(note, language);
   const res = await ai.models.generateContent({
     model: proModel,
     contents: [{ role: 'user', parts: [{ text: userMessage }] }],
     config: {
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction: buildSystemPrompt(language),
       responseMimeType: 'application/json',
       temperature: 0.5,
       maxOutputTokens: 1024,
@@ -114,12 +114,13 @@ export async function GET(
     .filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
     .slice(0, 7);
 
-  return NextResponse.json({ questions, source: 'vertex', model: proModel });
+  return NextResponse.json({ questions, language, source: 'vertex', model: proModel });
 }
 
-function buildUserMessage(note: TherapyNoteV1): string {
+function buildUserMessage(note: TherapyNoteV1, language: string): string {
   return [
     `Modality: ${note.modality}`,
+    `Output language: ${language}`,
     '',
     'Subjective:',
     note.subjective,
@@ -132,4 +133,29 @@ function buildUserMessage(note: TherapyNoteV1): string {
     '',
     'Produce reflection questions JSON only.',
   ].join('\n');
+}
+
+/**
+ * Mock questions in the requested language so dev/CI sees the wiring
+ * end-to-end without running the model. Only English + Malayalam are
+ * exhaustive today; Hindi/Tamil/Bengali fall back to English with a
+ * leading "[mock]" tag so the language hint is visible.
+ */
+function mockQuestionsForLanguage(language: string): string[] {
+  if (language === 'ml') {
+    return [
+      'ഈ സെഷനിൽ നിങ്ങൾക്ക് ഏറ്റവും കൂടുതൽ ശ്രദ്ധയിൽ വന്നത് എന്താണ്?',
+      'കഴിഞ്ഞ ആഴ്ച എപ്പോഴാണ് നമ്മൾ സംസാരിച്ച pattern പ്രത്യക്ഷപ്പെട്ടത്?',
+      'അടുത്ത സെഷനു മുമ്പ് നിങ്ങൾക്ക് പരീക്ഷിക്കാൻ കഴിയുന്ന ഒരു ചെറിയ കാര്യം എന്താണ്?',
+      'ആ ചെറിയ ചുവടുവയ്പ്പിന് നിങ്ങൾക്ക് എന്ത് support ഉണ്ട്?',
+      'നിങ്ങൾക്ക് എന്തെങ്കിലും shift ഉണ്ടാകുന്നുവെന്ന് നിങ്ങൾ എങ്ങനെ അറിയും?',
+    ];
+  }
+  return [
+    'What stood out for you from this session?',
+    'When during the past week did you notice the pattern we discussed?',
+    'What is one small step you could try before our next session?',
+    'What support do you have to help you with that step?',
+    'How would you know that something is shifting for you?',
+  ];
 }

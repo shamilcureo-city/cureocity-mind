@@ -66,6 +66,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         dateOfBirth: body.value.dateOfBirth ? new Date(body.value.dateOfBirth) : null,
         presentingConcerns: body.value.presentingConcerns ?? null,
         preferredModality: body.value.preferredModality ?? null,
+        ...(body.value.preferredLanguage !== undefined && {
+          preferredLanguage: body.value.preferredLanguage,
+        }),
+        ...(body.value.spokenLanguages !== undefined && {
+          spokenLanguages: body.value.spokenLanguages,
+        }),
         status: 'ACTIVE',
       },
     });
