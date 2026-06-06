@@ -7,10 +7,7 @@ import {
   type GeminiCallLogData,
   type Pass1Output,
 } from '@cureocity/llm';
-import {
-  PENDING_SECTION_CONFIRMATIONS,
-  type ClinicalLocale,
-} from '@cureocity/contracts';
+import { PENDING_SECTION_CONFIRMATIONS, type ClinicalLocale } from '@cureocity/contracts';
 import {
   recordCostCircuitTrip,
   recordCostInr,
@@ -37,6 +34,14 @@ export interface OrchestratorResult {
   draftId: string;
   status: 'COMPLETED' | 'FAILED';
   errorMessage?: string;
+  /**
+   * Sprint 19 hotfix — Pass 3 arguments returned to the caller instead
+   * of being awaited inline. The generate-note route schedules
+   * runClinicalAnalysis via Next.js `after()` so Pass 3 doesn't push
+   * the synchronous response past the function's maxDuration window
+   * (the original cause of intermittent 504s in production).
+   */
+  pendingClinicalAnalysisArgs?: ClinicalAnalysisArgs;
 }
 
 export async function runNoteGeneration(sessionId: string): Promise<OrchestratorResult> {
@@ -158,8 +163,9 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
           presentingConcerns: session.client.presentingConcerns,
         }),
         ...(session.client.preferredModality !== null && {
-          preferredModality: session.client
-            .preferredModality as Parameters<typeof router.pass2>[0]['clientContext']['preferredModality'],
+          preferredModality: session.client.preferredModality as Parameters<
+            typeof router.pass2
+          >[0]['clientContext']['preferredModality'],
         }),
       },
     });
@@ -229,10 +235,12 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     }
 
     // Pass 3 — Clinical Analysis. Best-effort: a Pass 3 failure does
-    // NOT fail note generation; the Clinical Brief tab surfaces the
-    // failure and offers a manual retry via POST /clinical-analysis.
-    // Sprint 13.
-    await runClinicalAnalysis({
+    // NOT fail note generation. Sprint 13 ran it inline; Sprint 19
+    // hotfix moves it to the route's `after()` block so the
+    // synchronous Pass 1 + Pass 2 path can return as soon as the
+    // note draft is committed. The Clinical Brief tab polls / shows
+    // a manual retry button when Pass 3 fails or hasn't completed yet.
+    const pendingClinicalAnalysisArgs: ClinicalAnalysisArgs = {
       sessionId,
       clientId: session.clientId,
       psychologistId: session.psychologistId,
@@ -245,9 +253,9 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       // Sprint 19 — note shape depends on session.kind. Pass 3 prompt
       // branches on its own kind input; we pass the body opaquely.
       note: pass2Body,
-    });
+    };
 
-    return { draftId: draft.id, status: 'COMPLETED' };
+    return { draftId: draft.id, status: 'COMPLETED', pendingClinicalAnalysisArgs };
   } catch (e) {
     const message = (e as Error).message;
     await prisma.noteDraft.update({
@@ -376,7 +384,7 @@ function bucketDuration(ms: number): string {
 // and the Clinical Brief tab surfaces a manual retry.
 // ============================================================================
 
-interface ClinicalAnalysisArgs {
+export interface ClinicalAnalysisArgs {
   sessionId: string;
   clientId: string;
   psychologistId: string;
@@ -450,8 +458,7 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     }));
     const priorTreatmentPlan = activePlan
       ? {
-          modality:
-            (activePlan.body as { modality?: string } | null)?.modality ?? 'unknown',
+          modality: (activePlan.body as { modality?: string } | null)?.modality ?? 'unknown',
           phaseSequence:
             (activePlan.body as { phaseSequence?: string[] } | null)?.phaseSequence ?? [],
           goals:
@@ -553,9 +560,7 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     if (e instanceof CostCircuitOpenError) {
       recordCostCircuitTrip(e.meta.scope);
     }
-    console.error(
-      `[clinical-analysis] sessionId=${args.sessionId} failed: ${message}`,
-    );
+    console.error(`[clinical-analysis] sessionId=${args.sessionId} failed: ${message}`);
     // Non-fatal: do NOT re-throw. Pass 3 failure must not unwind
     // Pass 1/2 success.
   }

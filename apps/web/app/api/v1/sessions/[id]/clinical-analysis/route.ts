@@ -7,7 +7,7 @@ import { toClinicalReport } from '@/lib/clinical-mappers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /**
  * POST /api/v1/sessions/[id]/clinical-analysis — manually (re)run Pass 3
@@ -64,7 +64,12 @@ export async function POST(
   }
 
   const segments = draft.speakerSegments as
-    | { speaker: 'therapist' | 'client' | 'unknown'; startMs: number; endMs: number; text: string }[]
+    | {
+        speaker: 'therapist' | 'client' | 'unknown';
+        startMs: number;
+        endMs: number;
+        text: string;
+      }[]
     | null;
   if (!segments || segments.length === 0) {
     return NextResponse.json(
@@ -114,7 +119,10 @@ export async function GET(
   }
   const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
   if (!row) {
-    return NextResponse.json({ error: 'No clinical report for this session yet.' }, { status: 404 });
+    return NextResponse.json(
+      { error: 'No clinical report for this session yet.' },
+      { status: 404 },
+    );
   }
   return NextResponse.json({ report: toClinicalReport(row) });
 }
