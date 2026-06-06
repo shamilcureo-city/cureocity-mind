@@ -77,6 +77,12 @@ export const AuditActionSchema = z.enum([
   'DIAGNOSIS_CONFIRMED',
   'PLAN_CONFIRMED',
   'CRISIS_ACKNOWLEDGED',
+  // Therapy script — Sprint 14. Pass 4 generates a per-therapy
+  // script keyed by (client, therapy, language, inputs-hash);
+  // cached + audited so re-views don't re-bill and the regulator
+  // can replay what the therapist viewed.
+  'THERAPY_SCRIPT_GENERATED',
+  'THERAPY_SCRIPT_VIEWED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

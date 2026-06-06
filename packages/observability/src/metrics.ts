@@ -44,7 +44,8 @@ export function recordGeminiCall(opts: {
     | 'PASS_1_TRANSCRIBE_AND_ANALYSE'
     | 'PASS_2_NOTE_GENERATION'
     | 'PASS_3_CLINICAL_ANALYSIS'
-    | 'PASS_3_MISSED_THEMES';
+    | 'PASS_3_MISSED_THEMES'
+    | 'PASS_4_THERAPY_SCRIPT';
   status: 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
   region: string;
   durationMs: number;

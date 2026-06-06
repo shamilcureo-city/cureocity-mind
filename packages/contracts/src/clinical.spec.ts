@@ -3,9 +3,12 @@ import {
   ClinicalReportV1Schema,
   ClinicalSectionConfirmationsSchema,
   ConfirmClinicalSectionInputSchema,
+  GenerateTherapyScriptQuerySchema,
   Icd11CodeSchema,
   PENDING_SECTION_CONFIRMATIONS,
+  TherapyScriptV1Schema,
   type ClinicalReportV1,
+  type TherapyScriptV1,
 } from './clinical';
 
 describe('Icd11CodeSchema', () => {
@@ -167,5 +170,132 @@ describe('PENDING_SECTION_CONFIRMATIONS', () => {
   it('passes the confirmations schema', () => {
     const parsed = ClinicalSectionConfirmationsSchema.safeParse(PENDING_SECTION_CONFIRMATIONS);
     expect(parsed.success).toBe(true);
+  });
+});
+
+describe('TherapyScriptV1Schema', () => {
+  const valid: TherapyScriptV1 = {
+    version: 'V1',
+    language: 'en',
+    therapyName: 'Cognitive Restructuring',
+    openingScript: 'Hi, good to see you. Today we will work on the thoughts behind the anxiety.',
+    mainExercise: {
+      steps: [
+        {
+          id: 'orient',
+          purpose: 'Set up the technique.',
+          therapistSays: "Today I'm going to walk you through a tool called cognitive restructuring.",
+          listenFor: 'Engagement vs. hesitation.',
+          branches: [
+            {
+              ifClientSays: 'Sounds good',
+              thenDo: 'Great — pick one anxious moment from this week.',
+            },
+          ],
+        },
+        {
+          id: 'elicit',
+          purpose: 'Get a specific thought.',
+          therapistSays: 'What was going through your mind in that moment?',
+          listenFor: 'A cognition rather than a feeling.',
+          branches: [],
+        },
+      ],
+    },
+    adaptationCues: ['If client dissociates, switch to grounding.'],
+    closingScript: 'Good work today. Try to catch one more thought like this before next session.',
+    homework: {
+      description: 'Catch one anxious thought each day and write it down.',
+      deliveryNotes: 'Give the client a small notebook.',
+    },
+    riskWatchpoints: ['Suicidal ideation surfaces — stop the technique.'],
+    estimatedDurationMin: 50,
+  };
+
+  it('accepts a representative script', () => {
+    expect(TherapyScriptV1Schema.safeParse(valid).success).toBe(true);
+  });
+
+  it('rejects a script with zero steps', () => {
+    expect(
+      TherapyScriptV1Schema.safeParse({
+        ...valid,
+        mainExercise: { steps: [] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a step with empty therapistSays', () => {
+    expect(
+      TherapyScriptV1Schema.safeParse({
+        ...valid,
+        mainExercise: {
+          steps: [{ ...valid.mainExercise.steps[0]!, therapistSays: '' }],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects estimatedDurationMin outside [5, 120]', () => {
+    expect(
+      TherapyScriptV1Schema.safeParse({ ...valid, estimatedDurationMin: 3 }).success,
+    ).toBe(false);
+    expect(
+      TherapyScriptV1Schema.safeParse({ ...valid, estimatedDurationMin: 200 }).success,
+    ).toBe(false);
+  });
+
+  it('accepts a Malayalam-language script', () => {
+    const ml: TherapyScriptV1 = {
+      ...valid,
+      language: 'ml',
+      openingScript: 'നമസ്കാരം. ഇന്ന് നമ്മൾ ഉത്കണ്ഠയ്ക്ക് പിന്നിലുള്ള ചിന്തകളിൽ പ്രവർത്തിക്കും.',
+      closingScript:
+        'നന്നായി പ്രവർത്തിച്ചു. അടുത്ത സെഷനു മുമ്പ് ഇതുപോലുള്ള ഒരു ചിന്ത പിടിക്കാൻ ശ്രമിക്കുക.',
+    };
+    expect(TherapyScriptV1Schema.safeParse(ml).success).toBe(true);
+  });
+
+  it('caps branches at 4', () => {
+    const tooMany = Array.from({ length: 5 }, (_, i) => ({
+      ifClientSays: `case ${i}`,
+      thenDo: 'do something',
+    }));
+    expect(
+      TherapyScriptV1Schema.safeParse({
+        ...valid,
+        mainExercise: {
+          steps: [{ ...valid.mainExercise.steps[0]!, branches: tooMany }],
+        },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('GenerateTherapyScriptQuerySchema', () => {
+  it('accepts a bare therapy name', () => {
+    expect(
+      GenerateTherapyScriptQuerySchema.safeParse({ therapy: 'Cognitive Restructuring' }).success,
+    ).toBe(true);
+  });
+
+  it('coerces refresh=1 to boolean true', () => {
+    const parsed = GenerateTherapyScriptQuerySchema.safeParse({
+      therapy: 'Behavioural Activation',
+      refresh: '1',
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.refresh).toBe(true);
+    }
+  });
+
+  it('rejects a malformed language code', () => {
+    expect(
+      GenerateTherapyScriptQuerySchema.safeParse({
+        therapy: 'X',
+        language: 'klingon',
+      }).success,
+    ).toBe(false);
   });
 });

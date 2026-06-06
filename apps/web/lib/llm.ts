@@ -3,10 +3,12 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
+  MockGeminiPass4Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProClinicalBackend,
   VertexGeminiProGlobalBackend,
+  VertexGeminiProTherapyScriptBackend,
   type IModelRouter,
 } from '@cureocity/llm';
 
@@ -80,6 +82,14 @@ function build(): IModelRouter {
         location: proRegion,
         model: process.env['VERTEX_CLINICAL_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
+      pass4: new VertexGeminiProTherapyScriptBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['VERTEX_THERAPY_SCRIPT_MODEL'] ??
+          process.env['VERTEX_PRO_MODEL'] ??
+          'gemini-2.5-pro',
+      }),
     });
   }
   console.info(
@@ -89,6 +99,7 @@ function build(): IModelRouter {
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
     pass3: new MockGeminiPass3Backend(),
+    pass4: new MockGeminiPass4Backend(),
   });
 }
 

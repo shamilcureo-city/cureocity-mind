@@ -370,3 +370,104 @@ export const TreatmentPlanSchema = z.object({
   updatedAt: IsoDateTimeSchema,
 });
 export type TreatmentPlan = z.infer<typeof TreatmentPlanSchema>;
+
+// ============================================================================
+// Sprint 14 — Therapy Script (Pass 4).
+//
+// Pass 4 takes a recommended therapy name + the client's primary
+// diagnosis + active treatment plan + last-session summary, and
+// produces a step-by-step in-session script the therapist can read
+// during the session. Output is cached per (client, therapy, language,
+// inputs-hash) so a re-view doesn't re-bill.
+//
+// The Script Player UI walks the therapist through the steps; each
+// step has verbatim language to say + cues for what to listen for +
+// optional branches for common client responses.
+// ============================================================================
+
+export const TherapyScriptBranchSchema = z.object({
+  /** Plain-language description of what the client said / showed. */
+  ifClientSays: z.string().min(1).max(400),
+  /** Verbatim therapist response. */
+  thenDo: z.string().min(1).max(800),
+});
+export type TherapyScriptBranch = z.infer<typeof TherapyScriptBranchSchema>;
+
+export const TherapyScriptStepSchema = z.object({
+  /** Short stable id so the UI can persist progress. */
+  id: z.string().min(1).max(64),
+  /** What this step accomplishes clinically. */
+  purpose: z.string().min(1).max(400),
+  /** Verbatim language for the therapist to say. */
+  therapistSays: z.string().min(1).max(2000),
+  /** What the therapist should pay attention to in the client's response. */
+  listenFor: z.string().min(1).max(800),
+  /** 0-4 branches for common client responses. */
+  branches: z.array(TherapyScriptBranchSchema).max(4).default([]),
+});
+export type TherapyScriptStep = z.infer<typeof TherapyScriptStepSchema>;
+
+export const TherapyScriptHomeworkSchema = z.object({
+  description: z.string().min(1).max(1000),
+  /** Concrete instructions for delivery (when, where, how). */
+  deliveryNotes: z.string().min(1).max(800),
+});
+export type TherapyScriptHomework = z.infer<typeof TherapyScriptHomeworkSchema>;
+
+export const TherapyScriptV1Schema = z.object({
+  version: z.literal('V1'),
+  language: ClinicalLocaleSchema.default('en'),
+  /** Therapy name as it appears in recommendedTherapies (or chosen from the library). */
+  therapyName: z.string().min(1).max(120),
+  /** Opening line(s) the therapist should say in the first 2-3 minutes. */
+  openingScript: z.string().min(1).max(2000),
+  /** The body of the session — ordered step list. */
+  mainExercise: z.object({
+    steps: z.array(TherapyScriptStepSchema).min(1).max(15),
+  }),
+  /** Short cues for adapting the script if the client deviates. */
+  adaptationCues: z.array(z.string().min(1).max(600)).max(8).default([]),
+  /** Closing line(s) for the last 3-5 minutes. */
+  closingScript: z.string().min(1).max(2000),
+  /** Homework / between-session assignment. */
+  homework: TherapyScriptHomeworkSchema,
+  /** Things to watch for that should pause the script (escalation cues). */
+  riskWatchpoints: z.array(z.string().min(1).max(400)).max(8).default([]),
+  /** Estimated duration in minutes — informs session pacing. */
+  estimatedDurationMin: z.number().int().min(5).max(120),
+});
+export type TherapyScriptV1 = z.infer<typeof TherapyScriptV1Schema>;
+
+// ============================================================================
+// TherapyScript — server-side cache row. Keyed by (clientId, cacheKey)
+// so re-views of the same therapy under the same context return the
+// already-billed script.
+// ============================================================================
+
+export const TherapyScriptSchema = z.object({
+  id: CuidSchema,
+  clientId: CuidSchema,
+  psychologistId: CuidSchema,
+  therapyName: z.string(),
+  language: ClinicalLocaleSchema,
+  /** 64-char hex SHA-256 of normalised input tuple. */
+  cacheKey: z.string().regex(/^[0-9a-f]{64}$/, 'must be 64 lowercase hex chars'),
+  body: TherapyScriptV1Schema,
+  /** Optional FK back to the TreatmentPlan the script was grounded against. */
+  sourceTreatmentPlanId: CuidSchema.nullable(),
+  /** Optional FK back to the primary ClientDiagnosis at generation time. */
+  sourcePrimaryDiagnosisId: CuidSchema.nullable(),
+  totalCostInr: z.string(),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
+});
+export type TherapyScript = z.infer<typeof TherapyScriptSchema>;
+
+export const GenerateTherapyScriptQuerySchema = z.object({
+  therapy: z.string().min(1).max(120),
+  /** Optional override; defaults to client.preferredLanguage. */
+  language: ClinicalLocaleSchema.optional(),
+  /** Force a fresh generation even when a cached row exists. */
+  refresh: z.coerce.boolean().optional(),
+});
+export type GenerateTherapyScriptQuery = z.infer<typeof GenerateTherapyScriptQuerySchema>;

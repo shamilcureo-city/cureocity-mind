@@ -1,20 +1,25 @@
 import type {
   ClientDiagnosis as ClientDiagnosisRow,
   ClinicalReport as ClinicalReportRow,
+  TherapyScript as TherapyScriptRow,
   TreatmentPlan as TreatmentPlanRow,
 } from '@prisma/client';
 import {
+  ClinicalLocaleSchema,
   ClinicalReportV1Schema,
   ClinicalSectionConfirmationsSchema,
   ClinicalSupportingQuoteSchema,
   ClinicalTreatmentPlanSchema,
   PENDING_SECTION_CONFIRMATIONS,
+  TherapyScriptV1Schema,
   type ClientDiagnosis,
+  type ClinicalLocale,
   type ClinicalReport,
   type ClinicalReportV1,
   type ClinicalSectionConfirmations,
   type ClinicalSupportingQuote,
   type ClinicalTreatmentPlan,
+  type TherapyScript,
   type TreatmentPlan,
 } from '@cureocity/contracts';
 
@@ -111,4 +116,38 @@ function parseSupportingQuotes(raw: unknown): ClinicalSupportingQuote[] {
     .map((q) => ClinicalSupportingQuoteSchema.safeParse(q))
     .filter((r): r is { success: true; data: ClinicalSupportingQuote } => r.success)
     .map((r) => r.data);
+}
+
+export function toTherapyScript(row: TherapyScriptRow): TherapyScript {
+  const parsedBody = TherapyScriptV1Schema.safeParse(row.body);
+  const body = parsedBody.success
+    ? parsedBody.data
+    : {
+        version: 'V1' as const,
+        language: 'en' as const,
+        therapyName: row.therapyName,
+        openingScript: '(legacy script row failed schema validation)',
+        mainExercise: { steps: [] as never[] },
+        adaptationCues: [],
+        closingScript: '',
+        homework: { description: '', deliveryNotes: '' },
+        riskWatchpoints: [],
+        estimatedDurationMin: 45,
+      };
+  const parsedLang = ClinicalLocaleSchema.safeParse(row.language);
+  const language: ClinicalLocale = parsedLang.success ? parsedLang.data : 'en';
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    psychologistId: row.psychologistId,
+    therapyName: row.therapyName,
+    language,
+    cacheKey: row.cacheKey,
+    body: body as TherapyScript['body'],
+    sourceTreatmentPlanId: row.sourceTreatmentPlanId,
+    sourcePrimaryDiagnosisId: row.sourcePrimaryDiagnosisId,
+    totalCostInr: row.totalCostInr.toString(),
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }

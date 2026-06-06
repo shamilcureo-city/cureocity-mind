@@ -9,6 +9,7 @@ import {
   type SpeakerSegment,
   TherapyNoteV1Schema,
   type TherapyNoteV1,
+  TherapyScriptV1Schema,
   type TreatmentPlan,
 } from '@cureocity/contracts';
 
@@ -21,6 +22,7 @@ export {
   RiskSeveritySchema,
   TherapyNoteV1Schema,
   ClinicalReportV1Schema,
+  TherapyScriptV1Schema,
 } from '@cureocity/contracts';
 export type {
   Speaker,
@@ -30,6 +32,7 @@ export type {
   TherapyNoteV1,
   ClinicalReportV1,
   ClinicalLocale,
+  TherapyScriptV1,
 } from '@cureocity/contracts';
 
 // ============================================================================
@@ -121,6 +124,40 @@ export const Pass3OutputSchema = z.object({
 export type Pass3Output = z.infer<typeof Pass3OutputSchema>;
 
 // ============================================================================
+// Pass 4: Therapy name + diagnosis + plan + summary → TherapyScriptV1.
+// Sprint 14. Same global Pro region as Pass 2/3.
+// ============================================================================
+
+export interface Pass4PriorPlanSummary {
+  modality: string;
+  phaseSequence: string[];
+  goals: { description: string; measure: string }[];
+  expectedDurationSessions: number | null;
+}
+
+export interface Pass4Input {
+  therapyName: string;
+  /** Output language hint (default "en"). */
+  language: ClinicalLocale;
+  /** Optional context. Empty fields are rendered as "(none)" in the prompt. */
+  primaryDiagnosis?: { icd11Code: string; icd11Label: string };
+  treatmentPlan?: Pass4PriorPlanSummary;
+  lastSessionSummary?: string;
+  presentingConcerns?: string;
+  /**
+   * Optional cache-affecting fields. Not consumed by the prompt but
+   * included in the cache-key hash so unrelated session context
+   * doesn't poison the cache. The route layer computes this.
+   */
+  cacheKeyTrace?: string;
+}
+
+export const Pass4OutputSchema = z.object({
+  therapyScript: TherapyScriptV1Schema,
+});
+export type Pass4Output = z.infer<typeof Pass4OutputSchema>;
+
+// ============================================================================
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
@@ -128,7 +165,8 @@ export type GeminiPass =
   | 'PASS_1_TRANSCRIBE_AND_ANALYSE'
   | 'PASS_2_NOTE_GENERATION'
   | 'PASS_3_CLINICAL_ANALYSIS'
-  | 'PASS_3_MISSED_THEMES';
+  | 'PASS_3_MISSED_THEMES'
+  | 'PASS_4_THERAPY_SCRIPT';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -163,10 +201,15 @@ export interface IPass3Backend {
   run(input: Pass3Input): Promise<{ output: Pass3Output; callLog: GeminiCallLogData }>;
 }
 
+export interface IPass4Backend {
+  run(input: Pass4Input): Promise<{ output: Pass4Output; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
   pass3(input: Pass3Input): Promise<{ output: Pass3Output; callLog: GeminiCallLogData }>;
+  pass4(input: Pass4Input): Promise<{ output: Pass4Output; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

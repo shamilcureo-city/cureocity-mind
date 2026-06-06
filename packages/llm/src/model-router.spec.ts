@@ -4,16 +4,18 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
+  MockGeminiPass4Backend,
 } from './backends/mock-gemini.backend';
 import { computeCostInr, FLASH_PRICING, PRO_PRICING, estimateAudioInputTokens } from './pricing';
 
 describe('ModelRouter', () => {
-  it('runs pass1, pass2, and pass3, invoking onCallLog for each', async () => {
+  it('runs pass1, pass2, pass3, and pass4, invoking onCallLog for each', async () => {
     const onCallLog = vi.fn();
     const router = new ModelRouter({
       pass1: new MockGeminiPass1Backend(),
       pass2: new MockGeminiPass2Backend(),
       pass3: new MockGeminiPass3Backend(),
+      pass4: new MockGeminiPass4Backend(),
       onCallLog,
     });
 
@@ -49,7 +51,17 @@ describe('ModelRouter', () => {
     expect(p3.output.clinicalReport.diagnosisCandidates.length).toBeGreaterThan(0);
     expect(p3.callLog.pass).toBe('PASS_3_CLINICAL_ANALYSIS');
 
-    expect(onCallLog).toHaveBeenCalledTimes(3);
+    const p4 = await router.pass4({
+      therapyName: 'Cognitive Restructuring',
+      language: 'en',
+      primaryDiagnosis: { icd11Code: '6B00', icd11Label: 'Generalised anxiety disorder' },
+    });
+    expect(p4.output.therapyScript.version).toBe('V1');
+    expect(p4.output.therapyScript.mainExercise.steps.length).toBeGreaterThan(0);
+    expect(p4.output.therapyScript.therapyName).toBe('Cognitive Restructuring');
+    expect(p4.callLog.pass).toBe('PASS_4_THERAPY_SCRIPT');
+
+    expect(onCallLog).toHaveBeenCalledTimes(4);
   });
 
   it('works without onCallLog callback', async () => {
@@ -57,6 +69,7 @@ describe('ModelRouter', () => {
       pass1: new MockGeminiPass1Backend(),
       pass2: new MockGeminiPass2Backend(),
       pass3: new MockGeminiPass3Backend(),
+      pass4: new MockGeminiPass4Backend(),
     });
     const result = await router.pass1({
       sessionId: 's_2',
