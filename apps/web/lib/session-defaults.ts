@@ -2,10 +2,14 @@ import type { ConsentScope } from '@prisma/client';
 import {
   type ClinicalLocale,
   ClinicalLocaleSchema,
+  type ModalitySource,
+  type SessionDefaults,
   type SessionKind,
   type SessionModality,
 } from '@cureocity/contracts';
 import { prisma } from './prisma';
+
+export type { ModalitySource, SessionDefaults } from '@cureocity/contracts';
 
 /**
  * Sprint 19 — session-defaults cascade.
@@ -35,26 +39,6 @@ const INTAKE_FALLBACK: SessionModality = 'INTAKE';
 const LAST_RESORT_FALLBACK: SessionModality = 'SUPPORTIVE';
 /** Number of completed sessions after which an active plan triggers REVIEW. */
 const REVIEW_THRESHOLD_SESSIONS = 8;
-
-export type ModalitySource =
-  | 'plan'
-  | 'client'
-  | 'therapist'
-  | 'intake-fallback'
-  | 'last-resort';
-
-export interface SessionDefaults {
-  kind: SessionKind;
-  modality: SessionModality | null;
-  modalitySource: ModalitySource;
-  language: ClinicalLocale;
-  spokenLanguages: string[];
-  consentsAlreadyGranted: ConsentScope[];
-  consentsNeeded: ConsentScope[];
-  sessionsCompleted: number;
-  /** Per-instrument key → ISO timestamp of last administration, or null. */
-  lastInstrumentAdministrations: Record<string, string | null>;
-}
 
 const REQUIRED_CONSENTS: ConsentScope[] = [
   'AUDIO_RECORDING',

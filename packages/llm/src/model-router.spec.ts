@@ -34,9 +34,13 @@ describe('ModelRouter', () => {
       sessionId: 's_1',
       transcript: p1.output.transcript,
       speakerSegments: p1.output.speakerSegments,
+      kind: 'TREATMENT',
       modality: 'CBT',
       clientContext: { presentingConcerns: 'anxiety' },
     });
+    // Sprint 19 — Pass 2 output is a discriminated union; TREATMENT
+    // sessions emit therapyNote, INTAKE sessions emit intakeNote.
+    if (p2.output.kind !== 'TREATMENT') throw new Error('expected TREATMENT branch');
     expect(p2.output.therapyNote.version).toBe('V1');
     expect(p2.output.therapyNote.modality).toBe('CBT');
 
@@ -44,11 +48,14 @@ describe('ModelRouter', () => {
       sessionId: 's_1',
       transcript: p1.output.transcript,
       speakerSegments: p1.output.speakerSegments,
+      kind: 'TREATMENT',
       modality: 'CBT',
       language: 'en',
       note: p2.output.therapyNote,
       clientContext: { presentingConcerns: 'anxiety' },
     });
+    // Sprint 19 — Pass 3 output is also a discriminated union.
+    if (p3.output.kind !== 'TREATMENT') throw new Error('expected TREATMENT branch');
     expect(p3.output.clinicalReport.version).toBe('V1');
     expect(p3.output.clinicalReport.diagnosisCandidates.length).toBeGreaterThan(0);
     expect(p3.callLog.pass).toBe('PASS_3_CLINICAL_ANALYSIS');

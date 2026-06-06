@@ -10,7 +10,8 @@ import { uploadAudioFile } from '@/lib/audio/upload-file';
 interface Props {
   sessionId: string;
   clientName: string;
-  modality: string;
+  /// Sprint 19 — nullable: INTAKE sessions can defer the choice.
+  modality: string | null;
   onFinished: () => void;
 }
 
@@ -67,7 +68,7 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
         </div>
         <div className="flex items-center gap-2 text-sm text-[var(--color-ink-2)]">
           <Badge tone="muted">Upload</Badge>
-          <Badge tone="muted">{modality}</Badge>
+          <Badge tone="muted">{modality ?? 'Modality TBD'}</Badge>
         </div>
       </div>
 

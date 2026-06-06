@@ -5,10 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
-import {
-  useSessionRecorder,
-  type CaptureSource,
-} from '@/lib/audio/use-session-recorder';
+import { useSessionRecorder, type CaptureSource } from '@/lib/audio/use-session-recorder';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 
 const MODE_LABEL: Record<CaptureSource, string> = {
@@ -20,7 +17,8 @@ const MODE_LABEL: Record<CaptureSource, string> = {
 interface Props {
   sessionId: string;
   clientName: string;
-  modality: string;
+  /// Sprint 19 — nullable: INTAKE sessions can defer the choice.
+  modality: string | null;
   source: CaptureSource;
   onFinished: () => void;
 }
@@ -90,10 +88,7 @@ export function LiveRecorder({ sessionId, clientName, modality, source, onFinish
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {isRecording && (
-              <span
-                aria-hidden
-                className="relative flex h-2.5 w-2.5"
-              >
+              <span aria-hidden className="relative flex h-2.5 w-2.5">
                 <span className="absolute inset-0 animate-ping rounded-full bg-[var(--color-warn)] opacity-75" />
                 <span className="relative h-2.5 w-2.5 rounded-full bg-[var(--color-warn)]" />
               </span>
@@ -107,7 +102,7 @@ export function LiveRecorder({ sessionId, clientName, modality, source, onFinish
           </div>
           <div className="flex items-center gap-2 text-sm text-[var(--color-ink-2)]">
             <Badge tone="muted">{MODE_LABEL[source]}</Badge>
-            <Badge tone="muted">{modality}</Badge>
+            <Badge tone="muted">{modality ?? 'Modality TBD'}</Badge>
           </div>
         </div>
       </div>
@@ -145,8 +140,8 @@ export function LiveRecorder({ sessionId, clientName, modality, source, onFinish
 
       <div className="flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] bg-white px-6 py-4">
         <p className="text-xs text-[var(--color-ink-3)]">
-          Session is auto-saved every chunk. If your browser refreshes, recording resumes from
-          the next chunk.
+          Session is auto-saved every chunk. If your browser refreshes, recording resumes from the
+          next chunk.
         </p>
         <Button
           onClick={endSession}
