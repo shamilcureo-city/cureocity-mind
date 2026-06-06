@@ -6,7 +6,6 @@ import {
   PRO_PRICING,
   type GeminiCallLogData,
   type Pass1Output,
-  type Pass2Output,
 } from '@cureocity/llm';
 import {
   PENDING_SECTION_CONFIRMATIONS,
@@ -149,6 +148,10 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       sessionId,
       transcript: pass1.output.transcript,
       speakerSegments: pass1.output.speakerSegments,
+      // Sprint 19 — session.kind drives Pass 2 prompt branch (intake
+      // note vs treatment SOAP). modality is nullable; orchestrator
+      // passes whatever the cascade picked at session-create time.
+      kind: session.kind,
       modality: session.modality,
       clientContext: {
         ...(session.client.presentingConcerns !== null && {
@@ -156,10 +159,15 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         }),
         ...(session.client.preferredModality !== null && {
           preferredModality: session.client
-            .preferredModality as Pass2Output['therapyNote']['modality'],
+            .preferredModality as Parameters<typeof router.pass2>[0]['clientContext']['preferredModality'],
         }),
       },
     });
+    // Sprint 19 — Pass 2 output is a discriminated union. Read the
+    // body shape via the kind discriminator.
+    const pass2Body =
+      pass2.output.kind === 'INTAKE' ? pass2.output.intakeNote : pass2.output.therapyNote;
+    const pass2RiskFlags = pass2Body.riskFlags;
     await persistCallLog(pass2.callLog);
     recordGeminiCall({
       pass: pass2.callLog.pass,
@@ -174,11 +182,15 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     });
     const pass2Cost = new Prisma.Decimal(pass2.callLog.costInr);
 
-    const riskSeverity = mapRiskSeverity(pass2.output.therapyNote.riskFlags.severity);
+    const riskSeverity = mapRiskSeverity(pass2RiskFlags.severity);
     await prisma.noteDraft.update({
       where: { id: draft.id },
       data: {
-        content: pass2.output.therapyNote as unknown as Prisma.InputJsonValue,
+        // Sprint 19 — Pass 2 output body is either TherapyNoteV1 or
+        // IntakeNoteV1 depending on session.kind. NoteDraft.content
+        // is opaque JSON; the UI branches on session.kind to render
+        // the correct view.
+        content: pass2Body as unknown as Prisma.InputJsonValue,
         riskSeverity,
         status: 'COMPLETED',
         totalCostInr: pass1Cost.plus(pass2Cost),
@@ -208,8 +220,8 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         targetId: sessionId,
         metadata: {
           severity: riskSeverity,
-          indicators: pass2.output.therapyNote.riskFlags.indicators,
-          details: pass2.output.therapyNote.riskFlags.details ?? null,
+          indicators: pass2RiskFlags.indicators,
+          details: pass2RiskFlags.details ?? null,
           psychologistId: session.psychologistId,
           clientId: session.clientId,
         },
@@ -225,11 +237,14 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       clientId: session.clientId,
       psychologistId: session.psychologistId,
       language: (session.language as ClinicalLocale | undefined) ?? 'en',
+      kind: session.kind,
       modality: session.modality,
       presentingConcerns: session.client.presentingConcerns,
       transcript: pass1.output.transcript,
       speakerSegments: pass1.output.speakerSegments,
-      note: pass2.output.therapyNote,
+      // Sprint 19 — note shape depends on session.kind. Pass 3 prompt
+      // branches on its own kind input; we pass the body opaquely.
+      note: pass2Body,
     });
 
     return { draftId: draft.id, status: 'COMPLETED' };
@@ -366,11 +381,17 @@ interface ClinicalAnalysisArgs {
   clientId: string;
   psychologistId: string;
   language: ClinicalLocale;
-  modality: Pass2Output['therapyNote']['modality'];
+  /// Sprint 19 — session classification driving Pass 3 prompt branch.
+  kind: import('@cureocity/contracts').SessionKind;
+  /// Sprint 19 — modality is nullable for INTAKE sessions.
+  modality: import('@cureocity/contracts').SessionModality | null;
   presentingConcerns: string | null;
   transcript: string;
   speakerSegments: Pass1Output['speakerSegments'];
-  note: Pass2Output['therapyNote'];
+  /// Sprint 19 — note body is either TherapyNoteV1 or IntakeNoteV1
+  /// depending on kind. Pass 3 reads it opaquely; the prompt has
+  /// its own kind-aware branch.
+  note: unknown;
 }
 
 export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<void> {
@@ -449,9 +470,13 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
       sessionId: args.sessionId,
       transcript: args.transcript,
       speakerSegments: args.speakerSegments,
+      kind: args.kind,
       modality: args.modality,
       language: args.language,
-      note: args.note,
+      // Sprint 19 — note is union TherapyNoteV1 | IntakeNoteV1; the
+      // Pass 3 prompt branches on its own kind input. Cast is safe
+      // because Pass3Input.note accepts the union.
+      note: args.note as Parameters<typeof router.pass3>[0]['note'],
       clientContext: {
         ...(args.presentingConcerns !== null && {
           presentingConcerns: args.presentingConcerns,
@@ -474,11 +499,28 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
       inr: pass3.callLog.costInr,
     });
 
+    // Sprint 19 — Pass 3 output is a discriminated union. INTAKE
+    // sessions produce InitialAssessmentBriefV1; TREATMENT/REVIEW
+    // produce ClinicalReportV1. ClinicalReport.body stores either
+    // opaquely; the UI branches on session.kind to render.
+    const pass3Body =
+      pass3.output.kind === 'INTAKE'
+        ? pass3.output.initialAssessmentBrief
+        : pass3.output.clinicalReport;
+    const candidateCount =
+      pass3.output.kind === 'INTAKE'
+        ? pass3.output.initialAssessmentBrief.differential.length
+        : pass3.output.clinicalReport.diagnosisCandidates.length;
+    const crisisCount =
+      pass3.output.kind === 'INTAKE'
+        ? pass3.output.initialAssessmentBrief.crisisFlags.length
+        : pass3.output.clinicalReport.crisisFlags.length;
+
     await prisma.clinicalReport.update({
       where: { id: report.id },
       data: {
         status: 'COMPLETED',
-        body: pass3.output.clinicalReport as unknown as Prisma.InputJsonValue,
+        body: pass3Body as unknown as Prisma.InputJsonValue,
         totalCostInr: new Prisma.Decimal(pass3.callLog.costInr),
       },
     });
@@ -492,8 +534,9 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
         sessionId: args.sessionId,
         clientId: args.clientId,
         psychologistId: args.psychologistId,
-        diagnosisCandidateCount: pass3.output.clinicalReport.diagnosisCandidates.length,
-        crisisFlagCount: pass3.output.clinicalReport.crisisFlags.length,
+        kind: pass3.output.kind,
+        diagnosisCandidateCount: candidateCount,
+        crisisFlagCount: crisisCount,
         costInr: pass3.callLog.costInr,
       },
     });

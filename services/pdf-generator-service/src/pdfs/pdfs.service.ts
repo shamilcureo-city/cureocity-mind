@@ -54,7 +54,9 @@ export class PdfsService {
       note: noteContent,
       clientFullName: session.client.fullName,
       sessionId: session.id,
-      modality: session.modality,
+      // Sprint 19 — Session.modality is nullable for intake sessions.
+      // PDF rendering falls back to the session kind label.
+      modality: session.modality ?? session.kind,
       scheduledAt: session.scheduledAt.toISOString().slice(0, 10),
       durationMs,
       signedBy: session.therapyNote?.signedBy ?? null,

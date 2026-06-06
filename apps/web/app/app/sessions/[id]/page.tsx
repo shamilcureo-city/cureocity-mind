@@ -76,7 +76,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         <div>
           <h1 className="font-serif text-3xl">{session.client.fullName}</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {session.modality} · {session.scheduledAt.toLocaleString('en-US')}
+            {session.modality ?? session.kind} · {session.scheduledAt.toLocaleString('en-US')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -325,7 +325,9 @@ async function SessionInfoTabPanel({ sessionId }: { sessionId: string }) {
     <SessionInfoTab
       data={{
         id: session.id,
-        modality: session.modality,
+        // Sprint 19 — modality can be null (INTAKE sessions). Show a
+        // human-friendly fallback so the info tab still renders.
+        modality: session.modality ?? 'INTAKE',
         status: session.status,
         scheduledAt: session.scheduledAt,
         startedAt: session.startedAt,

@@ -9,6 +9,8 @@ import {
 import {
   CLINICAL_ANALYSIS_PROMPT_VERSION,
   CLINICAL_ANALYSIS_SYSTEM_PROMPT_V1,
+  INITIAL_ASSESSMENT_PROMPT_VERSION,
+  INITIAL_ASSESSMENT_SYSTEM_PROMPT_V1,
 } from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
 
@@ -48,17 +50,22 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
   async run(input: Pass3Input): Promise<{ output: Pass3Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
     const userMessage = buildUserMessage(input);
+    // Sprint 19 — kind drives prompt + parser branch.
+    const isIntake = input.kind === 'INTAKE';
+    const systemPrompt = isIntake
+      ? INITIAL_ASSESSMENT_SYSTEM_PROMPT_V1
+      : CLINICAL_ANALYSIS_SYSTEM_PROMPT_V1;
+    const promptVersion = isIntake
+      ? INITIAL_ASSESSMENT_PROMPT_VERSION
+      : CLINICAL_ANALYSIS_PROMPT_VERSION;
 
     try {
       const res = await this.ai.models.generateContent({
         model: this.modelName,
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         config: {
-          systemInstruction: CLINICAL_ANALYSIS_SYSTEM_PROMPT_V1,
+          systemInstruction: systemPrompt,
           responseMimeType: 'application/json',
-          // Lower than Pass 2 because clinical reasoning rewards
-          // determinism — the same transcript should not flip
-          // diagnosis candidates run to run.
           temperature: 0.15,
           maxOutputTokens: 12_288,
           safetySettings: [
@@ -75,13 +82,16 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
       const blockReason = res.promptFeedback?.blockReason;
       if (!text || text === '{}' || text === '') {
         console.warn(
-          `[vertex-clinical] sessionId=${input.sessionId} EMPTY response. finishReason=${finishReason} blockReason=${blockReason} textLen=${text?.length ?? 0}`,
+          `[vertex-clinical] sessionId=${input.sessionId} kind=${input.kind} EMPTY response. finishReason=${finishReason} blockReason=${blockReason} textLen=${text?.length ?? 0}`,
         );
       }
       const parsed: unknown = JSON.parse(text);
-      // Pass3 prompt asks for the ClinicalReportV1 directly (no wrapper).
-      // Wrap here so consumers see the same shape as the mock backend.
-      const output = Pass3OutputSchema.parse({ clinicalReport: parsed });
+      // Pass 3 prompts ask for the body directly (no wrapper). Wrap
+      // with the discriminator so consumers see the discriminated
+      // union shape.
+      const output: Pass3Output = isIntake
+        ? Pass3OutputSchema.parse({ kind: 'INTAKE', initialAssessmentBrief: parsed })
+        : Pass3OutputSchema.parse({ kind: input.kind, clinicalReport: parsed });
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
@@ -94,7 +104,7 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
           pass: 'PASS_3_CLINICAL_ANALYSIS',
           model: this.modelName,
           region: this.region,
-          promptVersion: CLINICAL_ANALYSIS_PROMPT_VERSION,
+          promptVersion,
           inputTokens,
           outputTokens,
           costInr: computeCostInr(inputTokens, outputTokens, PRO_PRICING),
@@ -109,7 +119,7 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
         pass: 'PASS_3_CLINICAL_ANALYSIS',
         model: this.modelName,
         region: this.region,
-        promptVersion: CLINICAL_ANALYSIS_PROMPT_VERSION,
+        promptVersion,
         inputTokens: fallbackTokens,
         outputTokens: 0,
         costInr: computeCostInr(fallbackTokens, 0, PRO_PRICING),
@@ -155,7 +165,8 @@ function buildUserMessage(input: Pass3Input): string {
     : '  (no prior treatment plan)';
   return [
     `Output language: ${input.language}`,
-    `Modality: ${input.modality}`,
+    `Session kind: ${input.kind}`,
+    `Modality: ${input.modality ?? '(not yet chosen — intake / investigative)'}`,
     `Presenting concerns: ${input.clientContext.presentingConcerns ?? '(none recorded)'}`,
     '',
     'Prior confirmed diagnoses:',
@@ -172,6 +183,8 @@ function buildUserMessage(input: Pass3Input): string {
     'TherapyNoteV1 produced for this session:',
     JSON.stringify(input.note, null, 2),
     '',
-    'Produce ClinicalReportV1 JSON only.',
+    input.kind === 'INTAKE'
+      ? 'Produce InitialAssessmentBriefV1 JSON only.'
+      : 'Produce ClinicalReportV1 JSON only.',
   ].join('\n');
 }

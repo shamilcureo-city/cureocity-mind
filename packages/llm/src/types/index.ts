@@ -4,7 +4,11 @@ import {
   type ClinicalLocale,
   ClinicalReportV1Schema,
   type ClientDiagnosis,
+  InitialAssessmentBriefV1Schema,
+  IntakeNoteV1Schema,
+  type IntakeNoteV1,
   PreSessionBriefV1Schema,
+  type SessionKind,
   type SessionModality,
   SpeakerSegmentSchema,
   type SpeakerSegment,
@@ -25,6 +29,9 @@ export {
   ClinicalReportV1Schema,
   TherapyScriptV1Schema,
   PreSessionBriefV1Schema,
+  IntakeNoteV1Schema,
+  InitialAssessmentBriefV1Schema,
+  SessionKindSchema,
 } from '@cureocity/contracts';
 export type {
   Speaker,
@@ -36,6 +43,9 @@ export type {
   ClinicalLocale,
   TherapyScriptV1,
   PreSessionBriefV1,
+  IntakeNoteV1,
+  InitialAssessmentBriefV1,
+  SessionKind,
 } from '@cureocity/contracts';
 
 // ============================================================================
@@ -91,16 +101,45 @@ export interface Pass2Input {
   sessionId: string;
   transcript: string;
   speakerSegments: SpeakerSegment[];
-  modality: SessionModality;
+  /**
+   * Sprint 19 — session classification. Drives the prompt branch:
+   *   TREATMENT / REVIEW → produces TherapyNoteV1 (SOAP)
+   *   INTAKE             → produces IntakeNoteV1 (history + MSE + working hypothesis)
+   * Treatment notes assume a known plan; intakes are investigative
+   * and need a different shape to be clinically useful.
+   */
+  kind: SessionKind;
+  /**
+   * Sprint 19 — modality may be null for INTAKE sessions. For
+   * TREATMENT / REVIEW, the orchestrator should have a non-null
+   * value from the session-defaults cascade.
+   */
+  modality: SessionModality | null;
   clientContext: {
     presentingConcerns?: string;
     preferredModality?: SessionModality;
   };
 }
 
-export const Pass2OutputSchema = z.object({
-  therapyNote: TherapyNoteV1Schema,
-});
+/**
+ * Sprint 19 — discriminated union. Treatment / review sessions
+ * produce a SOAP TherapyNoteV1; intakes produce an IntakeNoteV1.
+ * Callers MUST branch on `output.kind` before reading the body.
+ */
+export const Pass2OutputSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('TREATMENT'),
+    therapyNote: TherapyNoteV1Schema,
+  }),
+  z.object({
+    kind: z.literal('REVIEW'),
+    therapyNote: TherapyNoteV1Schema,
+  }),
+  z.object({
+    kind: z.literal('INTAKE'),
+    intakeNote: IntakeNoteV1Schema,
+  }),
+]);
 export type Pass2Output = z.infer<typeof Pass2OutputSchema>;
 
 // ============================================================================
@@ -130,11 +169,19 @@ export interface Pass3Input {
   sessionId: string;
   transcript: string;
   speakerSegments: SpeakerSegment[];
-  modality: SessionModality;
+  /** Sprint 19 — session classification. Same value as Pass2Input.kind. */
+  kind: SessionKind;
+  /** Sprint 19 — nullable for INTAKE sessions. */
+  modality: SessionModality | null;
   /** Per-session output language hint. */
   language: ClinicalLocale;
-  /** The TherapyNoteV1 already produced by Pass 2 for this session. */
-  note: TherapyNoteV1;
+  /**
+   * Sprint 19 — Pass 2 output. Discriminated by kind:
+   *   TREATMENT / REVIEW → TherapyNoteV1
+   *   INTAKE             → IntakeNoteV1
+   * Pass 3 prompt picks the right context shape.
+   */
+  note: TherapyNoteV1 | IntakeNoteV1;
   clientContext: {
     presentingConcerns?: string;
     priorDiagnoses?: Pass3PriorDiagnosis[];
@@ -142,9 +189,27 @@ export interface Pass3Input {
   };
 }
 
-export const Pass3OutputSchema = z.object({
-  clinicalReport: ClinicalReportV1Schema,
-});
+/**
+ * Sprint 19 — discriminated union. Treatment / review sessions
+ * produce a ClinicalReportV1 (diagnosis candidates + plan + crisis);
+ * intakes produce an InitialAssessmentBriefV1 (working hypothesis +
+ * wider differential + recommended instruments). Callers MUST
+ * branch on `output.kind` before reading the body.
+ */
+export const Pass3OutputSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('TREATMENT'),
+    clinicalReport: ClinicalReportV1Schema,
+  }),
+  z.object({
+    kind: z.literal('REVIEW'),
+    clinicalReport: ClinicalReportV1Schema,
+  }),
+  z.object({
+    kind: z.literal('INTAKE'),
+    initialAssessmentBrief: InitialAssessmentBriefV1Schema,
+  }),
+]);
 export type Pass3Output = z.infer<typeof Pass3OutputSchema>;
 
 // ============================================================================

@@ -1,12 +1,16 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema, ScriptVersionSchema } from './common';
-import { SessionModalitySchema } from './client';
+import { SessionKindSchema, SessionModalitySchema } from './client';
 import { SessionStatusSchema } from './briefing';
 import { ConsentScopeSchema } from './consent';
 
 export const CreateSessionInputSchema = z.object({
   clientId: CuidSchema,
-  modality: SessionModalitySchema,
+  /// Sprint 19 — modality is now OPTIONAL on create. When absent
+  /// the session-defaults cascade picks one (TreatmentPlan.modality
+  /// → Client.preferredModality → Psychologist.defaultModality →
+  /// INTAKE) and writes a SESSION_MODALITY_INFERRED audit row.
+  modality: SessionModalitySchema.optional(),
   scheduledAt: IsoDateTimeSchema,
 });
 
@@ -38,7 +42,11 @@ export const SessionSchema = z.object({
   id: CuidSchema,
   clientId: CuidSchema,
   psychologistId: CuidSchema,
-  modality: SessionModalitySchema,
+  /// Sprint 19 — nullable (INTAKE sessions can defer the choice).
+  modality: SessionModalitySchema.nullable(),
+  /// Sprint 19 — session kind drives Pass 2/3 prompt branches +
+  /// UI labels (Intake vs Treatment).
+  kind: SessionKindSchema.default('TREATMENT'),
   status: SessionStatusSchema,
   scheduledAt: IsoDateTimeSchema,
   startedAt: IsoDateTimeSchema.nullable(),

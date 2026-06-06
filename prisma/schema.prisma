@@ -565,7 +565,32 @@ enum SessionStatus {
 enum SessionModality {
   CBT
   EMDR
+  // Sprint 19 — expanded evidence-based approaches. The old "OTHER"
+  // bucket collapsed every non-CBT/EMDR practice into one tag; this
+  // distinguishes the common ones so the recommender + competency
+  // dashboard can attribute work correctly.
+  ACT
+  IFS
+  PSYCHODYNAMIC
+  MI
+  MBCT
+  SUPPORTIVE
+  /// First-session intake (assessment + history + working hypothesis).
+  /// Auto-assigned by the session-defaults cascade when no prior
+  /// COMPLETED session exists and no confirmed TreatmentPlan is on
+  /// file. Pass 2 produces an IntakeNoteV1 instead of a SOAP note
+  /// when modality is INTAKE.
+  INTAKE
   OTHER
+}
+
+/// Sprint 19 — coarse session classification computed server-side at
+/// create time from cumulative state. Drives Pass 2/3 prompt branches
+/// (intake-note vs treatment-note vs review-with-verdict).
+enum SessionKind {
+  INTAKE
+  TREATMENT
+  REVIEW
 }
 
 model Session {
@@ -573,8 +598,18 @@ model Session {
   clientId       String
   psychologistId String
 
-  modality SessionModality
-  status   SessionStatus   @default(SCHEDULED)
+  /// Sprint 19 made this nullable. The session-defaults cascade
+  /// computes a default (TreatmentPlan.body.modality →
+  /// Client.preferredModality → Psychologist.defaultModality →
+  /// SessionModality.INTAKE) so the create route always has a value
+  /// to write — but the column is nullable so older rows + future
+  /// "decide later" flows aren't blocked at the DB level.
+  modality SessionModality?
+  /// Sprint 19 — session classification driving Pass 2/3 prompt
+  /// branches. Defaults to TREATMENT for back-compat with rows
+  /// inserted before this migration.
+  kind     SessionKind      @default(TREATMENT)
+  status   SessionStatus    @default(SCHEDULED)
 
   scheduledAt DateTime
   startedAt   DateTime?
@@ -1615,6 +1650,13 @@ enum AuditAction {
   // Therapist settings + WebAuthn credentials — Sprint 18.
   WEBAUTHN_CREDENTIAL_REGISTERED
   WEBAUTHN_CREDENTIAL_REVOKED
+
+  // Scribing flow revamp — Sprint 19.
+  // Inferred = the session-defaults cascade picked a modality from
+  // history. Overridden = the therapist accepted the modal but
+  // changed the cascade-picked modality before submitting.
+  SESSION_MODALITY_INFERRED
+  SESSION_MODALITY_OVERRIDDEN
 }
 
 enum AuditActorType {

@@ -6,7 +6,12 @@ import {
   Pass2OutputSchema,
   type Pass2Output,
 } from '../types';
-import { THERAPY_NOTE_PROMPT_VERSION, THERAPY_NOTE_SYSTEM_PROMPT_V1 } from '../prompts';
+import {
+  INTAKE_NOTE_PROMPT_VERSION,
+  INTAKE_NOTE_SYSTEM_PROMPT_V1,
+  THERAPY_NOTE_PROMPT_VERSION,
+  THERAPY_NOTE_SYSTEM_PROMPT_V1,
+} from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
 
 export interface VertexGeminiProGlobalOptions {
@@ -45,19 +50,20 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
   async run(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
     const userMessage = buildUserMessage(input);
+    // Sprint 19 — kind drives prompt + parser branch.
+    const isIntake = input.kind === 'INTAKE';
+    const systemPrompt = isIntake ? INTAKE_NOTE_SYSTEM_PROMPT_V1 : THERAPY_NOTE_SYSTEM_PROMPT_V1;
+    const promptVersion = isIntake ? INTAKE_NOTE_PROMPT_VERSION : THERAPY_NOTE_PROMPT_VERSION;
 
     try {
       const res = await this.ai.models.generateContent({
         model: this.modelName,
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         config: {
-          systemInstruction: THERAPY_NOTE_SYSTEM_PROMPT_V1,
+          systemInstruction: systemPrompt,
           responseMimeType: 'application/json',
           temperature: 0.2,
           maxOutputTokens: 8192,
-          // Same rationale as the Flash backend: therapy notes summarise
-          // sensitive content (trauma, crisis flags). Default safety
-          // settings would silently empty the response.
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
@@ -72,16 +78,16 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
       const blockReason = res.promptFeedback?.blockReason;
       if (!text || text === '{}' || text === '') {
         console.warn(
-          `[vertex-pro] sessionId=${input.sessionId} EMPTY response. finishReason=${finishReason} blockReason=${blockReason} textLen=${text?.length ?? 0}`,
+          `[vertex-pro] sessionId=${input.sessionId} kind=${input.kind} EMPTY response. finishReason=${finishReason} blockReason=${blockReason} textLen=${text?.length ?? 0}`,
         );
       }
       const parsed: unknown = JSON.parse(text);
-      // The Pass2 prompt asks Gemini to produce a TherapyNoteV1 JSON
-      // object directly (no wrapper key) — that matches PRD 22.1 Part
-      // 10.3. The Pass2OutputSchema, however, wraps the note under a
-      // `therapyNote` key. Wrap here so downstream consumers
-      // (orchestrator, NoteDraft) see the same shape as the mock backend.
-      const output = Pass2OutputSchema.parse({ therapyNote: parsed });
+      // Pass 2 prompts ask Gemini to produce the body object directly
+      // (no wrapper). Wrap here with the discriminator so downstream
+      // consumers see the same shape as the mock backend.
+      const output: Pass2Output = isIntake
+        ? Pass2OutputSchema.parse({ kind: 'INTAKE', intakeNote: parsed })
+        : Pass2OutputSchema.parse({ kind: input.kind, therapyNote: parsed });
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
@@ -94,7 +100,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
           pass: 'PASS_2_NOTE_GENERATION',
           model: this.modelName,
           region: this.region,
-          promptVersion: THERAPY_NOTE_PROMPT_VERSION,
+          promptVersion,
           inputTokens,
           outputTokens,
           costInr: computeCostInr(inputTokens, outputTokens, PRO_PRICING),
@@ -109,7 +115,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
         pass: 'PASS_2_NOTE_GENERATION',
         model: this.modelName,
         region: this.region,
-        promptVersion: THERAPY_NOTE_PROMPT_VERSION,
+        promptVersion,
         inputTokens: fallbackTokens,
         outputTokens: 0,
         costInr: computeCostInr(fallbackTokens, 0, PRO_PRICING),
@@ -133,7 +139,8 @@ export class Pass2BackendError extends Error {
 
 function buildUserMessage(input: Pass2Input): string {
   return [
-    `Modality: ${input.modality}`,
+    `Session kind: ${input.kind}`,
+    `Modality: ${input.modality ?? '(not yet chosen — intake / investigative)'}`,
     `Presenting concerns: ${input.clientContext.presentingConcerns ?? '(none recorded)'}`,
     '',
     'Transcript (with speaker tags):',
@@ -141,6 +148,8 @@ function buildUserMessage(input: Pass2Input): string {
       .map((s) => `[${s.speaker} ${s.startMs}-${s.endMs}ms] ${s.text}`)
       .join('\n'),
     '',
-    'Produce TherapyNoteV1 JSON only.',
+    input.kind === 'INTAKE'
+      ? 'Produce IntakeNoteV1 JSON only.'
+      : 'Produce TherapyNoteV1 JSON only.',
   ].join('\n');
 }

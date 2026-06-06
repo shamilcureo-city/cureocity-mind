@@ -40,6 +40,7 @@ export async function POST(
       psychologistId: true,
       clientId: true,
       modality: true,
+      kind: true,
       language: true,
       client: { select: { presentingConcerns: true } },
       noteDraft: {
@@ -77,11 +78,12 @@ export async function POST(
     clientId: session.clientId,
     psychologistId: session.psychologistId,
     language: (session.language as ClinicalLocale | undefined) ?? 'en',
+    kind: session.kind,
     modality: session.modality,
     presentingConcerns: session.client.presentingConcerns,
     transcript: draft.transcript,
     speakerSegments: segments,
-    note: draft.content as unknown as Parameters<typeof runClinicalAnalysis>[0]['note'],
+    note: draft.content as Parameters<typeof runClinicalAnalysis>[0]['note'],
   });
 
   const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
