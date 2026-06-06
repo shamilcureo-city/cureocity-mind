@@ -2,10 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import type { NoteDraft, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
+import type {
+  IntakeNoteV1,
+  NoteDraft,
+  SessionKind,
+  TherapyNote,
+  TherapyNoteV1,
+} from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { IntakeNotePreview } from './IntakeNotePreview';
 import { NotePreview } from './NotePreview';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
@@ -24,6 +31,10 @@ type SessionStatus =
 interface Props {
   sessionId: string;
   sessionStatus: SessionStatus;
+  /// Sprint 19 — drives the discriminator for the note content
+  /// (TherapyNoteV1 vs IntakeNoteV1) + which downstream surfaces are
+  /// available (sign-off + modify panel are TherapyNote-only).
+  sessionKind: SessionKind;
   initialDraft: NoteDraft | null;
   initialNote: TherapyNote | null;
   clientId: string;
@@ -44,12 +55,19 @@ const POLL_MS = 2_000;
 export function NotesTab({
   sessionId,
   sessionStatus,
+  sessionKind,
   initialDraft,
   initialNote,
   clientId,
   llmBackend,
 }: Props) {
-  const [phase, setPhase] = useState<Phase>(() => derivePhase(sessionStatus, initialDraft, initialNote));
+  // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
+  // notes use IntakeNoteV1, which doesn't yet have a sign DTO or edit
+  // surface. Render-only for v1.
+  const isIntake = sessionKind === 'INTAKE';
+  const [phase, setPhase] = useState<Phase>(() =>
+    derivePhase(sessionStatus, initialDraft, initialNote),
+  );
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
@@ -260,11 +278,7 @@ export function NotesTab({
       <Card className="p-10">
         <p className="font-serif text-xl">Could not load the draft.</p>
         <p className="mt-2 text-sm text-[var(--color-warn)]">{phase.message}</p>
-        <Button
-          variant="secondary"
-          onClick={() => void pollOnce()}
-          className="mt-4"
-        >
+        <Button variant="secondary" onClick={() => void pollOnce()} className="mt-4">
           Try again
         </Button>
       </Card>
@@ -273,59 +287,67 @@ export function NotesTab({
 
   if (phase.kind === 'signed') {
     const note = phase.note;
+    // INTAKE notes won't reach this branch in v1 (no sign route) but
+    // the type system already supports it via the SOAP discriminator.
+    if (isIntake) {
+      return (
+        <>
+          <MockBackendBanner llmBackend={llmBackend} />
+          <Card className="p-7">
+            <RiskBanner riskFlags={note.content.riskFlags} />
+            <IntakeNotePreview
+              note={note.content as unknown as IntakeNoteV1}
+              signedAt={note.signedAt}
+              signedBy={note.signedBy}
+            />
+          </Card>
+        </>
+      );
+    }
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
           <Card className="p-7">
             <AdvancementBanner clientId={clientId} />
-          <RiskBanner riskFlags={note.content.riskFlags} />
-          <NotePreview
-            note={note.content}
-            signedAt={note.signedAt}
-            signedBy={note.signedBy}
-          />
-          <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => setShareOpen(true)}
-              className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
-            >
-              Send to patient
-            </button>
-            <a
-              href={`/api/v1/sessions/${sessionId}/note/pdf`}
-              download
-              className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-            >
-              Download PDF
-            </a>
-          </div>
-          <ShareModal
-            open={shareOpen}
-            onClose={() => setShareOpen(false)}
-            clientId={clientId}
-            hasContactPhone={true}
-            hasContactEmail={true}
-            artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
-            artefactLabel="Signed session note"
-          />
-          <RevisionPanel
-            sessionId={sessionId}
-            note={note}
-            onRevised={(nextContent) =>
-              setPhase({
-                kind: 'signed',
-                note: { ...note, content: nextContent },
-              })
-            }
-          />
-            <NoteFooter
-              costInr="—"
-              chunkCount={0}
-              transcriptChars={0}
-              region="signed"
+            <RiskBanner riskFlags={note.content.riskFlags} />
+            <NotePreview note={note.content} signedAt={note.signedAt} signedBy={note.signedBy} />
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+              >
+                Send to patient
+              </button>
+              <a
+                href={`/api/v1/sessions/${sessionId}/note/pdf`}
+                download
+                className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+              >
+                Download PDF
+              </a>
+            </div>
+            <ShareModal
+              open={shareOpen}
+              onClose={() => setShareOpen(false)}
+              clientId={clientId}
+              hasContactPhone={true}
+              hasContactEmail={true}
+              artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
+              artefactLabel="Signed session note"
             />
+            <RevisionPanel
+              sessionId={sessionId}
+              note={note}
+              onRevised={(nextContent) =>
+                setPhase({
+                  kind: 'signed',
+                  note: { ...note, content: nextContent },
+                })
+              }
+            />
+            <NoteFooter costInr="—" chunkCount={0} transcriptChars={0} region="signed" />
           </Card>
           <ModifyPanel disabled={true} sessionId={sessionId} note={phase.note.content} />
         </div>
@@ -334,6 +356,33 @@ export function NotesTab({
   }
 
   // completed
+  if (isIntake) {
+    const intakeNote = phase.draft.content as unknown as IntakeNoteV1;
+    return (
+      <>
+        <MockBackendBanner llmBackend={llmBackend} />
+        <Card className="p-7">
+          <RiskBanner riskFlags={intakeNote.riskFlags} />
+          <IntakeNotePreview note={intakeNote} />
+          <NoteFooter
+            costInr={phase.draft.totalCostInr}
+            chunkCount={phase.draft.speakerSegments?.length ?? 0}
+            transcriptChars={phase.draft.transcript?.length ?? 0}
+            region={llmBackend}
+          />
+          <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
+            <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
+              Re-generate
+            </Button>
+            <p className="text-xs italic text-[var(--color-ink-3)]">
+              Sign-off + AI modify panel are not yet supported for intake notes.
+            </p>
+          </div>
+        </Card>
+      </>
+    );
+  }
+
   const note = phase.draft.content as TherapyNoteV1;
   return (
     <>
@@ -358,7 +407,20 @@ export function NotesTab({
             {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
           </div>
         </Card>
-        <ModifyPanel disabled={false} sessionId={sessionId} note={phase.draft.content as TherapyNoteV1} onModified={(next) => setPhase({ kind: 'completed', draft: { ...phase.draft, content: next as unknown as NoteDraft['content'] } })} />
+        <ModifyPanel
+          disabled={false}
+          sessionId={sessionId}
+          note={phase.draft.content as TherapyNoteV1}
+          onModified={(next) =>
+            setPhase({
+              kind: 'completed',
+              draft: {
+                ...phase.draft,
+                content: next as unknown as NoteDraft['content'],
+              },
+            })
+          }
+        />
       </div>
     </>
   );
@@ -518,18 +580,14 @@ function ModifyPanel({
       </div>
 
       {lastChanged && lastChanged.length > 0 && (
-        <p className="mt-3 text-xs text-[var(--color-accent)]">
-          Updated: {lastChanged.join(', ')}
-        </p>
+        <p className="mt-3 text-xs text-[var(--color-accent)]">Updated: {lastChanged.join(', ')}</p>
       )}
       {lastChanged && lastChanged.length === 0 && (
         <p className="mt-3 text-xs text-[var(--color-ink-3)]">
           Model ran but no SOAP fields changed.
         </p>
       )}
-      {error && (
-        <p className="mt-3 text-xs text-[var(--color-warn)]">{error}</p>
-      )}
+      {error && <p className="mt-3 text-xs text-[var(--color-warn)]">{error}</p>}
 
       <div className="mt-auto pt-6">
         <form
@@ -561,8 +619,8 @@ function ModifyPanel({
         </form>
       </div>
       <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-        Word of warning: the model only rewrites — it won't invent new clinical content. Severity
-        + modality are preserved verbatim.
+        Word of warning: the model only rewrites — it won't invent new clinical content. Severity +
+        modality are preserved verbatim.
       </p>
     </Card>
   );

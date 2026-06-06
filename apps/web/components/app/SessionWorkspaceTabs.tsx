@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { SessionKind } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 
 type TabKey =
@@ -10,7 +11,14 @@ type TabKey =
   | 'mindmap'
   | 'reflection';
 
-const TABS: { key: TabKey; label: string; live: boolean; sprint?: string }[] = [
+interface TabSpec {
+  key: TabKey;
+  label: string;
+  live: boolean;
+  sprint?: string;
+}
+
+const BASE_TABS: TabSpec[] = [
   { key: 'notes', label: 'Notes', live: true },
   { key: 'clinical-brief', label: 'Clinical Brief', live: true },
   { key: 'client', label: 'Client', live: true },
@@ -23,15 +31,23 @@ const TABS: { key: TabKey; label: string; live: boolean; sprint?: string }[] = [
 interface Props {
   sessionId: string;
   active?: TabKey;
+  /// Sprint 19 — INTAKE sessions get intake-flavoured labels and
+  /// hide tabs that only make sense once a treatment plan exists.
+  sessionKind?: SessionKind;
 }
 
-export function SessionWorkspaceTabs({ sessionId, active = 'notes' }: Props) {
+export function SessionWorkspaceTabs({
+  sessionId,
+  active = 'notes',
+  sessionKind = 'TREATMENT',
+}: Props) {
+  const tabs = tabsForKind(sessionKind);
   return (
     <nav
       className="flex flex-wrap items-center gap-1 border-b border-[var(--color-line-soft)]"
       aria-label="Session sections"
     >
-      {TABS.map((t) => {
+      {tabs.map((t) => {
         const isActive = t.key === active;
         const className = `group inline-flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm transition-colors ${
           isActive
@@ -64,11 +80,32 @@ export function SessionWorkspaceTabs({ sessionId, active = 'notes' }: Props) {
             ? `/app/sessions/${sessionId}`
             : `/app/sessions/${sessionId}?tab=${t.key}`;
         return (
-          <Link key={t.key} href={href} className={className} aria-current={isActive ? 'page' : undefined}>
+          <Link
+            key={t.key}
+            href={href}
+            className={className}
+            aria-current={isActive ? 'page' : undefined}
+          >
             {inner}
           </Link>
         );
       })}
     </nav>
   );
+}
+
+function tabsForKind(kind: SessionKind): TabSpec[] {
+  if (kind === 'INTAKE') {
+    // Mindmap + reflection-questions are TherapyNoteV1-shaped — they
+    // assume SOAP fields the intake note doesn't produce. Hide them
+    // until an intake-specific renderer exists.
+    return BASE_TABS.filter((t) => t.key !== 'mindmap' && t.key !== 'reflection').map((t) =>
+      t.key === 'notes'
+        ? { ...t, label: 'Intake Note' }
+        : t.key === 'clinical-brief'
+          ? { ...t, label: 'Initial Assessment' }
+          : t,
+    );
+  }
+  return BASE_TABS;
 }

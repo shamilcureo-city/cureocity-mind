@@ -22,7 +22,7 @@ interface Props {
 }
 
 /**
- * Sprint 13 — Clinical Brief tab.
+ * Sprint 13 — Clinical Brief tab. (TREATMENT / REVIEW kinds only.)
  *
  * Shows the Pass 3 ClinicalReportV1 as six per-section cards. Each
  * card lets the therapist Accept / Modify-and-Accept / Reject the AI
@@ -33,6 +33,10 @@ interface Props {
  * banner with India hotline numbers; until acknowledged the rest of
  * the page renders with reduced opacity to nudge the therapist to
  * handle the crisis first.
+ *
+ * Sprint 19 — INTAKE sessions render InitialAssessmentTab instead;
+ * the page picks the component based on session.kind so this tab
+ * doesn't need to branch internally.
  */
 export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
   const [report, setReport] = useState<ClinicalReport | null>(initialReport);
@@ -46,8 +50,10 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
       const res = await fetch(`/api/v1/sessions/${sessionId}/clinical-analysis`, {
         method: 'POST',
       });
-      const body = (await res.json().catch(() => ({}))) as
-        | { report?: ClinicalReport; error?: string };
+      const body = (await res.json().catch(() => ({}))) as {
+        report?: ClinicalReport;
+        error?: string;
+      };
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
       setReport(body.report ?? null);
     } catch (e) {
@@ -66,18 +72,16 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">No clinical brief yet</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          The clinical brief is generated automatically after the note finishes. If you don't
-          see one, the underlying note may not have completed — generate the note first, then
-          come back here.
+          The clinical brief is generated automatically after the note finishes. If you don't see
+          one, the underlying note may not have completed — generate the note first, then come back
+          here.
         </p>
         <div className="mt-6">
           <Button onClick={() => void generate()} disabled={generating}>
             {generating ? 'Generating…' : 'Generate clinical brief'}
           </Button>
         </div>
-        {error && (
-          <p className="mt-4 text-sm text-[var(--color-warn)]">{error}</p>
-        )}
+        {error && <p className="mt-4 text-sm text-[var(--color-warn)]">{error}</p>}
       </Card>
     );
   }
@@ -110,7 +114,12 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
   }
 
   return (
-    <CompletedBrief report={report} onUpdate={updateConfirmation} onRegenerate={generate} regenerating={generating} />
+    <CompletedBrief
+      report={report}
+      onUpdate={updateConfirmation}
+      onRegenerate={generate}
+      regenerating={generating}
+    />
   );
 }
 
@@ -141,8 +150,8 @@ function CompletedBrief({
         <div>
           <h2 className="font-serif text-2xl">Clinical brief</h2>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-ink-2)]">
-            AI decision-support, generated from this session's transcript and the client's
-            prior confirmed history. Review each section and accept, edit, or reject.
+            AI decision-support, generated from this session's transcript and the client's prior
+            confirmed history. Review each section and accept, edit, or reject.
           </p>
         </div>
         <Button variant="secondary" onClick={() => void onRegenerate()} disabled={regenerating}>
@@ -236,10 +245,7 @@ function CrisisBanner({
       </div>
       <ul className="mt-3 space-y-3">
         {flags.map((f, i) => (
-          <li
-            key={i}
-            className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-4"
-          >
+          <li key={i} className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <strong className="text-sm">{labelForCrisisKind(f.kind)}</strong>
               <Badge tone="warn">{f.severity}</Badge>
@@ -359,8 +365,8 @@ function DiagnosisSection({
       />
       {primaryIndex !== null && candidates[primaryIndex] && confirmation.status === 'ACCEPTED' && (
         <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-          Accepting writes {candidates.length} diagnosis row(s) to this client's record; the
-          row marked primary above replaces any prior primary diagnosis.
+          Accepting writes {candidates.length} diagnosis row(s) to this client's record; the row
+          marked primary above replaces any prior primary diagnosis.
         </p>
       )}
     </SectionCard>
@@ -456,9 +462,7 @@ function PlanSection({
         </div>
       </dl>
       <div className="mt-4">
-        <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Phase sequence
-        </p>
+        <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Phase sequence</p>
         <ol className="mt-2 flex flex-wrap gap-2 text-sm">
           {plan.phaseSequence.map((p, i) => (
             <li
@@ -493,8 +497,7 @@ function PlanSection({
       />
       {confirmation.status === 'ACCEPTED' && (
         <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-          Accepting bumps this client's TreatmentPlan version and supersedes the prior active
-          plan.
+          Accepting bumps this client's TreatmentPlan version and supersedes the prior active plan.
         </p>
       )}
     </SectionCard>
@@ -561,9 +564,7 @@ function SectionCard({
         <div>
           <h3 className="font-serif text-xl">{title}</h3>
           {subtitle && (
-            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              {subtitle}
-            </p>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">{subtitle}</p>
           )}
         </div>
         <ConfirmationBadge confirmation={confirmation} />
@@ -616,16 +617,15 @@ function ActionButtons({
       try {
         const body: Record<string, unknown> = { action };
         if (action === 'reject') body['reason'] = reason;
-        const res = await fetch(
-          `/api/v1/clinical-reports/${report.id}/sections/${section}`,
-          {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          },
-        );
-        const data = (await res.json().catch(() => ({}))) as
-          | { report?: ClinicalReport; error?: string };
+        const res = await fetch(`/api/v1/clinical-reports/${report.id}/sections/${section}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          report?: ClinicalReport;
+          error?: string;
+        };
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
         if (data.report) onUpdate(data.report);
         setShowReject(false);

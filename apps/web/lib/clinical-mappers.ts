@@ -14,6 +14,7 @@ import {
   ClinicalSectionConfirmationsSchema,
   ClinicalSupportingQuoteSchema,
   ClinicalTreatmentPlanSchema,
+  InitialAssessmentBriefV1Schema,
   InstrumentKeySchema,
   InstrumentResponseMapSchema,
   PatientShareSnapshotSchema,
@@ -28,6 +29,7 @@ import {
   type ClinicalSectionConfirmations,
   type ClinicalSupportingQuote,
   type ClinicalTreatmentPlan,
+  type InitialAssessmentBriefV1,
   type InstrumentResponse,
   type PatientShare,
   type PatientShareSnapshot,
@@ -76,6 +78,20 @@ export function toClinicalReport(row: ClinicalReportRow): ClinicalReport {
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
+}
+
+/**
+ * Sprint 19 — parse the InitialAssessmentBrief stored on a ClinicalReport
+ * row for an INTAKE-kind session. The Prisma column accepts either
+ * shape opaquely; the mapper picks the right parser based on
+ * session.kind (passed by the page).
+ */
+export function readInitialAssessmentBrief(
+  row: ClinicalReportRow,
+): InitialAssessmentBriefV1 | null {
+  if (row.body === null || row.body === undefined) return null;
+  const parsed = InitialAssessmentBriefV1Schema.safeParse(row.body);
+  return parsed.success ? parsed.data : null;
 }
 
 export function toClientDiagnosis(row: ClientDiagnosisRow): ClientDiagnosis {
