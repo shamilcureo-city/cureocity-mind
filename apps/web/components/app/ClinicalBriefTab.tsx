@@ -119,8 +119,16 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Clinical brief is being prepared…</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Pass 3 is running. This usually takes 30-60 seconds after the note completes.
+          Pass 3 is running in the background. This usually takes 30-60 seconds after the note
+          completes. If it’s been longer, the background run may have been killed by the serverless
+          cap — re-run it now.
         </p>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+          <Button onClick={() => void generate()} disabled={generating}>
+            {generating ? 'Re-running…' : 'Re-run now'}
+          </Button>
+        </div>
+        {error && <p className="mt-4 text-sm text-[var(--color-warn)]">{error}</p>}
       </Card>
     );
   }
