@@ -95,6 +95,9 @@ export const AuditActionSchema = z.enum([
   'INSTRUMENT_VIEWED',
   'SAFETY_PLAN_CREATED',
   'SAFETY_PLAN_UPDATED',
+  // Therapist settings + WebAuthn credentials — Sprint 18.
+  'WEBAUTHN_CREDENTIAL_REGISTERED',
+  'WEBAUTHN_CREDENTIAL_REVOKED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

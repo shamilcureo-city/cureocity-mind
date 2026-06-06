@@ -18,3 +18,4 @@ export * from './share';
 export * from './brief';
 export * from './instrument';
 export * from './safety-plan';
+export * from './webauthn';

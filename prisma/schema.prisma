@@ -73,6 +73,14 @@ model Psychologist {
   sessionFeeInr         Int?
   isAcceptingNewClients Boolean  @default(true)
 
+  // Sprint 18 — therapist preferences.
+  /// ISO 639-1 default output language for new notes / briefs.
+  defaultOutputLanguage String  @default("en")
+  /// Default modality when creating a session for a client without a preferredModality.
+  defaultModality       String?
+  /// Secondary email for account recovery if phone-OTP fails. Verified separately.
+  backupEmail           String?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -95,11 +103,51 @@ model Psychologist {
   preSessionBriefs    PreSessionBrief[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
+  webauthnCredentials WebAuthnCredential[]
 
   @@index([status])
   @@index([role])
   @@index([isAcceptingNewClients])
   @@map("psychologists")
+}
+
+// ============================================================================
+// WebAuthnCredential — Sprint 18. One row per (psychologist, registered
+// platform authenticator). The presence of ≥1 non-revoked credential
+// flips the sign route from "assertion optional" to "assertion required".
+// Signature verification ladder documented in
+// packages/contracts/src/webauthn.ts.
+// ============================================================================
+
+model WebAuthnCredential {
+  id             String @id @default(cuid())
+  psychologistId String
+
+  /// base64url of cred.rawId — globally unique across all credentials.
+  credentialId String @unique
+  /// COSE public key bytes (base64url).
+  publicKey    String @db.Text
+
+  /// Counter the authenticator increments per use; rolling-back is replay.
+  signCount Int @default(0)
+
+  /// Comma-separated transport hints captured at registration.
+  /// Persisted as `String[]` since Postgres supports it natively.
+  transports String[] @default([])
+
+  /// User-friendly label ("MacBook Touch ID").
+  label String?
+
+  lastUsedAt DateTime?
+  revokedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId, revokedAt])
+  @@map("webauthn_credentials")
 }
 
 enum BookingStatus {
@@ -1563,6 +1611,10 @@ enum AuditAction {
   INSTRUMENT_VIEWED
   SAFETY_PLAN_CREATED
   SAFETY_PLAN_UPDATED
+
+  // Therapist settings + WebAuthn credentials — Sprint 18.
+  WEBAUTHN_CREDENTIAL_REGISTERED
+  WEBAUTHN_CREDENTIAL_REVOKED
 }
 
 enum AuditActorType {

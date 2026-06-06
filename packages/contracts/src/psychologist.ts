@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CuidSchema, IndianPhoneSchema, IsoDateTimeSchema } from './common';
+import { SessionModalitySchema } from './client';
 
 export const PsychologistStatusSchema = z.enum([
   'PENDING_VERIFICATION',
@@ -22,6 +23,48 @@ export const CreatePsychologistInputSchema = z.object({
   rciNumber: RciNumberSchema,
 });
 
+// ============================================================================
+// PATCH /api/v1/psychologists/me — Sprint 18.
+// Therapist self-service profile editing. All fields optional; refuses
+// empty body. RCI-number, email, phone are NOT settable here — those
+// require re-verification (Sprint 19+).
+// ============================================================================
+
+const Iso639Schema = z
+  .string()
+  .min(2)
+  .max(8)
+  .regex(/^[a-z]{2}(-[A-Z]{2})?$/, 'must be an ISO 639-1 code');
+
+export const UpdatePsychologistInputSchema = z
+  .object({
+    fullName: z.string().min(1).max(200),
+    headline: z.string().min(1).max(160).nullable(),
+    bio: z.string().min(1).max(4000).nullable(),
+    photoUrl: z.string().url().max(2000).nullable(),
+    specialties: z.array(z.string().min(1).max(80)).max(20),
+    languages: z.array(z.string().min(1).max(80)).max(10),
+    modalities: z.array(z.string().min(1).max(40)).max(10),
+    yearsOfExperience: z.number().int().min(0).max(80).nullable(),
+    locationCity: z.string().min(1).max(120).nullable(),
+    locationProvince: z.string().min(1).max(120).nullable(),
+    sessionFeeInr: z.number().int().min(0).max(100_000).nullable(),
+    isAcceptingNewClients: z.boolean(),
+    /** Sprint 18 — default output language for new notes/briefs. ISO 639-1. */
+    defaultOutputLanguage: Iso639Schema,
+    /** Default modality picked when creating a new session for a client without preferredModality. */
+    defaultModality: SessionModalitySchema.nullable(),
+    /**
+     * Backup email for account recovery if the phone-OTP path fails.
+     * Verified separately by the recovery flow (Sprint 18 PR 2 — schema
+     * only ships in V1).
+     */
+    backupEmail: z.string().email().max(320).nullable(),
+  })
+  .partial()
+  .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be provided' });
+export type UpdatePsychologistInput = z.infer<typeof UpdatePsychologistInputSchema>;
+
 export const PsychologistSchema = z.object({
   id: CuidSchema,
   firebaseUid: z.string().min(1),
@@ -32,6 +75,25 @@ export const PsychologistSchema = z.object({
   rciVerifiedAt: IsoDateTimeSchema.nullable(),
   status: PsychologistStatusSchema,
   role: PsychologistRoleSchema,
+
+  // Directory profile fields (Sprint 12-era, surfaced via PATCH /me in S18).
+  headline: z.string().nullable(),
+  bio: z.string().nullable(),
+  photoUrl: z.string().nullable(),
+  specialties: z.array(z.string()),
+  languages: z.array(z.string()),
+  modalities: z.array(z.string()),
+  yearsOfExperience: z.number().int().nullable(),
+  locationCity: z.string().nullable(),
+  locationProvince: z.string().nullable(),
+  sessionFeeInr: z.number().int().nullable(),
+  isAcceptingNewClients: z.boolean(),
+
+  // Sprint 18 — settings additions.
+  defaultOutputLanguage: z.string().default('en'),
+  defaultModality: SessionModalitySchema.nullable(),
+  backupEmail: z.string().nullable(),
+
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });

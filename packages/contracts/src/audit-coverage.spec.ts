@@ -68,10 +68,8 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   // worker that pushes reminder notifications on a schedule. The
   // immediate-send path used in PR 4 doesn't emit it.
   'NOTIFICATION_DISPATCHED',
-  // PSYCHOLOGIST_UPDATED is reserved for the PATCH /psychologists/me
-  // flow that Sprint 10 adds alongside the admin profile UI. Today
-  // we only emit PSYCHOLOGIST_REGISTERED on signup.
-  'PSYCHOLOGIST_UPDATED',
+  // PSYCHOLOGIST_UPDATED is now wired by Sprint 18's
+  // PATCH /api/v1/psychologists/me self-service profile editor.
   // CLIENT_SOFT_DELETED is now emitted by the admin erasure-queue
   // FULFILLED path (cause: DSR_ERASURE).
   // CONSENT_EXPIRED is reserved for the consent-expiry cron. Today

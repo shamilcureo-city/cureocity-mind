@@ -110,6 +110,41 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
+  // Sprint 18 — once the therapist has registered ≥1 platform
+  // authenticator, the assertion is REQUIRED and its credentialId
+  // must match a known non-revoked row. If they have none registered,
+  // we keep the historical optional-assertion behaviour so existing
+  // dev / pilot flows don't break.
+  const activeCredentials = await prisma.webAuthnCredential.findMany({
+    where: { psychologistId: auth.value.psychologistId, revokedAt: null },
+    select: { id: true, credentialId: true, signCount: true },
+  });
+  let credentialIdToBump: string | null = null;
+  if (activeCredentials.length > 0) {
+    if (!input.value.assertion) {
+      return NextResponse.json(
+        {
+          error:
+            'WebAuthn assertion required — at least one credential is registered for this account.',
+        },
+        { status: 401 },
+      );
+    }
+    const matched = activeCredentials.find(
+      (c) => c.credentialId === input.value.assertion!.credentialId,
+    );
+    if (!matched) {
+      return NextResponse.json(
+        {
+          error:
+            'Assertion credentialId does not match any registered credential for this account.',
+        },
+        { status: 401 },
+      );
+    }
+    credentialIdToBump = matched.id;
+  }
+
   const draft = await prisma.noteDraft.findUnique({ where: { sessionId } });
   if (!draft) return NextResponse.json({ error: 'Note draft not found' }, { status: 404 });
   if (draft.status !== 'COMPLETED' || draft.content === null) {
@@ -177,10 +212,17 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           editedFields: edits.map((e) => e.field),
           payloadHashHex: recomputed,
           webauthnUsed: input.value.assertion !== undefined,
+          webauthnEnforced: credentialIdToBump !== null,
         },
       },
       tx,
     );
+    if (credentialIdToBump !== null) {
+      await tx.webAuthnCredential.update({
+        where: { id: credentialIdToBump },
+        data: { lastUsedAt: new Date(), signCount: { increment: 1 } },
+      });
+    }
     return note;
   });
 
