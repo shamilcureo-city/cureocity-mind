@@ -3,7 +3,7 @@ import type { ClinicalLocale } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { runClinicalAnalysis } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
-import { toClinicalReport } from '@/lib/clinical-mappers';
+import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -95,7 +95,14 @@ export async function POST(
   if (!row) {
     return NextResponse.json({ error: 'Clinical report row missing after run' }, { status: 500 });
   }
-  return NextResponse.json({ report: toClinicalReport(row) });
+  // Sprint 19 — INTAKE sessions store an InitialAssessmentBriefV1 in
+  // .body; toClinicalReport parses that column as ClinicalReportV1 so
+  // it comes back null. Return the intake-shaped parse alongside so
+  // the client can pick the right field by session.kind.
+  return NextResponse.json({
+    report: toClinicalReport(row),
+    initialAssessmentBrief: readInitialAssessmentBrief(row),
+  });
 }
 
 /**
@@ -124,5 +131,8 @@ export async function GET(
       { status: 404 },
     );
   }
-  return NextResponse.json({ report: toClinicalReport(row) });
+  return NextResponse.json({
+    report: toClinicalReport(row),
+    initialAssessmentBrief: readInitialAssessmentBrief(row),
+  });
 }

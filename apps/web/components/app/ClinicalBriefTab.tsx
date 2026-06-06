@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   ClinicalAssessmentGap,
   ClinicalCrisisFlag,
@@ -66,6 +66,34 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
   const updateConfirmation = useCallback((next: ClinicalReport) => {
     setReport(next);
   }, []);
+
+  // Sprint 19 — poll while Pass 3 is running in the background. The
+  // generate-note route schedules Pass 3 via Next's after() callback
+  // so the user lands here in PENDING; we poll until the row flips
+  // to COMPLETED or FAILED so they don't have to refresh.
+  useEffect(() => {
+    if (report?.status !== 'PENDING') return;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/clinical-analysis`, {
+          cache: 'no-store',
+        });
+        if (res.status === 404) return;
+        if (!res.ok) return;
+        const body = (await res.json().catch(() => ({}))) as { report?: ClinicalReport };
+        if (cancelled || !body.report) return;
+        setReport(body.report);
+      } catch {
+        // Swallow — next tick will retry.
+      }
+    };
+    const id = setInterval(() => void poll(), 3_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [report?.status, sessionId]);
 
   if (!report) {
     return (

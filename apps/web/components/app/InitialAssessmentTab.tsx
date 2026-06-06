@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   ClinicalCrisisFlag,
   ClinicalCrisisSeverity,
@@ -43,6 +43,22 @@ export function InitialAssessmentTab({ sessionId, reportEnvelope, initialBrief }
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  interface AnalysisResponse {
+    report?: { status: ClinicalReport['status']; errorMessage: string | null };
+    initialAssessmentBrief?: InitialAssessmentBriefV1 | null;
+    error?: string;
+  }
+
+  const applyResponse = useCallback((payload: AnalysisResponse) => {
+    if (payload.report) {
+      setStatus(payload.report.status);
+      setErrorMessage(payload.report.errorMessage);
+    }
+    if (payload.initialAssessmentBrief !== undefined) {
+      setBrief(payload.initialAssessmentBrief ?? null);
+    }
+  }, []);
+
   const generate = useCallback(async () => {
     setGenerating(true);
     setError(null);
@@ -50,24 +66,43 @@ export function InitialAssessmentTab({ sessionId, reportEnvelope, initialBrief }
       const res = await fetch(`/api/v1/sessions/${sessionId}/clinical-analysis`, {
         method: 'POST',
       });
-      const body = (await res.json().catch(() => ({}))) as {
-        report?: ClinicalReport & { body?: InitialAssessmentBriefV1 };
-        error?: string;
-      };
+      const body = (await res.json().catch(() => ({}))) as AnalysisResponse;
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      if (body.report) {
-        setStatus(body.report.status);
-        setErrorMessage(body.report.errorMessage);
-        // The route returns the same envelope shape regardless of
-        // session.kind; body is the intake brief for INTAKE sessions.
-        setBrief((body.report.body as InitialAssessmentBriefV1 | undefined) ?? null);
-      }
+      applyResponse(body);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setGenerating(false);
     }
-  }, [sessionId]);
+  }, [sessionId, applyResponse]);
+
+  // Sprint 19 — poll while Pass 3 is running in the background. The
+  // generate-note route schedules Pass 3 via Next's after() callback
+  // so the user lands here in PENDING; we poll until the row flips
+  // to COMPLETED or FAILED.
+  useEffect(() => {
+    if (status !== 'PENDING') return;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/clinical-analysis`, {
+          cache: 'no-store',
+        });
+        if (res.status === 404) return;
+        if (!res.ok) return;
+        const body = (await res.json().catch(() => ({}))) as AnalysisResponse;
+        if (cancelled) return;
+        applyResponse(body);
+      } catch {
+        // Swallow — next tick will retry.
+      }
+    };
+    const id = setInterval(() => void poll(), 3_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [status, sessionId, applyResponse]);
 
   if (status === null || (status === 'COMPLETED' && !brief)) {
     return (
