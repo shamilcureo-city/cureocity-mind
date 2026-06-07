@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation';
 interface NavItem {
   href: string;
   label: string;
-  icon: 'record' | 'clients' | 'templates' | 'klara' | 'learn';
+  icon: 'record' | 'clients' | 'templates' | 'klara' | 'learn' | 'me';
 }
 
 const PRIMARY: NavItem[] = [
@@ -14,6 +14,7 @@ const PRIMARY: NavItem[] = [
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
   { href: '/app/templates', label: 'Templates', icon: 'templates' },
   { href: '/app/klara', label: 'Klara AI', icon: 'klara' },
+  { href: '/app/me', label: 'My practice', icon: 'me' },
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
 
@@ -36,8 +37,7 @@ export function Sidebar() {
       <nav className="px-3" aria-label="Primary">
         <ul className="space-y-1">
           {PRIMARY.map((item) => {
-            const active =
-              item.href === '/app' ? path === '/app' : path.startsWith(item.href);
+            const active = item.href === '/app' ? path === '/app' : path.startsWith(item.href);
             return (
               <li key={item.href}>
                 <Link
@@ -134,6 +134,7 @@ function Glyph({
     | 'templates'
     | 'klara'
     | 'learn'
+    | 'me'
     | 'gift'
     | 'cog'
     | 'help'
@@ -141,12 +142,13 @@ function Glyph({
 }) {
   const paths: Record<typeof kind, string> = {
     record: 'M12 4a4 4 0 0 1 4 4v4a4 4 0 0 1-8 0V8a4 4 0 0 1 4-4zM5 12a7 7 0 0 0 14 0M12 19v3',
-    clients:
-      'M16 14a4 4 0 1 0-8 0M3 21v-1a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v1',
+    clients: 'M16 14a4 4 0 1 0-8 0M3 21v-1a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v1',
     templates:
       'M7 4h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 8h6M9 12h6M9 16h4',
-    klara: 'M12 3v3M12 18v3M5 12H2M22 12h-3M5.6 5.6 3.5 3.5M18.4 5.6 20.5 3.5M5.6 18.4 3.5 20.5M18.4 18.4 20.5 20.5',
+    klara:
+      'M12 3v3M12 18v3M5 12H2M22 12h-3M5.6 5.6 3.5 3.5M18.4 5.6 20.5 3.5M5.6 18.4 3.5 20.5M18.4 18.4 20.5 20.5',
     learn: 'M4 5h12a3 3 0 0 1 3 3v11a2 2 0 0 0-2-2H4V5zM4 17h12',
+    me: 'M3 12h3l3-8 4 16 3-8h5',
     gift: 'M3 9h18v4H3zM12 9v13M5 13v8h14v-8M8 9c0-2 1-4 4-4s4 2 4 4',
     cog: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
     help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',
