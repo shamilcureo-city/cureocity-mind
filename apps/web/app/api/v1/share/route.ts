@@ -95,6 +95,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const { snapshot, subject, sessionId } = snapshotResult;
+
+  // Sprint 20 — a progress report's generation is a clinically
+  // significant event in its own right (separate from any send): the
+  // therapist confirmed the trend they're showing the client. Audit
+  // once before the per-channel fan-out so the competency dashboard
+  // can attribute outcome-reporting separately from artefact-sharing.
+  if (input.artefact.artefactType === 'PROGRESS_REPORT') {
+    await writeAudit({
+      actorType: 'PSYCHOLOGIST',
+      actorPsychologistId: auth.value.psychologistId,
+      action: 'PATIENT_PROGRESS_REPORT_GENERATED',
+      targetType: 'Client',
+      targetId: client.id,
+      metadata: {
+        ...auditMetadataFromRequest(req),
+        clientId: client.id,
+        channels: input.channels,
+      },
+    });
+  }
+
   const portalOrigin = req.nextUrl.origin;
   const channels = dedup(input.channels);
   const channelResults: ShareResultEntry[] = [];
@@ -169,10 +190,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const nextStatus = mapOutcomeToStatus(sendResult.outcome);
-    const sendErrorCode = 'errorCode' in sendResult ? sendResult.errorCode ?? null : null;
-    const sendErrorDetail = 'errorDetail' in sendResult ? sendResult.errorDetail ?? null : null;
+    const sendErrorCode = 'errorCode' in sendResult ? (sendResult.errorCode ?? null) : null;
+    const sendErrorDetail = 'errorDetail' in sendResult ? (sendResult.errorDetail ?? null) : null;
     const providerMessageId =
-      'providerMessageId' in sendResult ? sendResult.providerMessageId ?? null : null;
+      'providerMessageId' in sendResult ? (sendResult.providerMessageId ?? null) : null;
 
     const updated = await prisma.patientShare.update({
       where: { id: row.id },
@@ -202,6 +223,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         errorCode: sendErrorCode,
       },
     });
+
+    // Sprint 20 — also emit the specialised audit for progress reports
+    // so the competency dashboard can attribute outcome-sharing separately
+    // from the generic per-channel ARTEFACT_SHARED counter.
+    if (input.artefact.artefactType === 'PROGRESS_REPORT') {
+      await writeAudit({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: auth.value.psychologistId,
+        action: 'PATIENT_PROGRESS_REPORT_SHARED',
+        targetType: 'PatientShare',
+        targetId: updated.id,
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          clientId: client.id,
+          channel,
+          outcome: sendResult.outcome,
+        },
+      });
+    }
 
     channelResults.push({
       channel,
@@ -325,13 +365,14 @@ function extractArtefactId(input: ShareInput): string {
       return input.artefact.therapyScriptId;
     case 'TREATMENT_PLAN':
       return input.artefact.treatmentPlanId;
+    case 'PROGRESS_REPORT':
+      // Progress reports are derived from cumulative client state, not
+      // a stored row — the clientId IS the artefact discriminator.
+      return input.artefact.clientId;
   }
 }
 
-function resolveLanguage(
-  override: ClinicalLocale | undefined,
-  preferred: string,
-): ClinicalLocale {
+function resolveLanguage(override: ClinicalLocale | undefined, preferred: string): ClinicalLocale {
   if (override) return override;
   const parsed = ClinicalLocaleSchema.safeParse(preferred);
   return parsed.success ? parsed.data : 'en';

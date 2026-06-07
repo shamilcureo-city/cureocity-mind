@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { ClinicalLocaleSchema } from './clinical';
+import { InstrumentChangeSchema } from './instrument';
 
 /**
  * Sprint 15 — Patient CRM & sharing.
@@ -30,6 +31,11 @@ export const PatientShareArtefactTypeSchema = z.enum([
   'REFLECTION_QUESTIONS',
   'THERAPY_SCRIPT',
   'TREATMENT_PLAN',
+  /// Sprint 20 — client-facing pre→post progress report. Built
+  /// deterministically from the reliable-change engine + the active
+  /// treatment plan. The artefact the user said the product was
+  /// missing: a "here's your result" the client walks away with.
+  'PROGRESS_REPORT',
 ]);
 export type PatientShareArtefactType = z.infer<typeof PatientShareArtefactTypeSchema>;
 
@@ -97,11 +103,57 @@ export const TreatmentPlanSnapshotSchema = z.object({
 });
 export type TreatmentPlanSnapshot = z.infer<typeof TreatmentPlanSnapshotSchema>;
 
+/**
+ * Sprint 20 — Progress report snapshot.
+ *
+ * Plain-language, encouraging pre→post for each scored instrument the
+ * client has been administered, plus the active treatment plan's goals
+ * if one exists. Built deterministically from the reliable-change
+ * engine (NO LLM); the portal renders it visually so the client sees a
+ * real, measured result from their work in therapy.
+ *
+ * The headline is the most clinically meaningful change across
+ * available instruments (improving > stable > worsening). Per-instrument
+ * narrative + chip strings are pre-rendered server-side so the portal
+ * stays a thin renderer.
+ */
+export const ProgressReportInstrumentEntrySchema = z.object({
+  /** "PHQ-9 · depression" / "GAD-7 · anxiety". */
+  label: z.string().min(1),
+  /** Plain-language sentence ("you started at 18, you're at 7 …"). */
+  narrative: z.string().min(1).max(800),
+  /** Short tone chip ("Reliable improvement" / "Stable" / "Worsening"). */
+  verdictChip: z.string().min(1).max(60),
+  /** Numeric details for the chart strip. */
+  change: InstrumentChangeSchema,
+});
+export type ProgressReportInstrumentEntry = z.infer<typeof ProgressReportInstrumentEntrySchema>;
+
+export const ProgressReportSnapshotSchema = z.object({
+  kind: z.literal('PROGRESS_REPORT'),
+  /** Headline sentence shown in large type at the top of the portal. */
+  headline: z.string().min(1).max(400),
+  /** Optional intro paragraph the therapist personalises in the modal. */
+  intro: z.string().max(2000).nullable(),
+  /** Number of sessions the report covers. */
+  sessionsCompleted: z.number().int().nonnegative(),
+  /** When treatment started — first completed session. Null on intake. */
+  startedAt: IsoDateTimeSchema.nullable(),
+  /** Per-instrument plain-language pre→post. */
+  instruments: z.array(ProgressReportInstrumentEntrySchema),
+  /** Active treatment plan goals if one exists. */
+  goals: z.array(z.object({ description: z.string(), measure: z.string() })),
+  /** Three short encouraging lines tailored to the verdict. */
+  encouragements: z.array(z.string().min(1).max(400)).min(1).max(5),
+});
+export type ProgressReportSnapshot = z.infer<typeof ProgressReportSnapshotSchema>;
+
 export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedNoteSnapshotSchema,
   ReflectionQuestionsSnapshotSchema,
   TherapyScriptSnapshotSchema,
   TreatmentPlanSnapshotSchema,
+  ProgressReportSnapshotSchema,
 ]);
 export type PatientShareSnapshot = z.infer<typeof PatientShareSnapshotSchema>;
 
@@ -164,21 +216,27 @@ export const ShareTreatmentPlanInputSchema = z.object({
   treatmentPlanId: CuidSchema,
 });
 
+/// Sprint 20 — Progress report is derived from cumulative client state
+/// (instruments + plan); the only input is the clientId. The route fills
+/// in the heavy lifting via apps/web/lib/progress-report.ts.
+export const ShareProgressReportInputSchema = z.object({
+  artefactType: z.literal('PROGRESS_REPORT'),
+  clientId: CuidSchema,
+});
+
 export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareSignedNoteInputSchema,
   ShareReflectionQuestionsInputSchema,
   ShareTherapyScriptInputSchema,
   ShareTreatmentPlanInputSchema,
+  ShareProgressReportInputSchema,
 ]);
 export type ShareArtefactRef = z.infer<typeof ShareArtefactRefSchema>;
 
 export const ShareInputSchema = z
   .object({
     clientId: CuidSchema,
-    channels: z
-      .array(PatientShareChannelSchema)
-      .min(1, 'pick at least one channel')
-      .max(3),
+    channels: z.array(PatientShareChannelSchema).min(1, 'pick at least one channel').max(3),
     /** Optional therapist note shown to the patient above the artefact. */
     therapistMessage: z.string().max(2000).optional(),
     /** Optional language override; defaults to client.preferredLanguage. */

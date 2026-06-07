@@ -67,9 +67,7 @@ export default async function PortalPage({ params }: PageProps) {
   // but without access to NextRequest in the page component.
   const hdrs = await headers();
   const ip =
-    hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    hdrs.get('x-real-ip') ??
-    undefined;
+    hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? hdrs.get('x-real-ip') ?? undefined;
   const userAgent = hdrs.get('user-agent') ?? undefined;
 
   if (!expired) {
@@ -111,9 +109,7 @@ export default async function PortalPage({ params }: PageProps) {
       {expired ? (
         <section className="mt-8 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
           <p className="font-medium text-[var(--color-ink)]">This link has expired.</p>
-          <p className="mt-2">
-            Ask {row.psychologist.fullName} to share a fresh link with you.
-          </p>
+          <p className="mt-2">Ask {row.psychologist.fullName} to share a fresh link with you.</p>
         </section>
       ) : snapshot ? (
         <section className="mt-8">
@@ -167,8 +163,8 @@ function SnapshotView({
       return (
         <article className="space-y-5">
           <p className="text-sm text-[var(--color-ink-2)]">
-            Hi {clientFirstName}, sit with these between now and our next session. No need to
-            write essays — short, honest notes are enough.
+            Hi {clientFirstName}, sit with these between now and our next session. No need to write
+            essays — short, honest notes are enough.
           </p>
           <ol className="space-y-3">
             {snapshot.questions.map((q, i) => (
@@ -257,7 +253,76 @@ function SnapshotView({
                   className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4"
                 >
                   <p className="text-sm font-medium text-[var(--color-ink)]">{g.description}</p>
-                  <p className="mt-1 text-xs text-[var(--color-ink-3)]">how we'll know: {g.measure}</p>
+                  <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                    how we'll know: {g.measure}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </article>
+      );
+    case 'PROGRESS_REPORT':
+      return (
+        <article className="space-y-6">
+          <p className="text-sm text-[var(--color-ink-2)]">Hi {clientFirstName},</p>
+          <section className="rounded-2xl bg-[var(--color-accent-soft)] p-6">
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">
+              Your progress
+            </p>
+            <p className="mt-2 font-serif text-2xl leading-snug text-[var(--color-ink)]">
+              {snapshot.headline}
+            </p>
+            {(snapshot.sessionsCompleted > 0 || snapshot.startedAt) && (
+              <p className="mt-3 text-sm text-[var(--color-ink-2)]">
+                {snapshot.sessionsCompleted} session
+                {snapshot.sessionsCompleted === 1 ? '' : 's'} since{' '}
+                {formatStartedAt(snapshot.startedAt)}.
+              </p>
+            )}
+          </section>
+          {snapshot.intro && (
+            <p className="whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
+              {snapshot.intro}
+            </p>
+          )}
+          <section className="space-y-4">
+            {snapshot.instruments.map((entry) => (
+              <ProgressInstrumentBar key={entry.label} entry={entry} />
+            ))}
+          </section>
+          {snapshot.goals.length > 0 && (
+            <section>
+              <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                What we are working on together
+              </h2>
+              <ul className="mt-2 space-y-2">
+                {snapshot.goals.map((g, i) => (
+                  <li
+                    key={i}
+                    className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 text-sm"
+                  >
+                    <p className="font-medium text-[var(--color-ink)]">{g.description}</p>
+                    <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                      how we will know: {g.measure}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-5">
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              A few thoughts from your therapist
+            </h2>
+            <ul className="mt-2 space-y-2 text-sm leading-relaxed text-[var(--color-ink)]">
+              {snapshot.encouragements.map((line, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span
+                    aria-hidden
+                    className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                  />
+                  <span>{line}</span>
                 </li>
               ))}
             </ul>
@@ -265,6 +330,44 @@ function SnapshotView({
         </article>
       );
   }
+}
+
+function ProgressInstrumentBar({
+  entry,
+}: {
+  entry: import('@cureocity/contracts').ProgressReportInstrumentEntry;
+}) {
+  const v = entry.change.verdict;
+  const chipPalette =
+    v === 'reliable_improvement'
+      ? 'bg-[var(--color-accent)] text-white'
+      : v === 'deterioration'
+        ? 'bg-[var(--color-warn)] text-white'
+        : 'bg-white text-[var(--color-ink-2)] border border-[var(--color-line)]';
+  return (
+    <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-[var(--color-ink)]">{entry.label}</p>
+        <span className={`rounded-full px-2.5 py-1 text-xs ${chipPalette}`}>
+          {entry.verdictChip}
+        </span>
+      </div>
+      <p className="mt-2 text-base leading-relaxed text-[var(--color-ink)]">{entry.narrative}</p>
+      <p className="mt-3 text-xs text-[var(--color-ink-3)]">
+        Then <span className="font-mono">{entry.change.baselineScore}</span> · Now{' '}
+        <span className="font-mono">{entry.change.latestScore}</span> ·{' '}
+        {entry.change.administrationCount} check-in
+        {entry.change.administrationCount === 1 ? '' : 's'}
+      </p>
+    </div>
+  );
+}
+
+function formatStartedAt(iso: string | null): string {
+  if (!iso) return 'we began';
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return 'we began';
+  return then.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
 function NoteSection({ title, body }: { title: string; body: string }) {
