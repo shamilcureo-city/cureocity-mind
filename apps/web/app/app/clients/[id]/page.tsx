@@ -12,6 +12,7 @@ import { AffectCard } from '@/components/app/AffectCard';
 import { CaseBriefingPanel } from '@/components/app/CaseBriefingPanel';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
+import { EpisodeStepper } from '@/components/app/EpisodeStepper';
 import { InstrumentRunner } from '@/components/app/InstrumentRunner';
 import { JourneyHeader } from '@/components/app/JourneyHeader';
 import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
@@ -146,6 +147,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
 
   const age = client.dateOfBirth ? calcAge(client.dateOfBirth) : null;
+  const completedSessions = client.sessions.filter((s) => s.status === 'COMPLETED').length;
 
   return (
     <Container className="py-10">
@@ -194,8 +196,15 @@ export default async function ClientDetailPage({ params }: PageProps) {
         </section>
       </Card>
 
-      {/* Sprint 22 — the decision surface. Everything below it is the
-          evidence the briefing is built from. */}
+      {/* Episode-of-care flow — makes the clinical arc visible at the top. */}
+      <div className="mt-6">
+        <EpisodeStepper journey={journey} sessionsCompleted={completedSessions} />
+      </div>
+
+      {/* The decision surface. Everything below it is the evidence the
+          briefing is built from, grouped into three collapsible
+          sections so the page reads as ONE anchor + ONE details
+          surface, not a stack of cards. */}
       {briefing && (
         <div className="mt-6">
           <CaseBriefingPanel
@@ -213,92 +222,136 @@ export default async function ClientDetailPage({ params }: PageProps) {
         <span className="h-px flex-1 bg-[var(--color-line-soft)]" aria-hidden />
       </div>
       <p className="mt-2 text-sm text-[var(--color-ink-3)]">
-        What the briefing is built from — measured progress, the diagnosis trail, the active plan,
-        screeners, and every session.
+        Everything the briefing is built from. Expand a section when you need it.
       </p>
 
-      {journey && (
-        <div className="mt-6">
-          <JourneyHeader
-            journey={journey}
-            clientName={client.fullName}
-            clientHasContactPhone={!!client.contactPhone}
-            clientHasContactEmail={!!client.contactEmail}
+      {/* Section 1 — measured progress (open by default; this is the
+          most-glanced surface on follow-up visits). */}
+      <details
+        open
+        className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40"
+      >
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+          <span>
+            <span className="text-sm font-semibold text-[var(--color-ink)]">Measured progress</span>
+            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
+              Journey · instruments · affect
+            </span>
+          </span>
+          <span
+            aria-hidden
+            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
+          >
+            ▸
+          </span>
+        </summary>
+        <div className="space-y-6 border-t border-[var(--color-line-soft)] p-5">
+          {journey && (
+            <JourneyHeader
+              journey={journey}
+              clientName={client.fullName}
+              clientHasContactPhone={!!client.contactPhone}
+              clientHasContactEmail={!!client.contactEmail}
+            />
+          )}
+          <div id="instruments" className="scroll-mt-6">
+            <InstrumentRunner clientId={client.id} />
+          </div>
+          <AffectCard clientId={client.id} />
+        </div>
+      </details>
+
+      {/* Section 2 — clinical history (closed by default; opened when
+          the therapist needs to trace the diagnosis / plan trail). */}
+      <details className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+          <span>
+            <span className="text-sm font-semibold text-[var(--color-ink)]">Clinical history</span>
+            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
+              Diagnosis · workflow · therapy library
+            </span>
+          </span>
+          <span
+            aria-hidden
+            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
+          >
+            ▸
+          </span>
+        </summary>
+        <div className="space-y-6 border-t border-[var(--color-line-soft)] p-5">
+          {diagnoses.length > 0 && <DiagnosisHistoryCard diagnoses={diagnoses} />}
+          <WorkflowSection clientId={client.id} />
+          <TherapyLibrary
+            clientId={client.id}
+            recommendedTherapies={recommendedTherapies}
+            libraryTherapies={LIBRARY_THERAPIES}
+            defaultLanguage={defaultLanguage}
+            activeTreatmentPlanId={activePlan?.id ?? null}
           />
         </div>
-      )}
+      </details>
 
-      <div className="mt-6">
-        <PreSessionBriefCard clientId={client.id} />
-      </div>
-
-      {diagnoses.length > 0 && (
-        <div className="mt-6">
-          <DiagnosisHistoryCard diagnoses={diagnoses} />
+      {/* Section 3 — sessions + ops (closed by default). */}
+      <details className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+          <span>
+            <span className="text-sm font-semibold text-[var(--color-ink)]">
+              Sessions &amp; data
+            </span>
+            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
+              {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} ·
+              pre-session brief · data rights
+            </span>
+          </span>
+          <span
+            aria-hidden
+            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
+          >
+            ▸
+          </span>
+        </summary>
+        <div className="space-y-6 border-t border-[var(--color-line-soft)] p-5">
+          <PreSessionBriefCard clientId={client.id} />
+          <Card className="overflow-hidden">
+            <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
+              <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Sessions
+              </h3>
+              <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
+              </p>
+            </header>
+            {client.sessions.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
+                No sessions yet. Start one from the Record tab.
+              </p>
+            ) : (
+              <ul className="divide-y divide-[var(--color-line-soft)]">
+                {client.sessions.map((s) => (
+                  <li key={s.id}>
+                    <Link
+                      href={`/app/sessions/${s.id}`}
+                      className="grid grid-cols-[1.5fr_1fr_1.5fr_1fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
+                    >
+                      <span className="text-[var(--color-ink)]">
+                        {formatDateTime(s.scheduledAt)}
+                      </span>
+                      <span className="text-[var(--color-ink-2)]">{s.modality}</span>
+                      <span className="text-[var(--color-ink-2)]">
+                        {sessionSummary(s.status, s.therapyNote, s.noteDraft)}
+                      </span>
+                      <span className="text-right">
+                        <Badge tone={statusTone(s.status)}>{s.status.toLowerCase()}</Badge>
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+          <DataRightsCard clientId={client.id} clientName={client.fullName} />
         </div>
-      )}
-
-      <div className="mt-6">
-        <WorkflowSection clientId={client.id} />
-      </div>
-
-      <div id="instruments" className="mt-6 scroll-mt-6">
-        <InstrumentRunner clientId={client.id} />
-      </div>
-
-      <div className="mt-6">
-        <TherapyLibrary
-          clientId={client.id}
-          recommendedTherapies={recommendedTherapies}
-          libraryTherapies={LIBRARY_THERAPIES}
-          defaultLanguage={defaultLanguage}
-          activeTreatmentPlanId={activePlan?.id ?? null}
-        />
-      </div>
-
-      <div className="mt-6">
-        <AffectCard clientId={client.id} />
-      </div>
-
-      <div className="mt-6">
-        <DataRightsCard clientId={client.id} clientName={client.fullName} />
-      </div>
-
-      <div className="mt-6">
-        <Card className="overflow-hidden">
-          <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
-            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Sessions</h2>
-            <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
-            </p>
-          </header>
-          {client.sessions.length === 0 ? (
-            <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-              No sessions yet. Start one from the Record tab.
-            </p>
-          ) : (
-            <ul className="divide-y divide-[var(--color-line-soft)]">
-              {client.sessions.map((s) => (
-                <li key={s.id}>
-                  <Link
-                    href={`/app/sessions/${s.id}`}
-                    className="grid grid-cols-[1.5fr_1fr_1.5fr_1fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
-                  >
-                    <span className="text-[var(--color-ink)]">{formatDateTime(s.scheduledAt)}</span>
-                    <span className="text-[var(--color-ink-2)]">{s.modality}</span>
-                    <span className="text-[var(--color-ink-2)]">
-                      {sessionSummary(s.status, s.therapyNote, s.noteDraft)}
-                    </span>
-                    <span className="text-right">
-                      <Badge tone={statusTone(s.status)}>{s.status.toLowerCase()}</Badge>
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
-      </div>
+      </details>
     </Container>
   );
 }
