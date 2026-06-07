@@ -58,13 +58,13 @@ client's preferred language.
 
 These were settled with the user before Sprint 13 PR 1 was written:
 
-| Decision | Value | Rationale |
-|---|---|---|
-| AI authority | **Decision-support + confirm** | AI proposes, clinician confirms. Defensible under RCI scope-of-practice + DPDP audit trail. |
-| Clinical content origin | **LLM-generated live** | No pre-curated knowledge base. Gemini Pro produces diagnoses + plans + scripts on demand from transcript + history. Faster to ship; the audit trail + confirm-gates carry the safety load. |
-| Diagnosis codes | **ICD-11** chapter 06 | WHO's current standard, India-aligned, royalty-free. Codes stay in English even when narrative is in Malayalam. |
-| Languages | **Multi-value spoken + single output + single patient-preferred** | Real Indian sessions are code-mixed; force a single language and we lose clinical signal. See § 5. |
-| Curated content | **Only scored instruments** | PHQ-9 + GAD-7 are validated screeners whose validity depends on EXACT wording. Everything else is LLM-generated. |
+| Decision                | Value                                                             | Rationale                                                                                                                                                                                  |
+| ----------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| AI authority            | **Decision-support + confirm**                                    | AI proposes, clinician confirms. Defensible under RCI scope-of-practice + DPDP audit trail.                                                                                                |
+| Clinical content origin | **LLM-generated live**                                            | No pre-curated knowledge base. Gemini Pro produces diagnoses + plans + scripts on demand from transcript + history. Faster to ship; the audit trail + confirm-gates carry the safety load. |
+| Diagnosis codes         | **ICD-11** chapter 06                                             | WHO's current standard, India-aligned, royalty-free. Codes stay in English even when narrative is in Malayalam.                                                                            |
+| Languages               | **Multi-value spoken + single output + single patient-preferred** | Real Indian sessions are code-mixed; force a single language and we lose clinical signal. See § 5.                                                                                         |
+| Curated content         | **Only scored instruments**                                       | PHQ-9 + GAD-7 are validated screeners whose validity depends on EXACT wording. Everything else is LLM-generated.                                                                           |
 
 ## 3. The five Gemini passes
 
@@ -196,11 +196,11 @@ File: `packages/llm/src/backends/vertex-brief.backend.ts`
 Confirmed AI suggestions persist to cumulative tables so the next session
 is grounded in real history rather than re-asking the model from scratch.
 
-| Source section | Confirmed → persists to | Supersession |
-|---|---|---|
-| `ClinicalReport.confirmations.diagnosis = ACCEPTED/MODIFIED` | `ClientDiagnosis` rows (one per candidate) | New diagnosis confirmation supersedes prior active diagnoses (`supersededAt` set) |
-| `ClinicalReport.confirmations.plan = ACCEPTED/MODIFIED` | `TreatmentPlan` row (versioned) | New plan supersedes prior active plan; `version` auto-increments per client |
-| `ClinicalReport.confirmations.crisis = ACCEPTED/MODIFIED` at high/critical | `CRISIS_ACKNOWLEDGED` audit; therapist optionally creates a `SafetyPlan` row | New safety plan supersedes prior |
+| Source section                                                             | Confirmed → persists to                                                      | Supersession                                                                      |
+| -------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `ClinicalReport.confirmations.diagnosis = ACCEPTED/MODIFIED`               | `ClientDiagnosis` rows (one per candidate)                                   | New diagnosis confirmation supersedes prior active diagnoses (`supersededAt` set) |
+| `ClinicalReport.confirmations.plan = ACCEPTED/MODIFIED`                    | `TreatmentPlan` row (versioned)                                              | New plan supersedes prior active plan; `version` auto-increments per client       |
+| `ClinicalReport.confirmations.crisis = ACCEPTED/MODIFIED` at high/critical | `CRISIS_ACKNOWLEDGED` audit; therapist optionally creates a `SafetyPlan` row | New safety plan supersedes prior                                                  |
 
 The therapist can also administer **PHQ-9 / GAD-7** screeners
 (`packages/clinical/src/instruments`); scored rows live in
@@ -210,12 +210,12 @@ The therapist can also administer **PHQ-9 / GAD-7** screeners
 
 The single most important design decision of Sprint 16:
 
-| Concept | Field | Single or multi? | Purpose |
-|---|---|---|---|
-| Spoken | `Client.spokenLanguages`, `Session.spokenLanguages` | multi (ISO 639-1 + `mixed`) | What comes out of mouths. Pass 1 fills `Session.spokenLanguages`. |
-| Output | `Session.language` | single | What therapist-facing notes / brief / script rationale is in. Defaults to English. |
-| Patient-preferred | `Client.preferredLanguage` | single | What patient-facing content (portal, reflection questions, share copy) is in. |
-| Verbatim-speech | Pass 4 `spokenLanguage` parameter | single | What the therapist reads ALOUD to the client. Defaults to client's first spoken language. |
+| Concept           | Field                                               | Single or multi?            | Purpose                                                                                   |
+| ----------------- | --------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------- |
+| Spoken            | `Client.spokenLanguages`, `Session.spokenLanguages` | multi (ISO 639-1 + `mixed`) | What comes out of mouths. Pass 1 fills `Session.spokenLanguages`.                         |
+| Output            | `Session.language`                                  | single                      | What therapist-facing notes / brief / script rationale is in. Defaults to English.        |
+| Patient-preferred | `Client.preferredLanguage`                          | single                      | What patient-facing content (portal, reflection questions, share copy) is in.             |
+| Verbatim-speech   | Pass 4 `spokenLanguage` parameter                   | single                      | What the therapist reads ALOUD to the client. Defaults to client's first spoken language. |
 
 For a Manglish-speaking client whose therapist takes notes in English
 and shares portal content in Malayalam:
@@ -251,6 +251,7 @@ token is the auth. The view is typed per `artefactType` with friendly
 copy ("Hi {firstName}, here is the note from our session…").
 
 Channels:
+
 - **WhatsApp** via WATI's `sendTemplateMessage`. Template name in
   `WATI_TEMPLATE_PATIENT_SHARE` env (default `patient_share`). Template
   must be pre-approved by WhatsApp Business.
@@ -268,6 +269,7 @@ The clinical co-pilot is intentionally LLM-generated except for two
 small curated sets:
 
 ### Scored instruments
+
 File: `packages/clinical/src/instruments/index.ts`
 
 - **PHQ-9** (Kroenke 2001) — 9 items, 0..3 scale, 5 severity bands,
@@ -280,6 +282,7 @@ File: `packages/clinical/src/instruments/index.ts`
   machine-translation.
 
 ### India crisis hotlines
+
 File: `packages/clinical/src/crisis.ts`
 
 - 5 verified hotlines (iCall, Vandrevala, NIMHANS, Childline, Women Helpline)
@@ -289,25 +292,26 @@ File: `packages/clinical/src/crisis.ts`
 
 ## 8. Audit + observability
 
-| Sprint | New AuditAction values |
-|---|---|
-| 13 | `CLINICAL_REPORT_GENERATED`, `CLINICAL_SECTION_CONFIRMED`, `DIAGNOSIS_CONFIRMED`, `PLAN_CONFIRMED`, `CRISIS_ACKNOWLEDGED` |
-| 14 | `THERAPY_SCRIPT_GENERATED`, `THERAPY_SCRIPT_VIEWED` |
-| 15 | `PATIENT_ARTEFACT_SHARED`, `PATIENT_PORTAL_OPENED` |
-| 16 | (no new audit actions; schema-only) |
-| 17 | `PRE_SESSION_BRIEF_GENERATED`, `PRE_SESSION_BRIEF_VIEWED`, `INSTRUMENT_ADMINISTERED`, `INSTRUMENT_VIEWED`, `SAFETY_PLAN_CREATED`, `SAFETY_PLAN_UPDATED` |
+| Sprint | New AuditAction values                                                                                                                                  |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 13     | `CLINICAL_REPORT_GENERATED`, `CLINICAL_SECTION_CONFIRMED`, `DIAGNOSIS_CONFIRMED`, `PLAN_CONFIRMED`, `CRISIS_ACKNOWLEDGED`                               |
+| 14     | `THERAPY_SCRIPT_GENERATED`, `THERAPY_SCRIPT_VIEWED`                                                                                                     |
+| 15     | `PATIENT_ARTEFACT_SHARED`, `PATIENT_PORTAL_OPENED`                                                                                                      |
+| 16     | (no new audit actions; schema-only)                                                                                                                     |
+| 17     | `PRE_SESSION_BRIEF_GENERATED`, `PRE_SESSION_BRIEF_VIEWED`, `INSTRUMENT_ADMINISTERED`, `INSTRUMENT_VIEWED`, `SAFETY_PLAN_CREATED`, `SAFETY_PLAN_UPDATED` |
 
-| Sprint | New GeminiPass enum value |
-|---|---|
-| 13 | `PASS_3_CLINICAL_ANALYSIS` |
-| 14 | `PASS_4_THERAPY_SCRIPT` |
-| 17 | `PASS_5_PRE_SESSION_BRIEF` |
+| Sprint | New GeminiPass enum value  |
+| ------ | -------------------------- |
+| 13     | `PASS_3_CLINICAL_ANALYSIS` |
+| 14     | `PASS_4_THERAPY_SCRIPT`    |
+| 17     | `PASS_5_PRE_SESSION_BRIEF` |
 
 The audit-coverage chaos test
 (`packages/contracts/src/audit-coverage.spec.ts`) scans `apps/web/app/api`
-+ `apps/web/lib` + `apps/web/app/p` for `action: 'X'` literals and
-asserts each AuditAction enum value has at least one writer or is
-explicitly listed in `KNOWN_UNWIRED_ACTIONS`.
+
+- `apps/web/lib` + `apps/web/app/p` for `action: 'X'` literals and
+  asserts each AuditAction enum value has at least one writer or is
+  explicitly listed in `KNOWN_UNWIRED_ACTIONS`.
 
 Observability `recordGeminiCall` accepts all 5 passes as label values;
 each call also writes a `GeminiCallLog` row with model, region, prompt
@@ -350,21 +354,21 @@ Client.preferredLanguage are the four language fields.
 
 ## 11. New routes (Sprints 13-17)
 
-| Method + Path | Sprint | Purpose |
-|---|---|---|
-| `POST /api/v1/sessions/[id]/clinical-analysis` | 13 | Manually (re)run Pass 3 |
-| `GET /api/v1/sessions/[id]/clinical-analysis` | 13 | Read the report |
-| `PATCH /api/v1/clinical-reports/[id]/sections/[section]` | 13 | Accept / modify / reject |
-| `GET /api/v1/clients/[id]/therapy-scripts?therapy=X[&refresh=1]` | 14 | Pass 4 cached/fresh |
-| `POST /api/v1/share` | 15 | Fan-out share to N channels |
-| `GET /api/v1/clients/[id]/shares` | 15 | History |
-| `GET /p/[token]` | 15 | Public patient portal |
-| `GET /api/v1/clients/[id]/pre-session-brief[?refresh=1]` | 17 | Pass 5 cached/fresh |
-| `GET /api/v1/instruments` | 17 | Catalogue (PHQ-9, GAD-7) |
-| `POST /api/v1/clients/[id]/instruments` | 17 | Administer + score |
-| `GET /api/v1/clients/[id]/instruments` | 17 | History/trend |
-| `POST /api/v1/clients/[id]/safety-plan` | 17 | Save (supersedes prior) |
-| `GET /api/v1/clients/[id]/safety-plan` | 17 | Active plan |
+| Method + Path                                                    | Sprint | Purpose                     |
+| ---------------------------------------------------------------- | ------ | --------------------------- |
+| `POST /api/v1/sessions/[id]/clinical-analysis`                   | 13     | Manually (re)run Pass 3     |
+| `GET /api/v1/sessions/[id]/clinical-analysis`                    | 13     | Read the report             |
+| `PATCH /api/v1/clinical-reports/[id]/sections/[section]`         | 13     | Accept / modify / reject    |
+| `GET /api/v1/clients/[id]/therapy-scripts?therapy=X[&refresh=1]` | 14     | Pass 4 cached/fresh         |
+| `POST /api/v1/share`                                             | 15     | Fan-out share to N channels |
+| `GET /api/v1/clients/[id]/shares`                                | 15     | History                     |
+| `GET /p/[token]`                                                 | 15     | Public patient portal       |
+| `GET /api/v1/clients/[id]/pre-session-brief[?refresh=1]`         | 17     | Pass 5 cached/fresh         |
+| `GET /api/v1/instruments`                                        | 17     | Catalogue (PHQ-9, GAD-7)    |
+| `POST /api/v1/clients/[id]/instruments`                          | 17     | Administer + score          |
+| `GET /api/v1/clients/[id]/instruments`                           | 17     | History/trend               |
+| `POST /api/v1/clients/[id]/safety-plan`                          | 17     | Save (supersedes prior)     |
+| `GET /api/v1/clients/[id]/safety-plan`                           | 17     | Active plan                 |
 
 Plus the new admin page `/app/admin/competency`.
 
@@ -401,3 +405,122 @@ backlog items from the original 13-sprint plan that survived the pivot:
 - Validated Malayalam / Hindi PHQ-9 + GAD-7 (clinical sign-off required)
 
 See `CLAUDE.md` § 11 for the full backlog list.
+
+---
+
+# Sprint 19 — Scribing flow revamp
+
+The pre-record wizard was forcing every session through the same
+3-step CLIENT → MODALITY → CONSENT flow. That's clinically backwards
+for a first session: you pick the modality (CBT / EMDR / …) _before_
+you've done any assessment. Sprint 19 made the flow honest about
+session kind.
+
+## 14. SessionKind + nullable modality
+
+A new `SessionKind` enum (`INTAKE | TREATMENT | REVIEW`) was added,
+inferred server-side from cumulative state when a session is created:
+
+- `INTAKE` — no prior `COMPLETED` session AND no confirmed
+  `TreatmentPlan`. Pass 2 produces an `IntakeNoteV1` (presenting
+  concerns, history of presenting illness, past psychiatric history,
+  family + social history, mental status exam, working hypothesis,
+  immediate plan). Pass 3 produces an `InitialAssessmentBriefV1`
+  (wider differential, more assessment gaps, recommended scored
+  instruments, no treatment plan — intakes don't have one yet).
+- `TREATMENT` — the default. Pass 2 produces `TherapyNoteV1` (SOAP).
+  Pass 3 produces `ClinicalReportV1`.
+- `REVIEW` — active plan ≥ 8 completed sessions ago. Treated as
+  TREATMENT but flagged for plan re-evaluation.
+
+`Session.modality` is now **nullable**. The session-defaults cascade
+(`apps/web/lib/session-defaults.ts`) picks one:
+
+1. Active `TreatmentPlan.body.modality`
+2. `Client.preferredModality`
+3. `Psychologist.defaultModality`
+4. `INTAKE` sentinel (no prior data)
+5. `SUPPORTIVE` last-resort fallback
+
+The session-create route writes `SESSION_MODALITY_INFERRED` (auto-
+picked) or `SESSION_MODALITY_OVERRIDDEN` (therapist edited the
+cascade-picked value). `SessionModality` was also expanded from
+`CBT | EMDR | OTHER` to a richer evidence-based set: `ACT`, `IFS`,
+`PSYCHODYNAMIC`, `MI`, `MBCT`, `SUPPORTIVE`, `INTAKE`, `OTHER`.
+
+## 15. Pre-Flight panel
+
+`PreRecordWizard` (3 modal steps) was replaced by `PreFlightPanel`
+(single screen). The panel calls
+`GET /api/v1/clients/[id]/session-defaults` once and pre-fills
+everything from the cascade; the therapist edits only what they want.
+Sections: client picker, cascade summary (kind chip + completed-
+session count + PHQ-9/GAD-7 last administration), modality (10-option
+select with source hint), note language, consent (already-granted
+scopes shown as ✓, only missing ones need ticking).
+
+## 16. Session detail page goes intake-aware
+
+The session detail tabs branch on `session.kind`:
+
+- INTAKE: "Notes" relabels to "Intake Note"; renders
+  `IntakeNotePreview`. "Clinical Brief" relabels to "Initial
+  Assessment"; renders `InitialAssessmentTab`. Mindmap + Reflection
+  tabs are hidden (they read SOAP fields the intake note doesn't
+  produce); deep links degrade to a friendly "unavailable" card.
+- TREATMENT / REVIEW: unchanged.
+
+Pass 3 was moved from inline-await to Vercel `after()` so the HTTP
+response goes out as soon as Pass 2 finishes; the brief tabs poll +
+expose a synchronous "Re-run now" fallback for cases where the
+`after()` callback gets killed by the Vercel function cap.
+
+---
+
+# Sprint 20 — Measurement-based-care loop
+
+After Sprint 19 shipped, the initial assessment was beautiful but the
+arc dead-ended at "assessment gaps". The product had every clinical
+data point — diagnoses, plans, PHQ-9 / GAD-7 scores, goals — but
+nothing connecting them into a journey, no measured verdict on
+whether the client was improving, and **no result to give the
+client**. Sprint 20 closed the measurement-based-care loop.
+
+For the full conceptual model + evidence base, read
+**[`docs/MEASUREMENT_BASED_CARE.md`](MEASUREMENT_BASED_CARE.md)**.
+The short version:
+
+- **Phase 1 — Journey hub** at the top of every client detail page:
+  stage rail (Intake → Assessment → Active treatment → Review due →
+  Discharge ready → Discharged), a deterministic reliable-change
+  verdict on each instrument (Improving / No change / Worsening +
+  response + remission tags), the plan goals, and a single passive
+  Next-Best-Action. No new tables — composed from existing cumulative
+  state by `apps/web/lib/journey.ts`.
+- **Phase 2 — Client Progress Report** as a new `PatientShare`
+  artefact type (`PROGRESS_REPORT`). Plain-language pre→post built
+  deterministically from the reliable-change engine + active plan
+  goals. Shared via the existing WhatsApp / email / portal flow.
+- **Phase 3 — Treatment episodes**. A new `TreatmentEpisode` table
+  with `OPEN | DISCHARGED | TRANSFERRED` gives the arc a real terminal
+  state. An episode opens automatically with the first session;
+  `POST /clients/[id]/discharge` closes it (with a reason + optional
+  outcome note). A returning discharged client starts a fresh episode.
+  Per-goal achievement status lives in a `TreatmentGoalProgress` side
+  table so toggling it doesn't re-version the plan.
+
+---
+
+# Sprint 21 — Incremental polish
+
+- **Diagnosis history card** on the client detail page surfaces the
+  cumulative `ClientDiagnosis` rows (current + superseded). Read-only.
+- **Intake-note AI modify panel** — `/sessions/[id]/note/modify`
+  became kind-aware. INTAKE sessions get an `INTAKE_SYSTEM_PROMPT`
+  and the `IntakeNoteV1Schema` parser; therapy sessions stay on the
+  TherapyNoteV1 path. Sign-off is still deferred for intake notes
+  until the sign contract is generalised.
+- **Therapist My Practice view** at `/app/me` — same per-therapist
+  competency signal the admin dashboard already computes, surfaced
+  back to the practitioner. Self-reflective framing (no comparison
+  against colleagues, no judgment language).
