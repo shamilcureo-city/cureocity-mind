@@ -329,6 +329,7 @@ model Client {
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
   treatmentEpisodes   TreatmentEpisode[]
+  assessmentItems     AssessmentItem[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -704,6 +705,7 @@ enum GeminiPass {
   PASS_3_MISSED_THEMES
   PASS_4_THERAPY_SCRIPT // Sprint 14 — Therapy Script Pass
   PASS_5_PRE_SESSION_BRIEF // Sprint 17 — Pre-Session Brief
+  PASS_6_CASE_BRIEFING // Sprint 22 — per-client case briefing synthesis
 }
 
 enum GeminiCallStatus {
@@ -1117,6 +1119,64 @@ model TreatmentEpisode {
   @@index([clientId, openedAt])
   @@index([clientId, status])
   @@map("treatment_episodes")
+}
+
+// ============================================================================
+// AssessmentItem — Sprint 22 "running differential".
+// A persisted, trackable diagnostic / assessment question. Generated
+// from Pass 3 output (the brief's assessmentGaps + each candidate's
+// gapsToFill), carried forward across sessions, and closed by the
+// therapist (or auto-suggested closed when a later Pass 3 no longer
+// lists it). The set of OPEN items IS the "what to ask next session"
+// surface — the SCID-style running differential the product was
+// regenerating + discarding every session.
+// ============================================================================
+
+enum AssessmentItemStatus {
+  OPEN
+  ADDRESSED
+  CLOSED
+}
+
+enum AssessmentItemKind {
+  DIAGNOSTIC_CRITERION
+  ASSESSMENT_GAP
+  INSTRUMENT
+  SAFETY
+}
+
+model AssessmentItem {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  /// Groups items within one episode of care (nullable for legacy).
+  episodeId String?
+
+  kind      AssessmentItemKind
+  question  String
+  rationale String
+
+  /// Optional ICD-11 code of the candidate this item tests.
+  icd11Code String?
+
+  status AssessmentItemStatus @default(OPEN)
+
+  /// Pass 3 session the item originated from; session it was closed in.
+  sourceSessionId    String?
+  addressedSessionId String?
+
+  /// Therapist's one-line finding when the item is closed.
+  resolutionNote String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  closedAt  DateTime?
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, status])
+  @@map("assessment_items")
 }
 
 // ============================================================================
@@ -1745,6 +1805,13 @@ enum AuditAction {
   TREATMENT_EPISODE_CLOSED
   // Per-goal achievement toggles — Sprint 20 Phase 3 follow-up.
   TREATMENT_GOAL_PROGRESS_UPDATED
+  // Running-differential assessment items — Sprint 22. CREATED when a
+  // Pass 3 gap is reconciled into a trackable item; CLOSED when the
+  // therapist resolves it (confirmed / ruled out).
+  ASSESSMENT_ITEM_CREATED
+  ASSESSMENT_ITEM_CLOSED
+  // Case-briefing synthesis (Pass 6) — Sprint 22.
+  CASE_BRIEFING_GENERATED
 }
 
 enum AuditActorType {

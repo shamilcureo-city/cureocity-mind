@@ -14,6 +14,7 @@ import {
   recordCrisisFlag,
   recordGeminiCall,
 } from '@cureocity/observability';
+import { reconcileAssessmentItems } from './assessment-items';
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { modelRouter } from './llm';
@@ -547,6 +548,23 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
         costInr: pass3.callLog.costInr,
       },
     });
+
+    // Sprint 22 — reconcile the brief's diagnostic gaps into the
+    // running differential (persistent AssessmentItems). Best-effort:
+    // a reconcile failure must not fail the clinical analysis.
+    try {
+      await reconcileAssessmentItems({
+        clientId: args.clientId,
+        psychologistId: args.psychologistId,
+        sourceSessionId: args.sessionId,
+        pass3Body,
+        kind: pass3.output.kind,
+      });
+    } catch (e) {
+      console.error(
+        `[assessment-items] reconcile failed for session ${args.sessionId}: ${(e as Error).message}`,
+      );
+    }
   } catch (e) {
     const message = (e as Error).message;
     await prisma.clinicalReport

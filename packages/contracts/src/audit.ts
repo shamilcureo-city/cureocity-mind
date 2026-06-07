@@ -116,6 +116,10 @@ export const AuditActionSchema = z.enum([
   'TREATMENT_EPISODE_CLOSED',
   // Per-goal achievement toggle — Sprint 20 Phase 3 follow-up.
   'TREATMENT_GOAL_PROGRESS_UPDATED',
+  // Running-differential assessment items + case briefing — Sprint 22.
+  'ASSESSMENT_ITEM_CREATED',
+  'ASSESSMENT_ITEM_CLOSED',
+  'CASE_BRIEFING_GENERATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

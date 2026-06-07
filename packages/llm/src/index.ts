@@ -8,6 +8,7 @@ export {
   MockGeminiPass3Backend,
   MockGeminiPass4Backend,
   MockGeminiPass5Backend,
+  MockGeminiPass6Backend,
 } from './backends/mock-gemini.backend';
 export {
   VertexGeminiFlashIndiaBackend,
@@ -33,3 +34,8 @@ export {
   Pass5BackendError,
   type VertexGeminiProBriefOptions,
 } from './backends/vertex-brief.backend';
+export {
+  VertexGeminiProCaseBriefingBackend,
+  Pass6BackendError,
+  type VertexGeminiProCaseBriefingOptions,
+} from './backends/vertex-case-briefing.backend';

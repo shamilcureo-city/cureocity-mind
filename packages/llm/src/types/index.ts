@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AffectFeatureSchema,
+  CaseBriefingV1Schema,
   type ClinicalLocale,
   ClinicalReportV1Schema,
   type ClientDiagnosis,
@@ -319,6 +320,27 @@ export const Pass5OutputSchema = z.object({
 export type Pass5Output = z.infer<typeof Pass5OutputSchema>;
 
 // ============================================================================
+// Pass 6 — Case Briefing (Sprint 22). A per-client synthesis: 5 Ps
+// formulation, open assessment items, next 1-3 actions, cadence. The
+// input is a compact serialisation of the whole cumulative record for
+// ONE client; the deterministic builder in apps/web is the fallback.
+// ============================================================================
+
+export interface Pass6Input {
+  clientId: string;
+  language: ClinicalLocale;
+  /** Pre-serialised cumulative record (the route builds this text blob). */
+  contextText: string;
+  /** The deterministic briefing as a JSON string — the LLM refines it. */
+  deterministicBriefingJson: string;
+}
+
+export const Pass6OutputSchema = z.object({
+  caseBriefing: CaseBriefingV1Schema,
+});
+export type Pass6Output = z.infer<typeof Pass6OutputSchema>;
+
+// ============================================================================
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
@@ -328,7 +350,8 @@ export type GeminiPass =
   | 'PASS_3_CLINICAL_ANALYSIS'
   | 'PASS_3_MISSED_THEMES'
   | 'PASS_4_THERAPY_SCRIPT'
-  | 'PASS_5_PRE_SESSION_BRIEF';
+  | 'PASS_5_PRE_SESSION_BRIEF'
+  | 'PASS_6_CASE_BRIEFING';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -371,12 +394,17 @@ export interface IPass5Backend {
   run(input: Pass5Input): Promise<{ output: Pass5Output; callLog: GeminiCallLogData }>;
 }
 
+export interface IPass6Backend {
+  run(input: Pass6Input): Promise<{ output: Pass6Output; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
   pass3(input: Pass3Input): Promise<{ output: Pass3Output; callLog: GeminiCallLogData }>;
   pass4(input: Pass4Input): Promise<{ output: Pass4Output; callLog: GeminiCallLogData }>;
   pass5(input: Pass5Input): Promise<{ output: Pass5Output; callLog: GeminiCallLogData }>;
+  pass6(input: Pass6Input): Promise<{ output: Pass6Output; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

@@ -19,5 +19,7 @@ export * from './brief';
 export * from './instrument';
 export * from './journey';
 export * from './episode';
+export * from './assessment-item';
+export * from './case-briefing';
 export * from './safety-plan';
 export * from './webauthn';

@@ -17,6 +17,9 @@ const MessageSchema = z.object({
 
 const ChatInputSchema = z.object({
   messages: z.array(MessageSchema).min(1).max(20),
+  /// Sprint 22 — when present, Klara loads that client's cumulative
+  /// record and answers as a case-specific reasoning partner.
+  clientId: z.string().optional(),
 });
 
 const SYSTEM_PROMPT = `You are Klara, a private AI assistant for an Indian psychotherapy practice.
@@ -65,7 +68,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const context = await buildContext(auth.value.psychologistId);
+  // Sprint 22 — client-scoped chat ("Ask about <client>") loads that
+  // one client's record; otherwise the practice-wide roster snapshot.
+  const context = body.value.clientId
+    ? await buildClientContext(auth.value.psychologistId, body.value.clientId)
+    : await buildContext(auth.value.psychologistId);
 
   ensureGcpCreds();
   const project = process.env['VERTEX_PROJECT_ID'];
@@ -76,7 +83,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const proModel = process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro';
   const ai = new GoogleGenAI({ vertexai: true, project, location: proRegion });
 
-  const systemInstruction = `${SYSTEM_PROMPT}\n\n## Current practice snapshot\n\n${context}`;
+  const heading = body.value.clientId ? 'Current client' : 'Current practice snapshot';
+  const systemInstruction = `${SYSTEM_PROMPT}\n\n## ${heading}\n\n${context}`;
 
   // Map the chat history into the SDK's Content[] shape. Assistant
   // turns map to role: 'model' (the Gemini convention).
@@ -95,8 +103,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.OFF,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.OFF,
+        },
       ],
     },
   });
@@ -110,6 +124,53 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({ reply, model: proModel });
+}
+
+/**
+ * Sprint 22 — compact cumulative record for ONE client. Reuses the
+ * deterministic case-briefing builder so the chat is grounded in the
+ * same synthesis the workspace shows. Cross-tenant access throws inside
+ * the builder, which we surface as a short refusal.
+ */
+async function buildClientContext(psychologistId: string, clientId: string): Promise<string> {
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { fullName: true, psychologistId: true, presentingConcerns: true },
+  });
+  if (!client || client.psychologistId !== psychologistId) {
+    return 'No accessible client record. Tell the therapist you cannot find that client.';
+  }
+  try {
+    const { buildDeterministicCaseBriefing } = await import('@/lib/case-briefing');
+    const briefing = await buildDeterministicCaseBriefing(clientId, psychologistId);
+    const lines = [
+      `Client: ${client.fullName}`,
+      `Presenting concerns: ${client.presentingConcerns ?? '(not recorded)'}`,
+      `Headline: ${briefing.headline}`,
+      `Working diagnosis: ${
+        briefing.workingDiagnosis
+          ? `${briefing.workingDiagnosis.icd11Code} ${briefing.workingDiagnosis.icd11Label} (${
+              briefing.workingDiagnosis.confirmed ? 'confirmed' : 'working'
+            })`
+          : '(none yet)'
+      }`,
+      'Formulation (5 Ps):',
+      `  Presenting: ${briefing.formulation.presenting}`,
+      `  Predisposing: ${briefing.formulation.predisposing}`,
+      `  Precipitating: ${briefing.formulation.precipitating}`,
+      `  Perpetuating: ${briefing.formulation.perpetuating}`,
+      `  Protective: ${briefing.formulation.protective}`,
+      'Open assessment items:',
+      ...briefing.openItems.map((i) => `  - ${i.question} (${i.rationale})`),
+      'Suggested next actions:',
+      ...briefing.nextActions.map((a) => `  - ${a.title}: ${a.detail} [why: ${a.why}]`),
+      `Recommended next session interval: ~${briefing.cadence.recommendedIntervalDays} days (${briefing.cadence.rationale})`,
+      `Safety: severity ${briefing.safety.highestSeverity}; safety plan on file: ${briefing.safety.hasSafetyPlan ? 'yes' : 'no'}`,
+    ];
+    return lines.join('\n');
+  } catch {
+    return `Client: ${client.fullName}. (Could not assemble the full record — answer from general principles and say so.)`;
+  }
 }
 
 /**
@@ -191,7 +252,9 @@ async function buildContext(psychologistId: string): Promise<string> {
   }
 
   lines.push('');
-  lines.push(`Sessions completed in last 7 days: ${recentSessions.filter((s) => s.endedAt && s.endedAt >= sevenDaysAgo).length}`);
+  lines.push(
+    `Sessions completed in last 7 days: ${recentSessions.filter((s) => s.endedAt && s.endedAt >= sevenDaysAgo).length}`,
+  );
   lines.push(`Sessions completed in last 30 days: ${recentSessions.length}`);
   for (const s of recentSessions.slice(0, 5)) {
     const note = s.therapyNote?.content as
@@ -219,9 +282,7 @@ async function buildContext(psychologistId: string): Promise<string> {
   });
   if (highRisk.length > 0) {
     lines.push('');
-    lines.push(
-      `High-risk recent sessions: ${highRisk.map((s) => s.client.fullName).join(', ')}`,
-    );
+    lines.push(`High-risk recent sessions: ${highRisk.map((s) => s.client.fullName).join(', ')}`);
   }
 
   return lines.join('\n');
