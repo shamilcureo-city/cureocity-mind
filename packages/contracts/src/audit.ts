@@ -109,6 +109,11 @@ export const AuditActionSchema = z.enum([
   // progress-report snapshot is built (even before a share is dispatched).
   'PATIENT_PROGRESS_REPORT_GENERATED',
   'PATIENT_PROGRESS_REPORT_SHARED',
+  // Treatment-episode lifecycle — Sprint 20 Phase 3. OPENED when a
+  // session is created with no active episode; CLOSED on discharge /
+  // transfer (terminal state for the care arc).
+  'TREATMENT_EPISODE_OPENED',
+  'TREATMENT_EPISODE_CLOSED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

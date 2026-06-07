@@ -10,11 +10,14 @@ import type {
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { DischargeModal } from './DischargeModal';
 import { ShareModal } from './ShareModal';
 
 interface Props {
   journey: JourneySummary;
-  /// Sprint 20 — needed to power the Share progress report flow.
+  /// Sprint 20 — client display name + contact availability power the
+  /// Share progress report + Discharge flows.
+  clientName: string;
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
 }
@@ -25,8 +28,11 @@ const STAGE_LABEL: Record<JourneyStage, string> = {
   ACTIVE_TREATMENT: 'Active treatment',
   REVIEW_DUE: 'Review due',
   DISCHARGE_READY: 'Discharge ready',
+  DISCHARGED: 'Discharged',
 };
 
+// The visible progression rail — DISCHARGED is terminal and rendered
+// as a separate banner, not a rail step.
 const STAGE_ORDER: JourneyStage[] = [
   'INTAKE',
   'ASSESSMENT',
@@ -63,13 +69,22 @@ const INSTRUMENT_LABEL: Record<string, string> = {
  * client-side — no nagging, no persistence (measurement-based-care
  * adoption research: passive + autonomy-respecting beats interruptive).
  */
-export function JourneyHeader({ journey, clientHasContactPhone, clientHasContactEmail }: Props) {
+export function JourneyHeader({
+  journey,
+  clientName,
+  clientHasContactPhone,
+  clientHasContactEmail,
+}: Props) {
   const [dismissed, setDismissed] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [dischargeOpen, setDischargeOpen] = useState(false);
+  const isDischarged = journey.stage === 'DISCHARGED';
   const stageIdx = STAGE_ORDER.indexOf(journey.stage);
   // Sprint 20 — a Progress Report needs ≥2 administrations on at least
   // one instrument (the change engine returns an entry only then).
   const canShareProgressReport = journey.instrumentChanges.length > 0;
+  // Discharge is available once there's a real episode to close.
+  const canDischarge = !isDischarged && journey.sessionsCompleted > 0;
 
   return (
     <Card className="p-6">
@@ -98,31 +113,52 @@ export function JourneyHeader({ journey, clientHasContactPhone, clientHasContact
         )}
       </header>
 
-      {/* Stage rail */}
-      <ol className="mt-5 flex flex-wrap items-center gap-1.5" aria-label="Care stage">
-        {STAGE_ORDER.map((s, i) => {
-          const done = i < stageIdx;
-          const active = i === stageIdx;
-          return (
-            <li key={s} className="flex items-center gap-1.5">
-              <span
-                className={`rounded-full px-2.5 py-1 text-xs ${
-                  active
-                    ? 'bg-[var(--color-accent)] text-white'
-                    : done
-                      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                      : 'border border-[var(--color-line)] text-[var(--color-ink-3)]'
-                }`}
-              >
-                {STAGE_LABEL[s]}
-              </span>
-              {i < STAGE_ORDER.length - 1 && (
-                <span aria-hidden className="h-px w-3 bg-[var(--color-line)]" />
-              )}
-            </li>
-          );
-        })}
-      </ol>
+      {/* Stage rail (active arc) or terminal discharge banner */}
+      {isDischarged && journey.closedEpisode ? (
+        <div className="mt-5 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-5 py-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="muted">
+              {journey.closedEpisode.status === 'TRANSFERRED' ? 'Transferred' : 'Discharged'}
+            </Badge>
+            <span className="text-sm text-[var(--color-ink-2)]">
+              Care episode closed {formatRelative(journey.closedEpisode.closedAt)}.
+            </span>
+          </div>
+          {journey.closedEpisode.closeReason && (
+            <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+              {journey.closedEpisode.closeReason}
+            </p>
+          )}
+          <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+            Recording a new session reopens care as a fresh episode.
+          </p>
+        </div>
+      ) : (
+        <ol className="mt-5 flex flex-wrap items-center gap-1.5" aria-label="Care stage">
+          {STAGE_ORDER.map((s, i) => {
+            const done = i < stageIdx;
+            const active = i === stageIdx;
+            return (
+              <li key={s} className="flex items-center gap-1.5">
+                <span
+                  className={`rounded-full px-2.5 py-1 text-xs ${
+                    active
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : done
+                        ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                        : 'border border-[var(--color-line)] text-[var(--color-ink-3)]'
+                  }`}
+                >
+                  {STAGE_LABEL[s]}
+                </span>
+                {i < STAGE_ORDER.length - 1 && (
+                  <span aria-hidden className="h-px w-3 bg-[var(--color-line)]" />
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
 
       {/* Outcome trend */}
       {journey.instrumentChanges.length > 0 && (
@@ -133,15 +169,26 @@ export function JourneyHeader({ journey, clientHasContactPhone, clientHasContact
         </div>
       )}
 
-      {canShareProgressReport && (
-        <div className="mt-4 flex items-center justify-end">
-          <button
-            type="button"
-            onClick={() => setShareOpen(true)}
-            className="rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
-          >
-            Share progress report
-          </button>
+      {(canShareProgressReport || canDischarge) && (
+        <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          {canDischarge && (
+            <button
+              type="button"
+              onClick={() => setDischargeOpen(true)}
+              className="rounded-full border border-[var(--color-line)] bg-white px-4 py-1.5 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-soft)]"
+            >
+              Discharge
+            </button>
+          )}
+          {canShareProgressReport && (
+            <button
+              type="button"
+              onClick={() => setShareOpen(true)}
+              className="rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+            >
+              {isDischarged ? 'Share final outcome report' : 'Share progress report'}
+            </button>
+          )}
         </div>
       )}
 
@@ -184,6 +231,14 @@ export function JourneyHeader({ journey, clientHasContactPhone, clientHasContact
           artefactLabel="Progress report"
         />
       )}
+
+      <DischargeModal
+        open={dischargeOpen}
+        clientId={journey.clientId}
+        clientName={clientName}
+        canShareReport={canShareProgressReport}
+        onClose={() => setDischargeOpen(false)}
+      />
     </Card>
   );
 }

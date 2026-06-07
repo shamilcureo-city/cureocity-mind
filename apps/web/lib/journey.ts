@@ -2,6 +2,7 @@ import { computeInstrumentChange, type InstrumentKey } from '@cureocity/clinical
 import type {
   InstrumentChange,
   JourneyActivePlan,
+  JourneyEpisode,
   JourneyStage,
   JourneySummary,
   JourneyWorkingDiagnosis,
@@ -54,33 +55,49 @@ export async function computeClientJourney(
     throw new JourneyError('Client not owned by this psychologist');
   }
 
-  const [completedCount, lastSession, primaryDiagnosis, activePlanRow, instrumentRows] =
-    await Promise.all([
-      prisma.session.count({ where: { clientId, status: 'COMPLETED' } }),
-      prisma.session.findFirst({
-        where: { clientId, status: 'COMPLETED' },
-        orderBy: { scheduledAt: 'desc' },
-        select: { scheduledAt: true },
-      }),
-      prisma.clientDiagnosis.findFirst({
-        where: { clientId, supersededAt: null, isPrimary: true },
-        orderBy: { confirmedAt: 'desc' },
-        select: { icd11Code: true, icd11Label: true, confidence: true, confirmedAt: true },
-      }),
-      prisma.treatmentPlan.findFirst({
-        where: { clientId, supersededAt: null },
-        orderBy: { version: 'desc' },
-        select: { version: true, body: true, confirmedAt: true },
-      }),
-      prisma.instrumentResponse.findMany({
-        where: { clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
-        orderBy: { administeredAt: 'asc' },
-        select: { instrumentKey: true, score: true, administeredAt: true },
-      }),
-    ]);
+  const [
+    completedCount,
+    lastSession,
+    primaryDiagnosis,
+    activePlanRow,
+    instrumentRows,
+    latestEpisode,
+  ] = await Promise.all([
+    prisma.session.count({ where: { clientId, status: 'COMPLETED' } }),
+    prisma.session.findFirst({
+      where: { clientId, status: 'COMPLETED' },
+      orderBy: { scheduledAt: 'desc' },
+      select: { scheduledAt: true, endedAt: true },
+    }),
+    prisma.clientDiagnosis.findFirst({
+      where: { clientId, supersededAt: null, isPrimary: true },
+      orderBy: { confirmedAt: 'desc' },
+      select: { icd11Code: true, icd11Label: true, confidence: true, confirmedAt: true },
+    }),
+    prisma.treatmentPlan.findFirst({
+      where: { clientId, supersededAt: null },
+      orderBy: { version: 'desc' },
+      select: { version: true, body: true, confirmedAt: true },
+    }),
+    prisma.instrumentResponse.findMany({
+      where: { clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
+      orderBy: { administeredAt: 'asc' },
+      select: { instrumentKey: true, score: true, administeredAt: true },
+    }),
+    prisma.treatmentEpisode.findFirst({
+      where: { clientId },
+      orderBy: { openedAt: 'desc' },
+      select: { status: true, closedAt: true, closeReason: true },
+    }),
+  ]);
 
   // Per-instrument reliable-change verdicts (only where ≥2 administrations).
   const instrumentChanges = buildInstrumentChanges(instrumentRows);
+
+  // Sprint 20 Phase 3 — a closed episode makes the arc terminal, UNLESS
+  // the client has come back (a completed session after the close).
+  const closedEpisode = resolveClosedEpisode(latestEpisode, lastSession?.endedAt ?? null);
+  const isDischarged = closedEpisode !== null;
 
   // Sessions completed since the active plan was confirmed → review cadence.
   let sessionsSincePlan = 0;
@@ -116,23 +133,27 @@ export async function computeClientJourney(
       }
     : null;
 
-  const stage = deriveStage({
-    completedCount,
-    hasActivePlan: activePlanRow !== null,
-    sessionsSincePlan,
-    dischargeReady,
-  });
+  const stage: JourneyStage = isDischarged
+    ? 'DISCHARGED'
+    : deriveStage({
+        completedCount,
+        hasActivePlan: activePlanRow !== null,
+        sessionsSincePlan,
+        dischargeReady,
+      });
 
-  const nextBestAction = deriveNextBestAction({
-    clientId,
-    stage,
-    completedCount,
-    hasInstruments: instrumentRows.length > 0,
-    hasPrimaryDiagnosis: primaryDiagnosis !== null,
-    hasActivePlan: activePlanRow !== null,
-    instrumentChanges,
-    dischargeReady,
-  });
+  const nextBestAction = isDischarged
+    ? dischargedAction(clientId, instrumentChanges.length > 0)
+    : deriveNextBestAction({
+        clientId,
+        stage,
+        completedCount,
+        hasInstruments: instrumentRows.length > 0,
+        hasPrimaryDiagnosis: primaryDiagnosis !== null,
+        hasActivePlan: activePlanRow !== null,
+        instrumentChanges,
+        dischargeReady,
+      });
 
   return {
     clientId,
@@ -143,6 +164,39 @@ export async function computeClientJourney(
     activePlan,
     instrumentChanges,
     nextBestAction,
+    closedEpisode,
+  };
+}
+
+/**
+ * A terminal episode marks the arc DISCHARGED only if no completed
+ * session happened after it closed (otherwise the client returned and
+ * a fresh OPEN episode should exist).
+ */
+function resolveClosedEpisode(
+  episode: { status: string; closedAt: Date | null; closeReason: string | null } | null,
+  lastEndedAt: Date | null,
+): JourneyEpisode | null {
+  if (!episode || episode.status === 'OPEN' || episode.closedAt === null) return null;
+  if (lastEndedAt && lastEndedAt.getTime() > episode.closedAt.getTime()) return null;
+  if (episode.status !== 'DISCHARGED' && episode.status !== 'TRANSFERRED') return null;
+  return {
+    status: episode.status,
+    closedAt: episode.closedAt.toISOString(),
+    closeReason: episode.closeReason,
+  };
+}
+
+function dischargedAction(clientId: string, canShareReport: boolean): NextBestAction {
+  return {
+    kind: 'CONTINUE',
+    tone: 'positive',
+    title: 'Care episode closed',
+    detail: canShareReport
+      ? 'This episode of care is complete. Share a final outcome report so the client leaves with a record of their progress. Recording a new session reopens care.'
+      : 'This episode of care is complete. Recording a new session reopens care.',
+    ctaLabel: null,
+    ctaHref: null,
   };
 }
 
