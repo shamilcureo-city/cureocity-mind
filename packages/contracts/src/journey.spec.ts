@@ -121,9 +121,19 @@ describe('JourneySummarySchema (Sprint 20)', () => {
       confirmedAt: '2026-05-10T10:00:00.000Z',
     },
     activePlan: {
+      id: 'cplan11111111111111111111',
       version: 2,
       modality: 'CBT' as const,
-      goals: [{ description: 'Reduce panic frequency', measure: 'Attacks/week' }],
+      goals: [
+        {
+          index: 0,
+          description: 'Reduce panic frequency',
+          measure: 'Attacks/week',
+          status: 'IN_PROGRESS' as const,
+        },
+      ],
+      goalsAchieved: 0,
+      goalsTotal: 1,
       confirmedAt: '2026-05-10T10:00:00.000Z',
     },
     instrumentChanges: [],

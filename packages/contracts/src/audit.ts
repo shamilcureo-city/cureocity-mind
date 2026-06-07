@@ -114,6 +114,8 @@ export const AuditActionSchema = z.enum([
   // transfer (terminal state for the care arc).
   'TREATMENT_EPISODE_OPENED',
   'TREATMENT_EPISODE_CLOSED',
+  // Per-goal achievement toggle — Sprint 20 Phase 3 follow-up.
+  'TREATMENT_GOAL_PROGRESS_UPDATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

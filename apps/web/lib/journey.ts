@@ -77,7 +77,13 @@ export async function computeClientJourney(
     prisma.treatmentPlan.findFirst({
       where: { clientId, supersededAt: null },
       orderBy: { version: 'desc' },
-      select: { version: true, body: true, confirmedAt: true },
+      select: {
+        id: true,
+        version: true,
+        body: true,
+        confirmedAt: true,
+        goalProgress: { select: { goalIndex: true, status: true } },
+      },
     }),
     prisma.instrumentResponse.findMany({
       where: { clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
@@ -125,12 +131,7 @@ export async function computeClientJourney(
     : null;
 
   const activePlan: JourneyActivePlan | null = activePlanRow
-    ? {
-        version: activePlanRow.version,
-        modality: readPlanModality(activePlanRow.body),
-        goals: readPlanGoals(activePlanRow.body),
-        confirmedAt: activePlanRow.confirmedAt.toISOString(),
-      }
+    ? buildActivePlan(activePlanRow)
     : null;
 
   const stage: JourneyStage = isDischarged
@@ -383,6 +384,32 @@ function readPlanModality(body: unknown): SessionModality | null {
     default:
       return null;
   }
+}
+
+function buildActivePlan(row: {
+  id: string;
+  version: number;
+  body: unknown;
+  confirmedAt: Date;
+  goalProgress: { goalIndex: number; status: 'NOT_STARTED' | 'IN_PROGRESS' | 'ACHIEVED' }[];
+}): JourneyActivePlan {
+  const statusByIndex = new Map(row.goalProgress.map((g) => [g.goalIndex, g.status]));
+  const rawGoals = readPlanGoals(row.body);
+  const goals = rawGoals.map((g, index) => ({
+    index,
+    description: g.description,
+    measure: g.measure,
+    status: statusByIndex.get(index) ?? ('NOT_STARTED' as const),
+  }));
+  return {
+    id: row.id,
+    version: row.version,
+    modality: readPlanModality(row.body),
+    goals,
+    goalsAchieved: goals.filter((g) => g.status === 'ACHIEVED').length,
+    goalsTotal: goals.length,
+    confirmedAt: row.confirmedAt.toISOString(),
+  };
 }
 
 function readPlanGoals(body: unknown): { description: string; measure: string }[] {
