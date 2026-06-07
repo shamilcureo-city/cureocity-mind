@@ -9,6 +9,7 @@ import {
   type ClinicalTreatmentPlan,
   ClinicalTreatmentPlanSchema,
 } from '@cureocity/contracts';
+import { ProgressReportError, buildProgressReport } from './progress-report';
 import { prisma } from './prisma';
 
 /**
@@ -59,6 +60,8 @@ export async function buildSnapshot(args: BuildArgs): Promise<SnapshotResult | n
       return buildTherapyScript(args, args.ref.therapyScriptId);
     case 'TREATMENT_PLAN':
       return buildTreatmentPlan(args, args.ref.treatmentPlanId);
+    case 'PROGRESS_REPORT':
+      return buildProgressReportSnapshot(args, args.ref.clientId);
   }
 }
 
@@ -80,9 +83,7 @@ async function buildSignedNote(
     return null;
   }
   if (!session.therapyNote) {
-    throw new SnapshotBuildError(
-      'Cannot share an unsigned note. Sign the note first.',
-    );
+    throw new SnapshotBuildError('Cannot share an unsigned note. Sign the note first.');
   }
   const parsed = TherapyNoteV1Schema.safeParse(session.therapyNote.content);
   if (!parsed.success) {
@@ -213,6 +214,40 @@ async function buildTreatmentPlan(
 }
 
 /**
+ * Sprint 20 — Progress report snapshot builder. Delegates to the
+ * deterministic `buildProgressReport` helper, which composes a
+ * plain-language pre→post from the cumulative instrument + plan data
+ * (no LLM). Cross-tenant access is already enforced inside the
+ * helper; we re-check the artefact's clientId matches the route's
+ * clientId so a typo in the request body can't share Client A's
+ * data into Client B's PatientShare row.
+ */
+async function buildProgressReportSnapshot(
+  args: BuildArgs,
+  refClientId: string,
+): Promise<SnapshotResult | null> {
+  if (refClientId !== args.clientId) {
+    throw new SnapshotBuildError('Progress report clientId does not match the request clientId.');
+  }
+  try {
+    const result = await buildProgressReport({
+      clientId: args.clientId,
+      psychologistId: args.psychologistId,
+    });
+    return {
+      snapshot: result.snapshot,
+      subject: result.subject,
+      sessionId: null,
+    };
+  } catch (e) {
+    if (e instanceof ProgressReportError) {
+      throw new SnapshotBuildError(e.message);
+    }
+    throw e;
+  }
+}
+
+/**
  * Strip therapist-facing instructions out of a TherapyScriptV1 so
  * the patient sees an actionable summary — opening intent, what
  * we'll work on, what to expect, homework. Verbatim therapistSays
@@ -223,16 +258,11 @@ function composePatientFriendlyScriptSummary(
   _language: ClinicalLocale,
 ): string {
   const intro = stripBracketTag(script.openingScript);
-  const purposes = script.mainExercise.steps.slice(0, 5).map((s) => `• ${stripBracketTag(s.purpose)}`);
+  const purposes = script.mainExercise.steps
+    .slice(0, 5)
+    .map((s) => `• ${stripBracketTag(s.purpose)}`);
   const close = stripBracketTag(script.closingScript);
-  return [
-    intro,
-    '',
-    'What we worked on in session:',
-    ...purposes,
-    '',
-    close,
-  ].join('\n');
+  return [intro, '', 'What we worked on in session:', ...purposes, '', close].join('\n');
 }
 
 /**

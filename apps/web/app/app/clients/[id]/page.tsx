@@ -170,7 +170,11 @@ export default async function ClientDetailPage({ params }: PageProps) {
 
       {journey && (
         <div className="mt-6">
-          <JourneyHeader journey={journey} />
+          <JourneyHeader
+            journey={journey}
+            clientHasContactPhone={!!client.contactPhone}
+            clientHasContactEmail={!!client.contactEmail}
+          />
         </div>
       )}
 

@@ -10,9 +10,13 @@ import type {
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { ShareModal } from './ShareModal';
 
 interface Props {
   journey: JourneySummary;
+  /// Sprint 20 — needed to power the Share progress report flow.
+  clientHasContactPhone: boolean;
+  clientHasContactEmail: boolean;
 }
 
 const STAGE_LABEL: Record<JourneyStage, string> = {
@@ -59,9 +63,13 @@ const INSTRUMENT_LABEL: Record<string, string> = {
  * client-side — no nagging, no persistence (measurement-based-care
  * adoption research: passive + autonomy-respecting beats interruptive).
  */
-export function JourneyHeader({ journey }: Props) {
+export function JourneyHeader({ journey, clientHasContactPhone, clientHasContactEmail }: Props) {
   const [dismissed, setDismissed] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const stageIdx = STAGE_ORDER.indexOf(journey.stage);
+  // Sprint 20 — a Progress Report needs ≥2 administrations on at least
+  // one instrument (the change engine returns an entry only then).
+  const canShareProgressReport = journey.instrumentChanges.length > 0;
 
   return (
     <Card className="p-6">
@@ -125,6 +133,18 @@ export function JourneyHeader({ journey }: Props) {
         </div>
       )}
 
+      {canShareProgressReport && (
+        <div className="mt-4 flex items-center justify-end">
+          <button
+            type="button"
+            onClick={() => setShareOpen(true)}
+            className="rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+          >
+            Share progress report
+          </button>
+        </div>
+      )}
+
       {/* Active plan goals */}
       {journey.activePlan && journey.activePlan.goals.length > 0 && (
         <div className="mt-5">
@@ -151,6 +171,18 @@ export function JourneyHeader({ journey }: Props) {
       {/* Next best action */}
       {journey.nextBestAction && !dismissed && (
         <NextActionCard action={journey.nextBestAction} onDismiss={() => setDismissed(true)} />
+      )}
+
+      {canShareProgressReport && (
+        <ShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          clientId={journey.clientId}
+          hasContactPhone={clientHasContactPhone}
+          hasContactEmail={clientHasContactEmail}
+          artefact={{ artefactType: 'PROGRESS_REPORT', clientId: journey.clientId }}
+          artefactLabel="Progress report"
+        />
       )}
     </Card>
   );

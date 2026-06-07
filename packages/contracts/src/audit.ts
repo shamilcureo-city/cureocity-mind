@@ -103,6 +103,12 @@ export const AuditActionSchema = z.enum([
   // edited the cascade-picked value before submitting.
   'SESSION_MODALITY_INFERRED',
   'SESSION_MODALITY_OVERRIDDEN',
+  // Measurement-based care progress reports — Sprint 20. Distinct from
+  // PATIENT_ARTEFACT_SHARED so the competency dashboard can attribute
+  // outcome-sharing separately. Generated audit fires whenever the
+  // progress-report snapshot is built (even before a share is dispatched).
+  'PATIENT_PROGRESS_REPORT_GENERATED',
+  'PATIENT_PROGRESS_REPORT_SHARED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

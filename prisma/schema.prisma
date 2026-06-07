@@ -1066,6 +1066,7 @@ enum PatientShareArtefactType {
   REFLECTION_QUESTIONS
   THERAPY_SCRIPT
   TREATMENT_PLAN
+  PROGRESS_REPORT
 }
 
 enum PatientShareChannel {
@@ -1657,6 +1658,11 @@ enum AuditAction {
   // changed the cascade-picked modality before submitting.
   SESSION_MODALITY_INFERRED
   SESSION_MODALITY_OVERRIDDEN
+  // Measurement-based-care progress reports — Sprint 20. GENERATED
+  // fires whenever the snapshot is built; SHARED fires per-channel
+  // inside the existing share route (alongside PATIENT_ARTEFACT_SHARED).
+  PATIENT_PROGRESS_REPORT_GENERATED
+  PATIENT_PROGRESS_REPORT_SHARED
 }
 
 enum AuditActorType {
