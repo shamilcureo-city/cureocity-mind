@@ -7,6 +7,7 @@ import {
   type IPass3Backend,
   type IPass4Backend,
   type IPass5Backend,
+  type IPass6Backend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -17,10 +18,13 @@ import {
   type Pass4Output,
   type Pass5Input,
   type Pass5Output,
+  type Pass6Input,
+  type Pass6Output,
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
 import {
+  CASE_BRIEFING_PROMPT_VERSION,
   CLINICAL_ANALYSIS_PROMPT_VERSION,
   PRE_SESSION_BRIEF_PROMPT_VERSION,
   TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
@@ -169,7 +173,11 @@ export class MockGeminiPass2Backend implements IPass2Backend {
               riskFlags: { severity: 'none', indicators: [] },
               modalitySpecific: { mock: true },
               phaseHints: [
-                { phase: 'middle', confidence: 0.75, rationale: 'Therapeutic alliance established' },
+                {
+                  phase: 'middle',
+                  confidence: 0.75,
+                  rationale: 'Therapeutic alliance established',
+                },
               ],
             },
           };
@@ -411,9 +419,9 @@ export class MockGeminiPass4Backend implements IPass4Backend {
               "Look for cooperation vs. hesitation. If they seem unsure, slow down and check what's coming up.",
             branches: [
               {
-                ifClientSays: 'That sounds fine, let\'s try it',
+                ifClientSays: "That sounds fine, let's try it",
                 thenDo:
-                  '[mock] Great. Take a moment and think of a time this week when the anxiety was strong. Don\'t pick the worst — just one that\'s recent.',
+                  "[mock] Great. Take a moment and think of a time this week when the anxiety was strong. Don't pick the worst — just one that's recent.",
               },
               {
                 ifClientSays: "I don't know if that will work for me",
@@ -431,9 +439,9 @@ export class MockGeminiPass4Backend implements IPass4Backend {
               'A specific cognition, not a feeling. If they say "I felt scared", gently steer to the thought driving the feeling.',
             branches: [
               {
-                ifClientSays: 'I just felt scared, I don\'t know what I was thinking',
+                ifClientSays: "I just felt scared, I don't know what I was thinking",
                 thenDo:
-                  '[mock] That\'s common — the thought can be quick. Let me ask differently: if the fear could speak, what would it say?',
+                  "[mock] That's common — the thought can be quick. Let me ask differently: if the fear could speak, what would it say?",
               },
             ],
           },
@@ -441,14 +449,14 @@ export class MockGeminiPass4Backend implements IPass4Backend {
             id: 'examine-evidence',
             purpose: 'Examine evidence for and against the thought.',
             therapistSays:
-              '[mock] Okay, so the thought was [restate]. Let\'s look at it like detectives. What evidence supports this thought? And then — what evidence doesn\'t support it?',
+              "[mock] Okay, so the thought was [restate]. Let's look at it like detectives. What evidence supports this thought? And then — what evidence doesn't support it?",
             listenFor:
-              "Whether they can hold both columns. Strong attachment to the thought means more behavioural work is needed first.",
+              'Whether they can hold both columns. Strong attachment to the thought means more behavioural work is needed first.',
             branches: [
               {
                 ifClientSays: 'But it IS true, I really am going to fail',
                 thenDo:
-                  '[mock] You feel it strongly — that\'s real. The question isn\'t whether the thought feels true. It\'s whether all the evidence points one way. What\'s ONE piece that doesn\'t fit the thought?',
+                  "[mock] You feel it strongly — that's real. The question isn't whether the thought feels true. It's whether all the evidence points one way. What's ONE piece that doesn't fit the thought?",
               },
             ],
           },
@@ -467,7 +475,7 @@ export class MockGeminiPass4Backend implements IPass4Backend {
         '[mock] If the client gets stuck in evidence-for, switch to behavioural experiment design instead.',
       ],
       closingScript:
-        '[mock] We did good work today. Notice the thought we examined, and over the week try to catch one more like it and write it down. We\'ll look at what you find next session.',
+        "[mock] We did good work today. Notice the thought we examined, and over the week try to catch one more like it and write it down. We'll look at what you find next session.",
       homework: {
         description:
           '[mock] Catch one anxious thought each day. Write it down with the situation, the thought, and the feeling. Bring the notes to next session.',
@@ -535,13 +543,20 @@ export class MockGeminiPass5Backend implements IPass5Backend {
               'Run a safety check before anything else — open crisis flag still on record.',
               '[mock] Re-emergence of avoidance behaviour around the goal context.',
             ]
-          : ['[mock] Watch for movement on the homework outcome.', '[mock] Listen for any new triggers.'],
+          : [
+              '[mock] Watch for movement on the homework outcome.',
+              '[mock] Listen for any new triggers.',
+            ],
       homeworkStatus: input.lastHomework
         ? {
             description: input.lastHomework.description,
             outcome:
-              (input.lastHomework.outcome as 'completed' | 'partial' | 'skipped' | 'unknown' | null) ??
-              'unknown',
+              (input.lastHomework.outcome as
+                | 'completed'
+                | 'partial'
+                | 'skipped'
+                | 'unknown'
+                | null) ?? 'unknown',
             notes: null,
           }
         : null,
@@ -569,6 +584,34 @@ export class MockGeminiPass5Backend implements IPass5Backend {
         promptVersion: PRE_SESSION_BRIEF_PROMPT_VERSION,
         inputTokens: 300,
         outputTokens: 250,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Pass 6 mock (Sprint 22). The route passes a fully-formed deterministic
+ * briefing as JSON; the mock simply echoes it back (kept as
+ * source='deterministic' so dev/CI can tell mock from a real LLM run).
+ * This means the case-workspace works end-to-end without GCP.
+ */
+export class MockGeminiPass6Backend implements IPass6Backend {
+  async run(input: Pass6Input): Promise<{ output: Pass6Output; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const briefing = JSON.parse(input.deterministicBriefingJson);
+    return {
+      output: { caseBriefing: briefing },
+      callLog: {
+        sessionId: null,
+        pass: 'PASS_6_CASE_BRIEFING',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: CASE_BRIEFING_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.contextText.length / 4),
+        outputTokens: Math.ceil(input.deterministicBriefingJson.length / 4),
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',

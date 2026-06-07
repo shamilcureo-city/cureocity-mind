@@ -9,6 +9,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { AffectCard } from '@/components/app/AffectCard';
+import { CaseBriefingPanel } from '@/components/app/CaseBriefingPanel';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
 import { InstrumentRunner } from '@/components/app/InstrumentRunner';
@@ -16,6 +17,7 @@ import { JourneyHeader } from '@/components/app/JourneyHeader';
 import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
+import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { JourneyError, computeClientJourney } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
 
@@ -45,18 +47,19 @@ interface PageProps {
 }
 
 /**
- * Client detail page. Embeds the same WorkflowSection + AffectCard
- * that the per-session Client tab uses, but without the
- * session-scoped context — this is the standalone clinical record
- * for a single client.
+ * Client detail page — the Case Workspace (Sprint 22).
  *
- * Sections (top to bottom):
- *   1. Header — name, status, age, preferred modality
- *   2. Contact + presenting concerns
- *   3. Workflow (modality phase, goals, prescribed exercises) — reused
- *      component so behaviour matches the per-session client tab
- *   4. Affect baseline + recent deviations
- *   5. All sessions list — newest first, links to per-session detail
+ * Restructured from a flat stack of cards into a decision surface +
+ * supporting evidence:
+ *   1. Identity — name, status, age, contact, presenting concerns
+ *   2. Case Briefing (the anchor) — what's going on (5 Ps), what's still
+ *      open (the running differential), the next 1-3 actions, and when to
+ *      see the client again. Server-rendered deterministically; the panel
+ *      offers a Pass-6 "Refresh" for the LLM narrative.
+ *   — "Clinical record & evidence" divider —
+ *   3. Journey (measured progress) · Pre-session brief · Diagnosis history
+ *      · Workflow · Instruments · Therapy library · Affect · Data rights ·
+ *      every session. These are the data the briefing is built from.
  *
  * Auth: the WorkflowSection / AffectCard endpoints they hit are
  * already requirePsychologistId-gated, so cross-tenant attempts to
@@ -133,6 +136,15 @@ export default async function ClientDetailPage({ params }: PageProps) {
     throw e;
   });
 
+  // Sprint 22 — the Case Briefing: the single synthesis that anchors the
+  // workspace (what's going on · what's still open · do next · when to
+  // return). Deterministic server render; the panel offers a Pass-6
+  // "Refresh" for the LLM narrative. Never blocks the page.
+  const briefing = await buildDeterministicCaseBriefing(client.id, therapist.id).catch((e) => {
+    if (e instanceof JourneyError) return null;
+    throw e;
+  });
+
   const age = client.dateOfBirth ? calcAge(client.dateOfBirth) : null;
 
   return (
@@ -181,6 +193,29 @@ export default async function ClientDetailPage({ params }: PageProps) {
           </p>
         </section>
       </Card>
+
+      {/* Sprint 22 — the decision surface. Everything below it is the
+          evidence the briefing is built from. */}
+      {briefing && (
+        <div className="mt-6">
+          <CaseBriefingPanel
+            clientId={client.id}
+            clientName={client.fullName}
+            initialBriefing={briefing}
+          />
+        </div>
+      )}
+
+      <div className="mt-10 flex items-center gap-3">
+        <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
+          Clinical record &amp; evidence
+        </h2>
+        <span className="h-px flex-1 bg-[var(--color-line-soft)]" aria-hidden />
+      </div>
+      <p className="mt-2 text-sm text-[var(--color-ink-3)]">
+        What the briefing is built from — measured progress, the diagnosis trail, the active plan,
+        screeners, and every session.
+      </p>
 
       {journey && (
         <div className="mt-6">

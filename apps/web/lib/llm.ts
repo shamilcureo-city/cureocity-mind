@@ -5,9 +5,11 @@ import {
   MockGeminiPass3Backend,
   MockGeminiPass4Backend,
   MockGeminiPass5Backend,
+  MockGeminiPass6Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
+  VertexGeminiProCaseBriefingBackend,
   VertexGeminiProClinicalBackend,
   VertexGeminiProGlobalBackend,
   VertexGeminiProTherapyScriptBackend,
@@ -82,7 +84,10 @@ function build(): IModelRouter {
       pass3: new VertexGeminiProClinicalBackend({
         projectId: project,
         location: proRegion,
-        model: process.env['VERTEX_CLINICAL_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
+        model:
+          process.env['VERTEX_CLINICAL_MODEL'] ??
+          process.env['VERTEX_PRO_MODEL'] ??
+          'gemini-2.5-pro',
       }),
       pass4: new VertexGeminiProTherapyScriptBackend({
         projectId: project,
@@ -96,9 +101,13 @@ function build(): IModelRouter {
         projectId: project,
         location: proRegion,
         model:
-          process.env['VERTEX_BRIEF_MODEL'] ??
-          process.env['VERTEX_PRO_MODEL'] ??
-          'gemini-2.5-pro',
+          process.env['VERTEX_BRIEF_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
+      }),
+      pass6: new VertexGeminiProCaseBriefingBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['VERTEX_BRIEF_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
     });
   }
@@ -111,6 +120,7 @@ function build(): IModelRouter {
     pass3: new MockGeminiPass3Backend(),
     pass4: new MockGeminiPass4Backend(),
     pass5: new MockGeminiPass5Backend(),
+    pass6: new MockGeminiPass6Backend(),
   });
 }
 
