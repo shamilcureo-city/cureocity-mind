@@ -1039,10 +1039,43 @@ model TreatmentPlan {
   clinicalReport ClinicalReport  @relation(fields: [sourceClinicalReportId], references: [id])
   therapyScripts TherapyScript[]
 
+  goalProgress TreatmentGoalProgress[]
+
   @@unique([clientId, version])
   @@index([clientId, supersededAt])
   @@index([psychologistId, createdAt])
   @@map("treatment_plans")
+}
+
+// ============================================================================
+// TreatmentGoalProgress — Sprint 20 Phase 3 follow-up.
+// Per-goal achievement status, keyed by (treatmentPlanId, goalIndex)
+// against the goals array inside TreatmentPlan.body. Kept as a side
+// table (not inside the versioned plan JSON) so toggling status doesn't
+// re-version the plan and historical plans keep their own progress.
+// ============================================================================
+
+enum TreatmentGoalStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  ACHIEVED
+}
+
+model TreatmentGoalProgress {
+  id                      String              @id @default(cuid())
+  treatmentPlanId         String
+  goalIndex               Int
+  status                  TreatmentGoalStatus @default(NOT_STARTED)
+  updatedByPsychologistId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan TreatmentPlan @relation(fields: [treatmentPlanId], references: [id], onDelete: Cascade)
+
+  @@unique([treatmentPlanId, goalIndex])
+  @@index([treatmentPlanId])
+  @@map("treatment_goal_progress")
 }
 
 // ============================================================================
@@ -1710,6 +1743,8 @@ enum AuditAction {
   // transfer.
   TREATMENT_EPISODE_OPENED
   TREATMENT_EPISODE_CLOSED
+  // Per-goal achievement toggles — Sprint 20 Phase 3 follow-up.
+  TREATMENT_GOAL_PROGRESS_UPDATED
 }
 
 enum AuditActorType {

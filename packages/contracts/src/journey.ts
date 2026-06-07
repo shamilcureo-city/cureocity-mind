@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Icd11CodeSchema } from './clinical';
+import { Icd11CodeSchema, TreatmentGoalStatusSchema } from './clinical';
 import { IsoDateTimeSchema } from './common';
 import { InstrumentChangeSchema } from './instrument';
 import { SessionModalitySchema } from './client';
@@ -69,14 +69,24 @@ export const JourneyWorkingDiagnosisSchema = z.object({
 export type JourneyWorkingDiagnosis = z.infer<typeof JourneyWorkingDiagnosisSchema>;
 
 export const JourneyGoalSchema = z.object({
+  /// Index into the active plan's goals array — drives the per-goal
+  /// status toggle (PATCH /treatment-plans/:id/goals/:index).
+  index: z.number().int().nonnegative(),
   description: z.string(),
   measure: z.string(),
+  status: TreatmentGoalStatusSchema,
 });
+export type JourneyGoal = z.infer<typeof JourneyGoalSchema>;
 
 export const JourneyActivePlanSchema = z.object({
+  /// FK back to the active TreatmentPlan so the UI can PATCH goal status.
+  id: z.string(),
   version: z.number().int().positive(),
   modality: SessionModalitySchema.nullable(),
   goals: z.array(JourneyGoalSchema),
+  /// Convenience counts for the "X of Y achieved" readout.
+  goalsAchieved: z.number().int().nonnegative(),
+  goalsTotal: z.number().int().nonnegative(),
   confirmedAt: IsoDateTimeSchema,
 });
 export type JourneyActivePlan = z.infer<typeof JourneyActivePlanSchema>;

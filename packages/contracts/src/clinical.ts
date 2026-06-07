@@ -98,6 +98,28 @@ export const ClinicalGoalSchema = z.object({
 });
 export type ClinicalGoal = z.infer<typeof ClinicalGoalSchema>;
 
+/**
+ * Sprint 20 Phase 3 follow-up — per-goal achievement status. Persisted
+ * in the TreatmentGoalProgress side table (keyed by treatmentPlanId +
+ * goalIndex), NOT inside the versioned plan JSON. Drives the
+ * "X of Y goals achieved" readout on the journey hub.
+ */
+export const TreatmentGoalStatusSchema = z.enum(['NOT_STARTED', 'IN_PROGRESS', 'ACHIEVED']);
+export type TreatmentGoalStatus = z.infer<typeof TreatmentGoalStatusSchema>;
+
+export const UpdateGoalProgressInputSchema = z.object({
+  status: TreatmentGoalStatusSchema,
+});
+export type UpdateGoalProgressInput = z.infer<typeof UpdateGoalProgressInputSchema>;
+
+export const GoalProgressSchema = z.object({
+  treatmentPlanId: CuidSchema,
+  goalIndex: z.number().int().nonnegative(),
+  status: TreatmentGoalStatusSchema,
+  updatedAt: IsoDateTimeSchema,
+});
+export type GoalProgress = z.infer<typeof GoalProgressSchema>;
+
 // ============================================================================
 // Treatment plan — proposed sequence of phases + measurable goals.
 // `modality` may extend beyond the SessionModality enum to include
@@ -241,12 +263,7 @@ export const ClinicalSectionKeySchema = z.enum([
 ]);
 export type ClinicalSectionKey = z.infer<typeof ClinicalSectionKeySchema>;
 
-export const ClinicalSectionStatusSchema = z.enum([
-  'PENDING',
-  'ACCEPTED',
-  'MODIFIED',
-  'REJECTED',
-]);
+export const ClinicalSectionStatusSchema = z.enum(['PENDING', 'ACCEPTED', 'MODIFIED', 'REJECTED']);
 export type ClinicalSectionStatus = z.infer<typeof ClinicalSectionStatusSchema>;
 
 export const ClinicalSectionConfirmationSchema = z.object({

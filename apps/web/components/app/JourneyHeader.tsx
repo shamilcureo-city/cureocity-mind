@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type {
   ChangeVerdict,
   InstrumentChange,
   JourneyStage,
   JourneySummary,
   NextBestAction,
+  TreatmentGoalStatus,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
@@ -195,21 +197,25 @@ export function JourneyHeader({
       {/* Active plan goals */}
       {journey.activePlan && journey.activePlan.goals.length > 0 && (
         <div className="mt-5">
-          <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Plan goals{journey.activePlan.modality ? ` · ${journey.activePlan.modality}` : ''}
-          </p>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Plan goals{journey.activePlan.modality ? ` · ${journey.activePlan.modality}` : ''}
+            </p>
+            <p className="text-xs font-medium text-[var(--color-ink-2)]">
+              {journey.activePlan.goalsAchieved} of {journey.activePlan.goalsTotal} achieved
+            </p>
+          </div>
           <ul className="mt-2 space-y-1.5">
-            {journey.activePlan.goals.map((g, i) => (
-              <li key={i} className="flex items-start gap-2 text-sm">
-                <span
-                  aria-hidden
-                  className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-                />
-                <span>
-                  {g.description}
-                  <span className="text-[var(--color-ink-3)]"> · {g.measure}</span>
-                </span>
-              </li>
+            {journey.activePlan.goals.map((g) => (
+              <GoalRow
+                key={g.index}
+                planId={journey.activePlan!.id}
+                index={g.index}
+                description={g.description}
+                measure={g.measure}
+                status={g.status}
+                disabled={isDischarged}
+              />
             ))}
           </ul>
         </div>
@@ -273,6 +279,106 @@ function InstrumentTrend({ change }: { change: InstrumentChange }) {
         </span>
       </div>
     </div>
+  );
+}
+
+const GOAL_STATUS_LABEL: Record<TreatmentGoalStatus, string> = {
+  NOT_STARTED: 'Not started',
+  IN_PROGRESS: 'In progress',
+  ACHIEVED: 'Achieved',
+};
+
+// Click cycles the status; the order matches a goal's natural lifecycle.
+const GOAL_STATUS_CYCLE: Record<TreatmentGoalStatus, TreatmentGoalStatus> = {
+  NOT_STARTED: 'IN_PROGRESS',
+  IN_PROGRESS: 'ACHIEVED',
+  ACHIEVED: 'NOT_STARTED',
+};
+
+function GoalRow({
+  planId,
+  index,
+  description,
+  measure,
+  status,
+  disabled,
+}: {
+  planId: string;
+  index: number;
+  description: string;
+  measure: string;
+  status: TreatmentGoalStatus;
+  disabled: boolean;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [optimistic, setOptimistic] = useState<TreatmentGoalStatus>(status);
+
+  async function cycle(): Promise<void> {
+    if (disabled || busy) return;
+    const next = GOAL_STATUS_CYCLE[optimistic];
+    setOptimistic(next);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/v1/treatment-plans/${planId}/goals/${index}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next }),
+      });
+      if (!res.ok) {
+        setOptimistic(status); // revert
+        return;
+      }
+      router.refresh();
+    } catch {
+      setOptimistic(status);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const dot =
+    optimistic === 'ACHIEVED'
+      ? 'bg-[var(--color-accent)]'
+      : optimistic === 'IN_PROGRESS'
+        ? 'bg-[var(--color-warn)]'
+        : 'border border-[var(--color-line)] bg-transparent';
+
+  return (
+    <li className="flex items-start gap-2 text-sm">
+      <button
+        type="button"
+        onClick={() => void cycle()}
+        disabled={disabled || busy}
+        aria-label={`Goal status: ${GOAL_STATUS_LABEL[optimistic]} (click to change)`}
+        className="mt-1 grid h-4 w-4 shrink-0 place-items-center rounded-full disabled:cursor-default"
+      >
+        <span aria-hidden className={`h-3 w-3 rounded-full ${dot}`}>
+          {optimistic === 'ACHIEVED' && (
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-3 w-3"
+            >
+              <path d="M5 12l5 5 9-9" />
+            </svg>
+          )}
+        </span>
+      </button>
+      <span className={optimistic === 'ACHIEVED' ? 'text-[var(--color-ink-3)] line-through' : ''}>
+        {description}
+        <span className="text-[var(--color-ink-3)]"> · {measure}</span>
+        {optimistic !== 'NOT_STARTED' && (
+          <span className="ml-1.5 text-xs text-[var(--color-ink-3)]">
+            ({GOAL_STATUS_LABEL[optimistic]})
+          </span>
+        )}
+      </span>
+    </li>
   );
 }
 
