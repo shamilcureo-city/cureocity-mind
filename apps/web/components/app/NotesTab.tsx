@@ -13,6 +13,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { IntakeNotePreview } from './IntakeNotePreview';
+import { IntakeModifyPanel } from './IntakeModifyPanel';
 import { NotePreview } from './NotePreview';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
@@ -361,24 +362,40 @@ export function NotesTab({
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
-        <Card className="p-7">
-          <RiskBanner riskFlags={intakeNote.riskFlags} />
-          <IntakeNotePreview note={intakeNote} />
-          <NoteFooter
-            costInr={phase.draft.totalCostInr}
-            chunkCount={phase.draft.speakerSegments?.length ?? 0}
-            transcriptChars={phase.draft.transcript?.length ?? 0}
-            region={llmBackend}
+        <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+          <Card className="p-7">
+            <RiskBanner riskFlags={intakeNote.riskFlags} />
+            <IntakeNotePreview note={intakeNote} />
+            <NoteFooter
+              costInr={phase.draft.totalCostInr}
+              chunkCount={phase.draft.speakerSegments?.length ?? 0}
+              transcriptChars={phase.draft.transcript?.length ?? 0}
+              region={llmBackend}
+            />
+            <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
+              <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
+                Re-generate
+              </Button>
+              <p className="text-xs italic text-[var(--color-ink-3)]">
+                Sign-off for intake notes is deferred — the sign contract is still
+                TherapyNoteV1-shaped.
+              </p>
+            </div>
+          </Card>
+          <IntakeModifyPanel
+            sessionId={sessionId}
+            note={intakeNote}
+            onModified={(next) =>
+              setPhase({
+                kind: 'completed',
+                draft: {
+                  ...phase.draft,
+                  content: next as unknown as NoteDraft['content'],
+                },
+              })
+            }
           />
-          <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-            <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
-              Re-generate
-            </Button>
-            <p className="text-xs italic text-[var(--color-ink-3)]">
-              Sign-off + AI modify panel are not yet supported for intake notes.
-            </p>
-          </div>
-        </Card>
+        </div>
       </>
     );
   }
