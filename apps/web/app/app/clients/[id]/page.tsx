@@ -11,9 +11,11 @@ import { Badge } from '@/components/ui/Badge';
 import { AffectCard } from '@/components/app/AffectCard';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { InstrumentRunner } from '@/components/app/InstrumentRunner';
+import { JourneyHeader } from '@/components/app/JourneyHeader';
 import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
+import { JourneyError, computeClientJourney } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
 
 /**
@@ -109,6 +111,14 @@ export default async function ClientDetailPage({ params }: PageProps) {
   const langParse = ClinicalLocaleSchema.safeParse(client.preferredLanguage);
   const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';
 
+  // Sprint 20 — measurement-based-care journey summary. Composed from the
+  // cumulative tables; never blocks the page (a derivation error just
+  // hides the band).
+  const journey = await computeClientJourney(client.id, therapist.id).catch((e) => {
+    if (e instanceof JourneyError) return null;
+    throw e;
+  });
+
   const age = client.dateOfBirth ? calcAge(client.dateOfBirth) : null;
 
   return (
@@ -158,6 +168,12 @@ export default async function ClientDetailPage({ params }: PageProps) {
         </section>
       </Card>
 
+      {journey && (
+        <div className="mt-6">
+          <JourneyHeader journey={journey} />
+        </div>
+      )}
+
       <div className="mt-6">
         <PreSessionBriefCard clientId={client.id} />
       </div>
@@ -166,7 +182,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
         <WorkflowSection clientId={client.id} />
       </div>
 
-      <div className="mt-6">
+      <div id="instruments" className="mt-6 scroll-mt-6">
         <InstrumentRunner clientId={client.id} />
       </div>
 
@@ -191,9 +207,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
       <div className="mt-6">
         <Card className="overflow-hidden">
           <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
-            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Sessions
-            </h2>
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Sessions</h2>
             <p className="mt-1 text-sm text-[var(--color-ink-2)]">
               {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
             </p>

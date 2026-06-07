@@ -74,3 +74,39 @@ export const ListInstrumentResponsesResponseSchema = z.object({
   items: z.array(InstrumentResponseSchema),
 });
 export type ListInstrumentResponsesResponse = z.infer<typeof ListInstrumentResponsesResponseSchema>;
+
+// ============================================================================
+// Sprint 20 — Reliable-change verdict (measurement-based care).
+//
+// Computed deterministically in @cureocity/clinical/change-score from a
+// baseline + latest administration. Surfaced on the client Journey hub so
+// the therapist sees whether the client is actually improving, not just a
+// list of raw scores.
+// ============================================================================
+
+export const ChangeVerdictSchema = z.enum([
+  'reliable_improvement',
+  'no_reliable_change',
+  'deterioration',
+]);
+export type ChangeVerdict = z.infer<typeof ChangeVerdictSchema>;
+
+export const InstrumentChangeSchema = z.object({
+  instrumentKey: InstrumentKeySchema,
+  baselineScore: z.number().int().nonnegative(),
+  latestScore: z.number().int().nonnegative(),
+  /** latest - baseline; negative = improvement (lower is better). */
+  delta: z.number().int(),
+  /** Percent change vs baseline; null when baseline is 0. */
+  percentChange: z.number().nullable(),
+  verdict: ChangeVerdictSchema,
+  isResponse: z.boolean(),
+  isRemission: z.boolean(),
+  baselineSeverityKey: z.string(),
+  latestSeverityKey: z.string(),
+  /** Number of administrations the verdict is based on (≥2 to be meaningful). */
+  administrationCount: z.number().int().positive(),
+  baselineAt: IsoDateTimeSchema,
+  latestAt: IsoDateTimeSchema,
+});
+export type InstrumentChange = z.infer<typeof InstrumentChangeSchema>;

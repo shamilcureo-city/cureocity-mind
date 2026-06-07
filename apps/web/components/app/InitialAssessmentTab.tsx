@@ -15,6 +15,9 @@ import { Card } from '../ui/Card';
 
 interface Props {
   sessionId: string;
+  /// Sprint 20 — used to deep-link the recommended-instrument chips to
+  /// the client's Instruments section so a baseline is one tap away.
+  clientId: string;
   /// Wrapper carrying status + cost + errorMessage. Bodies are
   /// shape-different from a treatment-session ClinicalReport so the
   /// parsed brief is passed separately.
@@ -32,7 +35,7 @@ interface Props {
  * is not applicable until a treatment plan exists, which intakes
  * don't produce.
  */
-export function InitialAssessmentTab({ sessionId, reportEnvelope, initialBrief }: Props) {
+export function InitialAssessmentTab({ sessionId, clientId, reportEnvelope, initialBrief }: Props) {
   const [brief, setBrief] = useState<InitialAssessmentBriefV1 | null>(initialBrief);
   const [status, setStatus] = useState<ClinicalReport['status'] | null>(
     reportEnvelope?.status ?? null,
@@ -157,7 +160,14 @@ export function InitialAssessmentTab({ sessionId, reportEnvelope, initialBrief }
     );
   }
 
-  return <CompletedBrief brief={brief} onRegenerate={generate} regenerating={generating} />;
+  return (
+    <CompletedBrief
+      brief={brief}
+      clientId={clientId}
+      onRegenerate={generate}
+      regenerating={generating}
+    />
+  );
 }
 
 // ============================================================================
@@ -166,10 +176,12 @@ export function InitialAssessmentTab({ sessionId, reportEnvelope, initialBrief }
 
 function CompletedBrief({
   brief,
+  clientId,
   onRegenerate,
   regenerating,
 }: {
   brief: InitialAssessmentBriefV1;
+  clientId: string;
   onRegenerate: () => void | Promise<void>;
   regenerating: boolean;
 }) {
@@ -273,19 +285,31 @@ function CompletedBrief({
           </p>
         ) : (
           <ul className="mt-3 flex flex-wrap gap-2">
-            {brief.recommendedInstruments.map((key) => (
-              <li
-                key={key}
-                className="rounded-full bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-ink-2)]"
-              >
-                {key}
-              </li>
-            ))}
+            {brief.recommendedInstruments.map((key) => {
+              const administerable = isAdministerable(key);
+              return administerable ? (
+                <li key={key}>
+                  <a
+                    href={`/app/clients/${clientId}#instruments`}
+                    className="inline-flex items-center gap-1 rounded-full bg-[var(--color-accent-soft)] px-3 py-1 text-sm font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
+                  >
+                    + Administer {key}
+                  </a>
+                </li>
+              ) : (
+                <li
+                  key={key}
+                  className="rounded-full bg-[var(--color-surface)] px-3 py-1 text-sm text-[var(--color-ink-2)]"
+                >
+                  {key}
+                </li>
+              );
+            })}
           </ul>
         )}
         <p className="mt-3 text-xs italic text-[var(--color-ink-3)]">
-          Administer these from the client’s Instruments tab — the assessment narrows the
-          differential.
+          Administer the screeners now to lock in a baseline — every later session measures change
+          against it.
         </p>
       </Card>
     </div>
@@ -439,4 +463,14 @@ function formatTimestamp(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Whether a recommended-instrument label maps to one the runner can
+ * actually administer (PHQ-9 / GAD-7 today). Tolerant of hyphen/spacing
+ * variants the model might emit ("PHQ-9", "phq9").
+ */
+function isAdministerable(key: string): boolean {
+  const normalised = key.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return normalised === 'PHQ9' || normalised === 'GAD7';
 }
