@@ -128,6 +128,7 @@ describe('JourneySummarySchema (Sprint 20)', () => {
     },
     instrumentChanges: [],
     nextBestAction: null,
+    closedEpisode: null,
   };
 
   it('accepts a fully-populated summary', () => {

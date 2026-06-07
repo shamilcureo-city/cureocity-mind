@@ -172,6 +172,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
         <div className="mt-6">
           <JourneyHeader
             journey={journey}
+            clientName={client.fullName}
             clientHasContactPhone={!!client.contactPhone}
             clientHasContactEmail={!!client.contactEmail}
           />

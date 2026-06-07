@@ -18,5 +18,6 @@ export * from './share';
 export * from './brief';
 export * from './instrument';
 export * from './journey';
+export * from './episode';
 export * from './safety-plan';
 export * from './webauthn';

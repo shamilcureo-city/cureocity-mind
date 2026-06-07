@@ -117,6 +117,37 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         tx,
       );
     }
+
+    // Sprint 20 Phase 3 — ensure the client has an OPEN treatment
+    // episode. A new client (or one who returned after discharge)
+    // starts a fresh episode of care here so the journey arc has a
+    // durable container with a real openedAt.
+    const openEpisode = await tx.treatmentEpisode.findFirst({
+      where: { clientId: dto.value.clientId, status: 'OPEN' },
+      select: { id: true },
+    });
+    if (!openEpisode) {
+      const episode = await tx.treatmentEpisode.create({
+        data: {
+          clientId: dto.value.clientId,
+          psychologistId: auth.value.psychologistId,
+          status: 'OPEN',
+        },
+      });
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'TREATMENT_EPISODE_OPENED',
+          targetType: 'TreatmentEpisode',
+          targetId: episode.id,
+          metadata: {
+            clientId: dto.value.clientId,
+            sessionId: row.id,
+          },
+        },
+        tx,
+      );
+    }
     return row;
   });
   return NextResponse.json(toSession(created), { status: 201 });

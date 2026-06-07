@@ -16,12 +16,14 @@ import { SessionModalitySchema } from './client';
  */
 
 /**
- * The arc stage, derived (not stored):
+ * The arc stage, mostly derived:
  *   INTAKE           — no completed session yet
  *   ASSESSMENT       — intake done, no confirmed primary diagnosis
  *   ACTIVE_TREATMENT — an active (non-superseded) treatment plan exists
  *   REVIEW_DUE       — active plan aged ≥8 completed sessions (re-eval cadence)
  *   DISCHARGE_READY  — instrument remission reached with a plan in place
+ *   DISCHARGED       — the active episode was closed (Sprint 20 Phase 3);
+ *                      terminal until the client returns for a new session
  */
 export const JourneyStageSchema = z.enum([
   'INTAKE',
@@ -29,6 +31,7 @@ export const JourneyStageSchema = z.enum([
   'ACTIVE_TREATMENT',
   'REVIEW_DUE',
   'DISCHARGE_READY',
+  'DISCHARGED',
 ]);
 export type JourneyStage = z.infer<typeof JourneyStageSchema>;
 
@@ -78,6 +81,14 @@ export const JourneyActivePlanSchema = z.object({
 });
 export type JourneyActivePlan = z.infer<typeof JourneyActivePlanSchema>;
 
+/** Sprint 20 Phase 3 — closed-episode summary surfaced on a discharged arc. */
+export const JourneyEpisodeSchema = z.object({
+  status: z.enum(['DISCHARGED', 'TRANSFERRED']),
+  closedAt: IsoDateTimeSchema,
+  closeReason: z.string().nullable(),
+});
+export type JourneyEpisode = z.infer<typeof JourneyEpisodeSchema>;
+
 export const JourneySummarySchema = z.object({
   clientId: z.string(),
   stage: JourneyStageSchema,
@@ -89,5 +100,7 @@ export const JourneySummarySchema = z.object({
   instrumentChanges: z.array(InstrumentChangeSchema),
   /** The single suggested action, or null when nothing is pending. */
   nextBestAction: NextBestActionSchema.nullable(),
+  /** Set when the arc is in the DISCHARGED stage (Sprint 20 Phase 3). */
+  closedEpisode: JourneyEpisodeSchema.nullable(),
 });
 export type JourneySummary = z.infer<typeof JourneySummarySchema>;

@@ -328,6 +328,7 @@ model Client {
   preSessionBriefs    PreSessionBrief[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
+  treatmentEpisodes   TreatmentEpisode[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -1045,6 +1046,47 @@ model TreatmentPlan {
 }
 
 // ============================================================================
+// TreatmentEpisode — Sprint 20 Phase 3.
+// Groups a client's care from intake → discharge into an episode so the
+// journey arc has a durable terminal state instead of a purely derived
+// one. A new episode is ensured OPEN when a session is created and no
+// OPEN episode exists; discharge closes it. A client who returns after
+// discharge starts a fresh episode. psychologistId is a plain scalar
+// (no relation) to keep the Psychologist model untouched.
+// ============================================================================
+
+enum TreatmentEpisodeStatus {
+  OPEN
+  DISCHARGED
+  TRANSFERRED
+}
+
+model TreatmentEpisode {
+  id             String                 @id @default(cuid())
+  clientId       String
+  psychologistId String
+  status         TreatmentEpisodeStatus @default(OPEN)
+
+  openedAt DateTime  @default(now())
+  closedAt DateTime?
+
+  /// Free-text reason captured on close (discharge / transfer).
+  closeReason String?
+
+  /// Optional clinician outcome note shown alongside the final report.
+  outcomeNote String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, openedAt])
+  @@index([clientId, status])
+  @@map("treatment_episodes")
+}
+
+// ============================================================================
 // TherapyScript — Sprint 14 cache row for Pass 4 output. Keyed by
 // (clientId, cacheKey) where cacheKey is a SHA-256 hash of the
 // normalised input tuple (therapyName, language, primaryDiagnosis,
@@ -1663,6 +1705,11 @@ enum AuditAction {
   // inside the existing share route (alongside PATIENT_ARTEFACT_SHARED).
   PATIENT_PROGRESS_REPORT_GENERATED
   PATIENT_PROGRESS_REPORT_SHARED
+  // Treatment-episode lifecycle — Sprint 20 Phase 3. OPENED when a
+  // session is created with no active episode; CLOSED on discharge /
+  // transfer.
+  TREATMENT_EPISODE_OPENED
+  TREATMENT_EPISODE_CLOSED
 }
 
 enum AuditActorType {
