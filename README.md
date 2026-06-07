@@ -1,14 +1,22 @@
 # Cureocity Mind
 
-A clinical co-pilot for Indian psychotherapists. The therapist records a
-session in the browser; Gemini produces a transcript, a SOAP note, an
-ICD-11 clinical brief with diagnosis candidates + cited evidence + a
-treatment plan, a step-by-step therapy script for the next session, and
-a pre-session brief that summarises what to focus on. The therapist
-confirms each AI suggestion; confirmed diagnoses and plans persist
-cumulatively. Patient-facing content (signed notes, reflection
-questions, therapy script, treatment plan) can be sent via WhatsApp,
-email, or a private portal link.
+A clinical co-pilot for Indian psychotherapists that **closes the
+measurement-based-care loop**. The therapist records a session in the
+browser; Gemini produces a transcript, an intake or SOAP note (depending
+on session kind), an ICD-11 clinical brief or initial-assessment brief
+with diagnosis candidates + cited evidence + (where relevant) a
+treatment plan, a step-by-step therapy script, and a pre-session brief
+for next time. Confirmed diagnoses and plans persist cumulatively.
+
+On top of that, every client has a **Journey hub** that shows where they
+are in their care arc (Intake → Assessment → Active treatment → Review
+due → Discharge ready → Discharged), a deterministic reliable-change
+verdict on PHQ-9 and GAD-7 (Improving / No change / Worsening, with
+response and remission tags — thresholds from the validation literature,
+no AI), the plan goals with per-goal achievement status, and a passive
+next-best-action. When the client is ready, the therapist shares a
+plain-language **Progress Report** they can read on a private portal
+link, then closes the care episode with a one-click Discharge.
 
 Designed for real Indian practice: the audio can be in any language
 (English, Malayalam, Hindi, Tamil, Bengali, …) or any code-mix
@@ -17,41 +25,56 @@ spoken and transcribes faithfully in the spoken language(s).
 
 ## Start here
 
-| Doc | Purpose |
-|---|---|
-| [`CLAUDE.md`](CLAUDE.md) | Agent + developer operational guide — read this first |
-| [`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md) | Product context — what the clinical co-pilot does (Sprints 13-17) |
-| [`docs/SETUP.md`](docs/SETUP.md) | Account procurement + env var matrix per sprint |
-| [`docs/dpdp-data-flow.md`](docs/dpdp-data-flow.md) | DPDP compliance data flows |
-| [`docs/security-audit.md`](docs/security-audit.md) | Pre-pilot security audit |
-| [`docs/EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md) | **Historical** — original 13-sprint scribe plan, superseded for Sprint 13+ |
+| Doc                                                                | Purpose                                                                          |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| [`CLAUDE.md`](CLAUDE.md)                                           | Agent + developer operational guide — read this first                            |
+| [`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md)             | Product context — Sprints 13-19, clinical co-pilot pivot + intake-aware flow     |
+| [`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md) | Sprint 20 — the journey hub, reliable-change engine, progress report, episodes   |
+| [`docs/SPRINT_21.md`](docs/SPRINT_21.md)                           | Sprint 21 — diagnosis history, intake-note modify, My Practice view, goal status |
+| [`docs/SETUP.md`](docs/SETUP.md)                                   | Account procurement + env var matrix per sprint                                  |
+| [`docs/dpdp-data-flow.md`](docs/dpdp-data-flow.md)                 | DPDP compliance data flows                                                       |
+| [`docs/security-audit.md`](docs/security-audit.md)                 | Pre-pilot security audit                                                         |
+| [`docs/EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md)                 | **Historical** — original 13-sprint scribe plan, superseded for Sprint 13+       |
 
 ## Status
 
-| Track | Status |
-|---|---|
-| Clinical co-pilot (Sprints 13-17) | **Feature-complete** |
-| AI scribe (Sprints 0-12) | **Shipped** |
-| Pre-pilot backlog (encryption rollout, multi-tenant clinic, billing, observability) | **Pending** |
+| Track                                                                                                 | Status      |
+| ----------------------------------------------------------------------------------------------------- | ----------- |
+| Clinical co-pilot (Sprints 13-17)                                                                     | **Shipped** |
+| Sprint 18 — Therapist settings + WebAuthn registration + sign hardening                               | **Shipped** |
+| Sprint 19 — Scribing flow revamp (intake-aware: Pre-Flight panel, IntakeNote, InitialAssessmentBrief) | **Shipped** |
+| Sprint 20 — Measurement-based-care loop (Journey hub, Progress Report, Episodes, goal status)         | **Shipped** |
+| Sprint 21 — Diagnosis history, intake-note AI modify, My Practice view                                | **Shipped** |
+| Pre-pilot blockers (real Firebase auth, PII field encryption, WebAuthn-required sign)                 | **Pending** |
+| Other backlog (multi-tenant Clinic, billing, observability stack, multilingual progress copy)         | **Pending** |
 
-Latest sprint completed:
+Latest sprint highlights:
 
-- **Sprint 17** — Pre-Session Brief (Pass 5) + curated PHQ-9/GAD-7
-  instruments + Stanley & Brown safety plan + competency dashboard
-- **Sprint 16** — Multilingual / code-mix-first (Manglish, Hinglish, …)
-- **Sprint 15** — Patient CRM: share artefacts via WhatsApp / email / portal
-- **Sprint 14** — Therapy Script Pass (Pass 4) + Therapy Library
-- **Sprint 13** — Clinical Analysis Pass (Pass 3) + Clinical Brief tab
+- **Sprint 21** — Cumulative diagnosis history card on the client page;
+  AI modify panel now works on intake notes (kind-aware route); new
+  `/app/me` "How it's going" view for therapist self-reflection;
+  per-goal `NOT_STARTED / IN_PROGRESS / ACHIEVED` status with a clickable
+  cycle dot on the journey hub.
+- **Sprint 20** — Journey hub band on every client page with stage rail,
+  reliable-change verdict, plan goals, and a passive Next-Best-Action;
+  `PROGRESS_REPORT` patient-share artefact built deterministically from
+  the change engine; `TreatmentEpisode` + `POST /clients/[id]/discharge`
+  give the arc a real terminal state.
+- **Sprint 19** — Single-screen Pre-Flight panel replaces the 3-step
+  PreRecordWizard; `SessionKind = INTAKE | TREATMENT | REVIEW` drives
+  Pass 2 / Pass 3 prompt branches; intake sessions produce
+  `IntakeNoteV1` + `InitialAssessmentBriefV1` instead of forcing a SOAP
+  shape onto a first session.
 
 ## The five Gemini passes
 
-| Pass | Input | Output | Region | Pass label |
-|---|---|---|---|---|
-| 1 | Audio (PCM 16kHz) | Transcript + speakerSegments (with language tag) + affectFeatures + detectedLanguages[] | `asia-south1` (DPDP residency) | `PASS_1_TRANSCRIBE_AND_ANALYSE` |
-| 2 | Transcript text | `TherapyNoteV1` (SOAP + riskFlags + modalitySpecific) | Global | `PASS_2_NOTE_GENERATION` |
-| 3 | Transcript + note + history | `ClinicalReportV1` (ICD-11 diagnosis candidates + gaps + formulation + plan + recommended therapies + crisis flags) | Global | `PASS_3_CLINICAL_ANALYSIS` |
-| 4 | Therapy name + diagnosis + plan + history | `TherapyScriptV1` (opening + step-by-step + branches + closing + homework) | Global | `PASS_4_THERAPY_SCRIPT` |
-| 5 | Client context (last session, homework, plan, crisis, instruments) | `PreSessionBriefV1` (context line + recap + today's focus + opening line + watchpoints) | Global | `PASS_5_PRE_SESSION_BRIEF` |
+| Pass | Input                                                              | Output                                                                                                              | Region                         | Pass label                      |
+| ---- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------- |
+| 1    | Audio (PCM 16kHz)                                                  | Transcript + speakerSegments (with language tag) + affectFeatures + detectedLanguages[]                             | `asia-south1` (DPDP residency) | `PASS_1_TRANSCRIBE_AND_ANALYSE` |
+| 2    | Transcript text                                                    | `TherapyNoteV1` (SOAP + riskFlags + modalitySpecific)                                                               | Global                         | `PASS_2_NOTE_GENERATION`        |
+| 3    | Transcript + note + history                                        | `ClinicalReportV1` (ICD-11 diagnosis candidates + gaps + formulation + plan + recommended therapies + crisis flags) | Global                         | `PASS_3_CLINICAL_ANALYSIS`      |
+| 4    | Therapy name + diagnosis + plan + history                          | `TherapyScriptV1` (opening + step-by-step + branches + closing + homework)                                          | Global                         | `PASS_4_THERAPY_SCRIPT`         |
+| 5    | Client context (last session, homework, plan, crisis, instruments) | `PreSessionBriefV1` (context line + recap + today's focus + opening line + watchpoints)                             | Global                         | `PASS_5_PRE_SESSION_BRIEF`      |
 
 ## Prerequisites
 
@@ -78,15 +101,15 @@ therapy script → pre-session brief — no GCP creds needed.
 
 ## Workspace commands
 
-| Command             | Purpose                                                |
-| ------------------- | ------------------------------------------------------ |
-| `pnpm -r build`     | Build every package + service + app                    |
-| `pnpm -r lint`      | ESLint across the workspace                            |
-| `pnpm -r test`      | Vitest across packages + services                      |
-| `pnpm format`       | Auto-format with Prettier                              |
-| `pnpm format:check` | Verify formatting without modifying                    |
-| `pnpm infra:up`     | Start local Postgres / Redis / Kafka / MinIO           |
-| `pnpm infra:down`   | Stop the same                                          |
+| Command             | Purpose                                      |
+| ------------------- | -------------------------------------------- |
+| `pnpm -r build`     | Build every package + service + app          |
+| `pnpm -r lint`      | ESLint across the workspace                  |
+| `pnpm -r test`      | Vitest across packages + services            |
+| `pnpm format`       | Auto-format with Prettier                    |
+| `pnpm format:check` | Verify formatting without modifying          |
+| `pnpm infra:up`     | Start local Postgres / Redis / Kafka / MinIO |
+| `pnpm infra:down`   | Stop the same                                |
 
 ## Repository layout
 
@@ -140,9 +163,11 @@ Every state-changing endpoint writes a row to `audit_logs`. A chaos test
 value has at least one writer. Failing this test means the codebase
 can't answer the regulator's "where is action X audited?" question.
 
-Cumulative audit-action count as of Sprint 17: **70+** distinct actions
+Cumulative audit-action count as of Sprint 21: **85+** distinct actions
 covering clinical lifecycle, sharing, instruments, DSR rights, admin
-operations, and crisis surfacing.
+operations, crisis surfacing, session-defaults cascade decisions,
+treatment-episode lifecycle, per-goal achievement toggles, and
+progress-report generation + sharing.
 
 ## Contributing
 
