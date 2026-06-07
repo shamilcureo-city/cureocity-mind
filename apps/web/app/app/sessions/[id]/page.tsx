@@ -109,7 +109,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         )}
         {tab === 'clinical-brief' &&
           (isIntake ? (
-            <InitialAssessmentTabPanel sessionId={id} />
+            <InitialAssessmentTabPanel sessionId={id} clientId={session.clientId} />
           ) : (
             <ClinicalBriefTabPanel sessionId={id} />
           ))}
@@ -154,12 +154,23 @@ async function ClinicalBriefTabPanel({ sessionId }: { sessionId: string }) {
   return <ClinicalBriefTab sessionId={sessionId} initialReport={initial} />;
 }
 
-async function InitialAssessmentTabPanel({ sessionId }: { sessionId: string }) {
+async function InitialAssessmentTabPanel({
+  sessionId,
+  clientId,
+}: {
+  sessionId: string;
+  clientId: string;
+}) {
   const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
   const envelope = row ? { status: row.status, errorMessage: row.errorMessage } : null;
   const brief = row ? readInitialAssessmentBrief(row) : null;
   return (
-    <InitialAssessmentTab sessionId={sessionId} reportEnvelope={envelope} initialBrief={brief} />
+    <InitialAssessmentTab
+      sessionId={sessionId}
+      clientId={clientId}
+      reportEnvelope={envelope}
+      initialBrief={brief}
+    />
   );
 }
 
