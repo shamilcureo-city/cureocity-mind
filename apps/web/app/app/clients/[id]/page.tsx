@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { AffectCard } from '@/components/app/AffectCard';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
+import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
 import { InstrumentRunner } from '@/components/app/InstrumentRunner';
 import { JourneyHeader } from '@/components/app/JourneyHeader';
 import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
@@ -95,7 +96,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
   // Surface recommended therapies from the most recent completed
   // ClinicalReport. If none exists yet, fall back to an empty list —
   // the LIBRARY_THERAPIES set is always available.
-  const [latestReport, activePlan] = await Promise.all([
+  const [latestReport, activePlan, diagnoses] = await Promise.all([
     prisma.clinicalReport.findFirst({
       where: { clientId: client.id, status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
@@ -105,6 +106,19 @@ export default async function ClientDetailPage({ params }: PageProps) {
       where: { clientId: client.id, supersededAt: null },
       orderBy: { version: 'desc' },
       select: { id: true },
+    }),
+    prisma.clientDiagnosis.findMany({
+      where: { clientId: client.id },
+      orderBy: [{ supersededAt: 'asc' }, { confirmedAt: 'desc' }],
+      select: {
+        id: true,
+        icd11Code: true,
+        icd11Label: true,
+        confidence: true,
+        isPrimary: true,
+        confirmedAt: true,
+        supersededAt: true,
+      },
     }),
   ]);
   const recommendedTherapies = extractRecommended(latestReport?.body);
@@ -182,6 +196,12 @@ export default async function ClientDetailPage({ params }: PageProps) {
       <div className="mt-6">
         <PreSessionBriefCard clientId={client.id} />
       </div>
+
+      {diagnoses.length > 0 && (
+        <div className="mt-6">
+          <DiagnosisHistoryCard diagnoses={diagnoses} />
+        </div>
+      )}
 
       <div className="mt-6">
         <WorkflowSection clientId={client.id} />
