@@ -5,7 +5,7 @@ import type { SessionKind, SessionModality } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckboxRow, Input, Label, FieldError } from '../ui/Field';
-import { type RecordReady, SCRIPT_VERSION } from './record-types';
+import { readApiError, type RecordReady, SCRIPT_VERSION } from './record-types';
 import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
 
 interface Props {
@@ -47,7 +47,12 @@ export function NewClientForm({ onCancel, onReady }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const ready = !!fullName.trim() && contactPhone.trim().startsWith('+91') && audioOk && noteOk;
+  // The IndianPhoneSchema regex (`^\+91\d{10}$`) is strict on purpose
+  // (WhatsApp + SMS routing need the canonical form), so accept spaces
+  // / hyphens / parens in the input field and strip them on submit.
+  const normalisedPhone = contactPhone.replace(/[\s\-()]/g, '');
+  const ready =
+    !!fullName.trim() && /^\+91\d{10}$/.test(normalisedPhone) && audioOk && noteOk;
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -67,7 +72,7 @@ export function NewClientForm({ onCancel, onReady }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fullName: fullName.trim(),
-          contactPhone: contactPhone.trim(),
+          contactPhone: normalisedPhone,
           consents: [
             ...(audioOk
               ? [
@@ -100,8 +105,7 @@ export function NewClientForm({ onCancel, onReady }: Props) {
         }),
       });
       if (!clientRes.ok) {
-        const body = (await clientRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Create client failed (${clientRes.status})`);
+        throw new Error(await readApiError(clientRes, 'Create client failed'));
       }
       const created = (await clientRes.json()) as { id: string; fullName: string };
 
@@ -117,8 +121,7 @@ export function NewClientForm({ onCancel, onReady }: Props) {
         }),
       });
       if (!sessionRes.ok) {
-        const body = (await sessionRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Create session failed (${sessionRes.status})`);
+        throw new Error(await readApiError(sessionRes, 'Create session failed'));
       }
       const sessionRow = (await sessionRes.json()) as {
         id: string;
@@ -136,15 +139,13 @@ export function NewClientForm({ onCancel, onReady }: Props) {
         }),
       });
       if (!consentRes.ok) {
-        const body = (await consentRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Record consent failed (${consentRes.status})`);
+        throw new Error(await readApiError(consentRes, 'Record consent failed'));
       }
 
       // 4. Move session to IN_PROGRESS.
       const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
       if (!startRes.ok) {
-        const body = (await startRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Start session failed (${startRes.status})`);
+        throw new Error(await readApiError(startRes, 'Start session failed'));
       }
 
       onReady({
@@ -201,8 +202,10 @@ export function NewClientForm({ onCancel, onReady }: Props) {
               required
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
+              placeholder="+91 98765 43210"
               autoComplete="off"
             />
+            <p className="mt-1 text-xs text-[var(--color-ink-3)]">+91 + 10 digits.</p>
           </div>
         </div>
 
