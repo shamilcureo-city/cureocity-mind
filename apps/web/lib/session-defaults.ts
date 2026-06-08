@@ -63,6 +63,7 @@ export async function computeSessionDefaults(
     grantedConsents,
     phq9Latest,
     gad7Latest,
+    lastCompleted,
   ] = await Promise.all([
     prisma.client.findUnique({
       where: { id: clientId },
@@ -103,6 +104,11 @@ export async function computeSessionDefaults(
       where: { clientId, instrumentKey: 'GAD7' },
       orderBy: { administeredAt: 'desc' },
       select: { administeredAt: true },
+    }),
+    prisma.session.findFirst({
+      where: { clientId, status: 'COMPLETED' },
+      orderBy: { endedAt: 'desc' },
+      select: { endedAt: true },
     }),
   ]);
 
@@ -179,6 +185,7 @@ export async function computeSessionDefaults(
       PHQ9: phq9Latest?.administeredAt.toISOString() ?? null,
       GAD7: gad7Latest?.administeredAt.toISOString() ?? null,
     },
+    lastCompletedSessionAt: lastCompleted?.endedAt?.toISOString() ?? null,
   };
 }
 

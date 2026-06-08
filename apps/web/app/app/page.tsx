@@ -3,6 +3,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { RecordingShell } from '@/components/app/RecordingShell';
+import type { ClientTileEntry } from '@/components/app/ClientPicker';
 import { prisma } from '@/lib/prisma';
 import type { Session as SessionPrismaRow } from '@prisma/client';
 
@@ -14,7 +15,7 @@ export default async function RecordPage() {
     select: { id: true, fullName: true },
   });
 
-  const [sessions, clients] = therapist
+  const [sessions, rawClients] = therapist
     ? await Promise.all([
         prisma.session.findMany({
           where: { psychologistId: therapist.id },
@@ -22,29 +23,40 @@ export default async function RecordPage() {
           take: 30,
           include: { client: { select: { fullName: true } } },
         }),
+        // Sprint 23 — Client tiles need the most recent COMPLETED
+        // session's `endedAt` to render "last 2d ago" copy. Inline
+        // include (take: 1) keeps the query a single round-trip.
         prisma.client.findMany({
           where: { psychologistId: therapist.id, deletedAt: null, status: 'ACTIVE' },
           orderBy: { fullName: 'asc' },
-          select: { id: true, fullName: true, preferredModality: true },
+          select: {
+            id: true,
+            fullName: true,
+            preferredModality: true,
+            sessions: {
+              where: { status: 'COMPLETED' },
+              orderBy: { endedAt: 'desc' },
+              take: 1,
+              select: { endedAt: true },
+            },
+          },
         }),
       ])
     : [[], []];
+
+  const clients: ClientTileEntry[] = rawClients.map((c) => ({
+    id: c.id,
+    fullName: c.fullName,
+    preferredModality: c.preferredModality,
+    lastCompletedSessionAt: c.sessions[0]?.endedAt?.toISOString() ?? null,
+  }));
 
   const grouped = groupByDate(sessions as SessionWithClient[]);
 
   return (
     <main>
       <Container className="py-10">
-        <header className="mb-8">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
-            Record
-          </p>
-          <h1 className="mt-2 font-serif text-3xl leading-tight">
-            New session — pick how you want to capture it.
-          </h1>
-        </header>
-
-        <RecordingShell initialClients={clients} />
+        <RecordingShell clients={clients} />
 
         <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
