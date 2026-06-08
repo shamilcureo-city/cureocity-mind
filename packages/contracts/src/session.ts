@@ -85,6 +85,11 @@ export const SessionDefaultsSchema = z.object({
   /// Per-instrument key (PHQ9, GAD7) → ISO timestamp of the most
   /// recent administration, or null if never administered.
   lastInstrumentAdministrations: z.record(z.string(), z.string().nullable()),
+  /// ISO timestamp of the most recent COMPLETED session, or null if
+  /// none. Drives the "Last: 2d ago" copy on the Record-page client
+  /// tile. Optional in the contract so consumers built before this
+  /// field still validate.
+  lastCompletedSessionAt: z.string().nullable().optional(),
 });
 
 export type CreateSessionInput = z.infer<typeof CreateSessionInputSchema>;
