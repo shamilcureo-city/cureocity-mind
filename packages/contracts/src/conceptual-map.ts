@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CuidSchema, IsoDateTimeSchema } from './common';
+import { IsoDateTimeSchema } from './common';
 
 /**
  * Sprint 24 — Conceptual Map (Pass 7).
@@ -54,8 +54,13 @@ export const ConceptNodeSchema = z.object({
    * Reuses the existing Reflection-Question portal share pattern.
    */
   reflectionPrompts: z.array(z.string().min(1).max(280)).max(3),
-  /** Session IDs the node was derived from — for the audit trail. */
-  sourceSessionIds: z.array(CuidSchema).max(50),
+  /**
+   * Session IDs the node was derived from. The LLM is asked to echo
+   * back IDs from the input set, but we don't strict-validate them
+   * (CUID checks here just brittle the response without buying safety
+   * — these IDs are display-only).
+   */
+  sourceSessionIds: z.array(z.string()).max(50),
 });
 export type ConceptNode = z.infer<typeof ConceptNodeSchema>;
 
@@ -82,8 +87,8 @@ export const ConceptualMapV1Schema = z.object({
    */
   edges: z.array(ConceptEdgeSchema).max(30),
   generatedAt: IsoDateTimeSchema,
-  /** Session IDs the prompt actually saw. */
-  basedOnSessionIds: z.array(CuidSchema).max(100),
+  /** Session IDs the prompt actually saw — server-controlled (route fills in). */
+  basedOnSessionIds: z.array(z.string()).max(100),
 }).superRefine((map, ctx) => {
   const ids = new Set(map.nodes.map((n) => n.id));
   for (const [i, e] of map.edges.entries()) {

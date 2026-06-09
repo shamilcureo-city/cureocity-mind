@@ -124,11 +124,16 @@ export async function POST(
       },
     });
   } catch (e) {
+    // Surface the actual cause so the UI shows something actionable.
+    // The previous saved map (if any) is left untouched — the live
+    // row is only superseded after a successful persist below.
+    const detail = (e as Error).message;
     console.error(
-      `[conceptual-map] Pass 7 failed for client ${clientId}: ${(e as Error).message}`,
+      `[conceptual-map] Pass 7 failed for client ${clientId}: ${detail}`,
+      e,
     );
     return NextResponse.json(
-      { error: 'Generation failed. The previous map (if any) is still visible — try again later.' },
+      { error: `Generation failed: ${detail}` },
       { status: 502 },
     );
   }
