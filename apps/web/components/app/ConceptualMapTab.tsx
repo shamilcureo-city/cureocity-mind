@@ -108,8 +108,8 @@ export function ConceptualMapTab({ clientId }: Props) {
         <h2 className="font-serif text-2xl">Conceptual map</h2>
         <p className="mt-2 text-sm text-[var(--color-ink-2)]">
           {data?.generatedAt
-            ? "Last refresh produced no nodes — there might not be enough transcript yet."
-            : 'A graph of the values, beliefs, patterns and challenges that have surfaced across this client&apos;s sessions. Once you&apos;ve recorded at least one session, you can generate it here.'}
+            ? 'Last refresh produced no nodes — there might not be enough transcript yet.'
+            : 'A graph of the values, beliefs, patterns and challenges that have surfaced across this client’s sessions. Once you’ve recorded at least one session, you can generate it here.'}
         </p>
         {error && <p className="mt-3 text-xs text-[var(--color-warn)]">{error}</p>}
         <div className="mt-5">

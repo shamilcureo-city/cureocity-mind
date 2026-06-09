@@ -65,8 +65,17 @@ export class VertexGeminiProConceptualMapBackend implements IPass7Backend {
       });
 
       const text = res.text ?? '{}';
-      const parsed: unknown = JSON.parse(text);
-      const output = Pass7OutputSchema.parse({ conceptualMap: parsed });
+      const parsedRaw = JSON.parse(text) as Record<string, unknown>;
+      // Inject the three server-controlled fields. LLMs frequently
+      // skip timestamps + repeat the input session IDs imperfectly,
+      // which would fail Zod validation. We own these fields anyway.
+      const normalised = {
+        ...parsedRaw,
+        version: 'V1',
+        generatedAt: new Date().toISOString(),
+        basedOnSessionIds: input.basedOnSessionIds,
+      };
+      const output = Pass7OutputSchema.parse({ conceptualMap: normalised });
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
