@@ -16,18 +16,16 @@ interface Props {
 }
 
 /**
- * Sprint 26/27 — slimmer top-level tab bar.
+ * Sprint 26/28 — slimmer top-level tab bar.
  *
  * Documentation-flavoured tabs (Notes / Transcript / Session
- * Information / Client) live as peers. The per-session AI surfaces
- * (Clinical Brief / Initial Assessment, Mindmap, Reflection
- * Questions) collapse into a single **AI Copilot** tab that
- * therapists who only want a documentation tool can simply ignore.
- *
- * Cross-session decision-support (Case Briefing, Conceptual Map,
- * Diagnosis history, Therapy Library, Workflow, the care journey)
- * is NOT here — it lives on the *client* page's AI Copilot tab
- * (`ClientAICopilotTab`); the session copilot links across to it.
+ * Information / Client) live as peers. The entire AI
+ * decision-support layer collapses into a single **AI Copilot**
+ * tab that therapists who only want a documentation tool can simply
+ * ignore. Inside it, a sub-tab bar groups the surfaces by altitude
+ * (This session / Journey / Case Briefing / Measures / Formulation
+ * & Plan) — see `AICopilotTab`. The client page is a lean record
+ * and carries none of this.
  */
 export function SessionWorkspaceTabs({
   sessionId,
