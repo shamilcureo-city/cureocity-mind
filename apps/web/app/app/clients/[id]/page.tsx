@@ -10,14 +10,17 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { AffectCard } from '@/components/app/AffectCard';
 import { CaseBriefingPanel } from '@/components/app/CaseBriefingPanel';
+import { ClientWorkspaceTabs, type ClientTabKey } from '@/components/app/ClientWorkspaceTabs';
 import { ConceptualMapTab } from '@/components/app/ConceptualMapTab';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
 import { EpisodeStepper } from '@/components/app/EpisodeStepper';
 import { InstrumentRunner } from '@/components/app/InstrumentRunner';
 import { JourneyHeader } from '@/components/app/JourneyHeader';
+import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
+import { TodayStrip } from '@/components/app/TodayStrip';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { JourneyError, computeClientJourney } from '@/lib/journey';
@@ -26,8 +29,7 @@ import { prisma } from '@/lib/prisma';
 /**
  * Library of therapies always available in the Therapy Library card,
  * even when the active ClinicalReport hasn't surfaced any
- * recommendations yet. Kept as a small static list — Sprint 17+ will
- * pull from a richer evidence-based catalog if needed.
+ * recommendations yet.
  */
 const LIBRARY_THERAPIES: string[] = [
   'Cognitive Restructuring',
@@ -42,37 +44,45 @@ const LIBRARY_THERAPIES: string[] = [
   'Motivational Interviewing',
 ];
 
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }
 
-/**
- * Client detail page — the Case Workspace (Sprint 22).
- *
- * Restructured from a flat stack of cards into a decision surface +
- * supporting evidence:
- *   1. Identity — name, status, age, contact, presenting concerns
- *   2. Case Briefing (the anchor) — what's going on (5 Ps), what's still
- *      open (the running differential), the next 1-3 actions, and when to
- *      see the client again. Server-rendered deterministically; the panel
- *      offers a Pass-6 "Refresh" for the LLM narrative.
- *   — "Clinical record & evidence" divider —
- *   3. Journey (measured progress) · Pre-session brief · Diagnosis history
- *      · Workflow · Instruments · Therapy library · Affect · Data rights ·
- *      every session. These are the data the briefing is built from.
- *
- * Auth: the WorkflowSection / AffectCard endpoints they hit are
- * already requirePsychologistId-gated, so cross-tenant attempts to
- * load by client id surface as empty cards rather than data leakage.
- * The session-list query here uses the same psychologist scope.
- */
-export default async function ClientDetailPage({ params }: PageProps) {
-  const { id } = await params;
+const VALID_TABS: readonly ClientTabKey[] = ['clinical', 'map', 'progress', 'sessions'] as const;
 
-  // Dev shortcut: read the seeded dev user. Sprint 12 hardens this
-  // into a middleware check.
+/**
+ * Client detail page — the Case Workspace (Sprint 22, retabbed Sprint 25).
+ *
+ * Restructured from a stacked accordion into a tabbed workspace.
+ * Always rendered above the tab nav:
+ *   1. Identity card — name, status, age, contact, presenting concerns
+ *   2. Episode-of-care stepper — where the client is in the arc
+ *   3. Today strip — next session due · open items · latest instrument
+ *   4. Page-level crisis banner — when an active flag warrants it
+ *   5. Tab nav (4 peer tabs)
+ *
+ * The four peer tabs:
+ *   - Clinical Engine (default) — Case Briefing + Diagnosis + Workflow + Therapy library
+ *   - Conceptual Map           — Sprint-24 force-directed thematic graph
+ *   - Progress                 — Journey verdict + Instruments + Affect
+ *   - Sessions                 — Sessions list + Pre-session brief + Data rights
+ *
+ * Auth: every downstream component already enforces tenant gating
+ * via `requirePsychologistId`. The page-level query filters by
+ * `psychologistId` so cross-tenant URL probing returns 404.
+ */
+export default async function ClientDetailPage({ params, searchParams }: PageProps) {
+  const { id } = await params;
+  const { tab: tabParam } = await searchParams;
+  const activeTab: ClientTabKey = VALID_TABS.includes(tabParam as ClientTabKey)
+    ? (tabParam as ClientTabKey)
+    : 'clinical';
+
   const therapist = await prisma.psychologist.findUnique({
     where: { firebaseUid: 'dev-firebase-uid-priya' },
     select: { id: true },
@@ -98,10 +108,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
   if (!client) notFound();
 
-  // Surface recommended therapies from the most recent completed
-  // ClinicalReport. If none exists yet, fall back to an empty list —
-  // the LIBRARY_THERAPIES set is always available.
-  const [latestReport, activePlan, diagnoses] = await Promise.all([
+  const [latestReport, activePlan, diagnoses, latestMap] = await Promise.all([
     prisma.clinicalReport.findFirst({
       where: { clientId: client.id, status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
@@ -125,23 +132,22 @@ export default async function ClientDetailPage({ params }: PageProps) {
         supersededAt: true,
       },
     }),
+    // Sprint 25 — Map badge: stale if a session has been completed
+    // since the last refresh. Just need the timestamp.
+    prisma.clientConceptualMap.findFirst({
+      where: { clientId: client.id, supersededAt: null },
+      orderBy: { generatedAt: 'desc' },
+      select: { generatedAt: true },
+    }),
   ]);
   const recommendedTherapies = extractRecommended(latestReport?.body);
   const langParse = ClinicalLocaleSchema.safeParse(client.preferredLanguage);
   const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';
 
-  // Sprint 20 — measurement-based-care journey summary. Composed from the
-  // cumulative tables; never blocks the page (a derivation error just
-  // hides the band).
   const journey = await computeClientJourney(client.id, therapist.id).catch((e) => {
     if (e instanceof JourneyError) return null;
     throw e;
   });
-
-  // Sprint 22 — the Case Briefing: the single synthesis that anchors the
-  // workspace (what's going on · what's still open · do next · when to
-  // return). Deterministic server render; the panel offers a Pass-6
-  // "Refresh" for the LLM narrative. Never blocks the page.
   const briefing = await buildDeterministicCaseBriefing(client.id, therapist.id).catch((e) => {
     if (e instanceof JourneyError) return null;
     throw e;
@@ -149,6 +155,11 @@ export default async function ClientDetailPage({ params }: PageProps) {
 
   const age = client.dateOfBirth ? calcAge(client.dateOfBirth) : null;
   const completedSessions = client.sessions.filter((s) => s.status === 'COMPLETED').length;
+
+  // Sprint 25 — tab freshness heuristics. No persistence; just absolute
+  // recency. `Sessions ●` when a completed session lands today;
+  // `Map ↻` when the saved map is older than the latest session.
+  const badges = computeBadges(client.sessions, latestMap?.generatedAt ?? null);
 
   return (
     <Container className="py-10">
@@ -187,197 +198,133 @@ export default async function ClientDetailPage({ params }: PageProps) {
           )}
         </dl>
 
-        <section className="mt-6">
-          <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Presenting concerns
-          </h2>
-          <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
-            {client.presentingConcerns?.trim() || 'No presenting concerns recorded yet.'}
-          </p>
-        </section>
+        {client.presentingConcerns?.trim() && (
+          <section className="mt-6">
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Presenting concerns
+            </h2>
+            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
+              {client.presentingConcerns.trim()}
+            </p>
+          </section>
+        )}
       </Card>
 
-      {/* Episode-of-care flow — makes the clinical arc visible at the top. */}
       <div className="mt-6">
         <EpisodeStepper journey={journey} sessionsCompleted={completedSessions} />
       </div>
 
-      {/* The decision surface. Everything below it is the evidence the
-          briefing is built from, grouped into three collapsible
-          sections so the page reads as ONE anchor + ONE details
-          surface, not a stack of cards. */}
-      {briefing && (
-        <div className="mt-6">
-          <CaseBriefingPanel
-            clientId={client.id}
-            clientName={client.fullName}
-            initialBriefing={briefing}
-          />
-        </div>
-      )}
+      <TodayStrip journey={journey} briefing={briefing} />
+      <PageCrisisBanner briefing={briefing} />
 
-      <div className="mt-10 flex items-center gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
-          Clinical record &amp; evidence
-        </h2>
-        <span className="h-px flex-1 bg-[var(--color-line-soft)]" aria-hidden />
+      <div className="mt-6">
+        <ClientWorkspaceTabs clientId={client.id} active={activeTab} badges={badges} />
       </div>
-      <p className="mt-2 text-sm text-[var(--color-ink-3)]">
-        Everything the briefing is built from. Expand a section when you need it.
-      </p>
 
-      {/* Section 1 — measured progress (open by default; this is the
-          most-glanced surface on follow-up visits). */}
-      <details
-        open
-        className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40"
-      >
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-          <span>
-            <span className="text-sm font-semibold text-[var(--color-ink)]">Measured progress</span>
-            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
-              Journey · instruments · affect
-            </span>
-          </span>
-          <span
-            aria-hidden
-            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
-          >
-            ▸
-          </span>
-        </summary>
-        <div className="space-y-6 border-t border-[var(--color-line-soft)] p-5">
-          {journey && (
-            <JourneyHeader
-              journey={journey}
-              clientName={client.fullName}
-              clientHasContactPhone={!!client.contactPhone}
-              clientHasContactEmail={!!client.contactEmail}
-            />
-          )}
-          <div id="instruments" className="scroll-mt-6">
-            <InstrumentRunner clientId={client.id} />
-          </div>
-          <AffectCard clientId={client.id} />
-        </div>
-      </details>
-
-      {/* Section 2 — clinical history (closed by default; opened when
-          the therapist needs to trace the diagnosis / plan trail). */}
-      <details className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-          <span>
-            <span className="text-sm font-semibold text-[var(--color-ink)]">Clinical history</span>
-            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
-              Diagnosis · workflow · therapy library
-            </span>
-          </span>
-          <span
-            aria-hidden
-            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
-          >
-            ▸
-          </span>
-        </summary>
-        <div className="space-y-6 border-t border-[var(--color-line-soft)] p-5">
-          {diagnoses.length > 0 && <DiagnosisHistoryCard diagnoses={diagnoses} />}
-          <WorkflowSection clientId={client.id} />
-          <TherapyLibrary
-            clientId={client.id}
-            recommendedTherapies={recommendedTherapies}
-            libraryTherapies={LIBRARY_THERAPIES}
-            defaultLanguage={defaultLanguage}
-            activeTreatmentPlanId={activePlan?.id ?? null}
-          />
-        </div>
-      </details>
-
-      {/* Section 3 — Conceptual map (Sprint 24, Pass 7). Closed by
-          default — therapist opens on demand to glance at the thematic
-          graph or send reflection prompts to the client. */}
-      <details className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-          <span>
-            <span className="text-sm font-semibold text-[var(--color-ink)]">Conceptual map</span>
-            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
-              Themes · values · patterns · beliefs
-            </span>
-          </span>
-          <span
-            aria-hidden
-            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
-          >
-            ▸
-          </span>
-        </summary>
-        <div className="border-t border-[var(--color-line-soft)] p-5">
-          <ConceptualMapTab clientId={client.id} />
-        </div>
-      </details>
-
-      {/* Section 4 — sessions + ops (closed by default). */}
-      <details className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
-          <span>
-            <span className="text-sm font-semibold text-[var(--color-ink)]">
-              Sessions &amp; data
-            </span>
-            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
-              {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} ·
-              pre-session brief · data rights
-            </span>
-          </span>
-          <span
-            aria-hidden
-            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
-          >
-            ▸
-          </span>
-        </summary>
-        <div className="space-y-6 border-t border-[var(--color-line-soft)] p-5">
-          <PreSessionBriefCard clientId={client.id} />
-          <Card className="overflow-hidden">
-            <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
-              <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-                Sessions
-              </h3>
-              <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
-              </p>
-            </header>
-            {client.sessions.length === 0 ? (
-              <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-                No sessions yet. Start one from the Record tab.
-              </p>
-            ) : (
-              <ul className="divide-y divide-[var(--color-line-soft)]">
-                {client.sessions.map((s) => (
-                  <li key={s.id}>
-                    <Link
-                      href={`/app/sessions/${s.id}`}
-                      className="grid grid-cols-[1.5fr_1fr_1.5fr_1fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
-                    >
-                      <span className="text-[var(--color-ink)]">
-                        {formatDateTime(s.scheduledAt)}
-                      </span>
-                      <span className="text-[var(--color-ink-2)]">{s.modality}</span>
-                      <span className="text-[var(--color-ink-2)]">
-                        {sessionSummary(s.status, s.therapyNote, s.noteDraft)}
-                      </span>
-                      <span className="text-right">
-                        <Badge tone={statusTone(s.status)}>{s.status.toLowerCase()}</Badge>
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+      <div className="mt-6">
+        {activeTab === 'clinical' && (
+          <div className="space-y-6">
+            {briefing && (
+              <CaseBriefingPanel
+                clientId={client.id}
+                clientName={client.fullName}
+                initialBriefing={briefing}
+              />
             )}
-          </Card>
-          <DataRightsCard clientId={client.id} clientName={client.fullName} />
-        </div>
-      </details>
+            {diagnoses.length > 0 && <DiagnosisHistoryCard diagnoses={diagnoses} />}
+            <WorkflowSection clientId={client.id} />
+            <TherapyLibrary
+              clientId={client.id}
+              recommendedTherapies={recommendedTherapies}
+              libraryTherapies={LIBRARY_THERAPIES}
+              defaultLanguage={defaultLanguage}
+              activeTreatmentPlanId={activePlan?.id ?? null}
+            />
+          </div>
+        )}
+
+        {activeTab === 'map' && <ConceptualMapTab clientId={client.id} />}
+
+        {activeTab === 'progress' && (
+          <div className="space-y-6">
+            {journey && (
+              <JourneyHeader
+                journey={journey}
+                clientName={client.fullName}
+                clientHasContactPhone={!!client.contactPhone}
+                clientHasContactEmail={!!client.contactEmail}
+              />
+            )}
+            <div id="instruments" className="scroll-mt-6">
+              <InstrumentRunner clientId={client.id} />
+            </div>
+            <AffectCard clientId={client.id} />
+          </div>
+        )}
+
+        {activeTab === 'sessions' && (
+          <div className="space-y-6">
+            <PreSessionBriefCard clientId={client.id} />
+            <Card className="overflow-hidden">
+              <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
+                <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                  Sessions
+                </h3>
+                <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                  {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'}{' '}
+                  recorded.
+                </p>
+              </header>
+              {client.sessions.length === 0 ? (
+                <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
+                  No sessions yet. Start one from the Record tab.
+                </p>
+              ) : (
+                <ul className="divide-y divide-[var(--color-line-soft)]">
+                  {client.sessions.map((s) => (
+                    <li key={s.id}>
+                      <Link
+                        href={`/app/sessions/${s.id}`}
+                        className="grid grid-cols-[1.5fr_1fr_1.5fr_1fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
+                      >
+                        <span className="text-[var(--color-ink)]">
+                          {formatDateTime(s.scheduledAt)}
+                        </span>
+                        <span className="text-[var(--color-ink-2)]">{s.modality ?? '—'}</span>
+                        <span className="text-[var(--color-ink-2)]">
+                          {sessionSummary(s.status, s.therapyNote, s.noteDraft)}
+                        </span>
+                        <span className="text-right">
+                          <Badge tone={statusTone(s.status)}>{s.status.toLowerCase()}</Badge>
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+            <DataRightsCard clientId={client.id} clientName={client.fullName} />
+          </div>
+        )}
+      </div>
     </Container>
   );
+}
+
+function computeBadges(
+  sessions: { status: string; endedAt: Date | null }[],
+  latestMapAt: Date | null,
+): Partial<Record<ClientTabKey, string>> {
+  const out: Partial<Record<ClientTabKey, string>> = {};
+  const completed = sessions.filter((s) => s.status === 'COMPLETED' && s.endedAt !== null);
+  const lastSessionAt = completed[0]?.endedAt ?? null;
+  if (lastSessionAt && Date.now() - lastSessionAt.getTime() < ONE_DAY_MS) {
+    out.sessions = '●';
+  }
+  if (lastSessionAt && (!latestMapAt || latestMapAt < lastSessionAt)) {
+    out.map = '↻';
+  }
+  return out;
 }
 
 function calcAge(dob: Date): number {

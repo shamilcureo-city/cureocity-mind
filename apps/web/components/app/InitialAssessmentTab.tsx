@@ -130,9 +130,9 @@ export function InitialAssessmentTab({ sessionId, clientId, reportEnvelope, init
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Initial assessment is being prepared…</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Pass 3 is running in the background. This usually takes 30-60 seconds after the intake
-          note completes. If it’s been longer, the background run may have been killed by the
-          serverless cap — re-run it now.
+          Generating the initial assessment in the background. This usually takes 30-60 seconds
+          after the intake note completes. If it’s been longer, the background run may have been
+          killed by the serverless cap — re-run it now.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <Button onClick={() => void generate()} disabled={generating}>
@@ -149,7 +149,7 @@ export function InitialAssessmentTab({ sessionId, clientId, reportEnvelope, init
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Initial assessment generation failed</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-warn)]">
-          {errorMessage ?? 'Unknown error from Pass 3.'}
+          {errorMessage ?? "Couldn't generate the initial assessment — try Regenerate."}
         </p>
         <div className="mt-6">
           <Button onClick={() => void generate()} disabled={generating}>
@@ -217,8 +217,8 @@ function CompletedBrief({
 
       <Card className="p-6">
         <SectionHeader
-          title="Differential diagnoses"
-          subtitle={`${brief.differential.length} candidate${brief.differential.length === 1 ? '' : 's'}`}
+          title="Possible diagnoses — still narrowing"
+          subtitle={`${brief.differential.length} candidate${brief.differential.length === 1 ? '' : 's'} · differential`}
         />
         <ul className="mt-3 space-y-3">
           {brief.differential.map((c, i) => (
@@ -226,13 +226,16 @@ function CompletedBrief({
           ))}
         </ul>
         <p className="mt-3 text-xs italic text-[var(--color-ink-3)]">
-          Intake confidence ceilings are tight — none of these are confirmed. Treat them as a
-          starting point for the next 1-2 sessions.
+          AI confidence stays low at intake by design — none of these are confirmed. Treat them as
+          a starting point for the next 1-2 sessions.
         </p>
       </Card>
 
       <Card className="p-6">
-        <SectionHeader title="Assessment gaps" subtitle="open questions for next session" />
+        <SectionHeader
+          title="Questions to answer next"
+          subtitle="what's still missing before a working diagnosis"
+        />
         {brief.assessmentGaps.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
             No outstanding questions — the AI thinks the picture is clear enough.
@@ -324,7 +327,7 @@ function DifferentialCard({ candidate }: { candidate: ClinicalDiagnosisCandidate
           <strong className="font-mono text-sm">{candidate.icd11Code}</strong>{' '}
           <span className="text-sm">{candidate.icd11Label}</span>
         </div>
-        <Badge tone="muted">confidence {(candidate.confidence * 100).toFixed(0)}%</Badge>
+        <Badge tone="muted">AI confidence {(candidate.confidence * 100).toFixed(0)}%</Badge>
       </div>
       <ul className="mt-3 space-y-1">
         {candidate.supportingEvidence.map((q, j) => (
@@ -336,7 +339,7 @@ function DifferentialCard({ candidate }: { candidate: ClinicalDiagnosisCandidate
       {candidate.gapsToFill.length > 0 && (
         <div className="mt-3">
           <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Still to assess
+            Questions to answer next
           </p>
           <ul className="mt-1 list-disc pl-5 text-sm text-[var(--color-ink-2)]">
             {candidate.gapsToFill.map((g, j) => (

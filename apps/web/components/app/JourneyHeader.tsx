@@ -105,7 +105,10 @@ export function JourneyHeader({
         {journey.workingDiagnosis && (
           <div className="text-right">
             <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Working diagnosis
+              Current best fit
+              <span className="ml-2 normal-case tracking-normal text-[10px] text-[var(--color-ink-3)]">
+                (working diagnosis)
+              </span>
             </p>
             <p className="mt-1 text-sm">
               <span className="font-mono">{journey.workingDiagnosis.icd11Code}</span>{' '}
@@ -272,8 +275,16 @@ function InstrumentTrend({ change }: { change: InstrumentChange }) {
         <span className="text-[var(--color-ink-3)]"> ({severity(change.latestSeverityKey)})</span>
       </p>
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {change.isResponse && <Badge tone="accent">≥50% response</Badge>}
-        {change.isRemission && <Badge tone="accent">remission</Badge>}
+        {change.isResponse && (
+          <span title="≥50% reduction from baseline — clinically meaningful response.">
+            <Badge tone="accent">Big improvement</Badge>
+          </span>
+        )}
+        {change.isRemission && (
+          <span title="PHQ-9 ≤ 4 or GAD-7 ≤ 4 — at or below the symptom-free cutoff.">
+            <Badge tone="accent">In remission</Badge>
+          </span>
+        )}
         <span className="text-xs text-[var(--color-ink-3)]">
           {change.administrationCount} administration{change.administrationCount === 1 ? '' : 's'}
         </span>

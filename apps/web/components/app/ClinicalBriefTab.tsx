@@ -119,9 +119,9 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Clinical brief is being prepared…</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Pass 3 is running in the background. This usually takes 30-60 seconds after the note
-          completes. If it’s been longer, the background run may have been killed by the serverless
-          cap — re-run it now.
+          Generating the clinical brief in the background. This usually takes 30-60 seconds after
+          the note completes. If it’s been longer, the background run may have been killed by the
+          serverless cap — re-run it now.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <Button onClick={() => void generate()} disabled={generating}>
@@ -138,7 +138,7 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Clinical brief generation failed</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-warn)]">
-          {report.errorMessage ?? 'Unknown error from Pass 3.'}
+          {report.errorMessage ?? "Couldn't generate the clinical brief — try Regenerate."}
         </p>
         <div className="mt-6">
           <Button onClick={() => void generate()} disabled={generating}>
@@ -343,7 +343,11 @@ function DiagnosisSection({
   confirmation: ClinicalSectionConfirmation;
 }) {
   return (
-    <SectionCard title="Diagnosis" confirmation={confirmation}>
+    <SectionCard
+      title="Diagnosis"
+      subtitle="the working diagnosis — what the AI sees as the best fit right now"
+      confirmation={confirmation}
+    >
       {candidates.length === 0 ? (
         <p className="text-sm text-[var(--color-ink-2)]">
           The AI did not propose any diagnosis candidates — evidence too thin.
@@ -366,7 +370,7 @@ function DiagnosisSection({
                 </div>
                 <div className="flex gap-2">
                   {primaryIndex === i && <Badge tone="accent">primary</Badge>}
-                  <Badge tone="muted">confidence {(c.confidence * 100).toFixed(0)}%</Badge>
+                  <Badge tone="muted">AI confidence {(c.confidence * 100).toFixed(0)}%</Badge>
                 </div>
               </div>
               <ul className="mt-3 space-y-1">
