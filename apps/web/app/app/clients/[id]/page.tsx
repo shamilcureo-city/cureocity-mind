@@ -3,45 +3,63 @@ import { notFound } from 'next/navigation';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { AffectCard } from '@/components/app/AffectCard';
+import { ClientAICopilotTab } from '@/components/app/ClientAICopilotTab';
+import type { ClientCopilotSubKey } from '@/components/app/ClientAICopilotSubTabs';
+import { ClientWorkspaceTabs, type ClientTabKey } from '@/components/app/ClientWorkspaceTabs';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
-import { EpisodeStepper } from '@/components/app/EpisodeStepper';
-import { InstrumentRunner } from '@/components/app/InstrumentRunner';
-import { JourneyHeader } from '@/components/app/JourneyHeader';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
-import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
-import { TodayStrip } from '@/components/app/TodayStrip';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
-import { JourneyError, computeClientJourney } from '@/lib/journey';
+import { JourneyError } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string; sub?: string }>;
+}
+
+const VALID_TABS: ReadonlySet<ClientTabKey> = new Set(['record', 'copilot']);
+const VALID_SUBS: ReadonlySet<ClientCopilotSubKey> = new Set([
+  'journey',
+  'briefing',
+  'measures',
+  'formulation',
+]);
+
+function parseTab(raw: string | undefined): ClientTabKey {
+  return raw && (VALID_TABS as ReadonlySet<string>).has(raw) ? (raw as ClientTabKey) : 'record';
+}
+
+function parseSub(raw: string | undefined): ClientCopilotSubKey {
+  return raw && (VALID_SUBS as ReadonlySet<string>).has(raw)
+    ? (raw as ClientCopilotSubKey)
+    : 'journey';
 }
 
 /**
- * Client detail page — the cross-session browse surface (Sprint 26).
+ * Client detail page — Sprint 27 `Record | AI Copilot` split.
  *
- * Holds everything that is about the client *over time*: identity,
- * the episode-of-care arc, today-strip glance state, journey verdict
- * + discharge/share affordances, instruments tracked across sessions,
- * affect trend, the pre-session brief for the next visit, the
- * sessions list, and DSR controls.
+ * The **Record** tab is the bare administrative record every
+ * therapist needs: identity, the sessions list, and DSR controls.
+ * The **AI Copilot** tab holds all client-level decision-support
+ * (journey, case briefing, instruments + affect, conceptual map,
+ * diagnosis history, therapy library, workflow) behind one opt-in
+ * surface — see `ClientAICopilotTab`.
  *
- * The AI decision-support layer (Case Briefing, Conceptual Map,
- * Diagnosis history, Therapy Library, Workflow) is NOT rendered
- * here — it lives inside the session page's AI Copilot tab where
- * therapists can engage with it (or ignore it) on a session-by-
- * session basis. See `apps/web/components/app/AICopilotTab.tsx`.
+ * `PageCrisisBanner` is the one safety exception: it renders at the
+ * page level, above the tabs, so an active crisis flag is visible
+ * to a documentation-only therapist who never opens the copilot.
  *
- * Auth: every downstream component already enforces tenant gating
- * via `requirePsychologistId`. The page-level query filters by
+ * Auth: every downstream component enforces tenant gating via
+ * `requirePsychologistId`; the page query filters by
  * `psychologistId` so cross-tenant URL probing returns 404.
  */
-export default async function ClientDetailPage({ params }: PageProps) {
+export default async function ClientDetailPage({ params, searchParams }: PageProps) {
   const { id } = await params;
+  const { tab: rawTab, sub: rawSub } = await searchParams;
+  const tab = parseTab(rawTab);
+  const sub = parseSub(rawSub);
 
   const therapist = await prisma.psychologist.findUnique({
     where: { firebaseUid: 'dev-firebase-uid-priya' },
@@ -68,14 +86,8 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
   if (!client) notFound();
 
-  const journey = await computeClientJourney(client.id, therapist.id).catch((e) => {
-    if (e instanceof JourneyError) return null;
-    throw e;
-  });
-  // TodayStrip + PageCrisisBanner read briefing.cadence + .safety +
-  // .openItems — those signals are about the client, not about
-  // copilot, so we still derive the briefing server-side for the
-  // glance bands. The full panel renders inside AI Copilot.
+  // Built once for the page-level crisis banner; reused by the
+  // copilot's Journey/Briefing sub-tabs so they don't rebuild it.
   const briefing = await buildDeterministicCaseBriefing(client.id, therapist.id).catch((e) => {
     if (e instanceof JourneyError) return null;
     throw e;
@@ -92,12 +104,77 @@ export default async function ClientDetailPage({ params }: PageProps) {
         </Link>
       </p>
 
+      {/* Safety: always visible, regardless of the active tab. */}
+      <PageCrisisBanner briefing={briefing} />
+
+      <div className="mt-4">
+        <ClientWorkspaceTabs clientId={client.id} active={tab} />
+      </div>
+
+      <div className="mt-6">
+        {tab === 'record' ? (
+          <RecordTab
+            client={{
+              id: client.id,
+              fullName: client.fullName,
+              status: client.status,
+              preferredModality: client.preferredModality,
+              contactPhone: client.contactPhone,
+              contactEmail: client.contactEmail,
+              presentingConcerns: client.presentingConcerns,
+              createdAt: client.createdAt,
+              age,
+            }}
+            sessions={client.sessions}
+          />
+        ) : (
+          <ClientAICopilotTab
+            clientId={client.id}
+            psychologistId={therapist.id}
+            clientName={client.fullName}
+            clientHasContactPhone={!!client.contactPhone}
+            clientHasContactEmail={!!client.contactEmail}
+            preferredLanguage={client.preferredLanguage}
+            sessionsCompleted={completedSessions}
+            briefing={briefing}
+            sub={sub}
+          />
+        )}
+      </div>
+    </Container>
+  );
+}
+
+interface RecordClient {
+  id: string;
+  fullName: string;
+  status: string;
+  preferredModality: string | null;
+  contactPhone: string;
+  contactEmail: string | null;
+  presentingConcerns: string | null;
+  createdAt: Date;
+  age: number | null;
+}
+
+interface RecordSession {
+  id: string;
+  modality: string | null;
+  status: string;
+  scheduledAt: Date;
+  therapyNote: { id: string } | null;
+  noteDraft: { status: string } | null;
+}
+
+function RecordTab({ client, sessions }: { client: RecordClient; sessions: RecordSession[] }) {
+  return (
+    <>
       <Card className="p-7">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="font-serif text-3xl">{client.fullName}</h1>
             <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              {age !== null ? `${age} years` : 'Age not recorded'}
+              {client.age !== null ? `${client.age} years` : 'Age not recorded'}
               {' · '}
               Client since {formatMonth(client.createdAt)}
             </p>
@@ -134,50 +211,20 @@ export default async function ClientDetailPage({ params }: PageProps) {
       </Card>
 
       <div className="mt-6">
-        <EpisodeStepper journey={journey} sessionsCompleted={completedSessions} />
-      </div>
-
-      <TodayStrip journey={journey} briefing={briefing} />
-      <PageCrisisBanner briefing={briefing} />
-
-      {journey && (
-        <div className="mt-6">
-          <JourneyHeader
-            journey={journey}
-            clientName={client.fullName}
-            clientHasContactPhone={!!client.contactPhone}
-            clientHasContactEmail={!!client.contactEmail}
-          />
-        </div>
-      )}
-
-      <div className="mt-6" id="instruments">
-        <InstrumentRunner clientId={client.id} />
-      </div>
-
-      <div className="mt-6">
-        <AffectCard clientId={client.id} />
-      </div>
-
-      <div className="mt-6">
-        <PreSessionBriefCard clientId={client.id} />
-      </div>
-
-      <div className="mt-6">
         <Card className="overflow-hidden">
           <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
             <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Sessions</h3>
             <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
+              {sessions.length} session{sessions.length === 1 ? '' : 's'} recorded.
             </p>
           </header>
-          {client.sessions.length === 0 ? (
+          {sessions.length === 0 ? (
             <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
               No sessions yet. Start one from the Record tab.
             </p>
           ) : (
             <ul className="divide-y divide-[var(--color-line-soft)]">
-              {client.sessions.map((s) => (
+              {sessions.map((s) => (
                 <li key={s.id}>
                   <Link
                     href={`/app/sessions/${s.id}`}
@@ -202,7 +249,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
       <div className="mt-6">
         <DataRightsCard clientId={client.id} clientName={client.fullName} />
       </div>
-    </Container>
+    </>
   );
 }
 
