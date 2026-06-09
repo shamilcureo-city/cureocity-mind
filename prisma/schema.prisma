@@ -101,6 +101,7 @@ model Psychologist {
   therapyScripts      TherapyScript[]
   patientShares       PatientShare[]
   preSessionBriefs    PreSessionBrief[]
+  conceptualMaps      ClientConceptualMap[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
   webauthnCredentials WebAuthnCredential[]
@@ -326,6 +327,7 @@ model Client {
   therapyScripts      TherapyScript[]
   patientShares       PatientShare[]
   preSessionBriefs    PreSessionBrief[]
+  conceptualMaps      ClientConceptualMap[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
   treatmentEpisodes   TreatmentEpisode[]
@@ -706,6 +708,7 @@ enum GeminiPass {
   PASS_4_THERAPY_SCRIPT // Sprint 14 — Therapy Script Pass
   PASS_5_PRE_SESSION_BRIEF // Sprint 17 — Pre-Session Brief
   PASS_6_CASE_BRIEFING // Sprint 22 — per-client case briefing synthesis
+  PASS_7_CONCEPTUAL_MAP // Sprint 24 — Klarify-style per-client thematic graph
 }
 
 enum GeminiCallStatus {
@@ -1360,6 +1363,36 @@ model PreSessionBrief {
 }
 
 // ============================================================================
+// ClientConceptualMap — Sprint 24. Pass 7 output. Per-client cumulative
+// graph of values / affirmations / challenges / patterns / beliefs that
+// surfaced across the client's sessions, with verbatim supporting quotes
+// + reflection prompts per node. Versioned via `supersededAt` (each
+// refresh creates a new row and sets the previous row's supersededAt).
+// ============================================================================
+
+model ClientConceptualMap {
+  id                String   @id @default(cuid())
+  clientId          String
+  psychologistId    String
+  /// ConceptualMapV1 — see packages/contracts/src/conceptual-map.ts.
+  body              Json
+  /// Session IDs the prompt actually saw — for the audit trail.
+  basedOnSessionIds Json
+  generatedAt       DateTime @default(now())
+  /// Set when a newer map is generated. Null on the live row.
+  supersededAt      DateTime?
+  /// "llm" today. "fallback-empty" reserved for future deterministic placeholder.
+  source            String   @default("llm")
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, supersededAt])
+  @@index([psychologistId, generatedAt])
+  @@map("client_conceptual_maps")
+}
+
+// ============================================================================
 // InstrumentResponse — Sprint 17. A single administration of a
 // scored clinical instrument (PHQ-9, GAD-7, ...). One row per
 // administration; trends are queryable per (clientId, instrumentKey).
@@ -1812,6 +1845,8 @@ enum AuditAction {
   ASSESSMENT_ITEM_CLOSED
   // Case-briefing synthesis (Pass 6) — Sprint 22.
   CASE_BRIEFING_GENERATED
+  // Conceptual map (Pass 7) — Sprint 24. Per-client thematic graph.
+  CONCEPTUAL_MAP_GENERATED
 }
 
 enum AuditActorType {

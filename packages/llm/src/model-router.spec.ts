@@ -7,6 +7,7 @@ import {
   MockGeminiPass4Backend,
   MockGeminiPass5Backend,
   MockGeminiPass6Backend,
+  MockGeminiPass7Backend,
 } from './backends/mock-gemini.backend';
 import { computeCostInr, FLASH_PRICING, PRO_PRICING, estimateAudioInputTokens } from './pricing';
 
@@ -20,6 +21,7 @@ describe('ModelRouter', () => {
       pass4: new MockGeminiPass4Backend(),
       pass5: new MockGeminiPass5Backend(),
       pass6: new MockGeminiPass6Backend(),
+      pass7: new MockGeminiPass7Backend(),
       onCallLog,
     });
 
@@ -83,6 +85,7 @@ describe('ModelRouter', () => {
       pass4: new MockGeminiPass4Backend(),
       pass5: new MockGeminiPass5Backend(),
       pass6: new MockGeminiPass6Backend(),
+      pass7: new MockGeminiPass7Backend(),
     });
     const r = await router.pass1({
       sessionId: 's_lang_default',
@@ -101,6 +104,7 @@ describe('ModelRouter', () => {
       pass4: new MockGeminiPass4Backend(),
       pass5: new MockGeminiPass5Backend(),
       pass6: new MockGeminiPass6Backend(),
+      pass7: new MockGeminiPass7Backend(),
     });
     const r = await router.pass1({
       sessionId: 's_lang_manglish',
@@ -121,6 +125,7 @@ describe('ModelRouter', () => {
       pass4: new MockGeminiPass4Backend(),
       pass5: new MockGeminiPass5Backend(),
       pass6: new MockGeminiPass6Backend(),
+      pass7: new MockGeminiPass7Backend(),
     });
     // The mock backend itself produces a deterministic English script,
     // but the routing layer must accept the new field without errors.
@@ -140,6 +145,7 @@ describe('ModelRouter', () => {
       pass4: new MockGeminiPass4Backend(),
       pass5: new MockGeminiPass5Backend(),
       pass6: new MockGeminiPass6Backend(),
+      pass7: new MockGeminiPass7Backend(),
     });
     const result = await router.pass1({
       sessionId: 's_2',

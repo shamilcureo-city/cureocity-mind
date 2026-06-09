@@ -120,6 +120,7 @@ export const AuditActionSchema = z.enum([
   'ASSESSMENT_ITEM_CREATED',
   'ASSESSMENT_ITEM_CLOSED',
   'CASE_BRIEFING_GENERATED',
+  'CONCEPTUAL_MAP_GENERATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

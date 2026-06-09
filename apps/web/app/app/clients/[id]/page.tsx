@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { AffectCard } from '@/components/app/AffectCard';
 import { CaseBriefingPanel } from '@/components/app/CaseBriefingPanel';
+import { ConceptualMapTab } from '@/components/app/ConceptualMapTab';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
 import { EpisodeStepper } from '@/components/app/EpisodeStepper';
@@ -291,7 +292,30 @@ export default async function ClientDetailPage({ params }: PageProps) {
         </div>
       </details>
 
-      {/* Section 3 — sessions + ops (closed by default). */}
+      {/* Section 3 — Conceptual map (Sprint 24, Pass 7). Closed by
+          default — therapist opens on demand to glance at the thematic
+          graph or send reflection prompts to the client. */}
+      <details className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
+          <span>
+            <span className="text-sm font-semibold text-[var(--color-ink)]">Conceptual map</span>
+            <span className="ml-2 text-xs text-[var(--color-ink-3)]">
+              Themes · values · patterns · beliefs
+            </span>
+          </span>
+          <span
+            aria-hidden
+            className="text-[var(--color-ink-3)] transition-transform group-open:rotate-90"
+          >
+            ▸
+          </span>
+        </summary>
+        <div className="border-t border-[var(--color-line-soft)] p-5">
+          <ConceptualMapTab clientId={client.id} />
+        </div>
+      </details>
+
+      {/* Section 4 — sessions + ops (closed by default). */}
       <details className="group mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-white/40">
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4">
           <span>

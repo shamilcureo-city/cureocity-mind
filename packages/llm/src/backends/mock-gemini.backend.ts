@@ -8,6 +8,7 @@ import {
   type IPass4Backend,
   type IPass5Backend,
   type IPass6Backend,
+  type IPass7Backend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -20,12 +21,16 @@ import {
   type Pass5Output,
   type Pass6Input,
   type Pass6Output,
+  type Pass7Input,
+  type Pass7Output,
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
+import type { ConceptualMapV1 } from '@cureocity/contracts';
 import {
   CASE_BRIEFING_PROMPT_VERSION,
   CLINICAL_ANALYSIS_PROMPT_VERSION,
+  CONCEPTUAL_MAP_PROMPT_VERSION,
   PRE_SESSION_BRIEF_PROMPT_VERSION,
   TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
   THERAPY_NOTE_PROMPT_VERSION,
@@ -612,6 +617,109 @@ export class MockGeminiPass6Backend implements IPass6Backend {
         promptVersion: CASE_BRIEFING_PROMPT_VERSION,
         inputTokens: Math.ceil(input.contextText.length / 4),
         outputTokens: Math.ceil(input.deterministicBriefingJson.length / 4),
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Pass 7 mock — deterministic 6-node conceptual map. Lets the UI render
+ * end-to-end without Vertex creds; nodes are tagged "[mock]" so it's
+ * obvious in dev. Edges form a single connected component.
+ */
+export class MockGeminiPass7Backend implements IPass7Backend {
+  async run(input: Pass7Input): Promise<{ output: Pass7Output; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const map: ConceptualMapV1 = {
+      version: 'V1',
+      nodes: [
+        {
+          id: 'n1',
+          label: '[mock] Conflicted role',
+          category: 'CHALLENGE',
+          supportingQuote: 'I keep trying to be everything for everyone and I just feel split.',
+          summary: ['Carries multiple incompatible roles', 'Feels fragmented under the weight'],
+          description: 'Holds a self-image as the person who must hold it all together.',
+          reflectionPrompts: [
+            'When does this feel heaviest in your week?',
+            'Whose voice tells you it all has to be you?',
+          ],
+          sourceSessionIds: input.basedOnSessionIds.slice(0, 1),
+        },
+        {
+          id: 'n2',
+          label: '[mock] Seeking approval',
+          category: 'PATTERN',
+          supportingQuote: "I just want him to say I'm doing okay, you know?",
+          summary: ['Waits for external validation', 'Defers self-assessment'],
+          description: 'Looks outside for permission to feel okay about herself.',
+          reflectionPrompts: ['What would change if you were the one to say it first?'],
+          sourceSessionIds: input.basedOnSessionIds.slice(0, 1),
+        },
+        {
+          id: 'n3',
+          label: '[mock] Honesty',
+          category: 'VALUE',
+          supportingQuote: 'I have to be honest, even when it costs me.',
+          summary: ['Names honesty as a non-negotiable', 'Pays a price for it relationally'],
+          description: 'Holds honesty as a core value, even at personal cost.',
+          reflectionPrompts: ['Where in your week is honesty hardest?'],
+          sourceSessionIds: input.basedOnSessionIds.slice(0, 1),
+        },
+        {
+          id: 'n4',
+          label: '[mock] Perfection is necessary',
+          category: 'BELIEF',
+          supportingQuote: 'If I slip even a bit, everything will fall apart.',
+          summary: ['Equates imperfection with collapse', 'High threat sensitivity to mistakes'],
+          description: 'Believes a single mistake will cascade into total failure.',
+          reflectionPrompts: ['What’s the smallest imperfect thing you can imagine surviving?'],
+          sourceSessionIds: input.basedOnSessionIds.slice(0, 1),
+        },
+        {
+          id: 'n5',
+          label: '[mock] Quiet capability',
+          category: 'AFFIRMATION',
+          supportingQuote: 'I figured the whole thing out on my own.',
+          summary: ['Self-directed problem solving', 'Resourceful under stress'],
+          description: 'Has a demonstrated capacity to handle hard things alone.',
+          reflectionPrompts: ['When you handle something well alone, what do you tell yourself?'],
+          sourceSessionIds: input.basedOnSessionIds.slice(0, 1),
+        },
+        {
+          id: 'n6',
+          label: '[mock] Withdrawing when overwhelmed',
+          category: 'PATTERN',
+          supportingQuote: 'I just go quiet when it gets too much.',
+          summary: ['Shuts down rather than asks for help'],
+          description: 'Withdraws when overwhelmed instead of reaching out.',
+          reflectionPrompts: ['Who in your life is safe to not be quiet with?'],
+          sourceSessionIds: input.basedOnSessionIds.slice(0, 1),
+        },
+      ],
+      edges: [
+        { from: 'n2', to: 'n1', relationship: 'Approval-seeking sustains the conflicted-role pattern.' },
+        { from: 'n4', to: 'n1', relationship: 'The perfection belief amplifies the felt cost of conflicting roles.' },
+        { from: 'n3', to: 'n2', relationship: 'Holding honesty as a value creates tension with the approval-seeking pattern.' },
+        { from: 'n6', to: 'n1', relationship: 'Withdrawing is the release valve when the role-pressure becomes unbearable.' },
+        { from: 'n5', to: 'n4', relationship: 'Quiet capability is the very strength that perfection-belief reframes as never enough.' },
+      ],
+      generatedAt: new Date().toISOString(),
+      basedOnSessionIds: input.basedOnSessionIds,
+    };
+    return {
+      output: { conceptualMap: map },
+      callLog: {
+        sessionId: null,
+        pass: 'PASS_7_CONCEPTUAL_MAP',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: CONCEPTUAL_MAP_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.contextText.length / 4),
+        outputTokens: 600,
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',
