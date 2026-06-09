@@ -6,11 +6,13 @@ import {
   MockGeminiPass4Backend,
   MockGeminiPass5Backend,
   MockGeminiPass6Backend,
+  MockGeminiPass7Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
   VertexGeminiProClinicalBackend,
+  VertexGeminiProConceptualMapBackend,
   VertexGeminiProGlobalBackend,
   VertexGeminiProTherapyScriptBackend,
   type IModelRouter,
@@ -109,6 +111,14 @@ function build(): IModelRouter {
         model:
           process.env['VERTEX_BRIEF_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
+      pass7: new VertexGeminiProConceptualMapBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['VERTEX_CONCEPTUAL_MAP_MODEL'] ??
+          process.env['VERTEX_PRO_MODEL'] ??
+          'gemini-2.5-pro',
+      }),
     });
   }
   console.info(
@@ -121,6 +131,7 @@ function build(): IModelRouter {
     pass4: new MockGeminiPass4Backend(),
     pass5: new MockGeminiPass5Backend(),
     pass6: new MockGeminiPass6Backend(),
+    pass7: new MockGeminiPass7Backend(),
   });
 }
 

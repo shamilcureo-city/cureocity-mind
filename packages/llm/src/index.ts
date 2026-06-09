@@ -9,6 +9,7 @@ export {
   MockGeminiPass4Backend,
   MockGeminiPass5Backend,
   MockGeminiPass6Backend,
+  MockGeminiPass7Backend,
 } from './backends/mock-gemini.backend';
 export {
   VertexGeminiFlashIndiaBackend,
@@ -39,3 +40,8 @@ export {
   Pass6BackendError,
   type VertexGeminiProCaseBriefingOptions,
 } from './backends/vertex-case-briefing.backend';
+export {
+  VertexGeminiProConceptualMapBackend,
+  Pass7BackendError,
+  type VertexGeminiProConceptualMapOptions,
+} from './backends/vertex-conceptual-map.backend';

@@ -5,6 +5,7 @@ import {
   type ClinicalLocale,
   ClinicalReportV1Schema,
   type ClientDiagnosis,
+  ConceptualMapV1Schema,
   InitialAssessmentBriefV1Schema,
   IntakeNoteV1Schema,
   type IntakeNoteV1,
@@ -341,6 +342,24 @@ export const Pass6OutputSchema = z.object({
 export type Pass6Output = z.infer<typeof Pass6OutputSchema>;
 
 // ============================================================================
+// Pass 7 — Conceptual Map (Sprint 24).
+// ============================================================================
+
+export interface Pass7Input {
+  clientId: string;
+  language: ClinicalLocale;
+  /** Pre-serialised cumulative record (the route builds this text blob). */
+  contextText: string;
+  /** Session IDs the contextText draws from. */
+  basedOnSessionIds: string[];
+}
+
+export const Pass7OutputSchema = z.object({
+  conceptualMap: ConceptualMapV1Schema,
+});
+export type Pass7Output = z.infer<typeof Pass7OutputSchema>;
+
+// ============================================================================
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
@@ -351,7 +370,8 @@ export type GeminiPass =
   | 'PASS_3_MISSED_THEMES'
   | 'PASS_4_THERAPY_SCRIPT'
   | 'PASS_5_PRE_SESSION_BRIEF'
-  | 'PASS_6_CASE_BRIEFING';
+  | 'PASS_6_CASE_BRIEFING'
+  | 'PASS_7_CONCEPTUAL_MAP';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -398,6 +418,10 @@ export interface IPass6Backend {
   run(input: Pass6Input): Promise<{ output: Pass6Output; callLog: GeminiCallLogData }>;
 }
 
+export interface IPass7Backend {
+  run(input: Pass7Input): Promise<{ output: Pass7Output; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
@@ -405,6 +429,7 @@ export interface IModelRouter {
   pass4(input: Pass4Input): Promise<{ output: Pass4Output; callLog: GeminiCallLogData }>;
   pass5(input: Pass5Input): Promise<{ output: Pass5Output; callLog: GeminiCallLogData }>;
   pass6(input: Pass6Input): Promise<{ output: Pass6Output; callLog: GeminiCallLogData }>;
+  pass7(input: Pass7Input): Promise<{ output: Pass7Output; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet
