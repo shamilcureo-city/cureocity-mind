@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { CaseBriefingV1, CaseBriefingWhen } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { InfoTip } from '../ui/InfoTip';
 import { ClientCaseChat } from './ClientCaseChat';
 
 interface Props {
@@ -119,25 +120,52 @@ export function CaseBriefingPanel({ clientId, clientName, initialBriefing }: Pro
           onClick={() => setShowFormulation((s) => !s)}
           className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
         >
-          What's going on — 5 Ps formulation
+          What's going on with this person
           <span aria-hidden>{showFormulation ? '▾' : '▸'}</span>
         </button>
         {showFormulation && (
           <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-            <FormulationP label="Presenting" body={briefing.formulation.presenting} />
-            <FormulationP label="Predisposing" body={briefing.formulation.predisposing} />
-            <FormulationP label="Precipitating" body={briefing.formulation.precipitating} />
-            <FormulationP label="Perpetuating" body={briefing.formulation.perpetuating} />
-            <FormulationP label="Protective" body={briefing.formulation.protective} />
+            <FormulationP
+              label="What's happening now"
+              clinical="presenting"
+              hint="The current complaints and symptoms the client is bringing to the room."
+              body={briefing.formulation.presenting}
+            />
+            <FormulationP
+              label="What set this up over time"
+              clinical="predisposing"
+              hint="Long-standing factors — temperament, early history, biology — that made the client vulnerable to this presentation."
+              body={briefing.formulation.predisposing}
+            />
+            <FormulationP
+              label="What triggered it"
+              clinical="precipitating"
+              hint="The recent events or stressors that brought the symptoms to a head right now."
+              body={briefing.formulation.precipitating}
+            />
+            <FormulationP
+              label="What keeps it going"
+              clinical="perpetuating"
+              hint="The thoughts, behaviours or situations that maintain the symptoms day to day — typically what treatment targets."
+              body={briefing.formulation.perpetuating}
+            />
+            <FormulationP
+              label="What's helping"
+              clinical="protective"
+              hint="Strengths, supports and coping that buffer the client against deterioration — to preserve and build on."
+              body={briefing.formulation.protective}
+            />
           </dl>
         )}
       </div>
 
-      {/* Running differential — the open items checklist. */}
+      {/* Open assessment items. */}
       <div className="mt-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-          Still open · {briefing.openItems.length}{' '}
-          <span className="font-normal text-[var(--color-ink-3)]">(what to ask / assess next)</span>
+          Still to find out · {briefing.openItems.length}{' '}
+          <span className="font-normal text-[var(--color-ink-3)]">
+            (questions to answer at the next visit)
+          </span>
         </p>
         {briefing.openItems.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--color-ink-3)]">
@@ -221,11 +249,24 @@ export function CaseBriefingPanel({ clientId, clientName, initialBriefing }: Pro
   );
 }
 
-function FormulationP({ label, body }: { label: string; body: string }) {
+function FormulationP({
+  label,
+  clinical,
+  hint,
+  body,
+}: {
+  label: string;
+  clinical: string;
+  hint: string;
+  body: string;
+}) {
   return (
     <div className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
       <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
         {label}
+        <span className="ml-2 normal-case tracking-normal">
+          <InfoTip hint={hint}>({clinical})</InfoTip>
+        </span>
       </dt>
       <dd className="mt-1 text-sm leading-relaxed text-[var(--color-ink)]">{body}</dd>
     </div>
