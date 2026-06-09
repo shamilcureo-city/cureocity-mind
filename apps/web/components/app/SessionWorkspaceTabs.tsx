@@ -1,41 +1,35 @@
 import Link from 'next/link';
 import type { SessionKind } from '@cureocity/contracts';
-import { Badge } from '../ui/Badge';
 
-type TabKey =
-  | 'notes'
-  | 'clinical-brief'
-  | 'client'
-  | 'transcript'
-  | 'session-info'
-  | 'mindmap'
-  | 'reflection';
+export type TabKey = 'notes' | 'copilot' | 'transcript' | 'session-info' | 'client';
 
 interface TabSpec {
   key: TabKey;
   label: string;
-  live: boolean;
-  sprint?: string;
 }
-
-const BASE_TABS: TabSpec[] = [
-  { key: 'notes', label: 'Notes', live: true },
-  { key: 'clinical-brief', label: 'Clinical Brief', live: true },
-  { key: 'client', label: 'Client', live: true },
-  { key: 'transcript', label: 'Transcript', live: true },
-  { key: 'session-info', label: 'Session Information', live: true },
-  { key: 'mindmap', label: 'Mindmap', live: true },
-  { key: 'reflection', label: 'Reflection Questions', live: true },
-];
 
 interface Props {
   sessionId: string;
   active?: TabKey;
-  /// Sprint 19 — INTAKE sessions get intake-flavoured labels and
-  /// hide tabs that only make sense once a treatment plan exists.
+  /// Sprint 19 — INTAKE-aware label tweaks (e.g. "Intake note").
   sessionKind?: SessionKind;
 }
 
+/**
+ * Sprint 26 — slimmer top-level tab bar.
+ *
+ * Documentation-flavoured tabs (Notes / Transcript / Session
+ * Information / Client) live as peers. All the AI decision-support
+ * surfaces (Clinical Brief, Mindmap, Reflection Questions, Therapy
+ * Script, Case Briefing, Conceptual Map, Diagnosis history, Therapy
+ * Library, Workflow) collapse into a single **AI Copilot** tab that
+ * therapists who only want a documentation tool can simply ignore.
+ *
+ * Inside the AI Copilot tab a smaller sub-tab bar groups the
+ * surfaces by altitude: "Briefing" (the synthesis), "This session"
+ * (per-session AI outputs), "This client" (cross-session AI
+ * surfaces). See `AICopilotSubTabs`.
+ */
 export function SessionWorkspaceTabs({
   sessionId,
   active = 'notes',
@@ -49,44 +43,20 @@ export function SessionWorkspaceTabs({
     >
       {tabs.map((t) => {
         const isActive = t.key === active;
-        const className = `group inline-flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm transition-colors ${
-          isActive
-            ? 'border-[var(--color-ink)] font-medium text-[var(--color-ink)]'
-            : t.live
-              ? 'border-transparent text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
-              : 'border-transparent text-[var(--color-ink-3)] cursor-not-allowed'
-        }`;
-        const inner = (
-          <>
-            {t.label}
-            {!t.live && (
-              <Badge tone="muted" className="opacity-60">
-                {t.sprint}
-              </Badge>
-            )}
-          </>
-        );
-        if (!t.live) {
-          return (
-            <button key={t.key} type="button" disabled className={className}>
-              {inner}
-            </button>
-          );
-        }
-        // The Notes tab is the canonical view — render it without a query param
-        // so the URL stays clean for the most common landing case.
         const href =
-          t.key === 'notes'
-            ? `/app/sessions/${sessionId}`
-            : `/app/sessions/${sessionId}?tab=${t.key}`;
+          t.key === 'notes' ? `/app/sessions/${sessionId}` : `/app/sessions/${sessionId}?tab=${t.key}`;
         return (
           <Link
             key={t.key}
             href={href}
-            className={className}
+            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm transition-colors ${
+              isActive
+                ? 'border-[var(--color-ink)] font-medium text-[var(--color-ink)]'
+                : 'border-transparent text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
+            }`}
             aria-current={isActive ? 'page' : undefined}
           >
-            {inner}
+            {t.label}
           </Link>
         );
       })}
@@ -95,17 +65,12 @@ export function SessionWorkspaceTabs({
 }
 
 function tabsForKind(kind: SessionKind): TabSpec[] {
-  if (kind === 'INTAKE') {
-    // Mindmap + reflection-questions are TherapyNoteV1-shaped — they
-    // assume SOAP fields the intake note doesn't produce. Hide them
-    // until an intake-specific renderer exists.
-    return BASE_TABS.filter((t) => t.key !== 'mindmap' && t.key !== 'reflection').map((t) =>
-      t.key === 'notes'
-        ? { ...t, label: 'Intake Note' }
-        : t.key === 'clinical-brief'
-          ? { ...t, label: 'Initial Assessment' }
-          : t,
-    );
-  }
-  return BASE_TABS;
+  const base: TabSpec[] = [
+    { key: 'notes', label: kind === 'INTAKE' ? 'Intake Note' : 'Notes' },
+    { key: 'copilot', label: 'AI Copilot' },
+    { key: 'transcript', label: 'Transcript' },
+    { key: 'session-info', label: 'Session Information' },
+    { key: 'client', label: 'Client' },
+  ];
+  return base;
 }
