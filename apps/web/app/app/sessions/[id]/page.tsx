@@ -11,7 +11,6 @@ import type {
 import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
 import { AICopilotTab } from '@/components/app/AICopilotTab';
-import type { CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { ClientTab } from '@/components/app/ClientTab';
 import { NotesTab } from '@/components/app/NotesTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
@@ -24,7 +23,7 @@ export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; sub?: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }
 
 const VALID_TABS: ReadonlySet<TabKey> = new Set([
@@ -35,43 +34,32 @@ const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'client',
 ]);
 
-const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['briefing', 'session', 'client']);
-
 /**
- * Sprint 26 — top-level tab parser.
+ * Sprint 27 — top-level tab parser.
  *
- * Accepts the current 5-key bar (notes / copilot / transcript /
- * session-info / client). Legacy keys (clinical-brief, mindmap,
- * reflection) silently route to AI Copilot's "this session" sub-tab
- * so old bookmarks keep working.
+ * Accepts the 5-key bar (notes / copilot / transcript / session-info
+ * / client). Legacy keys (clinical-brief, mindmap, reflection) fold
+ * to the per-session AI Copilot so old bookmarks keep working.
  */
-function parseTab(raw: string | undefined): { tab: TabKey; subOverride: CopilotSubKey | null } {
-  if (!raw) return { tab: 'notes', subOverride: null };
+function parseTab(raw: string | undefined): TabKey {
+  if (!raw) return 'notes';
   if ((VALID_TABS as ReadonlySet<string>).has(raw)) {
-    return { tab: raw as TabKey, subOverride: null };
+    return raw as TabKey;
   }
   if (raw === 'clinical-brief' || raw === 'mindmap' || raw === 'reflection') {
-    return { tab: 'copilot', subOverride: 'session' };
+    return 'copilot';
   }
-  return { tab: 'notes', subOverride: null };
-}
-
-function parseSub(raw: string | undefined): CopilotSubKey {
-  if (raw && (VALID_SUBS as ReadonlySet<string>).has(raw)) {
-    return raw as CopilotSubKey;
-  }
-  return 'briefing';
+  return 'notes';
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
   const { id } = await params;
-  const { tab: rawTab, sub: rawSub } = await searchParams;
-  const { tab, subOverride } = parseTab(rawTab);
-  const sub = subOverride ?? parseSub(rawSub);
+  const { tab: rawTab } = await searchParams;
+  const tab = parseTab(rawTab);
 
   const session = await prisma.session.findUnique({
     where: { id },
-    include: { client: { select: { fullName: true, preferredLanguage: true } } },
+    include: { client: { select: { fullName: true } } },
   });
   if (!session) notFound();
 
@@ -118,15 +106,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
           />
         )}
         {tab === 'copilot' && (
-          <AICopilotTab
-            sessionId={id}
-            clientId={session.clientId}
-            clientName={session.client.fullName}
-            psychologistId={session.psychologistId}
-            preferredLanguage={session.client.preferredLanguage}
-            sessionKind={sessionKind}
-            sub={sub}
-          />
+          <AICopilotTab sessionId={id} clientId={session.clientId} sessionKind={sessionKind} />
         )}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
