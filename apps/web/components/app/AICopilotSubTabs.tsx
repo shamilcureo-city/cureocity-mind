@@ -1,13 +1,14 @@
 import Link from 'next/link';
 
-export type ClientCopilotSubKey = 'journey' | 'briefing' | 'measures' | 'formulation';
+export type CopilotSubKey = 'session' | 'journey' | 'briefing' | 'measures' | 'formulation';
 
 interface Props {
-  clientId: string;
-  active?: ClientCopilotSubKey;
+  sessionId: string;
+  active?: CopilotSubKey;
 }
 
-const TABS: { key: ClientCopilotSubKey; label: string; hint: string }[] = [
+const TABS: { key: CopilotSubKey; label: string; hint: string }[] = [
+  { key: 'session', label: 'This session', hint: "This recording's AI analysis" },
   { key: 'journey', label: 'Journey', hint: 'Where they are, what to do next' },
   { key: 'briefing', label: 'Case Briefing', hint: 'The cross-session synthesis' },
   { key: 'measures', label: 'Measures', hint: 'Instruments + affect trend' },
@@ -15,14 +16,16 @@ const TABS: { key: ClientCopilotSubKey; label: string; hint: string }[] = [
 ];
 
 /**
- * Sprint 27 — secondary tab bar inside the client AI Copilot tab.
+ * Sprint 28 — secondary tab bar inside the session AI Copilot tab.
  *
- * Smaller and lighter than the top-level `ClientWorkspaceTabs` so the
- * two levels don't compete visually. URL: `?tab=copilot&sub=…`.
- * Defaulting to `journey` keeps a bare `?tab=copilot` deep-link
- * meaningful — the therapist lands on the "what's next" hub.
+ * The session AI Copilot is now the *full* copilot: "This session"
+ * (this recording's analysis) sits alongside the cross-session
+ * decision-support (Journey, Case Briefing, Measures, Formulation &
+ * Plan). Smaller/lighter than the top-level `SessionWorkspaceTabs`
+ * so the two levels don't compete. URL: `?tab=copilot&sub=…`,
+ * defaulting to `session`.
  */
-export function ClientAICopilotSubTabs({ clientId, active = 'journey' }: Props) {
+export function AICopilotSubTabs({ sessionId, active = 'session' }: Props) {
   return (
     <nav
       className="flex flex-wrap items-center gap-1 border-b border-[var(--color-line-soft)]"
@@ -30,7 +33,7 @@ export function ClientAICopilotSubTabs({ clientId, active = 'journey' }: Props) 
     >
       {TABS.map((t) => {
         const isActive = t.key === active;
-        const href = `/app/clients/${clientId}?tab=copilot&sub=${t.key}`;
+        const href = `/app/sessions/${sessionId}?tab=copilot&sub=${t.key}`;
         return (
           <Link
             key={t.key}

@@ -3,9 +3,6 @@ import { notFound } from 'next/navigation';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { ClientAICopilotTab } from '@/components/app/ClientAICopilotTab';
-import type { ClientCopilotSubKey } from '@/components/app/ClientAICopilotSubTabs';
-import { ClientWorkspaceTabs, type ClientTabKey } from '@/components/app/ClientWorkspaceTabs';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
@@ -16,50 +13,26 @@ export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; sub?: string }>;
-}
-
-const VALID_TABS: ReadonlySet<ClientTabKey> = new Set(['record', 'copilot']);
-const VALID_SUBS: ReadonlySet<ClientCopilotSubKey> = new Set([
-  'journey',
-  'briefing',
-  'measures',
-  'formulation',
-]);
-
-function parseTab(raw: string | undefined): ClientTabKey {
-  return raw && (VALID_TABS as ReadonlySet<string>).has(raw) ? (raw as ClientTabKey) : 'record';
-}
-
-function parseSub(raw: string | undefined): ClientCopilotSubKey {
-  return raw && (VALID_SUBS as ReadonlySet<string>).has(raw)
-    ? (raw as ClientCopilotSubKey)
-    : 'journey';
 }
 
 /**
- * Client detail page — Sprint 27 `Record | AI Copilot` split.
+ * Client detail page — the lean administrative record (Sprint 28).
  *
- * The **Record** tab is the bare administrative record every
- * therapist needs: identity, the sessions list, and DSR controls.
- * The **AI Copilot** tab holds all client-level decision-support
- * (journey, case briefing, instruments + affect, conceptual map,
- * diagnosis history, therapy library, workflow) behind one opt-in
- * surface — see `ClientAICopilotTab`.
+ * Identity, the sessions list, and DSR controls. That's it. All the
+ * decision-support — care journey, case briefing, instruments,
+ * affect, conceptual map, diagnosis history, therapy library,
+ * workflow — lives on the *session* page's AI Copilot tab, the
+ * therapist's primary workspace. Open any session to reach it.
  *
  * `PageCrisisBanner` is the one safety exception: it renders at the
- * page level, above the tabs, so an active crisis flag is visible
- * to a documentation-only therapist who never opens the copilot.
+ * top so an active crisis flag is visible even on this lean record.
  *
  * Auth: every downstream component enforces tenant gating via
  * `requirePsychologistId`; the page query filters by
  * `psychologistId` so cross-tenant URL probing returns 404.
  */
-export default async function ClientDetailPage({ params, searchParams }: PageProps) {
+export default async function ClientDetailPage({ params }: PageProps) {
   const { id } = await params;
-  const { tab: rawTab, sub: rawSub } = await searchParams;
-  const tab = parseTab(rawTab);
-  const sub = parseSub(rawSub);
 
   const therapist = await prisma.psychologist.findUnique({
     where: { firebaseUid: 'dev-firebase-uid-priya' },
@@ -77,7 +50,6 @@ export default async function ClientDetailPage({ params, searchParams }: PagePro
           modality: true,
           status: true,
           scheduledAt: true,
-          endedAt: true,
           therapyNote: { select: { id: true } },
           noteDraft: { select: { status: true } },
         },
@@ -86,15 +58,14 @@ export default async function ClientDetailPage({ params, searchParams }: PagePro
   });
   if (!client) notFound();
 
-  // Built once for the page-level crisis banner; reused by the
-  // copilot's Journey/Briefing sub-tabs so they don't rebuild it.
+  // Built only for the page-level crisis banner — the one clinical
+  // signal that stays on the lean record for safety.
   const briefing = await buildDeterministicCaseBriefing(client.id, therapist.id).catch((e) => {
     if (e instanceof JourneyError) return null;
     throw e;
   });
 
   const age = client.dateOfBirth ? calcAge(client.dateOfBirth) : null;
-  const completedSessions = client.sessions.filter((s) => s.status === 'COMPLETED').length;
 
   return (
     <Container className="py-10">
@@ -104,127 +75,67 @@ export default async function ClientDetailPage({ params, searchParams }: PagePro
         </Link>
       </p>
 
-      {/* Safety: always visible, regardless of the active tab. */}
+      {/* Safety: active crisis flags surface even on the lean record. */}
       <PageCrisisBanner briefing={briefing} />
 
       <div className="mt-4">
-        <ClientWorkspaceTabs clientId={client.id} active={tab} />
-      </div>
-
-      <div className="mt-6">
-        {tab === 'record' ? (
-          <RecordTab
-            client={{
-              id: client.id,
-              fullName: client.fullName,
-              status: client.status,
-              preferredModality: client.preferredModality,
-              contactPhone: client.contactPhone,
-              contactEmail: client.contactEmail,
-              presentingConcerns: client.presentingConcerns,
-              createdAt: client.createdAt,
-              age,
-            }}
-            sessions={client.sessions}
-          />
-        ) : (
-          <ClientAICopilotTab
-            clientId={client.id}
-            psychologistId={therapist.id}
-            clientName={client.fullName}
-            clientHasContactPhone={!!client.contactPhone}
-            clientHasContactEmail={!!client.contactEmail}
-            preferredLanguage={client.preferredLanguage}
-            sessionsCompleted={completedSessions}
-            briefing={briefing}
-            sub={sub}
-          />
-        )}
-      </div>
-    </Container>
-  );
-}
-
-interface RecordClient {
-  id: string;
-  fullName: string;
-  status: string;
-  preferredModality: string | null;
-  contactPhone: string;
-  contactEmail: string | null;
-  presentingConcerns: string | null;
-  createdAt: Date;
-  age: number | null;
-}
-
-interface RecordSession {
-  id: string;
-  modality: string | null;
-  status: string;
-  scheduledAt: Date;
-  therapyNote: { id: string } | null;
-  noteDraft: { status: string } | null;
-}
-
-function RecordTab({ client, sessions }: { client: RecordClient; sessions: RecordSession[] }) {
-  return (
-    <>
-      <Card className="p-7">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="font-serif text-3xl">{client.fullName}</h1>
-            <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              {client.age !== null ? `${client.age} years` : 'Age not recorded'}
-              {' · '}
-              Client since {formatMonth(client.createdAt)}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
-            {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
-          </div>
-        </header>
-
-        <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-          <div>
-            <dt className="text-xs text-[var(--color-ink-3)]">Phone</dt>
-            <dd className="font-mono text-[var(--color-ink)]">{client.contactPhone}</dd>
-          </div>
-          {client.contactEmail && (
+        <Card className="p-7">
+          <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <dt className="text-xs text-[var(--color-ink-3)]">Email</dt>
-              <dd className="text-[var(--color-ink)]">{client.contactEmail}</dd>
+              <h1 className="font-serif text-3xl">{client.fullName}</h1>
+              <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                {age !== null ? `${age} years` : 'Age not recorded'}
+                {' · '}
+                Client since {formatMonth(client.createdAt)}
+              </p>
             </div>
-          )}
-        </dl>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
+              {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
+            </div>
+          </header>
 
-        {client.presentingConcerns?.trim() && (
-          <section className="mt-6">
-            <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Presenting concerns
-            </h2>
-            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
-              {client.presentingConcerns.trim()}
-            </p>
-          </section>
-        )}
-      </Card>
+          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt className="text-xs text-[var(--color-ink-3)]">Phone</dt>
+              <dd className="font-mono text-[var(--color-ink)]">{client.contactPhone}</dd>
+            </div>
+            {client.contactEmail && (
+              <div>
+                <dt className="text-xs text-[var(--color-ink-3)]">Email</dt>
+                <dd className="text-[var(--color-ink)]">{client.contactEmail}</dd>
+              </div>
+            )}
+          </dl>
+
+          {client.presentingConcerns?.trim() && (
+            <section className="mt-6">
+              <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Presenting concerns
+              </h2>
+              <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
+                {client.presentingConcerns.trim()}
+              </p>
+            </section>
+          )}
+        </Card>
+      </div>
 
       <div className="mt-6">
         <Card className="overflow-hidden">
           <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
             <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Sessions</h3>
             <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              {sessions.length} session{sessions.length === 1 ? '' : 's'} recorded.
+              {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
             </p>
           </header>
-          {sessions.length === 0 ? (
+          {client.sessions.length === 0 ? (
             <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
               No sessions yet. Start one from the Record tab.
             </p>
           ) : (
             <ul className="divide-y divide-[var(--color-line-soft)]">
-              {sessions.map((s) => (
+              {client.sessions.map((s) => (
                 <li key={s.id}>
                   <Link
                     href={`/app/sessions/${s.id}`}
@@ -249,7 +160,7 @@ function RecordTab({ client, sessions }: { client: RecordClient; sessions: Recor
       <div className="mt-6">
         <DataRightsCard clientId={client.id} clientName={client.fullName} />
       </div>
-    </>
+    </Container>
   );
 }
 
