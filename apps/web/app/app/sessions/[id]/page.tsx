@@ -10,58 +10,68 @@ import type {
 } from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
-import { Card } from '@/components/ui/Card';
+import { AICopilotTab } from '@/components/app/AICopilotTab';
+import type { CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { ClientTab } from '@/components/app/ClientTab';
-import { ClinicalBriefTab } from '@/components/app/ClinicalBriefTab';
-import { InitialAssessmentTab } from '@/components/app/InitialAssessmentTab';
-import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
-import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
-import { SessionWorkspaceTabs } from '@/components/app/SessionWorkspaceTabs';
+import { SessionWorkspaceTabs, type TabKey } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
-import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 
 export const dynamic = 'force-dynamic';
 
-type TabKey =
-  | 'notes'
-  | 'clinical-brief'
-  | 'client'
-  | 'transcript'
-  | 'session-info'
-  | 'mindmap'
-  | 'reflection';
-
 interface PageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; sub?: string }>;
 }
 
 const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'notes',
-  'clinical-brief',
-  'client',
+  'copilot',
   'transcript',
   'session-info',
-  'mindmap',
-  'reflection',
+  'client',
 ]);
 
-function parseTab(raw: string | undefined): TabKey {
-  return raw && (VALID_TABS as ReadonlySet<string>).has(raw) ? (raw as TabKey) : 'notes';
+const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['briefing', 'session', 'client']);
+
+/**
+ * Sprint 26 — top-level tab parser.
+ *
+ * Accepts the current 5-key bar (notes / copilot / transcript /
+ * session-info / client). Legacy keys (clinical-brief, mindmap,
+ * reflection) silently route to AI Copilot's "this session" sub-tab
+ * so old bookmarks keep working.
+ */
+function parseTab(raw: string | undefined): { tab: TabKey; subOverride: CopilotSubKey | null } {
+  if (!raw) return { tab: 'notes', subOverride: null };
+  if ((VALID_TABS as ReadonlySet<string>).has(raw)) {
+    return { tab: raw as TabKey, subOverride: null };
+  }
+  if (raw === 'clinical-brief' || raw === 'mindmap' || raw === 'reflection') {
+    return { tab: 'copilot', subOverride: 'session' };
+  }
+  return { tab: 'notes', subOverride: null };
+}
+
+function parseSub(raw: string | undefined): CopilotSubKey {
+  if (raw && (VALID_SUBS as ReadonlySet<string>).has(raw)) {
+    return raw as CopilotSubKey;
+  }
+  return 'briefing';
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
   const { id } = await params;
-  const { tab: rawTab } = await searchParams;
-  const tab = parseTab(rawTab);
+  const { tab: rawTab, sub: rawSub } = await searchParams;
+  const { tab, subOverride } = parseTab(rawTab);
+  const sub = subOverride ?? parseSub(rawSub);
 
   const session = await prisma.session.findUnique({
     where: { id },
-    include: { client: { select: { fullName: true } } },
+    include: { client: { select: { fullName: true, preferredLanguage: true } } },
   });
   if (!session) notFound();
 
@@ -107,70 +117,22 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientId={session.clientId}
           />
         )}
-        {tab === 'clinical-brief' &&
-          (isIntake ? (
-            <InitialAssessmentTabPanel sessionId={id} clientId={session.clientId} />
-          ) : (
-            <ClinicalBriefTabPanel sessionId={id} />
-          ))}
+        {tab === 'copilot' && (
+          <AICopilotTab
+            sessionId={id}
+            clientId={session.clientId}
+            clientName={session.client.fullName}
+            psychologistId={session.psychologistId}
+            preferredLanguage={session.client.preferredLanguage}
+            sessionKind={sessionKind}
+            sub={sub}
+          />
+        )}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
         {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
-        {/* Mindmap + reflection are TherapyNoteV1-shaped; the workspace
-            tabs hide them for INTAKE, but a deep-link tab=mindmap should
-            still render a friendly empty state instead of crashing. */}
-        {tab === 'mindmap' &&
-          (isIntake ? (
-            <IntakeUnavailable tabLabel="Mindmap" />
-          ) : (
-            <MindmapTabPanel sessionId={id} />
-          ))}
-        {tab === 'reflection' &&
-          (isIntake ? (
-            <IntakeUnavailable tabLabel="Reflection questions" />
-          ) : (
-            <ReflectionTabPanel sessionId={id} clientId={session.clientId} />
-          ))}
       </div>
     </Container>
-  );
-}
-
-function IntakeUnavailable({ tabLabel }: { tabLabel: string }) {
-  return (
-    <Card className="p-10 text-center">
-      <p className="font-serif text-xl">{tabLabel} aren’t generated for intake sessions.</p>
-      <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-        These views read from a SOAP-shaped note. Intake notes use a different structure; the
-        Initial Assessment tab is the equivalent surface for intakes.
-      </p>
-    </Card>
-  );
-}
-
-async function ClinicalBriefTabPanel({ sessionId }: { sessionId: string }) {
-  const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
-  const initial = row ? toClinicalReport(row) : null;
-  return <ClinicalBriefTab sessionId={sessionId} initialReport={initial} />;
-}
-
-async function InitialAssessmentTabPanel({
-  sessionId,
-  clientId,
-}: {
-  sessionId: string;
-  clientId: string;
-}) {
-  const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
-  const envelope = row ? { status: row.status, errorMessage: row.errorMessage } : null;
-  const brief = row ? readInitialAssessmentBrief(row) : null;
-  return (
-    <InitialAssessmentTab
-      sessionId={sessionId}
-      clientId={clientId}
-      reportEnvelope={envelope}
-      initialBrief={brief}
-    />
   );
 }
 
@@ -245,9 +207,6 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
     return <p className="text-sm text-[var(--color-ink-2)]">Client record not found.</p>;
   }
 
-  // Past session count is "sessions other than this one for the same client",
-  // measured by COMPLETED status to match clinical sense (cancelled / no-shows
-  // shouldn't bump the count). Last session = most recent COMPLETED scheduledAt.
   const [pastSessionCount, lastSession] = await Promise.all([
     prisma.session.count({
       where: {
@@ -380,8 +339,6 @@ async function SessionInfoTabPanel({ sessionId }: { sessionId: string }) {
     <SessionInfoTab
       data={{
         id: session.id,
-        // Sprint 19 — modality can be null (INTAKE sessions). Show a
-        // human-friendly fallback so the info tab still renders.
         modality: session.modality ?? 'INTAKE',
         status: session.status,
         scheduledAt: session.scheduledAt,
@@ -411,54 +368,4 @@ function statusTone(status: string): 'accent' | 'warn' | 'muted' | 'default' {
   if (status === 'IN_PROGRESS') return 'warn';
   if (status === 'CANCELLED' || status === 'NO_SHOW') return 'muted';
   return 'default';
-}
-
-async function MindmapTabPanel({ sessionId }: { sessionId: string }) {
-  const [draft, signed] = await Promise.all([
-    prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
-    prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
-  ]);
-  const noteJson = signed?.content ?? draft?.content;
-  if (!noteJson) {
-    return (
-      <Card className="p-10 text-center">
-        <p className="font-serif text-xl">No note generated yet.</p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          End the session and generate the note — the mindmap renders from the note's structure.
-        </p>
-      </Card>
-    );
-  }
-  return <MindmapTab note={noteJson as unknown as TherapyNoteV1} />;
-}
-
-async function ReflectionTabPanel({
-  sessionId,
-  clientId,
-}: {
-  sessionId: string;
-  clientId: string;
-}) {
-  const [draft, signed] = await Promise.all([
-    prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
-    prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
-  ]);
-  const noteJson = signed?.content ?? draft?.content;
-  if (!noteJson) {
-    return (
-      <Card className="p-10 text-center">
-        <p className="font-serif text-xl">No note generated yet.</p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Reflection questions are generated from the note's themes. Generate the note first.
-        </p>
-      </Card>
-    );
-  }
-  return (
-    <ReflectionTab
-      sessionId={sessionId}
-      clientId={clientId}
-      note={noteJson as unknown as TherapyNoteV1}
-    />
-  );
 }
