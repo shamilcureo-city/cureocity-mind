@@ -12,6 +12,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
+import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauthn-verify';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -68,11 +69,16 @@ function validateEdits(
 /**
  * POST /api/v1/sessions/:id/sign — WebAuthn note sign-off.
  *
- * Verification chain (ported from scribe-service SignService):
+ * Verification chain:
  *   1. sha256(payload) === payloadHashHex
  *   2. sha256(payload) === assertion.challengeHashHex (when present)
  *   3. note matches TherapyNoteV1Schema
  *   4. edits[].before/after consistent with draft + final note
+ *   5. If the account has any registered credential, the assertion is
+ *      REQUIRED and is cryptographically verified against the matched
+ *      credential's public key (signature + challenge binding + rpIdHash
+ *      + signCount monotonicity) via verifyNoteSigningAssertion. See
+ *      apps/web/lib/webauthn-verify.ts.
  * Creates TherapyNote + NoteEdit rows + NOTE_SIGNED audit in a single tx.
  */
 export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
@@ -110,16 +116,19 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
-  // Sprint 18 — once the therapist has registered ≥1 platform
-  // authenticator, the assertion is REQUIRED and its credentialId
-  // must match a known non-revoked row. If they have none registered,
-  // we keep the historical optional-assertion behaviour so existing
-  // dev / pilot flows don't break.
+  // Sprint 18 → 33 — once the therapist has registered ≥1 platform
+  // authenticator, the assertion is REQUIRED, its credentialId must
+  // match a known non-revoked row, AND its signature must verify
+  // cryptographically against that credential's stored public key
+  // (Sprint 33 closed the V1.2 gap — credentialId alone is not a
+  // secret). Accounts with no credential registered keep the
+  // historical optional-assertion behaviour so dev / mock flows and
+  // not-yet-enrolled pilot therapists don't break.
   const activeCredentials = await prisma.webAuthnCredential.findMany({
     where: { psychologistId: auth.value.psychologistId, revokedAt: null },
-    select: { id: true, credentialId: true, signCount: true },
+    select: { id: true, credentialId: true, publicKey: true, signCount: true },
   });
-  let credentialIdToBump: string | null = null;
+  let credentialBump: { id: string; newSignCount: number } | null = null;
   if (activeCredentials.length > 0) {
     if (!input.value.assertion) {
       return NextResponse.json(
@@ -142,7 +151,24 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         { status: 401 },
       );
     }
-    credentialIdToBump = matched.id;
+    const rpId = process.env['WEBAUTHN_RP_ID'] ?? new URL(req.url).hostname;
+    const verification = verifyNoteSigningAssertion({
+      publicKeySpkiB64Url: matched.publicKey,
+      authenticatorDataB64Url: input.value.assertion.authenticatorData,
+      clientDataJsonB64Url: input.value.assertion.clientDataJSON,
+      signatureB64Url: input.value.assertion.signature,
+      expectedChallengeHashHex: recomputed,
+      expectedRpId: rpId,
+      allowedOrigins: resolveAllowedOrigins(),
+      storedSignCount: matched.signCount,
+    });
+    if (!verification.ok) {
+      return NextResponse.json(
+        { error: `WebAuthn assertion verification failed: ${verification.reason}` },
+        { status: 401 },
+      );
+    }
+    credentialBump = { id: matched.id, newSignCount: verification.newSignCount };
   }
 
   const draft = await prisma.noteDraft.findUnique({ where: { sessionId } });
@@ -212,15 +238,17 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           editedFields: edits.map((e) => e.field),
           payloadHashHex: recomputed,
           webauthnUsed: input.value.assertion !== undefined,
-          webauthnEnforced: credentialIdToBump !== null,
+          webauthnEnforced: credentialBump !== null,
         },
       },
       tx,
     );
-    if (credentialIdToBump !== null) {
+    if (credentialBump !== null) {
+      // Persist the authenticator's reported counter (not a blind +1) so
+      // the next sign can detect a rollback / cloned authenticator.
       await tx.webAuthnCredential.update({
-        where: { id: credentialIdToBump },
-        data: { lastUsedAt: new Date(), signCount: { increment: 1 } },
+        where: { id: credentialBump.id },
+        data: { lastUsedAt: new Date(), signCount: credentialBump.newSignCount },
       });
     }
     return note;

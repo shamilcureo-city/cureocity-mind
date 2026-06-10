@@ -208,10 +208,12 @@ export type NoteDraft = z.infer<typeof NoteDraftSchema>;
 // edit list. Server re-hashes, verifies, and creates a TherapyNote + NoteEdit
 // rows. Sprint 7 PR 4.
 //
-// V1 verification is hash + challenge-binding only — full WebAuthn
-// signature validation against a registered credential public key lands in
-// Sprint 9 when the registration flow exists. The proof is still persisted
-// so it can be retro-verified once registration is in place.
+// As of Sprint 33 the sign route fully verifies the assertion signature
+// against the registered credential's public key (see
+// apps/web/lib/webauthn-verify.ts) whenever the account has a credential
+// on file. The assertion stays optional at the SCHEMA level because
+// accounts with zero registered credentials still sign hash-only; the
+// route promotes it to required + verified once a credential exists.
 // ============================================================================
 
 export const NoteEditFieldSchema = z.enum(['subjective', 'objective', 'assessment', 'plan']);
