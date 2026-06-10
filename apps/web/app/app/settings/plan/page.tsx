@@ -1,6 +1,6 @@
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { requirePagePsychologist } from '@/lib/auth-page';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { getTherapistMonthlyTotalInr } from '@/lib/cost-guard';
 import { prisma } from '@/lib/prisma';
 
@@ -18,7 +18,7 @@ const FREE_PILOT_SESSION_CAP = 10;
  * enforcement + paid tiers arrive with the billing integration.
  */
 export default async function PlanSettingsPage() {
-  const me = await requirePagePsychologist();
+  const me = await requireOnboardedPsychologist();
 
   const [sessionCount, monthlySpend] = await Promise.all([
     prisma.session.count({ where: { psychologistId: me.id } }),

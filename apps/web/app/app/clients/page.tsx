@@ -3,13 +3,13 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClientsHeader } from '@/components/app/ClientsHeader';
-import { requirePagePsychologist } from '@/lib/auth-page';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ClientsPage() {
-  const therapist = await requirePagePsychologist();
+  const therapist = await requireOnboardedPsychologist();
   const rows = await prisma.client.findMany({
     where: { psychologistId: therapist.id, deletedAt: null },
     orderBy: { updatedAt: 'desc' },

@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
-import { requirePagePsychologist } from '@/lib/auth-page';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { JourneyError } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
@@ -35,7 +35,7 @@ interface PageProps {
 export default async function ClientDetailPage({ params }: PageProps) {
   const { id } = await params;
 
-  const therapist = await requirePagePsychologist();
+  const therapist = await requireOnboardedPsychologist();
 
   const client = await prisma.client.findFirst({
     where: { id, psychologistId: therapist.id, deletedAt: null },

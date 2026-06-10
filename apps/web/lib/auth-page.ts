@@ -48,12 +48,27 @@ export async function requirePagePsychologist(): Promise<Psychologist> {
 }
 
 /**
+ * Sprint 31 — primary page guard for `/app/*`. Bounces signed-in but
+ * not-yet-onboarded therapists to the onboarding form so the rest of
+ * the app never sees placeholder identity fields.
+ *
+ * The onboarding page itself must use `requirePagePsychologist` (not
+ * this helper) to avoid an infinite redirect.
+ */
+export async function requireOnboardedPsychologist(): Promise<Psychologist> {
+  const psy = await requirePagePsychologist();
+  if (psy.onboardingCompletedAt === null) redirect('/onboarding');
+  return psy;
+}
+
+/**
  * Page guard for cross-tenant admin surfaces (e.g. the competency
  * dashboard, which lists every therapist's stats). Non-admins are
  * bounced to their own dashboard rather than shown an error.
+ * Implies onboarded — admins use the same forms.
  */
 export async function requirePageAdmin(): Promise<Psychologist> {
-  const psy = await requirePagePsychologist();
+  const psy = await requireOnboardedPsychologist();
   if (psy.role !== 'ADMIN') redirect('/app');
   return psy;
 }

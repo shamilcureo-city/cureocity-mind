@@ -81,6 +81,12 @@ model Psychologist {
   /// Secondary email for account recovery if phone-OTP fails. Verified separately.
   backupEmail           String?
 
+  /// Sprint 31 — set once the auto-provisioned placeholder fields
+  /// (email/RCI/fullName from POST /api/v1/auth/session) have been
+  /// replaced via /app/onboarding. Page guards bounce sessions with a
+  /// null timestamp to the onboarding form.
+  onboardingCompletedAt DateTime?
+
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
@@ -109,6 +115,7 @@ model Psychologist {
   @@index([status])
   @@index([role])
   @@index([isAcceptingNewClients])
+  @@index([onboardingCompletedAt])
   @@map("psychologists")
 }
 

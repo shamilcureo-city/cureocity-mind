@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { Container } from '@/components/ui/Container';
-import { requirePagePsychologist } from '@/lib/auth-page';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * self-reflection and pilot evaluation.
  */
 export default async function MeOverviewPage() {
-  const therapist = await requirePagePsychologist();
+  const therapist = await requireOnboardedPsychologist();
 
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 

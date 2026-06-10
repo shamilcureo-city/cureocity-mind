@@ -2,16 +2,17 @@ import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { FirstRunChecklist } from '@/components/app/FirstRunChecklist';
 import { RecordingShell } from '@/components/app/RecordingShell';
 import type { ClientTileEntry } from '@/components/app/ClientPicker';
-import { requirePagePsychologist } from '@/lib/auth-page';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 import type { Session as SessionPrismaRow } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
 export default async function RecordPage() {
-  const therapist = await requirePagePsychologist();
+  const therapist = await requireOnboardedPsychologist();
 
   const [sessions, rawClients] = therapist
     ? await Promise.all([
@@ -55,6 +56,8 @@ export default async function RecordPage() {
     <main>
       <Container className="py-10">
         <RecordingShell clients={clients} />
+
+        <FirstRunChecklist psychologistId={therapist.id} />
 
         <section className="mt-10">
           <div className="mb-4 flex items-center justify-between">
