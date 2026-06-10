@@ -9,14 +9,15 @@ import { CuidSchema, IsoDateTimeSchema } from './common';
  * credential is on file, signing a therapy note REQUIRES the
  * assertion; passwordless replay-resistant signing.
  *
- * V1 verification ladder:
- *   - V1.0 (today): hash-bound challenge — `assertion.challengeHashHex`
- *     must equal sha256(payload). Already enforced.
- *   - V1.1 (this sprint): credential-id lookup — assertion must
- *     reference a credentialId we know about for this psychologist,
- *     and the credential's signCount must be increasing.
- *   - V1.2 (follow-up): full COSE signature verification against the
- *     stored public key. Tracked as Sprint 18 PR 2.
+ * Verification ladder (all live as of Sprint 33):
+ *   - V1.0: hash-bound challenge — `assertion.challengeHashHex` must
+ *     equal sha256(payload).
+ *   - V1.1: credential-id lookup — assertion must reference a
+ *     credentialId registered + non-revoked for this psychologist.
+ *   - V1.2: full signature verification against the stored public key
+ *     (SPKI DER), challenge↔payload binding, rpIdHash check, and
+ *     signCount monotonicity (clone detection). Implemented in
+ *     apps/web/lib/webauthn-verify.ts; enforced by the sign route.
  */
 
 export const Base64UrlSchema = z

@@ -14,8 +14,9 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
  * who steals a valid ticket within its 5-minute window could replay).
  * Acceptable for V1.1 (registration only, no signing-step replay risk).
  *
- * V1.2 (Sprint 18 PR 2) will add COSE signature verification of the
- * sign-time assertion against the registered public key. Tracked.
+ * Sign-time assertion signature verification (the V1.2 step) lives in
+ * apps/web/lib/webauthn-verify.ts as of Sprint 33 and is enforced by
+ * the note sign route. This module remains registration-only.
  */
 
 const TICKET_TTL_MS = 5 * 60 * 1000;

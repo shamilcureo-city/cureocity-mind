@@ -1,0 +1,15 @@
+-- Sprint 33: reset WebAuthn signCount baseline for the verification cutover.
+--
+-- Before Sprint 33 the note-sign route bumped signCount with a blind
+-- `increment: 1` on every sign, so the stored value did not correspond to
+-- any real authenticator counter. Sprint 33 starts persisting the counter
+-- reported in the assertion's authenticatorData and enforcing strict
+-- monotonicity (clone detection).
+--
+-- A stale non-zero baseline would false-positive against authenticators
+-- that always report 0 (e.g. Apple Touch ID): stored=3, asserted=0 would
+-- read as a rollback. Reset every credential to 0 so the first
+-- post-cutover assertion establishes the true baseline. Safe because the
+-- old values were meaningless and WebAuthn signing was not yet in real
+-- pilot use.
+UPDATE "webauthn_credentials" SET "signCount" = 0;
