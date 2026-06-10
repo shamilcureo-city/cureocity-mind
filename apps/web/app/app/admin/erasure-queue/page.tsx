@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { ErasureQueueClient } from '@/components/app/ErasureQueueClient';
-import { requirePagePsychologist } from '@/lib/auth-page';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
  * widens to a clinic-admin role.
  */
 export default async function ErasureQueuePage() {
-  await requirePagePsychologist();
+  await requireOnboardedPsychologist();
   return (
     <Container className="py-10">
       <p className="mb-4 text-xs text-[var(--color-ink-3)]">

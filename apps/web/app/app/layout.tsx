@@ -12,10 +12,11 @@ const FREE_PILOT_SESSION_CAP = 10;
 
 /**
  * Authenticated scribe shell. Sidebar on md+, bottom tab bar on
- * phones. Page-level guards (`requirePagePsychologist`) handle the
- * actual redirect; the layout only resolves the identity to feed the
- * plan widget, and renders fine when unauthenticated (the child page
- * will redirect before content matters).
+ * phones. Page-level guards (`requireOnboardedPsychologist`) handle
+ * the actual redirect to /login or /onboarding; the layout only
+ * resolves the identity to feed the plan widget, and renders fine
+ * when unauthenticated (the child page redirects before content
+ * matters).
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const psy = await currentPsychologist();

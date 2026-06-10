@@ -271,6 +271,7 @@ export function toPsychologist(row: PsychologistRow): Psychologist {
     defaultOutputLanguage: row.defaultOutputLanguage,
     defaultModality: (row.defaultModality as SessionModality | null) ?? null,
     backupEmail: row.backupEmail,
+    onboardingCompletedAt: row.onboardingCompletedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

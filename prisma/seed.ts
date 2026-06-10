@@ -241,6 +241,9 @@ async function main(): Promise<void> {
         sessionFeeInr: t.sessionFeeInr,
         isAcceptingNewClients: t.isAcceptingNewClients,
         status: 'ACTIVE',
+        // Sprint 31 — seeded fixtures are pre-onboarded so the demo
+        // therapist (used in AUTH_BYPASS mode) skips the onboarding gate.
+        onboardingCompletedAt: new Date('2024-01-15T00:00:00Z'),
       },
       create: {
         firebaseUid: t.firebaseUid,
@@ -249,6 +252,7 @@ async function main(): Promise<void> {
         phone: t.phone,
         rciNumber: t.rciNumber,
         rciVerifiedAt: new Date('2024-01-15T00:00:00Z'),
+        onboardingCompletedAt: new Date('2024-01-15T00:00:00Z'),
         status: 'ACTIVE',
         headline: t.headline,
         bio: t.bio,

@@ -94,6 +94,9 @@ export const PsychologistSchema = z.object({
   defaultModality: SessionModalitySchema.nullable(),
   backupEmail: z.string().nullable(),
 
+  // Sprint 31 — null until POST /api/v1/onboarding/complete runs.
+  onboardingCompletedAt: IsoDateTimeSchema.nullable(),
+
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
