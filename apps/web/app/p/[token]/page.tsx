@@ -367,7 +367,7 @@ function formatStartedAt(iso: string | null): string {
   if (!iso) return 'we began';
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return 'we began';
-  return then.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  return then.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 }
 
 function NoteSection({ title, body }: { title: string; body: string }) {

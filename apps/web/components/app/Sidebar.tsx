@@ -18,7 +18,19 @@ const PRIMARY: NavItem[] = [
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
 
-export function Sidebar() {
+export interface PlanUsage {
+  /// Sessions recorded against the free pilot allowance.
+  used: number;
+  cap: number;
+}
+
+interface SidebarProps {
+  /// Real usage computed by the app layout (server). Null hides the
+  /// widget (e.g. unauthenticated edge states).
+  usage?: PlanUsage | null;
+}
+
+export function Sidebar({ usage = null }: SidebarProps) {
   const path = usePathname() ?? '/app';
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] md:flex">
@@ -59,53 +71,44 @@ export function Sidebar() {
       </nav>
 
       <div className="mt-auto px-4 pb-6">
-        <PlanWidget />
-        <ReferralCta />
+        <PlanWidget usage={usage} />
         <FooterLinks />
       </div>
     </aside>
   );
 }
 
-function PlanWidget() {
+function PlanWidget({ usage }: { usage: PlanUsage | null }) {
+  if (!usage) return null;
+  const pct = Math.min(100, Math.round((usage.used / usage.cap) * 100));
   return (
     <div className="rounded-2xl border border-[var(--color-line)] bg-white p-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Seed Plan</p>
+        <p className="text-sm font-semibold">Free pilot</p>
         <Link
           href="/app/settings/plan"
           className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
         >
-          Upgrade
+          Plan
         </Link>
       </div>
       <div className="mt-3 flex items-baseline justify-between text-xs text-[var(--color-ink-3)]">
         <span>Sessions</span>
-        <span className="tabular-nums">0 of 10</span>
+        <span className="tabular-nums">
+          {usage.used} of {usage.cap}
+        </span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
-        <div className="h-full w-0 bg-[var(--color-accent)]" />
+        <div className="h-full bg-[var(--color-accent)]" style={{ width: `${pct}%` }} />
       </div>
     </div>
-  );
-}
-
-function ReferralCta() {
-  return (
-    <Link
-      href="/app/settings/refer"
-      className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent-soft)] px-3 py-2 text-sm font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
-    >
-      <Glyph kind="gift" />
-      Give $20, get $20
-    </Link>
   );
 }
 
 function FooterLinks() {
   const items: { href: string; label: string; icon: 'cog' | 'help' | 'signout' }[] = [
     { href: '/app/settings', label: 'Settings', icon: 'cog' },
-    { href: '/help', label: 'Get Help', icon: 'help' },
+    { href: '/app/learn', label: 'Get Help', icon: 'help' },
     { href: '/api/v1/auth/signout', label: 'Sign out', icon: 'signout' },
   ];
   return (
@@ -125,7 +128,7 @@ function FooterLinks() {
   );
 }
 
-function Glyph({
+export function Glyph({
   kind,
 }: {
   kind:

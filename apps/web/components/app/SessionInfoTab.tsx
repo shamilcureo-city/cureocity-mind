@@ -81,7 +81,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
           />
           <Field
             label="Scheduled"
-            value={data.scheduledAt.toLocaleString('en-US', {
+            value={data.scheduledAt.toLocaleString('en-IN', {
               month: 'short',
               day: 'numeric',
               year: 'numeric',
@@ -93,7 +93,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
             label="Recorded"
             value={
               elapsed !== null
-                ? `${formatDuration(elapsed)} (${data.startedAt!.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} – ${data.endedAt!.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })})`
+                ? `${formatDuration(elapsed)} (${data.startedAt!.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} – ${data.endedAt!.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })})`
                 : data.startedAt
                   ? 'Started, not ended'
                   : 'Not started'
@@ -102,7 +102,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
           <Field label="Session ID" value={data.id.slice(0, 12) + '…'} mono />
           <Field
             label="Created"
-            value={data.createdAt.toLocaleString('en-US', {
+            value={data.createdAt.toLocaleString('en-IN', {
               month: 'short',
               day: 'numeric',
               hour: 'numeric',
@@ -129,7 +129,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
               >
                 <span className="font-medium">{c.scope.replace(/_/g, ' ')}</span>
                 <span className="text-xs text-[var(--color-ink-3)]">
-                  {c.scriptVersion} · {new Date(c.ackedAt).toLocaleString('en-US')}
+                  {c.scriptVersion} · {new Date(c.ackedAt).toLocaleString('en-IN')}
                 </span>
               </li>
             ))}
@@ -164,7 +164,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
                 <span>{formatActionLabel(e.action)}</span>
                 <span className="text-xs text-[var(--color-ink-3)]">
                   {e.actorType.toLowerCase()} ·{' '}
-                  {e.createdAt.toLocaleString('en-US', {
+                  {e.createdAt.toLocaleString('en-IN', {
                     month: 'short',
                     day: 'numeric',
                     hour: 'numeric',

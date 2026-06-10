@@ -1,15 +1,18 @@
 import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { ErasureQueueClient } from '@/components/app/ErasureQueueClient';
+import { requirePagePsychologist } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Admin queue for DPDP § 15 erasure requests. Pilot scope: each
  * therapist reviews their own clients' requests (the data fiduciary
- * is single-tenant). Sprint 10 widens to a clinic-admin role.
+ * is single-tenant; the API scopes rows by psychologistId). Sprint 10
+ * widens to a clinic-admin role.
  */
-export default function ErasureQueuePage() {
+export default async function ErasureQueuePage() {
+  await requirePagePsychologist();
   return (
     <Container className="py-10">
       <p className="mb-4 text-xs text-[var(--color-ink-3)]">

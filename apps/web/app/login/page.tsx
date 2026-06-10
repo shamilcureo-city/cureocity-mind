@@ -54,7 +54,19 @@ export default function LoginPage() {
     if (!confirmation) return;
     setBusy(true);
     try {
-      await confirmation.confirm(otp);
+      const cred = await confirmation.confirm(otp);
+      // Exchange the id token for an httpOnly session cookie. First
+      // sign-in auto-provisions the Psychologist row (the signup).
+      const idToken = await cred.user.getIdToken();
+      const res = await fetch('/api/v1/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(body?.error ?? 'Could not start your session. Please try again.');
+      }
       router.push('/app');
     } catch (err) {
       setError((err as Error).message);

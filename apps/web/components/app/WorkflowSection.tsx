@@ -251,7 +251,7 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         </header>
         <p className="mt-3 font-serif text-xl">{headline}</p>
         <p className="mt-2 text-xs text-[var(--color-ink-3)]">
-          Started {new Date(workflow.startedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+          Started {new Date(workflow.startedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
           {workflow.goals.length > 0 && (
             <>
               {' · '}
@@ -285,7 +285,7 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
                   {g.achieved && g.achievedAt && (
                     <span className="block text-[11px] text-[var(--color-ink-3)]">
                       Achieved{' '}
-                      {new Date(g.achievedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                      {new Date(g.achievedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
                     </span>
                   )}
                 </label>
@@ -352,7 +352,7 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
                   <Badge tone="muted">{a.status.replaceAll('_', ' ').toLowerCase()}</Badge>
                   <span>
                     assigned{' '}
-                    {new Date(a.assignedAt).toLocaleDateString('en-US', { dateStyle: 'medium' })}
+                    {new Date(a.assignedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
                   </span>
                   <button
                     type="button"

@@ -4,16 +4,14 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { RecordingShell } from '@/components/app/RecordingShell';
 import type { ClientTileEntry } from '@/components/app/ClientPicker';
+import { requirePagePsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 import type { Session as SessionPrismaRow } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
 export default async function RecordPage() {
-  const therapist = await prisma.psychologist.findUnique({
-    where: { firebaseUid: 'dev-firebase-uid-priya' },
-    select: { id: true, fullName: true },
-  });
+  const therapist = await requirePagePsychologist();
 
   const [sessions, rawClients] = therapist
     ? await Promise.all([
@@ -145,7 +143,7 @@ function groupByDate(rows: SessionWithClient[]): DateGroup[] {
   const groups = new Map<string, DateGroup>();
   for (const r of rows) {
     const key = r.scheduledAt.toISOString().slice(0, 10);
-    const label = r.scheduledAt.toLocaleDateString('en-US', {
+    const label = r.scheduledAt.toLocaleDateString('en-IN', {
       weekday: 'long',
       month: 'long',
       day: 'numeric',
@@ -177,5 +175,5 @@ function statusLabel(status: SessionWithClient['status']): string {
 }
 
 function formatTime(d: Date): string {
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
 }

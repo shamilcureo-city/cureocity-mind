@@ -90,7 +90,7 @@ async function buildSignedNote(
     throw new SnapshotBuildError('Signed note failed schema validation; cannot share.');
   }
   const note: TherapyNoteV1 = parsed.data;
-  const subject = `Your session note · ${session.scheduledAt.toLocaleDateString('en-US', {
+  const subject = `Your session note · ${session.scheduledAt.toLocaleDateString('en-IN', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
