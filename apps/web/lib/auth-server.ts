@@ -4,8 +4,8 @@ import { prisma } from './prisma';
 
 /**
  * Three resolution functions, ported from the NestJS guards:
- *   resolvePsychologist  — Psychologist row from Firebase id token.
- *   resolveClient        — Client row from Firebase id token (paired).
+ *   resolvePsychologist  — Psychologist row from the request identity.
+ *   resolveClient        — Client row from the request identity (paired).
  *   resolveFirebaseUid   — uid only, no row required (used by
  *                          claim-token redeem).
  *
@@ -13,21 +13,52 @@ import { prisma } from './prisma';
  * right HTTP status. The route handler then either uses the resolved
  * value or returns the early response.
  *
- * Bypass is engaged when EITHER:
- *   - AUTH_BYPASS=true                (explicit opt-in), or
- *   - Firebase Admin is unconfigured  (FIREBASE_PROJECT_ID /
- *                                      CLIENT_EMAIL / PRIVATE_KEY missing).
- * Both routes short-circuit to the seeded dev fixtures. Once real
- * Firebase env vars land on Vercel, the bypass auto-disengages and
- * Bearer-token verification becomes mandatory — no flag flip required.
+ * Identity is accepted from EITHER:
+ *   - an `Authorization: Bearer <Firebase id token>` header, or
+ *   - the `__session` cookie (Firebase session cookie, minted by
+ *     POST /api/v1/auth/session after OTP verify). Server pages and
+ *     plain same-origin fetches from client components ride on the
+ *     cookie — no Bearer plumbing in components needed.
+ *
+ * Bypass (resolves everything to the seeded dev fixtures) engages when:
+ *   - AUTH_BYPASS=true                (explicit opt-in, any environment), or
+ *   - Firebase Admin is unconfigured AND this is NOT a Vercel
+ *     production deployment.
+ *
+ * On Vercel production with Firebase unconfigured and no explicit
+ * AUTH_BYPASS, requests FAIL CLOSED with 503 instead of silently
+ * becoming the demo therapist. Demo deployments must now opt in
+ * explicitly with AUTH_BYPASS=true.
  */
 
 const DEV_BYPASS_FIREBASE_UID = 'dev-firebase-uid-priya';
 const DEV_BYPASS_CLIENT_FIREBASE_UID = 'dev-client-firebase-uid-arjun';
 
-function shouldBypass(): boolean {
+export const SESSION_COOKIE_NAME = '__session';
+/// 5 days — matches the Firebase session-cookie max and keeps a
+/// weekly-practice therapist signed in between sessions.
+export const SESSION_COOKIE_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
+
+let warnedFailClosed = false;
+
+export function isAuthBypassed(): boolean {
   if (process.env['AUTH_BYPASS'] === 'true') return true;
-  return firebaseAuth() === null;
+  if (firebaseAuth() !== null) return false;
+  // Unconfigured Firebase: bypass is a dev/preview convenience only.
+  // A production deployment without Firebase env vars fails closed.
+  if (process.env['VERCEL_ENV'] === 'production') {
+    if (!warnedFailClosed) {
+      warnedFailClosed = true;
+      console.error(
+        '[auth] Firebase Admin is not configured on a production deployment and ' +
+          'AUTH_BYPASS is not set — refusing to serve the demo identity. ' +
+          'Set FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY for real auth, ' +
+          'or AUTH_BYPASS=true for an explicit demo deployment.',
+      );
+    }
+    return false;
+  }
+  return true;
 }
 
 export interface AuthenticatedUser {
@@ -44,32 +75,56 @@ export interface AuthenticatedClient {
 
 type Resolved<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
 
-async function verifyBearer(req: NextRequest): Promise<Resolved<string>> {
-  if (shouldBypass()) {
+async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>> {
+  if (isAuthBypassed()) {
     return { ok: true, value: DEV_BYPASS_FIREBASE_UID };
   }
+  const auth = firebaseAuth();
+  if (!auth) {
+    // Production + unconfigured + no explicit bypass: fail closed.
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'Authentication is not configured on this deployment' },
+        { status: 503 },
+      ),
+    };
+  }
+
   const header = req.headers.get('authorization');
-  if (!header || !header.startsWith('Bearer ')) {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: 'Missing Bearer token' }, { status: 401 }),
-    };
+  if (header?.startsWith('Bearer ')) {
+    try {
+      const decoded = await auth.verifyIdToken(header.substring('Bearer '.length));
+      return { ok: true, value: decoded.uid };
+    } catch {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: 'Invalid token' }, { status: 401 }),
+      };
+    }
   }
-  // firebaseAuth() is non-null here — shouldBypass() returned false.
-  const auth = firebaseAuth()!;
-  try {
-    const decoded = await auth.verifyIdToken(header.substring('Bearer '.length));
-    return { ok: true, value: decoded.uid };
-  } catch {
-    return {
-      ok: false,
-      response: NextResponse.json({ error: 'Invalid token' }, { status: 401 }),
-    };
+
+  const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (cookie) {
+    try {
+      const decoded = await auth.verifySessionCookie(cookie, true);
+      return { ok: true, value: decoded.uid };
+    } catch {
+      return {
+        ok: false,
+        response: NextResponse.json({ error: 'Session expired — sign in again' }, { status: 401 }),
+      };
+    }
   }
+
+  return {
+    ok: false,
+    response: NextResponse.json({ error: 'Missing Bearer token or session' }, { status: 401 }),
+  };
 }
 
 export async function resolvePsychologist(req: NextRequest): Promise<Resolved<AuthenticatedUser>> {
-  const uidRes = await verifyBearer(req);
+  const uidRes = await verifyRequestIdentity(req);
   if (!uidRes.ok) return uidRes;
   const psy = await prisma.psychologist.findUnique({
     where: { firebaseUid: uidRes.value },
@@ -94,7 +149,7 @@ export async function requirePsychologistId(
       response: NextResponse.json(
         {
           error:
-            'Firebase user has not registered as a Psychologist yet. POST /api/v1/psychologists first.',
+            'Firebase user has not registered as a Psychologist yet. Sign in via /login to auto-provision your account.',
         },
         { status: 403 },
       ),
@@ -121,7 +176,7 @@ export async function requireAdmin(
 }
 
 export async function resolveClient(req: NextRequest): Promise<Resolved<AuthenticatedClient>> {
-  if (shouldBypass()) {
+  if (isAuthBypassed()) {
     const client = await prisma.client.findUnique({
       where: { clientFirebaseUid: DEV_BYPASS_CLIENT_FIREBASE_UID },
       select: { id: true, deletedAt: true, status: true },
@@ -140,7 +195,7 @@ export async function resolveClient(req: NextRequest): Promise<Resolved<Authenti
       value: { firebaseUid: DEV_BYPASS_CLIENT_FIREBASE_UID, clientId: client.id },
     };
   }
-  const uidRes = await verifyBearer(req);
+  const uidRes = await verifyRequestIdentity(req);
   if (!uidRes.ok) return uidRes;
   const client = await prisma.client.findUnique({
     where: { clientFirebaseUid: uidRes.value },
@@ -169,5 +224,10 @@ export async function resolveClient(req: NextRequest): Promise<Resolved<Authenti
  * row yet (binding happens inside the route).
  */
 export async function resolveFirebaseUidOnly(req: NextRequest): Promise<Resolved<string>> {
-  return verifyBearer(req);
+  return verifyRequestIdentity(req);
+}
+
+/** The seeded therapist identity used when bypass is engaged. */
+export function bypassFirebaseUid(): string {
+  return DEV_BYPASS_FIREBASE_UID;
 }

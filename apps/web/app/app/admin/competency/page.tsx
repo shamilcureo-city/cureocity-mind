@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
+import { requirePageAdmin } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -12,11 +13,11 @@ export const dynamic = 'force-dynamic';
  * AI suggestions are accepted vs modified vs rejected, how fast they
  * confirm sections, crisis surface, etc.
  *
- * Pilot scope: shows all therapists in the org. Sprint 9+ adds a
- * clinic-admin role; today the page is open to any logged-in user
- * because the seeded dev fixture is the only therapist.
+ * Cross-tenant surface (it lists every therapist's stats), so it's
+ * gated to the ADMIN role — non-admins bounce to their dashboard.
  */
 export default async function CompetencyPage() {
+  await requirePageAdmin();
   const psychologists = await prisma.psychologist.findMany({
     where: { deletedAt: null },
     select: {

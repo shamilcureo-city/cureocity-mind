@@ -30,8 +30,9 @@ therapist's own clinical records that are provided as context.
 
 When answering:
 - Be concise. Default to 2-4 sentences unless the therapist asks for more detail.
-- Always reference specific clients by name when the data warrants — the therapist
-  is the only reader, no de-identification needed.
+- Reference specific clients when the data warrants. Client names in your context
+  are shortened to "FirstName S." for data minimisation — use them in that form;
+  the therapist knows who is who.
 - When you don't have data to answer, say so plainly. Do not invent.
 - Use plain prose, not markdown headings or bullets, unless asked for a structured
   list.
@@ -127,6 +128,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 }
 
 /**
+ * Data minimisation for the cross-border LLM call: client names are
+ * reduced to "FirstName S." before entering the system prompt. The
+ * chat stays usable ("how is Asha doing?") while full legal names
+ * stay out of the global-region Gemini context. Transcripts and full
+ * note bodies are never included — only the briefing synthesis and
+ * one-line assessment summaries.
+ */
+function redactName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length <= 1) return parts[0] ?? 'Client';
+  return `${parts[0]} ${parts[parts.length - 1]![0]}.`;
+}
+
+/**
  * Sprint 22 — compact cumulative record for ONE client. Reuses the
  * deterministic case-briefing builder so the chat is grounded in the
  * same synthesis the workspace shows. Cross-tenant access throws inside
@@ -144,7 +159,7 @@ async function buildClientContext(psychologistId: string, clientId: string): Pro
     const { buildDeterministicCaseBriefing } = await import('@/lib/case-briefing');
     const briefing = await buildDeterministicCaseBriefing(clientId, psychologistId);
     const lines = [
-      `Client: ${client.fullName}`,
+      `Client: ${redactName(client.fullName)}`,
       `Presenting concerns: ${client.presentingConcerns ?? '(not recorded)'}`,
       `Headline: ${briefing.headline}`,
       `Working diagnosis: ${
@@ -169,7 +184,7 @@ async function buildClientContext(psychologistId: string, clientId: string): Pro
     ];
     return lines.join('\n');
   } catch {
-    return `Client: ${client.fullName}. (Could not assemble the full record — answer from general principles and say so.)`;
+    return `Client: ${redactName(client.fullName)}. (Could not assemble the full record — answer from general principles and say so.)`;
   }
 }
 
@@ -237,7 +252,7 @@ async function buildContext(psychologistId: string): Promise<string> {
   if (inactive.length > 0) {
     lines.push(
       `Clients not seen in 30+ days: ${inactive
-        .map((c) => c.fullName)
+        .map((c) => redactName(c.fullName))
         .slice(0, 10)
         .join(', ')}${inactive.length > 10 ? ` +${inactive.length - 10} more` : ''}`,
     );
@@ -247,7 +262,7 @@ async function buildContext(psychologistId: string): Promise<string> {
   lines.push(`Upcoming sessions (next 7 days): ${upcomingSessions.length}`);
   for (const s of upcomingSessions.slice(0, 6)) {
     lines.push(
-      `  - ${s.client.fullName} (${s.modality}) on ${s.scheduledAt.toISOString().slice(0, 16).replace('T', ' ')}`,
+      `  - ${redactName(s.client.fullName)} (${s.modality}) on ${s.scheduledAt.toISOString().slice(0, 16).replace('T', ' ')}`,
     );
   }
 
@@ -264,7 +279,7 @@ async function buildContext(psychologistId: string): Promise<string> {
     const severity = note?.riskFlags?.severity ?? 'unknown';
     const summary = note?.assessment?.split('.')[0]?.slice(0, 120) ?? '(no signed note)';
     lines.push(
-      `  - ${s.client.fullName} (${s.modality}, ${s.endedAt?.toISOString().slice(0, 10)}, risk: ${severity}): ${summary}`,
+      `  - ${redactName(s.client.fullName)} (${s.modality}, ${s.endedAt?.toISOString().slice(0, 10)}, risk: ${severity}): ${summary}`,
     );
   }
 
@@ -272,7 +287,7 @@ async function buildContext(psychologistId: string): Promise<string> {
     lines.push('');
     lines.push('Active workflows:');
     for (const w of workflows.slice(0, 10)) {
-      lines.push(`  - ${w.client.fullName}: ${w.modality} in ${w.currentPhase}`);
+      lines.push(`  - ${redactName(w.client.fullName)}: ${w.modality} in ${w.currentPhase}`);
     }
   }
 
@@ -282,7 +297,7 @@ async function buildContext(psychologistId: string): Promise<string> {
   });
   if (highRisk.length > 0) {
     lines.push('');
-    lines.push(`High-risk recent sessions: ${highRisk.map((s) => s.client.fullName).join(', ')}`);
+    lines.push(`High-risk recent sessions: ${highRisk.map((s) => redactName(s.client.fullName)).join(', ')}`);
   }
 
   return lines.join('\n');

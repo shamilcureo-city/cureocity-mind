@@ -103,7 +103,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         <div>
           <h1 className="font-serif text-3xl">{session.client.fullName}</h1>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {session.modality ?? session.kind} · {session.scheduledAt.toLocaleString('en-US')}
+            {session.modality ?? session.kind} · {session.scheduledAt.toLocaleString('en-IN')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

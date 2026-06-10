@@ -225,7 +225,7 @@ export function InstrumentRunner({ clientId }: Props) {
                     </span>
                   </div>
                   <span className="text-xs text-[var(--color-ink-3)]">
-                    {new Date(h.administeredAt).toLocaleString('en-US', {
+                    {new Date(h.administeredAt).toLocaleString('en-IN', {
                       month: 'short',
                       day: 'numeric',
                       year: 'numeric',

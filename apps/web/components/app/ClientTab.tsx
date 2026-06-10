@@ -49,7 +49,7 @@ export function ClientTab({ data }: { data: ClientPanelData }) {
           label="Last session"
           value={
             data.lastSessionAt
-              ? data.lastSessionAt.toLocaleDateString('en-US', {
+              ? data.lastSessionAt.toLocaleDateString('en-IN', {
                   year: 'numeric',
                   month: 'short',
                   day: 'numeric',

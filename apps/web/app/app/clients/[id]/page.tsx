@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
+import { requirePagePsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { JourneyError } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
@@ -34,11 +35,7 @@ interface PageProps {
 export default async function ClientDetailPage({ params }: PageProps) {
   const { id } = await params;
 
-  const therapist = await prisma.psychologist.findUnique({
-    where: { firebaseUid: 'dev-firebase-uid-priya' },
-    select: { id: true },
-  });
-  if (!therapist) notFound();
+  const therapist = await requirePagePsychologist();
 
   const client = await prisma.client.findFirst({
     where: { id, psychologistId: therapist.id, deletedAt: null },
@@ -131,7 +128,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
           </header>
           {client.sessions.length === 0 ? (
             <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-              No sessions yet. Start one from the Record tab.
+              No sessions yet. Start one from Record in the navigation.
             </p>
           ) : (
             <ul className="divide-y divide-[var(--color-line-soft)]">
@@ -170,11 +167,11 @@ function calcAge(dob: Date): number {
 }
 
 function formatMonth(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 }
 
 function formatDateTime(d: Date): string {
-  return d.toLocaleDateString('en-US', {
+  return d.toLocaleDateString('en-IN', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',

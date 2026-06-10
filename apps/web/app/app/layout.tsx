@@ -1,19 +1,36 @@
 import type { ReactNode } from 'react';
-import { Sidebar } from '@/components/app/Sidebar';
+import { MobileNav } from '@/components/app/MobileNav';
+import { Sidebar, type PlanUsage } from '@/components/app/Sidebar';
+import { currentPsychologist } from '@/lib/auth-page';
+import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
+/// Free-pilot session allowance shown in the sidebar plan widget.
+/// Display-only today; server-side enforcement lands with billing.
+const FREE_PILOT_SESSION_CAP = 10;
+
 /**
- * Authenticated scribe shell. Klarify-parity left nav + main content
- * pane. Auth gate lives at the page/route level for now; Sprint 12
- * hardens this into a middleware redirect when real Firebase auth
- * lands.
+ * Authenticated scribe shell. Sidebar on md+, bottom tab bar on
+ * phones. Page-level guards (`requirePagePsychologist`) handle the
+ * actual redirect; the layout only resolves the identity to feed the
+ * plan widget, and renders fine when unauthenticated (the child page
+ * will redirect before content matters).
  */
-export default function AppLayout({ children }: { children: ReactNode }) {
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  const psy = await currentPsychologist();
+  const usage: PlanUsage | null = psy
+    ? {
+        used: await prisma.session.count({ where: { psychologistId: psy.id } }),
+        cap: FREE_PILOT_SESSION_CAP,
+      }
+    : null;
+
   return (
     <div className="flex min-h-screen bg-[var(--color-bg)]">
-      <Sidebar />
-      <div className="flex flex-1 flex-col">{children}</div>
+      <Sidebar usage={usage} />
+      <div className="flex flex-1 flex-col pb-16 md:pb-0">{children}</div>
+      <MobileNav />
     </div>
   );
 }

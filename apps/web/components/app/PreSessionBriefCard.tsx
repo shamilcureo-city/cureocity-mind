@@ -98,7 +98,7 @@ function BriefBody({ brief }: { brief: PreSessionBriefV1 }) {
             {brief.carryoverCrisis.map((c, i) => (
               <li key={i}>
                 {c.kind.replace(/_/g, ' ')} — severity {c.severity}, last surfaced{' '}
-                {new Date(c.lastSeenAt).toLocaleDateString('en-US', {
+                {new Date(c.lastSeenAt).toLocaleDateString('en-IN', {
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',

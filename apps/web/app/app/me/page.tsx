@@ -1,7 +1,7 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
 import { Container } from '@/components/ui/Container';
+import { requirePagePsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -13,16 +13,9 @@ export const dynamic = 'force-dynamic';
  * computes, but framed for the practitioner: their own counters, no
  * comparison against colleagues, no judgment language. Useful for
  * self-reflection and pilot evaluation.
- *
- * Dev fixture-bound for now — drops in cleanly under the real Firebase
- * auth cutover (Tier 3 pilot blocker).
  */
 export default async function MeOverviewPage() {
-  const therapist = await prisma.psychologist.findUnique({
-    where: { firebaseUid: 'dev-firebase-uid-priya' },
-    select: { id: true, fullName: true, role: true },
-  });
-  if (!therapist) notFound();
+  const therapist = await requirePagePsychologist();
 
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 

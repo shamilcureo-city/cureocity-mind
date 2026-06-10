@@ -788,7 +788,7 @@ function formatTimestamp(ms: number): string {
 
 function formatDate(iso: string | null): string {
   if (!iso) return '';
-  return new Date(iso).toLocaleString('en-US', {
+  return new Date(iso).toLocaleString('en-IN', {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',

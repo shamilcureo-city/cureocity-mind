@@ -99,5 +99,5 @@ function DiagnosisRow({ d, current }: { d: DiagnosisHistoryRow; current: boolean
 }
 
 function formatDate(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return d.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
 }

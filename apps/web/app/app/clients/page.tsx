@@ -3,23 +3,19 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClientsHeader } from '@/components/app/ClientsHeader';
+import { requirePagePsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 export default async function ClientsPage() {
-  const therapist = await prisma.psychologist.findUnique({
-    where: { firebaseUid: 'dev-firebase-uid-priya' },
-    select: { id: true },
+  const therapist = await requirePagePsychologist();
+  const rows = await prisma.client.findMany({
+    where: { psychologistId: therapist.id, deletedAt: null },
+    orderBy: { updatedAt: 'desc' },
+    include: { sessions: { orderBy: { scheduledAt: 'desc' }, take: 1 } },
+    take: 100,
   });
-  const rows = therapist
-    ? await prisma.client.findMany({
-        where: { psychologistId: therapist.id, deletedAt: null },
-        orderBy: { updatedAt: 'desc' },
-        include: { sessions: { orderBy: { scheduledAt: 'desc' }, take: 1 } },
-        take: 100,
-      })
-    : [];
 
   return (
     <Container className="py-10">
@@ -70,11 +66,11 @@ export default async function ClientsPage() {
 }
 
 function formatMonth(d: Date): string {
-  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
 }
 
 function formatDateTime(d: Date): string {
-  return d.toLocaleDateString('en-US', {
+  return d.toLocaleDateString('en-IN', {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
