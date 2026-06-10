@@ -60,8 +60,16 @@ export function LiveRecorder({ sessionId, clientName, modality, source, onFinish
       // Kick off note generation; don't block the redirect. The session
       // detail page polls the draft status, so the user immediately sees
       // "Generating note…" and watches it flip to COMPLETED.
+      //
+      // keepalive: the redirect below navigates away from this page
+      // immediately. Without keepalive the browser ABORTS this in-flight
+      // POST, leaving the draft stuck PENDING and the review screen
+      // spinning forever. keepalive lets the request finish during the
+      // navigation. As a backstop, the Notes tab also detects a stuck
+      // PENDING/IN_PROGRESS draft and offers a manual resume.
       void fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
         method: 'POST',
+        keepalive: true,
       }).catch(() => {
         /* swallow — the polling UI surfaces real failures */
       });

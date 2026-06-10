@@ -53,6 +53,16 @@ type Phase =
 
 const POLL_MS = 2_000;
 
+// How long a non-completing generation can sit before the UI offers a
+// manual "Resume". A PENDING draft means /end created the row but the
+// generation kick never landed (a navigation-aborted fire-and-forget),
+// so surface recovery quickly. IN_PROGRESS means Gemini is genuinely
+// running — wait much longer before crying wolf on a slow-but-fine run.
+// Either way polling continues underneath, so a slow run still
+// auto-completes without the user touching anything.
+const STALL_PENDING_MS = 8_000;
+const STALL_RUNNING_MS = 90_000;
+
 export function NotesTab({
   sessionId,
   sessionStatus,
@@ -74,6 +84,12 @@ export function NotesTab({
   const [signError, setSignError] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Stall detection for the generating phase. `slow` latches true once
+  // a run has sat past its threshold, flipping the spinner into a
+  // recoverable state with a Resume button (instead of polling forever).
+  const [slow, setSlow] = useState(false);
+  const genStartRef = useRef<number | null>(null);
+  const draftStatusRef = useRef<string | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollTimer.current) {
@@ -126,6 +142,34 @@ export function NotesTab({
     return stopPolling;
   }, [phase.kind, pollOnce, stopPolling]);
 
+  // Keep the latest draft status in a ref so the stall timer can read
+  // it without restarting every poll tick.
+  useEffect(() => {
+    draftStatusRef.current = phase.kind === 'generating' ? phase.draft.status : null;
+  }, [phase]);
+
+  // Stall detector: while generating, latch `slow` once the run sits
+  // past its status-dependent threshold. Keyed on phase.kind only so it
+  // survives the per-tick phase updates from pollOnce.
+  useEffect(() => {
+    if (phase.kind !== 'generating') {
+      genStartRef.current = null;
+      setSlow(false);
+      return;
+    }
+    if (genStartRef.current === null) genStartRef.current = Date.now();
+    const id = setInterval(() => {
+      setSlow((prev) => {
+        if (prev) return true; // latched
+        const elapsed = Date.now() - (genStartRef.current ?? Date.now());
+        const threshold =
+          draftStatusRef.current === 'IN_PROGRESS' ? STALL_RUNNING_MS : STALL_PENDING_MS;
+        return elapsed > threshold;
+      });
+    }, 1_000);
+    return () => clearInterval(id);
+  }, [phase.kind]);
+
   const triggerGeneration = useCallback(async (): Promise<void> => {
     setGenerating(true);
     try {
@@ -164,6 +208,15 @@ export function NotesTab({
       setGenerating(false);
     }
   }, [sessionId, pollOnce, phase.kind]);
+
+  // Manual recovery from a stalled run. Re-runs the orchestrator, which
+  // is idempotent: it resets the draft to IN_PROGRESS and re-drafts from
+  // the saved audio, so nothing the therapist recorded is lost.
+  const resumeGeneration = useCallback((): void => {
+    setSlow(false);
+    genStartRef.current = Date.now();
+    void triggerGeneration();
+  }, [triggerGeneration]);
 
   const triggerSignOff = useCallback(async (): Promise<void> => {
     if (phase.kind !== 'completed') return;
@@ -241,7 +294,14 @@ export function NotesTab({
   }
 
   if (phase.kind === 'generating') {
-    return <GeneratingState draft={phase.draft} />;
+    return (
+      <GeneratingState
+        draft={phase.draft}
+        slow={slow}
+        resuming={generating}
+        onResume={resumeGeneration}
+      />
+    );
   }
 
   if (phase.kind === 'failed') {
@@ -443,7 +503,17 @@ export function NotesTab({
   );
 }
 
-function GeneratingState({ draft }: { draft: NoteDraft }) {
+function GeneratingState({
+  draft,
+  slow,
+  resuming,
+  onResume,
+}: {
+  draft: NoteDraft;
+  slow: boolean;
+  resuming: boolean;
+  onResume: () => void;
+}) {
   const steps = [
     { key: 'PENDING', label: 'Setting up the run' },
     { key: 'IN_PROGRESS', label: 'Transcribing + drafting' },
@@ -484,6 +554,24 @@ function GeneratingState({ draft }: { draft: NoteDraft }) {
           );
         })}
       </ol>
+
+      {slow && (
+        <div className="mt-6 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-4">
+          <p className="text-sm font-medium text-[var(--color-ink)]">
+            This is taking longer than usual.
+          </p>
+          <p className="mt-1 max-w-xl text-sm text-[var(--color-ink-2)]">
+            The hand-off to note generation may have been interrupted. Your recording and transcript
+            are saved — resuming re-drafts the note from the saved audio. Nothing you recorded is
+            lost.
+          </p>
+          <div className="mt-3">
+            <Button onClick={onResume} disabled={resuming}>
+              {resuming ? 'Resuming…' : 'Resume generation'}
+            </Button>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
