@@ -13,6 +13,10 @@ const fraunces = Fraunces({
   subsets: ['latin'],
   display: 'swap',
   variable: '--font-fraunces',
+  // Italic is used by the landing-page display headline; without the real
+  // italic file the browser synthesizes a faux oblique that ruins
+  // Fraunces' letterforms.
+  style: ['normal', 'italic'],
   axes: ['SOFT', 'opsz'],
 });
 
