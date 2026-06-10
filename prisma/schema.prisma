@@ -1854,6 +1854,9 @@ enum AuditAction {
   CASE_BRIEFING_GENERATED
   // Conceptual map (Pass 7) — Sprint 24. Per-client thematic graph.
   CONCEPTUAL_MAP_GENERATED
+  // Per-tenant envelope encryption rollout — Sprint 32 Phase 1.
+  ENCRYPTION_KEY_PROVISIONED
+  ENCRYPTION_BACKFILL_RAN
 }
 
 enum AuditActorType {

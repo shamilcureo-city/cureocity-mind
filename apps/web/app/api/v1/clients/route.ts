@@ -8,6 +8,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toClient } from '@/lib/mappers';
+import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson, parseQuery } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -56,13 +57,28 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const auditMeta = auditMetadataFromRequest(req);
   const now = new Date();
+
+  // S32 Phase 1 — dual-write the encrypted PII columns. encryptForTenant
+  // is hoisted outside the transaction because it may auto-provision a
+  // PsychologistTenantKey row + KMS-wrap a fresh DEK; doing that inside
+  // the client-create tx would extend the lock window unnecessarily.
+  const contactPhoneEncrypted = await encryptForTenant(
+    auth.value.psychologistId,
+    body.value.contactPhone,
+  );
+  const contactEmailEncrypted = body.value.contactEmail
+    ? await encryptForTenant(auth.value.psychologistId, body.value.contactEmail)
+    : null;
+
   const created = await prisma.$transaction(async (tx) => {
     const row = await tx.client.create({
       data: {
         psychologistId: auth.value.psychologistId,
         fullName: body.value.fullName,
         contactPhone: body.value.contactPhone,
+        contactPhoneEncrypted,
         contactEmail: body.value.contactEmail ?? null,
+        contactEmailEncrypted,
         dateOfBirth: body.value.dateOfBirth ? new Date(body.value.dateOfBirth) : null,
         presentingConcerns: body.value.presentingConcerns ?? null,
         preferredModality: body.value.preferredModality ?? null,
