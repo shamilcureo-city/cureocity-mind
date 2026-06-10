@@ -4,6 +4,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toClient } from '@/lib/mappers';
 import { prisma } from '@/lib/prisma';
+import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -33,13 +34,28 @@ export async function PATCH(
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
 
+  // S32 Phase 1 — DPDP correction is the same write surface as PATCH
+  // /clients, so dual-write the encrypted PII columns identically.
+  const contactPhoneEncrypted =
+    body.value.contactPhone !== undefined
+      ? await encryptForTenant(auth.value.psychologistId, body.value.contactPhone)
+      : undefined;
+  const contactEmailEncrypted =
+    body.value.contactEmail !== undefined
+      ? body.value.contactEmail
+        ? await encryptForTenant(auth.value.psychologistId, body.value.contactEmail)
+        : null
+      : undefined;
+
   const updated = await prisma.$transaction(async (tx) => {
     const next = await tx.client.update({
       where: { id: clientId },
       data: {
         ...(body.value.fullName !== undefined && { fullName: body.value.fullName }),
         ...(body.value.contactPhone !== undefined && { contactPhone: body.value.contactPhone }),
+        ...(contactPhoneEncrypted !== undefined && { contactPhoneEncrypted }),
         ...(body.value.contactEmail !== undefined && { contactEmail: body.value.contactEmail }),
+        ...(contactEmailEncrypted !== undefined && { contactEmailEncrypted }),
       },
     });
     await writeAudit(

@@ -121,6 +121,11 @@ export const AuditActionSchema = z.enum([
   'ASSESSMENT_ITEM_CLOSED',
   'CASE_BRIEFING_GENERATED',
   'CONCEPTUAL_MAP_GENERATED',
+  // Per-tenant envelope encryption rollout — Sprint 32 Phase 1.
+  // Provisioned on first encrypt-for-tenant call; backfill runs
+  // bulk-encrypt across legacy plaintext rows.
+  'ENCRYPTION_KEY_PROVISIONED',
+  'ENCRYPTION_BACKFILL_RAN',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

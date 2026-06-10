@@ -4,6 +4,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toClient } from '@/lib/mappers';
+import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -53,13 +54,29 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
   const dto = await parseJson(req, UpdateClientInputSchema);
   if (!dto.ok) return dto.response;
 
+  // S32 Phase 1 — re-encrypt PII whenever the plaintext changes. Hoisted
+  // outside the tx for the same reason as POST /clients (KMS round-trip
+  // shouldn't stretch the row lock).
+  const contactPhoneEncrypted =
+    dto.value.contactPhone !== undefined
+      ? await encryptForTenant(auth.value.psychologistId, dto.value.contactPhone)
+      : undefined;
+  const contactEmailEncrypted =
+    dto.value.contactEmail !== undefined
+      ? dto.value.contactEmail
+        ? await encryptForTenant(auth.value.psychologistId, dto.value.contactEmail)
+        : null
+      : undefined;
+
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.client.update({
       where: { id },
       data: {
         ...(dto.value.fullName !== undefined && { fullName: dto.value.fullName }),
         ...(dto.value.contactPhone !== undefined && { contactPhone: dto.value.contactPhone }),
+        ...(contactPhoneEncrypted !== undefined && { contactPhoneEncrypted }),
         ...(dto.value.contactEmail !== undefined && { contactEmail: dto.value.contactEmail }),
+        ...(contactEmailEncrypted !== undefined && { contactEmailEncrypted }),
         ...(dto.value.dateOfBirth !== undefined && {
           dateOfBirth: dto.value.dateOfBirth ? new Date(dto.value.dateOfBirth) : null,
         }),
