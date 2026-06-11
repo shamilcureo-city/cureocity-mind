@@ -6,6 +6,7 @@ import {
   isAuthBypassed,
 } from '@/lib/auth-server';
 import { writeAudit } from '@/lib/audit';
+import { ensurePersonalClinic } from '@/lib/clinic';
 import { firebaseAuth } from '@/lib/firebase-admin';
 import { isPilotInviteRequired, redeemInviteCode } from '@/lib/invite';
 import { parseJson } from '@/lib/validate';
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             phone: decoded.phone_number ?? `pending:${decoded.uid}`,
             rciNumber: `PENDING-${decoded.uid}`,
           },
-          select: { id: true, deletedAt: true },
+          select: { id: true, deletedAt: true, fullName: true },
         });
         await writeAudit(
           {
@@ -107,6 +108,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           },
           tx,
         );
+        // Sprint 39 — seat the new therapist as OWNER of a personal clinic.
+        await ensurePersonalClinic(tx, { psychologistId: row.id, name: row.fullName });
         if (inviteRequired) {
           await writeAudit(
             {
