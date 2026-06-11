@@ -52,3 +52,45 @@ export function getFirebaseAuth(): Auth {
 export function createRecaptchaVerifier(elementId: string): RecaptchaVerifier {
   return new RecaptchaVerifier(getFirebaseAuth(), elementId, { size: 'invisible' });
 }
+
+/**
+ * Sprint 36 — map Firebase auth error codes to human messages.
+ *
+ * The setup-time codes (configuration-not-found / operation-not-allowed
+ * / captcha-check-failed) only surface while the project is being wired,
+ * so their messages carry a short admin hint. The runtime codes
+ * (invalid number / wrong code / rate limit) read as plain user guidance.
+ * Unknown codes fall back to the raw Firebase message with the noisy
+ * "Firebase: …" prefix stripped.
+ */
+export function friendlyAuthError(err: unknown): string {
+  const code = (err as { code?: string } | null)?.code ?? '';
+  switch (code) {
+    case 'auth/configuration-not-found':
+      return 'Phone sign-in isn’t enabled for this app yet. (Admin: enable Phone under Firebase → Authentication → Sign-in method.)';
+    case 'auth/operation-not-allowed':
+      return 'SMS to this region isn’t enabled yet. (Admin: allow it under Firebase → Authentication → Settings → SMS region policy.)';
+    case 'auth/captcha-check-failed':
+    case 'auth/invalid-app-credential':
+    case 'auth/unauthorized-domain':
+      return 'This site isn’t authorised for sign-in yet. (Admin: add this domain under Firebase → Authentication → Settings → Authorized domains.)';
+    case 'auth/invalid-phone-number':
+      return 'That doesn’t look like a valid number. Use international format, like +91XXXXXXXXXX.';
+    case 'auth/missing-phone-number':
+      return 'Enter your mobile number first.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a few minutes and try again.';
+    case 'auth/quota-exceeded':
+      return 'The SMS limit was reached for now. Please try again later.';
+    case 'auth/invalid-verification-code':
+      return 'That code didn’t match. Check the 6 digits and try again.';
+    case 'auth/code-expired':
+      return 'That code expired. Request a new one.';
+    case 'auth/network-request-failed':
+      return 'Network problem reaching sign-in. Check your connection and retry.';
+    default: {
+      const msg = (err as Error | null)?.message ?? 'Something went wrong. Please try again.';
+      return msg.replace(/^Firebase:\s*/i, '').trim();
+    }
+  }
+}

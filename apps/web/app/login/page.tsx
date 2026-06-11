@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
 import {
   createRecaptchaVerifier,
+  friendlyAuthError,
   getFirebaseAuth,
   isFirebaseConfigured,
 } from '@/lib/firebase-therapist';
@@ -42,7 +43,7 @@ export default function LoginPage() {
       setConfirmation(conf);
       setStage('otp');
     } catch (err) {
-      setError((err as Error).message);
+      setError(friendlyAuthError(err));
     } finally {
       setBusy(false);
     }
@@ -69,7 +70,7 @@ export default function LoginPage() {
       }
       router.push('/app');
     } catch (err) {
-      setError((err as Error).message);
+      setError(friendlyAuthError(err));
     } finally {
       setBusy(false);
     }
