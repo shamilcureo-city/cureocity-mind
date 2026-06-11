@@ -1,11 +1,13 @@
 'use client';
 
+import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 
 /**
- * Root error boundary. Shows a recoverable message instead of the
- * framework's default stack screen; the digest lets us correlate
- * with server logs without exposing internals to the user.
+ * Route-level error boundary. Shows a recoverable message instead of the
+ * framework's default stack screen; the digest lets us correlate with
+ * server logs without exposing internals to the user. Sprint 40 — also
+ * reports to the observability ingest route.
  */
 export default function RootError({
   error,
@@ -14,6 +16,20 @@ export default function RootError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    void fetch('/api/v1/observability/client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: error.message,
+        stack: error.stack,
+        digest: error.digest,
+        source: 'error-boundary',
+        url: typeof window !== 'undefined' ? window.location.href : undefined,
+      }),
+    }).catch(() => {});
+  }, [error]);
+
   return (
     <main className="grid min-h-screen place-items-center bg-[var(--color-bg)] p-6">
       <div className="max-w-md text-center">
