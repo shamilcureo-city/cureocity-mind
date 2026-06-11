@@ -152,6 +152,7 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
 
   return (
     <CompletedBrief
+      sessionId={sessionId}
       report={report}
       onUpdate={updateConfirmation}
       onRegenerate={generate}
@@ -165,11 +166,13 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
 // ============================================================================
 
 function CompletedBrief({
+  sessionId,
   report,
   onUpdate,
   onRegenerate,
   regenerating,
 }: {
+  sessionId: string;
   report: ClinicalReport;
   onUpdate: (next: ClinicalReport) => void;
   onRegenerate: () => void | Promise<void>;
@@ -191,9 +194,17 @@ function CompletedBrief({
             confirmed history. Review each section and accept, edit, or reject.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => void onRegenerate()} disabled={regenerating}>
-          {regenerating ? 'Regenerating…' : 'Regenerate'}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/api/v1/sessions/${sessionId}/clinical-report/pdf`}
+            className="inline-flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-full border border-[var(--color-line)] bg-white px-6 text-[15px] font-medium text-[var(--color-ink)] transition-colors hover:border-[var(--color-ink)]"
+          >
+            Download PDF
+          </a>
+          <Button variant="secondary" onClick={() => void onRegenerate()} disabled={regenerating}>
+            {regenerating ? 'Regenerating…' : 'Regenerate'}
+          </Button>
+        </div>
       </header>
 
       {body.crisisFlags.length > 0 && (
