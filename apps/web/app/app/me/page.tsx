@@ -122,6 +122,27 @@ export default async function MeOverviewPage() {
         </p>
       </header>
 
+      {therapist.role === 'ADMIN' && (
+        <div className="mb-8 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-line)] bg-white/50 px-5 py-3">
+          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">
+            Admin
+          </span>
+          <Link
+            href="/app/admin/invite-codes"
+            className="text-sm text-[var(--color-ink-2)] underline-offset-2 hover:text-[var(--color-ink)] hover:underline"
+          >
+            Pilot invite codes
+          </Link>
+          <span className="text-[var(--color-line)]">·</span>
+          <Link
+            href="/app/admin/erasure-queue"
+            className="text-sm text-[var(--color-ink-2)] underline-offset-2 hover:text-[var(--color-ink)] hover:underline"
+          >
+            Erasure queue
+          </Link>
+        </div>
+      )}
+
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatTile label="Active clients" value={String(activeClients)} />
         <StatTile label="Sessions · last 30d" value={String(sessions30d)} />
