@@ -1,0 +1,4 @@
+-- Sprint 42: multi-tenant clinics Phase 2 — admin powers audit actions.
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'CLINIC_MEMBER_REMOVED';
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'CLINIC_MEMBER_ROLE_CHANGED';
+ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'CLIENT_REASSIGNED';

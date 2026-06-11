@@ -1942,6 +1942,10 @@ enum AuditAction {
   // Multi-tenant clinics — Sprint 39.
   CLINIC_CREATED
   CLINIC_MEMBER_ADDED
+  // Multi-tenant clinics — Sprint 42 (Phase 2).
+  CLINIC_MEMBER_REMOVED
+  CLINIC_MEMBER_ROLE_CHANGED
+  CLIENT_REASSIGNED
 }
 
 enum AuditActorType {
