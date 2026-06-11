@@ -5,6 +5,17 @@
   "description": "OpenTelemetry SDK bootstrap + Prometheus metrics for Cureocity Mind services",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "//exports": "Sprint 41 — '.' carries the full surface (metrics + the heavy OTel NodeSDK) for the NestJS services; './metrics' is the lightweight recorders only (@opentelemetry/api), so apps/web imports them without pulling sdk-node + auto-instrumentations into the Next bundle.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./metrics": {
+      "types": "./dist/metrics.d.ts",
+      "default": "./dist/metrics.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
