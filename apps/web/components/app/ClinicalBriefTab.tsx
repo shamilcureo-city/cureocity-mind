@@ -12,6 +12,7 @@ import type {
   ClinicalSectionKey,
   ClinicalTreatmentPlan,
 } from '@cureocity/contracts';
+import { ClinicalTreatmentPlanSchema } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -483,20 +484,30 @@ function PlanSection({
   plan: ClinicalTreatmentPlan;
   confirmation: ClinicalSectionConfirmation;
 }) {
+  // Sprint 36 — once the therapist has modified-and-accepted, show THEIR
+  // edited plan in the read view (the AI's original is superseded), not
+  // just a "modified" badge. The edited body lives in confirmations.plan.edits.
+  const edited = editedPlanFromConfirmation(confirmation);
+  const shown = edited ?? plan;
   return (
     <SectionCard title="Treatment plan" confirmation={confirmation}>
+      {edited && (
+        <p className="-mt-2 mb-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-accent)]">
+          Showing your edited plan
+        </p>
+      )}
       <dl className="grid gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Modality</dt>
-          <dd className="mt-1 capitalize">{plan.modality}</dd>
+          <dd className="mt-1 capitalize">{shown.modality}</dd>
         </div>
         <div>
           <dt className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
             Expected duration
           </dt>
           <dd className="mt-1">
-            {plan.expectedDurationSessions !== null
-              ? `${plan.expectedDurationSessions} sessions`
+            {shown.expectedDurationSessions !== null
+              ? `${shown.expectedDurationSessions} sessions`
               : 'too uncertain'}
           </dd>
         </div>
@@ -504,7 +515,7 @@ function PlanSection({
       <div className="mt-4">
         <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Phase sequence</p>
         <ol className="mt-2 flex flex-wrap gap-2 text-sm">
-          {plan.phaseSequence.map((p, i) => (
+          {shown.phaseSequence.map((p, i) => (
             <li
               key={i}
               className="rounded-full bg-[var(--color-surface)] px-3 py-1 text-[var(--color-ink-2)]"
@@ -517,7 +528,7 @@ function PlanSection({
       <div className="mt-4">
         <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Goals</p>
         <ul className="mt-2 space-y-2">
-          {plan.goals.map((g, i) => (
+          {shown.goals.map((g, i) => (
             <li
               key={i}
               className="rounded-xl border border-[var(--color-line-soft)] bg-white/30 p-3"
@@ -1159,6 +1170,20 @@ function formatTimestamp(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Sprint 36 — pull the therapist's edited plan out of a MODIFIED
+ * confirmation. Returns null for any other status or an unparseable
+ * edits blob (defensive: a malformed blob falls back to the AI plan).
+ */
+function editedPlanFromConfirmation(
+  confirmation: ClinicalSectionConfirmation,
+): ClinicalTreatmentPlan | null {
+  if (confirmation.status !== 'MODIFIED' || !confirmation.edits) return null;
+  const edits = confirmation.edits as { treatmentPlan?: unknown };
+  const parsed = ClinicalTreatmentPlanSchema.safeParse(edits?.treatmentPlan);
+  return parsed.success ? parsed.data : null;
 }
 
 function formatDate(iso: string | null): string {
