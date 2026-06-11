@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { ConceptualMapV1Schema, type ConceptualMapV1 } from '@cureocity/contracts';
-import { recordGeminiCall } from '@cureocity/observability';
+import { recordGeminiCall } from '@cureocity/observability/metrics';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { modelRouter } from '@/lib/llm';

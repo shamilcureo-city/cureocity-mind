@@ -6,7 +6,7 @@ import {
   type ClinicalTreatmentPlan,
   GeneratePreSessionBriefQuerySchema,
 } from '@cureocity/contracts';
-import { recordCostInr, recordGeminiCall } from '@cureocity/observability';
+import { recordCostInr, recordGeminiCall } from '@cureocity/observability/metrics';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toPreSessionBrief } from '@/lib/clinical-mappers';

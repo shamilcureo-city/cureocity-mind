@@ -10,7 +10,7 @@ import {
 import {
   recordCostInr,
   recordGeminiCall,
-} from '@cureocity/observability';
+} from '@cureocity/observability/metrics';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toTherapyScript } from '@/lib/clinical-mappers';

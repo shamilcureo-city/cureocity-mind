@@ -13,7 +13,7 @@ import {
   recordCostInr,
   recordCrisisFlag,
   recordGeminiCall,
-} from '@cureocity/observability';
+} from '@cureocity/observability/metrics';
 import { reconcileAssessmentItems } from './assessment-items';
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';

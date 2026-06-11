@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import type { AuditAction, AuditActorType, AuditMetadata } from '@cureocity/contracts';
-import { recordAuditWrite } from '@cureocity/observability';
+import { recordAuditWrite } from '@cureocity/observability/metrics';
 import { prisma } from './prisma';
 
 /**

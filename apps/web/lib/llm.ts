@@ -1,4 +1,5 @@
 import { existsSync, writeFileSync } from 'node:fs';
+import { GoogleGenAI } from '@google/genai';
 import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
@@ -140,4 +141,60 @@ export function modelRouter(): IModelRouter {
     globalThis.__cureocityModelRouter = build();
   }
   return globalThis.__cureocityModelRouter;
+}
+
+export interface LlmSelfTestResult {
+  ok: boolean;
+  backend: string;
+  project?: string;
+  region?: string;
+  model?: string;
+  latencyMs?: number;
+  sample?: string;
+  error?: string;
+}
+
+/**
+ * Sprint 41 — Vertex connectivity self-test.
+ *
+ * Runs ONE tiny real generateContent against the configured Pro model +
+ * region so an operator can confirm "is real LLM actually wired?" without
+ * recording a whole session. On the mock backend it's a no-op success
+ * (nothing to call). Failures surface the raw Vertex error (bad creds,
+ * model not available in the region, project not allowlisted, …) which
+ * is exactly what you need to debug the cutover.
+ */
+export async function llmSelfTest(): Promise<LlmSelfTestResult> {
+  const backend = process.env['LLM_BACKEND'] ?? 'mock';
+  if (backend !== 'vertex') {
+    return { ok: true, backend, sample: 'mock backend — no real LLM call made' };
+  }
+  ensureGcpCreds();
+  const project = process.env['VERTEX_PROJECT_ID'];
+  if (!project) {
+    return { ok: false, backend, error: 'LLM_BACKEND=vertex but VERTEX_PROJECT_ID is not set' };
+  }
+  const region = process.env['VERTEX_PRO_REGION'] ?? 'global';
+  const model = process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro';
+  try {
+    const ai = new GoogleGenAI({ vertexai: true, project, location: region });
+    const start = Date.now();
+    const res = await ai.models.generateContent({
+      model,
+      contents: [{ role: 'user', parts: [{ text: 'Reply with exactly: OK' }] }],
+      config: { temperature: 0, maxOutputTokens: 16 },
+    });
+    const latencyMs = Date.now() - start;
+    return {
+      ok: true,
+      backend,
+      project,
+      region,
+      model,
+      latencyMs,
+      sample: (res.text ?? '').trim().slice(0, 40),
+    };
+  } catch (e) {
+    return { ok: false, backend, project, region, model, error: (e as Error).message };
+  }
 }
