@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
 import { ClientsHeader } from '@/components/app/ClientsHeader';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
@@ -22,12 +21,11 @@ export default async function ClientsPage() {
       <ClientsHeader />
 
       <Card className="overflow-hidden">
-        <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr] gap-3 border-b border-[var(--color-line-soft)] px-5 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-3)]">
+        <div className="grid grid-cols-[2fr_1fr_1fr_1.5fr] gap-3 border-b border-[var(--color-line-soft)] px-5 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-3)]">
           <span>Name</span>
           <span>Client since</span>
           <span className="text-right tabular-nums">Total sessions</span>
           <span>Last session</span>
-          <span className="text-right">Client type</span>
         </div>
         {rows.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
@@ -39,7 +37,7 @@ export default async function ClientsPage() {
               <li key={c.id}>
                 <Link
                   href={`/app/clients/${c.id}`}
-                  className="grid grid-cols-[2fr_1fr_1fr_1.5fr_1fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
+                  className="grid grid-cols-[2fr_1fr_1fr_1.5fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
                 >
                   <span className="font-medium text-[var(--color-ink)]">{c.fullName}</span>
                   <span className="text-[var(--color-ink-2)]">{formatMonth(c.createdAt)}</span>
@@ -50,9 +48,6 @@ export default async function ClientsPage() {
                     {c.sessions[0]
                       ? formatDateTime(c.sessions[0].scheduledAt)
                       : '—'}
-                  </span>
-                  <span className="text-right">
-                    <Badge tone="muted">Individual</Badge>
                   </span>
                 </Link>
               </li>

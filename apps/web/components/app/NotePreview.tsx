@@ -33,16 +33,6 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
     <article className="space-y-8">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <select
-            disabled
-            className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1.5 text-sm text-[var(--color-ink-2)] opacity-70"
-            defaultValue="BASE"
-            aria-label="Note type"
-          >
-            <option value="BASE">BASE</option>
-            <option value="SOAP">SOAP</option>
-            <option value="DAP">DAP</option>
-          </select>
           <Badge tone="muted">{note.modality}</Badge>
           <Badge tone="muted">v{note.version}</Badge>
         </div>

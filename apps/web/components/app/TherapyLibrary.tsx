@@ -20,6 +20,10 @@ interface TherapyLibraryProps {
   defaultLanguage: 'en' | 'ml' | 'hi' | 'ta' | 'bn';
   /** Id of the client's currently active treatment plan, if any. */
   activeTreatmentPlanId: string | null;
+  /// Sprint 43 — real contact availability so the share modal greys
+  /// out channels the client can't receive on (was hardcoded `true`).
+  clientHasContactPhone: boolean;
+  clientHasContactEmail: boolean;
 }
 
 interface ScriptResponse {
@@ -42,6 +46,8 @@ export function TherapyLibrary({
   libraryTherapies,
   defaultLanguage,
   activeTreatmentPlanId,
+  clientHasContactPhone,
+  clientHasContactEmail,
 }: TherapyLibraryProps) {
   const [activeTherapy, setActiveTherapy] = useState<string | null>(null);
   const [scriptData, setScriptData] = useState<ScriptResponse | null>(null);
@@ -178,8 +184,8 @@ export function TherapyLibrary({
           open={shareTarget !== null}
           onClose={() => setShareTarget(null)}
           clientId={clientId}
-          hasContactPhone={true}
-          hasContactEmail={true}
+          hasContactPhone={clientHasContactPhone}
+          hasContactEmail={clientHasContactEmail}
           artefact={
             shareTarget.kind === 'therapy-script'
               ? {
