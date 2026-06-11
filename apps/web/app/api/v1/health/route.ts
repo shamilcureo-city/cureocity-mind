@@ -41,6 +41,8 @@ function configReadout() {
       rpId: process.env['WEBAUTHN_RP_ID'] ?? '(request hostname)',
       originsPinned: Boolean(process.env['WEBAUTHN_ORIGINS']),
     },
+    pilotInviteRequired: process.env['PILOT_INVITE_REQUIRED'] === 'true',
+    observabilityForwarding: Boolean(process.env['OBSERVABILITY_WEBHOOK_URL']),
     vercelEnv: process.env['VERCEL_ENV'] ?? 'local',
   };
 }
