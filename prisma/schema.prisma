@@ -215,9 +215,9 @@ model ClinicMembership {
 /// /api/v1/auth/session) requires a valid, unredeemed code. Minted by
 /// admins; multi-use via maxUses (one code can seat a whole cohort).
 model PilotInviteCode {
-  id    String @id @default(cuid())
+  id    String  @id @default(cuid())
   /// The human-shareable code (uppercase alphanumeric). Unique.
-  code  String @unique
+  code  String  @unique
   /// Admin note — who/what this code is for.
   label String?
 
@@ -1290,6 +1290,13 @@ enum PatientShareArtefactType {
   THERAPY_SCRIPT
   TREATMENT_PLAN
   PROGRESS_REPORT
+  INSTRUMENT_CHECKIN // Sprint 47 — interactive self-serve check-in
+}
+
+/// Sprint 47 — how an InstrumentResponse was administered.
+enum InstrumentAdministrationMode {
+  CLINICIAN
+  SELF
 }
 
 enum PatientShareChannel {
@@ -1456,18 +1463,18 @@ model PreSessionBrief {
 // ============================================================================
 
 model ClientConceptualMap {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   clientId          String
   psychologistId    String
   /// ConceptualMapV1 — see packages/contracts/src/conceptual-map.ts.
   body              Json
   /// Session IDs the prompt actually saw — for the audit trail.
   basedOnSessionIds Json
-  generatedAt       DateTime @default(now())
+  generatedAt       DateTime  @default(now())
   /// Set when a newer map is generated. Null on the live row.
   supersededAt      DateTime?
   /// "llm" today. "fallback-empty" reserved for future deterministic placeholder.
-  source            String   @default("llm")
+  source            String    @default("llm")
 
   client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
@@ -1514,6 +1521,11 @@ model InstrumentResponse {
   /// backfilled rows.
   administeredAt               DateTime
   administeredByPsychologistId String
+
+  /// Sprint 47 — CLINICIAN (in-session runner) vs SELF (remote portal
+  /// check-in the client completed). Defaults to CLINICIAN so existing
+  /// rows + the in-session route keep their meaning without a backfill.
+  administrationMode InstrumentAdministrationMode @default(CLINICIAN)
 
   notes String? @db.Text
 
@@ -1901,6 +1913,7 @@ enum AuditAction {
   PRE_SESSION_BRIEF_VIEWED
   INSTRUMENT_ADMINISTERED
   INSTRUMENT_VIEWED
+  PATIENT_CHECKIN_SUBMITTED // Sprint 47 — client self-serve check-in
   SAFETY_PLAN_CREATED
   SAFETY_PLAN_UPDATED
 

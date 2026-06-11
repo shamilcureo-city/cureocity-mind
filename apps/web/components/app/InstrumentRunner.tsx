@@ -270,6 +270,11 @@ export function InstrumentRunner({ clientId }: Props) {
                       <Badge tone={severityTone(h.severity)}>
                         {h.severity.replace(/_/g, ' ')}
                       </Badge>
+                      {h.administrationMode === 'SELF' && (
+                        <Badge tone="muted" className="ml-1.5">
+                          self check-in
+                        </Badge>
+                      )}
                     </span>
                   </div>
                   <span className="text-xs text-[var(--color-ink-3)]">

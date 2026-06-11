@@ -398,6 +398,10 @@ function extractArtefactId(input: ShareInput): string {
       // Progress reports are derived from cumulative client state, not
       // a stored row — the clientId IS the artefact discriminator.
       return input.artefact.clientId;
+    case 'INSTRUMENT_CHECKIN':
+      // The check-in isn't a stored row either; key it by client +
+      // instrument so the share history reads sensibly.
+      return `${input.artefact.clientId}:${input.artefact.instrumentKey}`;
   }
 }
 

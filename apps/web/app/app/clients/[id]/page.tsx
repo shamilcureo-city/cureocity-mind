@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClientEditPanel } from '@/components/app/ClientEditPanel';
+import { SendCheckinButton } from '@/components/app/SendCheckinButton';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
@@ -90,6 +91,11 @@ export default async function ClientDetailPage({ params }: PageProps) {
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
               {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
+              <SendCheckinButton
+                clientId={client.id}
+                hasContactPhone={!!client.contactPhone}
+                hasContactEmail={!!client.contactEmail}
+              />
               <ClientEditPanel
                 client={{
                   id: client.id,

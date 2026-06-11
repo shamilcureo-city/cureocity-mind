@@ -96,6 +96,8 @@ export const AuditActionSchema = z.enum([
   'PRE_SESSION_BRIEF_VIEWED',
   'INSTRUMENT_ADMINISTERED',
   'INSTRUMENT_VIEWED',
+  // Sprint 47 — client completed a self-serve check-in from the portal.
+  'PATIENT_CHECKIN_SUBMITTED',
   'SAFETY_PLAN_CREATED',
   'SAFETY_PLAN_UPDATED',
   // Therapist settings + WebAuthn credentials — Sprint 18.

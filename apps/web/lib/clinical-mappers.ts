@@ -258,6 +258,7 @@ export function toInstrumentResponse(row: InstrumentResponseRow): InstrumentResp
     severity: row.severity,
     administeredAt: row.administeredAt.toISOString(),
     administeredByPsychologistId: row.administeredByPsychologistId,
+    administrationMode: row.administrationMode,
     notes: row.notes,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
