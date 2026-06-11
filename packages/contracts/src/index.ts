@@ -25,3 +25,4 @@ export * from './conceptual-map';
 export * from './safety-plan';
 export * from './webauthn';
 export * from './invite';
+export * from './clinic';

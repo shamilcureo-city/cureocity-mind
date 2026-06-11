@@ -130,6 +130,9 @@ export const AuditActionSchema = z.enum([
   'PILOT_INVITE_CREATED',
   'PILOT_INVITE_REDEEMED',
   'PILOT_INVITE_REVOKED',
+  // Multi-tenant clinics — Sprint 39 (foundation).
+  'CLINIC_CREATED',
+  'CLINIC_MEMBER_ADDED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

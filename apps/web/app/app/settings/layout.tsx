@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 
 const TABS = [
   { href: '/app/settings/account', label: 'Account' },
+  { href: '/app/settings/clinic', label: 'Clinic' },
   { href: '/app/settings/preferences', label: 'Preferences' },
   { href: '/app/settings/security', label: 'Security' },
   { href: '/app/settings/plan', label: 'Plan & usage' },

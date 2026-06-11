@@ -111,6 +111,7 @@ model Psychologist {
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
   webauthnCredentials WebAuthnCredential[]
+  clinicMemberships   ClinicMembership[]
 
   @@index([status])
   @@index([role])
@@ -156,6 +157,57 @@ model WebAuthnCredential {
 
   @@index([psychologistId, revokedAt])
   @@map("webauthn_credentials")
+}
+
+/// Sprint 39 — multi-tenant foundation. A Clinic is the org unit a
+/// therapist belongs to. Solo practitioners get an auto-created SOLO
+/// clinic (a clinic of one); GROUP clinics seat several therapists.
+///
+/// PHASE 1 (this sprint) is additive only: clinics + memberships exist
+/// and every therapist is an OWNER of their own clinic, but client /
+/// session / note rows stay therapist-owned and every existing query is
+/// unchanged. PHASE 2 (cross-therapist visibility, clinic-admin views,
+/// shared records) is deliberately deferred — it needs product
+/// decisions on clinical confidentiality boundaries.
+model Clinic {
+  id   String     @id @default(cuid())
+  name String
+  kind ClinicKind @default(SOLO)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships ClinicMembership[]
+
+  @@map("clinics")
+}
+
+enum ClinicKind {
+  SOLO
+  GROUP
+}
+
+enum ClinicRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model ClinicMembership {
+  id             String     @id @default(cuid())
+  clinicId       String
+  psychologistId String
+  role           ClinicRole @default(MEMBER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  clinic       Clinic       @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@unique([clinicId, psychologistId])
+  @@index([psychologistId])
+  @@map("clinic_memberships")
 }
 
 /// Sprint 37 — pilot invite codes. When PILOT_INVITE_REQUIRED=true, a
@@ -1887,6 +1939,9 @@ enum AuditAction {
   PILOT_INVITE_CREATED
   PILOT_INVITE_REDEEMED
   PILOT_INVITE_REVOKED
+  // Multi-tenant clinics — Sprint 39.
+  CLINIC_CREATED
+  CLINIC_MEMBER_ADDED
 }
 
 enum AuditActorType {
