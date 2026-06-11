@@ -126,6 +126,10 @@ export const AuditActionSchema = z.enum([
   // bulk-encrypt across legacy plaintext rows.
   'ENCRYPTION_KEY_PROVISIONED',
   'ENCRYPTION_BACKFILL_RAN',
+  // Pilot invite codes — Sprint 37. Mint/redeem/revoke a signup gate.
+  'PILOT_INVITE_CREATED',
+  'PILOT_INVITE_REDEEMED',
+  'PILOT_INVITE_REVOKED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

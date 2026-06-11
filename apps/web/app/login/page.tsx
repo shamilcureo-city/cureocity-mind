@@ -20,7 +20,8 @@ export default function LoginPage() {
   const router = useRouter();
   const [phone, setPhone] = useState('+91');
   const [otp, setOtp] = useState('');
-  const [stage, setStage] = useState<'phone' | 'otp'>('phone');
+  const [stage, setStage] = useState<'phone' | 'otp' | 'invite'>('phone');
+  const [inviteCode, setInviteCode] = useState('');
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -49,6 +50,23 @@ export default function LoginPage() {
     }
   }
 
+  // POST the verified id token for a session cookie. Returns 'invite'
+  // when the pilot gate (Sprint 37) needs a code, 'ok' on success.
+  async function startSession(idToken: string, code?: string): Promise<'ok' | 'invite'> {
+    const res = await fetch('/api/v1/auth/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken, ...(code ? { inviteCode: code } : {}) }),
+    });
+    if (res.ok) return 'ok';
+    const body = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
+    if (res.status === 403 && body?.code === 'INVITE_REQUIRED') {
+      setError(body.error ?? 'An invite code is required for this pilot.');
+      return 'invite';
+    }
+    throw new Error(body?.error ?? 'Could not start your session. Please try again.');
+  }
+
   async function verifyOtp(e: FormEvent): Promise<void> {
     e.preventDefault();
     setError(null);
@@ -59,16 +77,32 @@ export default function LoginPage() {
       // Exchange the id token for an httpOnly session cookie. First
       // sign-in auto-provisions the Psychologist row (the signup).
       const idToken = await cred.user.getIdToken();
-      const res = await fetch('/api/v1/auth/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? 'Could not start your session. Please try again.');
-      }
-      router.push('/app');
+      const result = await startSession(idToken, inviteCode.trim() || undefined);
+      if (result === 'invite') setStage('invite');
+      else router.push('/app');
+    } catch (err) {
+      setError(friendlyAuthError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Pilot gate: re-mint a token from the already-verified Firebase user
+  // (no second OTP) and retry the session POST with the entered code.
+  async function submitInvite(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    setError(null);
+    const user = getFirebaseAuth().currentUser;
+    if (!user) {
+      setStage('phone');
+      setError('Your sign-in expired — please start again.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const idToken = await user.getIdToken(true);
+      const result = await startSession(idToken, inviteCode.trim());
+      if (result === 'ok') router.push('/app');
     } catch (err) {
       setError(friendlyAuthError(err));
     } finally {
@@ -140,7 +174,7 @@ export default function LoginPage() {
                   </p>
                 )}
               </form>
-            ) : (
+            ) : stage === 'otp' ? (
               <form onSubmit={verifyOtp} className="space-y-5">
                 <p className="text-sm text-[var(--color-ink-2)]">
                   Code sent to <span className="font-medium text-[var(--color-ink)]">{phone}</span>.
@@ -170,6 +204,48 @@ export default function LoginPage() {
                   className="block w-full text-center text-xs text-[var(--color-ink-3)] underline"
                 >
                   Use a different number
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={submitInvite} className="space-y-5">
+                <div>
+                  <p className="font-serif text-lg">You&rsquo;re almost in.</p>
+                  <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                    Cureocity Mind is in invite-only pilot. Enter the code you were given.
+                  </p>
+                </div>
+                <div>
+                  <Label htmlFor="invite">Invite code</Label>
+                  <Input
+                    id="invite"
+                    value={inviteCode}
+                    onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                    placeholder="CURE-XXXX-XXXX"
+                    autoCapitalize="characters"
+                    className="uppercase tracking-[0.2em]"
+                    required
+                  />
+                </div>
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={busy || inviteCode.trim().length === 0}
+                  className="w-full"
+                >
+                  {busy ? 'Checking…' : 'Join the pilot'}
+                </Button>
+                <FieldError message={error} />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStage('phone');
+                    setOtp('');
+                    setInviteCode('');
+                    setError(null);
+                  }}
+                  className="block w-full text-center text-xs text-[var(--color-ink-3)] underline"
+                >
+                  Start over
                 </button>
               </form>
             )}

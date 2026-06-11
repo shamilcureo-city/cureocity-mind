@@ -7,6 +7,7 @@ import {
 } from '@/lib/auth-server';
 import { writeAudit } from '@/lib/audit';
 import { firebaseAuth } from '@/lib/firebase-admin';
+import { isPilotInviteRequired, redeemInviteCode } from '@/lib/invite';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 
@@ -14,7 +15,12 @@ export const dynamic = 'force-dynamic';
 
 const CreateSessionInputSchema = z.object({
   idToken: z.string().min(1),
+  /** Sprint 37 — required for a first-time signup when PILOT_INVITE_REQUIRED=true. */
+  inviteCode: z.string().max(64).optional(),
 });
+
+/** Thrown inside the signup tx to roll it back with a user-facing reason. */
+class InviteRejectedError extends Error {}
 
 /**
  * POST /api/v1/auth/session — exchange a Firebase id token (from the
@@ -66,30 +72,64 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   if (!psy) {
-    // First sign-in: auto-provision. email/phone/rciNumber are unique
-    // + required in the schema, so placeholders derive from the uid;
-    // the therapist completes them in Settings → Account before RCI
-    // verification flips status to VERIFIED.
-    const created = await prisma.psychologist.create({
-      data: {
-        firebaseUid: decoded.uid,
-        fullName: decoded.name ?? 'New therapist',
-        email: decoded.email ?? `${decoded.uid}@unclaimed.cureocity.app`,
-        phone: decoded.phone_number ?? `pending:${decoded.uid}`,
-        rciNumber: `PENDING-${decoded.uid}`,
-      },
-      select: { id: true, deletedAt: true },
-    });
-    await writeAudit({
-      actorType: 'PSYCHOLOGIST',
-      actorPsychologistId: created.id,
-      action: 'PSYCHOLOGIST_REGISTERED',
-      targetType: 'Psychologist',
-      targetId: created.id,
-      metadata: { via: 'phone-otp-auto-provision' },
-    });
-    psy = created;
-    registered = true;
+    // First sign-in: auto-provision (this IS the signup). Sprint 37 —
+    // when PILOT_INVITE_REQUIRED is on, a valid invite code is required
+    // and is redeemed atomically with the psychologist create, so a
+    // failed/raced redeem rolls back the whole signup (no orphan row).
+    const inviteRequired = isPilotInviteRequired();
+    try {
+      const created = await prisma.$transaction(async (tx) => {
+        if (inviteRequired) {
+          const redeemed = await redeemInviteCode(tx, input.value.inviteCode ?? '');
+          if (!redeemed.ok) throw new InviteRejectedError(redeemed.reason);
+        }
+        const row = await tx.psychologist.create({
+          data: {
+            firebaseUid: decoded.uid,
+            fullName: decoded.name ?? 'New therapist',
+            email: decoded.email ?? `${decoded.uid}@unclaimed.cureocity.app`,
+            phone: decoded.phone_number ?? `pending:${decoded.uid}`,
+            rciNumber: `PENDING-${decoded.uid}`,
+          },
+          select: { id: true, deletedAt: true },
+        });
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: row.id,
+            action: 'PSYCHOLOGIST_REGISTERED',
+            targetType: 'Psychologist',
+            targetId: row.id,
+            metadata: {
+              via: 'phone-otp-auto-provision',
+              inviteGated: inviteRequired,
+            },
+          },
+          tx,
+        );
+        if (inviteRequired) {
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: row.id,
+              action: 'PILOT_INVITE_REDEEMED',
+              targetType: 'Psychologist',
+              targetId: row.id,
+              metadata: { code: (input.value.inviteCode ?? '').trim().toUpperCase() },
+            },
+            tx,
+          );
+        }
+        return row;
+      });
+      psy = created;
+      registered = true;
+    } catch (e) {
+      if (e instanceof InviteRejectedError) {
+        return NextResponse.json({ error: e.message, code: 'INVITE_REQUIRED' }, { status: 403 });
+      }
+      throw e;
+    }
   }
 
   let sessionCookie: string;
