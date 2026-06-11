@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { ClientEditPanel } from '@/components/app/ClientEditPanel';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
@@ -89,6 +90,20 @@ export default async function ClientDetailPage({ params }: PageProps) {
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
               {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
+              <ClientEditPanel
+                client={{
+                  id: client.id,
+                  fullName: client.fullName,
+                  contactPhone: client.contactPhone,
+                  contactEmail: client.contactEmail,
+                  dateOfBirth: client.dateOfBirth
+                    ? client.dateOfBirth.toISOString().slice(0, 10)
+                    : null,
+                  presentingConcerns: client.presentingConcerns,
+                  preferredLanguage: client.preferredLanguage,
+                  spokenLanguages: client.spokenLanguages,
+                }}
+              />
             </div>
           </header>
 

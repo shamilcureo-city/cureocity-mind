@@ -86,6 +86,12 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
         ...(dto.value.preferredModality !== undefined && {
           preferredModality: dto.value.preferredModality,
         }),
+        ...(dto.value.preferredLanguage !== undefined && {
+          preferredLanguage: dto.value.preferredLanguage,
+        }),
+        ...(dto.value.spokenLanguages !== undefined && {
+          spokenLanguages: dto.value.spokenLanguages,
+        }),
         ...(dto.value.status !== undefined && { status: dto.value.status }),
       },
     });

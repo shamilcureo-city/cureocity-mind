@@ -32,6 +32,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       psychologistId: auth.value.psychologistId,
       deletedAt: null,
       ...(q.value.status && { status: q.value.status }),
+      ...(q.value.q && { fullName: { contains: q.value.q, mode: 'insensitive' as const } }),
     },
     orderBy: { createdAt: 'desc' },
     take: limit + 1,
