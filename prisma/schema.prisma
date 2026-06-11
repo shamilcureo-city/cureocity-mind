@@ -1800,6 +1800,9 @@ enum AuditAction {
   SESSION_STARTED
   SESSION_ENDED
   SESSION_CANCELLED
+  // Sprint 45 — Today screen status transitions.
+  SESSION_NO_SHOW
+  SESSION_RESCHEDULED
 
   // Audio + notes (scribe-service, Sprint 2)
   AUDIO_CHUNK_UPLOADED

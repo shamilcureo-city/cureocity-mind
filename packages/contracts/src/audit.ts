@@ -17,6 +17,9 @@ export const AuditActionSchema = z.enum([
   'SESSION_STARTED',
   'SESSION_ENDED',
   'SESSION_CANCELLED',
+  // Sprint 45 — Today screen status transitions on scheduled sessions.
+  'SESSION_NO_SHOW',
+  'SESSION_RESCHEDULED',
   'AUDIO_CHUNK_UPLOADED',
   'NOTE_DRAFT_CREATED',
   'NOTE_DRAFT_VIEWED',

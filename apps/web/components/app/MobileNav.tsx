@@ -4,14 +4,21 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Glyph } from '@/components/app/Sidebar';
 
-const ITEMS: { href: string; label: string; icon: 'record' | 'clients' | 'klara' | 'me' | 'cog' }[] =
-  [
-    { href: '/app', label: 'Record', icon: 'record' },
-    { href: '/app/clients', label: 'Clients', icon: 'clients' },
-    { href: '/app/klara', label: 'Klara', icon: 'klara' },
-    { href: '/app/me', label: 'Practice', icon: 'me' },
-    { href: '/app/settings', label: 'Settings', icon: 'cog' },
-  ];
+// Sprint 45 — Today is the morning landing screen on phones too. Mobile
+// is capped at 5 grid cols; "My practice" drops off the bottom bar
+// (still on the desktop sidebar) since it's a self-reflection surface
+// rather than an in-session tool.
+const ITEMS: {
+  href: string;
+  label: string;
+  icon: 'today' | 'record' | 'clients' | 'klara' | 'cog';
+}[] = [
+  { href: '/app/today', label: 'Today', icon: 'today' },
+  { href: '/app', label: 'Record', icon: 'record' },
+  { href: '/app/clients', label: 'Clients', icon: 'clients' },
+  { href: '/app/klara', label: 'Klara', icon: 'klara' },
+  { href: '/app/settings', label: 'Settings', icon: 'cog' },
+];
 
 /**
  * Bottom tab bar for phones. The desktop sidebar is `hidden md:flex`,
