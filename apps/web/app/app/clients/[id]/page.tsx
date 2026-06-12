@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClientEditPanel } from '@/components/app/ClientEditPanel';
+import { DemoClientButton } from '@/components/app/DemoClientButton';
 import { SendCheckinButton } from '@/components/app/SendCheckinButton';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
@@ -81,16 +82,29 @@ export default async function ClientDetailPage({ params }: PageProps) {
         <Card className="p-7">
           <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="font-serif text-3xl">{client.fullName}</h1>
+              <h1 className="flex flex-wrap items-center gap-3 font-serif text-3xl">
+                {client.fullName}
+                {client.isDemo && <Badge tone="warn">Example</Badge>}
+              </h1>
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
                 {age !== null ? `${age} years` : 'Age not recorded'}
                 {' · '}
                 Client since {formatMonth(client.createdAt)}
               </p>
+              {client.isDemo && (
+                <p className="mt-2 max-w-xl text-xs text-[var(--color-ink-3)]">
+                  This is a seeded example — fabricated for the demo. Sessions, instruments, and the
+                  shared progress report are real records you can click through, but they don&rsquo;t
+                  count toward your trial allowance or practice metrics.
+                </p>
+              )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
               {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
+              {client.isDemo && (
+                <DemoClientButton demoClientId={client.id} variant="inline" />
+              )}
               <SendCheckinButton
                 clientId={client.id}
                 hasContactPhone={!!client.contactPhone}

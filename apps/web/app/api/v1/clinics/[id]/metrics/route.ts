@@ -40,12 +40,31 @@ export async function GET(
   const rows = await Promise.all(
     members.map(async (m) => {
       const pid = m.psychologistId;
+      // Sprint 48 — demo "Example" clients never count in clinic rollups.
       const [activeClients, sessions30d, sessionsLifetime] = await Promise.all([
-        prisma.client.count({ where: { psychologistId: pid, status: 'ACTIVE', deletedAt: null } }),
-        prisma.session.count({
-          where: { psychologistId: pid, status: 'COMPLETED', endedAt: { gte: since30d } },
+        prisma.client.count({
+          where: {
+            psychologistId: pid,
+            status: 'ACTIVE',
+            deletedAt: null,
+            isDemo: false,
+          },
         }),
-        prisma.session.count({ where: { psychologistId: pid, status: 'COMPLETED' } }),
+        prisma.session.count({
+          where: {
+            psychologistId: pid,
+            status: 'COMPLETED',
+            endedAt: { gte: since30d },
+            client: { isDemo: false },
+          },
+        }),
+        prisma.session.count({
+          where: {
+            psychologistId: pid,
+            status: 'COMPLETED',
+            client: { isDemo: false },
+          },
+        }),
       ]);
       return {
         psychologistId: pid,

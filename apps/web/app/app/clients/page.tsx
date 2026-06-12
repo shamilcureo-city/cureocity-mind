@@ -52,6 +52,7 @@ export default async function ClientsPage({
         id: true,
         fullName: true,
         status: true,
+        isDemo: true,
         createdAt: true,
         _count: { select: { sessions: true } },
         sessions: {
@@ -112,7 +113,10 @@ export default async function ClientsPage({
                   href={`/app/clients/${c.id}`}
                   className="grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
                 >
-                  <span className="font-medium text-[var(--color-ink)]">{c.fullName}</span>
+                  <span className="flex flex-wrap items-center gap-2 font-medium text-[var(--color-ink)]">
+                    {c.fullName}
+                    {c.isDemo && <Badge tone="warn">Example</Badge>}
+                  </span>
                   <span>
                     <Badge tone={c.status === 'ACTIVE' ? 'accent' : 'muted'}>
                       {c.status.toLowerCase()}

@@ -21,7 +21,11 @@ export default async function PlanSettingsPage() {
   const me = await requireOnboardedPsychologist();
 
   const [sessionCount, monthlySpend] = await Promise.all([
-    prisma.session.count({ where: { psychologistId: me.id } }),
+    // Sprint 48 — demo "Example" client sessions never count toward
+    // the trial allowance.
+    prisma.session.count({
+      where: { psychologistId: me.id, client: { isDemo: false } },
+    }),
     getTherapistMonthlyTotalInr(me.id),
   ]);
 

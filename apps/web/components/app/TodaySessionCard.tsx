@@ -23,6 +23,8 @@ export interface TodaySessionCardProps {
     kind: 'INTAKE' | 'TREATMENT' | 'REVIEW';
     clientId: string;
     clientName: string;
+    /** Sprint 48 — seeded "Example" client; renders a warn badge. */
+    clientIsDemo?: boolean;
     hasSignedNote: boolean;
     draftStatus: string | null;
   };
@@ -89,6 +91,7 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
             >
               {session.clientName}
             </Link>
+            {session.clientIsDemo && <Badge tone="warn">Example</Badge>}
             <Badge tone={kindTone(session.kind)}>{session.kind.toLowerCase()}</Badge>
             {session.modality && <Badge tone="muted">{session.modality}</Badge>}
             <Badge tone={statusTone(session.status)}>

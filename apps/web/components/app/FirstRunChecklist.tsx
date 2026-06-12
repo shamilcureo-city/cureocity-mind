@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
+import { DemoClientButton } from '@/components/app/DemoClientButton';
 import { prisma } from '@/lib/prisma';
 
 interface Props {
@@ -11,6 +12,10 @@ interface Step {
   done: boolean;
   hint: string;
   href?: string;
+  /** When set, render this slot in place of the default "Go →" link. */
+  customCta?: 'demo';
+  /** Existing demo client id, used by the demo CTA. */
+  demoClientId?: string | null;
 }
 
 /**
@@ -24,14 +29,32 @@ interface Step {
  * gate guarantees it), so the four steps below are the next loops.
  */
 export async function FirstRunChecklist({ psychologistId }: Props) {
-  const [clients, sessions, signedNotes, shares] = await Promise.all([
-    prisma.client.count({ where: { psychologistId, deletedAt: null } }),
-    prisma.session.count({ where: { psychologistId, status: 'COMPLETED' } }),
-    prisma.therapyNote.count({ where: { session: { psychologistId } } }),
-    prisma.patientShare.count({ where: { psychologistId } }),
+  // Sprint 48 — the showcase "Example" client must not check off the
+  // user's own getting-started steps; the demo arc is its own thing.
+  const [clients, sessions, signedNotes, shares, demoClient] = await Promise.all([
+    prisma.client.count({ where: { psychologistId, deletedAt: null, isDemo: false } }),
+    prisma.session.count({
+      where: { psychologistId, status: 'COMPLETED', client: { isDemo: false } },
+    }),
+    prisma.therapyNote.count({
+      where: { session: { psychologistId, client: { isDemo: false } } },
+    }),
+    prisma.patientShare.count({ where: { psychologistId, client: { isDemo: false } } }),
+    prisma.client.findFirst({
+      where: { psychologistId, isDemo: true, deletedAt: null },
+      select: { id: true },
+    }),
   ]);
 
   const steps: Step[] = [
+    {
+      label: 'Explore the example client',
+      done: demoClient !== null,
+      hint:
+        'Seed a fully-arced demo client (signed intake, 5 sessions, PHQ-9 trend, progress report) to see the full co-pilot in one click.',
+      customCta: 'demo',
+      demoClientId: demoClient?.id ?? null,
+    },
     {
       label: 'Add your first client',
       done: clients > 0,
@@ -104,14 +127,16 @@ export async function FirstRunChecklist({ psychologistId }: Props) {
               </p>
               <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">{s.hint}</p>
             </div>
-            {s.href && !s.done && (
+            {s.customCta === 'demo' ? (
+              <DemoClientButton demoClientId={s.demoClientId ?? null} variant="cta" />
+            ) : s.href && !s.done ? (
               <Link
                 href={s.href}
                 className="self-center text-xs font-medium text-[var(--color-accent)] hover:underline"
               >
                 Go →
               </Link>
-            )}
+            ) : null}
           </li>
         ))}
       </ul>

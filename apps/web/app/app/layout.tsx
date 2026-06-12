@@ -22,7 +22,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const psy = await currentPsychologist();
   const usage: PlanUsage | null = psy
     ? {
-        used: await prisma.session.count({ where: { psychologistId: psy.id } }),
+        // Sprint 48 — demo "Example" client sessions never count
+        // toward the trial allowance.
+        used: await prisma.session.count({
+          where: { psychologistId: psy.id, client: { isDemo: false } },
+        }),
         cap: FREE_PILOT_SESSION_CAP,
       }
     : null;

@@ -142,6 +142,9 @@ export const AuditActionSchema = z.enum([
   'CLINIC_MEMBER_REMOVED',
   'CLINIC_MEMBER_ROLE_CHANGED',
   'CLIENT_REASSIGNED',
+  // Demo showcase client — Sprint 48. Seeded / removed in one click.
+  'DEMO_CLIENT_CREATED',
+  'DEMO_CLIENT_REMOVED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

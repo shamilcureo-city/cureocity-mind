@@ -394,6 +394,13 @@ model Client {
   // in something the client understands. Empty when unset.
   spokenLanguages String[] @default([])
 
+  // Sprint 48 — the showcase "Example" client a therapist can seed in
+  // one click to see the full Journey / reliable-change / Progress
+  // Report arc without recording six real sessions. Demo rows are
+  // badged "Example" in the UI and excluded from every metric, the
+  // competency rollups, and the trial session cap.
+  isDemo Boolean @default(false)
+
   psychologist        Psychologist             @relation(fields: [psychologistId], references: [id])
   consents            Consent[]
   sessions            Session[]
@@ -420,6 +427,7 @@ model Client {
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
+  @@index([psychologistId, isDemo])
   @@map("clients")
 }
 
@@ -1962,6 +1970,10 @@ enum AuditAction {
   CLINIC_MEMBER_REMOVED
   CLINIC_MEMBER_ROLE_CHANGED
   CLIENT_REASSIGNED
+  // Demo showcase client — Sprint 48. Seeded / removed in one click so
+  // a trialing therapist sees the full measurement arc immediately.
+  DEMO_CLIENT_CREATED
+  DEMO_CLIENT_REMOVED
 }
 
 enum AuditActorType {
