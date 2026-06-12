@@ -17,6 +17,7 @@ import {
 import { reconcileAssessmentItems } from './assessment-items';
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
+import { encryptForTenant } from './tenant-crypto';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
 
@@ -117,10 +118,30 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     });
     const pass1Cost = new Prisma.Decimal(pass1.callLog.costInr);
 
+    // Sprint 54 — dual-write the envelope-encrypted transcript. The
+    // verbatim session transcript is the most sensitive clinical
+    // content we store, so it joins the at-rest encryption rollout via
+    // the same per-tenant DEK path as Client PII. Best-effort: a KMS
+    // hiccup must NOT fail an otherwise-complete note generation — we
+    // log + leave `transcriptEncrypted` null (the backfill route can
+    // catch it up later), exactly as the plaintext column behaves today.
+    let transcriptEncrypted: string | null = null;
+    try {
+      transcriptEncrypted = await encryptForTenant(
+        session.psychologistId,
+        pass1.output.transcript,
+      );
+    } catch (e) {
+      console.warn(
+        `[note-orchestrator] transcript encryption failed for session=${sessionId}; storing plaintext only: ${(e as Error).message}`,
+      );
+    }
+
     await prisma.noteDraft.update({
       where: { id: draft.id },
       data: {
         transcript: pass1.output.transcript,
+        transcriptEncrypted,
         speakerSegments: pass1.output.speakerSegments as unknown as Prisma.InputJsonValue,
         affectFeatures: pass1.output.affectFeatures as unknown as Prisma.InputJsonValue,
         totalCostInr: pass1Cost,

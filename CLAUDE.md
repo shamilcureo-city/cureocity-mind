@@ -429,9 +429,11 @@ These gate a real Indian pilot. **Critical-path items live at the top.**
   KMS-decision-dependent: (1) the READ cutover (reads still use the
   plaintext columns; nothing decrypts yet), (2) the plaintext-column
   DROP, and (3) wiring `AwsKmsProvider` for `KMS_BACKEND=aws-kms`
-  (asia-south1 procurement). `transcriptEncrypted` (NoteDraft) +
-  `contentEncrypted` (JournalEntry) columns exist but aren't dual-
-  written on the live path yet.
+  (asia-south1 procurement). `NoteDraft.transcriptEncrypted` now
+  dual-writes at the source (note-orchestrator, Sprint 54) + backfill.
+  `JournalEntry.contentEncrypted` column exists but has no live
+  `apps/web` write path (journal creation is a patient-app /
+  continuity-service concern) — nothing to wire there yet.
 - **WebAuthn-bound signing** — sign route accepts `assertion` as
   optional. Sprint 18 introduced per-account WebAuthn registration;
   next is making the assertion required once any credential is

@@ -143,6 +143,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Sprint 54 — second pass: NoteDraft transcripts. Separate table +
+  // loop because NoteDraft reaches its tenant via session.psychologistId
+  // rather than carrying it directly. Same shrink-the-null-set
+  // termination as the Client loop.
+  let transcriptScanned = 0;
+  let transcriptEncryptedCount = 0;
+  let tIter = 0;
+  while (tIter++ < maxIterations) {
+    const drafts = await prisma.noteDraft.findMany({
+      where: { transcript: { not: null }, transcriptEncrypted: null },
+      orderBy: { id: 'asc' },
+      take: batchSize,
+      select: {
+        id: true,
+        transcript: true,
+        session: { select: { psychologistId: true } },
+      },
+    });
+    if (drafts.length === 0) break;
+    for (const d of drafts) {
+      if (!d.transcript) continue;
+      transcriptScanned++;
+      if (dryRun) {
+        transcriptEncryptedCount++;
+        continue;
+      }
+      try {
+        const ct = await encryptForTenant(d.session.psychologistId, d.transcript);
+        await prisma.noteDraft.update({
+          where: { id: d.id },
+          data: { transcriptEncrypted: ct },
+        });
+        transcriptEncryptedCount++;
+      } catch (e) {
+        errors.push({ clientId: d.id, field: 'transcript', message: (e as Error).message });
+      }
+    }
+    if (dryRun) break;
+  }
+
   await writeAudit({
     actorType: 'PSYCHOLOGIST',
     actorPsychologistId: auth.value.psychologistId,
@@ -159,6 +199,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       emailEncrypted,
       fullNameScanned,
       fullNameEncrypted,
+      transcriptScanned,
+      transcriptEncrypted: transcriptEncryptedCount,
       errorCount: errors.length,
     },
   });
@@ -171,6 +213,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     emailEncrypted,
     fullNameScanned,
     fullNameEncrypted,
+    transcriptScanned,
+    transcriptEncrypted: transcriptEncryptedCount,
     errors,
   });
 }
