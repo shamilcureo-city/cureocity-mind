@@ -9,6 +9,7 @@ import {
   type IPass5Backend,
   type IPass6Backend,
   type IPass7Backend,
+  type IPass8Backend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
@@ -16,10 +17,12 @@ import {
   MockGeminiPass5Backend,
   MockGeminiPass6Backend,
   MockGeminiPass7Backend,
+  MockGeminiPass8Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
+  VertexGeminiProCaseConsultBackend,
   VertexGeminiProClinicalBackend,
   VertexGeminiProConceptualMapBackend,
   VertexGeminiProGlobalBackend,
@@ -49,10 +52,11 @@ const modelRouterProvider: Provider = {
     let pass5: IPass5Backend;
     let pass6: IPass6Backend;
     let pass7: IPass7Backend;
+    let pass8: IPass8Backend;
 
     if (!projectId) {
       logger.warn(
-        'GCP_PROJECT_ID is unset — using Mock backends for Pass 1-7. Do NOT ship to production like this.',
+        'GCP_PROJECT_ID is unset — using Mock backends for Pass 1-8. Do NOT ship to production like this.',
       );
       pass1 = new MockGeminiPass1Backend();
       pass2 = new MockGeminiPass2Backend();
@@ -61,6 +65,7 @@ const modelRouterProvider: Provider = {
       pass5 = new MockGeminiPass5Backend();
       pass6 = new MockGeminiPass6Backend();
       pass7 = new MockGeminiPass7Backend();
+      pass8 = new MockGeminiPass8Backend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -120,6 +125,15 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-pro-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      pass8 = new VertexGeminiProCaseConsultBackend({
+        projectId,
+        location: config.get<string>('GEMINI_PRO_REGION') ?? 'us-central1',
+        model:
+          config.get<string>('GEMINI_CASE_CONSULT_MODEL') ??
+          config.get<string>('GEMINI_PRO_MODEL') ??
+          'gemini-1.5-pro-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
@@ -131,6 +145,7 @@ const modelRouterProvider: Provider = {
       pass5,
       pass6,
       pass7,
+      pass8,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

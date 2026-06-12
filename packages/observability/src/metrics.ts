@@ -48,7 +48,8 @@ export function recordGeminiCall(opts: {
     | 'PASS_4_THERAPY_SCRIPT'
     | 'PASS_5_PRE_SESSION_BRIEF'
     | 'PASS_6_CASE_BRIEFING'
-    | 'PASS_7_CONCEPTUAL_MAP';
+    | 'PASS_7_CONCEPTUAL_MAP'
+    | 'PASS_8_CASE_CONSULT';
   status: 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
   region: string;
   durationMs: number;

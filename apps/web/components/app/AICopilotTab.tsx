@@ -8,6 +8,7 @@ import {
 import { Card } from '@/components/ui/Card';
 import { AffectCard } from '@/components/app/AffectCard';
 import { CaseBriefingPanel } from '@/components/app/CaseBriefingPanel';
+import { CaseConsultPanel } from '@/components/app/CaseConsultPanel';
 import { ClinicalBriefTab } from '@/components/app/ClinicalBriefTab';
 import { ConceptualMapTab } from '@/components/app/ConceptualMapTab';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
@@ -261,7 +262,14 @@ async function BriefingSub({
     );
   }
   return (
-    <CaseBriefingPanel clientId={clientId} clientName={clientName} initialBriefing={briefing} />
+    <div className="space-y-6">
+      <CaseBriefingPanel clientId={clientId} clientName={clientName} initialBriefing={briefing} />
+      {/* Sprint 52 — Case Consult sits alongside the briefing inside
+          the Briefing sub-tab. The briefing answers "what is going
+          on?", the consult answers "given everything I've tried,
+          what should I consider next?". */}
+      <CaseConsultPanel clientId={clientId} />
+    </div>
   );
 }
 

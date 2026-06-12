@@ -9,6 +9,7 @@ import {
   type IPass5Backend,
   type IPass6Backend,
   type IPass7Backend,
+  type IPass8Backend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -23,9 +24,12 @@ import {
   type Pass6Output,
   type Pass7Input,
   type Pass7Output,
+  type Pass8Input,
+  type Pass8Output,
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
+import type { CaseConsultV1 } from '@cureocity/contracts';
 import type { ConceptualMapV1 } from '@cureocity/contracts';
 import {
   CASE_BRIEFING_PROMPT_VERSION,
@@ -35,6 +39,7 @@ import {
   TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
   THERAPY_NOTE_PROMPT_VERSION,
   THERAPY_SCRIPT_PROMPT_VERSION,
+  CASE_CONSULT_PROMPT_VERSION,
 } from '../prompts';
 
 /**
@@ -720,6 +725,73 @@ export class MockGeminiPass7Backend implements IPass7Backend {
         promptVersion: CONCEPTUAL_MAP_PROMPT_VERSION,
         inputTokens: Math.ceil(input.contextText.length / 4),
         outputTokens: 600,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Sprint 52 — Pass 8 mock. Deterministic Case Consult — every field
+ * tagged `[mock]` so it's obvious in dev. Mirrors the real prompt's
+ * structure (situation summary + tried + data + differential +
+ * options + supervision questions + India context + disclaimer)
+ * without inventing clinical content.
+ */
+export class MockGeminiPass8Backend implements IPass8Backend {
+  async run(input: Pass8Input): Promise<{ output: Pass8Output; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const consult: CaseConsultV1 = {
+      version: 'V1',
+      language: input.language,
+      situationSummary:
+        '[mock] This is a deterministic Case Consult fixture. Set LLM_BACKEND=vertex to see the real consult that grounds in the client record.',
+      whatsBeenTried: [
+        {
+          approach: '[mock] Behavioural activation',
+          sessions: 4,
+          observedEffect: '[mock] partial engagement; mood slightly improved',
+        },
+      ],
+      whatTheDataShows: [
+        '[mock] Journey signals: see the JSON the route passes in for verdicts and next-best-action.',
+      ],
+      differentialConsiderations: [
+        {
+          consideration: '[mock] Consider screening for co-occurring anxiety.',
+          icd11Code: null,
+          evidenceFor: '[mock] residual worry content noted in last 2 sessions',
+          evidenceAgainst: '[mock] GAD-7 not yet administered',
+        },
+      ],
+      evidenceBasedOptions: [
+        {
+          option: '[mock] Add a thought-record practice between sessions.',
+          rationale: '[mock] BA needs cognitive-restructuring scaffolding once activation is steady.',
+          indiaContextNote: null,
+        },
+      ],
+      questionsForSupervision: [
+        '[mock] Is the current rate of progress consistent with this presentation?',
+      ],
+      indiaContextCautions: [
+        '[mock] If safety concerns escalate, route to iCall 9152987821 or NIMHANS 080-46110007 alongside escalation.',
+      ],
+      disclaimer:
+        '[mock] This consult is decision-support, not supervision. Clinical responsibility remains with the treating clinician.',
+    };
+    return {
+      output: { caseConsult: consult },
+      callLog: {
+        sessionId: null,
+        pass: 'PASS_8_CASE_CONSULT',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: CASE_CONSULT_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.contextText.length / 4),
+        outputTokens: 500,
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',

@@ -145,6 +145,8 @@ export const AuditActionSchema = z.enum([
   // Demo showcase client — Sprint 48. Seeded / removed in one click.
   'DEMO_CLIENT_CREATED',
   'DEMO_CLIENT_REMOVED',
+  // Case Consult — Sprint 52. Structured second opinion when stuck.
+  'CASE_CONSULT_GENERATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

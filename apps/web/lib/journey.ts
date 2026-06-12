@@ -67,7 +67,7 @@ export async function computeClientJourney(
     prisma.session.findFirst({
       where: { clientId, status: 'COMPLETED' },
       orderBy: { scheduledAt: 'desc' },
-      select: { scheduledAt: true, endedAt: true },
+      select: { id: true, scheduledAt: true, endedAt: true },
     }),
     prisma.clientDiagnosis.findFirst({
       where: { clientId, supersededAt: null, isPrimary: true },
@@ -147,6 +147,7 @@ export async function computeClientJourney(
     ? dischargedAction(clientId, instrumentChanges.length > 0)
     : deriveNextBestAction({
         clientId,
+        lastCompletedSessionId: lastSession?.id ?? null,
         stage,
         completedCount,
         hasInstruments: instrumentRows.length > 0,
@@ -220,6 +221,8 @@ function deriveStage(input: {
 
 function deriveNextBestAction(input: {
   clientId: string;
+  /** Sprint 52 — fed to the not-improving CTA so it deep-links to the AI Copilot Briefing sub-tab. */
+  lastCompletedSessionId: string | null;
   stage: JourneyStage;
   completedCount: number;
   hasInstruments: boolean;
@@ -276,13 +279,19 @@ function deriveNextBestAction(input: {
       c.verdict !== 'reliable_improvement',
   );
   if (input.hasActivePlan && stalled) {
+    // Sprint 52 — link the "not improving" action to the Case Consult
+    // inside the Briefing sub-tab of the last session's AI Copilot.
+    // That's the exact "I'm stuck" moment the consult was built for.
+    const consultHref = input.lastCompletedSessionId
+      ? `/app/sessions/${input.lastCompletedSessionId}?tab=copilot&sub=briefing`
+      : null;
     return {
       kind: 'REVIEW_PLAN_NOT_IMPROVING',
       tone: 'warn',
       title: 'Not improving as expected — review the plan',
       detail: `${stalled.instrumentKey} has shown no reliable improvement across ${stalled.administrationCount} administrations. Clients who aren't on track benefit most from an early change of course — revisit the formulation or step up the plan.`,
-      ctaLabel: null,
-      ctaHref: null,
+      ctaLabel: consultHref ? 'Get a case consult' : null,
+      ctaHref: consultHref,
     };
   }
 

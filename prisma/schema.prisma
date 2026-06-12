@@ -420,6 +420,7 @@ model Client {
   patientShares       PatientShare[]
   preSessionBriefs    PreSessionBrief[]
   conceptualMaps      ClientConceptualMap[]
+  caseConsults        CaseConsult[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
   treatmentEpisodes   TreatmentEpisode[]
@@ -793,6 +794,13 @@ model AudioChunk {
 // Sprint 2 PR 3.
 // ============================================================================
 
+/// Sprint 52 — Case Consult status, mirrors PreSessionBriefStatus.
+enum CaseConsultStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
 enum GeminiPass {
   PASS_1_TRANSCRIBE_AND_ANALYSE
   PASS_2_NOTE_GENERATION
@@ -802,6 +810,7 @@ enum GeminiPass {
   PASS_5_PRE_SESSION_BRIEF // Sprint 17 — Pre-Session Brief
   PASS_6_CASE_BRIEFING // Sprint 22 — per-client case briefing synthesis
   PASS_7_CONCEPTUAL_MAP // Sprint 24 — Klarify-style per-client thematic graph
+  PASS_8_CASE_CONSULT // Sprint 52 — second-opinion artefact for stuck cases
 }
 
 enum GeminiCallStatus {
@@ -1474,6 +1483,40 @@ model PreSessionBrief {
 }
 
 // ============================================================================
+// CaseConsult — Sprint 52. Pass 8 output. A structured second opinion
+// the therapist generates when they're stuck on a case. Cached per
+// (clientId, lastSessionId) and invalidated by the next completed
+// session. Never patient-shareable.
+// ============================================================================
+
+model CaseConsult {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  /// Most recent COMPLETED session at generation time; null for
+  /// brand-new clients (no completed sessions yet).
+  lastSessionId String?
+
+  status CaseConsultStatus @default(PENDING)
+
+  /// Validated against CaseConsultV1Schema before write.
+  body Json?
+
+  totalCostInr Decimal @default(0) @db.Decimal(10, 4)
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@map("case_consults")
+}
+
+// ============================================================================
 // ClientConceptualMap — Sprint 24. Pass 7 output. Per-client cumulative
 // graph of values / affirmations / challenges / patterns / beliefs that
 // surfaced across the client's sessions, with verbatim supporting quotes
@@ -2004,6 +2047,9 @@ enum AuditAction {
   // a trialing therapist sees the full measurement arc immediately.
   DEMO_CLIENT_CREATED
   DEMO_CLIENT_REMOVED
+  // Case Consult — Sprint 52. Structured second opinion the therapist
+  // generates when stuck on a case.
+  CASE_CONSULT_GENERATED
 }
 
 enum AuditActorType {

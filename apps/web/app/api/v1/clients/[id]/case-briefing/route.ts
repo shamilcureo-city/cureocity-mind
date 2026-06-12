@@ -3,7 +3,7 @@ import { CaseBriefingV1Schema, type CaseBriefingV1 } from '@cureocity/contracts'
 import { recordGeminiCall } from '@cureocity/observability/metrics';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
-import { buildDeterministicCaseBriefing, gatherInputs } from '@/lib/case-briefing';
+import { buildDeterministicCaseBriefing, gatherInputs, serialiseContext } from '@/lib/case-briefing';
 import { JourneyError } from '@/lib/journey';
 import { modelRouter } from '@/lib/llm';
 import { prisma } from '@/lib/prisma';
@@ -120,44 +120,5 @@ export async function POST(
   return NextResponse.json({ briefing });
 }
 
-/** Compact text dump of the cumulative record for the Pass 6 prompt. */
-function serialiseContext(inputs: Awaited<ReturnType<typeof gatherInputs>>): string {
-  const j = inputs.journey;
-  const lines: string[] = [];
-  lines.push(`Stage: ${j.stage}`);
-  lines.push(`Completed sessions: ${j.sessionsCompleted}`);
-  if (j.workingDiagnosis) {
-    lines.push(
-      `Confirmed diagnosis: ${j.workingDiagnosis.icd11Code} ${j.workingDiagnosis.icd11Label} (confidence ${j.workingDiagnosis.confidence})`,
-    );
-  }
-  if (j.activePlan) {
-    lines.push(
-      `Active plan v${j.activePlan.version} (${j.activePlan.modality ?? 'modality TBD'}); goals ${j.activePlan.goalsAchieved}/${j.activePlan.goalsTotal} achieved:`,
-    );
-    for (const g of j.activePlan.goals) lines.push(`  - [${g.status}] ${g.description}`);
-  }
-  if (j.instrumentChanges.length > 0) {
-    lines.push('Instruments:');
-    for (const c of j.instrumentChanges) {
-      lines.push(
-        `  - ${c.instrumentKey}: ${c.baselineScore} → ${c.latestScore} (${c.verdict}${c.isRemission ? ', remission' : ''})`,
-      );
-    }
-  }
-  if (inputs.presentingConcerns) lines.push(`Presenting concerns: ${inputs.presentingConcerns}`);
-  if (inputs.intakeNote) {
-    lines.push(
-      `Intake — history of presenting illness: ${inputs.intakeNote.historyOfPresentingIllness}`,
-    );
-    lines.push(`Intake — working hypothesis: ${inputs.intakeNote.workingHypothesis}`);
-    lines.push(`Intake — social history: ${inputs.intakeNote.socialHistory}`);
-    lines.push(`Intake — family history: ${inputs.intakeNote.familyHistory}`);
-  }
-  if (inputs.openItems.length > 0) {
-    lines.push('Open assessment items (the running differential):');
-    for (const i of inputs.openItems) lines.push(`  - (${i.kind}) ${i.question} — ${i.rationale}`);
-  }
-  lines.push(`Safety plan on file: ${inputs.hasSafetyPlan ? 'yes' : 'no'}`);
-  return lines.join('\n');
-}
+// Sprint 52 — serialiseContext moved into apps/web/lib/case-briefing.ts
+// so Pass 6 (this route) and Pass 8 (case-consult route) share it.
