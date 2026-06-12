@@ -10,6 +10,7 @@ import { recordCostInr, recordGeminiCall } from '@cureocity/observability/metric
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toPreSessionBrief } from '@/lib/clinical-mappers';
+import { fetchOpenCrises } from '@/lib/crisis-flags';
 import { modelRouter } from '@/lib/llm';
 import { prisma } from '@/lib/prisma';
 import { parseQuery } from '@/lib/validate';
@@ -243,49 +244,10 @@ export async function GET(
 // Helpers.
 // ============================================================================
 
-interface OpenCrisis {
-  kind: string;
-  severity: 'high' | 'critical';
-  lastSeenAt: string;
-}
-
-/**
- * Open crisis flags from prior sessions' ClinicalReports — any
- * high/critical flag whose section confirmation is PENDING or whose
- * acknowledgement has no superseding SafetyPlan.
- */
-async function fetchOpenCrises(clientId: string): Promise<OpenCrisis[]> {
-  const reports = await prisma.clinicalReport.findMany({
-    where: { clientId, status: 'COMPLETED' },
-    orderBy: { createdAt: 'desc' },
-    take: 5,
-    select: { body: true, createdAt: true, confirmations: true },
-  });
-  const result: OpenCrisis[] = [];
-  for (const r of reports) {
-    if (!r.body) continue;
-    const body = r.body as unknown as {
-      crisisFlags?: { kind: string; severity: string }[];
-    };
-    const flags = body.crisisFlags ?? [];
-    for (const f of flags) {
-      if (f.severity === 'high' || f.severity === 'critical') {
-        result.push({
-          kind: f.kind,
-          severity: f.severity,
-          lastSeenAt: r.createdAt.toISOString(),
-        });
-      }
-    }
-  }
-  // Dedupe by kind keeping the most recent timestamp.
-  const seen = new Map<string, OpenCrisis>();
-  for (const c of result) {
-    const existing = seen.get(c.kind);
-    if (!existing || existing.lastSeenAt < c.lastSeenAt) seen.set(c.kind, c);
-  }
-  return [...seen.values()].slice(0, 5);
-}
+// Sprint 50 — `fetchOpenCrises` + `OpenCrisis` were lifted into the
+// shared `apps/web/lib/crisis-flags.ts` so the Prepare panel on the
+// Today screen can call the same logic without duplicating it. This
+// route imports them at the top.
 
 function extractLastSummary(
   session: {

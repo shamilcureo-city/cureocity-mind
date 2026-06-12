@@ -16,6 +16,7 @@ export * from './template';
 export * from './clinical';
 export * from './share';
 export * from './brief';
+export * from './prepare';
 export * from './instrument';
 export * from './journey';
 export * from './episode';

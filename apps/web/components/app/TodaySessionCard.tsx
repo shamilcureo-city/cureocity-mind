@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { PreparePanel } from './PreparePanel';
 import { RescheduleModal } from './RescheduleModal';
 
 export interface TodaySessionCardProps {
@@ -159,6 +160,9 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
           <p className="mt-2 text-xs text-[var(--color-warn)]" role="alert">
             {error}
           </p>
+        )}
+        {(session.status === 'SCHEDULED' || session.status === 'IN_PROGRESS') && (
+          <PreparePanel clientId={session.clientId} />
         )}
       </Card>
       <RescheduleModal
