@@ -801,6 +801,76 @@ enum CaseConsultStatus {
   FAILED
 }
 
+/// Sprint 53 — subscription plan tier. FREE_TRIAL is the default for
+/// every new psychologist; SOLO_MONTHLY / SOLO_ANNUAL are paid plans.
+enum BillingPlan {
+  FREE_TRIAL
+  SOLO_MONTHLY
+  SOLO_ANNUAL
+}
+
+/// Sprint 53 — Razorpay payment lifecycle. CREATED on order, PAID
+/// when the webhook confirms capture, FAILED on webhook failure.
+enum BillingPaymentStatus {
+  CREATED
+  PAID
+  FAILED
+}
+
+/// Sprint 53 — per-psychologist billing state. Sits beside the
+/// Psychologist row (1:1) so the trial cap, plan, and paid-through
+/// date are queryable in a single round-trip from any enforcement
+/// site (session-create, sidebar usage, plan page).
+model BillingAccount {
+  id             String @id @default(cuid())
+  psychologistId String @unique
+
+  plan            BillingPlan @default(FREE_TRIAL)
+  /// Number of sessions the trial allows; deliberately overridable
+  /// so we can extend trial for friendly pilots without code change.
+  trialSessionCap Int         @default(10)
+  /// Paid-through date — null until the first PAID webhook lands.
+  /// On every renewal the date extends from max(now, current value).
+  paidThroughAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments BillingPayment[]
+
+  @@index([psychologistId])
+  @@map("billing_accounts")
+}
+
+/// Sprint 53 — one row per Razorpay order. CREATED when we open the
+/// checkout, flipped to PAID by the webhook (idempotent), FAILED on
+/// payment.failed. periodStart/End record the period the payment
+/// covered — convenient for receipts later.
+model BillingPayment {
+  id               String @id @default(cuid())
+  psychologistId   String
+  billingAccountId String
+
+  razorpayOrderId   String  @unique
+  razorpayPaymentId String?
+
+  plan       BillingPlan
+  amountInr  Int
+  status     BillingPaymentStatus @default(CREATED)
+  periodStart DateTime?
+  periodEnd   DateTime?
+  /// Verbatim webhook event payload for audit / debugging.
+  rawEvent Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId, createdAt])
+  @@map("billing_payments")
+}
+
 enum GeminiPass {
   PASS_1_TRANSCRIBE_AND_ANALYSE
   PASS_2_NOTE_GENERATION
@@ -2050,6 +2120,13 @@ enum AuditAction {
   // Case Consult — Sprint 52. Structured second opinion the therapist
   // generates when stuck on a case.
   CASE_CONSULT_GENERATED
+  // Billing — Sprint 53. Trial cap soft-enforcement + Razorpay
+  // checkout lifecycle. PAYMENT_RECEIVED / PAYMENT_FAILED route
+  // through SYSTEM actor (the webhook).
+  TRIAL_CAP_REACHED
+  PLAN_UPGRADED
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
 }
 
 enum AuditActorType {

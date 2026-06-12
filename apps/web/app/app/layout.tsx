@@ -2,13 +2,9 @@ import type { ReactNode } from 'react';
 import { MobileNav } from '@/components/app/MobileNav';
 import { Sidebar, type PlanUsage } from '@/components/app/Sidebar';
 import { currentPsychologist } from '@/lib/auth-page';
-import { prisma } from '@/lib/prisma';
+import { getEntitlement } from '@/lib/billing';
 
 export const dynamic = 'force-dynamic';
-
-/// Free-pilot session allowance shown in the sidebar plan widget.
-/// Display-only today; server-side enforcement lands with billing.
-const FREE_PILOT_SESSION_CAP = 10;
 
 /**
  * Authenticated scribe shell. Sidebar on md+, bottom tab bar on
@@ -17,19 +13,23 @@ const FREE_PILOT_SESSION_CAP = 10;
  * resolves the identity to feed the plan widget, and renders fine
  * when unauthenticated (the child page redirects before content
  * matters).
+ *
+ * Sprint 53 — the PlanUsage feed now comes from getEntitlement so the
+ * cap is real (BillingAccount.trialSessionCap) and the widget flips
+ * to "Solo · renews <date>" when the therapist is on a paid plan.
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const psy = await currentPsychologist();
-  const usage: PlanUsage | null = psy
-    ? {
-        // Sprint 48 — demo "Example" client sessions never count
-        // toward the trial allowance.
-        used: await prisma.session.count({
-          where: { psychologistId: psy.id, client: { isDemo: false } },
-        }),
-        cap: FREE_PILOT_SESSION_CAP,
-      }
-    : null;
+  let usage: PlanUsage | null = null;
+  if (psy) {
+    const ent = await getEntitlement(psy.id);
+    usage = {
+      used: ent.trialUsed,
+      cap: ent.trialCap,
+      plan: ent.plan,
+      paidThroughAt: ent.paidThroughAt,
+    };
+  }
 
   return (
     <div className="flex min-h-screen bg-[var(--color-bg)]">

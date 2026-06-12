@@ -23,6 +23,7 @@ export * from './episode';
 export * from './assessment-item';
 export * from './case-briefing';
 export * from './case-consult';
+export * from './billing';
 export * from './conceptual-map';
 export * from './safety-plan';
 export * from './webauthn';
