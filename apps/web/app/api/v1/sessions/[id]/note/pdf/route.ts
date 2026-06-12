@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
-import type { TherapyNoteV1 } from '@cureocity/contracts';
+import type { IntakeNoteV1, TherapyNoteV1 } from '@cureocity/contracts';
+import { IntakeNotePdf } from '@/components/pdf/IntakeNotePdf';
 import { SignedNotePdf } from '@/components/pdf/SignedNotePdf';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
@@ -43,23 +44,34 @@ export async function GET(
     );
   }
 
-  const note = session.therapyNote.content as unknown as TherapyNoteV1;
   const durationMs =
     session.startedAt && session.endedAt
       ? session.endedAt.getTime() - session.startedAt.getTime()
       : null;
 
-  const buffer = await renderToBuffer(
-    SignedNotePdf({
-      note,
-      clientFullName: session.client.fullName,
-      sessionId: session.id,
-      scheduledAt: session.scheduledAt.toISOString(),
-      durationMs,
-      signedBy: session.therapyNote.signedBy,
-      signedAt: session.therapyNote.signedAt?.toISOString() ?? null,
-    }),
-  );
+  // Sprint 49 — INTAKE sessions store an IntakeNoteV1 here; render the
+  // intake-specific PDF. Other kinds still render the SOAP PDF.
+  const isIntake = session.kind === 'INTAKE';
+  const pdfDocument = isIntake
+    ? IntakeNotePdf({
+        note: session.therapyNote.content as unknown as IntakeNoteV1,
+        clientFullName: session.client.fullName,
+        sessionId: session.id,
+        scheduledAt: session.scheduledAt.toISOString(),
+        durationMs,
+        signedBy: session.therapyNote.signedBy,
+        signedAt: session.therapyNote.signedAt?.toISOString() ?? null,
+      })
+    : SignedNotePdf({
+        note: session.therapyNote.content as unknown as TherapyNoteV1,
+        clientFullName: session.client.fullName,
+        sessionId: session.id,
+        scheduledAt: session.scheduledAt.toISOString(),
+        durationMs,
+        signedBy: session.therapyNote.signedBy,
+        signedAt: session.therapyNote.signedAt?.toISOString() ?? null,
+      });
+  const buffer = await renderToBuffer(pdfDocument);
 
   await writeAudit({
     actorType: 'PSYCHOLOGIST',
@@ -73,16 +85,17 @@ export async function GET(
       clientId: session.clientId,
       format: 'pdf',
       bytes: buffer.length,
+      kind: isIntake ? 'INTAKE' : 'TREATMENT',
     },
   });
 
-  // Filename: session-{clientLastName}-{YYYY-MM-DD}.pdf
+  // Filename: {intake|session}-note-{clientName}-{YYYY-MM-DD}.pdf
   const dateStr = session.scheduledAt.toISOString().slice(0, 10);
   const safeName = session.client.fullName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  const filename = `session-note-${safeName}-${dateStr}.pdf`;
+  const filename = `${isIntake ? 'intake' : 'session'}-note-${safeName}-${dateStr}.pdf`;
 
   return new Response(new Uint8Array(buffer), {
     status: 200,

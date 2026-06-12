@@ -186,6 +186,21 @@ export type NoteDraftStatus = z.infer<typeof NoteDraftStatusSchema>;
 export const NoteRiskSeveritySchema = z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 export type NoteRiskSeverity = z.infer<typeof NoteRiskSeveritySchema>;
 
+/**
+ * Sprint 49 — signed-note content is either a TherapyNoteV1 (SOAP,
+ * TREATMENT sessions) OR an IntakeNoteV1 (intake history, INTAKE
+ * sessions). Both shapes carry `version: 'V1'` so this is a regular
+ * union — the server narrows by `session.kind` (the Pass2Output
+ * convention). Disjoint required fields keep parse ambiguity to zero
+ * (TherapyNote requires `subjective`; IntakeNote requires
+ * `presentingConcerns`).
+ *
+ * Putting TherapyNoteV1 first nudges the union to try the
+ * overwhelmingly-common case first.
+ */
+export const SignedNoteContentSchema = z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]);
+export type SignedNoteContent = z.infer<typeof SignedNoteContentSchema>;
+
 export const NoteDraftSchema = z.object({
   id: CuidSchema,
   sessionId: CuidSchema,
@@ -193,7 +208,12 @@ export const NoteDraftSchema = z.object({
   transcript: z.string().nullable(),
   speakerSegments: z.array(SpeakerSegmentSchema).nullable(),
   affectFeatures: z.array(AffectFeatureSchema).nullable(),
-  content: TherapyNoteV1Schema.nullable(),
+  /**
+   * Sprint 49 — widened to a union so intake drafts validate. Pre-
+   * sprint code paths that only handled TREATMENT can narrow with
+   * `'subjective' in content`.
+   */
+  content: SignedNoteContentSchema.nullable(),
   riskSeverity: NoteRiskSeveritySchema.nullable(),
   totalCostInr: z.string(), // Postgres Decimal serialised as string
   errorMessage: z.string().nullable(),
@@ -216,7 +236,29 @@ export type NoteDraft = z.infer<typeof NoteDraftSchema>;
 // route promotes it to required + verified once a credential exists.
 // ============================================================================
 
-export const NoteEditFieldSchema = z.enum(['subjective', 'objective', 'assessment', 'plan']);
+/**
+ * Sprint 49 — intake fields join the SOAP four so intake notes can be
+ * field-level edited during sign-off too. The sign route picks the
+ * applicable subset by `session.kind`:
+ *   TREATMENT → subjective | objective | assessment | plan
+ *   INTAKE    → presentingConcerns | historyOfPresentingIllness |
+ *               pastPsychiatricHistory | familyHistory | socialHistory |
+ *               mentalStatusExam | workingHypothesis | immediatePlan
+ */
+export const NoteEditFieldSchema = z.enum([
+  'subjective',
+  'objective',
+  'assessment',
+  'plan',
+  'presentingConcerns',
+  'historyOfPresentingIllness',
+  'pastPsychiatricHistory',
+  'familyHistory',
+  'socialHistory',
+  'mentalStatusExam',
+  'workingHypothesis',
+  'immediatePlan',
+]);
 export type NoteEditField = z.infer<typeof NoteEditFieldSchema>;
 
 export const NoteEditEntrySchema = z.object({
@@ -256,7 +298,12 @@ export const SignNoteInputSchema = z.object({
     .min(1)
     .max(64 * 1024),
   payloadHashHex: z.string().regex(/^[0-9a-f]{64}$/, 'must be 64 lowercase hex chars'),
-  note: TherapyNoteV1Schema,
+  /**
+   * Sprint 49 — widened to accept either a TherapyNoteV1 (TREATMENT
+   * sign-off) or an IntakeNoteV1 (INTAKE sign-off). The route narrows
+   * by `session.kind` before validating field-level edits.
+   */
+  note: SignedNoteContentSchema,
   edits: z.array(NoteEditEntrySchema).default([]),
   signedAt: IsoDateTimeSchema,
   /**
@@ -272,7 +319,13 @@ export const TherapyNoteSchema = z.object({
   sessionId: CuidSchema,
   draftId: CuidSchema,
   version: z.literal('V1'),
-  content: TherapyNoteV1Schema,
+  /**
+   * Sprint 49 — widened so the same row carries either a SOAP TherapyNoteV1
+   * body or an IntakeNoteV1 body. Consumers narrow by checking
+   * `'subjective' in content` (or, on the route, by the parent session's
+   * `kind`).
+   */
+  content: SignedNoteContentSchema,
   signedAt: IsoDateTimeSchema,
   signedBy: CuidSchema,
   edits: z.array(

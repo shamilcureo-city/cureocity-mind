@@ -938,6 +938,16 @@ enum NoteEditField {
   objective
   assessment
   plan
+  // Sprint 49 — intake-note field-level edits. SignNoteInput picks the
+  // applicable subset by session.kind.
+  presentingConcerns
+  historyOfPresentingIllness
+  pastPsychiatricHistory
+  familyHistory
+  socialHistory
+  mentalStatusExam
+  workingHypothesis
+  immediatePlan
 }
 
 model NoteEdit {
@@ -1299,6 +1309,7 @@ enum PatientShareArtefactType {
   TREATMENT_PLAN
   PROGRESS_REPORT
   INSTRUMENT_CHECKIN // Sprint 47 — interactive self-serve check-in
+  SIGNED_INTAKE_NOTE // Sprint 49 — intake-note counterpart to SIGNED_NOTE
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.

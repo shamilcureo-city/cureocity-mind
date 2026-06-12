@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
+  IntakeNoteV1Schema,
   SignNoteInputSchema,
   TherapyNoteV1Schema,
   type NoteEditEntry,
   type NoteEditField,
+  type SignedNoteContent,
   type TherapyNote,
-  type TherapyNoteV1,
 } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
@@ -17,20 +18,45 @@ import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauth
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const SIGNABLE: readonly NoteEditField[] = ['subjective', 'objective', 'assessment', 'plan'];
+/**
+ * Sprint 49 — signable fields depend on the parent session's kind.
+ * TREATMENT picks the SOAP four; INTAKE picks the eight intake
+ * sections. Field-level edits to anything outside the applicable set
+ * are rejected at parse time.
+ */
+const SIGNABLE_BY_KIND: Record<'TREATMENT' | 'INTAKE', readonly NoteEditField[]> = {
+  TREATMENT: ['subjective', 'objective', 'assessment', 'plan'],
+  INTAKE: [
+    'presentingConcerns',
+    'historyOfPresentingIllness',
+    'pastPsychiatricHistory',
+    'familyHistory',
+    'socialHistory',
+    'mentalStatusExam',
+    'workingHypothesis',
+    'immediatePlan',
+  ],
+};
+
+type SignableKind = keyof typeof SIGNABLE_BY_KIND;
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+function readField(note: SignedNoteContent, field: NoteEditField): string {
+  return (note as unknown as Record<string, unknown>)[field] as string;
+}
+
 function validateEdits(
-  draft: TherapyNoteV1,
-  final: TherapyNoteV1,
+  draft: SignedNoteContent,
+  final: SignedNoteContent,
   edits: readonly NoteEditEntry[],
+  signable: readonly NoteEditField[],
 ): NextResponse | null {
   const seen = new Set<NoteEditField>();
   for (const e of edits) {
-    if (!SIGNABLE.includes(e.field)) {
+    if (!signable.includes(e.field)) {
       return NextResponse.json({ error: `edit.field ${e.field} is not signable` }, { status: 400 });
     }
     if (seen.has(e.field)) {
@@ -40,7 +66,7 @@ function validateEdits(
       );
     }
     seen.add(e.field);
-    if (e.before !== draft[e.field]) {
+    if (e.before !== readField(draft, e.field)) {
       return NextResponse.json(
         {
           error: `edit.before for ${e.field} does not match the current draft text (stale draft?)`,
@@ -48,15 +74,15 @@ function validateEdits(
         { status: 400 },
       );
     }
-    if (e.after !== final[e.field]) {
+    if (e.after !== readField(final, e.field)) {
       return NextResponse.json(
         { error: `edit.after for ${e.field} does not match the submitted note` },
         { status: 400 },
       );
     }
   }
-  for (const field of SIGNABLE) {
-    if (!seen.has(field) && final[field] !== draft[field]) {
+  for (const field of signable) {
+    if (!seen.has(field) && readField(final, field) !== readField(draft, field)) {
       return NextResponse.json(
         { error: `Field ${field} changed but is missing from the edits list` },
         { status: 400 },
@@ -104,7 +130,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { psychologistId: true, status: true },
+    select: { psychologistId: true, status: true, kind: true },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -115,6 +141,11 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       { status: 400 },
     );
   }
+  // Sprint 49 — INTAKE notes are signable too. REVIEW kind doesn't
+  // have its own note shape; it reuses TREATMENT's SOAP.
+  const signableKind: SignableKind = session.kind === 'INTAKE' ? 'INTAKE' : 'TREATMENT';
+  const noteSchema = signableKind === 'INTAKE' ? IntakeNoteV1Schema : TherapyNoteV1Schema;
+  const signableFields = SIGNABLE_BY_KIND[signableKind];
 
   // Sprint 18 → 33 — once the therapist has registered ≥1 platform
   // authenticator, the assertion is REQUIRED, its credentialId must
@@ -190,12 +221,15 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
-  const draftContent = TherapyNoteV1Schema.parse(draft.content);
-  const finalNote = TherapyNoteV1Schema.parse(input.value.note);
+  // Sprint 49 — parse both draft + final note against the kind-keyed
+  // schema. An INTAKE session whose draft happens to validate against
+  // TherapyNoteV1 (or vice-versa) would still be wrong shape for sign-off.
+  const draftContent = noteSchema.parse(draft.content) as SignedNoteContent;
+  const finalNote = noteSchema.parse(input.value.note) as SignedNoteContent;
   // Zod default([]) — runtime is [], TS sees optional under
   // exactOptionalPropertyTypes: false. Coalesce defensively.
   const edits = input.value.edits ?? [];
-  const editsError = validateEdits(draftContent, finalNote, edits);
+  const editsError = validateEdits(draftContent, finalNote, edits, signableFields);
   if (editsError) return editsError;
 
   const created = await prisma.$transaction(async (tx) => {
@@ -239,6 +273,9 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           payloadHashHex: recomputed,
           webauthnUsed: input.value.assertion !== undefined,
           webauthnEnforced: credentialBump !== null,
+          // Sprint 49 — disaggregate intake vs treatment in the
+          // signed-note audit trail so My Practice can split them.
+          kind: signableKind,
         },
       },
       tx,

@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { TherapyNoteV1Schema, type TherapyNote } from '@cureocity/contracts';
+import {
+  IntakeNoteV1Schema,
+  TherapyNoteV1Schema,
+  type TherapyNote,
+} from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 
@@ -22,7 +26,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { psychologistId: true },
+    select: { psychologistId: true, kind: true },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -33,7 +37,12 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   });
   if (!note) return NextResponse.json(null);
 
-  const content = TherapyNoteV1Schema.parse(note.content);
+  // Sprint 49 — intake sessions carry IntakeNoteV1 content; pick the
+  // schema by kind so the parse doesn't reject a valid intake.
+  const content =
+    session.kind === 'INTAKE'
+      ? IntakeNoteV1Schema.parse(note.content)
+      : TherapyNoteV1Schema.parse(note.content);
   const body: TherapyNote = {
     id: note.id,
     sessionId: note.sessionId,

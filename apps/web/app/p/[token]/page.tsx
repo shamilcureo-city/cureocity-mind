@@ -364,6 +364,31 @@ function SnapshotView({
           crisisHotlines={hotlinesForCrisisKind('suicidal_ideation')}
         />
       );
+    case 'SIGNED_INTAKE_NOTE':
+      // Sprint 49 — patient-friendly subset of the intake note. Each
+      // section is rendered as a titled block (the builder picked the
+      // sections + their order).
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, here is a summary of our intake conversation.
+          </p>
+          {snapshot.sections.map((s, i) => (
+            <NoteSection key={i} title={s.title} body={s.body} />
+          ))}
+          {snapshot.pdfUrl && (
+            <p className="text-sm">
+              <a
+                href={snapshot.pdfUrl}
+                className="text-[var(--color-accent)] underline"
+                rel="noopener"
+              >
+                Download a PDF of this summary
+              </a>
+            </p>
+          )}
+        </article>
+      );
   }
 }
 

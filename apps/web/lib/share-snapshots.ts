@@ -7,8 +7,11 @@ import {
   TherapyScriptV1Schema,
   type TherapyNoteV1,
   TherapyNoteV1Schema,
+  type IntakeNoteV1,
+  IntakeNoteV1Schema,
   type ClinicalTreatmentPlan,
   ClinicalTreatmentPlanSchema,
+  type SignedIntakeNoteSnapshotSection,
 } from '@cureocity/contracts';
 import { INSTRUMENTS } from '@cureocity/clinical';
 import { ProgressReportError, buildProgressReport } from './progress-report';
@@ -66,6 +69,8 @@ export async function buildSnapshot(args: BuildArgs): Promise<SnapshotResult | n
       return buildProgressReportSnapshot(args, args.ref.clientId);
     case 'INSTRUMENT_CHECKIN':
       return buildInstrumentCheckin(args, args.ref.clientId, args.ref.instrumentKey);
+    case 'SIGNED_INTAKE_NOTE':
+      return buildSignedIntakeNote(args, args.ref.sessionId);
   }
 }
 
@@ -154,6 +159,74 @@ async function buildSignedNote(
       objective: note.objective,
       assessment: note.assessment,
       plan: note.plan,
+      pdfUrl: null,
+    },
+    subject,
+    sessionId: session.id,
+  };
+}
+
+/**
+ * Sprint 49 — Signed intake note snapshot.
+ *
+ * Patient-appropriate subset of the intake note: what the client shared
+ * + the immediate plan, plus an optional intro section in the
+ * therapist's tone. Deliberately excludes mental status exam, working
+ * hypothesis, past psychiatric history, family / social history — those
+ * carry clinically sensitive content + provisional formulation that
+ * needs an explicit clinician sign-off to share, and the patient
+ * doesn't need them to act on the plan.
+ */
+async function buildSignedIntakeNote(
+  { clientId, psychologistId }: BuildArgs,
+  sessionId: string,
+): Promise<SnapshotResult | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      clientId: true,
+      psychologistId: true,
+      kind: true,
+      scheduledAt: true,
+      therapyNote: { select: { content: true } },
+    },
+  });
+  if (!session || session.psychologistId !== psychologistId || session.clientId !== clientId) {
+    return null;
+  }
+  if (session.kind !== 'INTAKE') {
+    throw new SnapshotBuildError(
+      'SIGNED_INTAKE_NOTE artefact can only be built from an INTAKE session.',
+    );
+  }
+  if (!session.therapyNote) {
+    throw new SnapshotBuildError('Cannot share an unsigned intake note. Sign the note first.');
+  }
+  const parsed = IntakeNoteV1Schema.safeParse(session.therapyNote.content);
+  if (!parsed.success) {
+    throw new SnapshotBuildError('Signed intake note failed schema validation; cannot share.');
+  }
+  const note: IntakeNoteV1 = parsed.data;
+  const sections: SignedIntakeNoteSnapshotSection[] = [
+    {
+      title: 'What you shared',
+      body: stripBracketTag(note.presentingConcerns),
+    },
+    {
+      title: 'What we agreed to do',
+      body: stripBracketTag(note.immediatePlan),
+    },
+  ];
+  const subject = `Your intake summary · ${session.scheduledAt.toLocaleDateString('en-IN', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })}`;
+  return {
+    snapshot: {
+      kind: 'SIGNED_INTAKE_NOTE',
+      sections,
       pdfUrl: null,
     },
     subject,

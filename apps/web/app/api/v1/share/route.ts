@@ -402,6 +402,9 @@ function extractArtefactId(input: ShareInput): string {
       // The check-in isn't a stored row either; key it by client +
       // instrument so the share history reads sensibly.
       return `${input.artefact.clientId}:${input.artefact.instrumentKey}`;
+    case 'SIGNED_INTAKE_NOTE':
+      // Sprint 49 — sessionId is the discriminator, same as SIGNED_NOTE.
+      return input.artefact.sessionId;
   }
 }
 

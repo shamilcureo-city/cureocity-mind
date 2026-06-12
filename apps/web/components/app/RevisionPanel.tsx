@@ -13,9 +13,16 @@ interface HistoryEntry {
   createdAt: string;
 }
 
+/**
+ * Sprint 49 — RevisionPanel still revises TREATMENT notes only (the
+ * /note/edit route is SOAP-shaped). The caller in NotesTab narrows the
+ * union-typed `TherapyNote.content` to TherapyNoteV1 before passing.
+ */
+type TreatmentNote = Omit<TherapyNote, 'content'> & { content: TherapyNoteV1 };
+
 interface Props {
   sessionId: string;
-  note: TherapyNote;
+  note: TreatmentNote;
   onRevised: (next: TherapyNoteV1) => void;
 }
 

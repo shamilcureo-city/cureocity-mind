@@ -52,7 +52,7 @@ export async function POST(
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { id: true, psychologistId: true, therapyNote: true },
+    select: { id: true, psychologistId: true, kind: true, therapyNote: true },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -61,6 +61,18 @@ export async function POST(
     return NextResponse.json(
       { error: 'Session has no signed note to revise.' },
       { status: 404 },
+    );
+  }
+  // Sprint 49 — this route is SOAP-only. Intake-note revisions aren't
+  // wired through this contract yet; the modify-then-sign path is the
+  // current intake editing surface.
+  if (session.kind === 'INTAKE') {
+    return NextResponse.json(
+      {
+        error:
+          'Editing a signed intake note is not yet supported through this endpoint. Modify the draft and re-sign instead.',
+      },
+      { status: 409 },
     );
   }
 
