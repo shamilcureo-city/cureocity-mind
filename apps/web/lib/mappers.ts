@@ -215,6 +215,10 @@ export function toExerciseAssignment(row: ExerciseAssignmentRow): ExerciseAssign
     clientId: row.clientId,
     psychologistId: row.psychologistId,
     exerciseId: row.exerciseId,
+    // Sprint 51 — provenance fields.
+    source: row.source,
+    customDescription: row.customDescription,
+    sourceTherapyScriptId: row.sourceTherapyScriptId,
     assignedAt: row.assignedAt.toISOString(),
     dueAt: row.dueAt?.toISOString() ?? null,
     status: row.status,

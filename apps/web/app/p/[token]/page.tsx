@@ -7,6 +7,7 @@ import {
 } from '@cureocity/contracts';
 import { hotlinesForCrisisKind } from '@cureocity/clinical';
 import { CheckinForm } from '@/components/portal/CheckinForm';
+import { HomeworkDoneButton } from '@/components/portal/HomeworkDoneButton';
 import { writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 
@@ -212,6 +213,29 @@ function SnapshotView({
             <p className="mt-2 text-xs italic text-[var(--color-ink-3)]">
               {snapshot.homework.deliveryNotes}
             </p>
+            {/* Sprint 51 — homework loop. The button appears only when
+                the share was sent with assignHomework=true (assignment
+                id present) and not yet marked done. */}
+            {snapshot.homeworkAssignmentId && !snapshot.homeworkCompleted && (
+              <HomeworkDoneButton token={token} />
+            )}
+            {snapshot.homeworkCompleted && (
+              <p className="mt-3 rounded-xl bg-white/40 p-3 text-sm text-[var(--color-ink-2)]">
+                Marked done
+                {snapshot.homeworkCompletedAt && (
+                  <>
+                    {' '}
+                    on{' '}
+                    {new Date(snapshot.homeworkCompletedAt).toLocaleDateString('en-IN', {
+                      month: 'short',
+                      day: 'numeric',
+                      year: 'numeric',
+                    })}
+                  </>
+                )}
+                . Your therapist will see it before your next session.
+              </p>
+            )}
           </section>
         </article>
       );

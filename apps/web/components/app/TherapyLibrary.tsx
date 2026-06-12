@@ -191,6 +191,10 @@ export function TherapyLibrary({
               ? {
                   artefactType: 'THERAPY_SCRIPT',
                   therapyScriptId: shareTarget.therapyScriptId,
+                  // Sprint 51 — opt into the homework loop: the share
+                  // route auto-persists the script's homework as an
+                  // ExerciseAssignment so the client can mark it done.
+                  assignHomework: true,
                 }
               : {
                   artefactType: 'TREATMENT_PLAN',

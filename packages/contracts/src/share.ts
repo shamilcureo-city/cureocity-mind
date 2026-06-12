@@ -101,6 +101,18 @@ export const TherapyScriptSnapshotSchema = z.object({
     description: z.string(),
     deliveryNotes: z.string(),
   }),
+  /**
+   * Sprint 51 — homework loop. When the share route persists the
+   * script's homework as an ExerciseAssignment, the assignment id is
+   * embedded here so the public Mark-as-done route can find it
+   * without re-querying. The two completion fields flip when the
+   * client marks done from the portal. All three are optional +
+   * defaulted so pre-S51 THERAPY_SCRIPT snapshots keep parsing on
+   * the portal (same back-compat trick S47 used for INSTRUMENT_CHECKIN).
+   */
+  homeworkAssignmentId: CuidSchema.nullable().default(null),
+  homeworkCompleted: z.boolean().default(false),
+  homeworkCompletedAt: IsoDateTimeSchema.nullable().default(null),
 });
 export type TherapyScriptSnapshot = z.infer<typeof TherapyScriptSnapshotSchema>;
 
@@ -295,7 +307,24 @@ export const ShareReflectionQuestionsInputSchema = z.object({
 export const ShareTherapyScriptInputSchema = z.object({
   artefactType: z.literal('THERAPY_SCRIPT'),
   therapyScriptId: CuidSchema,
+  /**
+   * Sprint 51 — when true, the share route persists the script's
+   * `homework` field as an ExerciseAssignment (or reuses the open
+   * row for the same script) so the client can mark it COMPLETED
+   * from the portal and the pre-session brief reads real homework
+   * truth. Optional (default treated as `true` at the call site) —
+   * we deliberately avoid `.default()` here because it breaks the
+   * discriminated union's input/output symmetry that other modules
+   * rely on for assignment compatibility.
+   */
+  assignHomework: z.boolean().optional(),
 });
+
+/// Sprint 51 — public POST /api/v1/p/[token]/homework body. Empty —
+/// the share token IS the auth, identical posture to S47's check-in
+/// submit route. Spelled out as a schema for contracts-first parity.
+export const HomeworkDoneInputSchema = z.object({});
+export type HomeworkDoneInput = z.infer<typeof HomeworkDoneInputSchema>;
 
 export const ShareTreatmentPlanInputSchema = z.object({
   artefactType: z.literal('TREATMENT_PLAN'),

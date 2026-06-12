@@ -287,6 +287,12 @@ async function buildTherapyScript(
       kind: 'THERAPY_SCRIPT',
       therapyName: script.therapyName,
       patientSummary,
+      // Sprint 51 — homework loop. assignmentId is null here; the
+      // share route mutates the snapshot in-place to inject the
+      // ExerciseAssignment id it created before persisting.
+      homeworkAssignmentId: null,
+      homeworkCompleted: false,
+      homeworkCompletedAt: null,
       homework: {
         description: script.homework.description,
         deliveryNotes: script.homework.deliveryNotes,

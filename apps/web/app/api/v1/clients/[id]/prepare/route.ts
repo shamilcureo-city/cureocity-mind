@@ -107,6 +107,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
         completedAt: true,
         dueAt: true,
         exerciseId: true,
+        customDescription: true,
         therapistNote: true,
       },
     }),
@@ -115,10 +116,14 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
 
   const homework: PrepareHomeworkEntry[] = assignments.map((a) => ({
     id: a.id,
-    // S51 will replace this with a customDescription column on the
-    // assignment + the catalog title fallback. Pre-S51 rows only have
-    // the catalog id, which still reads sensibly ("cbt_thought_record_5col").
-    description: a.therapistNote?.trim() || a.exerciseId,
+    // Sprint 51 — script-sourced rows have customDescription;
+    // catalog rows fall back to the therapist's note or the catalog
+    // id stem so the panel always renders something readable.
+    description:
+      a.customDescription?.trim() ||
+      a.therapistNote?.trim() ||
+      a.exerciseId ||
+      'Homework',
     status: a.status,
     assignedAt: a.assignedAt.toISOString(),
     completedAt: a.completedAt?.toISOString() ?? null,

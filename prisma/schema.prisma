@@ -1613,6 +1613,17 @@ enum ExerciseAssignmentStatus {
   EXPIRED
 }
 
+/// Sprint 51 — provenance for an ExerciseAssignment row.
+/// CATALOG = therapist hand-picked from the @cureocity/clinical catalog.
+/// THERAPY_SCRIPT = auto-created when sharing a therapy script so the
+/// script's `homework` field persists as a trackable assignment and
+/// the patient's "Mark as done" on the portal feeds the pre-session
+/// brief deterministically.
+enum ExerciseAssignmentSource {
+  CATALOG
+  THERAPY_SCRIPT
+}
+
 model ExerciseAssignment {
   id             String @id @default(cuid())
   clientId       String
@@ -1620,7 +1631,15 @@ model ExerciseAssignment {
 
   // Catalog id like 'cbt_thought_record_5col' or 'emdr_safe_place_installation'.
   // Validated against @cureocity/clinical at the service layer.
-  exerciseId String
+  // Sprint 51 — nullable so script-sourced rows can carry free-text
+  // homework (the script's `homework.description`, which doesn't match
+  // the catalog regex) without needing a fake catalog id.
+  exerciseId String?
+
+  // Sprint 51 — provenance + free-text description for non-catalog rows.
+  source                ExerciseAssignmentSource @default(CATALOG)
+  customDescription     String?                  @db.Text
+  sourceTherapyScriptId String?
 
   assignedAt DateTime  @default(now())
   dueAt      DateTime?
