@@ -11,6 +11,10 @@ interface Props {
   sessionId: string;
   clientId: string;
   note: TherapyNoteV1;
+  /// Sprint 43 — real contact availability so the share modal greys
+  /// out channels the client can't receive on (was hardcoded `true`).
+  clientHasContactPhone: boolean;
+  clientHasContactEmail: boolean;
 }
 
 interface Response {
@@ -31,7 +35,13 @@ interface Response {
  * the therapist can hit "Regenerate" to spend on a fresh set if the
  * first batch doesn't feel right.
  */
-export function ReflectionTab({ sessionId, clientId, note }: Props) {
+export function ReflectionTab({
+  sessionId,
+  clientId,
+  note,
+  clientHasContactPhone,
+  clientHasContactEmail,
+}: Props) {
   const [data, setData] = useState<Response | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -147,8 +157,8 @@ export function ReflectionTab({ sessionId, clientId, note }: Props) {
           open={shareOpen}
           onClose={() => setShareOpen(false)}
           clientId={clientId}
-          hasContactPhone={true}
-          hasContactEmail={true}
+          hasContactPhone={clientHasContactPhone}
+          hasContactEmail={clientHasContactEmail}
           artefact={{
             artefactType: 'REFLECTION_QUESTIONS',
             sessionId,

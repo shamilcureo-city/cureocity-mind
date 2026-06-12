@@ -59,6 +59,12 @@ export function ShareModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ShareResultEntry[] | null>(null);
+  // Sprint 43 — which send channels this deployment can actually deliver
+  // on. Null until loaded; greying falls back to contact-availability.
+  const [config, setConfig] = useState<{
+    whatsappConfigured: boolean;
+    emailConfigured: boolean;
+  } | null>(null);
 
   // Reset state when modal closes.
   useEffect(() => {
@@ -68,6 +74,40 @@ export function ShareModal({
       setBusy(false);
     }
   }, [open]);
+
+  // Load channel config when the modal opens; drop selections for
+  // channels the server can't deliver on so the therapist never sends
+  // into a silent no-op.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/v1/share/config', { cache: 'no-store' });
+        if (!res.ok) return;
+        const cfg = (await res.json()) as {
+          whatsappConfigured: boolean;
+          emailConfigured: boolean;
+        };
+        if (cancelled) return;
+        setConfig(cfg);
+        setSelected((s) => {
+          const next = {
+            ...s,
+            WHATSAPP: s.WHATSAPP && cfg.whatsappConfigured && hasContactPhone,
+            EMAIL: s.EMAIL && cfg.emailConfigured && hasContactEmail,
+          };
+          if (!next.WHATSAPP && !next.EMAIL) next.PORTAL_LINK = true;
+          return next;
+        });
+      } catch {
+        /* leave config null — fall back to contact-only greying */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, hasContactPhone, hasContactEmail]);
 
   const toggle = useCallback((key: PatientShareChannel) => {
     setSelected((s) => ({ ...s, [key]: !s[key] }));
@@ -146,9 +186,21 @@ export function ShareModal({
             <section className="space-y-3">
               <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Channels</p>
               {ALL_CHANNELS.map((c) => {
-                const disabled =
-                  (c.key === 'WHATSAPP' && !hasContactPhone) ||
-                  (c.key === 'EMAIL' && !hasContactEmail);
+                const disabledReason =
+                  c.key === 'WHATSAPP'
+                    ? config && !config.whatsappConfigured
+                      ? 'WhatsApp sending isn’t set up on this account.'
+                      : !hasContactPhone
+                        ? 'No phone on file.'
+                        : null
+                    : c.key === 'EMAIL'
+                      ? config && !config.emailConfigured
+                        ? 'Email sending isn’t set up on this account.'
+                        : !hasContactEmail
+                          ? 'No email on file.'
+                          : null
+                      : null;
+                const disabled = disabledReason !== null;
                 return (
                   <label
                     key={c.key}
@@ -172,11 +224,7 @@ export function ShareModal({
                         {c.label}
                       </span>
                       <span className="ml-2 text-xs text-[var(--color-ink-3)]">
-                        {disabled
-                          ? c.key === 'WHATSAPP'
-                            ? 'No phone on file.'
-                            : 'No email on file.'
-                          : c.description}
+                        {disabledReason ?? c.description}
                       </span>
                     </span>
                   </label>

@@ -21,6 +21,12 @@ import { ClinicalLocaleSchema } from './clinical';
 export const InstrumentKeySchema = z.enum(['PHQ9', 'GAD7']);
 export type InstrumentKey = z.infer<typeof InstrumentKeySchema>;
 
+/// Sprint 47 — who completed the administration. CLINICIAN is the
+/// in-session default; SELF is a remote portal check-in the client
+/// filled out themselves between sessions.
+export const InstrumentAdministrationModeSchema = z.enum(['CLINICIAN', 'SELF']);
+export type InstrumentAdministrationMode = z.infer<typeof InstrumentAdministrationModeSchema>;
+
 /** PHQ-9 + GAD-7 use 0..3 per item. */
 export const InstrumentResponseValueSchema = z.number().int().min(0).max(3);
 export type InstrumentResponseValue = z.infer<typeof InstrumentResponseValueSchema>;
@@ -45,6 +51,8 @@ export const InstrumentResponseSchema = z.object({
   severity: z.string(),
   administeredAt: IsoDateTimeSchema,
   administeredByPsychologistId: CuidSchema,
+  /// Sprint 47 — CLINICIAN (in-session) vs SELF (remote portal check-in).
+  administrationMode: InstrumentAdministrationModeSchema.default('CLINICIAN'),
   notes: z.string().nullable(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

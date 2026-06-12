@@ -102,7 +102,7 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
         {phase === 'uploading' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-[var(--color-ink-2)]">Decoding + chunking…</span>
+              <span className="text-[var(--color-ink-2)]">Decoding audio…</span>
               <span className="tabular-nums">{pct}%</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
@@ -112,7 +112,9 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
               />
             </div>
             <p className="text-xs text-[var(--color-ink-3)]">
-              {progress.chunksUploaded} chunk{progress.chunksUploaded === 1 ? '' : 's'} written
+              Uploading in the background — {progress.chunksUploaded} chunk
+              {progress.chunksUploaded === 1 ? '' : 's'} sent so far. Keep this tab open until it
+              finishes.
             </p>
           </div>
         )}

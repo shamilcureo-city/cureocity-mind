@@ -119,6 +119,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const portalOrigin = req.nextUrl.origin;
   const channels = dedup(input.channels);
   const channelResults: ShareResultEntry[] = [];
+  // Sprint 43 — when the WATI / SendGrid env is unset the channel is
+  // backed by a NoopBackend that reports "sent" without delivering.
+  // Refuse those sends explicitly so the therapist sees a clear
+  // "not configured" failure instead of a false success; PORTAL_LINK
+  // always works and is the fallback.
+  const channelConfig = shareChannels();
 
   for (const channel of channels) {
     const toContact =
@@ -127,6 +133,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         : channel === 'EMAIL'
           ? client.contactEmail
           : null;
+
+    if (channel === 'WHATSAPP' && !channelConfig.whatsappReady) {
+      channelResults.push({
+        channel,
+        shareId: 'n/a',
+        status: 'PERMANENT_FAILURE',
+        portalUrl: '',
+        errorCode: 'CHANNEL_NOT_CONFIGURED',
+        errorDetail: 'WhatsApp sending is not configured. Share the portal link instead.',
+      });
+      continue;
+    }
+    if (channel === 'EMAIL' && !channelConfig.emailReady) {
+      channelResults.push({
+        channel,
+        shareId: 'n/a',
+        status: 'PERMANENT_FAILURE',
+        portalUrl: '',
+        errorCode: 'CHANNEL_NOT_CONFIGURED',
+        errorDetail: 'Email sending is not configured. Share the portal link instead.',
+      });
+      continue;
+    }
 
     if (channel === 'WHATSAPP' && !toContact) {
       channelResults.push({
@@ -369,6 +398,10 @@ function extractArtefactId(input: ShareInput): string {
       // Progress reports are derived from cumulative client state, not
       // a stored row — the clientId IS the artefact discriminator.
       return input.artefact.clientId;
+    case 'INSTRUMENT_CHECKIN':
+      // The check-in isn't a stored row either; key it by client +
+      // instrument so the share history reads sensibly.
+      return `${input.artefact.clientId}:${input.artefact.instrumentKey}`;
   }
 }
 

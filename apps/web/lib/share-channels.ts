@@ -21,6 +21,8 @@ declare global {
         messaging: IMessagingPort;
         email: IEmailPort;
         backend: 'noop' | 'wati+sendgrid' | 'mixed';
+        whatsappReady: boolean;
+        emailReady: boolean;
       }
     | undefined;
 }
@@ -29,6 +31,11 @@ interface ShareChannels {
   messaging: IMessagingPort;
   email: IEmailPort;
   backend: 'noop' | 'wati+sendgrid' | 'mixed';
+  /// Sprint 43 — per-channel readiness so the share route can refuse a
+  /// Noop-backed send (instead of reporting a false "sent") and the
+  /// share modal can grey the channel out before the therapist tries.
+  whatsappReady: boolean;
+  emailReady: boolean;
 }
 
 export function shareChannels(): ShareChannels {
@@ -62,7 +69,13 @@ export function shareChannels(): ShareChannels {
 
   const backend: ShareChannels['backend'] =
     watiReady && sendgridReady ? 'wati+sendgrid' : !watiReady && !sendgridReady ? 'noop' : 'mixed';
-  const cached: ShareChannels = { messaging, email, backend };
+  const cached: ShareChannels = {
+    messaging,
+    email,
+    backend,
+    whatsappReady: watiReady,
+    emailReady: sendgridReady,
+  };
   globalThis.__cureocityShareChannels = cached;
   return cached;
 }

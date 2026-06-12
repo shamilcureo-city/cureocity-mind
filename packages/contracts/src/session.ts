@@ -15,6 +15,25 @@ export const CreateSessionInputSchema = z.object({
   scheduledAt: IsoDateTimeSchema,
 });
 
+/// Sprint 45 — Today screen no-show transition. The client never
+/// arrived for the scheduled slot. `note` is an optional free-text
+/// observation captured by the therapist.
+export const SessionNoShowInputSchema = z.object({
+  note: z.string().trim().max(500).optional(),
+});
+
+/// Sprint 45 — Today screen reschedule transition. The slot is moved
+/// to a new time; the existing session is marked RESCHEDULED and a
+/// fresh SCHEDULED session is created at the new time so audit
+/// history is preserved (we never silently overwrite scheduledAt).
+export const SessionRescheduleInputSchema = z.object({
+  newScheduledAt: IsoDateTimeSchema,
+  reason: z.string().trim().max(500).optional(),
+});
+
+export type SessionNoShowInput = z.infer<typeof SessionNoShowInputSchema>;
+export type SessionRescheduleInput = z.infer<typeof SessionRescheduleInputSchema>;
+
 export const SessionConsentAckInputSchema = z.object({
   /**
    * Therapist confirms the client has acknowledged each consent scope for

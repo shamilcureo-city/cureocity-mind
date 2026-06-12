@@ -5,6 +5,8 @@ import {
   PatientShareTokenSchema,
   type PatientShareSnapshot,
 } from '@cureocity/contracts';
+import { hotlinesForCrisisKind } from '@cureocity/clinical';
+import { CheckinForm } from '@/components/portal/CheckinForm';
 import { writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 
@@ -113,7 +115,11 @@ export default async function PortalPage({ params }: PageProps) {
         </section>
       ) : snapshot ? (
         <section className="mt-8">
-          <SnapshotView snapshot={snapshot} clientFirstName={firstName(row.client.fullName)} />
+          <SnapshotView
+            snapshot={snapshot}
+            clientFirstName={firstName(row.client.fullName)}
+            token={token}
+          />
         </section>
       ) : (
         <section className="mt-8 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
@@ -131,9 +137,11 @@ export default async function PortalPage({ params }: PageProps) {
 function SnapshotView({
   snapshot,
   clientFirstName,
+  token,
 }: {
   snapshot: PatientShareSnapshot;
   clientFirstName: string;
+  token: string;
 }) {
   switch (snapshot.kind) {
     case 'SIGNED_NOTE':
@@ -328,6 +336,33 @@ function SnapshotView({
             </ul>
           </section>
         </article>
+      );
+    case 'INSTRUMENT_CHECKIN':
+      if (snapshot.completed) {
+        return (
+          <article className="space-y-4">
+            <div className="rounded-2xl bg-[var(--color-accent-soft)] p-6 text-center">
+              <p className="font-serif text-xl text-[var(--color-ink)]">
+                Thank you, {clientFirstName}.
+              </p>
+              <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+                Your check-in has been saved and sent to your therapist. There&apos;s nothing
+                more to do here — they&apos;ll review it before your next session.
+              </p>
+            </div>
+          </article>
+        );
+      }
+      return (
+        <CheckinForm
+          token={token}
+          clientFirstName={clientFirstName}
+          recallWindow={snapshot.recallWindow}
+          items={snapshot.items}
+          scale={snapshot.scale}
+          riskItemNumber={snapshot.riskItemNumber}
+          crisisHotlines={hotlinesForCrisisKind('suicidal_ideation')}
+        />
       );
   }
 }

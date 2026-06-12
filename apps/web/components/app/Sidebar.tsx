@@ -6,10 +6,14 @@ import { usePathname } from 'next/navigation';
 interface NavItem {
   href: string;
   label: string;
-  icon: 'record' | 'clients' | 'templates' | 'klara' | 'learn' | 'me';
+  icon: 'today' | 'record' | 'clients' | 'templates' | 'klara' | 'learn' | 'me';
 }
 
 const PRIMARY: NavItem[] = [
+  // Sprint 45 — Today is the first nav item: the screen a therapist opens
+  // each morning. Record stays for walk-ins / dictation; Today is the
+  // calendar-driven entry point.
+  { href: '/app/today', label: 'Today', icon: 'today' },
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
   { href: '/app/templates', label: 'Templates', icon: 'templates' },
@@ -132,6 +136,7 @@ export function Glyph({
   kind,
 }: {
   kind:
+    | 'today'
     | 'record'
     | 'clients'
     | 'templates'
@@ -144,6 +149,7 @@ export function Glyph({
     | 'signout';
 }) {
   const paths: Record<typeof kind, string> = {
+    today: 'M3 9h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM8 3v4M16 3v4M9 14h2v2H9z',
     record: 'M12 4a4 4 0 0 1 4 4v4a4 4 0 0 1-8 0V8a4 4 0 0 1 4-4zM5 12a7 7 0 0 0 14 0M12 19v3',
     clients: 'M16 14a4 4 0 1 0-8 0M3 21v-1a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v1',
     templates:

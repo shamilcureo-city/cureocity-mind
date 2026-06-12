@@ -7,47 +7,46 @@ export const dynamic = 'force-dynamic';
 /**
  * Static onboarding guide. Five concrete steps that introduce the
  * core therapist surface — no SDK calls, no DB reads; just text the
- * therapist can read on their first login. Sprint 11 turns these
- * into interactive walkthroughs with mock data; today they're
- * structured prose with deep links.
+ * therapist can read on their first login, with deep links into each
+ * area of the current product.
  */
 const SECTIONS = [
   {
     n: 1,
     title: 'Add a client',
-    body: 'Open the Clients tab on the left, click "+ Create new", and capture name + phone + the three required consents (audio recording, AI note generation, cross-border processing). The client is created immediately and you land on their detail page.',
+    body: 'Open Clients → New client (or "+ New client" straight from the Record screen). Capture their name and phone, and confirm they\'ve agreed to audio recording and AI note generation. Everything else — email, languages, presenting concerns — you can fill in later from their client page; the intake itself surfaces most of it.',
     cta: { href: '/app/clients', label: 'Open Clients' },
   },
   {
     n: 2,
     title: 'Record a session',
-    body: 'From the Record tab, pick the capture mode — virtual session (browser tab audio), in-person (device microphone), or dictate-after (post-session summary). The recorder buffers 30-second PCM chunks to Postgres and survives tab refreshes via IndexedDB.',
+    body: 'From Record, pick who you\'re with. The pre-flight reads their history and works out whether this is an intake, a treatment session, or a plan review — you just confirm and start. Capture by device microphone (in person), browser-tab audio (virtual), or upload a file. Audio is chunked as you go and survives a tab refresh.',
     cta: { href: '/app', label: 'Open Record' },
   },
   {
     n: 3,
-    title: 'Let the scribe draft the note',
-    body: 'When you end the session, the two-pass Vertex Gemini pipeline runs: Pass 1 (Flash in asia-south1) transcribes + diarizes + extracts affect; Pass 2 (Pro on the global endpoint) writes the SOAP note. The Notes tab shows progress and reveals the draft when ready.',
+    title: 'The AI drafts your note',
+    body: 'When you end the session the Vertex Gemini pipeline transcribes and diarizes the audio, then writes the note — a SOAP note for treatment sessions, a structured intake note for a first session. The Notes tab shows progress and reveals the draft when it\'s ready.',
     cta: null,
   },
   {
     n: 4,
-    title: 'Modify, sign, share',
-    body: 'Use the AI assistant panel to issue plain-text edit instructions ("rewrite the plan as bullets", "remove client names"). Sign off when the note matches your judgement. Download the signed PDF, view the radial mindmap, or generate reflection questions for the client.',
+    title: 'Review with the AI Copilot',
+    body: 'Open the AI Copilot tab for the clinical brief — diagnosis candidates with ICD-11 codes and supporting evidence, the case formulation, recommended therapies with step-by-step scripts, and a mindmap. You accept, edit, or reject each suggestion; confirmed diagnoses and treatment plans build up across sessions.',
     cta: null,
   },
   {
     n: 5,
-    title: 'Track progress with workflows',
-    body: 'On the client detail page, start a CBT or EMDR workflow with 1–20 goals. Each completed session feeds the advancement evaluator (CBT) or preparation gate (EMDR). The prescription engine suggests exercises tailored to the current phase; assign them with one click.',
+    title: 'Sign, measure, share',
+    body: 'Sign the note when it matches your judgement and download the PDF for your records. Administer PHQ-9 / GAD-7 to track change against validated thresholds, follow the client\'s Journey from intake through to discharge, and share a plain-language progress report or reflection questions with the client over WhatsApp, email, or a private portal link.',
     cta: { href: '/app/clients', label: 'Pick a client' },
   },
 ] as const;
 
 const SUPPORTING_LINKS = [
   { href: '/app/klara', label: 'Klara — chat with your practice data', desc: 'Ask "which clients haven\'t been seen in 30+ days?" and other roster-aware questions.' },
+  { href: '/app/me', label: 'My practice', desc: 'Your own tempo and decision split — for self-reflection, not comparison.' },
   { href: '/app/admin/erasure-queue', label: 'DPDP erasure queue', desc: 'Review and resolve § 15 erasure requests within the 30-day statutory window.' },
-  { href: '/app/templates', label: 'Note templates', desc: 'Customize note structures beyond the default SOAP layout (ships post-pilot).' },
 ];
 
 export default function LearnPage() {

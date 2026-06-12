@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, Textarea } from '../ui/Field';
+import { SpokenLanguageChips } from './SpokenLanguageChips';
 
 interface Props {
   open: boolean;
@@ -261,52 +262,3 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
   );
 }
 
-const SPOKEN_LANGUAGE_OPTIONS: { code: string; label: string }[] = [
-  { code: 'en', label: 'English' },
-  { code: 'ml', label: 'Malayalam' },
-  { code: 'hi', label: 'Hindi' },
-  { code: 'ta', label: 'Tamil' },
-  { code: 'bn', label: 'Bengali' },
-  { code: 'kn', label: 'Kannada' },
-  { code: 'te', label: 'Telugu' },
-  { code: 'mr', label: 'Marathi' },
-  { code: 'gu', label: 'Gujarati' },
-  { code: 'pa', label: 'Punjabi' },
-];
-
-function SpokenLanguageChips({
-  value,
-  onChange,
-}: {
-  value: string[];
-  onChange: (next: string[]) => void;
-}) {
-  function toggle(code: string) {
-    if (value.includes(code)) {
-      onChange(value.filter((c) => c !== code));
-    } else {
-      onChange([...value, code]);
-    }
-  }
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {SPOKEN_LANGUAGE_OPTIONS.map((o) => {
-        const active = value.includes(o.code);
-        return (
-          <button
-            key={o.code}
-            type="button"
-            onClick={() => toggle(o.code)}
-            className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-              active
-                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
-                : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink)]'
-            }`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}

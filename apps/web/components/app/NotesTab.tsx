@@ -39,6 +39,12 @@ interface Props {
   initialDraft: NoteDraft | null;
   initialNote: TherapyNote | null;
   clientId: string;
+  /// Sprint 43 — real contact availability so the share modal greys
+  /// out channels the client can't receive on. Previously hardcoded
+  /// `true`, which let a therapist try to WhatsApp a client with no
+  /// phone on file and only learn it failed after submitting.
+  clientHasContactPhone: boolean;
+  clientHasContactEmail: boolean;
   llmBackend: string;
 }
 
@@ -56,12 +62,14 @@ const POLL_MS = 2_000;
 // How long a non-completing generation can sit before the UI offers a
 // manual "Resume". A PENDING draft means /end created the row but the
 // generation kick never landed (a navigation-aborted fire-and-forget),
-// so surface recovery quickly. IN_PROGRESS means Gemini is genuinely
-// running — wait much longer before crying wolf on a slow-but-fine run.
-// Either way polling continues underneath, so a slow run still
-// auto-completes without the user touching anything.
-const STALL_PENDING_MS = 8_000;
-const STALL_RUNNING_MS = 90_000;
+// so surface recovery almost immediately. IN_PROGRESS means Gemini is
+// genuinely running — but on Vercel the background pass can be killed
+// without ever flipping the row to FAILED, so don't wait a full
+// minute-and-a-half to offer recovery. Either way polling continues
+// underneath, so a slow-but-fine run still auto-completes on its own
+// and the Resume button is purely additive (re-kick is idempotent).
+const STALL_PENDING_MS = 3_000;
+const STALL_RUNNING_MS = 30_000;
 
 export function NotesTab({
   sessionId,
@@ -70,6 +78,8 @@ export function NotesTab({
   initialDraft,
   initialNote,
   clientId,
+  clientHasContactPhone,
+  clientHasContactEmail,
   llmBackend,
 }: Props) {
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
@@ -393,8 +403,8 @@ export function NotesTab({
               open={shareOpen}
               onClose={() => setShareOpen(false)}
               clientId={clientId}
-              hasContactPhone={true}
-              hasContactEmail={true}
+              hasContactPhone={clientHasContactPhone}
+              hasContactEmail={clientHasContactEmail}
               artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
               artefactLabel="Signed session note"
             />
@@ -408,7 +418,12 @@ export function NotesTab({
                 })
               }
             />
-            <NoteFooter costInr="—" chunkCount={0} transcriptChars={0} region="signed" />
+            <NoteFooter
+              costInr={initialDraft?.totalCostInr ?? '—'}
+              chunkCount={initialDraft?.speakerSegments?.length ?? 0}
+              transcriptChars={initialDraft?.transcript?.length ?? 0}
+              region="signed"
+            />
           </Card>
           <ModifyPanel disabled={true} sessionId={sessionId} note={phase.note.content} />
         </div>

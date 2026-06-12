@@ -75,6 +75,17 @@ export const UpdateClientInputSchema = z
     dateOfBirth: IsoDateSchema.nullable(),
     presentingConcerns: z.string().max(2000).nullable(),
     preferredModality: SessionModalitySchema.nullable(),
+    /// Sprint 44 — editable post-intake so the therapist can fill in
+    /// language preferences from the client page (the new-client form
+    /// defers them). Same ISO 639-1 shape as CreateClientInputSchema.
+    preferredLanguage: z
+      .string()
+      .min(2)
+      .max(8)
+      .regex(/^[a-z]{2}(-[A-Z]{2})?$/),
+    spokenLanguages: z
+      .array(z.string().min(2).max(8).regex(/^[a-z]{2}(-[A-Z]{2})?$/))
+      .max(5),
     status: ClientStatusSchema,
   })
   .partial()
@@ -100,6 +111,10 @@ export const ClientSchema = z.object({
 
 export const ListClientsQuerySchema = z.object({
   status: ClientStatusSchema.optional(),
+  /// Sprint 44 — case-insensitive substring match on the client's full
+  /// name so a therapist with a large caseload can find someone without
+  /// scrolling. Empty/whitespace is treated as no filter by the route.
+  q: z.string().trim().max(100).optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
   cursor: PaginationCursorSchema,
 });

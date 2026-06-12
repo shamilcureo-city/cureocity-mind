@@ -1,5 +1,6 @@
 import {
   type ClinicalLocale,
+  type InstrumentKey,
   type PatientShareSnapshot,
   type ShareArtefactRef,
   type TherapyScriptV1,
@@ -9,6 +10,7 @@ import {
   type ClinicalTreatmentPlan,
   ClinicalTreatmentPlanSchema,
 } from '@cureocity/contracts';
+import { INSTRUMENTS } from '@cureocity/clinical';
 import { ProgressReportError, buildProgressReport } from './progress-report';
 import { prisma } from './prisma';
 
@@ -62,7 +64,57 @@ export async function buildSnapshot(args: BuildArgs): Promise<SnapshotResult | n
       return buildTreatmentPlan(args, args.ref.treatmentPlanId);
     case 'PROGRESS_REPORT':
       return buildProgressReportSnapshot(args, args.ref.clientId);
+    case 'INSTRUMENT_CHECKIN':
+      return buildInstrumentCheckin(args, args.ref.clientId, args.ref.instrumentKey);
   }
+}
+
+/**
+ * Sprint 47 — snapshot a PHQ-9 / GAD-7 for self-serve completion.
+ *
+ * Verifies the client is owned by the requesting therapist, then
+ * freezes the instrument's items + scale (in the share language) onto
+ * the snapshot so the portal renders the exact validated wording with
+ * no clinical-package dependency. The riskItemNumber rides along so
+ * the portal can surface crisis resources the moment a self-harm item
+ * is endorsed. `completed` starts false; the submit route flips it.
+ */
+async function buildInstrumentCheckin(
+  { clientId, psychologistId, language }: BuildArgs,
+  refClientId: string,
+  instrumentKey: InstrumentKey,
+): Promise<SnapshotResult | null> {
+  if (refClientId !== clientId) {
+    throw new SnapshotBuildError('Check-in clientId does not match the request clientId.');
+  }
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { id: true, psychologistId: true, deletedAt: true },
+  });
+  if (!client || client.psychologistId !== psychologistId || client.deletedAt !== null) {
+    return null;
+  }
+  const def = INSTRUMENTS[instrumentKey];
+  if (!def) {
+    throw new SnapshotBuildError(`Unknown instrument: ${instrumentKey}`);
+  }
+  const pick = <T extends { en: string } & Partial<Record<ClinicalLocale, string>>>(m: T): string =>
+    m[language] ?? m.en;
+  return {
+    snapshot: {
+      kind: 'INSTRUMENT_CHECKIN',
+      instrumentKey,
+      title: pick(def.title),
+      recallWindow: pick(def.recallWindow),
+      items: def.items.map((i) => ({ id: i.id, number: i.number, text: pick(i.text) })),
+      scale: def.scale.map((s) => ({ value: s.value, label: pick(s.label) })),
+      riskItemNumber: def.riskItemNumber ?? null,
+      completed: false,
+      completedAt: null,
+    },
+    subject: 'A quick check-in before our next session',
+    sessionId: null,
+  };
 }
 
 async function buildSignedNote(

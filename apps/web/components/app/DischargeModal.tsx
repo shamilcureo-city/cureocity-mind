@@ -77,6 +77,15 @@ export function DischargeModal({ open, clientId, clientName, canShareReport, onC
           </p>
         </header>
 
+        {/* Sprint 44 — discharging without any outcome measure means the
+            progress report has no before/after to show. Nudge, don't block. */}
+        {!canShareReport && (
+          <div className="mb-4 rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] px-4 py-3 text-xs text-[var(--color-warn)]">
+            No outcome measures recorded yet. Consider administering PHQ-9 / GAD-7 before
+            discharge so {clientName}&apos;s progress report has a measurable before and after.
+          </div>
+        )}
+
         <div className="space-y-4">
           <div>
             <Label htmlFor="discharge-status">Outcome</Label>

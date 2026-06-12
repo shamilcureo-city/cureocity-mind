@@ -88,7 +88,13 @@ export async function AICopilotTab({
     <div className="space-y-6">
       <AICopilotSubTabs sessionId={sessionId} active={sub} />
       {sub === 'session' && (
-        <SessionSub sessionId={sessionId} clientId={clientId} sessionKind={sessionKind} />
+        <SessionSub
+          sessionId={sessionId}
+          clientId={clientId}
+          sessionKind={sessionKind}
+          clientHasContactPhone={clientHasContactPhone}
+          clientHasContactEmail={clientHasContactEmail}
+        />
       )}
       {sub === 'journey' && (
         <JourneySub
@@ -109,7 +115,12 @@ export async function AICopilotTab({
         </div>
       )}
       {sub === 'formulation' && (
-        <FormulationSub clientId={clientId} preferredLanguage={preferredLanguage} />
+        <FormulationSub
+          clientId={clientId}
+          preferredLanguage={preferredLanguage}
+          clientHasContactPhone={clientHasContactPhone}
+          clientHasContactEmail={clientHasContactEmail}
+        />
       )}
     </div>
   );
@@ -121,10 +132,14 @@ async function SessionSub({
   sessionId,
   clientId,
   sessionKind,
+  clientHasContactPhone,
+  clientHasContactEmail,
 }: {
   sessionId: string;
   clientId: string;
   sessionKind: SessionKind;
+  clientHasContactPhone: boolean;
+  clientHasContactEmail: boolean;
 }) {
   const isIntake = sessionKind === 'INTAKE';
   const [reportRow, draft, signed] = await Promise.all([
@@ -166,7 +181,13 @@ async function SessionSub({
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
             Reflection questions
           </h3>
-          <ReflectionTab sessionId={sessionId} clientId={clientId} note={noteJson} />
+          <ReflectionTab
+            sessionId={sessionId}
+            clientId={clientId}
+            note={noteJson}
+            clientHasContactPhone={clientHasContactPhone}
+            clientHasContactEmail={clientHasContactEmail}
+          />
         </section>
       )}
     </div>
@@ -247,9 +268,13 @@ async function BriefingSub({
 async function FormulationSub({
   clientId,
   preferredLanguage,
+  clientHasContactPhone,
+  clientHasContactEmail,
 }: {
   clientId: string;
   preferredLanguage: string;
+  clientHasContactPhone: boolean;
+  clientHasContactEmail: boolean;
 }) {
   const [latestReport, activePlan, diagnoses] = await Promise.all([
     prisma.clinicalReport.findFirst({
@@ -291,6 +316,8 @@ async function FormulationSub({
         libraryTherapies={LIBRARY_THERAPIES}
         defaultLanguage={defaultLanguage}
         activeTreatmentPlanId={activePlan?.id ?? null}
+        clientHasContactPhone={clientHasContactPhone}
+        clientHasContactEmail={clientHasContactEmail}
       />
       <WorkflowSection clientId={clientId} />
     </div>

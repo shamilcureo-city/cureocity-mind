@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { ClinicalLocaleSchema } from './clinical';
-import { InstrumentChangeSchema } from './instrument';
+import { InstrumentChangeSchema, InstrumentKeySchema } from './instrument';
 
 /**
  * Sprint 15 — Patient CRM & sharing.
@@ -36,6 +36,11 @@ export const PatientShareArtefactTypeSchema = z.enum([
   /// treatment plan. The artefact the user said the product was
   /// missing: a "here's your result" the client walks away with.
   'PROGRESS_REPORT',
+  /// Sprint 47 — the first INTERACTIVE artefact. The therapist sends a
+  /// PHQ-9 / GAD-7 the client completes themselves from the portal
+  /// between sessions; the public submit route scores it into the
+  /// same InstrumentResponse trend the in-session runner feeds.
+  'INSTRUMENT_CHECKIN',
 ]);
 export type PatientShareArtefactType = z.infer<typeof PatientShareArtefactTypeSchema>;
 
@@ -148,12 +153,53 @@ export const ProgressReportSnapshotSchema = z.object({
 });
 export type ProgressReportSnapshot = z.infer<typeof ProgressReportSnapshotSchema>;
 
+/**
+ * Sprint 47 — Instrument check-in snapshot.
+ *
+ * Unlike every other snapshot (which the portal renders read-only),
+ * this one carries an instrument the client FILLS OUT. The items +
+ * scale are snapshotted at send time so the form is stable and the
+ * portal needs no clinical-package import. `completed` flips to true
+ * when the public submit route stores the response, so re-opening the
+ * link shows a thank-you instead of a blank form.
+ *
+ * `riskItemNumber` (PHQ-9 #9) lets the portal show crisis resources
+ * the instant the client endorses self-harm — a clinician isn't in
+ * the room, so the safety net has to be in the form itself.
+ */
+export const InstrumentCheckinItemSchema = z.object({
+  id: z.string(),
+  number: z.number().int().positive(),
+  text: z.string().min(1),
+});
+
+export const InstrumentCheckinScaleOptionSchema = z.object({
+  value: z.number().int().min(0).max(3),
+  label: z.string().min(1),
+});
+
+export const InstrumentCheckinSnapshotSchema = z.object({
+  kind: z.literal('INSTRUMENT_CHECKIN'),
+  instrumentKey: InstrumentKeySchema,
+  title: z.string().min(1),
+  recallWindow: z.string().min(1),
+  items: z.array(InstrumentCheckinItemSchema).min(1).max(20),
+  scale: z.array(InstrumentCheckinScaleOptionSchema).min(2).max(6),
+  /** 1-based index of the suicidality item (PHQ-9 #9), or null. */
+  riskItemNumber: z.number().int().positive().nullable(),
+  /** Flips true once the client submits; gates form vs thank-you. */
+  completed: z.boolean(),
+  completedAt: IsoDateTimeSchema.nullable(),
+});
+export type InstrumentCheckinSnapshot = z.infer<typeof InstrumentCheckinSnapshotSchema>;
+
 export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedNoteSnapshotSchema,
   ReflectionQuestionsSnapshotSchema,
   TherapyScriptSnapshotSchema,
   TreatmentPlanSnapshotSchema,
   ProgressReportSnapshotSchema,
+  InstrumentCheckinSnapshotSchema,
 ]);
 export type PatientShareSnapshot = z.infer<typeof PatientShareSnapshotSchema>;
 
@@ -224,14 +270,32 @@ export const ShareProgressReportInputSchema = z.object({
   clientId: CuidSchema,
 });
 
+/// Sprint 47 — send a self-serve check-in. The route snapshots the
+/// instrument catalog (items + scale) at send time; the only inputs
+/// are which client and which instrument.
+export const ShareInstrumentCheckinInputSchema = z.object({
+  artefactType: z.literal('INSTRUMENT_CHECKIN'),
+  clientId: CuidSchema,
+  instrumentKey: InstrumentKeySchema,
+});
+
 export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareSignedNoteInputSchema,
   ShareReflectionQuestionsInputSchema,
   ShareTherapyScriptInputSchema,
   ShareTreatmentPlanInputSchema,
   ShareProgressReportInputSchema,
+  ShareInstrumentCheckinInputSchema,
 ]);
 export type ShareArtefactRef = z.infer<typeof ShareArtefactRefSchema>;
+
+/// Sprint 47 — public check-in submission from /p/<token>. The token
+/// IS the auth; the route resolves the instrument + client from the
+/// PatientShare row. `responses` is item-id → 0..3.
+export const CheckinSubmitInputSchema = z.object({
+  responses: z.record(z.string(), z.number().int().min(0).max(3)),
+});
+export type CheckinSubmitInput = z.infer<typeof CheckinSubmitInputSchema>;
 
 export const ShareInputSchema = z
   .object({
