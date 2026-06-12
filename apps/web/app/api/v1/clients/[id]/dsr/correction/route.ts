@@ -36,6 +36,12 @@ export async function PATCH(
 
   // S32 Phase 1 — DPDP correction is the same write surface as PATCH
   // /clients, so dual-write the encrypted PII columns identically.
+  // Sprint 54 — fullName joins the dual-write set; DPDP correction is
+  // the same write surface as PATCH /clients.
+  const fullNameEncrypted =
+    body.value.fullName !== undefined
+      ? await encryptForTenant(auth.value.psychologistId, body.value.fullName)
+      : undefined;
   const contactPhoneEncrypted =
     body.value.contactPhone !== undefined
       ? await encryptForTenant(auth.value.psychologistId, body.value.contactPhone)
@@ -52,6 +58,7 @@ export async function PATCH(
       where: { id: clientId },
       data: {
         ...(body.value.fullName !== undefined && { fullName: body.value.fullName }),
+        ...(fullNameEncrypted !== undefined && { fullNameEncrypted }),
         ...(body.value.contactPhone !== undefined && { contactPhone: body.value.contactPhone }),
         ...(contactPhoneEncrypted !== undefined && { contactPhoneEncrypted }),
         ...(body.value.contactEmail !== undefined && { contactEmail: body.value.contactEmail }),

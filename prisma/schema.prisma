@@ -372,6 +372,13 @@ model Client {
   contactPhoneEncrypted String?
   contactEmailEncrypted String?
 
+  /// Envelope-encrypted fullName — Sprint 54. The patient's name is the
+  /// highest-sensitivity PII field; brought to dual-write parity with
+  /// phone + email. Nullable until backfilled. Plaintext `fullName` is
+  /// retained for the transition window (read-cutover + plaintext drop
+  /// are a later, prod-data-dependent step).
+  fullNameEncrypted String?
+
   // Clinical context (free text in V1; structured assessment in Sprint 5)
   presentingConcerns String?
   preferredModality  String?

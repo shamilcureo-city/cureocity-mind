@@ -57,6 +57,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
   // S32 Phase 1 — re-encrypt PII whenever the plaintext changes. Hoisted
   // outside the tx for the same reason as POST /clients (KMS round-trip
   // shouldn't stretch the row lock).
+  // Sprint 54 — re-encrypt fullName whenever the plaintext changes.
+  const fullNameEncrypted =
+    dto.value.fullName !== undefined
+      ? await encryptForTenant(auth.value.psychologistId, dto.value.fullName)
+      : undefined;
   const contactPhoneEncrypted =
     dto.value.contactPhone !== undefined
       ? await encryptForTenant(auth.value.psychologistId, dto.value.contactPhone)
@@ -73,6 +78,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
       where: { id },
       data: {
         ...(dto.value.fullName !== undefined && { fullName: dto.value.fullName }),
+        ...(fullNameEncrypted !== undefined && { fullNameEncrypted }),
         ...(dto.value.contactPhone !== undefined && { contactPhone: dto.value.contactPhone }),
         ...(contactPhoneEncrypted !== undefined && { contactPhoneEncrypted }),
         ...(dto.value.contactEmail !== undefined && { contactEmail: dto.value.contactEmail }),
