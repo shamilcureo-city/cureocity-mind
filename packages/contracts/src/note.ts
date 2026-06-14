@@ -268,6 +268,78 @@ export const NoteEditEntrySchema = z.object({
 });
 export type NoteEditEntry = z.infer<typeof NoteEditEntrySchema>;
 
+/**
+ * Sprint 55 — POST /sessions/[id]/note/edit input.
+ *
+ * Pre-S55 this was an inline 4-SOAP-field schema; Sprint 49 added a
+ * 409 gate so intake sessions couldn't revise at all. The route now
+ * accepts both kinds via a discriminated union — server narrows
+ * against `session.kind` (Pass2Output / SignedNoteContent convention,
+ * CLAUDE.md §4). Both branches require at least one body field +
+ * `reason`; intake-only fields validate as `z.string()` here — the
+ * lenient `mentalStatusExam` preprocess lives on `IntakeNoteV1Schema`
+ * and runs on the route's defensive re-parse after merge.
+ */
+export const ReviseTreatmentNoteInputSchema = z.object({
+  kind: z.literal('TREATMENT'),
+  subjective: z.string().min(1).optional(),
+  objective: z.string().min(1).optional(),
+  assessment: z.string().min(1).optional(),
+  plan: z.string().min(1).optional(),
+  reason: z.string().min(5).max(2000),
+});
+export type ReviseTreatmentNoteInput = z.infer<typeof ReviseTreatmentNoteInputSchema>;
+
+export const ReviseIntakeNoteInputSchema = z.object({
+  kind: z.literal('INTAKE'),
+  presentingConcerns: z.string().min(1).optional(),
+  historyOfPresentingIllness: z.string().min(1).optional(),
+  pastPsychiatricHistory: z.string().min(1).optional(),
+  familyHistory: z.string().min(1).optional(),
+  socialHistory: z.string().min(1).optional(),
+  mentalStatusExam: z.string().min(1).optional(),
+  workingHypothesis: z.string().min(1).optional(),
+  immediatePlan: z.string().min(1).optional(),
+  reason: z.string().min(5).max(2000),
+});
+export type ReviseIntakeNoteInput = z.infer<typeof ReviseIntakeNoteInputSchema>;
+
+// Discriminated union demands raw ZodObjects (refines produce ZodEffects
+// and break the discriminator path), so the "at least one body field"
+// check rides on top via superRefine after the kind branch is settled.
+export const ReviseNoteInputSchema = z
+  .discriminatedUnion('kind', [
+    ReviseTreatmentNoteInputSchema,
+    ReviseIntakeNoteInputSchema,
+  ])
+  .superRefine((d, ctx) => {
+    if (d.kind === 'TREATMENT') {
+      if (!d.subjective && !d.objective && !d.assessment && !d.plan) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'At least one SOAP field must be revised',
+        });
+      }
+      return;
+    }
+    if (
+      !d.presentingConcerns &&
+      !d.historyOfPresentingIllness &&
+      !d.pastPsychiatricHistory &&
+      !d.familyHistory &&
+      !d.socialHistory &&
+      !d.mentalStatusExam &&
+      !d.workingHypothesis &&
+      !d.immediatePlan
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one intake field must be revised',
+      });
+    }
+  });
+export type ReviseNoteInput = z.infer<typeof ReviseNoteInputSchema>;
+
 const Base64UrlSchema = z
   .string()
   .min(1)

@@ -18,6 +18,7 @@ import { NotePreview } from './NotePreview';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
+import { IntakeRevisionPanel } from './IntakeRevisionPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { ShareModal } from './ShareModal';
 
@@ -358,11 +359,9 @@ export function NotesTab({
 
   if (phase.kind === 'signed') {
     const note = phase.note;
-    // INTAKE notes won't reach this branch in v1 (no sign route) but
-    // the type system already supports it via the SOAP discriminator.
     if (isIntake) {
-      // Sprint 49 — intake signed view now mirrors treatment: share to
-      // patient (SIGNED_INTAKE_NOTE artefact) + PDF download.
+      // Sprint 49 — share + PDF; Sprint 55 — post-sign revision via
+      // IntakeRevisionPanel (kind: 'INTAKE' on /note/edit).
       const signedIntake = note.content as unknown as IntakeNoteV1;
       return (
         <>
@@ -398,6 +397,16 @@ export function NotesTab({
               hasContactEmail={clientHasContactEmail}
               artefact={{ artefactType: 'SIGNED_INTAKE_NOTE', sessionId }}
               artefactLabel="Signed intake note"
+            />
+            <IntakeRevisionPanel
+              sessionId={sessionId}
+              note={{ ...note, content: signedIntake }}
+              onRevised={(nextContent) =>
+                setPhase({
+                  kind: 'signed',
+                  note: { ...note, content: nextContent },
+                })
+              }
             />
           </Card>
         </>

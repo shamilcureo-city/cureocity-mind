@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import type { NoteEditField, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
+import type { IntakeNoteV1, NoteEditField, TherapyNote } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Label, Textarea } from '../ui/Field';
 
@@ -14,49 +14,61 @@ interface HistoryEntry {
 }
 
 /**
- * Sprint 49 — RevisionPanel still revises TREATMENT notes only (the
- * /note/edit route is SOAP-shaped). The caller in NotesTab narrows the
- * union-typed `TherapyNote.content` to TherapyNoteV1 before passing.
+ * Sprint 55 — post-sign revision for INTAKE notes. Structural twin of
+ * RevisionPanel (SOAP), kept as a sibling component because the field
+ * set differs in shape, label, and copy. Either both pull a shared
+ * primitive later, or both stay split — but no kind-branching inside
+ * one component.
  */
-type TreatmentNote = Omit<TherapyNote, 'content'> & { content: TherapyNoteV1 };
+type SignedIntakeNote = Omit<TherapyNote, 'content'> & { content: IntakeNoteV1 };
 
 interface Props {
   sessionId: string;
-  note: TreatmentNote;
-  onRevised: (next: TherapyNoteV1) => void;
+  note: SignedIntakeNote;
+  onRevised: (next: IntakeNoteV1) => void;
 }
 
-/**
- * Post-sign revision UI for the signed therapy note. Renders three
- * states:
- *   1. "Revise note" button + collapsible history list (default)
- *   2. Inline 4-field edit form with required-reason field (when
- *      Revise is clicked)
- *   3. Pending state while POST /note/edit is in-flight
- *
- * History fetches lazily on first expand; on successful revise, the
- * panel pushes the new content up to NotesTab via onRevised so the
- * NotePreview re-renders without a hard reload.
- */
-export function RevisionPanel({ sessionId, note, onRevised }: Props) {
+const INTAKE_FIELDS = [
+  { key: 'presentingConcerns', label: 'Presenting concerns', rows: 4 },
+  { key: 'historyOfPresentingIllness', label: 'History of presenting illness', rows: 4 },
+  { key: 'pastPsychiatricHistory', label: 'Past psychiatric history', rows: 3 },
+  { key: 'familyHistory', label: 'Family history', rows: 3 },
+  { key: 'socialHistory', label: 'Social history', rows: 3 },
+  { key: 'mentalStatusExam', label: 'Mental status exam', rows: 4 },
+  { key: 'workingHypothesis', label: 'Working hypothesis', rows: 3 },
+  { key: 'immediatePlan', label: 'Immediate plan', rows: 3 },
+] as const;
+
+type IntakeFieldKey = (typeof INTAKE_FIELDS)[number]['key'];
+
+export function IntakeRevisionPanel({ sessionId, note, onRevised }: Props) {
   const [mode, setMode] = useState<'idle' | 'editing'>('idle');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [subjective, setSubjective] = useState(note.content.subjective);
-  const [objective, setObjective] = useState(note.content.objective);
-  const [assessment, setAssessment] = useState(note.content.assessment);
-  const [plan, setPlan] = useState(note.content.plan);
+  const [values, setValues] = useState<Record<IntakeFieldKey, string>>(() =>
+    INTAKE_FIELDS.reduce(
+      (acc, f) => {
+        acc[f.key] = note.content[f.key];
+        return acc;
+      },
+      {} as Record<IntakeFieldKey, string>,
+    ),
+  );
   const [reason, setReason] = useState('');
 
-  // Keep fields in sync if the note prop changes (e.g. after a revise)
   useEffect(() => {
-    setSubjective(note.content.subjective);
-    setObjective(note.content.objective);
-    setAssessment(note.content.assessment);
-    setPlan(note.content.plan);
+    setValues(
+      INTAKE_FIELDS.reduce(
+        (acc, f) => {
+          acc[f.key] = note.content[f.key];
+          return acc;
+        },
+        {} as Record<IntakeFieldKey, string>,
+      ),
+    );
   }, [note.content]);
 
   const loadHistory = useCallback(async () => {
@@ -80,12 +92,14 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
     setPending(true);
     setError(null);
     try {
-      const payload: Record<string, string> = { kind: 'TREATMENT', reason };
-      if (subjective !== note.content.subjective) payload['subjective'] = subjective;
-      if (objective !== note.content.objective) payload['objective'] = objective;
-      if (assessment !== note.content.assessment) payload['assessment'] = assessment;
-      if (plan !== note.content.plan) payload['plan'] = plan;
-      if (Object.keys(payload).length === 1) {
+      const payload: Record<string, string> = { kind: 'INTAKE', reason };
+      for (const f of INTAKE_FIELDS) {
+        if (values[f.key] !== note.content[f.key]) {
+          payload[f.key] = values[f.key];
+        }
+      }
+      // Only `kind` + `reason` means nothing changed.
+      if (Object.keys(payload).length === 2) {
         setError('No changes to save.');
         setPending(false);
         return;
@@ -99,9 +113,8 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      const body = (await res.json()) as { content: TherapyNoteV1 };
+      const body = (await res.json()) as { content: IntakeNoteV1 };
       onRevised(body.content);
-      // Force history re-fetch to include the new entries.
       setHistory(null);
       setMode('idle');
       setReason('');
@@ -120,7 +133,7 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
       >
         <div className="flex items-baseline justify-between gap-3">
           <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Revise signed note
+            Revise signed intake note
           </h3>
           <button
             type="button"
@@ -134,42 +147,19 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
           The original text is preserved per field as a NoteEdit row. Add a brief reason
           so the audit log records why the revision was made.
         </p>
-        <div>
-          <Label htmlFor="rev-s">Subjective</Label>
-          <Textarea
-            id="rev-s"
-            rows={4}
-            value={subjective}
-            onChange={(e) => setSubjective(e.target.value)}
-          />
-        </div>
-        <div>
-          <Label htmlFor="rev-o">Objective</Label>
-          <Textarea
-            id="rev-o"
-            rows={4}
-            value={objective}
-            onChange={(e) => setObjective(e.target.value)}
-          />
-        </div>
-        <div>
-          <Label htmlFor="rev-a">Assessment</Label>
-          <Textarea
-            id="rev-a"
-            rows={4}
-            value={assessment}
-            onChange={(e) => setAssessment(e.target.value)}
-          />
-        </div>
-        <div>
-          <Label htmlFor="rev-p">Plan</Label>
-          <Textarea
-            id="rev-p"
-            rows={4}
-            value={plan}
-            onChange={(e) => setPlan(e.target.value)}
-          />
-        </div>
+        {INTAKE_FIELDS.map((f) => (
+          <div key={f.key}>
+            <Label htmlFor={`rev-${f.key}`}>{f.label}</Label>
+            <Textarea
+              id={`rev-${f.key}`}
+              rows={f.rows}
+              value={values[f.key]}
+              onChange={(e) =>
+                setValues((v) => ({ ...v, [f.key]: e.target.value }))
+              }
+            />
+          </div>
+        ))}
         <div>
           <Label htmlFor="rev-reason" hint="5–2000 chars · stored in audit metadata">
             Reason for revision
@@ -179,7 +169,7 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
             rows={2}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Corrected typo in plan section; added follow-up info from supervisor."
+            placeholder="Corrected misremembered date in family history; updated working hypothesis after supervisor input."
             required
           />
         </div>

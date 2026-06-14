@@ -1,8 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { z } from 'zod';
 import {
+  IntakeNoteV1Schema,
+  ReviseNoteInputSchema,
   TherapyNoteV1Schema,
+  type IntakeNoteV1,
   type NoteEditField,
+  type ReviseIntakeNoteInput,
+  type ReviseTreatmentNoteInput,
   type TherapyNoteV1,
 } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
@@ -14,31 +18,36 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * POST /api/v1/sessions/[id]/note/edit — revise a SIGNED therapy note.
+ * POST /api/v1/sessions/[id]/note/edit — revise a SIGNED note.
  *
- * Takes the four SOAP fields (any subset; only changed fields are
- * required) plus a free-text reason for the revision. Server computes
- * the diff against the current TherapyNote.content, persists a
- * NoteEdit row per changed field, and writes the new content back.
+ * Sprint 55 widens this route to both TREATMENT (SOAP) and INTAKE
+ * notes via a `kind`-discriminated input. The server narrows against
+ * `session.kind` and rejects mismatches; per-kind signable field sets
+ * mirror the sign route so the two surfaces evolve in lockstep.
  *
  * The reason is appended to the audit metadata so the regulator can
  * reconstruct WHY a signed clinical document was modified. We use the
- * existing NOTE_SIGNED audit verb with metadata `{ revision: true }`
- * — revising essentially re-signs the document (the therapist takes
- * authorship of the new version), which keeps the audit surface
- * additive without enum sprawl.
+ * existing NOTE_SIGNED audit verb with metadata `{ revision: true,
+ * kind }` — revising essentially re-signs the document, keeping the
+ * audit surface additive without enum sprawl.
  */
-const ReviseInputSchema = z
-  .object({
-    subjective: z.string().min(1).optional(),
-    objective: z.string().min(1).optional(),
-    assessment: z.string().min(1).optional(),
-    plan: z.string().min(1).optional(),
-    reason: z.string().min(5).max(2000),
-  })
-  .refine((d) => d.subjective || d.objective || d.assessment || d.plan, {
-    message: 'At least one SOAP field must be revised',
-  });
+
+// Duplicated from sign/route.ts:27. A shared helper would have one
+// caller per route and adds indirection for a 12-line constant;
+// either both lift it together or neither.
+const SIGNABLE_BY_KIND: Record<'TREATMENT' | 'INTAKE', readonly NoteEditField[]> = {
+  TREATMENT: ['subjective', 'objective', 'assessment', 'plan'],
+  INTAKE: [
+    'presentingConcerns',
+    'historyOfPresentingIllness',
+    'pastPsychiatricHistory',
+    'familyHistory',
+    'socialHistory',
+    'mentalStatusExam',
+    'workingHypothesis',
+    'immediatePlan',
+  ],
+};
 
 export async function POST(
   req: NextRequest,
@@ -47,7 +56,7 @@ export async function POST(
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
-  const body = await parseJson(req, ReviseInputSchema);
+  const body = await parseJson(req, ReviseNoteInputSchema);
   if (!body.ok) return body.response;
 
   const session = await prisma.session.findUnique({
@@ -63,25 +72,106 @@ export async function POST(
       { status: 404 },
     );
   }
-  // Sprint 49 — this route is SOAP-only. Intake-note revisions aren't
-  // wired through this contract yet; the modify-then-sign path is the
-  // current intake editing surface.
-  if (session.kind === 'INTAKE') {
+
+  // Server is the source of truth on kind. A mismatch usually means a
+  // stale UI tab — return 400 so the client refetches rather than
+  // silently writing a SOAP edit onto an intake note (or vice versa).
+  // REVIEW sessions have no signed note path of their own (the kind
+  // produces a brief, not a signable note), so they never reach here
+  // via the happy path; explicit reject keeps the contract clean.
+  if (session.kind === 'REVIEW' || session.kind !== body.value.kind) {
     return NextResponse.json(
       {
-        error:
-          'Editing a signed intake note is not yet supported through this endpoint. Modify the draft and re-sign instead.',
+        error: `This session is ${session.kind}; expected a ${body.value.kind} revision payload.`,
       },
-      { status: 409 },
+      { status: 400 },
     );
   }
 
-  const current = TherapyNoteV1Schema.parse(session.therapyNote.content);
+  const therapyNoteId = session.therapyNote.id;
+  const auditMeta = auditMetadataFromRequest(req);
+
+  if (session.kind === 'TREATMENT') {
+    const input = body.value as ReviseTreatmentNoteInput;
+    const current = TherapyNoteV1Schema.parse(session.therapyNote.content);
+    const edits: Array<{ field: NoteEditField; before: string; after: string }> = [];
+    for (const field of SIGNABLE_BY_KIND.TREATMENT) {
+      const key = field as 'subjective' | 'objective' | 'assessment' | 'plan';
+      const next = input[key];
+      if (next !== undefined && next !== current[key]) {
+        edits.push({ field, before: current[key], after: next });
+      }
+    }
+    if (edits.length === 0) {
+      return NextResponse.json(
+        { error: 'No fields changed from the current signed note.' },
+        { status: 422 },
+      );
+    }
+
+    const nextContent: TherapyNoteV1 = {
+      ...current,
+      ...(input.subjective !== undefined && { subjective: input.subjective }),
+      ...(input.objective !== undefined && { objective: input.objective }),
+      ...(input.assessment !== undefined && { assessment: input.assessment }),
+      ...(input.plan !== undefined && { plan: input.plan }),
+    };
+    // Defensive re-parse — mirrors sign/route.ts.
+    TherapyNoteV1Schema.parse(nextContent);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.noteEdit.createMany({
+        data: edits.map((e) => ({
+          therapyNoteId,
+          field: e.field,
+          before: e.before,
+          after: e.after,
+        })),
+      });
+      await tx.therapyNote.update({
+        where: { id: therapyNoteId },
+        data: { content: nextContent as unknown as object },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'NOTE_SIGNED',
+          targetType: 'TherapyNote',
+          targetId: therapyNoteId,
+          metadata: {
+            ...auditMeta,
+            revision: true,
+            kind: 'TREATMENT',
+            sessionId: session.id,
+            fieldsChanged: edits.map((e) => e.field),
+            reason: input.reason,
+          },
+        },
+        tx,
+      );
+    });
+
+    return NextResponse.json({
+      sessionId,
+      therapyNoteId,
+      kind: 'TREATMENT' as const,
+      fieldsChanged: edits.map((e) => e.field),
+      content: nextContent,
+    });
+  }
+
+  // INTAKE branch
+  const input = body.value as ReviseIntakeNoteInput;
+  const current = IntakeNoteV1Schema.parse(session.therapyNote.content);
+  const intakeFields = SIGNABLE_BY_KIND.INTAKE;
   const edits: Array<{ field: NoteEditField; before: string; after: string }> = [];
-  for (const field of ['subjective', 'objective', 'assessment', 'plan'] as const) {
-    const next = body.value[field];
-    if (next !== undefined && next !== current[field]) {
-      edits.push({ field, before: current[field], after: next });
+  for (const field of intakeFields) {
+    const key = field as keyof IntakeNoteV1 & keyof ReviseIntakeNoteInput;
+    const next = input[key] as string | undefined;
+    const before = current[key];
+    if (next !== undefined && typeof before === 'string' && next !== before) {
+      edits.push({ field, before, after: next });
     }
   }
   if (edits.length === 0) {
@@ -91,18 +181,18 @@ export async function POST(
     );
   }
 
-  const nextContent: TherapyNoteV1 = {
-    ...current,
-    ...(body.value.subjective !== undefined && { subjective: body.value.subjective }),
-    ...(body.value.objective !== undefined && { objective: body.value.objective }),
-    ...(body.value.assessment !== undefined && { assessment: body.value.assessment }),
-    ...(body.value.plan !== undefined && { plan: body.value.plan }),
-  };
-  // Defensive — should always pass since we only mutate string fields,
-  // but a Zod re-parse catches any incidental shape drift early.
-  TherapyNoteV1Schema.parse(nextContent);
+  const patch: Partial<IntakeNoteV1> = {};
+  for (const field of intakeFields) {
+    const key = field as keyof IntakeNoteV1 & keyof ReviseIntakeNoteInput;
+    const next = input[key] as string | undefined;
+    if (next !== undefined) {
+      (patch as Record<string, string>)[key] = next;
+    }
+  }
+  // Re-parse with IntakeNoteV1Schema so the lenient mentalStatusExam
+  // preprocess (CLAUDE.md §7) re-runs over the merged content.
+  const nextContent = IntakeNoteV1Schema.parse({ ...current, ...patch });
 
-  const therapyNoteId = session.therapyNote.id;
   await prisma.$transaction(async (tx) => {
     await tx.noteEdit.createMany({
       data: edits.map((e) => ({
@@ -124,11 +214,12 @@ export async function POST(
         targetType: 'TherapyNote',
         targetId: therapyNoteId,
         metadata: {
-          ...auditMetadataFromRequest(req),
+          ...auditMeta,
           revision: true,
+          kind: 'INTAKE',
           sessionId: session.id,
           fieldsChanged: edits.map((e) => e.field),
-          reason: body.value.reason,
+          reason: input.reason,
         },
       },
       tx,
@@ -138,6 +229,7 @@ export async function POST(
   return NextResponse.json({
     sessionId,
     therapyNoteId,
+    kind: 'INTAKE' as const,
     fieldsChanged: edits.map((e) => e.field),
     content: nextContent,
   });

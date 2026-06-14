@@ -455,11 +455,13 @@ These gate a real Indian pilot. **Critical-path items live at the top.**
 
 **Smaller follow-ups carried over from Sprint 20-21:**
 
-- **Intake-note sign-off** — DONE (Sprint 49): `SignNoteInputSchema`
-  is now a `SignedNoteContent` union and the sign route narrows by
-  `session.kind`; intake notes sign + share (`SIGNED_INTAKE_NOTE`) +
-  PDF. Remaining: post-sign intake REVISION (`/note/edit` still 409s
-  for intake — it's SOAP-only).
+- **Intake-note sign-off** — DONE (Sprint 49 + Sprint 55):
+  `SignNoteInputSchema` is now a `SignedNoteContent` union and the
+  sign route narrows by `session.kind`; intake notes sign + share
+  (`SIGNED_INTAKE_NOTE`) + PDF (Sprint 49). Post-sign revision
+  through `/note/edit` accepts a kind-discriminated
+  `ReviseNoteInputSchema` and writes per-field `NoteEdit` rows for
+  intake notes at parity with treatment notes (Sprint 55).
 - **Multilingual progress report** — schema is locale-aware; copy is
   English-only and needs validated translations (do not machine-translate).
 - **More scored instruments** (WHODAS-2, PCL-5, …) — registry supports
