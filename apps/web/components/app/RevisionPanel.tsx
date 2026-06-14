@@ -85,8 +85,20 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
       if (objective !== note.content.objective) payload['objective'] = objective;
       if (assessment !== note.content.assessment) payload['assessment'] = assessment;
       if (plan !== note.content.plan) payload['plan'] = plan;
-      if (Object.keys(payload).length === 1) {
+      // payload always carries `kind` + `reason`; anything beyond those
+      // two keys is a real field change.
+      if (Object.keys(payload).length === 2) {
         setError('No changes to save.');
+        setPending(false);
+        return;
+      }
+      // The contract rejects empty fields with an opaque 400 — catch it
+      // here with a field-aware message the therapist can act on.
+      const emptied = Object.keys(payload).find(
+        (k) => k !== 'kind' && k !== 'reason' && payload[k].trim().length === 0,
+      );
+      if (emptied) {
+        setError(`The "${emptied}" field can't be empty. Add text or cancel that change.`);
         setPending(false);
         return;
       }

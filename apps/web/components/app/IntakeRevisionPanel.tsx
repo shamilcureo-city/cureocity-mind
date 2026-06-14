@@ -104,6 +104,17 @@ export function IntakeRevisionPanel({ sessionId, note, onRevised }: Props) {
         setPending(false);
         return;
       }
+      // The contract rejects empty fields with an opaque 400 — catch it
+      // here with the section label so the therapist can act on it.
+      const emptied = Object.keys(payload).find(
+        (k) => k !== 'kind' && k !== 'reason' && payload[k].trim().length === 0,
+      );
+      if (emptied) {
+        const label = INTAKE_FIELDS.find((f) => f.key === emptied)?.label ?? emptied;
+        setError(`The "${label}" field can't be empty. Add text or cancel that change.`);
+        setPending(false);
+        return;
+      }
       const res = await fetch(`/api/v1/sessions/${sessionId}/note/edit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
