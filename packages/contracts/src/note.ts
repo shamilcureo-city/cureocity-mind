@@ -186,6 +186,21 @@ export type NoteDraftStatus = z.infer<typeof NoteDraftStatusSchema>;
 export const NoteRiskSeveritySchema = z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL']);
 export type NoteRiskSeverity = z.infer<typeof NoteRiskSeveritySchema>;
 
+/**
+ * Sprint 49 — signed-note content is either a TherapyNoteV1 (SOAP,
+ * TREATMENT sessions) OR an IntakeNoteV1 (intake history, INTAKE
+ * sessions). Both shapes carry `version: 'V1'` so this is a regular
+ * union — the server narrows by `session.kind` (the Pass2Output
+ * convention). Disjoint required fields keep parse ambiguity to zero
+ * (TherapyNote requires `subjective`; IntakeNote requires
+ * `presentingConcerns`).
+ *
+ * Putting TherapyNoteV1 first nudges the union to try the
+ * overwhelmingly-common case first.
+ */
+export const SignedNoteContentSchema = z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]);
+export type SignedNoteContent = z.infer<typeof SignedNoteContentSchema>;
+
 export const NoteDraftSchema = z.object({
   id: CuidSchema,
   sessionId: CuidSchema,
@@ -193,7 +208,12 @@ export const NoteDraftSchema = z.object({
   transcript: z.string().nullable(),
   speakerSegments: z.array(SpeakerSegmentSchema).nullable(),
   affectFeatures: z.array(AffectFeatureSchema).nullable(),
-  content: TherapyNoteV1Schema.nullable(),
+  /**
+   * Sprint 49 — widened to a union so intake drafts validate. Pre-
+   * sprint code paths that only handled TREATMENT can narrow with
+   * `'subjective' in content`.
+   */
+  content: SignedNoteContentSchema.nullable(),
   riskSeverity: NoteRiskSeveritySchema.nullable(),
   totalCostInr: z.string(), // Postgres Decimal serialised as string
   errorMessage: z.string().nullable(),
@@ -216,7 +236,29 @@ export type NoteDraft = z.infer<typeof NoteDraftSchema>;
 // route promotes it to required + verified once a credential exists.
 // ============================================================================
 
-export const NoteEditFieldSchema = z.enum(['subjective', 'objective', 'assessment', 'plan']);
+/**
+ * Sprint 49 — intake fields join the SOAP four so intake notes can be
+ * field-level edited during sign-off too. The sign route picks the
+ * applicable subset by `session.kind`:
+ *   TREATMENT → subjective | objective | assessment | plan
+ *   INTAKE    → presentingConcerns | historyOfPresentingIllness |
+ *               pastPsychiatricHistory | familyHistory | socialHistory |
+ *               mentalStatusExam | workingHypothesis | immediatePlan
+ */
+export const NoteEditFieldSchema = z.enum([
+  'subjective',
+  'objective',
+  'assessment',
+  'plan',
+  'presentingConcerns',
+  'historyOfPresentingIllness',
+  'pastPsychiatricHistory',
+  'familyHistory',
+  'socialHistory',
+  'mentalStatusExam',
+  'workingHypothesis',
+  'immediatePlan',
+]);
 export type NoteEditField = z.infer<typeof NoteEditFieldSchema>;
 
 export const NoteEditEntrySchema = z.object({
@@ -225,6 +267,78 @@ export const NoteEditEntrySchema = z.object({
   after: z.string(),
 });
 export type NoteEditEntry = z.infer<typeof NoteEditEntrySchema>;
+
+/**
+ * Sprint 55 — POST /sessions/[id]/note/edit input.
+ *
+ * Pre-S55 this was an inline 4-SOAP-field schema; Sprint 49 added a
+ * 409 gate so intake sessions couldn't revise at all. The route now
+ * accepts both kinds via a discriminated union — server narrows
+ * against `session.kind` (Pass2Output / SignedNoteContent convention,
+ * CLAUDE.md §4). Both branches require at least one body field +
+ * `reason`; intake-only fields validate as `z.string()` here — the
+ * lenient `mentalStatusExam` preprocess lives on `IntakeNoteV1Schema`
+ * and runs on the route's defensive re-parse after merge.
+ */
+export const ReviseTreatmentNoteInputSchema = z.object({
+  kind: z.literal('TREATMENT'),
+  subjective: z.string().min(1).optional(),
+  objective: z.string().min(1).optional(),
+  assessment: z.string().min(1).optional(),
+  plan: z.string().min(1).optional(),
+  reason: z.string().min(5).max(2000),
+});
+export type ReviseTreatmentNoteInput = z.infer<typeof ReviseTreatmentNoteInputSchema>;
+
+export const ReviseIntakeNoteInputSchema = z.object({
+  kind: z.literal('INTAKE'),
+  presentingConcerns: z.string().min(1).optional(),
+  historyOfPresentingIllness: z.string().min(1).optional(),
+  pastPsychiatricHistory: z.string().min(1).optional(),
+  familyHistory: z.string().min(1).optional(),
+  socialHistory: z.string().min(1).optional(),
+  mentalStatusExam: z.string().min(1).optional(),
+  workingHypothesis: z.string().min(1).optional(),
+  immediatePlan: z.string().min(1).optional(),
+  reason: z.string().min(5).max(2000),
+});
+export type ReviseIntakeNoteInput = z.infer<typeof ReviseIntakeNoteInputSchema>;
+
+// Discriminated union demands raw ZodObjects (refines produce ZodEffects
+// and break the discriminator path), so the "at least one body field"
+// check rides on top via superRefine after the kind branch is settled.
+export const ReviseNoteInputSchema = z
+  .discriminatedUnion('kind', [
+    ReviseTreatmentNoteInputSchema,
+    ReviseIntakeNoteInputSchema,
+  ])
+  .superRefine((d, ctx) => {
+    if (d.kind === 'TREATMENT') {
+      if (!d.subjective && !d.objective && !d.assessment && !d.plan) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'At least one SOAP field must be revised',
+        });
+      }
+      return;
+    }
+    if (
+      !d.presentingConcerns &&
+      !d.historyOfPresentingIllness &&
+      !d.pastPsychiatricHistory &&
+      !d.familyHistory &&
+      !d.socialHistory &&
+      !d.mentalStatusExam &&
+      !d.workingHypothesis &&
+      !d.immediatePlan
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one intake field must be revised',
+      });
+    }
+  });
+export type ReviseNoteInput = z.infer<typeof ReviseNoteInputSchema>;
 
 const Base64UrlSchema = z
   .string()
@@ -256,7 +370,12 @@ export const SignNoteInputSchema = z.object({
     .min(1)
     .max(64 * 1024),
   payloadHashHex: z.string().regex(/^[0-9a-f]{64}$/, 'must be 64 lowercase hex chars'),
-  note: TherapyNoteV1Schema,
+  /**
+   * Sprint 49 — widened to accept either a TherapyNoteV1 (TREATMENT
+   * sign-off) or an IntakeNoteV1 (INTAKE sign-off). The route narrows
+   * by `session.kind` before validating field-level edits.
+   */
+  note: SignedNoteContentSchema,
   edits: z.array(NoteEditEntrySchema).default([]),
   signedAt: IsoDateTimeSchema,
   /**
@@ -272,7 +391,13 @@ export const TherapyNoteSchema = z.object({
   sessionId: CuidSchema,
   draftId: CuidSchema,
   version: z.literal('V1'),
-  content: TherapyNoteV1Schema,
+  /**
+   * Sprint 49 — widened so the same row carries either a SOAP TherapyNoteV1
+   * body or an IntakeNoteV1 body. Consumers narrow by checking
+   * `'subjective' in content` (or, on the route, by the parent session's
+   * `kind`).
+   */
+  content: SignedNoteContentSchema,
   signedAt: IsoDateTimeSchema,
   signedBy: CuidSchema,
   edits: z.array(

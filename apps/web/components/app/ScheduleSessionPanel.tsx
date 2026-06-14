@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, FieldError } from '../ui/Field';
+import { UpgradeModal } from './UpgradeModal';
 
 interface ClientOption {
   id: string;
@@ -64,6 +65,11 @@ function ScheduleModal({
   const [time, setTime] = useState('10:00');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Sprint 53 — trial cap modal trigger.
+  const [upgradePrompt, setUpgradePrompt] = useState<{
+    trialCap: number;
+    upgradeUrl: string;
+  } | null>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -85,7 +91,19 @@ function ScheduleModal({
         body: JSON.stringify({ clientId, scheduledAt }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        const body = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          code?: string;
+          upgradeUrl?: string;
+        };
+        if (res.status === 402 && body.code === 'TRIAL_CAP_REACHED') {
+          const match = body.error?.match(/of (\d+) trial sessions/);
+          setUpgradePrompt({
+            trialCap: match ? Number(match[1]) : 10,
+            upgradeUrl: body.upgradeUrl ?? '/app/settings/plan',
+          });
+          return;
+        }
         throw new Error(body.error ?? `Failed (${res.status})`);
       }
       onScheduled();
@@ -186,6 +204,12 @@ function ScheduleModal({
           </form>
         )}
       </Card>
+      <UpgradeModal
+        open={upgradePrompt !== null}
+        onClose={() => setUpgradePrompt(null)}
+        trialCap={upgradePrompt?.trialCap ?? 10}
+        upgradeUrl={upgradePrompt?.upgradeUrl ?? '/app/settings/plan'}
+      />
     </div>
   );
 }

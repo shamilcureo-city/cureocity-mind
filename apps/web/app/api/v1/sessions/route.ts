@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { CreateSessionInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { getEntitlement } from '@/lib/billing';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import {
@@ -38,6 +39,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (client.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+  }
+
+  // Sprint 53 — trial cap gate. Soft enforcement: existing sessions,
+  // notes, shares, and copilot all keep working at cap. Only new
+  // session creation is blocked, and demo "Example" client sessions
+  // never count (handled inside getEntitlement). Returns 402 with a
+  // structured code the three creation UIs flip into an UpgradeModal.
+  if (!client.isDemo) {
+    const entitlement = await getEntitlement(auth.value.psychologistId);
+    if (!entitlement.isPaidActive && entitlement.trialUsed >= entitlement.trialCap) {
+      await writeAudit({
+        actorType: 'SYSTEM',
+        action: 'TRIAL_CAP_REACHED',
+        targetType: 'Psychologist',
+        targetId: auth.value.psychologistId,
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          trialCap: entitlement.trialCap,
+          trialUsed: entitlement.trialUsed,
+        },
+      });
+      return NextResponse.json(
+        {
+          error: `You have used ${entitlement.trialUsed} of ${entitlement.trialCap} trial sessions. Upgrade your plan to record another.`,
+          code: 'TRIAL_CAP_REACHED',
+          upgradeUrl: '/app/settings/plan',
+        },
+        { status: 402 },
+      );
+    }
   }
 
   let defaults;

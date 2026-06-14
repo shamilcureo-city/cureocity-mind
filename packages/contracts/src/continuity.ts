@@ -10,6 +10,15 @@ export const ExerciseAssignmentStatusSchema = z.enum([
 ]);
 export type ExerciseAssignmentStatus = z.infer<typeof ExerciseAssignmentStatusSchema>;
 
+/**
+ * Sprint 51 — provenance for an assignment row. CATALOG was the only
+ * source pre-S51; THERAPY_SCRIPT was added so sharing a therapy script
+ * persists its `homework` field as a row the client can mark COMPLETED
+ * on the portal. Defaults CATALOG so every legacy row reads sensibly.
+ */
+export const ExerciseAssignmentSourceSchema = z.enum(['CATALOG', 'THERAPY_SCRIPT']);
+export type ExerciseAssignmentSource = z.infer<typeof ExerciseAssignmentSourceSchema>;
+
 export const CreateExerciseAssignmentInputSchema = z.object({
   clientId: CuidSchema,
   /** Stable id from @cureocity/clinical catalog (cbt_* or emdr_*). */
@@ -31,7 +40,17 @@ export const ExerciseAssignmentSchema = z.object({
   id: CuidSchema,
   clientId: CuidSchema,
   psychologistId: CuidSchema,
-  exerciseId: z.string(),
+  /**
+   * Sprint 51 — nullable. Catalog rows carry a catalog id; therapy-
+   * script-sourced rows leave this null and use `customDescription`.
+   */
+  exerciseId: z.string().nullable(),
+  /** Sprint 51 — provenance; defaults CATALOG for back-compat. */
+  source: ExerciseAssignmentSourceSchema.default('CATALOG'),
+  /** Sprint 51 — free-text description for non-catalog rows. */
+  customDescription: z.string().nullable().default(null),
+  /** Sprint 51 — FK to the source TherapyScript for dedupe + provenance. */
+  sourceTherapyScriptId: CuidSchema.nullable().default(null),
   assignedAt: IsoDateTimeSchema,
   dueAt: IsoDateTimeSchema.nullable(),
   status: ExerciseAssignmentStatusSchema,

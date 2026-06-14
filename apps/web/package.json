@@ -15,6 +15,7 @@
     "@cureocity/contracts": "workspace:*",
     "@cureocity/crypto": "workspace:*",
     "@cureocity/llm": "workspace:*",
+    "@cureocity/billing": "workspace:*",
     "@cureocity/notifications": "workspace:*",
     "@cureocity/observability": "workspace:*",
     "@cureocity/storage": "workspace:*",

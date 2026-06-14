@@ -26,6 +26,10 @@ export interface PlanUsage {
   /// Sessions recorded against the free pilot allowance.
   used: number;
   cap: number;
+  /// Sprint 53 — when set to a paid plan, the widget flips its label
+  /// to "Solo · renews <date>" instead of showing the trial bar.
+  plan?: 'FREE_TRIAL' | 'SOLO_MONTHLY' | 'SOLO_ANNUAL';
+  paidThroughAt?: string | null;
 }
 
 interface SidebarProps {
@@ -84,11 +88,33 @@ export function Sidebar({ usage = null }: SidebarProps) {
 
 function PlanWidget({ usage }: { usage: PlanUsage | null }) {
   if (!usage) return null;
+  const isPaid = usage.plan === 'SOLO_MONTHLY' || usage.plan === 'SOLO_ANNUAL';
+  if (isPaid && usage.paidThroughAt) {
+    const renewsOn = new Date(usage.paidThroughAt).toLocaleDateString('en-IN', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
+    return (
+      <div className="rounded-2xl border border-[var(--color-line)] bg-white p-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold">Solo</p>
+          <Link
+            href="/app/settings/plan"
+            className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
+          >
+            Plan
+          </Link>
+        </div>
+        <p className="mt-2 text-xs text-[var(--color-ink-3)]">Renews {renewsOn}</p>
+      </div>
+    );
+  }
   const pct = Math.min(100, Math.round((usage.used / usage.cap) * 100));
   return (
     <div className="rounded-2xl border border-[var(--color-line)] bg-white p-4">
       <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Free pilot</p>
+        <p className="text-sm font-semibold">Free trial</p>
         <Link
           href="/app/settings/plan"
           className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"

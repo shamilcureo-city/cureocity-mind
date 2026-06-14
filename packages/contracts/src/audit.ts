@@ -142,6 +142,16 @@ export const AuditActionSchema = z.enum([
   'CLINIC_MEMBER_REMOVED',
   'CLINIC_MEMBER_ROLE_CHANGED',
   'CLIENT_REASSIGNED',
+  // Demo showcase client — Sprint 48. Seeded / removed in one click.
+  'DEMO_CLIENT_CREATED',
+  'DEMO_CLIENT_REMOVED',
+  // Case Consult — Sprint 52. Structured second opinion when stuck.
+  'CASE_CONSULT_GENERATED',
+  // Billing — Sprint 53.
+  'TRIAL_CAP_REACHED',
+  'PLAN_UPGRADED',
+  'PAYMENT_RECEIVED',
+  'PAYMENT_FAILED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

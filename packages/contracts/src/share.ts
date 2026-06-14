@@ -41,6 +41,11 @@ export const PatientShareArtefactTypeSchema = z.enum([
   /// between sessions; the public submit route scores it into the
   /// same InstrumentResponse trend the in-session runner feeds.
   'INSTRUMENT_CHECKIN',
+  /// Sprint 49 — the intake-note counterpart to SIGNED_NOTE. Distinct
+  /// snapshot shape (intake sections instead of SOAP four), so the
+  /// portal can render the right form without widening the existing
+  /// SignedNoteSnapshotSchema (and breaking pre-S49 shares' parses).
+  'SIGNED_INTAKE_NOTE',
 ]);
 export type PatientShareArtefactType = z.infer<typeof PatientShareArtefactTypeSchema>;
 
@@ -96,6 +101,18 @@ export const TherapyScriptSnapshotSchema = z.object({
     description: z.string(),
     deliveryNotes: z.string(),
   }),
+  /**
+   * Sprint 51 — homework loop. When the share route persists the
+   * script's homework as an ExerciseAssignment, the assignment id is
+   * embedded here so the public Mark-as-done route can find it
+   * without re-querying. The two completion fields flip when the
+   * client marks done from the portal. All three are optional +
+   * defaulted so pre-S51 THERAPY_SCRIPT snapshots keep parsing on
+   * the portal (same back-compat trick S47 used for INSTRUMENT_CHECKIN).
+   */
+  homeworkAssignmentId: CuidSchema.nullable().default(null),
+  homeworkCompleted: z.boolean().default(false),
+  homeworkCompletedAt: IsoDateTimeSchema.nullable().default(null),
 });
 export type TherapyScriptSnapshot = z.infer<typeof TherapyScriptSnapshotSchema>;
 
@@ -193,6 +210,32 @@ export const InstrumentCheckinSnapshotSchema = z.object({
 });
 export type InstrumentCheckinSnapshot = z.infer<typeof InstrumentCheckinSnapshotSchema>;
 
+/**
+ * Sprint 49 — Intake-note snapshot. Patient-appropriate subset of the
+ * intake note: what was discussed and the immediate plan, with optional
+ * therapist intro. Intentionally excludes MSE, working hypothesis,
+ * family / past-psychiatric history — those carry clinically sensitive
+ * content that needs an explicit clinician sign-off before sharing, and
+ * the patient doesn't need them to act on the plan. The portal renders
+ * each section as a titled body block (same pattern as ProgressReport).
+ */
+export const SignedIntakeNoteSnapshotSectionSchema = z.object({
+  title: z.string().min(1).max(120),
+  body: z.string().min(1).max(8000),
+});
+export type SignedIntakeNoteSnapshotSection = z.infer<typeof SignedIntakeNoteSnapshotSectionSchema>;
+
+export const SignedIntakeNoteSnapshotSchema = z.object({
+  kind: z.literal('SIGNED_INTAKE_NOTE'),
+  /// Ordered patient-friendly sections rendered by the portal. The
+  /// builder picks them from the intake note's presentingConcerns +
+  /// immediatePlan (and any therapist-provided intro).
+  sections: z.array(SignedIntakeNoteSnapshotSectionSchema).min(1).max(6),
+  /// Optional URL to the signed-intake PDF (presigned, time-bounded).
+  pdfUrl: z.string().url().nullable(),
+});
+export type SignedIntakeNoteSnapshot = z.infer<typeof SignedIntakeNoteSnapshotSchema>;
+
 export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedNoteSnapshotSchema,
   ReflectionQuestionsSnapshotSchema,
@@ -200,6 +243,7 @@ export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   TreatmentPlanSnapshotSchema,
   ProgressReportSnapshotSchema,
   InstrumentCheckinSnapshotSchema,
+  SignedIntakeNoteSnapshotSchema,
 ]);
 export type PatientShareSnapshot = z.infer<typeof PatientShareSnapshotSchema>;
 
@@ -242,6 +286,14 @@ export const ShareSignedNoteInputSchema = z.object({
   sessionId: CuidSchema,
 });
 
+/// Sprint 49 — share a signed intake note. Same payload shape as
+/// SIGNED_NOTE (sessionId is the artefact id), distinct artefactType so
+/// the route picks the intake-snapshot builder + portal branch.
+export const ShareSignedIntakeNoteInputSchema = z.object({
+  artefactType: z.literal('SIGNED_INTAKE_NOTE'),
+  sessionId: CuidSchema,
+});
+
 export const ShareReflectionQuestionsInputSchema = z.object({
   artefactType: z.literal('REFLECTION_QUESTIONS'),
   sessionId: CuidSchema,
@@ -255,7 +307,24 @@ export const ShareReflectionQuestionsInputSchema = z.object({
 export const ShareTherapyScriptInputSchema = z.object({
   artefactType: z.literal('THERAPY_SCRIPT'),
   therapyScriptId: CuidSchema,
+  /**
+   * Sprint 51 — when true, the share route persists the script's
+   * `homework` field as an ExerciseAssignment (or reuses the open
+   * row for the same script) so the client can mark it COMPLETED
+   * from the portal and the pre-session brief reads real homework
+   * truth. Optional (default treated as `true` at the call site) —
+   * we deliberately avoid `.default()` here because it breaks the
+   * discriminated union's input/output symmetry that other modules
+   * rely on for assignment compatibility.
+   */
+  assignHomework: z.boolean().optional(),
 });
+
+/// Sprint 51 — public POST /api/v1/p/[token]/homework body. Empty —
+/// the share token IS the auth, identical posture to S47's check-in
+/// submit route. Spelled out as a schema for contracts-first parity.
+export const HomeworkDoneInputSchema = z.object({});
+export type HomeworkDoneInput = z.infer<typeof HomeworkDoneInputSchema>;
 
 export const ShareTreatmentPlanInputSchema = z.object({
   artefactType: z.literal('TREATMENT_PLAN'),
@@ -286,6 +355,7 @@ export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareTreatmentPlanInputSchema,
   ShareProgressReportInputSchema,
   ShareInstrumentCheckinInputSchema,
+  ShareSignedIntakeNoteInputSchema,
 ]);
 export type ShareArtefactRef = z.infer<typeof ShareArtefactRefSchema>;
 

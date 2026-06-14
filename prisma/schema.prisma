@@ -372,6 +372,13 @@ model Client {
   contactPhoneEncrypted String?
   contactEmailEncrypted String?
 
+  /// Envelope-encrypted fullName — Sprint 54. The patient's name is the
+  /// highest-sensitivity PII field; brought to dual-write parity with
+  /// phone + email. Nullable until backfilled. Plaintext `fullName` is
+  /// retained for the transition window (read-cutover + plaintext drop
+  /// are a later, prod-data-dependent step).
+  fullNameEncrypted String?
+
   // Clinical context (free text in V1; structured assessment in Sprint 5)
   presentingConcerns String?
   preferredModality  String?
@@ -394,6 +401,13 @@ model Client {
   // in something the client understands. Empty when unset.
   spokenLanguages String[] @default([])
 
+  // Sprint 48 — the showcase "Example" client a therapist can seed in
+  // one click to see the full Journey / reliable-change / Progress
+  // Report arc without recording six real sessions. Demo rows are
+  // badged "Example" in the UI and excluded from every metric, the
+  // competency rollups, and the trial session cap.
+  isDemo Boolean @default(false)
+
   psychologist        Psychologist             @relation(fields: [psychologistId], references: [id])
   consents            Consent[]
   sessions            Session[]
@@ -413,6 +427,7 @@ model Client {
   patientShares       PatientShare[]
   preSessionBriefs    PreSessionBrief[]
   conceptualMaps      ClientConceptualMap[]
+  caseConsults        CaseConsult[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
   treatmentEpisodes   TreatmentEpisode[]
@@ -420,6 +435,7 @@ model Client {
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
+  @@index([psychologistId, isDemo])
   @@map("clients")
 }
 
@@ -785,6 +801,83 @@ model AudioChunk {
 // Sprint 2 PR 3.
 // ============================================================================
 
+/// Sprint 52 — Case Consult status, mirrors PreSessionBriefStatus.
+enum CaseConsultStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+/// Sprint 53 — subscription plan tier. FREE_TRIAL is the default for
+/// every new psychologist; SOLO_MONTHLY / SOLO_ANNUAL are paid plans.
+enum BillingPlan {
+  FREE_TRIAL
+  SOLO_MONTHLY
+  SOLO_ANNUAL
+}
+
+/// Sprint 53 — Razorpay payment lifecycle. CREATED on order, PAID
+/// when the webhook confirms capture, FAILED on webhook failure.
+enum BillingPaymentStatus {
+  CREATED
+  PAID
+  FAILED
+}
+
+/// Sprint 53 — per-psychologist billing state. Sits beside the
+/// Psychologist row (1:1) so the trial cap, plan, and paid-through
+/// date are queryable in a single round-trip from any enforcement
+/// site (session-create, sidebar usage, plan page).
+model BillingAccount {
+  id             String @id @default(cuid())
+  psychologistId String @unique
+
+  plan            BillingPlan @default(FREE_TRIAL)
+  /// Number of sessions the trial allows; deliberately overridable
+  /// so we can extend trial for friendly pilots without code change.
+  trialSessionCap Int         @default(10)
+  /// Paid-through date — null until the first PAID webhook lands.
+  /// On every renewal the date extends from max(now, current value).
+  paidThroughAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments BillingPayment[]
+
+  @@index([psychologistId])
+  @@map("billing_accounts")
+}
+
+/// Sprint 53 — one row per Razorpay order. CREATED when we open the
+/// checkout, flipped to PAID by the webhook (idempotent), FAILED on
+/// payment.failed. periodStart/End record the period the payment
+/// covered — convenient for receipts later.
+model BillingPayment {
+  id               String @id @default(cuid())
+  psychologistId   String
+  billingAccountId String
+
+  razorpayOrderId   String  @unique
+  razorpayPaymentId String?
+
+  plan       BillingPlan
+  amountInr  Int
+  status     BillingPaymentStatus @default(CREATED)
+  periodStart DateTime?
+  periodEnd   DateTime?
+  /// Verbatim webhook event payload for audit / debugging.
+  rawEvent Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account BillingAccount @relation(fields: [billingAccountId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId, createdAt])
+  @@map("billing_payments")
+}
+
 enum GeminiPass {
   PASS_1_TRANSCRIBE_AND_ANALYSE
   PASS_2_NOTE_GENERATION
@@ -794,6 +887,7 @@ enum GeminiPass {
   PASS_5_PRE_SESSION_BRIEF // Sprint 17 — Pre-Session Brief
   PASS_6_CASE_BRIEFING // Sprint 22 — per-client case briefing synthesis
   PASS_7_CONCEPTUAL_MAP // Sprint 24 — Klarify-style per-client thematic graph
+  PASS_8_CASE_CONSULT // Sprint 52 — second-opinion artefact for stuck cases
 }
 
 enum GeminiCallStatus {
@@ -930,6 +1024,16 @@ enum NoteEditField {
   objective
   assessment
   plan
+  // Sprint 49 — intake-note field-level edits. SignNoteInput picks the
+  // applicable subset by session.kind.
+  presentingConcerns
+  historyOfPresentingIllness
+  pastPsychiatricHistory
+  familyHistory
+  socialHistory
+  mentalStatusExam
+  workingHypothesis
+  immediatePlan
 }
 
 model NoteEdit {
@@ -1291,6 +1395,7 @@ enum PatientShareArtefactType {
   TREATMENT_PLAN
   PROGRESS_REPORT
   INSTRUMENT_CHECKIN // Sprint 47 — interactive self-serve check-in
+  SIGNED_INTAKE_NOTE // Sprint 49 — intake-note counterpart to SIGNED_NOTE
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.
@@ -1455,6 +1560,40 @@ model PreSessionBrief {
 }
 
 // ============================================================================
+// CaseConsult — Sprint 52. Pass 8 output. A structured second opinion
+// the therapist generates when they're stuck on a case. Cached per
+// (clientId, lastSessionId) and invalidated by the next completed
+// session. Never patient-shareable.
+// ============================================================================
+
+model CaseConsult {
+  id             String @id @default(cuid())
+  clientId       String
+  psychologistId String
+
+  /// Most recent COMPLETED session at generation time; null for
+  /// brand-new clients (no completed sessions yet).
+  lastSessionId String?
+
+  status CaseConsultStatus @default(PENDING)
+
+  /// Validated against CaseConsultV1Schema before write.
+  body Json?
+
+  totalCostInr Decimal @default(0) @db.Decimal(10, 4)
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@map("case_consults")
+}
+
+// ============================================================================
 // ClientConceptualMap — Sprint 24. Pass 7 output. Per-client cumulative
 // graph of values / affirmations / challenges / patterns / beliefs that
 // surfaced across the client's sessions, with verbatim supporting quotes
@@ -1594,6 +1733,17 @@ enum ExerciseAssignmentStatus {
   EXPIRED
 }
 
+/// Sprint 51 — provenance for an ExerciseAssignment row.
+/// CATALOG = therapist hand-picked from the @cureocity/clinical catalog.
+/// THERAPY_SCRIPT = auto-created when sharing a therapy script so the
+/// script's `homework` field persists as a trackable assignment and
+/// the patient's "Mark as done" on the portal feeds the pre-session
+/// brief deterministically.
+enum ExerciseAssignmentSource {
+  CATALOG
+  THERAPY_SCRIPT
+}
+
 model ExerciseAssignment {
   id             String @id @default(cuid())
   clientId       String
@@ -1601,7 +1751,15 @@ model ExerciseAssignment {
 
   // Catalog id like 'cbt_thought_record_5col' or 'emdr_safe_place_installation'.
   // Validated against @cureocity/clinical at the service layer.
-  exerciseId String
+  // Sprint 51 — nullable so script-sourced rows can carry free-text
+  // homework (the script's `homework.description`, which doesn't match
+  // the catalog regex) without needing a fake catalog id.
+  exerciseId String?
+
+  // Sprint 51 — provenance + free-text description for non-catalog rows.
+  source                ExerciseAssignmentSource @default(CATALOG)
+  customDescription     String?                  @db.Text
+  sourceTherapyScriptId String?
 
   assignedAt DateTime  @default(now())
   dueAt      DateTime?
@@ -1962,6 +2120,20 @@ enum AuditAction {
   CLINIC_MEMBER_REMOVED
   CLINIC_MEMBER_ROLE_CHANGED
   CLIENT_REASSIGNED
+  // Demo showcase client — Sprint 48. Seeded / removed in one click so
+  // a trialing therapist sees the full measurement arc immediately.
+  DEMO_CLIENT_CREATED
+  DEMO_CLIENT_REMOVED
+  // Case Consult — Sprint 52. Structured second opinion the therapist
+  // generates when stuck on a case.
+  CASE_CONSULT_GENERATED
+  // Billing — Sprint 53. Trial cap soft-enforcement + Razorpay
+  // checkout lifecycle. PAYMENT_RECEIVED / PAYMENT_FAILED route
+  // through SYSTEM actor (the webhook).
+  TRIAL_CAP_REACHED
+  PLAN_UPGRADED
+  PAYMENT_RECEIVED
+  PAYMENT_FAILED
 }
 
 enum AuditActorType {

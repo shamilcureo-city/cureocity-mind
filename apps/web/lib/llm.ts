@@ -8,10 +8,12 @@ import {
   MockGeminiPass5Backend,
   MockGeminiPass6Backend,
   MockGeminiPass7Backend,
+  MockGeminiPass8Backend,
   ModelRouter,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
+  VertexGeminiProCaseConsultBackend,
   VertexGeminiProClinicalBackend,
   VertexGeminiProConceptualMapBackend,
   VertexGeminiProGlobalBackend,
@@ -120,6 +122,17 @@ function build(): IModelRouter {
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
       }),
+      // Sprint 52 — Pass 8 Case Consult. Reuses the Pro model env so a
+      // single override toggles both Pass 6 + 8; both are reasoning-
+      // heavy briefing-shaped passes.
+      pass8: new VertexGeminiProCaseConsultBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['VERTEX_CASE_CONSULT_MODEL'] ??
+          process.env['VERTEX_PRO_MODEL'] ??
+          'gemini-2.5-pro',
+      }),
     });
   }
   console.info(
@@ -133,6 +146,7 @@ function build(): IModelRouter {
     pass5: new MockGeminiPass5Backend(),
     pass6: new MockGeminiPass6Backend(),
     pass7: new MockGeminiPass7Backend(),
+    pass8: new MockGeminiPass8Backend(),
   });
 }
 

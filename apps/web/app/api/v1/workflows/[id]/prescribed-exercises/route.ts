@@ -66,6 +66,10 @@ export async function GET(
   });
   const byExercise = new Map<string, { total: number; completed: number; lastAt: Date }>();
   for (const a of assignments) {
+    // Sprint 51 — therapy-script-sourced rows have a null exerciseId
+    // and don't belong in the catalog rollup (this route is the
+    // catalog-prescribed-exercises recommender). Skip them.
+    if (!a.exerciseId) continue;
     const existing = byExercise.get(a.exerciseId);
     if (!existing) {
       byExercise.set(a.exerciseId, {

@@ -96,6 +96,65 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const { snapshot, subject, sessionId } = snapshotResult;
 
+  // Sprint 51 — homework loop. When sharing a therapy script with
+  // assignHomework (default true), persist the script's `homework`
+  // field as an ExerciseAssignment so the client can mark it done
+  // from the portal and the pre-session brief reads real homework
+  // truth. If an OPEN assignment already exists for this script we
+  // reuse it (re-sharing the same script doesn't duplicate). The
+  // resulting assignment id is embedded into the snapshot in-place
+  // before the per-channel rows are written; every channel row
+  // therefore carries the same homeworkAssignmentId, and completing
+  // via any one of them flips siblings too (handled in the public
+  // homework route — Sprint 51).
+  if (
+    input.artefact.artefactType === 'THERAPY_SCRIPT' &&
+    snapshot.kind === 'THERAPY_SCRIPT' &&
+    (input.artefact.assignHomework ?? true)
+  ) {
+    const therapyScriptId = input.artefact.therapyScriptId;
+    let assignment = await prisma.exerciseAssignment.findFirst({
+      where: {
+        clientId: client.id,
+        sourceTherapyScriptId: therapyScriptId,
+        status: { in: ['PENDING', 'IN_PROGRESS'] },
+      },
+      orderBy: { assignedAt: 'desc' },
+      select: { id: true },
+    });
+    if (!assignment) {
+      const created = await prisma.exerciseAssignment.create({
+        data: {
+          clientId: client.id,
+          psychologistId: auth.value.psychologistId,
+          exerciseId: null,
+          source: 'THERAPY_SCRIPT',
+          sourceTherapyScriptId: therapyScriptId,
+          customDescription: snapshot.homework.description,
+          status: 'PENDING',
+        },
+        select: { id: true },
+      });
+      assignment = { id: created.id };
+      await writeAudit({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: auth.value.psychologistId,
+        action: 'EXERCISE_ASSIGNED',
+        targetType: 'ExerciseAssignment',
+        targetId: created.id,
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          clientId: client.id,
+          source: 'THERAPY_SCRIPT',
+          sourceTherapyScriptId: therapyScriptId,
+        },
+      });
+    }
+    // Mutate the snapshot in-place so every channel row stores the
+    // assignment id and matches sibling rows by it.
+    snapshot.homeworkAssignmentId = assignment.id;
+  }
+
   // Sprint 20 — a progress report's generation is a clinically
   // significant event in its own right (separate from any send): the
   // therapist confirmed the trend they're showing the client. Audit
@@ -402,6 +461,9 @@ function extractArtefactId(input: ShareInput): string {
       // The check-in isn't a stored row either; key it by client +
       // instrument so the share history reads sensibly.
       return `${input.artefact.clientId}:${input.artefact.instrumentKey}`;
+    case 'SIGNED_INTAKE_NOTE':
+      // Sprint 49 — sessionId is the discriminator, same as SIGNED_NOTE.
+      return input.artefact.sessionId;
   }
 }
 

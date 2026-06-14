@@ -105,9 +105,28 @@ export const ClientSchema = z.object({
   /** ISO 639-1 codes, may be empty. */
   spokenLanguages: z.array(z.string()).default([]),
   status: ClientStatusSchema,
+  /**
+   * Sprint 48 — true for the seeded "Example" showcase client. Badged
+   * in the UI and excluded from metrics, competency rollups, and the
+   * trial session cap. Defaults false for every real client.
+   */
+  isDemo: z.boolean().default(false),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
+
+/**
+ * Sprint 48 — response from POST/DELETE the demo-client endpoint. On
+ * POST, `created` is false when an existing demo client was returned
+ * (idempotent re-seed). On DELETE, `removed` reflects whether a row
+ * was actually deleted.
+ */
+export const DemoClientResponseSchema = z.object({
+  clientId: CuidSchema.nullable(),
+  created: z.boolean().optional(),
+  removed: z.boolean().optional(),
+});
+export type DemoClientResponse = z.infer<typeof DemoClientResponseSchema>;
 
 export const ListClientsQuerySchema = z.object({
   status: ClientStatusSchema.optional(),

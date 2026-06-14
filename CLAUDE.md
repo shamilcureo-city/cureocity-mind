@@ -414,13 +414,26 @@ These gate a real Indian pilot. **Critical-path items live at the top.**
 
 **Pilot-blocking (security + identity — needs your env to verify):**
 
-- **Real Firebase auth cutover** — `shouldBypass()` still auto-engages
-  when Firebase env vars are missing, and `/app/*` server pages
-  hard-code the seeded `dev-firebase-uid-priya` user. Effectively no
-  per-therapist auth in prod yet.
-- **PII field encryption rollout** — schema has the `*_encrypted`
-  columns; `apps/web` still reads/writes plaintext. The
-  `@cureocity/crypto` envelope is built; just needs the writer cutover.
+- **Real Firebase auth cutover** — DONE IN CODE (Sprint 31+).
+  `currentPsychologist()` + the API guards verify the real `__session`
+  Firebase cookie / Bearer token; `isAuthBypassed()` fails closed on
+  Vercel production when Firebase env is missing. The only
+  `dev-firebase-uid-priya` reference left is in `_archive/`. Remaining
+  work is OPERATIONAL only: set `FIREBASE_PROJECT_ID/CLIENT_EMAIL/
+  PRIVATE_KEY` on the prod deployment (then bypass auto-disables).
+- **PII field encryption rollout** — DUAL-WRITE DONE for every Client
+  PII field: `contactPhone` + `contactEmail` (Sprint 32) and `fullName`
+  (Sprint 54), across create / update / DSR-correction + the
+  `/admin/encryption/backfill` route, via `apps/web/lib/tenant-crypto.ts`
+  (LocalDevKmsProvider in dev). STILL PENDING, and prod-data /
+  KMS-decision-dependent: (1) the READ cutover (reads still use the
+  plaintext columns; nothing decrypts yet), (2) the plaintext-column
+  DROP, and (3) wiring `AwsKmsProvider` for `KMS_BACKEND=aws-kms`
+  (asia-south1 procurement). `NoteDraft.transcriptEncrypted` now
+  dual-writes at the source (note-orchestrator, Sprint 54) + backfill.
+  `JournalEntry.contentEncrypted` column exists but has no live
+  `apps/web` write path (journal creation is a patient-app /
+  continuity-service concern) — nothing to wire there yet.
 - **WebAuthn-bound signing** — sign route accepts `assertion` as
   optional. Sprint 18 introduced per-account WebAuthn registration;
   next is making the assertion required once any credential is
@@ -428,9 +441,13 @@ These gate a real Indian pilot. **Critical-path items live at the top.**
 
 **Big features (need scoping before a blanket build):**
 
-- **Multi-tenant Clinic + roles** — currently single-tenant.
-- **Settings pages** under `/app/settings/*` — none exist.
-- **Billing** (Stripe + Razorpay).
+- **Multi-tenant Clinic + roles** — Clinic + membership exist (Phase 2
+  metrics), but billing is still per-therapist; clinic-plan billing
+  isn't built.
+- **Billing** — Razorpay DONE (Sprint 53): trial-cap enforcement at
+  session-create + Checkout + webhook + Plan page. Remaining: renewal
+  reminders, self-serve downgrade/cancel, refunds, receipt PDFs,
+  clinic-plan billing. (Stripe explicitly out of scope.)
 - **Observability stack** — Sentry, OTel collector, Grafana — only
   metric counters exist today.
 - **Pilot account provisioning + first-5-therapist onboarding** —
@@ -438,10 +455,13 @@ These gate a real Indian pilot. **Critical-path items live at the top.**
 
 **Smaller follow-ups carried over from Sprint 20-21:**
 
-- **Intake-note sign-off** — `SignNoteInputSchema` + the sign route's
-  per-field edit-diff verification are TherapyNoteV1-shaped. The
-  modify panel works for intake (Sprint 21); sign-off needs the sign
-  contract to become a union.
+- **Intake-note sign-off** — DONE (Sprint 49 + Sprint 55):
+  `SignNoteInputSchema` is now a `SignedNoteContent` union and the
+  sign route narrows by `session.kind`; intake notes sign + share
+  (`SIGNED_INTAKE_NOTE`) + PDF (Sprint 49). Post-sign revision
+  through `/note/edit` accepts a kind-discriminated
+  `ReviseNoteInputSchema` and writes per-field `NoteEdit` rows for
+  intake notes at parity with treatment notes (Sprint 55).
 - **Multilingual progress report** — schema is locale-aware; copy is
   English-only and needs validated translations (do not machine-translate).
 - **More scored instruments** (WHODAS-2, PCL-5, …) — registry supports

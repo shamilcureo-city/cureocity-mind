@@ -84,6 +84,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
           preferredLanguage: true,
           contactPhone: true,
           contactEmail: true,
+          isDemo: true,
         },
       },
     },
@@ -101,7 +102,10 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
       <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="font-serif text-3xl">{session.client.fullName}</h1>
+          <h1 className="flex flex-wrap items-center gap-3 font-serif text-3xl">
+            {session.client.fullName}
+            {session.client.isDemo && <Badge tone="warn">Example</Badge>}
+          </h1>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
             {session.modality ?? session.kind} · {session.scheduledAt.toLocaleString('en-IN')}
           </p>

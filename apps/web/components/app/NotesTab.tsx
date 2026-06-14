@@ -18,6 +18,7 @@ import { NotePreview } from './NotePreview';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
+import { IntakeRevisionPanel } from './IntakeRevisionPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { ShareModal } from './ShareModal';
 
@@ -358,31 +359,70 @@ export function NotesTab({
 
   if (phase.kind === 'signed') {
     const note = phase.note;
-    // INTAKE notes won't reach this branch in v1 (no sign route) but
-    // the type system already supports it via the SOAP discriminator.
     if (isIntake) {
+      // Sprint 49 — share + PDF; Sprint 55 — post-sign revision via
+      // IntakeRevisionPanel (kind: 'INTAKE' on /note/edit).
+      const signedIntake = note.content as unknown as IntakeNoteV1;
       return (
         <>
           <MockBackendBanner llmBackend={llmBackend} />
           <Card className="p-7">
-            <RiskBanner riskFlags={note.content.riskFlags} />
+            <RiskBanner riskFlags={signedIntake.riskFlags} />
             <IntakeNotePreview
-              note={note.content as unknown as IntakeNoteV1}
+              note={signedIntake}
               signedAt={note.signedAt}
               signedBy={note.signedBy}
+            />
+            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShareOpen(true)}
+                className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+              >
+                Send to patient
+              </button>
+              <a
+                href={`/api/v1/sessions/${sessionId}/note/pdf`}
+                download
+                className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+              >
+                Download PDF
+              </a>
+            </div>
+            <ShareModal
+              open={shareOpen}
+              onClose={() => setShareOpen(false)}
+              clientId={clientId}
+              hasContactPhone={clientHasContactPhone}
+              hasContactEmail={clientHasContactEmail}
+              artefact={{ artefactType: 'SIGNED_INTAKE_NOTE', sessionId }}
+              artefactLabel="Signed intake note"
+            />
+            <IntakeRevisionPanel
+              sessionId={sessionId}
+              note={{ ...note, content: signedIntake }}
+              onRevised={(nextContent) =>
+                setPhase({
+                  kind: 'signed',
+                  note: { ...note, content: nextContent },
+                })
+              }
             />
           </Card>
         </>
       );
     }
+    // Treatment branch — narrow the now-union content to TherapyNoteV1
+    // (NotePreview, ModifyPanel, RevisionPanel all read SOAP fields).
+    const treatmentContent = note.content as TherapyNoteV1;
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
           <Card className="p-7">
             <AdvancementBanner clientId={clientId} />
-            <RiskBanner riskFlags={note.content.riskFlags} />
-            <NotePreview note={note.content} signedAt={note.signedAt} signedBy={note.signedBy} />
+            <RiskBanner riskFlags={treatmentContent.riskFlags} />
+            <NotePreview note={treatmentContent} signedAt={note.signedAt} signedBy={note.signedBy} />
             <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
@@ -410,7 +450,7 @@ export function NotesTab({
             />
             <RevisionPanel
               sessionId={sessionId}
-              note={note}
+              note={{ ...note, content: treatmentContent }}
               onRevised={(nextContent) =>
                 setPhase({
                   kind: 'signed',
@@ -425,7 +465,7 @@ export function NotesTab({
               region="signed"
             />
           </Card>
-          <ModifyPanel disabled={true} sessionId={sessionId} note={phase.note.content} />
+          <ModifyPanel disabled={true} sessionId={sessionId} note={treatmentContent} />
         </div>
       </>
     );
@@ -448,13 +488,14 @@ export function NotesTab({
               region={llmBackend}
             />
             <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
+              {/* Sprint 49 — intake notes can now be signed at parity with TREATMENT. */}
+              <Button onClick={triggerSignOff} disabled={signing}>
+                {signing ? 'Signing…' : 'Sign off'}
+              </Button>
               <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
                 Re-generate
               </Button>
-              <p className="text-xs italic text-[var(--color-ink-3)]">
-                Sign-off for intake notes is deferred — the sign contract is still
-                TherapyNoteV1-shaped.
-              </p>
+              {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
             </div>
           </Card>
           <IntakeModifyPanel

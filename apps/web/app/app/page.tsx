@@ -32,6 +32,7 @@ export default async function RecordPage() {
             id: true,
             fullName: true,
             preferredModality: true,
+            isDemo: true,
             sessions: {
               where: { status: 'COMPLETED' },
               orderBy: { endedAt: 'desc' },
@@ -48,6 +49,7 @@ export default async function RecordPage() {
     fullName: c.fullName,
     preferredModality: c.preferredModality,
     lastCompletedSessionAt: c.sessions[0]?.endedAt?.toISOString() ?? null,
+    isDemo: c.isDemo,
   }));
 
   const grouped = groupByDate(sessions as SessionWithClient[]);

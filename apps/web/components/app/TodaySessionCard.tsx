@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { PreparePanel } from './PreparePanel';
 import { RescheduleModal } from './RescheduleModal';
 
 export interface TodaySessionCardProps {
@@ -23,6 +24,8 @@ export interface TodaySessionCardProps {
     kind: 'INTAKE' | 'TREATMENT' | 'REVIEW';
     clientId: string;
     clientName: string;
+    /** Sprint 48 — seeded "Example" client; renders a warn badge. */
+    clientIsDemo?: boolean;
     hasSignedNote: boolean;
     draftStatus: string | null;
   };
@@ -89,6 +92,7 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
             >
               {session.clientName}
             </Link>
+            {session.clientIsDemo && <Badge tone="warn">Example</Badge>}
             <Badge tone={kindTone(session.kind)}>{session.kind.toLowerCase()}</Badge>
             {session.modality && <Badge tone="muted">{session.modality}</Badge>}
             <Badge tone={statusTone(session.status)}>
@@ -156,6 +160,9 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
           <p className="mt-2 text-xs text-[var(--color-warn)]" role="alert">
             {error}
           </p>
+        )}
+        {(session.status === 'SCHEDULED' || session.status === 'IN_PROGRESS') && (
+          <PreparePanel clientId={session.clientId} />
         )}
       </Card>
       <RescheduleModal

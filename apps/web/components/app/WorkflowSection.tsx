@@ -346,7 +346,7 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
                 className="flex items-baseline justify-between gap-3 border-b border-[var(--color-line-soft)] pb-2 last:border-b-0 last:pb-0"
               >
                 <span className="text-sm text-[var(--color-ink)]">
-                  {humanExerciseId(a.exerciseId)}
+                  {a.customDescription ?? (a.exerciseId ? humanExerciseId(a.exerciseId) : 'Homework')}
                 </span>
                 <span className="flex items-center gap-3 text-xs text-[var(--color-ink-3)]">
                   <Badge tone="muted">{a.status.replaceAll('_', ' ').toLowerCase()}</Badge>

@@ -75,9 +75,12 @@ export async function GET(
     { assigned: number; completed: number; lastAssignedAt: Date }
   >();
   for (const a of all) {
-    const existing = byExerciseMap.get(a.exerciseId);
+    // Sprint 51 — script-sourced rows have a null exerciseId; group
+    // them under a single bucket so they show up in the rollup at all.
+    const key = a.exerciseId ?? '__therapy_script__';
+    const existing = byExerciseMap.get(key);
     if (!existing) {
-      byExerciseMap.set(a.exerciseId, {
+      byExerciseMap.set(key, {
         assigned: 1,
         completed: a.status === 'COMPLETED' ? 1 : 0,
         lastAssignedAt: a.assignedAt,

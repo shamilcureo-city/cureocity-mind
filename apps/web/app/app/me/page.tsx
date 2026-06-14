@@ -19,6 +19,18 @@ export default async function MeOverviewPage() {
 
   const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
+  // Sprint 48 — fabricated demo rows must not show up in any of the
+  // tallies on this page. For Prisma counts we filter via the joined
+  // client relation; for audit-log-based counts we exclude the demo
+  // client ids in JS after the fetch.
+  const demoClientIds = (
+    await prisma.client.findMany({
+      where: { psychologistId: therapist.id, isDemo: true },
+      select: { id: true },
+    })
+  ).map((c) => c.id);
+  const nonDemoClient = { client: { isDemo: false } } as const;
+
   const [
     activeClients,
     sessions30d,
@@ -35,20 +47,26 @@ export default async function MeOverviewPage() {
     progressReports,
   ] = await Promise.all([
     prisma.client.count({
-      where: { psychologistId: therapist.id, status: 'ACTIVE', deletedAt: null },
+      where: {
+        psychologistId: therapist.id,
+        status: 'ACTIVE',
+        deletedAt: null,
+        isDemo: false,
+      },
     }),
     prisma.session.count({
       where: {
         psychologistId: therapist.id,
         status: 'COMPLETED',
         endedAt: { gte: since30d },
+        ...nonDemoClient,
       },
     }),
     prisma.session.count({
-      where: { psychologistId: therapist.id, status: 'COMPLETED' },
+      where: { psychologistId: therapist.id, status: 'COMPLETED', ...nonDemoClient },
     }),
     prisma.clinicalReport.count({
-      where: { psychologistId: therapist.id, status: 'COMPLETED' },
+      where: { psychologistId: therapist.id, status: 'COMPLETED', ...nonDemoClient },
     }),
     prisma.auditLog.findMany({
       where: {
@@ -61,11 +79,11 @@ export default async function MeOverviewPage() {
     prisma.auditLog.count({
       where: { actorPsychologistId: therapist.id, action: 'CRISIS_FLAG_RAISED' },
     }),
-    prisma.therapyScript.count({ where: { psychologistId: therapist.id } }),
+    prisma.therapyScript.count({ where: { psychologistId: therapist.id, ...nonDemoClient } }),
     prisma.preSessionBrief.count({
-      where: { psychologistId: therapist.id, status: 'COMPLETED' },
+      where: { psychologistId: therapist.id, status: 'COMPLETED', ...nonDemoClient },
     }),
-    prisma.patientShare.count({ where: { psychologistId: therapist.id } }),
+    prisma.patientShare.count({ where: { psychologistId: therapist.id, ...nonDemoClient } }),
     prisma.auditLog.count({
       where: {
         actorPsychologistId: therapist.id,
@@ -88,6 +106,13 @@ export default async function MeOverviewPage() {
       where: { actorPsychologistId: therapist.id, action: 'PATIENT_PROGRESS_REPORT_SHARED' },
     }),
   ]);
+
+  // Audit-log tallies are correct as long as the demo arc never fires
+  // these actions. createDemoClient() only writes DEMO_CLIENT_CREATED;
+  // it does NOT emit CLINICAL_REPORT_GENERATED, CLINICAL_SECTION_CONFIRMED,
+  // INSTRUMENT_ADMINISTERED, CRISIS_FLAG_RAISED, TREATMENT_EPISODE_CLOSED,
+  // or PATIENT_PROGRESS_REPORT_SHARED, so no demo rows leak in here.
+  void demoClientIds;
 
   const tally = { accepted: 0, modified: 0, rejected: 0 };
   for (const a of sectionConfirmations) {

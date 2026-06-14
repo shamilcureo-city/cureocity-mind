@@ -10,6 +10,7 @@ import { recordCostInr, recordGeminiCall } from '@cureocity/observability/metric
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toPreSessionBrief } from '@/lib/clinical-mappers';
+import { fetchOpenCrises } from '@/lib/crisis-flags';
 import { modelRouter } from '@/lib/llm';
 import { prisma } from '@/lib/prisma';
 import { parseQuery } from '@/lib/validate';
@@ -204,11 +205,19 @@ export async function GET(
       },
     });
 
+    // Sprint 51 — deterministic homework truth overwrite. Pass 5
+    // historically guessed `homeworkStatus` from transcript hints
+    // because there was no DB source of truth. Now that sharing a
+    // therapy script persists an ExerciseAssignment + the portal can
+    // flip it COMPLETED, we read the latest assignment for the
+    // client and replace whatever the LLM said with the truth.
+    const briefBody = await applyHomeworkTruth(clientId, pass5.output.preSessionBrief);
+
     const completed = await prisma.preSessionBrief.update({
       where: { id: briefRow.id },
       data: {
         status: 'COMPLETED',
-        body: pass5.output.preSessionBrief as unknown as Prisma.InputJsonValue,
+        body: briefBody as unknown as Prisma.InputJsonValue,
         totalCostInr: new Prisma.Decimal(pass5.callLog.costInr),
       },
     });
@@ -243,49 +252,10 @@ export async function GET(
 // Helpers.
 // ============================================================================
 
-interface OpenCrisis {
-  kind: string;
-  severity: 'high' | 'critical';
-  lastSeenAt: string;
-}
-
-/**
- * Open crisis flags from prior sessions' ClinicalReports — any
- * high/critical flag whose section confirmation is PENDING or whose
- * acknowledgement has no superseding SafetyPlan.
- */
-async function fetchOpenCrises(clientId: string): Promise<OpenCrisis[]> {
-  const reports = await prisma.clinicalReport.findMany({
-    where: { clientId, status: 'COMPLETED' },
-    orderBy: { createdAt: 'desc' },
-    take: 5,
-    select: { body: true, createdAt: true, confirmations: true },
-  });
-  const result: OpenCrisis[] = [];
-  for (const r of reports) {
-    if (!r.body) continue;
-    const body = r.body as unknown as {
-      crisisFlags?: { kind: string; severity: string }[];
-    };
-    const flags = body.crisisFlags ?? [];
-    for (const f of flags) {
-      if (f.severity === 'high' || f.severity === 'critical') {
-        result.push({
-          kind: f.kind,
-          severity: f.severity,
-          lastSeenAt: r.createdAt.toISOString(),
-        });
-      }
-    }
-  }
-  // Dedupe by kind keeping the most recent timestamp.
-  const seen = new Map<string, OpenCrisis>();
-  for (const c of result) {
-    const existing = seen.get(c.kind);
-    if (!existing || existing.lastSeenAt < c.lastSeenAt) seen.set(c.kind, c);
-  }
-  return [...seen.values()].slice(0, 5);
-}
+// Sprint 50 — `fetchOpenCrises` + `OpenCrisis` were lifted into the
+// shared `apps/web/lib/crisis-flags.ts` so the Prepare panel on the
+// Today screen can call the same logic without duplicating it. This
+// route imports them at the top.
 
 function extractLastSummary(
   session: {
@@ -306,4 +276,58 @@ function extractLastSummary(
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max)}…`;
+}
+
+/**
+ * Sprint 51 — replace the LLM's homework guess with DB truth.
+ *
+ * Pre-S51 the route had no way to know whether homework was done — it
+ * relied on Pass 5 inferring from transcript text, which was both
+ * costly (it had to read the transcript) and unreliable. Now that
+ * sharing a therapy script auto-persists an ExerciseAssignment and
+ * the portal flips it COMPLETED, the latest assignment for the
+ * client carries the only ground truth that matters. We look it up,
+ * pick a deterministic description (customDescription for script-
+ * sourced rows, catalog id fallback for catalog rows, free-text
+ * therapistNote as a last resort) and overwrite the brief body in
+ * place. No prompt changes; no Pass 5 backend changes.
+ */
+async function applyHomeworkTruth<T extends { homeworkStatus: unknown }>(
+  clientId: string,
+  brief: T,
+): Promise<T> {
+  const latest = await prisma.exerciseAssignment.findFirst({
+    where: { clientId },
+    orderBy: { assignedAt: 'desc' },
+    select: {
+      status: true,
+      customDescription: true,
+      therapistNote: true,
+      exerciseId: true,
+    },
+  });
+  if (!latest) {
+    // No assignment yet; trust whatever the LLM said (or null if it
+    // had nothing to go on).
+    return brief;
+  }
+  const outcome: 'completed' | 'partial' | 'skipped' | 'unknown' =
+    latest.status === 'COMPLETED'
+      ? 'completed'
+      : latest.status === 'SKIPPED' || latest.status === 'EXPIRED'
+        ? 'skipped'
+        : 'unknown';
+  const description =
+    latest.customDescription?.trim() ||
+    latest.therapistNote?.trim() ||
+    latest.exerciseId ||
+    'Homework';
+  return {
+    ...brief,
+    homeworkStatus: {
+      description,
+      outcome,
+      notes: null,
+    },
+  };
 }

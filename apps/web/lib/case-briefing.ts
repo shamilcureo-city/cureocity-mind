@@ -97,6 +97,54 @@ function parseIntake(content: unknown) {
   return parsed.success ? parsed.data : null;
 }
 
+/**
+ * Compact text dump of the cumulative record. Used as the
+ * `contextText` for Pass 6 (case briefing) and Pass 8 (case consult),
+ * which both want the same view of the chart. Lifted out of the
+ * case-briefing route in Sprint 52 so both consumers share one
+ * format and one source of truth.
+ */
+export function serialiseContext(inputs: CaseBriefingInputs): string {
+  const j = inputs.journey;
+  const lines: string[] = [];
+  lines.push(`Stage: ${j.stage}`);
+  lines.push(`Completed sessions: ${j.sessionsCompleted}`);
+  if (j.workingDiagnosis) {
+    lines.push(
+      `Confirmed diagnosis: ${j.workingDiagnosis.icd11Code} ${j.workingDiagnosis.icd11Label} (confidence ${j.workingDiagnosis.confidence})`,
+    );
+  }
+  if (j.activePlan) {
+    lines.push(
+      `Active plan v${j.activePlan.version} (${j.activePlan.modality ?? 'modality TBD'}); goals ${j.activePlan.goalsAchieved}/${j.activePlan.goalsTotal} achieved:`,
+    );
+    for (const g of j.activePlan.goals) lines.push(`  - [${g.status}] ${g.description}`);
+  }
+  if (j.instrumentChanges.length > 0) {
+    lines.push('Instruments:');
+    for (const c of j.instrumentChanges) {
+      lines.push(
+        `  - ${c.instrumentKey}: ${c.baselineScore} → ${c.latestScore} (${c.verdict}${c.isRemission ? ', remission' : ''})`,
+      );
+    }
+  }
+  if (inputs.presentingConcerns) lines.push(`Presenting concerns: ${inputs.presentingConcerns}`);
+  if (inputs.intakeNote) {
+    lines.push(
+      `Intake — history of presenting illness: ${inputs.intakeNote.historyOfPresentingIllness}`,
+    );
+    lines.push(`Intake — working hypothesis: ${inputs.intakeNote.workingHypothesis}`);
+    lines.push(`Intake — social history: ${inputs.intakeNote.socialHistory}`);
+    lines.push(`Intake — family history: ${inputs.intakeNote.familyHistory}`);
+  }
+  if (inputs.openItems.length > 0) {
+    lines.push('Open assessment items (the running differential):');
+    for (const i of inputs.openItems) lines.push(`  - (${i.kind}) ${i.question} — ${i.rationale}`);
+  }
+  lines.push(`Safety plan on file: ${inputs.hasSafetyPlan ? 'yes' : 'no'}`);
+  return lines.join('\n');
+}
+
 export function composeBriefing(inputs: CaseBriefingInputs): CaseBriefingV1 {
   const { journey } = inputs;
   const reportFormulation = readReportFormulation(inputs.latestReportBody);

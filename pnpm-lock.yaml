@@ -45,6 +45,9 @@ importers:
       '@cureocity/audio':
         specifier: workspace:*
         version: link:../../packages/audio
+      '@cureocity/billing':
+        specifier: workspace:*
+        version: link:../../packages/billing
       '@cureocity/clinical':
         specifier: workspace:*
         version: link:../../packages/clinical
@@ -144,6 +147,18 @@ importers:
     devDependencies:
       vitest:
         specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
+
+  packages/billing:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.1
+        version: 22.19.19
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.9
         version: 2.1.9(@types/node@22.19.19)(lightningcss@1.32.0)
 
   packages/clinical:

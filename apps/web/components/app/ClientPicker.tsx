@@ -10,6 +10,8 @@ export interface ClientTileEntry {
   preferredModality: string | null;
   /** ISO timestamp of most recent COMPLETED session, or null. */
   lastCompletedSessionAt: string | null;
+  /** Sprint 48 — Example/showcase client; renders a warn badge on the tile. */
+  isDemo?: boolean;
 }
 
 interface Props {
@@ -195,12 +197,17 @@ function ClientTile({
       onClick={() => onPick({ id: entry.id, fullName: entry.fullName })}
       className="group flex flex-col items-start rounded-2xl border border-[var(--color-line)] bg-white px-4 py-4 text-left transition-colors hover:border-[var(--color-ink)] hover:shadow-[0_18px_44px_-28px_rgba(15,27,42,0.18)]"
     >
-      <span className="flex items-center gap-2">
+      <span className="flex flex-wrap items-center gap-2">
         <span
           aria-hidden
           className="h-2 w-2 rounded-full bg-[var(--color-accent)]"
         />
         <span className="font-medium text-[var(--color-ink)]">{entry.fullName}</span>
+        {entry.isDemo && (
+          <span className="rounded-full bg-[var(--color-warn-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-warn)]">
+            Example
+          </span>
+        )}
       </span>
       <span className="mt-1.5 text-xs text-[var(--color-ink-3)]">{subline}</span>
     </button>

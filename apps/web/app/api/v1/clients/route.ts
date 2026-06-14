@@ -70,12 +70,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const contactEmailEncrypted = body.value.contactEmail
     ? await encryptForTenant(auth.value.psychologistId, body.value.contactEmail)
     : null;
+  // Sprint 54 — fullName is required on create, so always dual-write it.
+  const fullNameEncrypted = await encryptForTenant(
+    auth.value.psychologistId,
+    body.value.fullName,
+  );
 
   const created = await prisma.$transaction(async (tx) => {
     const row = await tx.client.create({
       data: {
         psychologistId: auth.value.psychologistId,
         fullName: body.value.fullName,
+        fullNameEncrypted,
         contactPhone: body.value.contactPhone,
         contactPhoneEncrypted,
         contactEmail: body.value.contactEmail ?? null,

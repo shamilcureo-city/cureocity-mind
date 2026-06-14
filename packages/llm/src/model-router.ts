@@ -8,6 +8,7 @@ import {
   type IPass5Backend,
   type IPass6Backend,
   type IPass7Backend,
+  type IPass8Backend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -22,6 +23,8 @@ import {
   type Pass6Output,
   type Pass7Input,
   type Pass7Output,
+  type Pass8Input,
+  type Pass8Output,
 } from './types';
 
 export interface ModelRouterOptions {
@@ -32,6 +35,7 @@ export interface ModelRouterOptions {
   pass5: IPass5Backend;
   pass6: IPass6Backend;
   pass7: IPass7Backend;
+  pass8: IPass8Backend;
   /** Called after every backend call with the resulting call-log row. */
   onCallLog?: (log: GeminiCallLogData) => Promise<void> | void;
 }
@@ -77,6 +81,12 @@ export class ModelRouter implements IModelRouter {
 
   async pass7(input: Pass7Input): Promise<{ output: Pass7Output; callLog: GeminiCallLogData }> {
     const result = await this.opts.pass7.run(input);
+    await this.opts.onCallLog?.(result.callLog);
+    return result;
+  }
+
+  async pass8(input: Pass8Input): Promise<{ output: Pass8Output; callLog: GeminiCallLogData }> {
+    const result = await this.opts.pass8.run(input);
     await this.opts.onCallLog?.(result.callLog);
     return result;
   }

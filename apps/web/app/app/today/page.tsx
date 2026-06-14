@@ -179,7 +179,7 @@ const sessionSelect = {
   modality: true,
   kind: true,
   clientId: true,
-  client: { select: { id: true, fullName: true } },
+  client: { select: { id: true, fullName: true, isDemo: true } },
   noteDraft: { select: { status: true } },
   therapyNote: { select: { id: true } },
 } as const;
@@ -191,7 +191,7 @@ function toCardProps(row: {
   modality: string | null;
   kind: string;
   clientId: string;
-  client: { fullName: string };
+  client: { fullName: string; isDemo: boolean };
   noteDraft: { status: string } | null;
   therapyNote: { id: string } | null;
 }) {
@@ -209,6 +209,7 @@ function toCardProps(row: {
     kind: row.kind as 'INTAKE' | 'TREATMENT' | 'REVIEW',
     clientId: row.clientId,
     clientName: row.client.fullName,
+    clientIsDemo: row.client.isDemo,
     hasSignedNote: row.therapyNote !== null,
     draftStatus: row.noteDraft?.status ?? null,
   };

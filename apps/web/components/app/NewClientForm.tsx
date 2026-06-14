@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckboxRow, Input, Label, FieldError } from '../ui/Field';
 import { readApiError, type RecordReady, SCRIPT_VERSION } from './record-types';
+import { UpgradeModal } from './UpgradeModal';
 import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
 
 interface Props {
@@ -45,6 +46,11 @@ export function NewClientForm({ onCancel, onReady }: Props) {
   const [displaySupported] = useState(() => isDisplayCaptureSupported());
 
   const [error, setError] = useState<string | null>(null);
+  // Sprint 53 — trial cap modal trigger; rendered at the end of the form.
+  const [upgradePrompt, setUpgradePrompt] = useState<{
+    trialCap: number;
+    upgradeUrl: string;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   // The IndianPhoneSchema regex (`^\+91\d{10}$`) is strict on purpose
@@ -121,6 +127,24 @@ export function NewClientForm({ onCancel, onReady }: Props) {
         }),
       });
       if (!sessionRes.ok) {
+        if (sessionRes.status === 402) {
+          // Sprint 53 — trial cap. Show the upgrade modal and stop;
+          // the client row already exists, the therapist can record
+          // a session later after upgrading.
+          const body = (await sessionRes.json().catch(() => ({}))) as {
+            error?: string;
+            code?: string;
+            upgradeUrl?: string;
+          };
+          if (body.code === 'TRIAL_CAP_REACHED') {
+            const match = body.error?.match(/of (\d+) trial sessions/);
+            setUpgradePrompt({
+              trialCap: match ? Number(match[1]) : 10,
+              upgradeUrl: body.upgradeUrl ?? '/app/settings/plan',
+            });
+            return;
+          }
+        }
         throw new Error(await readApiError(sessionRes, 'Create session failed'));
       }
       const sessionRow = (await sessionRes.json()) as {
@@ -266,6 +290,12 @@ export function NewClientForm({ onCancel, onReady }: Props) {
           </Button>
         </div>
       </form>
+      <UpgradeModal
+        open={upgradePrompt !== null}
+        onClose={() => setUpgradePrompt(null)}
+        trialCap={upgradePrompt?.trialCap ?? 10}
+        upgradeUrl={upgradePrompt?.upgradeUrl ?? '/app/settings/plan'}
+      />
     </Card>
   );
 }

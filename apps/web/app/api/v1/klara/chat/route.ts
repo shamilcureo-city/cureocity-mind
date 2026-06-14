@@ -197,9 +197,13 @@ async function buildContext(psychologistId: string): Promise<string> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
+  // Sprint 48 — the practice-wide Klara context must not ground answers
+  // in the seeded demo client. (Client-scoped chat on the demo client
+  // itself stays allowed; that path enters via /klara/chat with a
+  // clientId and never visits this builder.)
   const [clients, recentSessions, workflows, upcomingSessions] = await Promise.all([
     prisma.client.findMany({
-      where: { psychologistId, deletedAt: null },
+      where: { psychologistId, deletedAt: null, isDemo: false },
       select: {
         id: true,
         fullName: true,
@@ -218,6 +222,7 @@ async function buildContext(psychologistId: string): Promise<string> {
         psychologistId,
         status: 'COMPLETED',
         endedAt: { gte: thirtyDaysAgo },
+        client: { isDemo: false },
       },
       include: {
         client: { select: { fullName: true } },
@@ -227,7 +232,7 @@ async function buildContext(psychologistId: string): Promise<string> {
       take: 10,
     }),
     prisma.modalityState.findMany({
-      where: { psychologistId, completedAt: null },
+      where: { psychologistId, completedAt: null, client: { isDemo: false } },
       include: { client: { select: { fullName: true } } },
       take: 30,
     }),
@@ -236,6 +241,7 @@ async function buildContext(psychologistId: string): Promise<string> {
         psychologistId,
         status: 'SCHEDULED',
         scheduledAt: { gte: new Date(), lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
+        client: { isDemo: false },
       },
       include: { client: { select: { fullName: true } } },
       orderBy: { scheduledAt: 'asc' },

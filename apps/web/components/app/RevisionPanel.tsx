@@ -1,21 +1,28 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import type { TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
+import type { NoteEditField, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Label, Textarea } from '../ui/Field';
 
 interface HistoryEntry {
   id: string;
-  field: 'subjective' | 'objective' | 'assessment' | 'plan';
+  field: NoteEditField;
   before: string;
   after: string;
   createdAt: string;
 }
 
+/**
+ * Sprint 49 — RevisionPanel still revises TREATMENT notes only (the
+ * /note/edit route is SOAP-shaped). The caller in NotesTab narrows the
+ * union-typed `TherapyNote.content` to TherapyNoteV1 before passing.
+ */
+type TreatmentNote = Omit<TherapyNote, 'content'> & { content: TherapyNoteV1 };
+
 interface Props {
   sessionId: string;
-  note: TherapyNote;
+  note: TreatmentNote;
   onRevised: (next: TherapyNoteV1) => void;
 }
 
@@ -73,7 +80,7 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
     setPending(true);
     setError(null);
     try {
-      const payload: Record<string, string> = { reason };
+      const payload: Record<string, string> = { kind: 'TREATMENT', reason };
       if (subjective !== note.content.subjective) payload['subjective'] = subjective;
       if (objective !== note.content.objective) payload['objective'] = objective;
       if (assessment !== note.content.assessment) payload['assessment'] = assessment;
