@@ -160,6 +160,8 @@ export const AuditActionSchema = z.enum([
   'PLAN_PAUSED',
   'PLAN_RESUMED',
   'PLAN_CANCELLED',
+  // Billing — Sprint 56 (Lever 4 #5). Post-lapse dunning nudge.
+  'BILLING_DUNNING_SENT',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

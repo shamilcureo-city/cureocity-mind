@@ -36,6 +36,11 @@ export function daysUntil(paidThroughAt: Date, now: Date): number {
   return Math.ceil(ms / (24 * 60 * 60 * 1000));
 }
 
+/** Days since `paidThroughAt` lapsed, rounded UP. 1 = lapsed yesterday. */
+export function daysSinceExpiry(paidThroughAt: Date, now: Date): number {
+  return Math.ceil((now.getTime() - paidThroughAt.getTime()) / (24 * 60 * 60 * 1000));
+}
+
 export interface RenewalCopy {
   subject: string;
   textBody: string;
@@ -83,6 +88,51 @@ export function renewalCopy({
     textBody,
     whatsappTemplate:
       process.env['WATI_TEMPLATE_RENEWAL_REMINDER'] ?? 'cureocity_renewal_reminder',
+    whatsappParams: [tierLabel, String(day), dateStr],
+  };
+}
+
+/**
+ * Sprint 56 (Lever 4 #5) — post-lapse dunning copy. Escalates gently:
+ * day 1 = "just lapsed, one click to restore"; day 7 = "last nudge
+ * before you drop to the free trial".
+ */
+export function dunningCopy({
+  day,
+  tierLabel,
+  lapsedDate,
+  amountInr,
+}: {
+  day: ReminderDay;
+  tierLabel: string;
+  lapsedDate: Date;
+  amountInr: number;
+}): RenewalCopy {
+  const dateStr = lapsedDate.toLocaleDateString('en-IN', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  const subject =
+    day === 7
+      ? `Last reminder — your ${tierLabel} plan lapsed`
+      : `Your ${tierLabel} plan has lapsed — restore in one click`;
+  const textBody = [
+    `Hi from Cureocity Mind,`,
+    ``,
+    `Your ${tierLabel} plan lapsed on ${dateStr}. You're back on the free trial, so new`,
+    `session recording is capped — your notes, shares, and AI Copilot still work.`,
+    ``,
+    day === 7
+      ? `This is our last reminder. Renew (₹${amountInr.toLocaleString('en-IN')}) from Settings → Plan whenever you're ready; we'll keep your history safe.`
+      : `Renew (₹${amountInr.toLocaleString('en-IN')}) from Settings → Plan to restore unlimited recording.`,
+    ``,
+    `— The Cureocity Mind team`,
+  ].join('\n');
+  return {
+    subject,
+    textBody,
+    whatsappTemplate: process.env['WATI_TEMPLATE_DUNNING'] ?? 'cureocity_plan_lapsed',
     whatsappParams: [tierLabel, String(day), dateStr],
   };
 }

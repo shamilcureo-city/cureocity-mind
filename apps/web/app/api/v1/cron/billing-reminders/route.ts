@@ -1,8 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { PLAN_CATALOG, planTierLabel, isPaidPlan } from '@cureocity/contracts';
+import { PLAN_CATALOG, planTierLabel, isPaidPlan, type AuditAction } from '@cureocity/contracts';
 import { writeAudit } from '@/lib/audit';
 import { planAmountInr } from '@/lib/billing';
-import { daysUntil, reminderDayFor, renewalCopy } from '@/lib/billing-reminders';
+import {
+  daysSinceExpiry,
+  daysUntil,
+  dunningCopy,
+  reminderDayFor,
+  renewalCopy,
+  type RenewalCopy,
+} from '@/lib/billing-reminders';
 import { prisma } from '@/lib/prisma';
 import { shareChannels } from '@/lib/share-channels';
 
@@ -13,21 +20,29 @@ export const maxDuration = 60;
 /**
  * GET /api/v1/cron/billing-reminders — Sprint 56.
  *
- * Daily renewal-reminder pass over every active paid BillingAccount.
- * For each account whose `paidThroughAt` lands in the 7/3/1-day windows,
- * dispatch an email (SendGrid) + WhatsApp (WATI) reminder once per
- * (account, day, paidThroughAt) tuple.
+ * Daily renewal-lifecycle pass over every active/lapsed paid
+ * BillingAccount. One loop, two outcomes per account:
  *
- * Idempotency: NO new schema. The cron checks for an existing
- * `BILLING_REMINDER_SENT` audit row whose metadata.day +
- * metadata.paidThroughAtMs match the current pairing — if absent, send
- * + audit. A renewal that bumps `paidThroughAt` forward naturally
- * resets the cycle (different metadata.paidThroughAtMs).
+ *   pre-expiry  (paidThroughAt in the future): 7/3/1-day RENEWAL reminder
+ *               (Lever 4 #1, BILLING_REMINDER_SENT).
+ *   post-lapse  (paidThroughAt within the last 10 days): 1/3/7-day
+ *               DUNNING nudge (Lever 4 #5, BILLING_DUNNING_SENT) to
+ *               recover a therapist who let the plan slip.
  *
- * Auth: x-vercel-cron header (set by Vercel cron) OR Bearer CRON_SECRET.
- * Channel falls back to Noop (logs but doesn't send) when env is unset
- * — same posture as the share routes; safe in dev/CI.
+ * CANCELLED accounts are skipped (they opted out). Razorpay is
+ * one-time-orders, so there's no card to auto-retry — dunning is a
+ * "come back and renew" email/WhatsApp, not a charge retry.
+ *
+ * Idempotency: NO new schema. Each send writes an audit row whose
+ * metadata {day, paidThroughAtMs} is the dedupe key; the pre-send check
+ * scans the same. A renewal that bumps paidThroughAt forward resets the
+ * cycle (different paidThroughAtMs).
+ *
+ * Auth: x-vercel-cron header OR Bearer CRON_SECRET. Channels fall back
+ * to Noop when env is unset (dev/CI-safe).
  */
+const DUNNING_WINDOW_DAYS = 10;
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -35,24 +50,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const now = new Date();
   const channels = shareChannels();
+  const dunningFloor = new Date(now.getTime() - DUNNING_WINDOW_DAYS * 24 * 60 * 60 * 1000);
 
-  // Pull every account on a paid plan whose paidThroughAt is still in
-  // the future (lapsed accounts belong to the dunning path, not here).
-  // BillingAccount has no direct `psychologist` relation; resolve in a
-  // single companion query keyed by the psychologist ids.
+  // One query covers both passes: paidThroughAt in the future (reminder)
+  // OR within the recent lapse window (dunning). CANCELLED opted out.
   const accounts = await prisma.billingAccount.findMany({
-    // CANCELLED accounts keep access until lapse but opted out of nudges;
-    // PAUSED accounts have null paidThroughAt so the date filter skips them.
-    where: { plan: { not: 'FREE_TRIAL' }, paidThroughAt: { gt: now }, status: { not: 'CANCELLED' } },
+    where: {
+      plan: { not: 'FREE_TRIAL' },
+      status: { not: 'CANCELLED' },
+      paidThroughAt: { gt: dunningFloor },
+    },
   });
   const psychologists = await prisma.psychologist.findMany({
     where: { id: { in: accounts.map((a) => a.psychologistId) } },
-    select: { id: true, email: true, fullName: true, phone: true },
+    select: { id: true, email: true, phone: true },
   });
   const psyById = new Map(psychologists.map((p) => [p.id, p] as const));
 
   const considered = accounts.length;
-  const sent = { email: 0, whatsapp: 0, skipped: 0, alreadySent: 0 };
+  const sent = { reminder: 0, dunning: 0, email: 0, whatsapp: 0, skipped: 0, alreadySent: 0 };
   const errors: Array<{ psychologistId: string; channel: string; error: string }> = [];
 
   for (const a of accounts) {
@@ -62,117 +78,73 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
     const psy = psyById.get(a.psychologistId);
     if (!psy) {
-      // Orphaned billing row — defensive, shouldn't happen with the
-      // unique psychologistId, but skip rather than crash the cron.
       sent.skipped++;
       continue;
     }
-    const day = reminderDayFor(daysUntil(a.paidThroughAt, now));
+
+    // Bucket by sign: future → reminder, past → dunning.
+    const future = a.paidThroughAt.getTime() > now.getTime();
+    const day = future
+      ? reminderDayFor(daysUntil(a.paidThroughAt, now))
+      : reminderDayFor(daysSinceExpiry(a.paidThroughAt, now));
     if (day === null) {
       sent.skipped++;
       continue;
     }
+    const action: AuditAction = future ? 'BILLING_REMINDER_SENT' : 'BILLING_DUNNING_SENT';
     const paidThroughAtMs = a.paidThroughAt.getTime();
 
-    // Dedupe: have we already audited a reminder for this exact
-    // (account, day, paidThroughAt) tuple? Bounded scan over the last
-    // 60 days (renewal window is never wider) keeps the
-    // (actorPsychologistId, createdAt) index helpful.
-    const since = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-    const recent = await prisma.auditLog.findMany({
-      where: {
-        action: 'BILLING_REMINDER_SENT',
-        actorPsychologistId: a.psychologistId,
-        createdAt: { gte: since },
-      },
-      select: { metadata: true },
-      take: 10,
-    });
-    if (recent.some((r) => matchesDedupe(r.metadata, { day, paidThroughAtMs }))) {
+    if (await alreadySent(a.psychologistId, action, day, paidThroughAtMs, now)) {
       sent.alreadySent++;
       continue;
     }
 
     const tierLabel = planTierLabel(a.plan);
     const amountInr = planAmountInr(a.plan);
-    const copy = renewalCopy({ day, tierLabel, renewalDate: a.paidThroughAt, amountInr });
+    const copy: RenewalCopy = future
+      ? renewalCopy({ day, tierLabel, renewalDate: a.paidThroughAt, amountInr })
+      : dunningCopy({ day, tierLabel, lapsedDate: a.paidThroughAt, amountInr });
 
-    let emailSent = false;
-    let whatsappSent = false;
+    const result = await dispatch({ channels, email: psy.email, phone: psy.phone, copy, errors, ctx: a.psychologistId });
+    if (result.email) sent.email++;
+    if (result.whatsapp) sent.whatsapp++;
 
-    // Email — primary channel; fires unconditionally if the therapist
-    // has an email on file (every Psychologist row has email NOT NULL).
-    try {
-      const r = await channels.email.sendEmail({
-        to: psy.email,
-        subject: copy.subject,
-        textBody: copy.textBody,
-      });
-      if (r.outcome === 'sent') {
-        emailSent = true;
-        sent.email++;
+    if (result.email || result.whatsapp) {
+      if (future) sent.reminder++;
+      else sent.dunning++;
+      // Both verbs are written with a literal string so the audit-coverage
+      // chaos test can find the writer:
+      if (action === 'BILLING_REMINDER_SENT') {
+        await writeAudit({
+          actorType: 'SYSTEM',
+          actorPsychologistId: a.psychologistId,
+          action: 'BILLING_REMINDER_SENT',
+          targetType: 'BillingAccount',
+          targetId: a.id,
+          metadata: {
+            day,
+            paidThroughAtMs,
+            plan: a.plan,
+            tier: PLAN_CATALOG[a.plan].tier,
+            channels: { email: result.email, whatsapp: result.whatsapp },
+          },
+        });
       } else {
-        errors.push({
-          psychologistId: a.psychologistId,
-          channel: 'email',
-          error: `${r.outcome}${r.errorCode ? `:${r.errorCode}` : ''}`,
+        await writeAudit({
+          actorType: 'SYSTEM',
+          actorPsychologistId: a.psychologistId,
+          action: 'BILLING_DUNNING_SENT',
+          targetType: 'BillingAccount',
+          targetId: a.id,
+          metadata: {
+            day,
+            paidThroughAtMs,
+            plan: a.plan,
+            tier: PLAN_CATALOG[a.plan].tier,
+            channels: { email: result.email, whatsapp: result.whatsapp },
+          },
         });
       }
-    } catch (e) {
-      errors.push({
-        psychologistId: a.psychologistId,
-        channel: 'email',
-        error: (e as Error).message,
-      });
-    }
-
-    // WhatsApp — only if WATI is wired AND we have a phone. Template
-    // params are positional per the pre-approved WhatsApp template.
-    if (channels.whatsappReady && psy.phone) {
-      try {
-        const r = await channels.messaging.sendWhatsApp({
-          to: psy.phone,
-          templateName: copy.whatsappTemplate,
-          templateParams: copy.whatsappParams,
-        });
-        if (r.outcome === 'sent') {
-          whatsappSent = true;
-          sent.whatsapp++;
-        } else {
-          errors.push({
-            psychologistId: a.psychologistId,
-            channel: 'whatsapp',
-            error: `${r.outcome}${r.errorCode ? `:${r.errorCode}` : ''}`,
-          });
-        }
-      } catch (e) {
-        errors.push({
-          psychologistId: a.psychologistId,
-          channel: 'whatsapp',
-          error: (e as Error).message,
-        });
-      }
-    }
-
-    // Audit the reminder if ANY channel went out — that's enough to
-    // dedupe future runs (we don't want to spam a working channel
-    // because a sibling channel transiently failed). The dunning path
-    // owns retrying failed channels.
-    if (emailSent || whatsappSent) {
-      await writeAudit({
-        actorType: 'SYSTEM',
-        actorPsychologistId: a.psychologistId,
-        action: 'BILLING_REMINDER_SENT',
-        targetType: 'BillingAccount',
-        targetId: a.id,
-        metadata: {
-          day,
-          paidThroughAtMs,
-          plan: a.plan,
-          tier: PLAN_CATALOG[a.plan].tier,
-          channels: { email: emailSent, whatsapp: whatsappSent },
-        },
-      });
     }
   }
 
@@ -185,22 +157,78 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   });
 }
 
+/** Dedupe: has a matching audit row for (action, day, paidThroughAt) landed recently? */
+async function alreadySent(
+  psychologistId: string,
+  action: AuditAction,
+  day: number,
+  paidThroughAtMs: number,
+  now: Date,
+): Promise<boolean> {
+  const since = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+  const recent = await prisma.auditLog.findMany({
+    where: { action, actorPsychologistId: psychologistId, createdAt: { gte: since } },
+    select: { metadata: true },
+    take: 15,
+  });
+  return recent.some((r) => {
+    const m = r.metadata;
+    if (!m || typeof m !== 'object') return false;
+    const o = m as Record<string, unknown>;
+    return o['day'] === day && o['paidThroughAtMs'] === paidThroughAtMs;
+  });
+}
+
+interface DispatchArgs {
+  channels: ReturnType<typeof shareChannels>;
+  email: string;
+  phone: string;
+  copy: RenewalCopy;
+  errors: Array<{ psychologistId: string; channel: string; error: string }>;
+  ctx: string;
+}
+
+/** Send email (always) + WhatsApp (if wired); returns which channels went out. */
+async function dispatch({
+  channels,
+  email,
+  phone,
+  copy,
+  errors,
+  ctx,
+}: DispatchArgs): Promise<{ email: boolean; whatsapp: boolean }> {
+  let emailSent = false;
+  let whatsappSent = false;
+  try {
+    const r = await channels.email.sendEmail({
+      to: email,
+      subject: copy.subject,
+      textBody: copy.textBody,
+    });
+    if (r.outcome === 'sent') emailSent = true;
+    else errors.push({ psychologistId: ctx, channel: 'email', error: r.outcome });
+  } catch (e) {
+    errors.push({ psychologistId: ctx, channel: 'email', error: (e as Error).message });
+  }
+  if (channels.whatsappReady && phone) {
+    try {
+      const r = await channels.messaging.sendWhatsApp({
+        to: phone,
+        templateName: copy.whatsappTemplate,
+        templateParams: copy.whatsappParams,
+      });
+      if (r.outcome === 'sent') whatsappSent = true;
+      else errors.push({ psychologistId: ctx, channel: 'whatsapp', error: r.outcome });
+    } catch (e) {
+      errors.push({ psychologistId: ctx, channel: 'whatsapp', error: (e as Error).message });
+    }
+  }
+  return { email: emailSent, whatsapp: whatsappSent };
+}
+
 function isAuthorized(req: NextRequest): boolean {
   if (req.headers.get('x-vercel-cron')) return true;
   const secret = process.env['CRON_SECRET'];
   if (!secret) return false;
   return req.headers.get('authorization') === `Bearer ${secret}`;
-}
-
-/**
- * Defensive read of the audit metadata JSON. Prisma's `Json` field is
- * typed `unknown` after select; we only care about two scalar fields.
- */
-function matchesDedupe(
-  metadata: unknown,
-  { day, paidThroughAtMs }: { day: number; paidThroughAtMs: number },
-): boolean {
-  if (!metadata || typeof metadata !== 'object') return false;
-  const m = metadata as Record<string, unknown>;
-  return m['day'] === day && m['paidThroughAtMs'] === paidThroughAtMs;
 }
