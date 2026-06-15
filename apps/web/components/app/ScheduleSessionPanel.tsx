@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
+import type { BillingEntitlement } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, FieldError } from '../ui/Field';
@@ -65,10 +66,10 @@ function ScheduleModal({
   const [time, setTime] = useState('10:00');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Sprint 53 — trial cap modal trigger.
+  // Sprint 53 — trial cap modal trigger; Sprint 56 — paid-cap variant too.
   const [upgradePrompt, setUpgradePrompt] = useState<{
-    trialCap: number;
-    upgradeUrl: string;
+    variant: 'TRIAL_CAP' | 'PLAN_CAP';
+    entitlement: BillingEntitlement;
   } | null>(null);
 
   const filtered = useMemo(() => {
@@ -94,13 +95,16 @@ function ScheduleModal({
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
           code?: string;
-          upgradeUrl?: string;
+          entitlement?: BillingEntitlement;
         };
-        if (res.status === 402 && body.code === 'TRIAL_CAP_REACHED') {
-          const match = body.error?.match(/of (\d+) trial sessions/);
+        if (
+          res.status === 402 &&
+          (body.code === 'TRIAL_CAP_REACHED' || body.code === 'PLAN_CAP_REACHED') &&
+          body.entitlement
+        ) {
           setUpgradePrompt({
-            trialCap: match ? Number(match[1]) : 10,
-            upgradeUrl: body.upgradeUrl ?? '/app/settings/plan',
+            variant: body.code === 'TRIAL_CAP_REACHED' ? 'TRIAL_CAP' : 'PLAN_CAP',
+            entitlement: body.entitlement,
           });
           return;
         }
@@ -204,12 +208,14 @@ function ScheduleModal({
           </form>
         )}
       </Card>
-      <UpgradeModal
-        open={upgradePrompt !== null}
-        onClose={() => setUpgradePrompt(null)}
-        trialCap={upgradePrompt?.trialCap ?? 10}
-        upgradeUrl={upgradePrompt?.upgradeUrl ?? '/app/settings/plan'}
-      />
+      {upgradePrompt && (
+        <UpgradeModal
+          open={true}
+          onClose={() => setUpgradePrompt(null)}
+          variant={upgradePrompt.variant}
+          entitlement={upgradePrompt.entitlement}
+        />
+      )}
     </div>
   );
 }

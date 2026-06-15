@@ -65,6 +65,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           error: `You have used ${entitlement.trialUsed} of ${entitlement.trialCap} trial sessions. Upgrade your plan to record another.`,
           code: 'TRIAL_CAP_REACHED',
           upgradeUrl: '/app/settings/plan',
+          entitlement,
         },
         { status: 402 },
       );
@@ -94,6 +95,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           error: `You've recorded ${entitlement.monthlyUsed} sessions in the last 30 days — your ${planTierLabel(entitlement.plan)} plan includes ${entitlement.monthlySessionCap} a month. Upgrade to Pro for unlimited sessions.`,
           code: 'PLAN_CAP_REACHED',
           upgradeUrl: '/app/settings/plan',
+          entitlement,
         },
         { status: 402 },
       );

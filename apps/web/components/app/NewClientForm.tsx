@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { SessionKind, SessionModality } from '@cureocity/contracts';
+import type { BillingEntitlement, SessionKind, SessionModality } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckboxRow, Input, Label, FieldError } from '../ui/Field';
@@ -46,10 +46,10 @@ export function NewClientForm({ onCancel, onReady }: Props) {
   const [displaySupported] = useState(() => isDisplayCaptureSupported());
 
   const [error, setError] = useState<string | null>(null);
-  // Sprint 53 — trial cap modal trigger; rendered at the end of the form.
+  // Sprint 53 — trial cap modal trigger; Sprint 56 — paid-cap variant too.
   const [upgradePrompt, setUpgradePrompt] = useState<{
-    trialCap: number;
-    upgradeUrl: string;
+    variant: 'TRIAL_CAP' | 'PLAN_CAP';
+    entitlement: BillingEntitlement;
   } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -128,19 +128,21 @@ export function NewClientForm({ onCancel, onReady }: Props) {
       });
       if (!sessionRes.ok) {
         if (sessionRes.status === 402) {
-          // Sprint 53 — trial cap. Show the upgrade modal and stop;
-          // the client row already exists, the therapist can record
-          // a session later after upgrading.
+          // Sprint 53/56 — trial/plan cap. Show the upgrade modal and
+          // stop; the client row already exists, the therapist can
+          // record a session later after upgrading.
           const body = (await sessionRes.json().catch(() => ({}))) as {
             error?: string;
             code?: string;
-            upgradeUrl?: string;
+            entitlement?: BillingEntitlement;
           };
-          if (body.code === 'TRIAL_CAP_REACHED') {
-            const match = body.error?.match(/of (\d+) trial sessions/);
+          if (
+            (body.code === 'TRIAL_CAP_REACHED' || body.code === 'PLAN_CAP_REACHED') &&
+            body.entitlement
+          ) {
             setUpgradePrompt({
-              trialCap: match ? Number(match[1]) : 10,
-              upgradeUrl: body.upgradeUrl ?? '/app/settings/plan',
+              variant: body.code === 'TRIAL_CAP_REACHED' ? 'TRIAL_CAP' : 'PLAN_CAP',
+              entitlement: body.entitlement,
             });
             return;
           }
@@ -290,12 +292,14 @@ export function NewClientForm({ onCancel, onReady }: Props) {
           </Button>
         </div>
       </form>
-      <UpgradeModal
-        open={upgradePrompt !== null}
-        onClose={() => setUpgradePrompt(null)}
-        trialCap={upgradePrompt?.trialCap ?? 10}
-        upgradeUrl={upgradePrompt?.upgradeUrl ?? '/app/settings/plan'}
-      />
+      {upgradePrompt && (
+        <UpgradeModal
+          open={true}
+          onClose={() => setUpgradePrompt(null)}
+          variant={upgradePrompt.variant}
+          entitlement={upgradePrompt.entitlement}
+        />
+      )}
     </Card>
   );
 }

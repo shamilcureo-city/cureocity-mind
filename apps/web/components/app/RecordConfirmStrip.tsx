@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type {
+  BillingEntitlement,
   ConsentScope,
   ModalitySource,
   SessionDefaults,
@@ -135,9 +136,10 @@ export function RecordConfirmStrip({
   // therapist still has to tick before starting.
   const [missingRequired, setMissingRequired] = useState<Record<string, boolean>>({});
   // Sprint 53 — surfaced when the session-create gate returns 402.
+  // Sprint 56 — 402 carries a typed entitlement snapshot, no regex parse.
   const [upgradePrompt, setUpgradePrompt] = useState<{
-    trialCap: number;
-    upgradeUrl: string;
+    variant: 'TRIAL_CAP' | 'PLAN_CAP';
+    entitlement: BillingEntitlement;
   } | null>(null);
   const [crossBorder, setCrossBorder] = useState(false);
   const [extendedRetention, setExtendedRetention] = useState(false);
@@ -210,14 +212,18 @@ export function RecordConfirmStrip({
         const body = (await createRes.json().catch(() => ({}))) as {
           error?: string;
           code?: string;
-          upgradeUrl?: string;
+          entitlement?: BillingEntitlement;
         };
-        if (createRes.status === 402 && body.code === 'TRIAL_CAP_REACHED') {
-          // Sprint 53 — soft trial cap. Show the upgrade modal and
-          // stop the create flow without writing a generic error.
+        if (
+          createRes.status === 402 &&
+          (body.code === 'TRIAL_CAP_REACHED' || body.code === 'PLAN_CAP_REACHED') &&
+          body.entitlement
+        ) {
+          // Sprint 53/56 — soft cap. Show the in-product upgrade modal
+          // and stop the create flow without writing a generic error.
           setUpgradePrompt({
-            trialCap: extractTrialCap(body.error) ?? 10,
-            upgradeUrl: body.upgradeUrl ?? '/app/settings/plan',
+            variant: body.code === 'TRIAL_CAP_REACHED' ? 'TRIAL_CAP' : 'PLAN_CAP',
+            entitlement: body.entitlement,
           });
           return;
         }
@@ -447,12 +453,14 @@ export function RecordConfirmStrip({
           )}
         </>
       )}
-      <UpgradeModal
-        open={upgradePrompt !== null}
-        onClose={() => setUpgradePrompt(null)}
-        trialCap={upgradePrompt?.trialCap ?? 10}
-        upgradeUrl={upgradePrompt?.upgradeUrl ?? '/app/settings/plan'}
-      />
+      {upgradePrompt && (
+        <UpgradeModal
+          open={true}
+          onClose={() => setUpgradePrompt(null)}
+          variant={upgradePrompt.variant}
+          entitlement={upgradePrompt.entitlement}
+        />
+      )}
     </Card>
   );
 }
@@ -519,13 +527,3 @@ function formatRelative(iso: string): string {
   return months === 1 ? '1 month ago' : `${months} months ago`;
 }
 
-/**
- * Sprint 53 — pull the trial cap out of the gate's error string
- * ("You have used X of Y trial sessions...") so the modal shows the
- * right number. Falls back to 10 (the default cap) if we can't parse.
- */
-function extractTrialCap(message: string | undefined): number | null {
-  if (!message) return null;
-  const match = message.match(/of (\d+) trial sessions/);
-  return match ? Number(match[1]) : null;
-}
