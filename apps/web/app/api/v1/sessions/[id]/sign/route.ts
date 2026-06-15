@@ -11,6 +11,11 @@ import {
 } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import {
+  SIGNABLE_FIELDS_BY_KIND,
+  signableKindFor,
+  type SignableKind,
+} from '@/lib/note-edit-fields';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauthn-verify';
@@ -18,27 +23,9 @@ import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauth
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * Sprint 49 — signable fields depend on the parent session's kind.
- * TREATMENT picks the SOAP four; INTAKE picks the eight intake
- * sections. Field-level edits to anything outside the applicable set
- * are rejected at parse time.
- */
-const SIGNABLE_BY_KIND: Record<'TREATMENT' | 'INTAKE', readonly NoteEditField[]> = {
-  TREATMENT: ['subjective', 'objective', 'assessment', 'plan'],
-  INTAKE: [
-    'presentingConcerns',
-    'historyOfPresentingIllness',
-    'pastPsychiatricHistory',
-    'familyHistory',
-    'socialHistory',
-    'mentalStatusExam',
-    'workingHypothesis',
-    'immediatePlan',
-  ],
-};
-
-type SignableKind = keyof typeof SIGNABLE_BY_KIND;
+// Signable field sets + the session-kind → note-shape mapping live in
+// a shared module (apps/web/lib/note-edit-fields.ts) so this route and
+// the post-sign edit route stay in lockstep.
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -141,11 +128,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       { status: 400 },
     );
   }
-  // Sprint 49 — INTAKE notes are signable too. REVIEW kind doesn't
-  // have its own note shape; it reuses TREATMENT's SOAP.
-  const signableKind: SignableKind = session.kind === 'INTAKE' ? 'INTAKE' : 'TREATMENT';
+  // INTAKE notes sign their own shape; TREATMENT + REVIEW share SOAP.
+  const signableKind: SignableKind = signableKindFor(session.kind);
   const noteSchema = signableKind === 'INTAKE' ? IntakeNoteV1Schema : TherapyNoteV1Schema;
-  const signableFields = SIGNABLE_BY_KIND[signableKind];
+  const signableFields = SIGNABLE_FIELDS_BY_KIND[signableKind];
 
   // Sprint 18 → 33 — once the therapist has registered ≥1 platform
   // authenticator, the assertion is REQUIRED, its credentialId must

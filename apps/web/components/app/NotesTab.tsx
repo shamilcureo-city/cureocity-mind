@@ -9,6 +9,7 @@ import type {
   TherapyNote,
   TherapyNoteV1,
 } from '@cureocity/contracts';
+import { IntakeNoteV1Schema } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -362,7 +363,14 @@ export function NotesTab({
     if (isIntake) {
       // Sprint 49 — share + PDF; Sprint 55 — post-sign revision via
       // IntakeRevisionPanel (kind: 'INTAKE' on /note/edit).
-      const signedIntake = note.content as unknown as IntakeNoteV1;
+      // Re-parse so a legacy/object-shaped mentalStatusExam is flattened
+      // to a string before it reaches the revision textareas (the server
+      // does the same on revise). Fall back to the raw cast so a drifted
+      // row still renders.
+      const parsedIntake = IntakeNoteV1Schema.safeParse(note.content);
+      const signedIntake = parsedIntake.success
+        ? parsedIntake.data
+        : (note.content as unknown as IntakeNoteV1);
       return (
         <>
           <MockBackendBanner llmBackend={llmBackend} />
