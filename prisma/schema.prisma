@@ -2148,6 +2148,8 @@ enum AuditAction {
   PAYMENT_FAILED
   // Billing — Sprint 56. Paid tier hit its rolling-30-day session cap.
   PLAN_CAP_REACHED
+  // Billing — Sprint 56. Renewal reminder dispatched (7/3/1 day pre-expiry).
+  BILLING_REMINDER_SENT
 }
 
 enum AuditActorType {

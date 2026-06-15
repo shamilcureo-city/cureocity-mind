@@ -154,6 +154,8 @@ export const AuditActionSchema = z.enum([
   'PAYMENT_FAILED',
   // Billing — Sprint 56. Paid tier hit its rolling-30-day session cap.
   'PLAN_CAP_REACHED',
+  // Billing — Sprint 56. Renewal reminder dispatched (7/3/1 day pre-expiry).
+  'BILLING_REMINDER_SENT',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
