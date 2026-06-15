@@ -913,6 +913,37 @@ model BillingPayment {
   @@map("billing_payments")
 }
 
+/// Sprint 56 (Lever 3b) — one referral code per therapist (their own
+/// share link). Created lazily the first time they open the referral
+/// card.
+model ReferralCode {
+  id             String   @id @default(cuid())
+  psychologistId String   @unique
+  code           String   @unique
+  createdAt      DateTime @default(now())
+
+  @@map("referral_codes")
+}
+
+/// Sprint 56 (Lever 3b) — one row per successful referred signup. The
+/// referred therapist gets a free month immediately; the referrer's
+/// reward is granted only when the referred CONVERTS (first PAID
+/// payment), gated by rewardGrantedAt to prevent abuse + double-pay.
+model ReferralRedemption {
+  id                     String    @id @default(cuid())
+  code                   String
+  referrerPsychologistId String
+  /// A given therapist can be referred at most once (unique).
+  referredPsychologistId String    @unique
+  /// Set when the referrer payout fires (referred's first PAID).
+  rewardGrantedAt        DateTime?
+  createdAt              DateTime  @default(now())
+
+  @@index([referrerPsychologistId])
+  @@index([code])
+  @@map("referral_redemptions")
+}
+
 enum GeminiPass {
   PASS_1_TRANSCRIBE_AND_ANALYSE
   PASS_2_NOTE_GENERATION
@@ -2181,6 +2212,9 @@ enum AuditAction {
   BILLING_DUNNING_SENT
   // Billing — Sprint 56 (Lever 4 #3). GST invoice PDF downloaded.
   INVOICE_DOWNLOADED
+  // Referral — Sprint 56 (Lever 3b).
+  REFERRAL_REDEEMED
+  REFERRAL_REWARDED
 }
 
 enum AuditActorType {

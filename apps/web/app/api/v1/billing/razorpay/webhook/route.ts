@@ -6,6 +6,7 @@ import {
 } from '@cureocity/contracts';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { nextPaidThroughAt, razorpay } from '@/lib/billing';
+import { grantReferrerRewardOnConversion } from '@/lib/referral';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -161,6 +162,30 @@ async function handleCaptured(
       },
       tx,
     );
+
+    // Sprint 56 (Lever 3b) — if this payer was referred, the conversion
+    // triggers the referrer's reward exactly once.
+    const reward = await grantReferrerRewardOnConversion(tx, {
+      referredPsychologistId: payment.psychologistId,
+      now,
+    });
+    if (reward) {
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'REFERRAL_REWARDED',
+          targetType: 'Psychologist',
+          targetId: reward.referrerPsychologistId,
+          metadata: {
+            ...meta,
+            referrerPsychologistId: reward.referrerPsychologistId,
+            referredPsychologistId: payment.psychologistId,
+            newPaidThroughAt: reward.newPaidThroughAt.toISOString(),
+          },
+        },
+        tx,
+      );
+    }
   });
 }
 

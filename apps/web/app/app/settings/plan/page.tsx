@@ -2,6 +2,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { PlanCheckoutButton } from '@/components/app/PlanCheckoutButton';
 import { PlanManageButtons } from '@/components/app/PlanManageButtons';
+import { ReferralCard } from '@/components/app/ReferralCard';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { ensureBillingAccount, getEntitlement, planAmountInr } from '@/lib/billing';
 import { getTherapistMonthlyTotalInr } from '@/lib/cost-guard';
@@ -175,6 +176,8 @@ export default async function PlanSettingsPage() {
           })}
         </div>
       )}
+
+      <ReferralCard />
 
       <Card className="p-7">
         <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">

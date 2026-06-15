@@ -9,6 +9,7 @@ import { writeAudit } from '@/lib/audit';
 import { ensurePersonalClinic } from '@/lib/clinic';
 import { firebaseAuth } from '@/lib/firebase-admin';
 import { isPilotInviteRequired, redeemInviteCode } from '@/lib/invite';
+import { redeemReferralAtSignup } from '@/lib/referral';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 
@@ -36,6 +37,8 @@ const CreateSessionInputSchema = z.object({
   inviteCode: z.string().max(64).optional(),
   /** Sprint 56 — optional UTM bundle from the marketing landing page. */
   acquisitionUtm: AcquisitionUtmSchema.optional(),
+  /** Sprint 56 (Lever 3b) — optional peer referral code from ?ref=. */
+  referralCode: z.string().max(32).optional(),
 });
 
 /** Thrown inside the signup tx to roll it back with a user-facing reason. */
@@ -134,6 +137,34 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         );
         // Sprint 39 — seat the new therapist as OWNER of a personal clinic.
         await ensurePersonalClinic(tx, { psychologistId: row.id, name: row.fullName });
+        // Sprint 56 (Lever 3b) — redeem a referral code if present. The
+        // referred therapist gets a free Pro month; a bad code is a quiet
+        // no-op (never rolls back the signup).
+        if (input.value.referralCode) {
+          const acct = await tx.billingAccount.create({ data: { psychologistId: row.id } });
+          const redeemed = await redeemReferralAtSignup(tx, {
+            code: input.value.referralCode,
+            referredPsychologistId: row.id,
+            billingAccountId: acct.id,
+            now: new Date(),
+          });
+          if (redeemed) {
+            await writeAudit(
+              {
+                actorType: 'PSYCHOLOGIST',
+                actorPsychologistId: row.id,
+                action: 'REFERRAL_REDEEMED',
+                targetType: 'Psychologist',
+                targetId: row.id,
+                metadata: {
+                  code: input.value.referralCode.trim().toUpperCase(),
+                  referrerPsychologistId: redeemed.referrerPsychologistId,
+                },
+              },
+              tx,
+            );
+          }
+        }
         if (inviteRequired) {
           await writeAudit(
             {

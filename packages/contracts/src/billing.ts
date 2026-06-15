@@ -374,6 +374,22 @@ export const BillingMeResponseSchema = z.object({
 export type BillingMeResponse = z.infer<typeof BillingMeResponseSchema>;
 
 /**
+ * GET /api/v1/billing/referral — Sprint 56 (Lever 3b). The therapist's
+ * own code + how it's doing, for the "refer a peer" card.
+ */
+export const ReferralStatusSchema = z.object({
+  code: z.string().min(1),
+  /// Total referred signups attributed to this therapist's code.
+  referredCount: z.number().int().nonnegative(),
+  /// Referred peers who converted (referrer reward granted).
+  rewardedCount: z.number().int().nonnegative(),
+  /// Reward terms, surfaced so the card copy stays in sync with config.
+  referredFreeDays: z.number().int().positive(),
+  referrerRewardDays: z.number().int().positive(),
+});
+export type ReferralStatus = z.infer<typeof ReferralStatusSchema>;
+
+/**
  * Razorpay webhook event envelope. We only need to know the event
  * name + the payment + order ids; everything else stays in the rawEvent
  * column for audit/debug.

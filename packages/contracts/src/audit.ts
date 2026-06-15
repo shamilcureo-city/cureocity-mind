@@ -164,6 +164,9 @@ export const AuditActionSchema = z.enum([
   'BILLING_DUNNING_SENT',
   // Billing — Sprint 56 (Lever 4 #3). GST invoice PDF downloaded.
   'INVOICE_DOWNLOADED',
+  // Referral — Sprint 56 (Lever 3b).
+  'REFERRAL_REDEEMED',
+  'REFERRAL_REWARDED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
