@@ -118,6 +118,7 @@ export async function getEntitlement(psychologistId: string): Promise<BillingEnt
   if (!account) {
     return {
       plan: 'FREE_TRIAL',
+      status: 'ACTIVE',
       isPaidActive: false,
       trialCap: 10,
       trialUsed,
@@ -134,6 +135,7 @@ export async function getEntitlement(psychologistId: string): Promise<BillingEnt
     account.paidThroughAt.getTime() + grace > now;
   return {
     plan: account.plan,
+    status: account.status,
     isPaidActive,
     trialCap: account.trialSessionCap,
     trialUsed,

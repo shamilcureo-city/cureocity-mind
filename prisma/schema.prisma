@@ -859,6 +859,15 @@ model BillingAccount {
   /// On every renewal the date extends from max(now, current value).
   paidThroughAt   DateTime?
 
+  /// Sprint 56 (Lever 4 #4) — self-serve lifecycle.
+  status              BillingAccountStatus @default(ACTIVE)
+  /// Banked days when PAUSED. On pause we clear paidThroughAt and stash
+  /// the remaining days here; resume restores paidThroughAt = now + this.
+  pausedRemainingDays Int?
+  /// Set when the therapist cancels. Access continues until paidThroughAt
+  /// lapses, but renewal reminders + dunning go quiet.
+  canceledAt          DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -866,6 +875,13 @@ model BillingAccount {
 
   @@index([psychologistId])
   @@map("billing_accounts")
+}
+
+/// Sprint 56 (Lever 4 #4) — self-serve plan lifecycle.
+enum BillingAccountStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
 }
 
 /// Sprint 53 — one row per Razorpay order. CREATED when we open the
@@ -2157,6 +2173,10 @@ enum AuditAction {
   PLAN_CAP_REACHED
   // Billing — Sprint 56. Renewal reminder dispatched (7/3/1 day pre-expiry).
   BILLING_REMINDER_SENT
+  // Billing — Sprint 56 (Lever 4 #4). Self-serve plan lifecycle.
+  PLAN_PAUSED
+  PLAN_RESUMED
+  PLAN_CANCELLED
 }
 
 enum AuditActorType {

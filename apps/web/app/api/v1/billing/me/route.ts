@@ -41,8 +41,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     id: accountRow.id,
     psychologistId: accountRow.psychologistId,
     plan: accountRow.plan,
+    status: accountRow.status,
     trialSessionCap: accountRow.trialSessionCap,
     paidThroughAt: accountRow.paidThroughAt?.toISOString() ?? null,
+    pausedRemainingDays: accountRow.pausedRemainingDays,
+    canceledAt: accountRow.canceledAt?.toISOString() ?? null,
     createdAt: accountRow.createdAt.toISOString(),
     updatedAt: accountRow.updatedAt.toISOString(),
   };

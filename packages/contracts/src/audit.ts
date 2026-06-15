@@ -156,6 +156,10 @@ export const AuditActionSchema = z.enum([
   'PLAN_CAP_REACHED',
   // Billing — Sprint 56. Renewal reminder dispatched (7/3/1 day pre-expiry).
   'BILLING_REMINDER_SENT',
+  // Billing — Sprint 56 (Lever 4 #4). Self-serve plan lifecycle.
+  'PLAN_PAUSED',
+  'PLAN_RESUMED',
+  'PLAN_CANCELLED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

@@ -1,6 +1,7 @@
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { PlanCheckoutButton } from '@/components/app/PlanCheckoutButton';
+import { PlanManageButtons } from '@/components/app/PlanManageButtons';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { ensureBillingAccount, getEntitlement, planAmountInr } from '@/lib/billing';
 import { getTherapistMonthlyTotalInr } from '@/lib/cost-guard';
@@ -9,6 +10,7 @@ import {
   PLAN_CATALOG,
   intervalMonths,
   planLabel,
+  planTierLabel,
   purchasablePlansByTier,
 } from '@cureocity/contracts';
 
@@ -26,13 +28,17 @@ export default async function PlanSettingsPage() {
   const me = await requireOnboardedPsychologist();
   await ensureBillingAccount(me.id);
 
-  const [entitlement, monthlySpend, payments] = await Promise.all([
+  const [entitlement, monthlySpend, payments, account] = await Promise.all([
     getEntitlement(me.id),
     getTherapistMonthlyTotalInr(me.id),
     prisma.billingPayment.findMany({
       where: { psychologistId: me.id },
       orderBy: { createdAt: 'desc' },
       take: 10,
+    }),
+    prisma.billingAccount.findUnique({
+      where: { psychologistId: me.id },
+      select: { pausedRemainingDays: true, paidThroughAt: true },
     }),
   ]);
 
@@ -41,7 +47,21 @@ export default async function PlanSettingsPage() {
 
   const pct = Math.min(100, Math.round((entitlement.trialUsed / entitlement.trialCap) * 100));
   const isPaid = entitlement.isPaidActive;
-  const currentPlanLabel = isPaid ? planLabel(entitlement.plan) : 'Free trial';
+  // Sprint 56 (Lever 4 #4) — lifecycle states gate what the page shows.
+  const paused = entitlement.status === 'PAUSED';
+  const canceled = entitlement.status === 'CANCELLED';
+  const isTrial = entitlement.plan === 'FREE_TRIAL' && !isPaid;
+  // Pick-a-plan ladder: trial, lapsed paid, or cancelled-and-lapsed — but
+  // never while paused (Resume is the path back).
+  const showLadder = !isPaid && !paused;
+  const showManage = isPaid || paused;
+  const dateFmt = (d: string) =>
+    new Date(d).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
+  const currentPlanLabel = paused
+    ? `${planTierLabel(entitlement.plan)} — paused`
+    : isPaid
+      ? planLabel(entitlement.plan)
+      : 'Free trial';
 
   return (
     <div className="space-y-6">
@@ -49,28 +69,36 @@ export default async function PlanSettingsPage() {
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-serif text-2xl">{currentPlanLabel}</h2>
-            {isPaid && entitlement.paidThroughAt && (
+            {paused && (
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                Renews on{' '}
-                {new Date(entitlement.paidThroughAt).toLocaleDateString('en-IN', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-                .
+                {account?.pausedRemainingDays ?? 0} paid days are banked. Resume anytime to pick up
+                where you left off.
               </p>
             )}
-            {!isPaid && (
+            {isPaid && canceled && entitlement.paidThroughAt && (
+              <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                Cancelled — access until {dateFmt(entitlement.paidThroughAt)}. Your plan won&rsquo;t
+                renew.
+              </p>
+            )}
+            {isPaid && !canceled && entitlement.paidThroughAt && (
+              <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                Renews on {dateFmt(entitlement.paidThroughAt)}.
+              </p>
+            )}
+            {isTrial && (
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
                 Trial sessions are capped — upgrade to keep recording new sessions. Existing notes,
                 shares, and the AI copilot keep working at the cap.
               </p>
             )}
           </div>
-          <Badge tone={isPaid ? 'accent' : 'muted'}>{isPaid ? 'paid plan' : 'trial'}</Badge>
+          <Badge tone={canceled ? 'warn' : isPaid ? 'accent' : 'muted'}>
+            {paused ? 'paused' : canceled ? 'cancelling' : isPaid ? 'paid plan' : 'trial'}
+          </Badge>
         </header>
 
-        {!isPaid && (
+        {isTrial && (
           <div className="mt-6 max-w-md">
             <div className="flex items-baseline justify-between text-sm">
               <span className="text-[var(--color-ink-2)]">Sessions recorded</span>
@@ -83,9 +111,16 @@ export default async function PlanSettingsPage() {
             </div>
           </div>
         )}
+
+        {showManage && (
+          <PlanManageButtons
+            status={entitlement.status}
+            pausedRemainingDays={account?.pausedRemainingDays ?? null}
+          />
+        )}
       </Card>
 
-      {!isPaid && (
+      {showLadder && (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {purchasablePlansByTier().map((group) => {
             const monthly =

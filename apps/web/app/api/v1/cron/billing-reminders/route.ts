@@ -41,7 +41,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // BillingAccount has no direct `psychologist` relation; resolve in a
   // single companion query keyed by the psychologist ids.
   const accounts = await prisma.billingAccount.findMany({
-    where: { plan: { not: 'FREE_TRIAL' }, paidThroughAt: { gt: now } },
+    // CANCELLED accounts keep access until lapse but opted out of nudges;
+    // PAUSED accounts have null paidThroughAt so the date filter skips them.
+    where: { plan: { not: 'FREE_TRIAL' }, paidThroughAt: { gt: now }, status: { not: 'CANCELLED' } },
   });
   const psychologists = await prisma.psychologist.findMany({
     where: { id: { in: accounts.map((a) => a.psychologistId) } },

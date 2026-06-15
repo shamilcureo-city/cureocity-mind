@@ -276,6 +276,10 @@ export function purchasablePlansByTier(): Array<{
 export const BillingPaymentStatusSchema = z.enum(['CREATED', 'PAID', 'FAILED']);
 export type BillingPaymentStatus = z.infer<typeof BillingPaymentStatusSchema>;
 
+/** Sprint 56 (Lever 4 #4) — self-serve plan lifecycle state. */
+export const BillingAccountStatusSchema = z.enum(['ACTIVE', 'PAUSED', 'CANCELLED']);
+export type BillingAccountStatus = z.infer<typeof BillingAccountStatusSchema>;
+
 /**
  * Entitlement summary the UI + the session-create gate both read.
  * `isPaidActive` collapses (plan, paidThroughAt + grace) into a single
@@ -283,6 +287,8 @@ export type BillingPaymentStatus = z.infer<typeof BillingPaymentStatusSchema>;
  */
 export const BillingEntitlementSchema = z.object({
   plan: BillingPlanSchema,
+  /// Sprint 56 — lifecycle state (ACTIVE / PAUSED / CANCELLED).
+  status: BillingAccountStatusSchema,
   isPaidActive: z.boolean(),
   trialCap: z.number().int().nonnegative(),
   trialUsed: z.number().int().nonnegative(),
@@ -349,8 +355,12 @@ export const BillingAccountSchema = z.object({
   id: CuidSchema,
   psychologistId: CuidSchema,
   plan: BillingPlanSchema,
+  status: BillingAccountStatusSchema,
   trialSessionCap: z.number().int().nonnegative(),
   paidThroughAt: IsoDateTimeSchema.nullable(),
+  /// Banked days while PAUSED; null otherwise.
+  pausedRemainingDays: z.number().int().nonnegative().nullable(),
+  canceledAt: IsoDateTimeSchema.nullable(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
 });
