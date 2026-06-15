@@ -113,6 +113,13 @@ model Psychologist {
   webauthnCredentials WebAuthnCredential[]
   clinicMemberships   ClinicMembership[]
 
+  /// Sprint 56 (Lever 3a) — acquisition attribution captured at signup.
+  /// Free-form JSON; shape is { utm_source, utm_medium, utm_campaign,
+  /// referrer } with every field optional. Read by the admin funnel
+  /// dashboard. NULL for pre-S56 rows + any row whose signup happened
+  /// without UTM params on the landing URL.
+  acquisitionUtm Json?
+
   @@index([status])
   @@index([role])
   @@index([isAcceptingNewClients])

@@ -43,7 +43,12 @@ export default async function FunnelPage() {
     await Promise.all([
       prisma.psychologist.findMany({
         where: { deletedAt: null, role: 'THERAPIST' },
-        select: { id: true, createdAt: true, onboardingCompletedAt: true },
+        select: {
+          id: true,
+          createdAt: true,
+          onboardingCompletedAt: true,
+          acquisitionUtm: true,
+        },
       }),
       // distinct therapists with >=1 real-client session
       prisma.session.findMany({
@@ -130,6 +135,20 @@ export default async function FunnelPage() {
   }
   const cohorts = [...cohortMap.entries()].sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6);
 
+  // Sprint 56 (Lever 3a) — top acquisition sources by signups + paid
+  // conversion. Reads Psychologist.acquisitionUtm captured at signup;
+  // null rows fall into the '(direct / unknown)' bucket.
+  const sourceMap = new Map<string, { signups: number; paid: number }>();
+  for (const t of therapists) {
+    const utm = t.acquisitionUtm as { utm_source?: string } | null;
+    const key = utm?.utm_source?.toLowerCase().trim() || '(direct / unknown)';
+    const s = sourceMap.get(key) ?? { signups: 0, paid: 0 };
+    s.signups += 1;
+    if (activePaidByPsy.has(t.id)) s.paid += 1;
+    sourceMap.set(key, s);
+  }
+  const sources = [...sourceMap.entries()].sort((a, b) => b[1].signups - a[1].signups).slice(0, 8);
+
   const funnel = [
     { label: 'Signed up', value: signups, pct: 100 },
     { label: 'Onboarded', value: onboarded, pct: pct(onboarded) },
@@ -205,6 +224,46 @@ export default async function FunnelPage() {
                 </tr>
               );
             })}
+          </tbody>
+        </table>
+      </Card>
+
+      <Card className="mt-6 p-7">
+        <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+          Top acquisition sources
+        </h2>
+        <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+          Captured at signup from the marketing-landing URL params. Rows for past signups (pre-S56)
+          fall into the direct/unknown bucket.
+        </p>
+        <table className="mt-4 w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-[var(--color-ink-3)]">
+              <th className="pb-2">Source</th>
+              <th className="pb-2 text-right">Signups</th>
+              <th className="pb-2 text-right">Paid</th>
+              <th className="pb-2 text-right">Conv.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sources.length === 0 ? (
+              <tr>
+                <td colSpan={4} className="py-3 text-[var(--color-ink-3)]">
+                  No signups yet.
+                </td>
+              </tr>
+            ) : (
+              sources.map(([source, s]) => (
+                <tr key={source} className="border-t border-[var(--color-line-soft)]">
+                  <td className="py-2">{source}</td>
+                  <td className="py-2 text-right tabular-nums">{s.signups}</td>
+                  <td className="py-2 text-right tabular-nums">{s.paid}</td>
+                  <td className="py-2 text-right tabular-nums">
+                    {s.signups > 0 ? Math.round((s.paid / s.signups) * 100) : 0}%
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </Card>

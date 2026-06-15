@@ -20,6 +20,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { shareChannels } from '@/lib/share-channels';
 import { buildSnapshot, SnapshotBuildError } from '@/lib/share-snapshots';
+import { WATERMARK_TAGLINE, watermarkUrl } from '@/lib/watermark';
 import { toPatientShare } from '@/lib/clinical-mappers';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
@@ -374,6 +375,9 @@ async function sendViaChannel(args: SendArgs): Promise<SendResult> {
   }
   if (args.channel === 'EMAIL') {
     const intro = args.therapistMessage?.trim();
+    // Sprint 56 (Lever 3a) — append a UTM-tagged watermark so every
+    // share is a brand touch to prospective therapists.
+    const cmsUrl = watermarkUrl({ source: 'share_email', campaign: args.snapshot.kind });
     const bodyLines = [
       `Hi ${args.clientFirstName},`,
       '',
@@ -384,6 +388,8 @@ async function sendViaChannel(args: SendArgs): Promise<SendResult> {
       'This link is private to you. It expires in 30 days.',
       '',
       '— Cureocity Mind',
+      '',
+      `${WATERMARK_TAGLINE} ${cmsUrl}`,
     ];
     return channels.email.sendEmail({
       to: args.toContact,
@@ -394,6 +400,7 @@ async function sendViaChannel(args: SendArgs): Promise<SendResult> {
         intro: intro ?? null,
         subject: args.subject,
         portalUrl: args.portalUrl,
+        watermarkUrl: cmsUrl,
       }),
     });
   }
@@ -406,6 +413,7 @@ function composeEmailHtml(args: {
   intro: string | null;
   subject: string;
   portalUrl: string;
+  watermarkUrl: string;
 }): string {
   const introBlock = args.intro
     ? `<p style="margin:0 0 16px 0; color:#3c4858">${escapeHtml(args.intro)}</p>`
@@ -419,7 +427,10 @@ function composeEmailHtml(args: {
   <p style="margin:0 0 32px 0;">
     <a href="${args.portalUrl}" style="display:inline-block; background:#1f2933; color:#fff; text-decoration:none; padding:10px 18px; border-radius:999px; font-weight:500;">Open the page</a>
   </p>
-  <p style="margin:0; font-size:12px; color:#7b8794;">This link is private to you and expires in 30 days.</p>
+  <p style="margin:0 0 12px 0; font-size:12px; color:#7b8794;">This link is private to you and expires in 30 days.</p>
+  <p style="margin:24px 0 0 0; padding-top:16px; border-top:1px solid #e6e9ed; font-size:11px; color:#7b8794;">
+    <a href="${args.watermarkUrl}" style="color:#7b8794; text-decoration:none;">${escapeHtml(WATERMARK_TAGLINE)}</a>
+  </p>
 </body></html>`;
 }
 

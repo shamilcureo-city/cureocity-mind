@@ -10,6 +10,7 @@ import { CheckinForm } from '@/components/portal/CheckinForm';
 import { HomeworkDoneButton } from '@/components/portal/HomeworkDoneButton';
 import { writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
+import { WATERMARK_TAGLINE, watermarkUrl } from '@/lib/watermark';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -130,6 +131,19 @@ export default async function PortalPage({ params }: PageProps) {
 
       <footer className="mt-10 border-t border-[var(--color-line-soft)] pt-5 text-xs text-[var(--color-ink-3)]">
         <p>This page is private to you. Cureocity Mind does not share it with anyone else.</p>
+        <p className="mt-3">
+          <a
+            href={watermarkUrl({
+              source: 'patient_portal',
+              campaign: snapshot?.kind ?? 'PORTAL',
+            })}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--color-accent)] hover:underline"
+          >
+            {WATERMARK_TAGLINE}
+          </a>
+        </p>
       </footer>
     </main>
   );

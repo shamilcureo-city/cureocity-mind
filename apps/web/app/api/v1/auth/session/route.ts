@@ -14,10 +14,28 @@ import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
+/**
+ * Sprint 56 (Lever 3a) — acquisition attribution captured at signup.
+ * Marketing site forwards UTM params from the landing URL to this body
+ * so the funnel dashboard can attribute signups to the artefact / channel
+ * / campaign that drove them. All fields optional; bounded length so a
+ * malicious caller can't bloat the JSON column.
+ */
+const AcquisitionUtmSchema = z
+  .object({
+    utm_source: z.string().max(64).optional(),
+    utm_medium: z.string().max(64).optional(),
+    utm_campaign: z.string().max(128).optional(),
+    referrer: z.string().max(2048).optional(),
+  })
+  .strip();
+
 const CreateSessionInputSchema = z.object({
   idToken: z.string().min(1),
   /** Sprint 37 — required for a first-time signup when PILOT_INVITE_REQUIRED=true. */
   inviteCode: z.string().max(64).optional(),
+  /** Sprint 56 — optional UTM bundle from the marketing landing page. */
+  acquisitionUtm: AcquisitionUtmSchema.optional(),
 });
 
 /** Thrown inside the signup tx to roll it back with a user-facing reason. */
@@ -91,6 +109,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             email: decoded.email ?? `${decoded.uid}@unclaimed.cureocity.app`,
             phone: decoded.phone_number ?? `pending:${decoded.uid}`,
             rciNumber: `PENDING-${decoded.uid}`,
+            // Sprint 56 — only persist if at least one field is set, so a
+            // bare {} doesn't drown the signal in the funnel dashboard.
+            acquisitionUtm:
+              input.value.acquisitionUtm && Object.keys(input.value.acquisitionUtm).length > 0
+                ? input.value.acquisitionUtm
+                : undefined,
           },
           select: { id: true, deletedAt: true, fullName: true },
         });
