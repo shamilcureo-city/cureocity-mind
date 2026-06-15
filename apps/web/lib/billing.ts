@@ -4,6 +4,7 @@ import {
   RazorpayHttpBackend,
   type IRazorpayPort,
 } from '@cureocity/billing';
+import { PLAN_CATALOG } from '@cureocity/contracts';
 import type { BillingEntitlement, BillingPlan } from '@cureocity/contracts';
 import { prisma } from './prisma';
 
@@ -23,9 +24,8 @@ declare global {
   var __cureocityRazorpay: IRazorpayPort | undefined;
 }
 
-const SOLO_MONTHLY_DEFAULT_INR = 999;
-const SOLO_ANNUAL_DEFAULT_INR = 9990;
 const PAID_GRACE_DAYS = 3;
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function razorpay(): IRazorpayPort {
   if (globalThis.__cureocityRazorpay) return globalThis.__cureocityRazorpay;
@@ -62,20 +62,23 @@ export function publicRazorpayKeyId(): string | null {
   return process.env['NEXT_PUBLIC_RAZORPAY_KEY_ID'] ?? null;
 }
 
+/**
+ * List price in rupees for a plan, read from PLAN_CATALOG and
+ * overridable per the catalog's envKey (so we can A/B a price without a
+ * deploy). Returns 0 for FREE_TRIAL / unpriced — the checkout route
+ * treats <= 0 as "not configured" and 500s rather than minting a zero
+ * order. A non-numeric env override falls back to the catalog default.
+ */
 export function planAmountInr(plan: BillingPlan): number {
-  if (plan === 'SOLO_MONTHLY') {
-    return Number(process.env['BILLING_PRICE_SOLO_MONTHLY_INR'] ?? SOLO_MONTHLY_DEFAULT_INR);
-  }
-  if (plan === 'SOLO_ANNUAL') {
-    return Number(process.env['BILLING_PRICE_SOLO_ANNUAL_INR'] ?? SOLO_ANNUAL_DEFAULT_INR);
-  }
-  return 0;
+  const spec = PLAN_CATALOG[plan];
+  if (!spec || spec.defaultPriceInr <= 0) return 0;
+  const override = spec.envKey ? process.env[spec.envKey] : undefined;
+  const parsed = override !== undefined && override !== '' ? Number(override) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : spec.defaultPriceInr;
 }
 
 export function planPeriodDays(plan: BillingPlan): number {
-  if (plan === 'SOLO_MONTHLY') return 31; // one calendar month is fine
-  if (plan === 'SOLO_ANNUAL') return 366; // one calendar year is fine
-  return 0;
+  return PLAN_CATALOG[plan]?.periodDays ?? 0;
 }
 
 /**
@@ -101,10 +104,15 @@ export async function ensureBillingAccount(psychologistId: string): Promise<{ id
  * sessions must never burn trial allowance.
  */
 export async function getEntitlement(psychologistId: string): Promise<BillingEntitlement> {
-  const [account, trialUsed] = await Promise.all([
+  const since = new Date(Date.now() - THIRTY_DAYS_MS);
+  const [account, trialUsed, monthlyUsed] = await Promise.all([
     prisma.billingAccount.findUnique({ where: { psychologistId } }),
     prisma.session.count({
       where: { psychologistId, client: { isDemo: false } },
+    }),
+    // Sprint 56 — rolling-30-day count drives the paid-tier monthly cap.
+    prisma.session.count({
+      where: { psychologistId, client: { isDemo: false }, createdAt: { gte: since } },
     }),
   ]);
   if (!account) {
@@ -113,6 +121,8 @@ export async function getEntitlement(psychologistId: string): Promise<BillingEnt
       isPaidActive: false,
       trialCap: 10,
       trialUsed,
+      monthlyUsed,
+      monthlySessionCap: null,
       paidThroughAt: null,
     };
   }
@@ -127,6 +137,10 @@ export async function getEntitlement(psychologistId: string): Promise<BillingEnt
     isPaidActive,
     trialCap: account.trialSessionCap,
     trialUsed,
+    monthlyUsed,
+    // Only an active paid tier with a finite cap (Trainee/Starter) gates
+    // on the rolling window; Pro/Premium + trial return null here.
+    monthlySessionCap: isPaidActive ? PLAN_CATALOG[account.plan].monthlySessionCap : null,
     paidThroughAt: account.paidThroughAt?.toISOString() ?? null,
   };
 }

@@ -809,11 +809,23 @@ enum CaseConsultStatus {
 }
 
 /// Sprint 53 — subscription plan tier. FREE_TRIAL is the default for
-/// every new psychologist; SOLO_MONTHLY / SOLO_ANNUAL are paid plans.
+/// every new psychologist. SOLO_* are the legacy Sprint 53 plans, kept
+/// for grandfathered payers (not offered to new buyers). Sprint 56 adds
+/// the Trainee/Starter/Pro/Premium ladder (tier × interval). Per-plan
+/// facts (price, period, cap) live in PLAN_CATALOG in
+/// packages/contracts/src/billing.ts — this enum is just the identity.
 enum BillingPlan {
   FREE_TRIAL
   SOLO_MONTHLY
   SOLO_ANNUAL
+  TRAINEE_MONTHLY
+  STARTER_MONTHLY
+  STARTER_ANNUAL
+  PRO_MONTHLY
+  PRO_QUARTERLY
+  PRO_ANNUAL
+  PREMIUM_MONTHLY
+  PREMIUM_ANNUAL
 }
 
 /// Sprint 53 — Razorpay payment lifecycle. CREATED on order, PAID
@@ -2134,6 +2146,8 @@ enum AuditAction {
   PLAN_UPGRADED
   PAYMENT_RECEIVED
   PAYMENT_FAILED
+  // Billing — Sprint 56. Paid tier hit its rolling-30-day session cap.
+  PLAN_CAP_REACHED
 }
 
 enum AuditActorType {

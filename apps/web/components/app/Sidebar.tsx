@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { isPaidPlan, planTierLabel, type BillingPlan } from '@cureocity/contracts';
 
 interface NavItem {
   href: string;
@@ -26,9 +27,10 @@ export interface PlanUsage {
   /// Sessions recorded against the free pilot allowance.
   used: number;
   cap: number;
-  /// Sprint 53 — when set to a paid plan, the widget flips its label
-  /// to "Solo · renews <date>" instead of showing the trial bar.
-  plan?: 'FREE_TRIAL' | 'SOLO_MONTHLY' | 'SOLO_ANNUAL';
+  /// Sprint 53 — when set to a paid plan, the widget flips its label to
+  /// "<tier> · renews <date>" instead of showing the trial bar.
+  /// Sprint 56 — any BillingPlan (the tier ladder), not just SOLO.
+  plan?: BillingPlan;
   paidThroughAt?: string | null;
 }
 
@@ -88,7 +90,7 @@ export function Sidebar({ usage = null }: SidebarProps) {
 
 function PlanWidget({ usage }: { usage: PlanUsage | null }) {
   if (!usage) return null;
-  const isPaid = usage.plan === 'SOLO_MONTHLY' || usage.plan === 'SOLO_ANNUAL';
+  const isPaid = usage.plan !== undefined && isPaidPlan(usage.plan);
   if (isPaid && usage.paidThroughAt) {
     const renewsOn = new Date(usage.paidThroughAt).toLocaleDateString('en-IN', {
       month: 'short',
@@ -98,7 +100,9 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
     return (
       <div className="rounded-2xl border border-[var(--color-line)] bg-white p-4">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">Solo</p>
+          <p className="text-sm font-semibold">
+            {usage.plan ? planTierLabel(usage.plan) : 'Plan'}
+          </p>
           <Link
             href="/app/settings/plan"
             className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"

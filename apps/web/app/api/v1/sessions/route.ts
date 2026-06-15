@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { CreateSessionInputSchema } from '@cureocity/contracts';
+import { CreateSessionInputSchema, planTierLabel } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { getEntitlement } from '@/lib/billing';
@@ -64,6 +64,35 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         {
           error: `You have used ${entitlement.trialUsed} of ${entitlement.trialCap} trial sessions. Upgrade your plan to record another.`,
           code: 'TRIAL_CAP_REACHED',
+          upgradeUrl: '/app/settings/plan',
+        },
+        { status: 402 },
+      );
+    }
+    // Sprint 56 — paid-tier rolling-30-day session cap (Trainee 15 /
+    // Starter 30). Pro/Premium carry monthlySessionCap = null and never
+    // gate here; FREE_TRIAL is handled by the trial branch above.
+    if (
+      entitlement.isPaidActive &&
+      entitlement.monthlySessionCap !== null &&
+      entitlement.monthlyUsed >= entitlement.monthlySessionCap
+    ) {
+      await writeAudit({
+        actorType: 'SYSTEM',
+        action: 'PLAN_CAP_REACHED',
+        targetType: 'Psychologist',
+        targetId: auth.value.psychologistId,
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          plan: entitlement.plan,
+          monthlySessionCap: entitlement.monthlySessionCap,
+          monthlyUsed: entitlement.monthlyUsed,
+        },
+      });
+      return NextResponse.json(
+        {
+          error: `You've recorded ${entitlement.monthlyUsed} sessions in the last 30 days — your ${planTierLabel(entitlement.plan)} plan includes ${entitlement.monthlySessionCap} a month. Upgrade to Pro for unlimited sessions.`,
+          code: 'PLAN_CAP_REACHED',
           upgradeUrl: '/app/settings/plan',
         },
         { status: 402 },

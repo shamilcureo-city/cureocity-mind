@@ -152,6 +152,8 @@ export const AuditActionSchema = z.enum([
   'PLAN_UPGRADED',
   'PAYMENT_RECEIVED',
   'PAYMENT_FAILED',
+  // Billing — Sprint 56. Paid tier hit its rolling-30-day session cap.
+  'PLAN_CAP_REACHED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

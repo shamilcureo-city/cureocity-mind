@@ -5,15 +5,22 @@ import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { ensureBillingAccount, getEntitlement, planAmountInr } from '@/lib/billing';
 import { getTherapistMonthlyTotalInr } from '@/lib/cost-guard';
 import { prisma } from '@/lib/prisma';
+import {
+  PLAN_CATALOG,
+  intervalMonths,
+  planLabel,
+  purchasablePlansByTier,
+} from '@cureocity/contracts';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Settings → Plan — Sprint 53 rebuild.
+ * Settings → Plan — Sprint 53 rebuild, Sprint 56 tier ladder.
  *
- * Current plan + trial allowance (real, server-enforced now) + AI
- * spend + payment history. Razorpay Checkout opens via the inline
- * PlanCheckoutButton.
+ * Current plan + trial allowance + AI spend + payment history. When the
+ * therapist is on a trial (or lapsed), the Trainee/Starter/Pro/Premium
+ * ladder renders from PLAN_CATALOG so prices + tiers stay in one place.
+ * Razorpay Checkout opens via the inline PlanCheckoutButton.
  */
 export default async function PlanSettingsPage() {
   const me = await requireOnboardedPsychologist();
@@ -33,23 +40,15 @@ export default async function PlanSettingsPage() {
   const monthlyCapInr = Number(process.env['COST_CAP_PER_THERAPIST_MONTHLY_INR'] ?? 15_000);
 
   const pct = Math.min(100, Math.round((entitlement.trialUsed / entitlement.trialCap) * 100));
-  const monthlyInr = planAmountInr('SOLO_MONTHLY');
-  const annualInr = planAmountInr('SOLO_ANNUAL');
-
   const isPaid = entitlement.isPaidActive;
-  const planLabel =
-    entitlement.plan === 'SOLO_MONTHLY'
-      ? 'Solo · monthly'
-      : entitlement.plan === 'SOLO_ANNUAL'
-        ? 'Solo · annual'
-        : 'Free trial';
+  const currentPlanLabel = isPaid ? planLabel(entitlement.plan) : 'Free trial';
 
   return (
     <div className="space-y-6">
       <Card className="p-7">
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="font-serif text-2xl">{planLabel}</h2>
+            <h2 className="font-serif text-2xl">{currentPlanLabel}</h2>
             {isPaid && entitlement.paidThroughAt && (
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
                 Renews on{' '}
@@ -87,39 +86,58 @@ export default async function PlanSettingsPage() {
       </Card>
 
       {!isPaid && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="p-7">
-            <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Solo · monthly
-            </h3>
-            <p className="mt-2 font-serif text-3xl">₹{monthlyInr.toLocaleString('en-IN')}</p>
-            <p className="text-xs text-[var(--color-ink-3)]">per month</p>
-            <ul className="mt-4 space-y-1 text-sm text-[var(--color-ink-2)]">
-              <li>· Unlimited sessions</li>
-              <li>· Full AI Copilot (Brief, Mindmap, Journey, Consult)</li>
-              <li>· Patient portal + WhatsApp / email shares</li>
-            </ul>
-            <div className="mt-5">
-              <PlanCheckoutButton plan="SOLO_MONTHLY" />
-            </div>
-          </Card>
-          <Card className="p-7">
-            <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Solo · annual
-            </h3>
-            <p className="mt-2 font-serif text-3xl">₹{annualInr.toLocaleString('en-IN')}</p>
-            <p className="text-xs text-[var(--color-ink-3)]">
-              per year · about ₹{Math.round(annualInr / 12).toLocaleString('en-IN')} per month
-            </p>
-            <ul className="mt-4 space-y-1 text-sm text-[var(--color-ink-2)]">
-              <li>· Everything in Solo · monthly</li>
-              <li>· Two months free vs monthly</li>
-              <li>· One charge a year — no monthly chasing</li>
-            </ul>
-            <div className="mt-5">
-              <PlanCheckoutButton plan="SOLO_ANNUAL" />
-            </div>
-          </Card>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {purchasablePlansByTier().map((group) => {
+            const monthly =
+              group.plans.find((p) => PLAN_CATALOG[p].interval === 'MONTHLY') ?? group.plans[0]!;
+            const monthlyInr = planAmountInr(monthly);
+            const highlight = PLAN_CATALOG[monthly].highlight;
+            const longerIntervals = group.plans.filter((p) => p !== monthly);
+            return (
+              <Card
+                key={group.tier}
+                className={`flex flex-col p-6 ${
+                  highlight ? 'ring-2 ring-[var(--color-accent)]' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                    {group.tierLabel}
+                  </h3>
+                  {highlight && <Badge tone="accent">Most popular</Badge>}
+                </div>
+                <p className="mt-2 font-serif text-3xl">₹{monthlyInr.toLocaleString('en-IN')}</p>
+                <p className="text-xs text-[var(--color-ink-3)]">per month</p>
+                <p className="mt-2 text-xs text-[var(--color-ink-2)]">{group.blurb}</p>
+                <ul className="mt-4 flex-1 space-y-1 text-sm text-[var(--color-ink-2)]">
+                  {group.features.map((f) => (
+                    <li key={f}>· {f}</li>
+                  ))}
+                </ul>
+                <div className="mt-5 space-y-2">
+                  <PlanCheckoutButton plan={monthly} label={`Choose ${group.tierLabel}`} />
+                  {longerIntervals.map((p) => {
+                    const inr = planAmountInr(p);
+                    const months = intervalMonths(PLAN_CATALOG[p].interval);
+                    const effectiveMonthly = Math.round(inr / months);
+                    const save =
+                      monthlyInr > 0 ? Math.round((1 - effectiveMonthly / monthlyInr) * 100) : 0;
+                    const word = PLAN_CATALOG[p].interval === 'ANNUAL' ? 'year' : 'quarter';
+                    return (
+                      <PlanCheckoutButton
+                        key={p}
+                        plan={p}
+                        variant="secondary"
+                        label={`₹${inr.toLocaleString('en-IN')}/${word}${
+                          save > 0 ? ` · save ${save}%` : ''
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -154,11 +172,12 @@ export default async function PlanSettingsPage() {
           </h3>
           <ul className="mt-4 divide-y divide-[var(--color-line-soft)]">
             {payments.map((p) => (
-              <li key={p.id} className="flex flex-wrap items-baseline justify-between gap-2 py-3 text-sm">
+              <li
+                key={p.id}
+                className="flex flex-wrap items-baseline justify-between gap-2 py-3 text-sm"
+              >
                 <div>
-                  <p className="font-medium text-[var(--color-ink)]">
-                    {p.plan === 'SOLO_MONTHLY' ? 'Solo · monthly' : 'Solo · annual'}
-                  </p>
+                  <p className="font-medium text-[var(--color-ink)]">{planLabel(p.plan)}</p>
                   <p className="text-xs text-[var(--color-ink-3)]">
                     {p.createdAt.toLocaleDateString('en-IN', {
                       month: 'short',
@@ -171,7 +190,9 @@ export default async function PlanSettingsPage() {
                   <span className="font-mono tabular-nums text-[var(--color-ink)]">
                     ₹{p.amountInr.toLocaleString('en-IN')}
                   </span>
-                  <Badge tone={p.status === 'PAID' ? 'accent' : p.status === 'FAILED' ? 'warn' : 'muted'}>
+                  <Badge
+                    tone={p.status === 'PAID' ? 'accent' : p.status === 'FAILED' ? 'warn' : 'muted'}
+                  >
                     {p.status.toLowerCase()}
                   </Badge>
                 </div>

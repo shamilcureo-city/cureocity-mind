@@ -2,11 +2,13 @@
 
 import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { BillingPlan, CreateCheckoutResponse } from '@cureocity/contracts';
+import { planLabel } from '@cureocity/contracts';
+import type { CreateCheckoutResponse, PurchasablePlan } from '@cureocity/contracts';
 
 interface Props {
-  plan: Exclude<BillingPlan, 'FREE_TRIAL'>;
+  plan: PurchasablePlan;
   label?: string;
+  variant?: 'primary' | 'secondary';
 }
 
 /**
@@ -60,7 +62,7 @@ async function ensureRazorpay(): Promise<NonNullable<Window['Razorpay']>> {
   return window.Razorpay;
 }
 
-export function PlanCheckoutButton({ plan, label }: Props) {
+export function PlanCheckoutButton({ plan, label, variant = 'primary' }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export function PlanCheckoutButton({ plan, label }: Props) {
         amount: body.amountInr * 100,
         currency: 'INR',
         name: 'Cureocity Mind',
-        description: plan === 'SOLO_MONTHLY' ? 'Solo monthly subscription' : 'Solo annual subscription',
+        description: `${planLabel(plan)} subscription`,
         order_id: body.orderId,
         handler: () => {
           // Webhook is the source of truth; refresh server props +
@@ -110,7 +112,11 @@ export function PlanCheckoutButton({ plan, label }: Props) {
         type="button"
         onClick={launch}
         disabled={busy}
-        className="rounded-full bg-[var(--color-accent)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-60"
+        className={
+          variant === 'secondary'
+            ? 'w-full rounded-full border border-[var(--color-line)] bg-white px-5 py-2 text-sm font-medium text-[var(--color-ink-2)] hover:text-[var(--color-ink)] disabled:opacity-60'
+            : 'w-full rounded-full bg-[var(--color-accent)] px-5 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-60'
+        }
       >
         {busy ? 'Opening checkout…' : (label ?? 'Upgrade')}
       </button>

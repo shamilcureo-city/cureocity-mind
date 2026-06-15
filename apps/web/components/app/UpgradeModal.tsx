@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { PLAN_CATALOG } from '@cureocity/contracts';
 
 /**
  * Sprint 53 — UpgradeModal.
@@ -41,7 +42,10 @@ export function UpgradeModal({ open, onClose, trialCap = 10, upgradeUrl = '/app/
           and the AI Copilot still work — only new session recording is paused.
         </p>
         <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-          Upgrade to Solo (₹999/month or ₹9,990/year) and keep going.
+          Plans start at ₹{PLAN_CATALOG.TRAINEE_MONTHLY.defaultPriceInr.toLocaleString('en-IN')}/month;
+          most therapists choose Pro at ₹
+          {PLAN_CATALOG.PRO_MONTHLY.defaultPriceInr.toLocaleString('en-IN')}/month for unlimited
+          sessions.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
           <button
