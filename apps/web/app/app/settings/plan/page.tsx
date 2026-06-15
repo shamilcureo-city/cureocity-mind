@@ -230,6 +230,14 @@ export default async function PlanSettingsPage() {
                   >
                     {p.status.toLowerCase()}
                   </Badge>
+                  {p.status === 'PAID' && (
+                    <a
+                      href={`/api/v1/billing/payments/${p.id}/invoice`}
+                      className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-medium text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
+                    >
+                      Invoice
+                    </a>
+                  )}
                 </div>
               </li>
             ))}
