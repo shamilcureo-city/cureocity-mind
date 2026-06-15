@@ -20,3 +20,13 @@ next-business-day queue. Both still demand a runbook.
 There's also a non-alert runbook for the disaster-recovery procedure:
 [dr-postgres-restore.md](./dr-postgres-restore.md). It's exercised as
 part of the Sprint 10 DR test (PR 3).
+
+## Go-live walkthrough
+
+[go-live.md](./go-live.md) — sequenced, one-time setup that takes the
+codebase from the current state (mock backends, auth bypass, no
+payments) to real money + real patients. Covers every env var and
+provider step the Sprint 56 features (pricing ladder, upsell modal,
+renewal reminders, dunning, watermark, GST invoice, referral, etc.)
+need to function in production. Estimated 3–5 hours of clicking plus
+1–3 days waiting on WhatsApp template approval.
