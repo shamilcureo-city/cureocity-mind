@@ -44,7 +44,13 @@ export async function POST(
       language: true,
       client: { select: { presentingConcerns: true } },
       noteDraft: {
-        select: { status: true, transcript: true, speakerSegments: true, content: true },
+        select: {
+          status: true,
+          transcript: true,
+          speakerSegments: true,
+          content: true,
+          errorMessage: true,
+        },
       },
     },
   });
@@ -54,10 +60,24 @@ export async function POST(
 
   const draft = session.noteDraft;
   if (!draft || draft.status !== 'COMPLETED' || !draft.transcript || !draft.content) {
+    // Sprint 56 hotfix — when Pass 1 returned an empty transcript the
+    // draft is FAILED with an actionable errorMessage. Surface that
+    // instead of the generic "must be COMPLETED first" so the UI can
+    // route the user to /generate-note (which Pass 1-retries) instead
+    // of looping on /clinical-analysis (which will keep 409-ing until
+    // the underlying note succeeds).
+    const code =
+      !draft || draft.status === 'PENDING' || draft.status === 'IN_PROGRESS'
+        ? 'NOTE_NOT_READY'
+        : 'NOTE_NOT_USABLE';
     return NextResponse.json(
       {
         error:
-          'Cannot generate clinical analysis: the underlying note must be COMPLETED first (run /generate-note).',
+          code === 'NOTE_NOT_READY'
+            ? 'The note is still generating. Wait a moment and retry.'
+            : draft?.errorMessage ??
+              'The transcript came back empty, so no clinical analysis can run on this session. Re-record or hit Retry on the Note tab to re-run transcription.',
+        code,
       },
       { status: 409 },
     );

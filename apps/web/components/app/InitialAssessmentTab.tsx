@@ -69,8 +69,37 @@ export function InitialAssessmentTab({ sessionId, clientId, reportEnvelope, init
       const res = await fetch(`/api/v1/sessions/${sessionId}/clinical-analysis`, {
         method: 'POST',
       });
-      const body = (await res.json().catch(() => ({}))) as AnalysisResponse;
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
+      const body = (await res.json().catch(() => ({}))) as AnalysisResponse & {
+        code?: string;
+      };
+      if (!res.ok) {
+        // Sprint 56 hotfix — Pass 3 can't run if Pass 1 returned an empty
+        // transcript. /clinical-analysis returns 409 NOTE_NOT_USABLE; the
+        // therapist needs to re-run /generate-note (which retries Pass 1)
+        // before retrying Pass 3 makes sense. Kick that flow so a single
+        // Retry click here actually moves the user forward instead of
+        // looping on the same 409.
+        if (res.status === 409 && body.code === 'NOTE_NOT_USABLE') {
+          const regen = await fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
+            method: 'POST',
+          });
+          if (!regen.ok) {
+            const rb = (await regen.json().catch(() => ({}))) as { error?: string };
+            throw new Error(
+              rb.error ??
+                'Could not re-run note generation. Open the Note tab and hit Retry there.',
+            );
+          }
+          // Pass 1 just kicked off; clinical-analysis will get re-scheduled
+          // by the generate-note route's after() callback once Pass 2
+          // produces a valid draft. Bounce to PENDING so the poll picks
+          // it up automatically.
+          setStatus('PENDING');
+          setError(null);
+          return;
+        }
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
       applyResponse(body);
     } catch (e) {
       setError((e as Error).message);

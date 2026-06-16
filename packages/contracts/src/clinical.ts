@@ -226,10 +226,14 @@ export const InitialAssessmentBriefV1Schema = z.object({
   /// IntakeNoteV1.workingHypothesis field; surfaced here so the
   /// therapist sees what the differential is built around.
   workingHypothesis: z.string().min(1).max(4000),
-  /// 1-5 differential diagnoses with citations + confidence. Same
+  /// 0-5 differential diagnoses with citations + confidence. Same
   /// shape as ClinicalReportV1.diagnosisCandidates but typically
-  /// more candidates and lower confidence per candidate.
-  differential: z.array(ClinicalDiagnosisCandidateSchema).min(1).max(5),
+  /// more candidates and lower confidence per candidate. Allowed to be
+  /// EMPTY: when the transcript is thin (short session, sparse
+  /// disclosure) Gemini may legitimately refuse to invent a differential
+  /// rather than hallucinate one — the UI surfaces the rest of the
+  /// brief and the assessmentGaps that explain what's missing.
+  differential: z.array(ClinicalDiagnosisCandidateSchema).max(5).default([]),
   /// Open assessment questions to ask in the next session(s) to
   /// narrow the differential.
   assessmentGaps: z.array(ClinicalAssessmentGapSchema).max(12).default([]),
