@@ -3,12 +3,25 @@
  * from a server component. Configured from NEXT_PUBLIC_FIREBASE_*
  * env vars at build time.
  *
- * Phone OTP signup/login is the V1 flow per the plan. Backup email
- * recovery (gap G8) wires in a separate provider once Sharafath
- * confirms the recovery channel.
+ * Three sign-in methods, all funnel through the same /api/v1/auth/session
+ * route which accepts any Firebase idToken (phone, email, Google):
+ *   1. Google one-click  (signInWithGoogle) — recommended, zero friction
+ *   2. Email + password  (signInWithEmail, createEmailAccount, resetPassword)
+ *   3. Phone OTP         (createRecaptchaVerifier + signInWithPhoneNumber)
  */
 import { initializeApp, type FirebaseApp, getApps } from 'firebase/app';
-import { getAuth, type Auth, RecaptchaVerifier } from 'firebase/auth';
+import {
+  GoogleAuthProvider,
+  RecaptchaVerifier,
+  createUserWithEmailAndPassword,
+  getAuth,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signInWithRedirect,
+  type Auth,
+  type UserCredential,
+} from 'firebase/auth';
 
 let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
@@ -54,6 +67,44 @@ export function createRecaptchaVerifier(elementId: string): RecaptchaVerifier {
 }
 
 /**
+ * Google one-click sign-in. Uses popup by default; falls back to
+ * redirect on browsers (in-app webviews, some mobile Safari) that
+ * block popups. The session cookie minted server-side works either way.
+ */
+export async function signInWithGoogle(): Promise<UserCredential | null> {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try {
+    return await signInWithPopup(getFirebaseAuth(), provider);
+  } catch (err) {
+    const code = (err as { code?: string } | null)?.code ?? '';
+    if (code === 'auth/popup-blocked' || code === 'auth/popup-closed-by-user') {
+      // Redirect doesn't return a UserCredential synchronously; the page
+      // reloads and the caller picks the user up via onAuthStateChanged
+      // (or just gets redirected by the route guard).
+      await signInWithRedirect(getFirebaseAuth(), provider);
+      return null;
+    }
+    throw err;
+  }
+}
+
+/** Email + password — existing account. */
+export async function signInWithEmail(email: string, password: string): Promise<UserCredential> {
+  return signInWithEmailAndPassword(getFirebaseAuth(), email, password);
+}
+
+/** Email + password — create a new account (auto-provisions the Psychologist row). */
+export async function createEmailAccount(email: string, password: string): Promise<UserCredential> {
+  return createUserWithEmailAndPassword(getFirebaseAuth(), email, password);
+}
+
+/** Send a password-reset email. */
+export async function resetPassword(email: string): Promise<void> {
+  return sendPasswordResetEmail(getFirebaseAuth(), email);
+}
+
+/**
  * Sprint 36 — map Firebase auth error codes to human messages.
  *
  * The setup-time codes (configuration-not-found / operation-not-allowed
@@ -88,6 +139,25 @@ export function friendlyAuthError(err: unknown): string {
       return 'That code expired. Request a new one.';
     case 'auth/network-request-failed':
       return 'Network problem reaching sign-in. Check your connection and retry.';
+    case 'auth/popup-blocked':
+      return 'Your browser blocked the Google sign-in popup. Allow popups for this site and retry.';
+    case 'auth/popup-closed-by-user':
+      return 'Google sign-in was closed before finishing.';
+    case 'auth/account-exists-with-different-credential':
+      return 'An account with this email exists with a different sign-in method. Try Google or Phone, or reset your password.';
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+      return 'Email or password is incorrect. Try again or reset your password.';
+    case 'auth/user-not-found':
+      return 'No account with that email — switch to "Create account" to sign up.';
+    case 'auth/email-already-in-use':
+      return 'An account with this email already exists — switch to "Sign in" or reset your password.';
+    case 'auth/invalid-email':
+      return 'That doesn’t look like a valid email address.';
+    case 'auth/weak-password':
+      return 'Password must be at least 6 characters.';
+    case 'auth/missing-password':
+      return 'Enter a password.';
     default: {
       const msg = (err as Error | null)?.message ?? 'Something went wrong. Please try again.';
       return msg.replace(/^Firebase:\s*/i, '').trim();
