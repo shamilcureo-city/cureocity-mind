@@ -78,7 +78,13 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           systemInstruction: TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
           responseMimeType: 'application/json',
           temperature: 0.1,
-          maxOutputTokens: 8192,
+          // A full transcript + per-utterance diarization + affect JSON
+          // for a long session easily exceeds 8192 output tokens; hitting
+          // the ceiling truncates the JSON → parse throws → empty
+          // transcript (silent failure). 65536 is the gemini-2.5-flash
+          // output max. Cost is per-token-USED, so a high ceiling is free
+          // until the output is actually long (when you want every word).
+          maxOutputTokens: 65536,
           // Therapy content legitimately includes distress, trauma, self-harm
           // mentions, crisis content. Gemini's default BLOCK_MEDIUM_AND_ABOVE
           // silently returns empty candidates for those — observed as

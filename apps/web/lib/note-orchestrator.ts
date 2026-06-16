@@ -159,6 +159,32 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       });
     }
 
+    // Sprint 56 hotfix — guard against an empty Pass 1 transcript.
+    // A zero-char transcript means the recording had no intelligible
+    // speech (silent / wrong mic / muted input) OR Gemini returned an
+    // empty candidate. Running Pass 2 on it just produces a misleading
+    // note full of "(not elicited)" — the confusing symptom hit on the
+    // first real prod intake (2026-06-16). Fail loudly + retryably
+    // instead, and skip the Pass 2 bill. Retry re-runs Pass 1 (the
+    // idempotency check short-circuits only when transcriptChars > 0).
+    if (pass1.output.transcript.trim().length === 0) {
+      const pass1Errored = pass1.callLog.status === 'ERROR';
+      const detail =
+        pass1Errored && pass1.callLog.errorMessage
+          ? ` Transcription error: ${pass1.callLog.errorMessage}.`
+          : '';
+      const message =
+        `Transcription came back empty.${detail} The recording likely had no audible speech — ` +
+        `check your microphone / input device and that you weren't muted — or the model returned ` +
+        `nothing this time. No note was generated (you were not charged for note-writing). ` +
+        `Re-record, or hit Retry to run transcription again on the same audio.`;
+      await prisma.noteDraft.update({
+        where: { id: draft.id },
+        data: { status: 'FAILED', errorMessage: message },
+      });
+      return { draftId: draft.id, status: 'FAILED', errorMessage: message };
+    }
+
     // Pass 2 cost-guard pre-check
     const pass2Estimate = computeCostInr(
       Math.ceil(pass1.output.transcript.length / 4),
