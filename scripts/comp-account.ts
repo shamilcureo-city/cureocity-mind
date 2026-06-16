@@ -1,14 +1,12 @@
 /**
  * One-shot account comp script (Sprint 56 ops).
  *
- * Gives a specific therapist a free Premium plan for ~1 year, bypassing
- * Razorpay. Idempotent: re-running just refreshes paidThroughAt and
- * audits the action again. Writes a PLAN_UPGRADED audit row tagged
- * { source: 'manual_comp', operator: '<arg>' } so the trail makes it
- * obvious in /app/admin/funnel + downstream reporting that this MRR is
- * comped, not a real charge.
+ * Thin CLI wrapper around apps/web/lib/comp.ts → compAccount(). Use
+ * POST /api/v1/admin/comp (or the form at /app/admin/comp) as the
+ * primary path; this script exists for emergencies where the deployed
+ * app isn't reachable.
  *
- * Run from your laptop against prod (NOT auto-run on Vercel):
+ * Run from your laptop against prod:
  *
  *   DATABASE_URL='postgresql://…neon.tech/…?sslmode=require' \
  *     pnpm exec tsx scripts/comp-account.ts \
@@ -18,22 +16,13 @@
  *       --operator='shamil@cureocitymind.com' \
  *       --reason='founder comp'
  *
- * Defaults match the request that prompted the first run (Premium, 12mo).
- * Add `--dry-run` to look up the row + print the planned change without
- * writing anything.
+ * --dry-run prints the lookup + planned change without writing.
  */
-import { PrismaClient, type BillingPlan } from '@prisma/client';
-
-const TIER_TO_PLAN: Record<'PRO' | 'PREMIUM' | 'STARTER' | 'TRAINEE', BillingPlan> = {
-  PRO: 'PRO_MONTHLY',
-  PREMIUM: 'PREMIUM_MONTHLY',
-  STARTER: 'STARTER_MONTHLY',
-  TRAINEE: 'TRAINEE_MONTHLY',
-};
+import { compAccount, CompError, isCompTier, type CompTier } from '../apps/web/lib/comp';
 
 interface Args {
   phone: string;
-  tier: 'PRO' | 'PREMIUM' | 'STARTER' | 'TRAINEE';
+  tier: CompTier;
   months: number;
   operator: string;
   reason: string;
@@ -47,12 +36,12 @@ function parseArgs(argv: string[]): Args {
     if (k) m.set(k, rest.join('='));
   }
   const tierRaw = (m.get('tier') ?? 'PREMIUM').toUpperCase();
-  if (!['PRO', 'PREMIUM', 'STARTER', 'TRAINEE'].includes(tierRaw)) {
+  if (!isCompTier(tierRaw)) {
     throw new Error(`--tier must be one of PRO|PREMIUM|STARTER|TRAINEE (got "${tierRaw}")`);
   }
   return {
     phone: m.get('phone') ?? '+917025840227',
-    tier: tierRaw as Args['tier'],
+    tier: tierRaw,
     months: Number(m.get('months') ?? 12),
     operator: m.get('operator') ?? 'unspecified',
     reason: m.get('reason') ?? 'manual comp',
@@ -64,101 +53,45 @@ async function main() {
   const args = parseArgs(process.argv);
   console.log('Args:', args);
 
-  const prisma = new PrismaClient();
-  const psy = await prisma.psychologist.findUnique({
-    where: { phone: args.phone },
-    select: { id: true, fullName: true, email: true, phone: true, deletedAt: true },
-  });
-
-  if (!psy) {
-    console.error(`✗ No Psychologist found with phone="${args.phone}".`);
-    console.error('  Check the exact format Firebase wrote — e.g. did it include +91? Run');
-    console.error(
-      `  SELECT id, "fullName", phone FROM psychologists WHERE phone LIKE '%${args.phone.slice(-10)}%';`,
-    );
-    process.exit(1);
-  }
-  if (psy.deletedAt !== null) {
-    console.error(`✗ Psychologist ${psy.id} is soft-deleted (deletedAt=${psy.deletedAt.toISOString()}).`);
-    process.exit(1);
-  }
-
-  const existingAccount = await prisma.billingAccount.findUnique({
-    where: { psychologistId: psy.id },
-    select: { plan: true, status: true, paidThroughAt: true },
-  });
-
-  const newPlan = TIER_TO_PLAN[args.tier];
-  const newPaidThroughAt = new Date(Date.now() + args.months * 30 * 24 * 60 * 60 * 1000);
-
-  console.log('\nFound:');
-  console.log(`  id:    ${psy.id}`);
-  console.log(`  name:  ${psy.fullName}`);
-  console.log(`  email: ${psy.email}`);
-  console.log(`  phone: ${psy.phone}`);
-  console.log('\nBefore:');
-  if (existingAccount) {
-    console.log(`  plan: ${existingAccount.plan}`);
-    console.log(`  status: ${existingAccount.status}`);
-    console.log(`  paidThroughAt: ${existingAccount.paidThroughAt?.toISOString() ?? 'null'}`);
-  } else {
-    console.log('  (no BillingAccount row — will create)');
-  }
-  console.log('\nAfter:');
-  console.log(`  plan: ${newPlan}`);
-  console.log('  status: ACTIVE');
-  console.log(`  paidThroughAt: ${newPaidThroughAt.toISOString()}`);
-
   if (args.dryRun) {
+    // Dry-run path: only look up + print, no writes. Avoids calling
+    // compAccount() which always writes when it succeeds.
+    const { prisma } = await import('../apps/web/lib/prisma');
+    const psy = await prisma.psychologist.findUnique({
+      where: { phone: args.phone },
+      select: { id: true, fullName: true, email: true, phone: true, deletedAt: true },
+    });
+    if (!psy) {
+      console.error(`✗ No Psychologist with phone="${args.phone}".`);
+      process.exit(1);
+    }
+    const existing = await prisma.billingAccount.findUnique({
+      where: { psychologistId: psy.id },
+      select: { plan: true, status: true, paidThroughAt: true },
+    });
+    console.log(`\nFound: ${psy.fullName} (${psy.id})`);
+    console.log(
+      `Before: ${existing ? `${existing.plan} ${existing.status} paid through ${existing.paidThroughAt?.toISOString() ?? 'null'}` : '(no account)'}`,
+    );
+    console.log(`After:  ${args.tier} ACTIVE paid through now + ${args.months} months`);
     console.log('\n--dry-run: no changes written.');
-    await prisma.$disconnect();
-    return;
+    process.exit(0);
   }
 
-  await prisma.$transaction(async (tx) => {
-    const account = await tx.billingAccount.upsert({
-      where: { psychologistId: psy.id },
-      create: {
-        psychologistId: psy.id,
-        plan: newPlan,
-        status: 'ACTIVE',
-        paidThroughAt: newPaidThroughAt,
-      },
-      update: {
-        plan: newPlan,
-        status: 'ACTIVE',
-        paidThroughAt: newPaidThroughAt,
-        pausedRemainingDays: null,
-        canceledAt: null,
-      },
-      select: { id: true },
-    });
-    await tx.auditLog.create({
-      data: {
-        actorType: 'SYSTEM',
-        actorPsychologistId: psy.id,
-        action: 'PLAN_UPGRADED',
-        targetType: 'BillingAccount',
-        targetId: account.id,
-        metadata: {
-          source: 'manual_comp',
-          operator: args.operator,
-          reason: args.reason,
-          tier: args.tier,
-          plan: newPlan,
-          monthsGranted: args.months,
-          paidThroughAt: newPaidThroughAt.toISOString(),
-          comp: true,
-        },
-      },
-    });
-  });
-
-  console.log('\n✓ Comped.');
-  console.log(
-    `  Tip: this MRR row is tagged metadata.comp=true; the funnel dashboard's MRR card sums these together with real paid accounts. Subtract them in the SQL view if you want pure paid MRR.`,
-  );
-  await prisma.$disconnect();
+  try {
+    const r = await compAccount(args);
+    console.log(`\n✓ Comped ${r.fullName} (${r.psychologistId})`);
+    console.log(
+      `  Before: ${r.before ? `${r.before.plan} · ${r.before.status} · ${r.before.paidThroughAt ?? 'null'}` : '(no account — created)'}`,
+    );
+    console.log(`  After:  ${r.after.plan} · ${r.after.status} · ${r.after.paidThroughAt}`);
+  } catch (e) {
+    if (e instanceof CompError) {
+      console.error(`✗ ${e.code}: ${e.message}`);
+      process.exit(1);
+    }
+    throw e;
+  }
 }
 
 main().catch((e) => {
