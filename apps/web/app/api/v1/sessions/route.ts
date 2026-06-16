@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { CreateSessionInputSchema, planTierLabel } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
-import { getEntitlement } from '@/lib/billing';
+import { getEntitlement, isBillingEnforced } from '@/lib/billing';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import {
@@ -46,7 +46,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // session creation is blocked, and demo "Example" client sessions
   // never count (handled inside getEntitlement). Returns 402 with a
   // structured code the three creation UIs flip into an UpgradeModal.
-  if (!client.isDemo) {
+  //
+  // Sprint 56 ops — BILLING_ENFORCEMENT=off disables BOTH the trial cap
+  // and the paid-tier rolling-30-day cap, for testing/staging deploys.
+  if (!client.isDemo && isBillingEnforced()) {
     const entitlement = await getEntitlement(auth.value.psychologistId);
     if (!entitlement.isPaidActive && entitlement.trialUsed >= entitlement.trialCap) {
       await writeAudit({

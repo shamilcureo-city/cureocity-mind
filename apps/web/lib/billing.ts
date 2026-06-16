@@ -27,6 +27,16 @@ declare global {
 const PAID_GRACE_DAYS = 3;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
+/**
+ * Kill-switch for the trial + paid-tier session caps. Defaults to ON.
+ * Set `BILLING_ENFORCEMENT=off` on Vercel for testing/staging deploys
+ * where you don't want the 402 + upgrade modal to interrupt the flow.
+ * Production: leave unset (or set to `on`) so the gate enforces.
+ */
+export function isBillingEnforced(): boolean {
+  return (process.env['BILLING_ENFORCEMENT'] ?? 'on').toLowerCase() !== 'off';
+}
+
 export function razorpay(): IRazorpayPort {
   if (globalThis.__cureocityRazorpay) return globalThis.__cureocityRazorpay;
   const backend = process.env['BILLING_BACKEND'] ?? 'mock';
