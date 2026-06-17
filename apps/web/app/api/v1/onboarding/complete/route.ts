@@ -46,6 +46,14 @@ const OnboardingCompleteSchema = z.object({
       message: 'Enter your real RCI registration number',
     }),
   defaultOutputLanguage: Iso639InlineSchema,
+  /// Optional E.164 phone. Honoured ONLY when the current row's phone is
+  /// still the `pending:<uid>` placeholder (Google/email signup path) —
+  /// real OTP-verified phones can't be changed here.
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+\d{8,15}$/, 'must be in E.164 format (e.g. +919876543210)')
+    .optional(),
 });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
@@ -56,7 +64,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const me = await prisma.psychologist.findUnique({
     where: { id: auth.value.psychologistId },
-    select: { onboardingCompletedAt: true },
+    select: { onboardingCompletedAt: true, phone: true },
   });
   if (!me) return NextResponse.json({ error: 'Psychologist not found' }, { status: 404 });
   if (me.onboardingCompletedAt !== null) {
@@ -65,6 +73,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 409 },
     );
   }
+
+  const phoneIsPlaceholder = me.phone.startsWith('pending:');
+  const willUpdatePhone = phoneIsPlaceholder && input.value.phone !== undefined;
 
   let updated;
   try {
@@ -76,6 +87,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           email: input.value.email.toLowerCase(),
           rciNumber: input.value.rciNumber,
           defaultOutputLanguage: input.value.defaultOutputLanguage,
+          ...(willUpdatePhone && { phone: input.value.phone }),
           // status stays PENDING_VERIFICATION until an admin marks the
           // RCI verified (self-attestation gate).
           onboardingCompletedAt: new Date(),
@@ -91,7 +103,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           metadata: {
             ...auditMetadataFromRequest(req),
             event: 'ONBOARDING_COMPLETED',
-            fields: ['fullName', 'email', 'rciNumber', 'defaultOutputLanguage'],
+            fields: [
+              'fullName',
+              'email',
+              'rciNumber',
+              'defaultOutputLanguage',
+              ...(willUpdatePhone ? ['phone'] : []),
+            ],
           },
         },
         tx,
@@ -101,7 +119,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
       const target = (e.meta?.['target'] as string[] | undefined)?.[0] ?? 'field';
-      const human = target === 'email' ? 'email' : target === 'rciNumber' ? 'RCI number' : target;
+      const human =
+        target === 'email'
+          ? 'email'
+          : target === 'rciNumber'
+            ? 'RCI number'
+            : target === 'phone'
+              ? 'mobile number'
+              : target;
       return NextResponse.json(
         { error: `That ${human} is already used by another account.` },
         { status: 409 },
