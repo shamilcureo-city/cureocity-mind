@@ -1,14 +1,16 @@
 'use client';
 
+import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
 
 /**
  * Sprint 40 — root error boundary.
+ * Sprint 57 — also forwards to Sentry.
  *
  * Catches errors thrown in the root layout itself (which app/error.tsx
  * cannot, since it renders inside the layout). It must provide its own
- * <html>/<body>. On mount it reports to the observability ingest route,
- * then shows a minimal recoverable screen.
+ * <html>/<body>. On mount it reports to Sentry AND the observability
+ * ingest route, then shows a minimal recoverable screen.
  */
 export default function GlobalError({
   error,
@@ -18,6 +20,9 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
+    Sentry.captureException(error, {
+      tags: { source: 'global-error', ...(error.digest && { digest: error.digest }) },
+    });
     void fetch('/api/v1/observability/client-error', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
