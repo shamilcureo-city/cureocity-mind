@@ -45,6 +45,22 @@ const CreateSessionInputSchema = z.object({
 class InviteRejectedError extends Error {}
 
 /**
+ * Sprint 56 ops — auto-grant ADMIN to a new signup whose email is in the
+ * comma-separated BOOTSTRAP_ADMIN_EMAILS env. Solves the chicken-and-egg
+ * where the first real account (post-bypass) provisions as THERAPIST and
+ * can't reach /app/admin/* without manual SQL. Case-insensitive match;
+ * empty/unset env = nobody is auto-promoted.
+ */
+function isBootstrapAdminEmail(email: string | undefined): boolean {
+  if (!email) return false;
+  const allow = (process.env['BOOTSTRAP_ADMIN_EMAILS'] ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  return allow.includes(email.trim().toLowerCase());
+}
+
+/**
  * POST /api/v1/auth/session — exchange a Firebase id token (from the
  * phone-OTP login) for an httpOnly session cookie, auto-provisioning
  * a Psychologist row on first sign-in.
@@ -105,6 +121,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const redeemed = await redeemInviteCode(tx, input.value.inviteCode ?? '');
           if (!redeemed.ok) throw new InviteRejectedError(redeemed.reason);
         }
+        const bootstrapAdmin = isBootstrapAdminEmail(decoded.email);
         const row = await tx.psychologist.create({
           data: {
             firebaseUid: decoded.uid,
@@ -112,6 +129,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             email: decoded.email ?? `${decoded.uid}@unclaimed.cureocity.app`,
             phone: decoded.phone_number ?? `pending:${decoded.uid}`,
             rciNumber: `PENDING-${decoded.uid}`,
+            // Sprint 56 ops — auto-admin for bootstrap emails (env-gated).
+            ...(bootstrapAdmin && { role: 'ADMIN' as const }),
             // Sprint 56 — only persist if at least one field is set, so a
             // bare {} doesn't drown the signal in the funnel dashboard.
             acquisitionUtm:
@@ -129,8 +148,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             targetType: 'Psychologist',
             targetId: row.id,
             metadata: {
-              via: 'phone-otp-auto-provision',
+              via: 'auth-session-auto-provision',
               inviteGated: inviteRequired,
+              bootstrapAdmin,
             },
           },
           tx,
