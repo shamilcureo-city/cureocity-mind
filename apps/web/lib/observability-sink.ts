@@ -65,6 +65,29 @@ export async function captureError(error: unknown, ctx: CaptureContext): Promise
     `[observability] ${payload.source} ${payload.route ?? ''} — ${payload.name}: ${payload.message}`,
   );
 
+  // Sprint 57 — Sentry. The SDK is initialised in instrumentation.ts +
+  // sentry.{server,edge,client}.config.ts; if VERCEL_ENV is unset it's
+  // a no-op so local dev stays silent.
+  try {
+    const Sentry = await import('@sentry/nextjs');
+    Sentry.captureException(error, {
+      tags: {
+        source: ctx.source,
+        ...(ctx.route && { route: ctx.route }),
+        ...(ctx.method && { method: ctx.method }),
+      },
+      contexts: {
+        capture: {
+          digest: ctx.digest,
+          psychologistId: ctx.psychologistId,
+          ...ctx.extra,
+        },
+      },
+    });
+  } catch {
+    // Swallow — never throw from the reporter.
+  }
+
   const url = process.env['OBSERVABILITY_WEBHOOK_URL'];
   if (!url) return;
   const token = process.env['OBSERVABILITY_WEBHOOK_TOKEN'];
