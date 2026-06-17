@@ -25,6 +25,21 @@ type EmailMode = 'signin' | 'signup' | 'reset';
 type Stage = 'pick' | 'otp' | 'invite' | 'reset-sent';
 
 /**
+ * Country codes for the phone-OTP dropdown. India is first/default; the
+ * others cover the NRI bands where Indian therapists most commonly are
+ * (US, UK, UAE, Singapore, Australia, Canada). Add more as the
+ * geographic mix evolves — Firebase phone-OTP supports every dial code.
+ */
+const COUNTRY_CODES = [
+  { dial: '91', iso2: 'IN', flag: '🇮🇳' },
+  { dial: '1', iso2: 'US', flag: '🇺🇸' }, // includes Canada (NANP — same dial code)
+  { dial: '44', iso2: 'UK', flag: '🇬🇧' },
+  { dial: '971', iso2: 'AE', flag: '🇦🇪' },
+  { dial: '65', iso2: 'SG', flag: '🇸🇬' },
+  { dial: '61', iso2: 'AU', flag: '🇦🇺' },
+] as const;
+
+/**
  * Sprint 56 — login redesign.
  *
  * Three sign-in methods, all minting the same session cookie via
@@ -59,9 +74,14 @@ function LoginPageInner() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [phone, setPhone] = useState('+91');
+  // Phone is split into country code + local digits for UX; we
+  // reassemble at submit time. Default to India.
+  const [countryCode, setCountryCode] = useState('91');
+  const [phoneDigits, setPhoneDigits] = useState('');
   const [otp, setOtp] = useState('');
   const [inviteCode, setInviteCode] = useState('');
+
+  const phoneE164 = `+${countryCode}${phoneDigits}`;
 
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,14 +166,14 @@ function LoginPageInner() {
       router.push(next);
       return;
     }
-    if (!/^\+\d{8,15}$/.test(phone)) {
-      setError('Enter your number in international format, like +91XXXXXXXXXX.');
+    if (!/^\+\d{8,15}$/.test(phoneE164)) {
+      setError('Enter a valid mobile number — Indian numbers are 10 digits after the +91.');
       return;
     }
     setBusy(true);
     try {
       const verifier = createRecaptchaVerifier(RECAPTCHA_ELEMENT_ID);
-      const conf = await signInWithPhoneNumber(getFirebaseAuth(), phone, verifier);
+      const conf = await signInWithPhoneNumber(getFirebaseAuth(), phoneE164, verifier);
       setConfirmation(conf);
       setStage('otp');
     } catch (err) {
@@ -428,20 +448,49 @@ function LoginPageInner() {
                 {method === 'phone' && (
                   <form onSubmit={sendOtp} className="mt-5 space-y-4">
                     <div>
-                      <Label htmlFor="phone" hint="International format">
+                      <Label htmlFor="phone" hint="No spaces or dashes">
                         Mobile number
                       </Label>
-                      <Input
-                        id="phone"
-                        type="tel"
-                        value={phone}
-                        onChange={(e) => setPhone(e.target.value)}
-                        autoComplete="tel"
-                        placeholder="+91XXXXXXXXXX"
-                        required
-                      />
+                      {/* Country code dropdown attached to digits input */}
+                      <div className="flex items-stretch gap-0 overflow-hidden rounded-xl border border-[var(--color-line)] bg-white focus-within:border-[var(--color-accent)] focus-within:ring-2 focus-within:ring-[var(--color-accent)]/15">
+                        <label htmlFor="cc" className="sr-only">
+                          Country code
+                        </label>
+                        <select
+                          id="cc"
+                          value={countryCode}
+                          onChange={(e) => setCountryCode(e.target.value)}
+                          className="border-r border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-3 py-2.5 text-sm font-medium text-[var(--color-ink)] focus:outline-none"
+                          aria-label="Country code"
+                        >
+                          {COUNTRY_CODES.map((c) => (
+                            <option key={c.dial} value={c.dial}>
+                              {c.flag} +{c.dial} {c.iso2}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          id="phone"
+                          type="tel"
+                          inputMode="numeric"
+                          value={phoneDigits}
+                          onChange={(e) =>
+                            setPhoneDigits(e.target.value.replace(/\D/g, '').slice(0, 14))
+                          }
+                          autoComplete="tel-national"
+                          placeholder={countryCode === '91' ? '98765 43210' : 'mobile number'}
+                          maxLength={14}
+                          className="flex-1 bg-white px-3 py-2.5 text-sm tracking-wide outline-none placeholder:text-[var(--color-ink-3)]"
+                          required
+                        />
+                      </div>
                     </div>
-                    <Button type="submit" size="lg" disabled={busy} className="w-full">
+                    <Button
+                      type="submit"
+                      size="lg"
+                      disabled={busy || phoneDigits.length < 6}
+                      className="w-full"
+                    >
                       {busy ? 'Sending OTP…' : 'Send OTP'}
                     </Button>
                     <FieldError message={error} />
@@ -465,7 +514,7 @@ function LoginPageInner() {
                 <div>
                   <h2 className="font-serif text-2xl">Enter the 6-digit code</h2>
                   <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                    Sent to <span className="font-medium text-[var(--color-ink)]">{phone}</span>.
+                    Sent to <span className="font-medium text-[var(--color-ink)]">{phoneE164}</span>.
                   </p>
                 </div>
                 <div>
