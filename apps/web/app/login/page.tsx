@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
@@ -36,8 +36,19 @@ type Stage = 'pick' | 'otp' | 'invite' | 'reset-sent';
  * Auto-redirect to /app if Firebase isn't configured (auth bypass on
  * staging deploys without Firebase env). Carries an optional ?next=
  * for post-login redirect.
+ *
+ * Next 15 — useSearchParams() bails out of static rendering, so the
+ * client body lives in an inner component wrapped in <Suspense>.
  */
 export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
+  );
+}
+
+function LoginPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get('next') ?? '/app';
