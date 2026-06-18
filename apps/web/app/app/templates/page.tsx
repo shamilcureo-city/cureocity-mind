@@ -12,7 +12,7 @@ export default function TemplatesPage() {
         </p>
         <h1 className="mt-2 font-serif text-3xl">Templates</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-ink-2)]">
-          Templates define the section structure of the notes Klara drafts. The default
+          Templates define the section structure of the notes the AI drafts. The default
           template applies to new notes unless you pick another. Section ids are stable
           identifiers; titles + hints are what the model sees.
         </p>

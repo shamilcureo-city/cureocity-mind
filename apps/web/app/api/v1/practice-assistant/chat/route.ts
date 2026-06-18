@@ -17,12 +17,12 @@ const MessageSchema = z.object({
 
 const ChatInputSchema = z.object({
   messages: z.array(MessageSchema).min(1).max(20),
-  /// Sprint 22 — when present, Klara loads that client's cumulative
-  /// record and answers as a case-specific reasoning partner.
+  /// Sprint 22 — when present, the assistant loads that client's
+  /// cumulative record and answers as a case-specific reasoning partner.
   clientId: z.string().optional(),
 });
 
-const SYSTEM_PROMPT = `You are Klara, a private AI assistant for an Indian psychotherapy practice.
+const SYSTEM_PROMPT = `You are a private AI practice assistant for an Indian psychotherapy practice.
 
 You help the therapist think about their caseload, prepare for sessions, and reflect
 on their work. You are NOT a therapist; you do not diagnose. You synthesise from the
@@ -44,10 +44,10 @@ If asked something outside the practice context (general news, coding, etc.),
 politely redirect: "I can only help with your therapeutic practice."`;
 
 /**
- * POST /api/v1/klara/chat — context-aware chat with the therapist's
- * data. The server builds a short snapshot of the therapist's
- * roster (recent sessions, active workflows, client list) and
- * prepends it to the system prompt so the model can ground answers
+ * POST /api/v1/practice-assistant/chat — context-aware chat with the
+ * therapist's data. The server builds a short snapshot of the
+ * therapist's roster (recent sessions, active workflows, client list)
+ * and prepends it to the system prompt so the model can ground answers
  * in the actual data without needing retrieval/tool-calling.
  *
  * Limits: 20 messages of history, 8 KB per message, 30 s function
@@ -197,10 +197,10 @@ async function buildContext(psychologistId: string): Promise<string> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-  // Sprint 48 — the practice-wide Klara context must not ground answers
-  // in the seeded demo client. (Client-scoped chat on the demo client
-  // itself stays allowed; that path enters via /klara/chat with a
-  // clientId and never visits this builder.)
+  // Sprint 48 — the practice-wide assistant context must not ground
+  // answers in the seeded demo client. (Client-scoped chat on the demo
+  // client itself stays allowed; that path enters via
+  // /practice-assistant/chat with a clientId and never visits this builder.)
   const [clients, recentSessions, workflows, upcomingSessions] = await Promise.all([
     prisma.client.findMany({
       where: { psychologistId, deletedAt: null, isDemo: false },

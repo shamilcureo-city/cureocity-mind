@@ -17,15 +17,15 @@ const SUGGESTED_QUESTIONS = [
 ];
 
 /**
- * Klara chat UI. Holds a message thread in component state (no
- * server-side persistence in V1 — the conversation lives only for
- * the lifetime of the page). Posts the rolling history to
- * /api/v1/klara/chat which builds a fresh practice-snapshot system
- * prompt on every turn, so context drift between turns is bounded
- * by what the model retains in its window plus the server-supplied
- * snapshot.
+ * Practice Assistant chat UI. Holds a message thread in component
+ * state (no server-side persistence in V1 — the conversation lives
+ * only for the lifetime of the page). Posts the rolling history to
+ * /api/v1/practice-assistant/chat which builds a fresh practice-
+ * snapshot system prompt on every turn, so context drift between
+ * turns is bounded by what the model retains in its window plus the
+ * server-supplied snapshot.
  */
-export function KlaraChat() {
+export function PracticeAssistantChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [pending, setPending] = useState(false);
@@ -49,7 +49,7 @@ export function KlaraChat() {
       setPending(true);
       setError(null);
       try {
-        const res = await fetch('/api/v1/klara/chat', {
+        const res = await fetch('/api/v1/practice-assistant/chat', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ messages: next }),
@@ -99,8 +99,8 @@ export function KlaraChat() {
         {messages.length === 0 && (
           <div className="grid place-items-center pt-8 text-center">
             <p className="max-w-md text-sm text-[var(--color-ink-2)]">
-              Ask anything about your practice. The data Klara sees is your roster, recent
-              sessions, active workflows, and upcoming bookings.
+              Ask anything about your practice. The data the assistant sees is your roster,
+              recent sessions, active workflows, and upcoming bookings.
             </p>
             <div className="mt-6 grid w-full max-w-lg gap-2">
               {SUGGESTED_QUESTIONS.map((q) => (
@@ -157,7 +157,7 @@ export function KlaraChat() {
         <div className="flex items-center gap-2 rounded-2xl border border-[var(--color-line)] bg-white p-2">
           <input
             type="text"
-            placeholder={pending ? 'Klara is thinking…' : 'Ask anything about your practice'}
+            placeholder={pending ? 'Thinking…' : 'Ask anything about your practice'}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={pending}
@@ -173,8 +173,8 @@ export function KlaraChat() {
           </button>
         </div>
         <p className="mt-2 text-[11px] text-[var(--color-ink-3)]">
-          Klara only sees your own clinical data. Conversations are not persisted across
-          page reloads.
+          The assistant only sees your own clinical data. Conversations are not persisted
+          across page reloads.
         </p>
       </form>
     </Card>

@@ -44,7 +44,7 @@ const SECTIONS = [
 ] as const;
 
 const SUPPORTING_LINKS = [
-  { href: '/app/klara', label: 'Klara — chat with your practice data', desc: 'Ask "which clients haven\'t been seen in 30+ days?" and other roster-aware questions.' },
+  { href: '/app/practice-assistant', label: 'Practice Assistant — chat with your practice data', desc: 'Ask "which clients haven\'t been seen in 30+ days?" and other roster-aware questions.' },
   { href: '/app/me', label: 'My practice', desc: 'Your own tempo and decision split — for self-reflection, not comparison.' },
   { href: '/app/admin/erasure-queue', label: 'DPDP erasure queue', desc: 'Review and resolve § 15 erasure requests within the 30-day statutory window.' },
 ];
@@ -110,7 +110,7 @@ export default function LearnPage() {
       <Card className="mt-10 p-6">
         <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Need help?</h2>
         <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-          The Klara assistant is the fastest way to get answers grounded in your data. For
+          The Practice Assistant is the fastest way to get answers grounded in your data. For
           billing, compliance, and pilot-specific questions, reach out to Sharafath directly.
         </p>
       </Card>
