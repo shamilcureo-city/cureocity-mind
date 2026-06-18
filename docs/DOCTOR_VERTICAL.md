@@ -449,6 +449,9 @@ writer each (no ternaries — the chaos test regex is naïve):
 
 ## 13. Phased roadmap
 
+The task-level breakdown of these phases into sprints **DV0–DV8** lives
+in `docs/DOCTOR_VERTICAL_SPRINTS.md`.
+
 **Phase 0 — Spike (1 wk).** Prove the live loop on one specialty.
 WS gateway + chosen streaming ASR + a structurer filling a note
 skeleton live. Hardcoded, no auth. Validate **latency (< 5s note at

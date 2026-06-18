@@ -362,6 +362,7 @@ The five existing passes are the template — pick the closest analogue.
 | `docs/CLINICAL_COPILOT.md`       | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                |
 | `docs/MEASUREMENT_BASED_CARE.md` | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report               |
 | `docs/DOCTOR_VERTICAL.md`        | **Build spec** — doctor (super-specialty OPD) vertical: live-scribe pivot + reuse plan    |
+| `docs/DOCTOR_VERTICAL_SPRINTS.md` | **Sprint plan** — doctor vertical task breakdown, sprints DV0–DV8                         |
 | `docs/SPRINT_21.md`              | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status) |
 | `docs/EXECUTION_PLAN.md`         | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+   |
 | `docs/SETUP.md`                  | Account procurement + env var matrix per sprint                                           |
