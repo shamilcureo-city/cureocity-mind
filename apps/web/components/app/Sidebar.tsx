@@ -7,7 +7,7 @@ import { isPaidPlan, planTierLabel, type BillingPlan } from '@cureocity/contract
 interface NavItem {
   href: string;
   label: string;
-  icon: 'today' | 'record' | 'clients' | 'templates' | 'klara' | 'learn' | 'me';
+  icon: 'today' | 'record' | 'clients' | 'templates' | 'assistant' | 'learn' | 'me';
 }
 
 const PRIMARY: NavItem[] = [
@@ -18,7 +18,7 @@ const PRIMARY: NavItem[] = [
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
   { href: '/app/templates', label: 'Templates', icon: 'templates' },
-  { href: '/app/klara', label: 'Klara AI', icon: 'klara' },
+  { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
   { href: '/app/me', label: 'My practice', icon: 'me' },
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
@@ -170,7 +170,7 @@ export function Glyph({
     | 'record'
     | 'clients'
     | 'templates'
-    | 'klara'
+    | 'assistant'
     | 'learn'
     | 'me'
     | 'gift'
@@ -184,7 +184,7 @@ export function Glyph({
     clients: 'M16 14a4 4 0 1 0-8 0M3 21v-1a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v1',
     templates:
       'M7 4h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 8h6M9 12h6M9 16h4',
-    klara:
+    assistant:
       'M12 3v3M12 18v3M5 12H2M22 12h-3M5.6 5.6 3.5 3.5M18.4 5.6 20.5 3.5M5.6 18.4 3.5 20.5M18.4 18.4 20.5 20.5',
     learn: 'M4 5h12a3 3 0 0 1 3 3v11a2 2 0 0 0-2-2H4V5zM4 17h12',
     me: 'M3 12h3l3-8 4 16 3-8h5',

@@ -11,12 +11,12 @@ import { Glyph } from '@/components/app/Sidebar';
 const ITEMS: {
   href: string;
   label: string;
-  icon: 'today' | 'record' | 'clients' | 'klara' | 'cog';
+  icon: 'today' | 'record' | 'clients' | 'assistant' | 'cog';
 }[] = [
   { href: '/app/today', label: 'Today', icon: 'today' },
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
-  { href: '/app/klara', label: 'Klara', icon: 'klara' },
+  { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
   { href: '/app/settings', label: 'Settings', icon: 'cog' },
 ];
 

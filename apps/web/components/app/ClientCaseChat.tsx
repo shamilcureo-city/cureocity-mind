@@ -19,9 +19,10 @@ const SUGGESTIONS = [
 ];
 
 /**
- * Sprint 22 — client-aware chat embedded in the Case Briefing. Posts to
- * the Klara route with this client's id so the assistant reasons over
- * the one cumulative record (same synthesis the workspace shows).
+ * Sprint 22 — client-aware chat embedded in the Case Briefing. Posts
+ * to the practice-assistant route with this client's id so the
+ * assistant reasons over the one cumulative record (same synthesis
+ * the workspace shows).
  */
 export function ClientCaseChat({ clientId, clientName }: Props) {
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -36,7 +37,7 @@ export function ClientCaseChat({ clientId, clientName }: Props) {
     setInput('');
     setBusy(true);
     try {
-      const res = await fetch('/api/v1/klara/chat', {
+      const res = await fetch('/api/v1/practice-assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clientId, messages: next }),
@@ -84,7 +85,7 @@ export function ClientCaseChat({ clientId, clientName }: Props) {
               </span>
             </li>
           ))}
-          {busy && <li className="text-xs text-[var(--color-ink-3)]">Klara is thinking…</li>}
+          {busy && <li className="text-xs text-[var(--color-ink-3)]">Thinking…</li>}
         </ul>
       )}
       <form
