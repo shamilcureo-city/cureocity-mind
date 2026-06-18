@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import {
   SESSION_COOKIE_MAX_AGE_MS,
   SESSION_COOKIE_NAME,
@@ -104,9 +105,50 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     select: { id: true, deletedAt: true },
   });
   let registered = false;
+  let linked = false;
 
   if (psy?.deletedAt) {
     return NextResponse.json({ error: 'This account has been deleted' }, { status: 403 });
+  }
+
+  // Phone-OTP account linking. If no Psychologist matches this Firebase
+  // uid but one DOES match the verified phone number in the id token,
+  // re-bind the row to this uid. Firebase has already verified phone
+  // ownership via SMS before issuing the token, so this is safe and
+  // lets a therapist whose account was originally created via Google /
+  // email sign in via phone OTP without colliding on the unique phone
+  // constraint at auto-provision time.
+  if (!psy && decoded.phone_number) {
+    const byPhone = await prisma.psychologist.findUnique({
+      where: { phone: decoded.phone_number },
+      select: { id: true, deletedAt: true, firebaseUid: true },
+    });
+    if (byPhone && byPhone.deletedAt === null) {
+      await prisma.$transaction(async (tx) => {
+        await tx.psychologist.update({
+          where: { id: byPhone.id },
+          data: { firebaseUid: decoded.uid },
+        });
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: byPhone.id,
+            action: 'PSYCHOLOGIST_UPDATED',
+            targetType: 'Psychologist',
+            targetId: byPhone.id,
+            metadata: {
+              event: 'firebase-uid-relinked-via-phone-otp',
+              phone: decoded.phone_number,
+              previousFirebaseUid: byPhone.firebaseUid,
+              newFirebaseUid: decoded.uid,
+            },
+          },
+          tx,
+        );
+      });
+      psy = { id: byPhone.id, deletedAt: byPhone.deletedAt };
+      linked = true;
+    }
   }
 
   if (!psy) {
@@ -206,6 +248,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       if (e instanceof InviteRejectedError) {
         return NextResponse.json({ error: e.message, code: 'INVITE_REQUIRED' }, { status: 403 });
       }
+      // Unique-constraint collision on the auto-provision: a Psychologist
+      // row with this phone or email is already bound to a different
+      // Firebase identity. Phone-OTP collisions are handled above by
+      // re-linking; this catches the email-collision case (e.g. Google
+      // sign-in for an email that was registered via password earlier)
+      // and any phone collision that wasn't covered by the link path.
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+        const target = (e.meta?.['target'] as string[] | undefined) ?? [];
+        const conflictField = target.includes('phone')
+          ? 'phone'
+          : target.includes('email')
+            ? 'email'
+            : null;
+        const human =
+          conflictField === 'phone'
+            ? 'An account with this phone is already linked to a different sign-in method. Sign in with Google or email instead.'
+            : conflictField === 'email'
+              ? 'An account with this email is already linked to a different sign-in method. Sign in with the original method (phone OTP or the other of Google / email).'
+              : 'An account with these details is already linked to a different sign-in method.';
+        return NextResponse.json(
+          { error: human, code: 'SIGNIN_METHOD_CONFLICT' },
+          { status: 409 },
+        );
+      }
       throw e;
     }
   }
@@ -222,7 +288,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Token too old — sign in again' }, { status: 401 });
   }
 
-  const res = NextResponse.json({ ok: true, registered });
+  const res = NextResponse.json({ ok: true, registered, linked });
   res.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
