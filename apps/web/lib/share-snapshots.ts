@@ -9,6 +9,8 @@ import {
   TherapyNoteV1Schema,
   type IntakeNoteV1,
   IntakeNoteV1Schema,
+  type MedicalEncounterNoteV1,
+  MedicalEncounterNoteV1Schema,
   type ClinicalTreatmentPlan,
   ClinicalTreatmentPlanSchema,
   type SignedIntakeNoteSnapshotSection,
@@ -71,7 +73,60 @@ export async function buildSnapshot(args: BuildArgs): Promise<SnapshotResult | n
       return buildInstrumentCheckin(args, args.ref.clientId, args.ref.instrumentKey);
     case 'SIGNED_INTAKE_NOTE':
       return buildSignedIntakeNote(args, args.ref.sessionId);
+    case 'AFTER_VISIT_SUMMARY':
+      return buildAfterVisitSummary(args, args.ref.sessionId);
   }
+}
+
+/**
+ * Sprint DV3 — after-visit summary builder. Deterministic (no LLM): a
+ * patient-facing recap of the SIGNED medical encounter note — what was
+ * discussed + the plan, split into readable lines. Honest about its
+ * limits: no drug-list / red-flag extraction in this MVP (DV5/DV6).
+ */
+async function buildAfterVisitSummary(
+  { clientId, psychologistId }: BuildArgs,
+  sessionId: string,
+): Promise<SnapshotResult | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      clientId: true,
+      psychologistId: true,
+      scheduledAt: true,
+      therapyNote: { select: { content: true } },
+    },
+  });
+  if (!session || session.psychologistId !== psychologistId || session.clientId !== clientId) {
+    return null;
+  }
+  if (!session.therapyNote) {
+    throw new SnapshotBuildError(
+      'Cannot share an after-visit summary before the encounter note is signed.',
+    );
+  }
+  const parsed = MedicalEncounterNoteV1Schema.safeParse(session.therapyNote.content);
+  if (!parsed.success) {
+    throw new SnapshotBuildError('Signed encounter note failed schema validation; cannot share.');
+  }
+  const note: MedicalEncounterNoteV1 = parsed.data;
+  const cc = stripBracketTag(note.chiefComplaint).trim();
+  const snapshot: PatientShareSnapshot = {
+    kind: 'AFTER_VISIT_SUMMARY',
+    greeting: 'here is a summary of your visit today.',
+    whatWeDiscussed: cc ? [cc] : [],
+    medications: [],
+    instructions: splitLines(note.plan),
+    followUp: '',
+    redFlags: [],
+  };
+  const subject = `Your visit summary · ${session.scheduledAt.toLocaleDateString('en-IN', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })}`;
+  return { snapshot, subject, sessionId: session.id };
 }
 
 /**
@@ -402,4 +457,12 @@ function composePatientFriendlyScriptSummary(
  */
 function stripBracketTag(s: string): string {
   return s.replace(/^\s*\[[A-Za-z0-9_-]+\]\s*/, '');
+}
+
+/** Split a free-text plan into readable, patient-facing lines. */
+function splitLines(s: string): string[] {
+  return stripBracketTag(s)
+    .split(/[\n;]+/)
+    .map((x) => x.trim())
+    .filter((x) => x.length > 0);
 }

@@ -475,6 +475,10 @@ function extractArtefactId(input: ShareInput): string {
     case 'SIGNED_INTAKE_NOTE':
       // Sprint 49 — sessionId is the discriminator, same as SIGNED_NOTE.
       return input.artefact.sessionId;
+    case 'AFTER_VISIT_SUMMARY':
+      // Sprint DV3 — built from the signed encounter note; sessionId is
+      // the discriminator, same posture as SIGNED_NOTE.
+      return input.artefact.sessionId;
   }
 }
 

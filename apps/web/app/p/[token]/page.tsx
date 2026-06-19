@@ -384,8 +384,8 @@ function SnapshotView({
                 Thank you, {clientFirstName}.
               </p>
               <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-                Your check-in has been saved and sent to your therapist. There&apos;s nothing
-                more to do here — they&apos;ll review it before your next session.
+                Your check-in has been saved and sent to your therapist. There&apos;s nothing more
+                to do here — they&apos;ll review it before your next session.
               </p>
             </div>
           </article>
@@ -424,6 +424,38 @@ function SnapshotView({
                 Download a PDF of this summary
               </a>
             </p>
+          )}
+        </article>
+      );
+    case 'AFTER_VISIT_SUMMARY':
+      // Sprint DV3 — patient-facing recap of the doctor encounter. Each
+      // non-empty list is rendered; red flags get a warning block.
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, {snapshot.greeting}
+          </p>
+          {snapshot.whatWeDiscussed.length > 0 && (
+            <AvsList title="What we discussed" items={snapshot.whatWeDiscussed} />
+          )}
+          {snapshot.medications.length > 0 && (
+            <AvsList title="Your medicines" items={snapshot.medications} />
+          )}
+          {snapshot.instructions.length > 0 && (
+            <AvsList title="What to do" items={snapshot.instructions} />
+          )}
+          <NoteSection title="Follow-up" body={snapshot.followUp} />
+          {snapshot.redFlags.length > 0 && (
+            <section className="rounded-xl border-2 border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4">
+              <h2 className="text-xs uppercase tracking-wide text-[var(--color-warn)]">
+                Come back sooner if
+              </h2>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--color-ink)]">
+                {snapshot.redFlags.map((r, i) => (
+                  <li key={i}>{r}</li>
+                ))}
+              </ul>
+            </section>
           )}
         </article>
       );
@@ -466,6 +498,20 @@ function formatStartedAt(iso: string | null): string {
   const then = new Date(iso);
   if (Number.isNaN(then.getTime())) return 'we began';
   return then.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+}
+
+function AvsList({ title, items }: { title: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+      <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">{title}</h2>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-[var(--color-ink)]">
+        {items.map((it, i) => (
+          <li key={i}>{it}</li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function NoteSection({ title, body }: { title: string; body: string }) {

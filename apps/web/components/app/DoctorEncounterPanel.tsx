@@ -50,6 +50,9 @@ export function DoctorEncounterPanel({
   const [signed, setSigned] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   const fetchDraft = useCallback(async () => {
     const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`);
@@ -155,6 +158,32 @@ export function DoctorEncounterPanel({
     }
   }
 
+  // After-visit summary — built from the signed note and shared via the
+  // existing PatientShare pipeline (PORTAL_LINK is always available; the
+  // therapist can copy the link or send WhatsApp/email where configured).
+  async function shareAvs(): Promise<void> {
+    setSharing(true);
+    setShareError(null);
+    try {
+      const res = await fetch('/api/v1/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          channels: ['PORTAL_LINK'],
+          artefact: { artefactType: 'AFTER_VISIT_SUMMARY', sessionId },
+        }),
+      });
+      if (!res.ok) throw new Error(await errorOf(res, 'Could not create the summary'));
+      const data = (await res.json()) as { results: { portalUrl: string }[] };
+      setShareUrl(data.results[0]?.portalUrl ?? null);
+    } catch (e) {
+      setShareError((e as Error).message);
+    } finally {
+      setSharing(false);
+    }
+  }
+
   if (state.kind === 'loading' || state.kind === 'starting') {
     return (
       <Card className="p-8 text-center text-sm text-[var(--color-ink-3)]">
@@ -227,11 +256,27 @@ export function DoctorEncounterPanel({
       <Card className="p-7">
         <MedicalNoteView note={state.note} />
       </Card>
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex flex-wrap items-center justify-end gap-3">
         {signed ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent)]">
-            ✓ Signed
-          </span>
+          <>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent)]">
+              ✓ Signed
+            </span>
+            {shareUrl ? (
+              <a
+                href={shareUrl}
+                target="_blank"
+                rel="noopener"
+                className="text-sm text-[var(--color-accent)] underline"
+              >
+                Open the patient summary ↗
+              </a>
+            ) : (
+              <Button onClick={shareAvs} disabled={sharing} variant="secondary">
+                {sharing ? 'Creating…' : 'Share after-visit summary'}
+              </Button>
+            )}
+          </>
         ) : (
           <Button onClick={() => sign(state.note)} disabled={signing}>
             {signing ? 'Signing…' : 'Confirm &amp; sign'}
@@ -239,6 +284,7 @@ export function DoctorEncounterPanel({
         )}
       </div>
       {signError && <p className="text-right text-sm text-[var(--color-warn)]">{signError}</p>}
+      {shareError && <p className="text-right text-sm text-[var(--color-warn)]">{shareError}</p>}
     </div>
   );
 }

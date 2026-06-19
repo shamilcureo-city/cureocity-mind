@@ -46,6 +46,9 @@ export const PatientShareArtefactTypeSchema = z.enum([
   /// portal can render the right form without widening the existing
   /// SignedNoteSnapshotSchema (and breaking pre-S49 shares' parses).
   'SIGNED_INTAKE_NOTE',
+  /// Sprint DV3 — doctor after-visit summary. Patient-facing recap built
+  /// deterministically from the signed medical encounter note.
+  'AFTER_VISIT_SUMMARY',
 ]);
 export type PatientShareArtefactType = z.infer<typeof PatientShareArtefactTypeSchema>;
 
@@ -236,6 +239,24 @@ export const SignedIntakeNoteSnapshotSchema = z.object({
 });
 export type SignedIntakeNoteSnapshot = z.infer<typeof SignedIntakeNoteSnapshotSchema>;
 
+/**
+ * Sprint DV3 — Doctor after-visit summary. A plain-language, patient-facing
+ * recap built deterministically from the SIGNED medical encounter note (no
+ * LLM). The portal renders each non-empty list; the builder keeps it honest
+ * (no extracted meds / red-flags in this MVP — those arrive with DV5/DV6).
+ */
+export const AfterVisitSummarySnapshotSchema = z.object({
+  kind: z.literal('AFTER_VISIT_SUMMARY'),
+  /** Friendly opener (lower-case start; the portal prefixes "Hi <name>, "). */
+  greeting: z.string().max(2000),
+  whatWeDiscussed: z.array(z.string().min(1).max(800)),
+  medications: z.array(z.string().min(1).max(400)),
+  instructions: z.array(z.string().min(1).max(800)),
+  followUp: z.string().max(800),
+  redFlags: z.array(z.string().min(1).max(400)),
+});
+export type AfterVisitSummarySnapshot = z.infer<typeof AfterVisitSummarySnapshotSchema>;
+
 export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedNoteSnapshotSchema,
   ReflectionQuestionsSnapshotSchema,
@@ -244,6 +265,7 @@ export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   ProgressReportSnapshotSchema,
   InstrumentCheckinSnapshotSchema,
   SignedIntakeNoteSnapshotSchema,
+  AfterVisitSummarySnapshotSchema,
 ]);
 export type PatientShareSnapshot = z.infer<typeof PatientShareSnapshotSchema>;
 
@@ -348,6 +370,14 @@ export const ShareInstrumentCheckinInputSchema = z.object({
   instrumentKey: InstrumentKeySchema,
 });
 
+/// Sprint DV3 — share a doctor after-visit summary. sessionId is the
+/// artefact id (same posture as SIGNED_NOTE); the snapshot is built from
+/// the signed medical encounter note.
+export const ShareAfterVisitSummaryInputSchema = z.object({
+  artefactType: z.literal('AFTER_VISIT_SUMMARY'),
+  sessionId: CuidSchema,
+});
+
 export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareSignedNoteInputSchema,
   ShareReflectionQuestionsInputSchema,
@@ -356,6 +386,7 @@ export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareProgressReportInputSchema,
   ShareInstrumentCheckinInputSchema,
   ShareSignedIntakeNoteInputSchema,
+  ShareAfterVisitSummaryInputSchema,
 ]);
 export type ShareArtefactRef = z.infer<typeof ShareArtefactRefSchema>;
 

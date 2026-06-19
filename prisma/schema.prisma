@@ -1482,6 +1482,7 @@ enum PatientShareArtefactType {
   PROGRESS_REPORT
   INSTRUMENT_CHECKIN // Sprint 47 — interactive self-serve check-in
   SIGNED_INTAKE_NOTE // Sprint 49 — intake-note counterpart to SIGNED_NOTE
+  AFTER_VISIT_SUMMARY // Sprint DV3 — doctor after-visit summary
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.
