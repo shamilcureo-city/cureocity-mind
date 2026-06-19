@@ -22,6 +22,53 @@ hardest latency bar but the clearest India wedge.
 
 ---
 
+## 0. One system, two faces (read this first)
+
+This is **not** two separate systems or two codebases. It is **one
+system with two faces**, switched by a single `vertical` field
+(`THERAPIST | DOCTOR`) on each account, set at sign-up. An account is
+one or the other; a therapist never sees the doctor product and vice
+versa, and data is tenant-isolated as it already is today.
+
+```
+        / (therapists)                /for-doctors            ← TWO landing pages
+              │                            │
+      Therapist dashboard           Doctor dashboard          ← TWO dashboards
+      Clients / Journey             Patients / Rx                (branched UI/nav)
+              └──────────────┬───────────────┘
+                             ▼
+   ┌───────────────────────────────────────────────────────┐
+   │  ONE system — same repo · same APIs · same database    │  ← shared core
+   │  auth · billing · audit · audio · crypto · portal      │
+   └───────────────────────────────────────────────────────┘
+```
+
+| Doubled (the "face") | Shared, one of each (the "body") |
+| --- | --- |
+| Landing page (`/` vs `/for-doctors`) | Repo, Next.js app, deployment |
+| Dashboard nav + tabs | Postgres database (Prisma) |
+| AI prompts + note/clinical schemas | API routes (`apps/web/app/api/v1/*`) |
+| Marketing copy + examples | Auth, billing (Razorpay), audit log |
+| | Audio pipeline, encryption, patient portal, share |
+
+The `vertical` discriminator is the same pattern the code already uses
+for `Session.kind` (`INTAKE | TREATMENT | REVIEW`), one level up: it
+selects which landing, nav, prompt, and contract to use — without
+forking anything.
+
+**Why not two actually-separate systems?** A fork means every bug fix,
+security patch, DPDP/audit change, and billing tweak is done twice,
+forever. Sharing the core means ~70% of the work — the hard,
+compliance-heavy 70% — is written once and serves both verticals.
+
+**The one runtime exception:** the live streaming gateway (DV0/DV4) runs
+as a small separate **in-region service** because Vercel serverless
+functions can't hold a WebSocket. It still lives in this repo and is
+part of this one system — just a different runtime. The therapist batch
+path is untouched; only doctors use the live path.
+
+---
+
 ## 1. Why a doctor vertical (the short version)
 
 The long-form market + competitor research lives in the founder
