@@ -4,20 +4,36 @@ Sprint DV4 — the **WebSocket streaming gateway** for the doctor live
 copilot. Vercel serverless can't hold a socket, so the live path runs as
 its own (in-region, for DPDP) service rather than a Next.js route.
 
-This build is the **mock driver**: on `start` it replays a scripted
-Hinglish cardiology OPD consult, streaming the three rails — live
-transcript (Rail 1), a note that fills in as it goes (Rail 2), and
-gap / red-flag nudges (Rail 3) — and a final note on `stop`. It needs no
-GCP creds and no audio, so the whole live UX runs locally.
+This runs the **real pipeline**, not a script. The browser streams raw
+PCM audio frames (16 kHz mono s16le) over the socket; on a fixed cadence
+the gateway runs the same proven passes the batch path uses:
+
+- **Rail 1** — Pass 1 (transcription) over the rolling audio buffer → the
+  growing transcript.
+- **Rail 2** — Pass 2 with `vertical=DOCTOR` → `MedicalEncounterNoteV1`,
+  the note building itself.
+- **Rail 3** — the deterministic gap / red-flag engine (`gaps.ts`) over
+  the transcript + the building note.
+
+`LLM_BACKEND=mock` (default) runs locally with deterministic backends and
+no GCP creds — the whole live UX works offline. `LLM_BACKEND=vertex`
+makes it genuinely real: real audio → real Vertex transcription (Pass 1
+in asia-south1 for DPDP residency) → real Gemini note → real flags.
 
 ## Run it
 
 ```bash
-pnpm --filter @cureocity/live-gateway dev   # ws://localhost:8787
+# local, no creds:
+pnpm --filter @cureocity/live-gateway dev          # ws://localhost:8787
+
+# real:
+LLM_BACKEND=vertex VERTEX_PROJECT_ID=... \
+  GOOGLE_APPLICATION_CREDENTIALS=... \
+  pnpm --filter @cureocity/live-gateway dev
 ```
 
 Then open a doctor encounter in the web app and click **Try the live
-copilot (preview)**. Point the web app at the gateway with
+copilot**. Point the web app at the gateway with
 `NEXT_PUBLIC_LIVE_GATEWAY_URL` (defaults to `ws://localhost:8787`).
 
 ## Wire protocol
@@ -25,14 +41,15 @@ copilot (preview)**. Point the web app at the gateway with
 Shared, validated schemas live in `@cureocity/contracts`
 (`live-encounter.ts`):
 
-- Client → gateway: `LiveGatewayCommand` (`start` / `stop`)
+- Client → gateway: a JSON `LiveGatewayCommand` (`start` / `stop`), plus
+  **binary** messages carrying streamed PCM audio frames while listening.
 - Gateway → client: `LiveGatewayEvent` (`status` / `transcript` / `note`
-  / `gap` / `final`)
+  / `gap` / `final`).
 
-## What's next (real path)
+## What's next (latency)
 
-Swap the mock driver for: a streaming ASR (Rail 1, Indic/code-mix), a
-debounced structurer over the rolling transcript (Rail 2), and a
-gap/red-flag pass (Rail 3); persist the final note through the existing
-medical-note pipeline. Pick the ASR engine + confirm asia-south1
-residency first (see `docs/DOCTOR_VERTICAL.md` §4.3, §14).
+The clinical substance is real today; the remaining optimisation is
+true token-streaming ASR (so Rail 1 updates word-by-word instead of on
+the rolling-window cadence) and persisting the final note through the
+existing medical-note route. Confirm the streaming-ASR engine +
+asia-south1 residency first (see `docs/DOCTOR_VERTICAL.md` §4.3, §14).

@@ -2,13 +2,13 @@
 
 The task-level execution plan for the doctor vertical specified in
 `docs/DOCTOR_VERTICAL.md`. Read that build spec first — it explains the
-*why* and the architecture; this file is the *how*, sprint by sprint.
+_why_ and the architecture; this file is the _how_, sprint by sprint.
 
 Sprints are labelled **DV0–DV8** (Doctor Vertical) so they read as a
 parallel track that slots into the main product's sprint numbering.
 Estimated total: **~16–20 weeks**. The hardest, highest-risk work
 (streaming) is de-risked first (DV0) and the medical note is proven on
-the *existing batch pipeline* (DV3) **before** the live path (DV4) — so
+the _existing batch pipeline_ (DV3) **before** the live path (DV4) — so
 contracts and prompts are validated independently of the streaming
 build.
 
@@ -31,7 +31,7 @@ Per `CLAUDE.md`, no task is complete until:
   `mock-gemini.backend.ts`, so `LLM_BACKEND=mock` stays a complete
   end-to-end dev path (no GCP creds needed in CI).
 - **Tenant isolation** — every query filters by the practitioner; the
-  `vertical` discriminator narrows *before* `kind`.
+  `vertical` discriminator narrows _before_ `kind`.
 - **No therapist regression** — the existing psychotherapy flow is
   untouched; its test suite stays green every sprint.
 - **UI primitives** — compose `apps/web/components/ui/*` + design
@@ -41,17 +41,17 @@ Per `CLAUDE.md`, no task is complete until:
 
 ## 1. Sprint map
 
-| Sprint | Theme | Est. | Exit criteria (demo) |
-| --- | --- | --- | --- |
-| **DV0** | Live-loop spike (de-risk) | 1 wk | < 5s note-at-end on a code-mix fixture; ASR + gateway decisions recorded |
-| **DV1** | Vertical foundation: identity + routing | 1–2 wk | A doctor account logs in to a doctor-shaped (empty) dashboard; therapist flow unchanged |
-| **DV2** | Doctor landing + patient/encounter model | 1 wk | Doctor creates a patient + starts an encounter (no AI yet) |
-| **DV3** | Medical note on the **batch** path (parity first) | 1–2 wk | Doctor records (batch) → medical note → signs → shares after-visit summary |
-| **DV4** | The **live** path (streaming MVP) | 2–3 wk | Note ~90% done at end-consult; gaps surface mid-consult; degrades on 4G drop |
-| **DV5** | Rx + orders + interaction checks | 2 wk | Interaction-checked Rx draft + lab/referral drafts, confirmed + shared |
-| **DV6** | Differential + coding + templates + voice | 2–3 wk | Per-specialty gap-checks + live differential + ICD-10 nudges + voice commands |
-| **DV7** | Chronic-disease outcomes (the moat) | 1–2 wk | Per-patient control trajectory (BP/HbA1c) + shareable progress report |
-| **DV8** | ABDM/ABHA/FHIR + offline + pilot hardening | 2 wk | Pilot-ready for one super-specialty clinic |
+| Sprint  | Theme                                             | Est.   | Exit criteria (demo)                                                                    |
+| ------- | ------------------------------------------------- | ------ | --------------------------------------------------------------------------------------- |
+| **DV0** | Live-loop spike (de-risk)                         | 1 wk   | < 5s note-at-end on a code-mix fixture; ASR + gateway decisions recorded                |
+| **DV1** | Vertical foundation: identity + routing           | 1–2 wk | A doctor account logs in to a doctor-shaped (empty) dashboard; therapist flow unchanged |
+| **DV2** | Doctor landing + patient/encounter model          | 1 wk   | Doctor creates a patient + starts an encounter (no AI yet)                              |
+| **DV3** | Medical note on the **batch** path (parity first) | 1–2 wk | Doctor records (batch) → medical note → signs → shares after-visit summary              |
+| **DV4** | The **live** path (streaming MVP)                 | 2–3 wk | Note ~90% done at end-consult; gaps surface mid-consult; degrades on 4G drop            |
+| **DV5** | Rx + orders + interaction checks                  | 2 wk   | Interaction-checked Rx draft + lab/referral drafts, confirmed + shared                  |
+| **DV6** | Differential + coding + templates + voice         | 2–3 wk | Per-specialty gap-checks + live differential + ICD-10 nudges + voice commands           |
+| **DV7** | Chronic-disease outcomes (the moat)               | 1–2 wk | Per-patient control trajectory (BP/HbA1c) + shareable progress report                   |
+| **DV8** | ABDM/ABHA/FHIR + offline + pilot hardening        | 2 wk   | Pilot-ready for one super-specialty clinic                                              |
 
 **Critical path:** DV0 → DV1 → DV3 → DV4 → DV5. **Parallelisable:** DV2
 alongside DV1; DV7 alongside DV5/DV6; DV8's FHIR module alongside DV6.
@@ -62,7 +62,7 @@ alongside DV1; DV7 alongside DV5/DV6; DV8's FHIR module alongside DV6.
 
 **Goal.** Prove the live transcription → live structured note loop and
 measure latency on real code-mix audio. Throwaway code; the only output
-that ships is a *decision*.
+that ships is a _decision_.
 
 - **DV0.1** Stand up a minimal WebSocket gateway that accepts 16 kHz
   Int16 PCM frames and streams back interim/final transcript tokens.
@@ -70,7 +70,7 @@ that ships is a *decision*.
   service vs. a standalone Node socket service (decision goes back into
   `docs/DOCTOR_VERTICAL.md` §14).
 - **DV0.2** Behind the gateway, wire **two** ASR sources: (a) a mock
-  that replays a fixture transcript token-by-token, (b) one *real*
+  that replays a fixture transcript token-by-token, (b) one _real_
   engine candidate (Gemini Live or an Indic-native streaming model).
 - **DV0.3** Throwaway `/app/doctor-spike` page: capture mic with the
   existing `packages/audio` worklet + decimator but **stream frames**
@@ -80,8 +80,8 @@ that ships is a *decision*.
   2–3 example gaps (Rail 3).
 - **DV0.5** Benchmark on Hinglish/Manglish OPD fixtures: token latency,
   time-to-note at "end consult", transcription accuracy. Record results
-  + the **ASR engine choice** and **residency finding** (asia-south1
-  availability) in the build spec.
+  - the **ASR engine choice** and **residency finding** (asia-south1
+    availability) in the build spec.
 
 **Exit.** < 5 s note-ready at end-consult on a fixture; engine +
 gateway decisions written down. No production code retained.
@@ -136,7 +136,7 @@ dashboard; the entire therapist flow + test suite is unchanged.
   "Patient" where therapist renders "Client".
 - **DV2.3** Medical session kinds: add
   `MedicalSessionKindSchema` (`NEW_OPD | FOLLOW_UP | PROCEDURE |
-  REVIEW_REPORTS | TELECONSULT`) and branch
+REVIEW_REPORTS | TELECONSULT`) and branch
   `apps/web/lib/session-defaults.ts` so `DOCTOR` skips the therapy
   modality cascade.
 - **DV2.4** Encounter list + detail pages: minimally fork
@@ -208,6 +208,26 @@ capture surface. The flagship sprint.
 
 **Exit.** Live note is ~90% done at end-consult; gaps surface during
 the consult; a forced 4G drop falls back to batch with no data loss.
+
+**Status (built — full, not mock).** The live path is the **real
+pipeline**, not a scripted demo. `services/live-gateway` is a standalone
+WebSocket service: the browser (`apps/web/lib/audio/use-live-stream.ts`)
+streams the same 16 kHz s16le PCM the batch recorder produces, and on a
+rolling cadence the gateway runs the **proven Pass 1 (transcription) +
+Pass 2 (`vertical=DOCTOR` → `MedicalEncounterNoteV1`)** backends plus the
+deterministic gap engine (`services/live-gateway/src/gaps.ts`), emitting
+the three rails + a final note. `LLM_BACKEND=mock` runs it locally with
+no creds; `LLM_BACKEND=vertex` makes it genuinely real (real audio →
+real Vertex transcription in asia-south1 → real Gemini note → real
+flags). Validated end-to-end with a streaming WS smoke client.
+
+Remaining (latency + hardening, env-dependent — DV4.1/4.2/4.3/4.7):
+true **token-streaming ASR** (so Rail 1 updates word-by-word instead of
+on the ~4 s rolling window), **socket auth** against the practitioner
+session, **graceful batch fallback** on socket loss, persisting the
+finalized note through the existing medical-note route, and the
+`structure`/`finalize` **observability** members. The clinical substance
+is real today; these are the optimisation/ops layer.
 
 ---
 
@@ -300,11 +320,11 @@ clinic.
 
 ## 2. Risks & how the sequencing mitigates them
 
-| Risk | Mitigation in this plan |
-| --- | --- |
-| Streaming is hard / latency unknown | **DV0** spikes it first; ship nothing else until the number is proven |
-| Medical NLP quality (hallucinated exams) | **DV3** validates contracts/prompts on the batch path first; PE/vitals guarded + linked-evidence (spec §10) |
-| Scope creep into a full EMR | Reuse `Client`/`Session`/portal/billing as-is; build only the net-new clinical surfaces |
-| DPDP residency on streaming | DV0.5 records the asia-south1 finding before DV4 commits the engine |
-| Breaking the live therapist product | `vertical` discriminator + "no therapist regression" in the DoD every sprint |
-| Competing with EkaScribe's head start | Differentiate on DV4 Rail-3 copilot, DV6 reasoning, DV7 outcomes moat, EMR-agnostic — not on raw scribing parity alone |
+| Risk                                     | Mitigation in this plan                                                                                                |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Streaming is hard / latency unknown      | **DV0** spikes it first; ship nothing else until the number is proven                                                  |
+| Medical NLP quality (hallucinated exams) | **DV3** validates contracts/prompts on the batch path first; PE/vitals guarded + linked-evidence (spec §10)            |
+| Scope creep into a full EMR              | Reuse `Client`/`Session`/portal/billing as-is; build only the net-new clinical surfaces                                |
+| DPDP residency on streaming              | DV0.5 records the asia-south1 finding before DV4 commits the engine                                                    |
+| Breaking the live therapist product      | `vertical` discriminator + "no therapist regression" in the DoD every sprint                                           |
+| Competing with EkaScribe's head start    | Differentiate on DV4 Rail-3 copilot, DV6 reasoning, DV7 outcomes moat, EMR-agnostic — not on raw scribing parity alone |

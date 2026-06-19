@@ -4,42 +4,59 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   LiveGatewayEventSchema,
   type EncounterGap,
-  type LiveTranscriptDelta,
   type MedicalEncounterNoteV1,
   type PartialStructuredNote,
 } from '@cureocity/contracts';
+import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { MedicalNoteView } from './MedicalNoteView';
 
 /**
- * Sprint DV4 — the live copilot (preview). Connects to the standalone
- * WebSocket gateway and renders the three rails as they stream:
- *   Rail 1 — live transcript
- *   Rail 2 — the note building itself
- *   Rail 3 — gaps + red flags surfaced mid-consult
- * Mock-first: the gateway replays a scripted consult (no audio/ASR yet),
- * so the whole UX runs locally. See services/live-gateway.
+ * Sprint DV4 (full) — the live copilot. Streams real mic audio to the
+ * standalone WebSocket gateway and renders the three rails as the
+ * gateway runs the real pipeline:
+ *   Rail 1 — live transcript (Pass 1 on the rolling buffer)
+ *   Rail 2 — the note building itself (Pass 2, vertical=DOCTOR)
+ *   Rail 3 — gaps + red flags surfaced mid-consult (gap engine)
+ * LLM_BACKEND=mock makes it run locally; vertex makes it fully real.
+ * See services/live-gateway + docs/DOCTOR_VERTICAL.md §4.
  */
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
 type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'error';
 
-export function DoctorLiveEncounter() {
+export function DoctorLiveEncounter({ sessionId }: { sessionId: string }) {
   const wsRef = useRef<WebSocket | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
-  const [transcript, setTranscript] = useState<LiveTranscriptDelta[]>([]);
+  const [transcript, setTranscript] = useState('');
   const [note, setNote] = useState<PartialStructuredNote>({});
   const [gaps, setGaps] = useState<EncounterGap[]>([]);
   const [finalNote, setFinalNote] = useState<MedicalEncounterNoteV1 | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => () => wsRef.current?.close(), []);
+  const stream = useLiveStream({
+    onFrame: (pcm) => {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === ws.OPEN) ws.send(pcm);
+    },
+  });
+
+  // Close the socket + release the mic on unmount. `stream` is a stable
+  // hook handle; we intentionally run this once.
+  const streamRef = useRef(stream);
+  streamRef.current = stream;
+  useEffect(() => {
+    return () => {
+      wsRef.current?.close();
+      void streamRef.current.stop();
+    };
+  }, []);
 
   function start(): void {
     setError(null);
-    setTranscript([]);
+    setTranscript('');
     setNote({});
     setGaps([]);
     setFinalNote(null);
@@ -55,7 +72,14 @@ export function DoctorLiveEncounter() {
     }
     wsRef.current = ws;
 
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'start' }));
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'start', sessionId }));
+      void stream.start().catch((e: Error) => {
+        setError(`Microphone unavailable: ${e.message}`);
+        setPhase('error');
+        ws.close();
+      });
+    };
     ws.onerror = () => {
       setPhase('error');
       setError(
@@ -82,7 +106,7 @@ export function DoctorLiveEncounter() {
           else if (event.state === 'done') setPhase('done');
           break;
         case 'transcript':
-          setTranscript((prev) => [...prev, event.delta]);
+          setTranscript((prev) => (prev ? `${prev} ${event.delta.text}` : event.delta.text));
           break;
         case 'note':
           setNote(event.partial);
@@ -98,6 +122,7 @@ export function DoctorLiveEncounter() {
   }
 
   function stop(): void {
+    void stream.stop();
     wsRef.current?.send(JSON.stringify({ type: 'stop' }));
   }
 
@@ -109,13 +134,15 @@ export function DoctorLiveEncounter() {
         <div className="flex items-center gap-3">
           <PhaseBadge phase={phase} />
           <p className="text-xs text-[var(--color-ink-3)]">
-            Preview · mock gateway. No audio is recorded.
+            {live
+              ? 'Listening — your mic is streaming to the in-region gateway.'
+              : 'The note writes itself while you consult. Mic audio is streamed live, not stored.'}
           </p>
         </div>
         <div className="flex gap-2">
           {finalNote || phase === 'done' ? (
             <Button onClick={start} variant="secondary">
-              Run again
+              New consult
             </Button>
           ) : live ? (
             <Button onClick={stop} className="bg-[var(--color-warn)] hover:bg-[#a25b30]">
@@ -148,18 +175,11 @@ export function DoctorLiveEncounter() {
         <div className="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_0.9fr]">
           <Rail title="Transcript">
             {transcript.length === 0 ? (
-              <Empty>Press “Start live consult”.</Empty>
+              <Empty>Press “Start live consult” and allow the mic.</Empty>
             ) : (
-              <ul className="space-y-2">
-                {transcript.map((d, i) => (
-                  <li key={i} className="text-sm leading-relaxed">
-                    <span className="mr-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-                      {d.speaker}
-                    </span>
-                    <span className="text-[var(--color-ink)]">{d.text}</span>
-                  </li>
-                ))}
-              </ul>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-ink)]">
+                {transcript}
+              </p>
             )}
           </Rail>
 

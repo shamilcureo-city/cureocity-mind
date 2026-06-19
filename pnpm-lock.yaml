@@ -447,6 +447,9 @@ importers:
       '@cureocity/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@cureocity/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       ws:
         specifier: ^8.21.0
         version: 8.21.0
