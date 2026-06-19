@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { type PractitionerVertical } from '@cureocity/contracts';
 import { Glyph } from '@/components/app/Sidebar';
 
 // Sprint 45 — Today is the morning landing screen on phones too. Mobile
@@ -20,6 +21,15 @@ const ITEMS: {
   { href: '/app/settings', label: 'Settings', icon: 'cog' },
 ];
 
+// Sprint DV1 — doctor bottom bar. Clients reads as "Patients"; the
+// therapy-only Assistant is dropped. See docs/DOCTOR_VERTICAL.md.
+const DOCTOR_ITEMS: typeof ITEMS = [
+  { href: '/app/today', label: 'Today', icon: 'today' },
+  { href: '/app', label: 'Record', icon: 'record' },
+  { href: '/app/clients', label: 'Patients', icon: 'clients' },
+  { href: '/app/settings', label: 'Settings', icon: 'cog' },
+];
+
 /**
  * Bottom tab bar for phones. The desktop sidebar is `hidden md:flex`,
  * which previously left small screens with NO navigation at all —
@@ -27,15 +37,19 @@ const ITEMS: {
  * nav for a large slice of the pilot. Pages get bottom padding from
  * the app layout so content never hides behind the bar.
  */
-export function MobileNav() {
+export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerVertical }) {
   const path = usePathname() ?? '/app';
+  const items = vertical === 'DOCTOR' ? DOCTOR_ITEMS : ITEMS;
   return (
     <nav
       aria-label="Primary"
       className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-line-soft)] bg-[var(--color-surface-soft)]/95 backdrop-blur md:hidden"
     >
-      <ul className="grid grid-cols-5">
-        {ITEMS.map((item) => {
+      <ul
+        className="grid"
+        style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      >
+        {items.map((item) => {
           const active = item.href === '/app' ? path === '/app' : path.startsWith(item.href);
           return (
             <li key={item.href}>
@@ -43,9 +57,7 @@ export function MobileNav() {
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
                 className={`flex flex-col items-center gap-1 px-1 py-2.5 text-[10px] ${
-                  active
-                    ? 'font-medium text-[var(--color-accent)]'
-                    : 'text-[var(--color-ink-2)]'
+                  active ? 'font-medium text-[var(--color-accent)]' : 'text-[var(--color-ink-2)]'
                 }`}
               >
                 <Glyph kind={item.icon} />

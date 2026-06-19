@@ -52,9 +52,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </div>
       )}
       <div className="flex flex-1">
-        <Sidebar usage={usage} />
+        <Sidebar usage={usage} vertical={psy?.vertical ?? 'THERAPIST'} />
         <div className="flex flex-1 flex-col pb-16 md:pb-0">{children}</div>
-        <MobileNav />
+        <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
       </div>
     </div>
   );

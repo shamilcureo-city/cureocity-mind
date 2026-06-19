@@ -48,6 +48,14 @@ enum PsychologistRole {
   ADMIN
 }
 
+// Sprint DV1 — product vertical discriminator. One system, two faces:
+// THERAPIST (psychotherapy) vs DOCTOR (super-specialty OPD scribe). See
+// docs/DOCTOR_VERTICAL.md. Append-only; never reorder existing values.
+enum PractitionerVertical {
+  THERAPIST
+  DOCTOR
+}
+
 model Psychologist {
   id            String             @id @default(cuid())
   firebaseUid   String             @unique
@@ -58,6 +66,15 @@ model Psychologist {
   rciVerifiedAt DateTime?
   status        PsychologistStatus @default(PENDING_VERIFICATION)
   role          PsychologistRole   @default(THERAPIST)
+
+  /// Sprint DV1 — product vertical (THERAPIST | DOCTOR). Drives landing,
+  /// nav, prompt + contract selection. See docs/DOCTOR_VERTICAL.md.
+  vertical         PractitionerVertical @default(THERAPIST)
+  /// Sprint DV1 — doctor credential (NMC / state medical council reg).
+  /// NULL for therapists, who use rciNumber instead.
+  medicalRegNumber String?              @unique
+  /// Sprint DV1 — doctor specialty (e.g. "Cardiology"). NULL for therapists.
+  specialty        String?
 
   // Public directory profile fields. All optional so existing rows
   // continue to validate; the directory hides rows where bio is null.
@@ -896,13 +913,13 @@ model BillingPayment {
   razorpayOrderId   String  @unique
   razorpayPaymentId String?
 
-  plan       BillingPlan
-  amountInr  Int
-  status     BillingPaymentStatus @default(CREATED)
+  plan        BillingPlan
+  amountInr   Int
+  status      BillingPaymentStatus @default(CREATED)
   periodStart DateTime?
   periodEnd   DateTime?
   /// Verbatim webhook event payload for audit / debugging.
-  rawEvent Json?
+  rawEvent    Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

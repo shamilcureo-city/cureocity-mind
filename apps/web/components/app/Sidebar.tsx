@@ -2,7 +2,12 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { isPaidPlan, planTierLabel, type BillingPlan } from '@cureocity/contracts';
+import {
+  isPaidPlan,
+  planTierLabel,
+  type BillingPlan,
+  type PractitionerVertical,
+} from '@cureocity/contracts';
 
 interface NavItem {
   href: string;
@@ -23,6 +28,17 @@ const PRIMARY: NavItem[] = [
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
 
+// Sprint DV1 — doctor nav. Therapy-only items (Templates, Assistant, My
+// practice) are hidden and Clients reads as "Patients". DV2/DV3 add the
+// doctor-specific routes (Encounters, Prescriptions).
+// See docs/DOCTOR_VERTICAL.md.
+const DOCTOR_PRIMARY: NavItem[] = [
+  { href: '/app/today', label: 'Today', icon: 'today' },
+  { href: '/app', label: 'Record', icon: 'record' },
+  { href: '/app/clients', label: 'Patients', icon: 'clients' },
+  { href: '/app/learn', label: 'Learn', icon: 'learn' },
+];
+
 export interface PlanUsage {
   /// Sessions recorded against the free pilot allowance.
   used: number;
@@ -38,10 +54,13 @@ interface SidebarProps {
   /// Real usage computed by the app layout (server). Null hides the
   /// widget (e.g. unauthenticated edge states).
   usage?: PlanUsage | null;
+  /// Sprint DV1 — which vertical's nav to render. Defaults to THERAPIST.
+  vertical?: PractitionerVertical;
 }
 
-export function Sidebar({ usage = null }: SidebarProps) {
+export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) {
   const path = usePathname() ?? '/app';
+  const items = vertical === 'DOCTOR' ? DOCTOR_PRIMARY : PRIMARY;
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] md:flex">
       <div className="px-6 py-6">
@@ -58,7 +77,7 @@ export function Sidebar({ usage = null }: SidebarProps) {
 
       <nav className="px-3" aria-label="Primary">
         <ul className="space-y-1">
-          {PRIMARY.map((item) => {
+          {items.map((item) => {
             const active = item.href === '/app' ? path === '/app' : path.startsWith(item.href);
             return (
               <li key={item.href}>
@@ -100,9 +119,7 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
     return (
       <div className="rounded-2xl border border-[var(--color-line)] bg-white p-4">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-semibold">
-            {usage.plan ? planTierLabel(usage.plan) : 'Plan'}
-          </p>
+          <p className="text-sm font-semibold">{usage.plan ? planTierLabel(usage.plan) : 'Plan'}</p>
           <Link
             href="/app/settings/plan"
             className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
@@ -179,7 +196,8 @@ export function Glyph({
     | 'signout';
 }) {
   const paths: Record<typeof kind, string> = {
-    today: 'M3 9h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM8 3v4M16 3v4M9 14h2v2H9z',
+    today:
+      'M3 9h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM8 3v4M16 3v4M9 14h2v2H9z',
     record: 'M12 4a4 4 0 0 1 4 4v4a4 4 0 0 1-8 0V8a4 4 0 0 1 4-4zM5 12a7 7 0 0 0 14 0M12 19v3',
     clients: 'M16 14a4 4 0 1 0-8 0M3 21v-1a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v1',
     templates:

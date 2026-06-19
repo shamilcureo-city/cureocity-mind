@@ -75,6 +75,51 @@ PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off
 
 export const TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION = 'TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V2';
 
+// ============================================================================
+// Sprint DV1 — vertical-aware prompt selection (scaffold).
+//
+// The doctor vertical needs its own medical persona for Pass 1+. This is
+// a STUB medical transcription prompt plus a loader the orchestrator will
+// call (in DV3/DV4) instead of referencing the therapy prompt directly.
+// Verbatim medical wording lands in DV3. See docs/DOCTOR_VERTICAL.md §5, §7.
+// ============================================================================
+
+export const MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1 =
+  `You are an expert clinical scribe for an Indian super-specialty OPD.
+
+Input: audio of a doctor–patient consultation (16 kHz mono PCM), often
+short (2–3 minutes) and code-mixed (Hinglish, Manglish, Tanglish, …).
+The doctor may dictate tersely rather than converse.
+
+Task — produce strict JSON: a verbatim, diarized, language-tagged
+transcript in the language ACTUALLY SPOKEN (do not translate), with
+medical terms, drug names, and dosages preserved exactly.
+
+PLACEHOLDER: replace with verbatim medical wording in DV3 (medical note).` as const;
+
+export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1';
+
+/**
+ * Returns the Pass-1 transcription prompt + version for a vertical.
+ * Callers MUST persist the returned `version` in GeminiCallLog (never the
+ * body) so the audit trail can resolve prompt drift.
+ */
+export function transcribePromptFor(vertical: 'THERAPIST' | 'DOCTOR'): {
+  prompt: string;
+  version: string;
+} {
+  if (vertical === 'DOCTOR') {
+    return {
+      prompt: MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1,
+      version: MEDICAL_TRANSCRIBE_PROMPT_VERSION,
+    };
+  }
+  return {
+    prompt: TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
+    version: TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
+  };
+}
+
 export const THERAPY_NOTE_SYSTEM_PROMPT_V1 =
   `You are a clinical documentation specialist writing therapy session notes for an Indian psychotherapist.
 

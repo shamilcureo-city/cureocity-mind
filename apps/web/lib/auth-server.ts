@@ -66,6 +66,9 @@ export interface AuthenticatedUser {
   email?: string;
   psychologistId?: string;
   role?: 'THERAPIST' | 'ADMIN';
+  /// Sprint DV1 — product vertical of the resolved account. Absent when
+  /// no Psychologist row is linked yet. See docs/DOCTOR_VERTICAL.md.
+  vertical?: 'THERAPIST' | 'DOCTOR';
 }
 
 export interface AuthenticatedClient {
@@ -128,12 +131,13 @@ export async function resolvePsychologist(req: NextRequest): Promise<Resolved<Au
   if (!uidRes.ok) return uidRes;
   const psy = await prisma.psychologist.findUnique({
     where: { firebaseUid: uidRes.value },
-    select: { id: true, role: true, deletedAt: true, status: true },
+    select: { id: true, role: true, vertical: true, deletedAt: true, status: true },
   });
   const user: AuthenticatedUser = { firebaseUid: uidRes.value };
   if (psy && psy.deletedAt === null) {
     user.psychologistId = psy.id;
     user.role = psy.role;
+    user.vertical = psy.vertical;
   }
   return { ok: true, value: user };
 }
