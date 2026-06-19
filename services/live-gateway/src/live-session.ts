@@ -3,6 +3,7 @@ import type { SpeakerSegment } from '@cureocity/llm';
 import {
   checkInteractions,
   formatInteraction,
+  parseVoiceCommands,
   type InteractionSeverity,
 } from '@cureocity/clinical';
 import { detectGaps } from './gaps';
@@ -56,6 +57,8 @@ export class LiveSession {
   private lastNoteJson = '';
   /** Gap messages already surfaced, so each flag fires once. */
   private readonly seenGaps = new Set<string>();
+  /** Voice-command clauses already surfaced, so each fires once. */
+  private readonly seenCommands = new Set<string>();
   /** The most recent structured note, used as the final if none newer. */
   private latestNote: MedicalEncounterNoteV1 | null = null;
 
@@ -114,6 +117,16 @@ export class LiveSession {
     const segments = pass1.output.speakerSegments;
 
     this.emitTranscriptDelta(transcript, segments);
+
+    // Sprint DV6.4 — recognised voice commands (transcript-only, so they
+    // surface even before the note structures). The doctor confirms them.
+    if (!isFinal) {
+      for (const command of parseVoiceCommands(transcript)) {
+        if (this.seenCommands.has(command.raw)) continue;
+        this.seenCommands.add(command.raw);
+        this.emit({ type: 'command', command });
+      }
+    }
 
     const pass2 = await this.backends.pass2.run({
       sessionId: this.sessionId,

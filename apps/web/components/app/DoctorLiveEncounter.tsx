@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  ChronicTrajectorySchema,
   LiveGatewayEventSchema,
   type EncounterGap,
   type MedicalEncounterNoteV1,
   type PartialStructuredNote,
+  type VoiceCommand,
 } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { Button } from '../ui/Button';
@@ -29,9 +31,11 @@ type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'erro
 
 export function DoctorLiveEncounter({
   sessionId,
+  clientId,
   specialty,
 }: {
   sessionId: string;
+  clientId?: string;
   specialty?: string | null;
 }) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -39,8 +43,28 @@ export function DoctorLiveEncounter({
   const [transcript, setTranscript] = useState('');
   const [note, setNote] = useState<PartialStructuredNote>({});
   const [gaps, setGaps] = useState<EncounterGap[]>([]);
+  const [commands, setCommands] = useState<VoiceCommand[]>([]);
+  const [shownData, setShownData] = useState<Record<string, string>>({});
   const [finalNote, setFinalNote] = useState<MedicalEncounterNoteV1 | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Resolve a SHOW_DATA command against the patient's chronic readings.
+  async function resolveShowData(measure: string): Promise<void> {
+    if (!clientId) return;
+    try {
+      const res = await fetch(`/api/v1/clients/${clientId}/chronic`);
+      if (!res.ok) return;
+      const parsed = ChronicTrajectorySchema.safeParse(await res.json());
+      if (!parsed.success) return;
+      const m = parsed.data.measures.find((x) => x.measure === measure);
+      setShownData((prev) => ({
+        ...prev,
+        [measure]: m?.latest ? `${m.latest.display} ${m.unit}` : 'no readings on file',
+      }));
+    } catch {
+      /* best-effort */
+    }
+  }
 
   const stream = useLiveStream({
     onFrame: (pcm) => {
@@ -65,6 +89,8 @@ export function DoctorLiveEncounter({
     setTranscript('');
     setNote({});
     setGaps([]);
+    setCommands([]);
+    setShownData({});
     setFinalNote(null);
     setPhase('connecting');
 
@@ -119,6 +145,12 @@ export function DoctorLiveEncounter({
           break;
         case 'gap':
           setGaps((prev) => [...prev, event.gap]);
+          break;
+        case 'command':
+          setCommands((prev) =>
+            prev.some((c) => c.raw === event.command.raw) ? prev : [...prev, event.command],
+          );
+          if (event.command.kind === 'SHOW_DATA') void resolveShowData(event.command.measure);
           break;
         case 'final':
           setFinalNote(event.note);
@@ -178,49 +210,87 @@ export function DoctorLiveEncounter({
           </Card>
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_0.9fr]">
-          <Rail title="Transcript">
-            {transcript.length === 0 ? (
-              <Empty>Press “Start live consult” and allow the mic.</Empty>
-            ) : (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-ink)]">
-                {transcript}
-              </p>
-            )}
-          </Rail>
-
-          <Rail title="Note · building">
-            {isEmptyNote(note) ? (
-              <Empty>The note fills in as the consult goes.</Empty>
-            ) : (
-              <dl className="space-y-3 text-sm">
-                <NoteField label="Chief complaint" value={note.chiefComplaint} />
-                <NoteField label="HPI" value={note.hpi} />
-                <NoteField label="Vitals" value={formatVitals(note.vitals)} />
-                <NoteField label="Assessment" value={note.assessment} />
-                <NoteField label="Plan" value={note.plan} />
-              </dl>
-            )}
-          </Rail>
-
-          <Rail title="Ask & flag">
-            {gaps.length === 0 ? (
-              <Empty>Missed questions + red flags appear here.</Empty>
-            ) : (
-              <ul className="space-y-2">
-                {gaps.map((g, i) => (
-                  <li key={i} className={`rounded-xl border p-3 text-sm ${gapTone(g.severity)}`}>
-                    <span className="mr-1">{gapIcon(g.kind)}</span>
-                    {g.message}
+        <>
+          {commands.length > 0 && (
+            <Card className="mb-4 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-5">
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                Copilot heard
+              </h2>
+              <ul className="space-y-1.5">
+                {commands.map((c, i) => (
+                  <li key={i} className="text-sm text-[var(--color-ink)]">
+                    {commandLabel(c, shownData)}
                   </li>
                 ))}
               </ul>
-            )}
-          </Rail>
-        </div>
+              <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+                Recognised from your speech — confirm them on the note / orders before signing.
+              </p>
+            </Card>
+          )}
+          <div className="grid gap-4 lg:grid-cols-[1.1fr_1.1fr_0.9fr]">
+            <Rail title="Transcript">
+              {transcript.length === 0 ? (
+                <Empty>Press “Start live consult” and allow the mic.</Empty>
+              ) : (
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-ink)]">
+                  {transcript}
+                </p>
+              )}
+            </Rail>
+
+            <Rail title="Note · building">
+              {isEmptyNote(note) ? (
+                <Empty>The note fills in as the consult goes.</Empty>
+              ) : (
+                <dl className="space-y-3 text-sm">
+                  <NoteField label="Chief complaint" value={note.chiefComplaint} />
+                  <NoteField label="HPI" value={note.hpi} />
+                  <NoteField label="Vitals" value={formatVitals(note.vitals)} />
+                  <NoteField label="Assessment" value={note.assessment} />
+                  <NoteField label="Plan" value={note.plan} />
+                </dl>
+              )}
+            </Rail>
+
+            <Rail title="Ask & flag">
+              {gaps.length === 0 ? (
+                <Empty>Missed questions + red flags appear here.</Empty>
+              ) : (
+                <ul className="space-y-2">
+                  {gaps.map((g, i) => (
+                    <li key={i} className={`rounded-xl border p-3 text-sm ${gapTone(g.severity)}`}>
+                      <span className="mr-1">{gapIcon(g.kind)}</span>
+                      {g.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Rail>
+          </div>
+        </>
       )}
     </div>
   );
+}
+
+function commandLabel(c: VoiceCommand, shownData: Record<string, string>): string {
+  if (c.kind === 'ADD_MEDICATION') {
+    const parts = [
+      c.drug,
+      c.strength,
+      c.frequency,
+      c.durationDays ? `${c.durationDays} days` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return `➕ Add to Rx: ${parts}`;
+  }
+  if (c.kind === 'ORDER_TEST') {
+    return `🔬 Order: ${c.description}`;
+  }
+  const resolved = shownData[c.measure];
+  return `📈 ${c.measure}${resolved ? `: ${resolved}` : ' — fetching…'}`;
 }
 
 function PhaseBadge({ phase }: { phase: Phase }) {

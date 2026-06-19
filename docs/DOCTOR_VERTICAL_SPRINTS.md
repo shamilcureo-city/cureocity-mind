@@ -329,10 +329,20 @@ working voice commands.
   Rail-3 ❓ nudges are specialty-aware (verified end-to-end with a
   cardiology smoke test).
 
-Deferred — **DV6.4 voice commands** ("add paracetamol 500 TDS × 3 days",
-"show last HbA1c"): a self-contained command parser on the live
-transcript that needs a new live wire-protocol event type + UI; carried
-as a focused follow-up so the protocol addition gets its own pass.
+**DV6.4 voice commands — built.** A deterministic command parser
+(`packages/clinical/src/voice-commands.ts`, 11 tests) scans the rolling
+transcript for spoken commands — `ADD_MEDICATION` ("add paracetamol 500
+TDS x 3 days" → drug + strength + frequency + duration, with Indian-OPD
+dosing shorthand OD/BD/TDS/HS/SOS), `ORDER_TEST` ("order ECG" — gated on
+a known-investigation list), and `SHOW_DATA` ("show last HbA1c"). It is
+conservative by design (a med command needs a strength **or** a
+frequency code; order/show need a known test/measure) so ordinary
+conversation never triggers a false action. A new `command` event on the
+live wire protocol (`LiveGatewayEventSchema`) carries them; the gateway
+emits each once, and `DoctorLiveEncounter` shows a "Copilot heard" panel
+— resolving `SHOW_DATA` against the patient's chronic readings
+(`GET /clients/:id/chronic`) so "show last HbA1c" returns the real value.
+Nothing is auto-applied — the doctor confirms on the note / orders.
 
 ---
 

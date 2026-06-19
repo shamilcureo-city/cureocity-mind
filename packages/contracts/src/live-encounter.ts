@@ -40,6 +40,37 @@ export const EncounterGapSchema = z.object({
 export type EncounterGap = z.infer<typeof EncounterGapSchema>;
 
 // ============================================================================
+// Sprint DV6.4 — mid-consult voice commands. A deterministic parser (in
+// @cureocity/clinical) scans the rolling transcript for spoken commands
+// ("add paracetamol 500 TDS x 3 days", "order ECG", "show last HbA1c")
+// and the gateway surfaces them as a `command` event. The doctor confirms;
+// nothing is auto-applied. See docs/DOCTOR_VERTICAL_SPRINTS.md DV6.4.
+// ============================================================================
+
+export const VoiceCommandSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('ADD_MEDICATION'),
+    /** The transcript clause the command was parsed from. */
+    raw: z.string(),
+    drug: z.string(),
+    strength: z.string().optional(),
+    frequency: z.string().optional(),
+    durationDays: z.number().int().positive().optional(),
+  }),
+  z.object({
+    kind: z.literal('ORDER_TEST'),
+    raw: z.string(),
+    description: z.string(),
+  }),
+  z.object({
+    kind: z.literal('SHOW_DATA'),
+    raw: z.string(),
+    measure: z.enum(['BP', 'HBA1C', 'FBS', 'LDL', 'WEIGHT']),
+  }),
+]);
+export type VoiceCommand = z.infer<typeof VoiceCommandSchema>;
+
+// ============================================================================
 // Sprint DV4 — live gateway wire protocol. The doctor's browser opens a
 // WebSocket to the streaming gateway (a standalone in-region service —
 // Vercel can't hold a socket). The gateway streams the three rails +
@@ -61,12 +92,14 @@ export type LiveGatewayCommand = z.infer<typeof LiveGatewayCommandSchema>;
 export const LiveGatewayStateSchema = z.enum(['connected', 'listening', 'finalizing', 'done']);
 export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 
-/// Gateway → client events: the three rails + lifecycle status.
+/// Gateway → client events: the three rails + lifecycle status + (DV6.4)
+/// recognised voice commands.
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
   z.object({ type: z.literal('note'), partial: PartialStructuredNoteSchema }),
   z.object({ type: z.literal('gap'), gap: EncounterGapSchema }),
   z.object({ type: z.literal('final'), note: MedicalEncounterNoteV1Schema }),
+  z.object({ type: z.literal('command'), command: VoiceCommandSchema }),
 ]);
 export type LiveGatewayEvent = z.infer<typeof LiveGatewayEventSchema>;

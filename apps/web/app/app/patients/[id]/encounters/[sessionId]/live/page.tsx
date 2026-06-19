@@ -49,7 +49,7 @@ export default async function LiveEncounterPage({
           stored. End the consult to get the finished note.
         </p>
       </header>
-      <DoctorLiveEncounter sessionId={sessionId} specialty={doctor.specialty} />
+      <DoctorLiveEncounter sessionId={sessionId} clientId={clientId} specialty={doctor.specialty} />
     </Container>
   );
 }

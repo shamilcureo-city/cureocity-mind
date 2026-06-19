@@ -14,3 +14,4 @@ export * from './crisis';
 export * from './interactions';
 export * from './specialty-templates';
 export * from './chronic';
+export * from './voice-commands';
