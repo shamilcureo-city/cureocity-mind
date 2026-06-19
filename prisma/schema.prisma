@@ -456,6 +456,8 @@ model Client {
   safetyPlans         SafetyPlan[]
   treatmentEpisodes   TreatmentEpisode[]
   assessmentItems     AssessmentItem[]
+  // Doctor vertical — Sprint DV7. Chronic-disease reading series.
+  clinicalReadings    ClinicalReading[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -786,6 +788,8 @@ model Session {
   clinicalOrders      ClinicalOrder[]
   // Doctor vertical — Sprint DV6. Differential diagnosis (reasoning copilot).
   differential        Differential?
+  // Doctor vertical — Sprint DV7. Chronic-disease readings captured here.
+  clinicalReadings    ClinicalReading[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -1230,6 +1234,50 @@ model Differential {
 }
 
 // ============================================================================
+// Doctor vertical — Sprint DV7. ClinicalReading — a single chronic-disease
+// measurement (BP / HbA1c / FBS / LDL / weight) in a per-patient time
+// series. Auto-captured from the medical note's vitals on note completion
+// (source NOTE_VITALS) or logged manually (source MANUAL). The control /
+// trend verdicts are computed deterministically by @cureocity/clinical.
+// See docs/DOCTOR_VERTICAL.md §9.
+// ============================================================================
+
+enum ChronicMeasure {
+  BP
+  HBA1C
+  FBS
+  LDL
+  WEIGHT
+}
+
+model ClinicalReading {
+  id             String         @id @default(cuid())
+  clientId       String
+  psychologistId String
+  sessionId      String?
+  measure        ChronicMeasure
+
+  /// Primary value (systolic for BP).
+  value          Float
+  /// Secondary value — diastolic for BP; null otherwise.
+  valueSecondary Float?
+  unit           String
+  takenAt        DateTime
+  /// 'NOTE_VITALS' (auto from the note) | 'MANUAL' (doctor-entered).
+  source         String   @default("MANUAL")
+
+  createdAt DateTime @default(now())
+
+  client  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([clientId, measure, takenAt])
+  @@index([psychologistId])
+  @@index([sessionId])
+  @@map("clinical_readings")
+}
+
+// ============================================================================
 // NoteTemplate — therapist-owned customizable note structures. Sprint 11.
 // Each template owns an ordered list of sections; downstream the Pass 2
 // system prompt is rewritten to ask the model to populate the named
@@ -1574,6 +1622,7 @@ enum PatientShareArtefactType {
   INSTRUMENT_CHECKIN // Sprint 47 — interactive self-serve check-in
   SIGNED_INTAKE_NOTE // Sprint 49 — intake-note counterpart to SIGNED_NOTE
   AFTER_VISIT_SUMMARY // Sprint DV3 — doctor after-visit summary
+  CHRONIC_PROGRESS_REPORT // Sprint DV7 — doctor chronic-disease progress report
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.
@@ -2339,6 +2388,9 @@ enum AuditAction {
   CLINICAL_ORDER_DISCARDED
   // Doctor vertical — Sprint DV6. Differential-diagnosis pass.
   DIFFERENTIAL_GENERATED
+  // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
+  CLINICAL_READING_RECORDED
+  PATIENT_CHRONIC_REPORT_SHARED
 }
 
 enum AuditActorType {

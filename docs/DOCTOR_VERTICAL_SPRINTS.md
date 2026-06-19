@@ -356,6 +356,29 @@ spec §9. Parallelisable with DV5/DV6.
 **Exit.** Per-patient control trajectory + a shareable plain-language
 report.
 
+**Status (built).** The measurement-based-care moat, retargeted:
+
+- **Chronic engine** (`packages/clinical/src/chronic/`, 17 tests) — the
+  doctor analogue of `change-score.ts`: deterministic, citation-gated
+  control + trend verdicts for BP / HbA1c / FBS / LDL / weight (BP <
+  140/90, HbA1c < 7 %, FBS 80–130, LDL < 100; meaningful-change
+  thresholds from the trial literature). `classifyControl` +
+  `computeChronicTrend` + `formatReading`.
+- **Readings store** — `ClinicalReading` time-series table (migration
+  `…_dv7_chronic_readings` + `ChronicMeasure` enum). Auto-captured from
+  the note's vitals (BP + weight) on note completion in the orchestrator,
+  or logged manually via `POST /clients/:id/readings` (HbA1c / FBS /
+  LDL). `CLINICAL_READING_RECORDED` audit.
+- **Trajectory** — `apps/web/lib/chronic-trajectory.ts` (the `journey.ts`
+  analogue, no new verdict logic of its own) + `GET /clients/:id/chronic`
+  - the `ChronicCarePanel` on the patient page (per-measure control
+    badges, trend, series, a record-reading form).
+- **Patient report** (DV7.3) — `CHRONIC_PROGRESS_REPORT` PatientShare
+  artefact (the canonical 6-step pattern): a deterministic, plain-
+  language control report ("Your blood pressure improved from 150/90 to
+  130/80 over 8 readings — now within your target") shared via the
+  portal / WhatsApp. `PATIENT_CHRONIC_REPORT_SHARED` audit.
+
 ---
 
 ## DV8 — ABDM/ABHA/FHIR + offline + pilot hardening

@@ -17,7 +17,9 @@ import {
   type SignedIntakeNoteSnapshotSection,
 } from '@cureocity/contracts';
 import { INSTRUMENTS } from '@cureocity/clinical';
+import type { ChronicMeasureKey, ChronicMeasureTrajectory } from '@cureocity/contracts';
 import { ProgressReportError, buildProgressReport } from './progress-report';
+import { buildChronicTrajectory } from './chronic-trajectory';
 import { prisma } from './prisma';
 
 /**
@@ -76,6 +78,8 @@ export async function buildSnapshot(args: BuildArgs): Promise<SnapshotResult | n
       return buildSignedIntakeNote(args, args.ref.sessionId);
     case 'AFTER_VISIT_SUMMARY':
       return buildAfterVisitSummary(args, args.ref.sessionId);
+    case 'CHRONIC_PROGRESS_REPORT':
+      return buildChronicProgressReport(args, args.ref.clientId);
   }
 }
 
@@ -152,6 +156,76 @@ async function buildAfterVisitSummary(
     year: 'numeric',
   })}`;
   return { snapshot, subject, sessionId: session.id };
+}
+
+/**
+ * Sprint DV7 — chronic-disease progress report builder. Deterministic (no
+ * LLM): turns the per-patient control trajectory into a plain-language,
+ * encouraging patient-facing report ("Your blood pressure improved from
+ * 150/90 to 130/80 over 8 readings — now within your target"). Verdicts
+ * come from the deterministic engine; this only renders them.
+ */
+const PATIENT_MEASURE_LABEL: Record<ChronicMeasureKey, string> = {
+  BP: 'blood pressure',
+  HBA1C: 'sugar control (HbA1c)',
+  FBS: 'fasting blood sugar',
+  LDL: 'cholesterol (LDL)',
+  WEIGHT: 'weight',
+};
+
+async function buildChronicProgressReport(
+  { clientId, psychologistId }: BuildArgs,
+  refClientId: string,
+): Promise<SnapshotResult | null> {
+  if (refClientId !== clientId) {
+    throw new SnapshotBuildError('Report clientId does not match the request clientId.');
+  }
+  const client = await prisma.client.findUnique({
+    where: { id: clientId },
+    select: { id: true, psychologistId: true, deletedAt: true },
+  });
+  if (!client || client.psychologistId !== psychologistId || client.deletedAt !== null) {
+    return null;
+  }
+  const trajectory = await buildChronicTrajectory(clientId, psychologistId);
+  if (trajectory.measures.length === 0) {
+    throw new SnapshotBuildError('No readings recorded yet — nothing to report.');
+  }
+  const improving = trajectory.measures.filter((m) => m.trend === 'improving').length;
+  const headline =
+    improving > 0
+      ? `Good news — ${improving} of your tracked measures ${improving === 1 ? 'has' : 'have'} improved.`
+      : 'Here is how your health numbers are tracking.';
+  const snapshot: PatientShareSnapshot = {
+    kind: 'CHRONIC_PROGRESS_REPORT',
+    greeting: 'here is how your health numbers are tracking.',
+    headline,
+    measures: trajectory.measures.map(chronicLine),
+    encouragement:
+      'Keep taking your medicines as advised and keep your follow-up visits — small steps add up.',
+  };
+  return { snapshot, subject: 'Your health progress report', sessionId: null };
+}
+
+function chronicLine(m: ChronicMeasureTrajectory): string {
+  const label = PATIENT_MEASURE_LABEL[m.measure];
+  const latest = m.latest?.display ?? '';
+  const within =
+    m.control === 'controlled'
+      ? ' — now within your target.'
+      : m.control
+        ? ` (target ${m.targetText}).`
+        : '.';
+  if (m.series.length >= 2 && m.baseline) {
+    if (m.trend === 'improving') {
+      return `Your ${label} improved from ${m.baseline.display} to ${latest} ${m.unit}${within}`;
+    }
+    if (m.trend === 'worsening') {
+      return `Your ${label} needs some attention — it moved from ${m.baseline.display} to ${latest} ${m.unit} (target ${m.targetText}).`;
+    }
+    return `Your ${label} has stayed steady at ${latest} ${m.unit}${within}`;
+  }
+  return `Your ${label} is ${latest} ${m.unit}${within}`;
 }
 
 /**

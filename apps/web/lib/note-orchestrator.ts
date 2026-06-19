@@ -273,6 +273,15 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         pass2.output.medications,
         pass2.output.orders,
       );
+      // Sprint DV7 — capture the note's vitals into the chronic-reading
+      // time series so the per-patient control trajectory builds itself.
+      await persistVitalReadings(
+        sessionId,
+        session.clientId,
+        session.psychologistId,
+        session.scheduledAt,
+        encounterNote.vitals,
+      );
       return { draftId: draft.id, status: 'COMPLETED' };
     }
 
@@ -513,6 +522,69 @@ async function persistDraftedOrders(
       metadata: { sessionId, count: clinicalOrders.length },
     });
   }
+}
+
+/**
+ * Sprint DV7 — capture the medical note's vitals into the chronic-reading
+ * time series. BP + weight only (the chronic measures with a vital
+ * source; HbA1c / FBS / LDL are logged manually or from lab results).
+ * Replaces any readings already captured for this session (so a note
+ * re-run is clean). Audits with a literal action string.
+ */
+async function persistVitalReadings(
+  sessionId: string,
+  clientId: string,
+  psychologistId: string,
+  takenAt: Date,
+  vitals: MedicalEncounterNoteV1['vitals'],
+): Promise<void> {
+  if (!vitals) return;
+  const rows: {
+    clientId: string;
+    psychologistId: string;
+    sessionId: string;
+    measure: 'BP' | 'WEIGHT';
+    value: number;
+    valueSecondary?: number;
+    unit: string;
+    takenAt: Date;
+    source: string;
+  }[] = [];
+  if (vitals.bpSystolic && vitals.bpDiastolic) {
+    rows.push({
+      clientId,
+      psychologistId,
+      sessionId,
+      measure: 'BP',
+      value: vitals.bpSystolic,
+      valueSecondary: vitals.bpDiastolic,
+      unit: 'mmHg',
+      takenAt,
+      source: 'NOTE_VITALS',
+    });
+  }
+  if (vitals.weightKg) {
+    rows.push({
+      clientId,
+      psychologistId,
+      sessionId,
+      measure: 'WEIGHT',
+      value: vitals.weightKg,
+      unit: 'kg',
+      takenAt,
+      source: 'NOTE_VITALS',
+    });
+  }
+  if (rows.length === 0) return;
+  await prisma.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
+  await prisma.clinicalReading.createMany({ data: rows });
+  await writeAudit({
+    actorType: 'SYSTEM',
+    action: 'CLINICAL_READING_RECORDED',
+    targetType: 'Session',
+    targetId: sessionId,
+    metadata: { sessionId, clientId, source: 'NOTE_VITALS', count: rows.length },
+  });
 }
 
 function mapRiskSeverity(severity: Pass1Output extends never ? never : string): PrismaRiskSeverity {

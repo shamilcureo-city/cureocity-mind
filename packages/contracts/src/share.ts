@@ -49,6 +49,10 @@ export const PatientShareArtefactTypeSchema = z.enum([
   /// Sprint DV3 — doctor after-visit summary. Patient-facing recap built
   /// deterministically from the signed medical encounter note.
   'AFTER_VISIT_SUMMARY',
+  /// Sprint DV7 — doctor chronic-disease progress report. Patient-facing
+  /// plain-language control trajectory ("BP 150/90 → 130/80 over 8
+  /// visits"), built deterministically from the chronic-reading series.
+  'CHRONIC_PROGRESS_REPORT',
 ]);
 export type PatientShareArtefactType = z.infer<typeof PatientShareArtefactTypeSchema>;
 
@@ -257,6 +261,22 @@ export const AfterVisitSummarySnapshotSchema = z.object({
 });
 export type AfterVisitSummarySnapshot = z.infer<typeof AfterVisitSummarySnapshotSchema>;
 
+/**
+ * Sprint DV7 — chronic-disease progress report snapshot. Patient-facing,
+ * deterministic (no LLM). One row per tracked measure (BP, HbA1c, …) with
+ * a plain-language line, plus an overall headline. The portal renders the
+ * lines; the builder strips clinical jargon.
+ */
+export const ChronicProgressReportSnapshotSchema = z.object({
+  kind: z.literal('CHRONIC_PROGRESS_REPORT'),
+  greeting: z.string().max(2000),
+  headline: z.string().max(800),
+  /** One plain-language line per measure ("Your blood pressure improved…"). */
+  measures: z.array(z.string().min(1).max(600)),
+  encouragement: z.string().max(800),
+});
+export type ChronicProgressReportSnapshot = z.infer<typeof ChronicProgressReportSnapshotSchema>;
+
 export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedNoteSnapshotSchema,
   ReflectionQuestionsSnapshotSchema,
@@ -266,6 +286,7 @@ export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   InstrumentCheckinSnapshotSchema,
   SignedIntakeNoteSnapshotSchema,
   AfterVisitSummarySnapshotSchema,
+  ChronicProgressReportSnapshotSchema,
 ]);
 export type PatientShareSnapshot = z.infer<typeof PatientShareSnapshotSchema>;
 
@@ -378,6 +399,14 @@ export const ShareAfterVisitSummaryInputSchema = z.object({
   sessionId: CuidSchema,
 });
 
+/// Sprint DV7 — share a chronic-disease progress report. clientId is the
+/// artefact id (the report is per-patient, not per-encounter); the
+/// snapshot is built from the chronic-reading trajectory.
+export const ShareChronicProgressReportInputSchema = z.object({
+  artefactType: z.literal('CHRONIC_PROGRESS_REPORT'),
+  clientId: CuidSchema,
+});
+
 export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareSignedNoteInputSchema,
   ShareReflectionQuestionsInputSchema,
@@ -387,6 +416,7 @@ export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareInstrumentCheckinInputSchema,
   ShareSignedIntakeNoteInputSchema,
   ShareAfterVisitSummaryInputSchema,
+  ShareChronicProgressReportInputSchema,
 ]);
 export type ShareArtefactRef = z.infer<typeof ShareArtefactRefSchema>;
 

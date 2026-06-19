@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { StartEncounterButton } from '@/components/app/StartEncounterButton';
+import { ChronicCarePanel } from '@/components/app/ChronicCarePanel';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
@@ -99,6 +100,8 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           )}
         </Card>
       </section>
+
+      <ChronicCarePanel clientId={patient.id} />
     </Container>
   );
 }

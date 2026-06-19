@@ -36,3 +36,4 @@ export * from './live-encounter';
 export * from './differential';
 export * from './medication-order';
 export * from './aftervisit';
+export * from './chronic';

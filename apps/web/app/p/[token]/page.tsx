@@ -459,6 +459,29 @@ function SnapshotView({
           )}
         </article>
       );
+    case 'CHRONIC_PROGRESS_REPORT':
+      // Sprint DV7 — patient-facing chronic-disease control trajectory.
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, {snapshot.greeting}
+          </p>
+          <p className="font-serif text-xl text-[var(--color-ink)]">{snapshot.headline}</p>
+          <ul className="space-y-2">
+            {snapshot.measures.map((m, i) => (
+              <li
+                key={i}
+                className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 text-sm leading-relaxed text-[var(--color-ink)]"
+              >
+                {m}
+              </li>
+            ))}
+          </ul>
+          {snapshot.encouragement && (
+            <p className="text-sm text-[var(--color-ink-2)]">{snapshot.encouragement}</p>
+          )}
+        </article>
+      );
   }
 }
 
