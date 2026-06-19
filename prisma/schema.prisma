@@ -784,6 +784,8 @@ model Session {
   // Doctor vertical — Sprint DV5. Drafted/confirmed Rx + clinical orders.
   medicationOrders    MedicationOrder[]
   clinicalOrders      ClinicalOrder[]
+  // Doctor vertical — Sprint DV6. Differential diagnosis (reasoning copilot).
+  differential        Differential?
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -974,6 +976,7 @@ enum GeminiPass {
   PASS_6_CASE_BRIEFING // Sprint 22 — per-client case briefing synthesis
   PASS_7_CONCEPTUAL_MAP // Sprint 24 — Klarify-style per-client thematic graph
   PASS_8_CASE_CONSULT // Sprint 52 — second-opinion artefact for stuck cases
+  PASS_9_DIFFERENTIAL // Sprint DV6 — doctor differential diagnosis
 }
 
 enum GeminiCallStatus {
@@ -1197,6 +1200,33 @@ model ClinicalOrder {
   @@index([sessionId, status])
   @@index([psychologistId])
   @@map("clinical_orders")
+}
+
+// ============================================================================
+// Doctor vertical — Sprint DV6. Differential — the reasoning copilot's
+// output for one encounter (the medical analogue of ClinicalReport). One
+// row per session; `body` holds the validated DifferentialDiagnosisV1.
+// Decision-support only — never auto-applied to the note. See
+// docs/DOCTOR_VERTICAL.md §6, §7.
+// ============================================================================
+
+model Differential {
+  id             String          @id @default(cuid())
+  sessionId      String          @unique
+  psychologistId String
+  status         NoteDraftStatus @default(PENDING)
+
+  /// Validated DifferentialDiagnosisV1 (candidates + coding nudges).
+  body         Json?
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId])
+  @@map("differentials")
 }
 
 // ============================================================================
@@ -2307,6 +2337,8 @@ enum AuditAction {
   CLINICAL_ORDER_DRAFTED
   CLINICAL_ORDER_CONFIRMED
   CLINICAL_ORDER_DISCARDED
+  // Doctor vertical — Sprint DV6. Differential-diagnosis pass.
+  DIFFERENTIAL_GENERATED
 }
 
 enum AuditActorType {

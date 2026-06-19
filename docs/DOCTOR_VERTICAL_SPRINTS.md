@@ -306,6 +306,34 @@ with citations); ABDM-linked e-prescription (DV8).
 **Exit.** Per-specialty gap-checks + live differential + coding nudges +
 working voice commands.
 
+**Status (built — DV6.1/6.2/6.3).** The reasoning copilot is real:
+
+- **Differential pass** (DV6.1) — a full new Gemini pass
+  (`passDifferential`, `PASS_9_DIFFERENTIAL`): `DifferentialDiagnosisV1`
+  (ranked candidates with ICD-10 + likelihood + supporting evidence +
+  discriminating questions + suggested workup + red-flags-to-exclude).
+  Mock + Vertex backends, `ModelRouter` + `llm.ts` + scribe-service
+  wiring, observability union, `differentials` table (migration
+  `…_dv6_differential`). On-demand route `GET/POST
+/sessions/:id/differential` (own 120s budget); the
+  `EncounterDifferentialPanel` auto-runs it once the note is ready.
+  `DIFFERENTIAL_GENERATED` audit.
+- **ICD-10 coding nudges** (DV6.2) — `codingNudges[]` on the
+  differential (SUGGESTED_CODE / UNDERCODING / DOCUMENTATION_GAP),
+  rendered as 🧾 rows in the panel.
+- **Specialty templates** (DV6.3) — a deterministic registry
+  (`packages/clinical/src/specialty-templates.ts`, cardiology +
+  endocrinology, 8 tests) defining required HPI/ROS/exam/vitals
+  elements. Wired into the live gap engine: the doctor's `specialty`
+  flows browser → start command → `LiveSession` → `detectGaps`, so
+  Rail-3 ❓ nudges are specialty-aware (verified end-to-end with a
+  cardiology smoke test).
+
+Deferred — **DV6.4 voice commands** ("add paracetamol 500 TDS × 3 days",
+"show last HbA1c"): a self-contained command parser on the live
+transcript that needs a new live wire-protocol event type + UI; carried
+as a focused follow-up so the protocol addition gets its own pass.
+
 ---
 
 ## DV7 — Chronic-disease outcomes (the moat)

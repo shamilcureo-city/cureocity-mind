@@ -8,10 +8,12 @@ import {
   type ClientDiagnosis,
   ConceptualMapV1Schema,
   ClinicalOrderV1Schema,
+  DifferentialDiagnosisV1Schema,
   InitialAssessmentBriefV1Schema,
   IntakeNoteV1Schema,
   type IntakeNoteV1,
   MedicalEncounterNoteV1Schema,
+  type MedicalEncounterNoteV1,
   MedicationOrderV1Schema,
   PreSessionBriefV1Schema,
   type SessionKind,
@@ -404,6 +406,31 @@ export const Pass8OutputSchema = z.object({
 export type Pass8Output = z.infer<typeof Pass8OutputSchema>;
 
 // ============================================================================
+// Differential pass — Sprint DV6 (doctor vertical). The medical analogue of
+// Pass 3: encounter note + transcript → DifferentialDiagnosisV1 (ranked
+// candidates with ICD-10, discriminating questions, suggested workup) +
+// ICD-10 coding nudges. Run on-demand / via after() like Pass 3.
+// Gemini Pro (global) — transcript text only, same cross-border surface.
+// ============================================================================
+
+export interface PassDifferentialInput {
+  sessionId: string;
+  transcript: string;
+  speakerSegments: SpeakerSegment[];
+  /** The drafted medical encounter note (the MEDICAL Pass-2 arm). */
+  encounterNote: MedicalEncounterNoteV1;
+  /** The doctor's specialty, biases the differential + coding. */
+  specialty?: string;
+  /** Output language hint. */
+  language: ClinicalLocale;
+}
+
+export const PassDifferentialOutputSchema = z.object({
+  differential: DifferentialDiagnosisV1Schema,
+});
+export type PassDifferentialOutput = z.infer<typeof PassDifferentialOutputSchema>;
+
+// ============================================================================
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
@@ -416,7 +443,8 @@ export type GeminiPass =
   | 'PASS_5_PRE_SESSION_BRIEF'
   | 'PASS_6_CASE_BRIEFING'
   | 'PASS_7_CONCEPTUAL_MAP'
-  | 'PASS_8_CASE_CONSULT';
+  | 'PASS_8_CASE_CONSULT'
+  | 'PASS_9_DIFFERENTIAL';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -471,6 +499,12 @@ export interface IPass8Backend {
   run(input: Pass8Input): Promise<{ output: Pass8Output; callLog: GeminiCallLogData }>;
 }
 
+export interface IPassDifferentialBackend {
+  run(
+    input: PassDifferentialInput,
+  ): Promise<{ output: PassDifferentialOutput; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
@@ -480,6 +514,9 @@ export interface IModelRouter {
   pass6(input: Pass6Input): Promise<{ output: Pass6Output; callLog: GeminiCallLogData }>;
   pass7(input: Pass7Input): Promise<{ output: Pass7Output; callLog: GeminiCallLogData }>;
   pass8(input: Pass8Input): Promise<{ output: Pass8Output; callLog: GeminiCallLogData }>;
+  passDifferential(
+    input: PassDifferentialInput,
+  ): Promise<{ output: PassDifferentialOutput; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

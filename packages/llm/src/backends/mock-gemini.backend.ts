@@ -10,6 +10,7 @@ import {
   type IPass6Backend,
   type IPass7Backend,
   type IPass8Backend,
+  type IPassDifferentialBackend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -26,6 +27,8 @@ import {
   type Pass7Output,
   type Pass8Input,
   type Pass8Output,
+  type PassDifferentialInput,
+  type PassDifferentialOutput,
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
@@ -41,6 +44,7 @@ import {
   MEDICAL_NOTE_PROMPT_VERSION,
   THERAPY_SCRIPT_PROMPT_VERSION,
   CASE_CONSULT_PROMPT_VERSION,
+  DIFFERENTIAL_PROMPT_VERSION,
 } from '../prompts';
 
 /**
@@ -909,6 +913,99 @@ export class MockGeminiPass8Backend implements IPass8Backend {
         region: 'mock-global',
         promptVersion: CASE_CONSULT_PROMPT_VERSION,
         inputTokens: Math.ceil(input.contextText.length / 4),
+        outputTokens: 500,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Sprint DV6 — mock differential. Deterministic DifferentialDiagnosisV1
+ * tagged `[mock]`, coherent with the chest-pain medical mock (so the
+ * doctor live + batch demo works without Vertex). Cites the first
+ * speaker segment as supporting evidence.
+ */
+export class MockGeminiDifferentialBackend implements IPassDifferentialBackend {
+  async run(
+    input: PassDifferentialInput,
+  ): Promise<{ output: PassDifferentialOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const seg = input.speakerSegments[0];
+    const evidence = seg
+      ? [{ startMs: seg.startMs, endMs: seg.endMs, quote: seg.text.slice(0, 160) }]
+      : [];
+    const output: PassDifferentialOutput = {
+      differential: {
+        version: 'V1',
+        language: input.language,
+        candidates: [
+          {
+            condition: '[mock] Stable angina (effort-related)',
+            icd10Code: 'I20.8',
+            likelihood: 0.5,
+            supportingEvidence: evidence,
+            discriminatingQuestions: [
+              'Is the pain reliably brought on by exertion and relieved by rest within minutes?',
+              'Any radiation to the arm/jaw, or associated sweating?',
+            ],
+            suggestedWorkup: [
+              'Resting ECG',
+              'Troponin if ongoing',
+              'Lipid profile',
+              'Treadmill test',
+            ],
+          },
+          {
+            condition: '[mock] Acute coronary syndrome',
+            icd10Code: 'I24.9',
+            likelihood: 0.25,
+            supportingEvidence: evidence,
+            discriminatingQuestions: ['Is the pain present at rest or worsening in frequency?'],
+            suggestedWorkup: ['12-lead ECG now', 'Serial troponins'],
+          },
+          {
+            condition: '[mock] Gastro-oesophageal reflux',
+            icd10Code: 'K21.9',
+            likelihood: 0.15,
+            supportingEvidence: [],
+            discriminatingQuestions: ['Relation to meals or lying flat? Burning quality?'],
+            suggestedWorkup: ['Trial of PPI', 'Review diet history'],
+          },
+        ],
+        redFlagsToExclude: [
+          '[mock] Acute coronary syndrome — exclude with ECG + troponin before discharge.',
+          '[mock] Aortic dissection if tearing/radiating-to-back pain.',
+        ],
+        codingNudges: [
+          {
+            kind: 'DOCUMENTATION_GAP',
+            message:
+              '[mock] No physical exam documented — record cardiovascular exam to support an I20/I24 code.',
+            severity: 'warn',
+          },
+          {
+            kind: 'SUGGESTED_CODE',
+            icd10Code: 'I10',
+            message: '[mock] BP 148/92 documented — consider coding essential hypertension (I10).',
+            severity: 'info',
+          },
+        ],
+        disclaimer:
+          '[mock] Decision-support only — not a diagnosis. The treating doctor retains clinical responsibility.',
+      },
+    };
+    return {
+      output,
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_9_DIFFERENTIAL',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: DIFFERENTIAL_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.transcript.length / 4),
         outputTokens: 500,
         costInr: 0,
         latencyMs: Date.now() - start,

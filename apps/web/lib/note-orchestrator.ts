@@ -11,6 +11,7 @@ import {
   PENDING_SECTION_CONFIRMATIONS,
   type ClinicalLocale,
   type ClinicalOrderV1,
+  type MedicalEncounterNoteV1,
   type MedicationOrderV1,
 } from '@cureocity/contracts';
 import { interactionWarningsByDrug } from '@cureocity/clinical';
@@ -744,5 +745,110 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     console.error(`[clinical-analysis] sessionId=${args.sessionId} failed: ${message}`);
     // Non-fatal: do NOT re-throw. Pass 3 failure must not unwind
     // Pass 1/2 success.
+  }
+}
+
+// ============================================================================
+// Sprint DV6 — the differential pass (doctor vertical). The medical
+// analogue of runClinicalAnalysis: encounter note + transcript →
+// DifferentialDiagnosisV1, stored in the `differentials` table. On-demand
+// (the encounter panel triggers it once the note is ready); decision-
+// support only, never auto-applied. See docs/DOCTOR_VERTICAL.md §6, §7.
+// ============================================================================
+
+export interface DifferentialArgs {
+  sessionId: string;
+  psychologistId: string;
+  language: ClinicalLocale;
+  specialty: string | null;
+  transcript: string;
+  speakerSegments: Pass1Output['speakerSegments'];
+  encounterNote: MedicalEncounterNoteV1;
+}
+
+export async function runDifferential(args: DifferentialArgs): Promise<void> {
+  await prisma.differential.upsert({
+    where: { sessionId: args.sessionId },
+    update: { status: 'IN_PROGRESS', errorMessage: null },
+    create: {
+      sessionId: args.sessionId,
+      psychologistId: args.psychologistId,
+      status: 'IN_PROGRESS',
+    },
+  });
+
+  try {
+    const estimate = computeCostInr(
+      Math.ceil(args.transcript.length / 4) + 1_000,
+      1_500,
+      PRO_PRICING,
+    );
+    await checkCostCircuit({
+      sessionId: args.sessionId,
+      psychologistId: args.psychologistId,
+      estimatedCostInr: estimate,
+    });
+
+    const router = modelRouter();
+    const result = await router.passDifferential({
+      sessionId: args.sessionId,
+      transcript: args.transcript,
+      speakerSegments: args.speakerSegments,
+      encounterNote: args.encounterNote,
+      ...(args.specialty ? { specialty: args.specialty } : {}),
+      language: args.language,
+    });
+
+    await persistCallLog(result.callLog);
+    recordGeminiCall({
+      pass: result.callLog.pass,
+      status: result.callLog.status,
+      region: result.callLog.region,
+      durationMs: result.callLog.latencyMs,
+    });
+    recordCostInr({
+      service: 'gemini-pass-9',
+      durationLabel: 'differential',
+      inr: result.callLog.costInr,
+    });
+
+    await prisma.differential.update({
+      where: { sessionId: args.sessionId },
+      data: {
+        status: 'COMPLETED',
+        body: result.output.differential as unknown as Prisma.InputJsonValue,
+        errorMessage: null,
+      },
+    });
+
+    await writeAudit({
+      actorType: 'PSYCHOLOGIST',
+      actorPsychologistId: args.psychologistId,
+      action: 'DIFFERENTIAL_GENERATED',
+      targetType: 'Session',
+      targetId: args.sessionId,
+      metadata: {
+        sessionId: args.sessionId,
+        candidateCount: result.output.differential.candidates.length,
+        codingNudgeCount: result.output.differential.codingNudges.length,
+        costInr: result.callLog.costInr,
+      },
+    });
+  } catch (e) {
+    const message = (e as Error).message;
+    await prisma.differential
+      .update({
+        where: { sessionId: args.sessionId },
+        data: { status: 'FAILED', errorMessage: message },
+      })
+      .catch(() => {
+        /* primary failure logged below */
+      });
+    if (e instanceof CostCircuitOpenError) {
+      recordCostCircuitTrip(e.meta.scope);
+    }
+    console.error(`[differential] sessionId=${args.sessionId} failed: ${message}`);
+    // Non-fatal: don't re-throw — a differential failure must not unwind
+    // the note + orders the doctor already has.
   }
 }

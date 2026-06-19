@@ -40,6 +40,7 @@ export class LiveSession {
   private readonly emit: Emit;
   private readonly backends: LiveBackends;
   private readonly sessionId: string;
+  private readonly specialty: string | null;
 
   private audio: Buffer[] = [];
   private totalBytes = 0;
@@ -58,8 +59,9 @@ export class LiveSession {
   /** The most recent structured note, used as the final if none newer. */
   private latestNote: MedicalEncounterNoteV1 | null = null;
 
-  constructor(sessionId: string, backends: LiveBackends, emit: Emit) {
+  constructor(sessionId: string, specialty: string | null, backends: LiveBackends, emit: Emit) {
     this.sessionId = sessionId;
+    this.specialty = specialty;
     this.backends = backends;
     this.emit = emit;
   }
@@ -139,7 +141,7 @@ export class LiveSession {
       this.emit({ type: 'note', partial: note });
     }
 
-    for (const gap of detectGaps(transcript, note)) {
+    for (const gap of detectGaps(transcript, note, this.specialty)) {
       if (this.seenGaps.has(gap.message)) continue;
       this.seenGaps.add(gap.message);
       this.emit({ type: 'gap', gap: gap satisfies EncounterGap });

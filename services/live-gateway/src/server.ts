@@ -40,8 +40,11 @@ wss.on('connection', (ws) => {
     const cmd = parsed.data;
     if (cmd.type === 'start') {
       session?.dispose();
-      session = new LiveSession(cmd.sessionId ?? `live-${Date.now()}`, backends, (event) =>
-        send(ws, event),
+      session = new LiveSession(
+        cmd.sessionId ?? `live-${Date.now()}`,
+        cmd.specialty ?? null,
+        backends,
+        (event) => send(ws, event),
       );
       session.start();
     } else if (cmd.type === 'stop') {

@@ -178,6 +178,8 @@ export const AuditActionSchema = z.enum([
   'CLINICAL_ORDER_DRAFTED',
   'CLINICAL_ORDER_CONFIRMED',
   'CLINICAL_ORDER_DISCARDED',
+  // Doctor vertical — Sprint DV6. Differential-diagnosis pass.
+  'DIFFERENTIAL_GENERATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

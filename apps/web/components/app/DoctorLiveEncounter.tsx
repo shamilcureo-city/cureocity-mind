@@ -27,7 +27,13 @@ const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localho
 
 type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'error';
 
-export function DoctorLiveEncounter({ sessionId }: { sessionId: string }) {
+export function DoctorLiveEncounter({
+  sessionId,
+  specialty,
+}: {
+  sessionId: string;
+  specialty?: string | null;
+}) {
   const wsRef = useRef<WebSocket | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [transcript, setTranscript] = useState('');
@@ -73,7 +79,7 @@ export function DoctorLiveEncounter({ sessionId }: { sessionId: string }) {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'start', sessionId }));
+      ws.send(JSON.stringify({ type: 'start', sessionId, ...(specialty ? { specialty } : {}) }));
       void stream.start().catch((e: Error) => {
         setError(`Microphone unavailable: ${e.message}`);
         setPhase('error');

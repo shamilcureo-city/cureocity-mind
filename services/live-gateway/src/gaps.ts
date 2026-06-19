@@ -1,10 +1,20 @@
 import type { EncounterGap, MedicalEncounterNoteV1 } from '@cureocity/contracts';
+import {
+  missingTemplateElements,
+  resolveSpecialtyTemplate,
+  type EncounterCompletenessInput,
+} from '@cureocity/clinical';
 
 /**
  * Sprint DV4 — Rail 3, the live gap / red-flag engine. Deterministic
  * (rule-based) — the kind of safety-net logic real CDSS use: scan the
  * rolling transcript + the building note for red-flag cues, and flag note
- * sections that aren't documented yet. The richer LLM differential is DV6.
+ * sections that aren't documented yet.
+ *
+ * Sprint DV6.3 — also runs the specialty-template completeness check
+ * (cardiology, endocrinology …) so the ❓ nudges are specialty-aware. The
+ * richer LLM differential + ICD-10 coding nudges are the batch
+ * differential pass (DV6.1/6.2).
  */
 const RED_FLAGS: { pattern: RegExp; message: string }[] = [
   {
@@ -32,6 +42,7 @@ const RED_FLAGS: { pattern: RegExp; message: string }[] = [
 export function detectGaps(
   transcript: string,
   note: MedicalEncounterNoteV1 | null,
+  specialty?: string | null,
 ): EncounterGap[] {
   const hay = `${transcript}\n${
     note ? [note.chiefComplaint, note.hpi, note.assessment].join('\n') : ''
@@ -65,6 +76,38 @@ export function detectGaps(
         message: 'Physical exam not documented (or confirm "not examined").',
       });
     }
+
+    // Sprint DV6.3 — specialty-template completeness nudges.
+    const template = resolveSpecialtyTemplate(specialty);
+    if (template) {
+      for (const tg of missingTemplateElements(completenessInputFor(note), template)) {
+        gaps.push({
+          kind: 'MISSING_QUESTION',
+          severity: 'info',
+          message: `${template.label}: ${tg.message}`,
+        });
+      }
+    }
   }
   return gaps;
+}
+
+/** Project a medical note onto the primitive shape the template checker
+ *  reads (decoupled from the note schema). */
+function completenessInputFor(note: MedicalEncounterNoteV1): EncounterCompletenessInput {
+  const v = note.vitals;
+  const presentVitals: string[] = [];
+  if (v?.bpSystolic) presentVitals.push('bp');
+  if (v?.heartRateBpm) presentVitals.push('hr');
+  if (v?.spo2Pct) presentVitals.push('spo2');
+  if (v?.tempCelsius) presentVitals.push('temp');
+  if (v?.weightKg) presentVitals.push('weight');
+  if (v?.respRateBpm) presentVitals.push('rr');
+  return {
+    hpi: note.hpi ?? '',
+    reviewOfSystems: note.reviewOfSystems ?? [],
+    examined: note.physicalExam?.examined ?? false,
+    examFindings: note.physicalExam?.findings ?? '',
+    presentVitals,
+  };
 }

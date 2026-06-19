@@ -9,7 +9,9 @@ import {
   MockGeminiPass6Backend,
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
+  MockGeminiDifferentialBackend,
   ModelRouter,
+  VertexGeminiDifferentialBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -133,6 +135,15 @@ function build(): IModelRouter {
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
       }),
+      // Sprint DV6 — doctor differential. Reuses the Pro model env.
+      passDifferential: new VertexGeminiDifferentialBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['VERTEX_DIFFERENTIAL_MODEL'] ??
+          process.env['VERTEX_PRO_MODEL'] ??
+          'gemini-2.5-pro',
+      }),
     });
   }
   console.info(
@@ -147,6 +158,7 @@ function build(): IModelRouter {
     pass6: new MockGeminiPass6Backend(),
     pass7: new MockGeminiPass7Backend(),
     pass8: new MockGeminiPass8Backend(),
+    passDifferential: new MockGeminiDifferentialBackend(),
   });
 }
 

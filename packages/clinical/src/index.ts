@@ -12,3 +12,4 @@ export * from './instruments';
 export * from './instruments/change-score';
 export * from './crisis';
 export * from './interactions';
+export * from './specialty-templates';
