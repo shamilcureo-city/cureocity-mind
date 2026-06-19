@@ -10,6 +10,7 @@ import {
   InitialAssessmentBriefV1Schema,
   IntakeNoteV1Schema,
   type IntakeNoteV1,
+  MedicalEncounterNoteV1Schema,
   PreSessionBriefV1Schema,
   type SessionKind,
   type SessionModality,
@@ -118,6 +119,13 @@ export interface Pass2Input {
    * value from the session-defaults cascade.
    */
   modality: SessionModality | null;
+  /**
+   * Sprint DV3 — practitioner vertical. DOCTOR routes Pass 2 to the
+   * medical encounter note (MedicalEncounterNoteV1, the MEDICAL output
+   * arm); THERAPIST (default / omitted) uses the kind-based therapy
+   * branch above. See docs/DOCTOR_VERTICAL.md.
+   */
+  vertical?: 'THERAPIST' | 'DOCTOR';
   clientContext: {
     presentingConcerns?: string;
     preferredModality?: SessionModality;
@@ -141,6 +149,12 @@ export const Pass2OutputSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('INTAKE'),
     intakeNote: IntakeNoteV1Schema,
+  }),
+  // Sprint DV3 — doctor vertical. A medical encounter note instead of a
+  // therapy note; selected when Pass2Input.vertical === 'DOCTOR'.
+  z.object({
+    kind: z.literal('MEDICAL'),
+    encounterNote: MedicalEncounterNoteV1Schema,
   }),
 ]);
 export type Pass2Output = z.infer<typeof Pass2OutputSchema>;

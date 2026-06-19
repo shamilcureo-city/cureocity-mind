@@ -1,13 +1,12 @@
 import { z } from 'zod';
 
 /**
- * Sprint DV1 scaffold — doctor encounter-note contracts.
+ * Doctor encounter-note contracts. DV1 scaffold → DV3 production shape.
  *
- * STUB: shapes are placeholders for the DV3 batch medical-note sprint.
- * Kept minimal + permissive (every field defaulted) so the doctor
- * vertical compiles end-to-end now; fields tighten (OLDCART HPI, ROS,
- * guarded PE/vitals, linkedEvidence) when DV3 lands.
- * See docs/DOCTOR_VERTICAL.md §6.
+ * Mirrors the lenience of the therapy notes (packages/contracts/src/note.ts):
+ * narrative fields are plain strings (Gemini is unpredictable about deep
+ * structure), while the physical exam is GUARDED so the model cannot
+ * invent findings. See docs/DOCTOR_VERTICAL.md §6, §10.
  */
 
 /// Super-specialty OPD encounter kinds — the doctor analogue of the
@@ -21,8 +20,8 @@ export const MedicalSessionKindSchema = z.enum([
 ]);
 export type MedicalSessionKind = z.infer<typeof MedicalSessionKindSchema>;
 
-/// One note field traced back to the transcript segment + timestamp that
-/// produced it — the anti-hallucination "linked evidence" mechanism.
+/// One note statement traced back to the transcript segment + timestamp
+/// that produced it — the anti-hallucination "linked evidence" mechanism.
 export const EvidenceRefSchema = z.object({
   segmentId: z.string().optional(),
   startMs: z.number().int().nonnegative().optional(),
@@ -31,6 +30,8 @@ export const EvidenceRefSchema = z.object({
 });
 export type EvidenceRef = z.infer<typeof EvidenceRefSchema>;
 
+/// Only the vitals explicitly stated in the consult — every field
+/// optional; the prompt omits anything not said (never guesses).
 export const VitalsSchema = z.object({
   bpSystolic: z.number().int().positive().optional(),
   bpDiastolic: z.number().int().positive().optional(),
@@ -42,17 +43,35 @@ export const VitalsSchema = z.object({
 });
 export type Vitals = z.infer<typeof VitalsSchema>;
 
+/**
+ * GUARDED physical exam (docs/DOCTOR_VERTICAL.md §10): the #1 hallucination
+ * risk in ambient scribes is a documented exam that never happened. The
+ * default is "not examined" — the prompt must only set examined=true with
+ * findings the doctor explicitly stated.
+ */
+export const PhysicalExamSchema = z.object({
+  examined: z.boolean().default(false),
+  findings: z.string().default(''),
+});
+export type PhysicalExam = z.infer<typeof PhysicalExamSchema>;
+
 export const MedicalEncounterNoteV1Schema = z.object({
   version: z.literal('V1'),
-  kind: MedicalSessionKindSchema.default('NEW_OPD'),
+  /// The encounter kind (NEW_OPD, FOLLOW_UP, …). Named `encounterKind` to
+  /// avoid colliding with the Pass-2 output discriminator (`kind`).
+  encounterKind: MedicalSessionKindSchema.default('NEW_OPD'),
   chiefComplaint: z.string().default(''),
+  /// History of present illness — an OLDCART narrative.
   hpi: z.string().default(''),
+  /// Pertinent positives/negatives, one short entry per system touched.
   reviewOfSystems: z.array(z.string()).default([]),
-  /// Physical exam is GUARDED (DV3): never model-invented; doctor confirms.
-  physicalExam: z.string().default(''),
+  physicalExam: PhysicalExamSchema.default({}),
   vitals: VitalsSchema.default({}),
+  /// Clinical impression + working diagnosis (+ relevant differentials).
   assessment: z.string().default(''),
+  /// Investigations, medications, advice, follow-up.
   plan: z.string().default(''),
+  /// Per-statement provenance back to the transcript (anti-hallucination).
   linkedEvidence: z.array(EvidenceRefSchema).default([]),
 });
 export type MedicalEncounterNoteV1 = z.infer<typeof MedicalEncounterNoteV1Schema>;

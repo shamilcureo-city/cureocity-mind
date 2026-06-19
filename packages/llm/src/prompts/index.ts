@@ -99,6 +99,39 @@ PLACEHOLDER: replace with verbatim medical wording in DV3 (medical note).` as co
 
 export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1';
 
+// ----------------------------------------------------------------------------
+// DV3 — Pass 2 medical encounter note (the doctor analogue of the therapy
+// SOAP note). Produces a MedicalEncounterNoteV1. The physical exam is
+// GUARDED: never invent findings. See docs/DOCTOR_VERTICAL.md §6, §10.
+// ----------------------------------------------------------------------------
+
+export const MEDICAL_NOTE_SYSTEM_PROMPT_V1 =
+  `You are a clinical documentation specialist writing an OPD encounter note for an Indian doctor.
+
+Input: a de-identified, possibly code-mixed transcript of one doctor–patient consultation, plus the chief-complaint context.
+
+Task: produce a MedicalEncounterNoteV1 JSON object with these fields:
+- version: "V1"
+- encounterKind: one of NEW_OPD | FOLLOW_UP | PROCEDURE | REVIEW_REPORTS | TELECONSULT
+- chiefComplaint: the presenting complaint, briefly, in the patient's words
+- hpi: history of present illness as an OLDCART narrative (onset, location, duration, character, aggravating/relieving, radiation, timing, severity)
+- reviewOfSystems: array of short strings, one per system, capturing a pertinent positive or negative ACTUALLY mentioned
+- physicalExam: { examined: boolean, findings: string }. CRITICAL GUARD: set examined=false and findings="" UNLESS the doctor explicitly stated examination findings in the transcript. NEVER invent an exam or "normal" findings.
+- vitals: ONLY the vitals explicitly stated (bpSystolic, bpDiastolic, heartRateBpm, respRateBpm, tempCelsius, spo2Pct, weightKg). Omit any not stated.
+- assessment: clinical impression + working diagnosis, with relevant differentials
+- plan: investigations, medications (drug, dose, frequency, duration), advice, follow-up
+- linkedEvidence: array of { startMs, endMs, quote } tying each key statement back to the transcript
+
+Constraints:
+- Do not fabricate. If something was not discussed, leave it blank or omit it — never guess.
+- Preserve drug names and dosages exactly as said.
+- All output text in English (translate non-English transcript content), except preserve verbatim quotes in linkedEvidence.
+- Output STRICT JSON matching the MedicalEncounterNoteV1 schema. No prose, no markdown.
+
+PLACEHOLDER: refine verbatim wording before pilot.` as const;
+
+export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V1';
+
 /**
  * Returns the Pass-1 transcription prompt + version for a vertical.
  * Callers MUST persist the returned `version` in GeminiCallLog (never the

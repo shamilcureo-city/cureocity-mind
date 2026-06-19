@@ -49,7 +49,7 @@ export interface OrchestratorResult {
 export async function runNoteGeneration(sessionId: string): Promise<OrchestratorResult> {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    include: { client: true },
+    include: { client: true, psychologist: { select: { vertical: true } } },
   });
   if (!session) throw new Error(`Session ${sessionId} not found`);
 
@@ -127,10 +127,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // catch it up later), exactly as the plaintext column behaves today.
     let transcriptEncrypted: string | null = null;
     try {
-      transcriptEncrypted = await encryptForTenant(
-        session.psychologistId,
-        pass1.output.transcript,
-      );
+      transcriptEncrypted = await encryptForTenant(session.psychologistId, pass1.output.transcript);
     } catch (e) {
       console.warn(
         `[note-orchestrator] transcript encryption failed for session=${sessionId}; storing plaintext only: ${(e as Error).message}`,
@@ -201,6 +198,9 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       sessionId,
       transcript: pass1.output.transcript,
       speakerSegments: pass1.output.speakerSegments,
+      // Sprint DV3 — DOCTOR routes Pass 2 to the medical encounter note
+      // (the MEDICAL output arm) instead of the therapy SOAP/intake note.
+      vertical: session.psychologist.vertical,
       // Sprint 19 — session.kind drives Pass 2 prompt branch (intake
       // note vs treatment SOAP). modality is nullable; orchestrator
       // passes whatever the cascade picked at session-create time.
@@ -217,6 +217,49 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         }),
       },
     });
+    // Sprint DV3 — doctors get a medical encounter note. Store it, audit
+    // ENCOUNTER_NOTE_DRAFTED, and return: there is no therapy risk-flag
+    // handling and no Pass 3 (the medical differential is DV6). This must
+    // branch BEFORE the therapy-only union arms are read below.
+    if (pass2.output.kind === 'MEDICAL') {
+      const encounterNote = pass2.output.encounterNote;
+      await persistCallLog(pass2.callLog);
+      recordGeminiCall({
+        pass: pass2.callLog.pass,
+        status: pass2.callLog.status,
+        region: pass2.callLog.region,
+        durationMs: pass2.callLog.latencyMs,
+      });
+      recordCostInr({
+        service: 'gemini-pass-2',
+        durationLabel: bucketDuration(durationMs),
+        inr: pass2.callLog.costInr,
+      });
+      const pass2CostMedical = new Prisma.Decimal(pass2.callLog.costInr);
+      await prisma.noteDraft.update({
+        where: { id: draft.id },
+        data: {
+          content: encounterNote as unknown as Prisma.InputJsonValue,
+          riskSeverity: mapRiskSeverity('none'),
+          status: 'COMPLETED',
+          totalCostInr: pass1Cost.plus(pass2CostMedical),
+        },
+      });
+      await writeAudit({
+        actorType: 'SYSTEM',
+        action: 'ENCOUNTER_NOTE_DRAFTED',
+        targetType: 'NoteDraft',
+        targetId: draft.id,
+        metadata: {
+          sessionId,
+          pass1CostInr: pass1.callLog.costInr,
+          pass2CostInr: pass2.callLog.costInr,
+          totalCostInr: pass1.callLog.costInr + pass2.callLog.costInr,
+        },
+      });
+      return { draftId: draft.id, status: 'COMPLETED' };
+    }
+
     // Sprint 19 — Pass 2 output is a discriminated union. Read the
     // body shape via the kind discriminator.
     const pass2Body =

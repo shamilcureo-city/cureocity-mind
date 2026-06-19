@@ -167,6 +167,10 @@ export const AuditActionSchema = z.enum([
   // Referral — Sprint 56 (Lever 3b).
   'REFERRAL_REDEEMED',
   'REFERRAL_REWARDED',
+  // Doctor vertical — Sprint DV3. Medical encounter-note lifecycle (the
+  // doctor analogue of NOTE_DRAFT_CREATED / NOTE_SIGNED).
+  'ENCOUNTER_NOTE_DRAFTED',
+  'ENCOUNTER_NOTE_SIGNED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

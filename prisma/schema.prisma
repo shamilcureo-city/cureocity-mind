@@ -2232,6 +2232,9 @@ enum AuditAction {
   // Referral — Sprint 56 (Lever 3b).
   REFERRAL_REDEEMED
   REFERRAL_REWARDED
+  // Doctor vertical — Sprint DV3. Medical encounter-note lifecycle.
+  ENCOUNTER_NOTE_DRAFTED
+  ENCOUNTER_NOTE_SIGNED
 }
 
 enum AuditActorType {

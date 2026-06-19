@@ -38,6 +38,7 @@ import {
   PRE_SESSION_BRIEF_PROMPT_VERSION,
   TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
   THERAPY_NOTE_PROMPT_VERSION,
+  MEDICAL_NOTE_PROMPT_VERSION,
   THERAPY_SCRIPT_PROMPT_VERSION,
   CASE_CONSULT_PROMPT_VERSION,
 } from '../prompts';
@@ -141,6 +142,54 @@ export class MockGeminiPass1Backend implements IPass1Backend {
 export class MockGeminiPass2Backend implements IPass2Backend {
   async run(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
+    const firstSeg = input.speakerSegments[0];
+
+    // Sprint DV3 — doctors get a medical encounter note (the MEDICAL arm),
+    // not a therapy SOAP/intake note. Tagged [mock] like the others.
+    if (input.vertical === 'DOCTOR') {
+      return {
+        output: {
+          kind: 'MEDICAL',
+          encounterNote: {
+            version: 'V1',
+            encounterKind: 'NEW_OPD',
+            chiefComplaint: '[mock] Exertional chest pressure ×2 days',
+            hpi: '[mock] Retrosternal pressure on exertion ×2 days, relieved by rest, no radiation reported; no associated sweating elicited. No prior cardiac history.',
+            reviewOfSystems: [
+              '[mock] Cardiovascular: exertional chest pressure',
+              '[mock] Respiratory: no breathlessness at rest',
+            ],
+            physicalExam: { examined: false, findings: '' },
+            vitals: { bpSystolic: 148, bpDiastolic: 92, heartRateBpm: 88 },
+            assessment:
+              '[mock] Exertional chest pain — rule out stable angina / ACS. Newly noted hypertension.',
+            plan: '[mock] ECG today; aspirin if no contraindication; lipid profile + fasting glucose; review in 3 days with reports.',
+            linkedEvidence: firstSeg
+              ? [
+                  {
+                    startMs: firstSeg.startMs,
+                    endMs: firstSeg.endMs,
+                    quote: firstSeg.text.slice(0, 160),
+                  },
+                ]
+              : [],
+          },
+        },
+        callLog: {
+          sessionId: input.sessionId,
+          pass: 'PASS_2_NOTE_GENERATION',
+          model: 'mock-pro',
+          region: 'mock-global',
+          promptVersion: MEDICAL_NOTE_PROMPT_VERSION,
+          inputTokens: input.transcript.length / 4,
+          outputTokens: 400,
+          costInr: 0,
+          latencyMs: Date.now() - start,
+          status: 'SUCCESS',
+        },
+      };
+    }
+
     // Sprint 19 — kind branches the output shape.
     const output: Pass2Output =
       input.kind === 'INTAKE'
@@ -706,11 +755,34 @@ export class MockGeminiPass7Backend implements IPass7Backend {
         },
       ],
       edges: [
-        { from: 'n2', to: 'n1', relationship: 'Approval-seeking sustains the conflicted-role pattern.' },
-        { from: 'n4', to: 'n1', relationship: 'The perfection belief amplifies the felt cost of conflicting roles.' },
-        { from: 'n3', to: 'n2', relationship: 'Holding honesty as a value creates tension with the approval-seeking pattern.' },
-        { from: 'n6', to: 'n1', relationship: 'Withdrawing is the release valve when the role-pressure becomes unbearable.' },
-        { from: 'n5', to: 'n4', relationship: 'Quiet capability is the very strength that perfection-belief reframes as never enough.' },
+        {
+          from: 'n2',
+          to: 'n1',
+          relationship: 'Approval-seeking sustains the conflicted-role pattern.',
+        },
+        {
+          from: 'n4',
+          to: 'n1',
+          relationship: 'The perfection belief amplifies the felt cost of conflicting roles.',
+        },
+        {
+          from: 'n3',
+          to: 'n2',
+          relationship:
+            'Holding honesty as a value creates tension with the approval-seeking pattern.',
+        },
+        {
+          from: 'n6',
+          to: 'n1',
+          relationship:
+            'Withdrawing is the release valve when the role-pressure becomes unbearable.',
+        },
+        {
+          from: 'n5',
+          to: 'n4',
+          relationship:
+            'Quiet capability is the very strength that perfection-belief reframes as never enough.',
+        },
       ],
       generatedAt: new Date().toISOString(),
       basedOnSessionIds: input.basedOnSessionIds,
@@ -769,7 +841,8 @@ export class MockGeminiPass8Backend implements IPass8Backend {
       evidenceBasedOptions: [
         {
           option: '[mock] Add a thought-record practice between sessions.',
-          rationale: '[mock] BA needs cognitive-restructuring scaffolding once activation is steady.',
+          rationale:
+            '[mock] BA needs cognitive-restructuring scaffolding once activation is steady.',
           indiaContextNote: null,
         },
       ],
