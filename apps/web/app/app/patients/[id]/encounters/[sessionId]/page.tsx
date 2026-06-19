@@ -46,9 +46,17 @@ export default async function EncounterWorkspacePage({
       </Link>
       <header className="mb-6 mt-3 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">Encounter</h1>
-        <Badge tone={session.status === 'COMPLETED' ? 'accent' : 'muted'}>
-          {session.status.toLowerCase()}
-        </Badge>
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/app/patients/${clientId}/encounters/${sessionId}/live`}
+            className="text-sm font-medium text-[var(--color-accent)] hover:underline"
+          >
+            ⚡ Try the live copilot (preview)
+          </Link>
+          <Badge tone={session.status === 'COMPLETED' ? 'accent' : 'muted'}>
+            {session.status.toLowerCase()}
+          </Badge>
+        </div>
       </header>
       <DoctorEncounterPanel
         sessionId={session.id}

@@ -38,3 +38,35 @@ export const EncounterGapSchema = z.object({
   evidenceRef: EvidenceRefSchema.optional(),
 });
 export type EncounterGap = z.infer<typeof EncounterGapSchema>;
+
+// ============================================================================
+// Sprint DV4 — live gateway wire protocol. The doctor's browser opens a
+// WebSocket to the streaming gateway (a standalone in-region service —
+// Vercel can't hold a socket). The gateway streams the three rails +
+// lifecycle; the client sends start/stop. Both sides validate with these
+// schemas. See docs/DOCTOR_VERTICAL.md §4 + services/live-gateway.
+// ============================================================================
+
+/// Client → gateway commands.
+export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('start'),
+    sessionId: z.string().optional(),
+    specialty: z.string().optional(),
+  }),
+  z.object({ type: z.literal('stop') }),
+]);
+export type LiveGatewayCommand = z.infer<typeof LiveGatewayCommandSchema>;
+
+export const LiveGatewayStateSchema = z.enum(['connected', 'listening', 'finalizing', 'done']);
+export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
+
+/// Gateway → client events: the three rails + lifecycle status.
+export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
+  z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
+  z.object({ type: z.literal('note'), partial: PartialStructuredNoteSchema }),
+  z.object({ type: z.literal('gap'), gap: EncounterGapSchema }),
+  z.object({ type: z.literal('final'), note: MedicalEncounterNoteV1Schema }),
+]);
+export type LiveGatewayEvent = z.infer<typeof LiveGatewayEventSchema>;
