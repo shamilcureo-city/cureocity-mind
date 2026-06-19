@@ -28,14 +28,12 @@ const PRIMARY: NavItem[] = [
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
 
-// Sprint DV1 — doctor nav. Therapy-only items (Templates, Assistant, My
-// practice) are hidden and Clients reads as "Patients". DV2/DV3 add the
-// doctor-specific routes (Encounters, Prescriptions).
-// See docs/DOCTOR_VERTICAL.md.
+// Sprint DV2 — doctor nav. The doctor's home is the patient roster
+// (/app/patients, isolated from the therapy clients pages). The
+// therapy-shaped Today/Record surfaces are dropped until the doctor
+// encounter workspace lands (DV3/DV4). See docs/DOCTOR_VERTICAL.md.
 const DOCTOR_PRIMARY: NavItem[] = [
-  { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app', label: 'Record', icon: 'record' },
-  { href: '/app/clients', label: 'Patients', icon: 'clients' },
+  { href: '/app/patients', label: 'Patients', icon: 'clients' },
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
 

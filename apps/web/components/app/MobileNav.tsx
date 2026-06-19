@@ -21,12 +21,10 @@ const ITEMS: {
   { href: '/app/settings', label: 'Settings', icon: 'cog' },
 ];
 
-// Sprint DV1 — doctor bottom bar. Clients reads as "Patients"; the
-// therapy-only Assistant is dropped. See docs/DOCTOR_VERTICAL.md.
+// Sprint DV2 — doctor bottom bar: the patient roster + settings. See
+// docs/DOCTOR_VERTICAL.md.
 const DOCTOR_ITEMS: typeof ITEMS = [
-  { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app', label: 'Record', icon: 'record' },
-  { href: '/app/clients', label: 'Patients', icon: 'clients' },
+  { href: '/app/patients', label: 'Patients', icon: 'clients' },
   { href: '/app/settings', label: 'Settings', icon: 'cog' },
 ];
 
