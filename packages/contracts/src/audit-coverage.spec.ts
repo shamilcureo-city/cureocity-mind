@@ -102,10 +102,6 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   'INTAKE_SUBMITTED',
   'INTAKE_REVIEWED',
   'INTAKE_MATCHED',
-  // Doctor vertical — ENCOUNTER_NOTE_SIGNED is wired when the medical
-  // sign route lands (DV3 follow-up chunk). ENCOUNTER_NOTE_DRAFTED is
-  // already wired in apps/web/lib/note-orchestrator.ts.
-  'ENCOUNTER_NOTE_SIGNED',
 ]);
 
 function listSourceFiles(dir: string): string[] {

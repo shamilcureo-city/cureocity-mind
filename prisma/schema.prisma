@@ -1117,6 +1117,9 @@ enum NoteEditField {
   mentalStatusExam
   workingHypothesis
   immediatePlan
+  // Sprint DV3 — medical encounter note signable string fields.
+  chiefComplaint
+  hpi
 }
 
 model NoteEdit {

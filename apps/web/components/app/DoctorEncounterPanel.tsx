@@ -47,6 +47,9 @@ export function DoctorEncounterPanel({
   );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const reviewHref = `/app/patients/${clientId}/encounters/${sessionId}`;
+  const [signed, setSigned] = useState(false);
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
 
   const fetchDraft = useCallback(async () => {
     const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`);
@@ -118,6 +121,40 @@ export function DoctorEncounterPanel({
     void fetchDraft();
   }
 
+  // Sign-off. The seeded doctor has no WebAuthn credential, so the
+  // assertion-less path applies; a doctor who registers one would be
+  // required to assert (same rule as the therapist sign route). The note
+  // is signed as-drafted (no field edits in this MVP).
+  async function sign(note: MedicalEncounterNoteV1): Promise<void> {
+    setSigning(true);
+    setSignError(null);
+    try {
+      const payload = JSON.stringify(note);
+      const payloadHashHex = await sha256Hex(payload);
+      const res = await fetch(`/api/v1/sessions/${sessionId}/sign`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          payload,
+          payloadHashHex,
+          note,
+          edits: [],
+          signedAt: new Date().toISOString(),
+        }),
+      });
+      if (res.status === 409) {
+        setSigned(true); // already signed in a previous visit
+        return;
+      }
+      if (!res.ok) throw new Error(await errorOf(res, 'Could not sign the note'));
+      setSigned(true);
+    } catch (e) {
+      setSignError((e as Error).message);
+    } finally {
+      setSigning(false);
+    }
+  }
+
   if (state.kind === 'loading' || state.kind === 'starting') {
     return (
       <Card className="p-8 text-center text-sm text-[var(--color-ink-3)]">
@@ -186,13 +223,34 @@ export function DoctorEncounterPanel({
 
   // done
   return (
-    <Card className="p-7">
-      <MedicalNoteView note={state.note} />
-    </Card>
+    <div className="space-y-4">
+      <Card className="p-7">
+        <MedicalNoteView note={state.note} />
+      </Card>
+      <div className="flex items-center justify-end gap-3">
+        {signed ? (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent)]">
+            ✓ Signed
+          </span>
+        ) : (
+          <Button onClick={() => sign(state.note)} disabled={signing}>
+            {signing ? 'Signing…' : 'Confirm &amp; sign'}
+          </Button>
+        )}
+      </div>
+      {signError && <p className="text-right text-sm text-[var(--color-warn)]">{signError}</p>}
+    </div>
   );
 }
 
 async function errorOf(res: Response, fallback: string): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   return body.error ?? `${fallback} (${res.status}).`;
+}
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }

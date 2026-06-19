@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
   IntakeNoteV1Schema,
+  MedicalEncounterNoteV1Schema,
   SignNoteInputSchema,
   TherapyNoteV1Schema,
   type NoteEditEntry,
@@ -117,7 +118,12 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { psychologistId: true, status: true, kind: true },
+    select: {
+      psychologistId: true,
+      status: true,
+      kind: true,
+      psychologist: { select: { vertical: true } },
+    },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -128,9 +134,15 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       { status: 400 },
     );
   }
-  // INTAKE notes sign their own shape; TREATMENT + REVIEW share SOAP.
-  const signableKind: SignableKind = signableKindFor(session.kind);
-  const noteSchema = signableKind === 'INTAKE' ? IntakeNoteV1Schema : TherapyNoteV1Schema;
+  // INTAKE notes sign their own shape; TREATMENT + REVIEW share SOAP;
+  // a doctor's session signs a MedicalEncounterNoteV1 (Sprint DV3).
+  const signableKind: SignableKind = signableKindFor(session.kind, session.psychologist.vertical);
+  const noteSchema =
+    signableKind === 'INTAKE'
+      ? IntakeNoteV1Schema
+      : signableKind === 'MEDICAL'
+        ? MedicalEncounterNoteV1Schema
+        : TherapyNoteV1Schema;
   const signableFields = SIGNABLE_FIELDS_BY_KIND[signableKind];
 
   // Sprint 18 → 33 — once the therapist has registered ≥1 platform
@@ -244,28 +256,32 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         })),
       });
     }
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'NOTE_SIGNED',
-        targetType: 'TherapyNote',
-        targetId: note.id,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          sessionId,
-          draftId: draft.id,
-          editedFields: edits.map((e) => e.field),
-          payloadHashHex: recomputed,
-          webauthnUsed: input.value.assertion !== undefined,
-          webauthnEnforced: credentialBump !== null,
-          // Sprint 49 — disaggregate intake vs treatment in the
-          // signed-note audit trail so My Practice can split them.
-          kind: signableKind,
-        },
+    const auditBase = {
+      actorType: 'PSYCHOLOGIST' as const,
+      actorPsychologistId: auth.value.psychologistId,
+      targetType: 'TherapyNote',
+      targetId: note.id,
+      metadata: {
+        ...auditMetadataFromRequest(req),
+        sessionId,
+        draftId: draft.id,
+        editedFields: edits.map((e) => e.field),
+        payloadHashHex: recomputed,
+        webauthnUsed: input.value.assertion !== undefined,
+        webauthnEnforced: credentialBump !== null,
+        // Sprint 49 — disaggregate intake vs treatment (vs medical) in the
+        // signed-note audit trail so My Practice can split them.
+        kind: signableKind,
       },
-      tx,
-    );
+    };
+    // Sprint DV3 — medical encounter notes audit ENCOUNTER_NOTE_SIGNED;
+    // therapy notes keep NOTE_SIGNED. Two literal calls so the audit
+    // chaos-test regex picks both action strings up.
+    if (signableKind === 'MEDICAL') {
+      await writeAudit({ ...auditBase, action: 'ENCOUNTER_NOTE_SIGNED' }, tx);
+    } else {
+      await writeAudit({ ...auditBase, action: 'NOTE_SIGNED' }, tx);
+    }
     if (credentialBump !== null) {
       // Persist the authenticator's reported counter (not a blind +1) so
       // the next sign can detect a rollback / cloned authenticator.
