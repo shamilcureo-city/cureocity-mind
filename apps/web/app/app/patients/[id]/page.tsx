@@ -78,17 +78,21 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
         <Card className="overflow-hidden">
           {patient.sessions.length === 0 ? (
             <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-              No encounters yet — “Start encounter” to open one. Recording and the medical note
-              arrive in a later release.
+              No encounters yet — “Start encounter” to record one.
             </p>
           ) : (
             <ul className="divide-y divide-[var(--color-line-soft)]">
               {patient.sessions.map((s) => (
-                <li key={s.id} className="flex items-center justify-between px-5 py-4 text-sm">
-                  <span className="text-[var(--color-ink)]">{formatDateTime(s.scheduledAt)}</span>
-                  <Badge tone={s.status === 'COMPLETED' ? 'accent' : 'muted'}>
-                    {s.status.toLowerCase()}
-                  </Badge>
+                <li key={s.id}>
+                  <Link
+                    href={`/app/patients/${patient.id}/encounters/${s.id}`}
+                    className="flex items-center justify-between px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
+                  >
+                    <span className="text-[var(--color-ink)]">{formatDateTime(s.scheduledAt)}</span>
+                    <Badge tone={s.status === 'COMPLETED' ? 'accent' : 'muted'}>
+                      {s.status.toLowerCase()}
+                    </Badge>
+                  </Link>
                 </li>
               ))}
             </ul>
