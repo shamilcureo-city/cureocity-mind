@@ -174,6 +174,51 @@ export class MockGeminiPass2Backend implements IPass2Backend {
                 ]
               : [],
           },
+          // Sprint DV5 — the finalizer drafts the Rx + clinical orders.
+          // Clinically coherent for the chest-pain mock; the deterministic
+          // interaction-check runs over these in the orchestrator.
+          medications: [
+            {
+              version: 'V1',
+              drug: '[mock] Aspirin',
+              form: 'tablet',
+              strength: '75 mg',
+              dose: '1 tablet',
+              route: 'oral',
+              frequency: 'once daily',
+              durationDays: 30,
+              prn: false,
+              instructions: 'After food.',
+              interactionWarnings: [],
+            },
+            {
+              version: 'V1',
+              drug: '[mock] Atorvastatin',
+              form: 'tablet',
+              strength: '40 mg',
+              dose: '1 tablet',
+              route: 'oral',
+              frequency: 'at night',
+              durationDays: 30,
+              prn: false,
+              instructions: '',
+              interactionWarnings: [],
+            },
+          ],
+          orders: [
+            {
+              version: 'V1',
+              category: 'PROCEDURE',
+              description: '[mock] 12-lead ECG today',
+              rationale: 'Exertional chest pain — screen for ischaemia.',
+            },
+            {
+              version: 'V1',
+              category: 'LAB',
+              description: '[mock] Fasting lipid profile + fasting glucose',
+              rationale: 'Cardiovascular risk stratification.',
+            },
+          ],
         },
         callLog: {
           sessionId: input.sessionId,

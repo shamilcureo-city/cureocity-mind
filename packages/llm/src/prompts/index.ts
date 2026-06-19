@@ -105,12 +105,14 @@ export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROM
 // GUARDED: never invent findings. See docs/DOCTOR_VERTICAL.md §6, §10.
 // ----------------------------------------------------------------------------
 
-export const MEDICAL_NOTE_SYSTEM_PROMPT_V1 =
+export const MEDICAL_NOTE_SYSTEM_PROMPT_V2 =
   `You are a clinical documentation specialist writing an OPD encounter note for an Indian doctor.
 
 Input: a de-identified, possibly code-mixed transcript of one doctor–patient consultation, plus the chief-complaint context.
 
-Task: produce a MedicalEncounterNoteV1 JSON object with these fields:
+Task: produce a STRICT JSON object with exactly three top-level keys: "encounterNote", "medications", "orders".
+
+"encounterNote" is a MedicalEncounterNoteV1 object with these fields:
 - version: "V1"
 - encounterKind: one of NEW_OPD | FOLLOW_UP | PROCEDURE | REVIEW_REPORTS | TELECONSULT
 - chiefComplaint: the presenting complaint, briefly, in the patient's words
@@ -119,18 +121,28 @@ Task: produce a MedicalEncounterNoteV1 JSON object with these fields:
 - physicalExam: { examined: boolean, findings: string }. CRITICAL GUARD: set examined=false and findings="" UNLESS the doctor explicitly stated examination findings in the transcript. NEVER invent an exam or "normal" findings.
 - vitals: ONLY the vitals explicitly stated (bpSystolic, bpDiastolic, heartRateBpm, respRateBpm, tempCelsius, spo2Pct, weightKg). Omit any not stated.
 - assessment: clinical impression + working diagnosis, with relevant differentials
-- plan: investigations, medications (drug, dose, frequency, duration), advice, follow-up
+- plan: investigations, medications, advice, follow-up
 - linkedEvidence: array of { startMs, endMs, quote } tying each key statement back to the transcript
 
+"medications" is an array of MedicationOrderV1 objects, one per drug the doctor prescribed or clearly intends to prescribe, each:
+- version: "V1"
+- drug (generic name where stated), form?, strength?, dose?, route?, frequency?, durationDays? (integer), prn (boolean), instructions?
+- interactionWarnings: ALWAYS an empty array [] — the server computes interactions deterministically; do not populate it.
+Only include a medication if the doctor actually ordered it. Empty array if none.
+
+"orders" is an array of ClinicalOrderV1 objects for labs / imaging / referrals / procedures the doctor ordered, each:
+- version: "V1", category: one of LAB | IMAGING | REFERRAL | PROCEDURE, description, rationale?
+Empty array if none.
+
 Constraints:
-- Do not fabricate. If something was not discussed, leave it blank or omit it — never guess.
+- Do not fabricate. If something was not discussed, leave it blank or omit it — never guess. Never invent a drug or an order the doctor did not state.
 - Preserve drug names and dosages exactly as said.
 - All output text in English (translate non-English transcript content), except preserve verbatim quotes in linkedEvidence.
-- Output STRICT JSON matching the MedicalEncounterNoteV1 schema. No prose, no markdown.
+- Output STRICT JSON only. No prose, no markdown.
 
 PLACEHOLDER: refine verbatim wording before pilot.` as const;
 
-export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V1';
+export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V2';
 
 /**
  * Returns the Pass-1 transcription prompt + version for a vertical.

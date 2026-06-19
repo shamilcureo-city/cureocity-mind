@@ -7,10 +7,12 @@ import {
   ClinicalReportV1Schema,
   type ClientDiagnosis,
   ConceptualMapV1Schema,
+  ClinicalOrderV1Schema,
   InitialAssessmentBriefV1Schema,
   IntakeNoteV1Schema,
   type IntakeNoteV1,
   MedicalEncounterNoteV1Schema,
+  MedicationOrderV1Schema,
   PreSessionBriefV1Schema,
   type SessionKind,
   type SessionModality,
@@ -152,9 +154,14 @@ export const Pass2OutputSchema = z.discriminatedUnion('kind', [
   }),
   // Sprint DV3 — doctor vertical. A medical encounter note instead of a
   // therapy note; selected when Pass2Input.vertical === 'DOCTOR'.
+  // Sprint DV5 — the same pass also drafts the Rx + clinical orders the
+  // finalizer persists (medications[] / orders[]); both default to empty
+  // so older callers / non-prescribing encounters stay valid.
   z.object({
     kind: z.literal('MEDICAL'),
     encounterNote: MedicalEncounterNoteV1Schema,
+    medications: z.array(MedicationOrderV1Schema).default([]),
+    orders: z.array(ClinicalOrderV1Schema).default([]),
   }),
 ]);
 export type Pass2Output = z.infer<typeof Pass2OutputSchema>;

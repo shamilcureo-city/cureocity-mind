@@ -1,5 +1,10 @@
 import type { EncounterGap, LiveGatewayEvent, MedicalEncounterNoteV1 } from '@cureocity/contracts';
 import type { SpeakerSegment } from '@cureocity/llm';
+import {
+  checkInteractions,
+  formatInteraction,
+  type InteractionSeverity,
+} from '@cureocity/clinical';
 import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 
@@ -120,6 +125,7 @@ export class LiveSession {
 
     if (pass2.output.kind !== 'MEDICAL') return; // defensive — DOCTOR always MEDICAL
     const note = pass2.output.encounterNote;
+    const medications = pass2.output.medications;
     this.latestNote = note;
 
     if (isFinal) {
@@ -137,6 +143,22 @@ export class LiveSession {
       if (this.seenGaps.has(gap.message)) continue;
       this.seenGaps.add(gap.message);
       this.emit({ type: 'gap', gap: gap satisfies EncounterGap });
+    }
+
+    // Sprint DV5 — Rail-3 💊 flag. Deterministic interaction-check over
+    // the drafted Rx, emitted as a DRUG_INTERACTION gap.
+    for (const interaction of checkInteractions(medications.map((m) => m.drug))) {
+      const message = formatInteraction(interaction);
+      if (this.seenGaps.has(message)) continue;
+      this.seenGaps.add(message);
+      this.emit({
+        type: 'gap',
+        gap: {
+          kind: 'DRUG_INTERACTION',
+          severity: interactionSeverity(interaction.severity),
+          message,
+        },
+      });
     }
   }
 
@@ -191,4 +213,11 @@ export class LiveSession {
     this.audio = [];
     this.totalBytes = 0;
   }
+}
+
+/** Map a drug-interaction severity to the EncounterGap severity scale. */
+function interactionSeverity(s: InteractionSeverity): 'info' | 'warn' | 'critical' {
+  if (s === 'contraindicated' || s === 'major') return 'critical';
+  if (s === 'moderate') return 'warn';
+  return 'info';
 }

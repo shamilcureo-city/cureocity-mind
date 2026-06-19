@@ -252,6 +252,39 @@ is real today; these are the optimisation/ops layer.
 **Exit.** Doctor receives an interaction-checked Rx draft + lab/referral
 drafts, confirms them, and shares the Rx.
 
+**Status (built).** The Rx + orders loop is real end-to-end:
+
+- `MedicationOrderV1` / `ClinicalOrderV1` content schemas + lifecycle
+  DTOs (`OrderStatus` DRAFT→CONFIRMED/DISCARDED) in
+  `packages/contracts/src/medication-order.ts`; `MedicationOrder` +
+  `ClinicalOrder` Prisma tables keyed by `sessionId`, tenant-filtered by
+  `psychologistId` (migration `…_dv5_orders`).
+- **Deterministic interaction engine**
+  (`packages/clinical/src/interactions.ts`, 11 unit tests): a curated,
+  citation-bearing class-pair table (warfarin+NSAID, ACEi+K-sparing,
+  statin+macrolide, nitrate+PDE5 contraindicated, serotonergic pairs,
+  …) with Indian-brand resolution (Ecosprin→Aspirin). The 💊 flag.
+- **Finalizer drafts the Rx**: Pass 2's MEDICAL arm now emits
+  `medications[]` + `orders[]` (mock + Vertex, prompt V2). The
+  note-orchestrator persists them as DRAFT, runs the interaction-check
+  server-side, and stamps each order's `interactionWarnings`
+  (`MEDICATION_ORDER_DRAFTED` / `CLINICAL_ORDER_DRAFTED`).
+- **Confirm / edit / discard**: `GET /sessions/:id/orders`,
+  `PATCH /medication-orders/:id` (confirm with dose/frequency/duration
+  edits, or discard), `PATCH /clinical-orders/:id`; the
+  `EncounterOrdersPanel` UI on the encounter workspace
+  (`MEDICATION_ORDER_CONFIRMED/DISCARDED`,
+  `CLINICAL_ORDER_CONFIRMED/DISCARDED`).
+- **Share**: confirmed medications flow into the existing after-visit
+  summary artefact (portal / WhatsApp) in plain language.
+- **Live Rail-3**: the gateway emits 💊 `DRUG_INTERACTION` gaps from the
+  same engine over the drafted Rx, mid-consult.
+
+Deferred: a dedicated patient-facing PRESCRIPTION share artefact (the
+AVS already carries the confirmed drug list); an exhaustive formulary
+(the engine is intentionally the well-known dangerous pairs — extend
+with citations); ABDM-linked e-prescription (DV8).
+
 ---
 
 ## DV6 — Differential + coding + specialty templates + voice

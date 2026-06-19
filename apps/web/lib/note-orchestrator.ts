@@ -7,7 +7,13 @@ import {
   type GeminiCallLogData,
   type Pass1Output,
 } from '@cureocity/llm';
-import { PENDING_SECTION_CONFIRMATIONS, type ClinicalLocale } from '@cureocity/contracts';
+import {
+  PENDING_SECTION_CONFIRMATIONS,
+  type ClinicalLocale,
+  type ClinicalOrderV1,
+  type MedicationOrderV1,
+} from '@cureocity/contracts';
+import { interactionWarningsByDrug } from '@cureocity/clinical';
 import {
   recordCostCircuitTrip,
   recordCostInr,
@@ -257,6 +263,15 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
           totalCostInr: pass1.callLog.costInr + pass2.callLog.costInr,
         },
       });
+      // Sprint DV5 — persist the drafted Rx + clinical orders. The
+      // medication interaction-check runs deterministically server-side
+      // here (never client-supplied), stamping each order's warnings.
+      await persistDraftedOrders(
+        sessionId,
+        session.psychologistId,
+        pass2.output.medications,
+        pass2.output.orders,
+      );
       return { draftId: draft.id, status: 'COMPLETED' };
     }
 
@@ -439,6 +454,64 @@ async function persistCallLog(log: GeminiCallLogData): Promise<void> {
       ...(log.errorMessage !== undefined && { errorMessage: log.errorMessage }),
     },
   });
+}
+
+/**
+ * Sprint DV5 — persist the AI-drafted Rx + clinical orders for a doctor
+ * encounter. Replaces any existing DRAFT orders (so a note re-run is
+ * clean) while leaving already-CONFIRMED orders untouched. The drug
+ * interaction-check runs here, deterministically, and stamps each
+ * medication order's `interactionWarnings`. Audits with literal action
+ * strings (the chaos test scans for these).
+ */
+async function persistDraftedOrders(
+  sessionId: string,
+  psychologistId: string,
+  medications: MedicationOrderV1[],
+  clinicalOrders: ClinicalOrderV1[],
+): Promise<void> {
+  if (medications.length > 0) {
+    const warningsByDrug = interactionWarningsByDrug(medications.map((m) => m.drug));
+    await prisma.medicationOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+    await prisma.medicationOrder.createMany({
+      data: medications.map((m, i) => ({
+        sessionId,
+        psychologistId,
+        content: {
+          ...m,
+          interactionWarnings: warningsByDrug[i] ?? [],
+        } as unknown as Prisma.InputJsonValue,
+      })),
+    });
+    await writeAudit({
+      actorType: 'SYSTEM',
+      action: 'MEDICATION_ORDER_DRAFTED',
+      targetType: 'Session',
+      targetId: sessionId,
+      metadata: {
+        sessionId,
+        count: medications.length,
+        interactionCount: warningsByDrug.filter((w) => w.length > 0).length,
+      },
+    });
+  }
+  if (clinicalOrders.length > 0) {
+    await prisma.clinicalOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+    await prisma.clinicalOrder.createMany({
+      data: clinicalOrders.map((o) => ({
+        sessionId,
+        psychologistId,
+        content: o as unknown as Prisma.InputJsonValue,
+      })),
+    });
+    await writeAudit({
+      actorType: 'SYSTEM',
+      action: 'CLINICAL_ORDER_DRAFTED',
+      targetType: 'Session',
+      targetId: sessionId,
+      metadata: { sessionId, count: clinicalOrders.length },
+    });
+  }
 }
 
 function mapRiskSeverity(severity: Pass1Output extends never ? never : string): PrismaRiskSeverity {

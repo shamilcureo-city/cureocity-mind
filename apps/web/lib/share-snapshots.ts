@@ -11,6 +11,7 @@ import {
   IntakeNoteV1Schema,
   type MedicalEncounterNoteV1,
   MedicalEncounterNoteV1Schema,
+  MedicationOrderV1Schema,
   type ClinicalTreatmentPlan,
   ClinicalTreatmentPlanSchema,
   type SignedIntakeNoteSnapshotSection,
@@ -79,10 +80,10 @@ export async function buildSnapshot(args: BuildArgs): Promise<SnapshotResult | n
 }
 
 /**
- * Sprint DV3 — after-visit summary builder. Deterministic (no LLM): a
- * patient-facing recap of the SIGNED medical encounter note — what was
- * discussed + the plan, split into readable lines. Honest about its
- * limits: no drug-list / red-flag extraction in this MVP (DV5/DV6).
+ * Sprint DV3 → DV5 — after-visit summary builder. Deterministic (no LLM):
+ * a patient-facing recap of the SIGNED medical encounter note — what was
+ * discussed + the plan, plus (Sprint DV5) the CONFIRMED medications in
+ * plain language. Red-flag extraction is still DV6.
  */
 async function buildAfterVisitSummary(
   { clientId, psychologistId }: BuildArgs,
@@ -112,11 +113,35 @@ async function buildAfterVisitSummary(
   }
   const note: MedicalEncounterNoteV1 = parsed.data;
   const cc = stripBracketTag(note.chiefComplaint).trim();
+
+  // Sprint DV5 — confirmed Rx, in plain language. Only CONFIRMED orders
+  // reach the patient; drafts the doctor never confirmed are excluded.
+  const medRows = await prisma.medicationOrder.findMany({
+    where: { sessionId, status: 'CONFIRMED' },
+    orderBy: { createdAt: 'asc' },
+  });
+  const medications = medRows
+    .map((row) => {
+      const med = MedicationOrderV1Schema.safeParse(row.content);
+      if (!med.success) return null;
+      const m = med.data;
+      const parts = [
+        stripBracketTag(m.drug).trim(),
+        m.strength,
+        m.dose,
+        m.frequency,
+        m.durationDays ? `for ${m.durationDays} days` : null,
+      ].filter((p): p is string => !!p && p.length > 0);
+      const line = parts.join(' · ');
+      return m.instructions ? `${line} (${stripBracketTag(m.instructions).trim()})` : line;
+    })
+    .filter((l): l is string => l !== null && l.length > 0);
+
   const snapshot: PatientShareSnapshot = {
     kind: 'AFTER_VISIT_SUMMARY',
     greeting: 'here is a summary of your visit today.',
     whatWeDiscussed: cc ? [cc] : [],
-    medications: [],
+    medications,
     instructions: splitLines(note.plan),
     followUp: '',
     redFlags: [],

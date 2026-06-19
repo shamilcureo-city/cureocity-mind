@@ -781,6 +781,9 @@ model Session {
   patientShares       PatientShare[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
+  // Doctor vertical — Sprint DV5. Drafted/confirmed Rx + clinical orders.
+  medicationOrders    MedicationOrder[]
+  clinicalOrders      ClinicalOrder[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -1136,6 +1139,64 @@ model NoteEdit {
 
   @@index([therapyNoteId, createdAt])
   @@map("note_edits")
+}
+
+// ============================================================================
+// Doctor vertical — Sprint DV5. MedicationOrder + ClinicalOrder.
+//
+// The AI drafts these from the encounter (status DRAFT); the doctor
+// confirms each one (CONFIRMED) or discards it (DISCARDED) — nothing is
+// ever auto-prescribed. Keyed by sessionId, tenant-filtered by
+// psychologistId. `content` holds the validated MedicationOrderV1 /
+// ClinicalOrderV1 JSON. Distinct from the therapy-exercise prescription
+// engine — this is the drug Rx. See docs/DOCTOR_VERTICAL.md §6.
+// ============================================================================
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  DISCARDED
+}
+
+model MedicationOrder {
+  id             String      @id @default(cuid())
+  sessionId      String
+  psychologistId String
+  status         OrderStatus @default(DRAFT)
+
+  /// Validated MedicationOrderV1 (drug, dose, frequency, duration,
+  /// interactionWarnings[] computed server-side at draft time).
+  content Json
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  confirmedAt DateTime?
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status])
+  @@index([psychologistId])
+  @@map("medication_orders")
+}
+
+model ClinicalOrder {
+  id             String      @id @default(cuid())
+  sessionId      String
+  psychologistId String
+  status         OrderStatus @default(DRAFT)
+
+  /// Validated ClinicalOrderV1 (category, description, rationale).
+  content Json
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  confirmedAt DateTime?
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status])
+  @@index([psychologistId])
+  @@map("clinical_orders")
 }
 
 // ============================================================================
@@ -2239,6 +2300,13 @@ enum AuditAction {
   // Doctor vertical — Sprint DV3. Medical encounter-note lifecycle.
   ENCOUNTER_NOTE_DRAFTED
   ENCOUNTER_NOTE_SIGNED
+  // Doctor vertical — Sprint DV5. Rx + clinical-order lifecycle.
+  MEDICATION_ORDER_DRAFTED
+  MEDICATION_ORDER_CONFIRMED
+  MEDICATION_ORDER_DISCARDED
+  CLINICAL_ORDER_DRAFTED
+  CLINICAL_ORDER_CONFIRMED
+  CLINICAL_ORDER_DISCARDED
 }
 
 enum AuditActorType {

@@ -171,6 +171,13 @@ export const AuditActionSchema = z.enum([
   // doctor analogue of NOTE_DRAFT_CREATED / NOTE_SIGNED).
   'ENCOUNTER_NOTE_DRAFTED',
   'ENCOUNTER_NOTE_SIGNED',
+  // Doctor vertical — Sprint DV5. Rx + clinical-order lifecycle.
+  'MEDICATION_ORDER_DRAFTED',
+  'MEDICATION_ORDER_CONFIRMED',
+  'MEDICATION_ORDER_DISCARDED',
+  'CLINICAL_ORDER_DRAFTED',
+  'CLINICAL_ORDER_CONFIRMED',
+  'CLINICAL_ORDER_DISCARDED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

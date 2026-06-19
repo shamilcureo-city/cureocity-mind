@@ -7,6 +7,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { LiveRecorder } from './LiveRecorder';
 import { MedicalNoteView } from './MedicalNoteView';
+import { EncounterOrdersPanel } from './EncounterOrdersPanel';
 
 /**
  * Sprint DV3 — the doctor encounter workspace body. Drives the record →
@@ -256,6 +257,7 @@ export function DoctorEncounterPanel({
       <Card className="p-7">
         <MedicalNoteView note={state.note} />
       </Card>
+      <EncounterOrdersPanel sessionId={sessionId} />
       <div className="flex flex-wrap items-center justify-end gap-3">
         {signed ? (
           <>

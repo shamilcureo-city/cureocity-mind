@@ -10,7 +10,7 @@ import {
   INTAKE_NOTE_PROMPT_VERSION,
   INTAKE_NOTE_SYSTEM_PROMPT_V1,
   MEDICAL_NOTE_PROMPT_VERSION,
-  MEDICAL_NOTE_SYSTEM_PROMPT_V1,
+  MEDICAL_NOTE_SYSTEM_PROMPT_V2,
   THERAPY_NOTE_PROMPT_VERSION,
   THERAPY_NOTE_SYSTEM_PROMPT_V1,
 } from '../prompts';
@@ -56,7 +56,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
     const isDoctor = input.vertical === 'DOCTOR';
     const isIntake = input.kind === 'INTAKE';
     const systemPrompt = isDoctor
-      ? MEDICAL_NOTE_SYSTEM_PROMPT_V1
+      ? MEDICAL_NOTE_SYSTEM_PROMPT_V2
       : isIntake
         ? INTAKE_NOTE_SYSTEM_PROMPT_V1
         : THERAPY_NOTE_SYSTEM_PROMPT_V1;
@@ -102,8 +102,11 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
       // Pass 2 prompts ask Gemini to produce the body object directly
       // (no wrapper). Wrap here with the discriminator so downstream
       // consumers see the same shape as the mock backend.
+      // Sprint DV5 — the medical prompt returns { encounterNote,
+      // medications[], orders[] }. Stay tolerant of a flat note (older
+      // shape) by detecting the wrapper key.
       const output: Pass2Output = isDoctor
-        ? Pass2OutputSchema.parse({ kind: 'MEDICAL', encounterNote: parsed })
+        ? Pass2OutputSchema.parse(buildMedicalOutput(parsed))
         : isIntake
           ? Pass2OutputSchema.parse({ kind: 'INTAKE', intakeNote: parsed })
           : Pass2OutputSchema.parse({ kind: input.kind, therapyNote: parsed });
@@ -168,9 +171,31 @@ function buildUserMessage(input: Pass2Input): string {
       .join('\n'),
     '',
     input.vertical === 'DOCTOR'
-      ? 'Produce MedicalEncounterNoteV1 JSON only.'
+      ? 'Produce { encounterNote, medications[], orders[] } JSON only.'
       : input.kind === 'INTAKE'
         ? 'Produce IntakeNoteV1 JSON only.'
         : 'Produce TherapyNoteV1 JSON only.',
   ].join('\n');
+}
+
+/**
+ * Sprint DV5 — normalise the medical Pass-2 response to the MEDICAL
+ * discriminated-union arm. The V2 prompt returns
+ * `{ encounterNote, medications[], orders[] }`; tolerate a flat note
+ * (no wrapper) so a model that ignores the envelope still yields a note.
+ */
+function buildMedicalOutput(parsed: unknown): {
+  kind: 'MEDICAL';
+  encounterNote: unknown;
+  medications: unknown[];
+  orders: unknown[];
+} {
+  const obj = (parsed ?? {}) as Record<string, unknown>;
+  const hasWrapper = obj && typeof obj === 'object' && 'encounterNote' in obj;
+  return {
+    kind: 'MEDICAL',
+    encounterNote: hasWrapper ? obj['encounterNote'] : parsed,
+    medications: hasWrapper && Array.isArray(obj['medications']) ? obj['medications'] : [],
+    orders: hasWrapper && Array.isArray(obj['orders']) ? obj['orders'] : [],
+  };
 }
