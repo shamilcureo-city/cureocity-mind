@@ -69,12 +69,18 @@ trial cap at **encounter-create** and add doctor-plan pricing
 
 ## 6. Load + security sign-off (DV8.5)
 
-- Extend `docs/load-test-results.md` with the live-gateway concurrency
-  profile (sockets are stateful — size the in-region service for peak
-  simultaneous consults, not just request rate).
-- Extend `docs/security-audit.md` with the new doctor surfaces (FHIR
-  egress audit `ENCOUNTER_FHIR_EXPORTED`, ABDM push, chronic readings).
+- `docs/load-test-results.md` now carries the **live-gateway concurrency
+  profile** (size the in-region socket service for peak simultaneous
+  consults, not request rate) — run the gateway drill before go-live and
+  log the row.
+- `docs/security-audit.md` now carries the **doctor-vertical surfaces**
+  section (FHIR egress audit `ENCOUNTER_FHIR_EXPORTED`, ABDM push,
+  chronic readings, the live-socket auth TODO).
 - File this runbook + the two above with the clinic before go-live.
+
+> **Pilot-blocking from the security review:** the live gateway socket is
+> currently unauthenticated. Gate it behind a short-lived practitioner
+> token before any real-patient pilot.
 
 ## 7. Rollback
 

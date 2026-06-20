@@ -431,13 +431,18 @@ mock` completes the flow in dev; the real HIP/gateway call awaits ABDM
   reuses `useSessionRecorder` (IndexedDB chunk buffer + `initialChunkIndex`
   resume), so a 4G drop / refresh already recovers. The live path's
   graceful fall-back-to-batch on socket loss is the remaining DV4 item.
-- **DV8.4 billing — pending (env-gated).** Extend the Sprint-53 Razorpay
-  per-seat to the doctor vertical (trial-cap at encounter-create +
-  doctor-plan pricing). Operational once the pilot goes paid.
-- **DV8.5 hardening — runbook done.**
+- **DV8.4 billing — enforcement inherited, copy done; pricing env-gated.**
+  The Sprint-53 trial-cap + paid rolling-30-day cap already gate the
+  shared session-create route, so **doctor encounters are capped today**;
+  the cap copy is now vertical-aware ("trial encounters" vs "sessions").
+  Net-new doctor-plan _pricing tiers_ + Razorpay product config remain a
+  business/env decision for when the pilot goes paid.
+- **DV8.5 hardening — done.**
   `docs/runbooks/doctor-pilot-onboarding.md` (onboarding + clinical-loop
-  smoke + safety-rail verification + the env-gated steps). Load-test +
-  security-audit doc extensions are flagged there.
+  smoke + safety-rail verification + the env-gated steps);
+  `docs/security-audit.md` gained the doctor-vertical surfaces section
+  (incl. the live-socket auth TODO); `docs/load-test-results.md` gained
+  the live-gateway concurrency profile (size for peak parallel consults).
 
 ---
 

@@ -87,6 +87,23 @@ Workload Identity (GCP).
 | § 16 cross-border restrictions | Pass 1 in asia-south1; Pass 2 with explicit CROSS_BORDER consent.                        |
 | § 16 audit trail               | `audit_logs` + chaos audit coverage test + admin read.                                   |
 
+## Doctor vertical (DV1–DV8) surfaces
+
+The doctor vertical is additive and reuses the existing controls; the
+net-new surfaces and their safeguards:
+
+| Surface                                | Control                                                                                                                                                                                                                                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Encounter note + Rx + orders (DV3/DV5) | Same tenant filter (`psychologistId`) + sign + `NoteEdit` trail as therapy notes. Rx interaction-check is server-side only (never client-trusted). Nothing is prescribed without explicit confirmation.                                                                                           |
+| Live gateway (DV4)                     | Standalone in-region socket service; streams audio for transcription, does **not** persist it. **TODO before pilot:** auth the socket against the practitioner session (currently unauthenticated — gate behind a short-lived token; tracked in DV4 follow-ups).                                  |
+| Differential pass (DV6)                | Decision-support only; never auto-applied to the record. Same Gemini cross-border surface as Pass 2/3 (de-identified transcript text).                                                                                                                                                            |
+| Chronic readings (DV7)                 | Tenant-filtered; auto-captured from the signed note's vitals or doctor-entered. No new PII class.                                                                                                                                                                                                 |
+| FHIR export (DV8.1)                    | `ENCOUNTER_FHIR_EXPORTED` audits every egress (data leaves the tenant boundary). Requires a signed note.                                                                                                                                                                                          |
+| ABDM PHR push (DV8.2)                  | `ABHA_LINKED` + `ABDM_PRESCRIPTION_PUSHED` audited. The ABHA address is a new PII field (`Client.abhaAddress`) — fold it into the encryption-rollout backlog. Real gateway is env-gated; mock no-ops are clearly tagged. The push is an in-India data flow (cross-link `docs/dpdp-data-flow.md`). |
+
+Re-audit trigger additions: a new doctor surface that egresses clinical
+data (FHIR/ABDM), or the live socket gaining an auth path.
+
 ## Known-accepted risks (Sprint 11+ remediation)
 
 | Risk                                                      | Mitigation today                                            | Plan                                                     |
