@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { DsrDataExport } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -72,6 +73,7 @@ export async function GET(
   if (!client) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
+  const pii = await resolveClientPii(client);
 
   const [sessionCount, moodLogCount, journalEntryCount, exerciseAssignmentCount] =
     await Promise.all([
@@ -99,9 +101,9 @@ export async function GET(
     exportedAt,
     client: {
       id: client.id,
-      fullName: client.fullName,
-      contactPhone: client.contactPhone,
-      contactEmail: client.contactEmail,
+      fullName: pii.fullName,
+      contactPhone: pii.contactPhone,
+      contactEmail: pii.contactEmail,
       dateOfBirth: client.dateOfBirth?.toISOString().slice(0, 10) ?? null,
       presentingConcerns: client.presentingConcerns,
       preferredModality: client.preferredModality,

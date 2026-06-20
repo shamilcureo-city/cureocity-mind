@@ -42,10 +42,12 @@ export interface ResolvedClientPii {
 }
 
 /**
- * Decrypt one encrypted column, falling back to the plaintext value when the
- * ciphertext is absent or fails to decrypt.
+ * Decrypt one encrypted PII column, falling back to the plaintext value when
+ * the ciphertext is absent (un-backfilled row) or fails to decrypt. Exported
+ * for the direct-read sites that select a single field (e.g. a relation's
+ * `fullName`) rather than a whole Client row.
  */
-async function effective(
+export async function decryptClientField(
   psychologistId: string,
   ciphertext: string | null,
   plaintext: string,
@@ -64,8 +66,8 @@ async function effective(
  */
 export async function resolveClientPii(row: ClientPiiRow): Promise<ResolvedClientPii> {
   const [fullName, contactPhone] = await Promise.all([
-    effective(row.psychologistId, row.fullNameEncrypted, row.fullName),
-    effective(row.psychologistId, row.contactPhoneEncrypted, row.contactPhone),
+    decryptClientField(row.psychologistId, row.fullNameEncrypted, row.fullName),
+    decryptClientField(row.psychologistId, row.contactPhoneEncrypted, row.contactPhone),
   ]);
   // Email is nullable: a null plaintext + null ciphertext stays null.
   let contactEmail = row.contactEmail;

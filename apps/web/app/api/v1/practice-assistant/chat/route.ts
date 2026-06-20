@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import { ensureGcpCreds } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -150,16 +151,26 @@ function redactName(fullName: string): string {
 async function buildClientContext(psychologistId: string, clientId: string): Promise<string> {
   const client = await prisma.client.findUnique({
     where: { id: clientId },
-    select: { fullName: true, psychologistId: true, presentingConcerns: true },
+    select: {
+      fullName: true,
+      fullNameEncrypted: true,
+      psychologistId: true,
+      presentingConcerns: true,
+    },
   });
   if (!client || client.psychologistId !== psychologistId) {
     return 'No accessible client record. Tell the therapist you cannot find that client.';
   }
+  const fullName = await decryptClientField(
+    client.psychologistId,
+    client.fullNameEncrypted,
+    client.fullName,
+  );
   try {
     const { buildDeterministicCaseBriefing } = await import('@/lib/case-briefing');
     const briefing = await buildDeterministicCaseBriefing(clientId, psychologistId);
     const lines = [
-      `Client: ${redactName(client.fullName)}`,
+      `Client: ${redactName(fullName)}`,
       `Presenting concerns: ${client.presentingConcerns ?? '(not recorded)'}`,
       `Headline: ${briefing.headline}`,
       `Working diagnosis: ${

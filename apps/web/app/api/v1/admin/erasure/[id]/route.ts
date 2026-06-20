@@ -88,6 +88,10 @@ export async function PATCH(
           deletedAt: now,
           contactPhone: 'redacted',
           contactEmail: null,
+          // Read cutover — clear the encrypted twins too, else a
+          // decrypt-on-read would resurrect the erased contact details.
+          contactPhoneEncrypted: null,
+          contactEmailEncrypted: null,
           presentingConcerns: null,
         },
       });
