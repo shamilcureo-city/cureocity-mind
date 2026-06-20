@@ -15,6 +15,7 @@ import {
   RecaptchaVerifier,
   createUserWithEmailAndPassword,
   getAuth,
+  getRedirectResult,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -87,6 +88,19 @@ export async function signInWithGoogle(): Promise<UserCredential | null> {
     }
     throw err;
   }
+}
+
+/**
+ * Completes a Google sign-in that fell back to the full-page redirect
+ * (the popup-blocked branch of signInWithGoogle). Returns the credential
+ * on the post-redirect page load, or null when there's no pending
+ * redirect. MUST be called on the login page's first mount — otherwise
+ * the redirect path leaves a live Firebase user with NO server session
+ * cookie, and every authed API call 401s with "Missing Bearer token or
+ * session".
+ */
+export async function completeGoogleRedirect(): Promise<UserCredential | null> {
+  return getRedirectResult(getFirebaseAuth());
 }
 
 /** Email + password — existing account. */

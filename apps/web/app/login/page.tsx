@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
 import {
+  completeGoogleRedirect,
   createEmailAccount,
   createRecaptchaVerifier,
   friendlyAuthError,
@@ -90,6 +91,35 @@ function LoginPageInner() {
   useEffect(() => {
     setError(null);
   }, [method, emailMode]);
+
+  // Google popup-blocked path uses a full-page redirect (signInWithGoogle
+  // → signInWithRedirect). On the way back we MUST complete it here to
+  // mint the session cookie — mirroring the popup branch in handleGoogle.
+  // Without this, redirect sign-ins end up authenticated to Firebase with
+  // no __session cookie, and every API call 401s. Runs once on mount.
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const cred = await completeGoogleRedirect();
+        if (!cred || cancelled) return;
+        setBusy(true);
+        const idToken = await cred.user.getIdToken();
+        const result = await startSession(idToken);
+        if (cancelled) return;
+        if (result === 'invite') setStage('invite');
+        else router.push(next);
+      } catch (err) {
+        if (!cancelled) setError(friendlyAuthError(err));
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // POST the verified id token for a session cookie. Returns 'invite'
   // when the pilot gate (Sprint 37) needs a code, 'ok' on success.
