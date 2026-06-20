@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -32,23 +33,31 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ...(statuses.length > 0 ? { status: { in: statuses } } : { status: 'PENDING' }),
     },
     orderBy: { createdAt: 'asc' },
-    include: { client: { select: { id: true, fullName: true, status: true } } },
+    include: {
+      client: { select: { id: true, fullName: true, fullNameEncrypted: true, status: true } },
+    },
     take: 100,
   });
 
   return NextResponse.json({
-    items: rows.map((r) => ({
-      id: r.id,
-      status: r.status,
-      reason: r.reason,
-      createdAt: r.createdAt.toISOString(),
-      resolvedAt: r.resolvedAt?.toISOString() ?? null,
-      resolutionNotes: r.resolutionNotes,
-      client: {
-        id: r.client.id,
-        fullName: r.client.fullName,
-        status: r.client.status,
-      },
-    })),
+    items: await Promise.all(
+      rows.map(async (r) => ({
+        id: r.id,
+        status: r.status,
+        reason: r.reason,
+        createdAt: r.createdAt.toISOString(),
+        resolvedAt: r.resolvedAt?.toISOString() ?? null,
+        resolutionNotes: r.resolutionNotes,
+        client: {
+          id: r.client.id,
+          fullName: await decryptClientField(
+            auth.value.psychologistId,
+            r.client.fullNameEncrypted,
+            r.client.fullName,
+          ),
+          status: r.client.status,
+        },
+      })),
+    ),
   });
 }

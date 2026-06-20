@@ -6,6 +6,7 @@ import {
   type ProgressReportSnapshot,
 } from '@cureocity/contracts';
 import { prisma } from './prisma';
+import { decryptClientField } from './client-pii';
 
 /**
  * Sprint 20 — Client-facing Progress Report builder.
@@ -60,6 +61,7 @@ export async function buildProgressReport(
       psychologistId: true,
       deletedAt: true,
       fullName: true,
+      fullNameEncrypted: true,
     },
   });
   if (!client || client.deletedAt !== null) {
@@ -68,6 +70,11 @@ export async function buildProgressReport(
   if (client.psychologistId !== args.psychologistId) {
     throw new ProgressReportError('Client not owned by this psychologist');
   }
+  const clientFullName = await decryptClientField(
+    client.psychologistId,
+    client.fullNameEncrypted,
+    client.fullName,
+  );
 
   const [completedCount, firstSession, instrumentRows, activePlanRow] = await Promise.all([
     prisma.session.count({ where: { clientId: args.clientId, status: 'COMPLETED' } }),
@@ -110,7 +117,7 @@ export async function buildProgressReport(
     goals,
     encouragements,
   };
-  const subject = `Your progress · ${formatClientFirstName(client.fullName)}`.slice(0, 120);
+  const subject = `Your progress · ${formatClientFirstName(clientFullName)}`.slice(0, 120);
   return { snapshot, measuredInstrumentCount: entries.length, subject };
 }
 

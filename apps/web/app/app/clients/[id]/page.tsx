@@ -11,6 +11,7 @@ import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { JourneyError } from '@/lib/journey';
+import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -57,6 +58,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
     },
   });
   if (!client) notFound();
+  const pii = await resolveClientPii(client);
 
   // Built only for the page-level crisis banner — the one clinical
   // signal that stays on the lean record for safety.
@@ -83,7 +85,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
           <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="flex flex-wrap items-center gap-3 font-serif text-3xl">
-                {client.fullName}
+                {pii.fullName}
                 {client.isDemo && <Badge tone="warn">Example</Badge>}
               </h1>
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
@@ -105,15 +107,15 @@ export default async function ClientDetailPage({ params }: PageProps) {
               {client.isDemo && <DemoClientButton demoClientId={client.id} variant="inline" />}
               <SendCheckinButton
                 clientId={client.id}
-                hasContactPhone={!!client.contactPhone}
-                hasContactEmail={!!client.contactEmail}
+                hasContactPhone={!!pii.contactPhone}
+                hasContactEmail={!!pii.contactEmail}
               />
               <ClientEditPanel
                 client={{
                   id: client.id,
-                  fullName: client.fullName,
-                  contactPhone: client.contactPhone,
-                  contactEmail: client.contactEmail,
+                  fullName: pii.fullName,
+                  contactPhone: pii.contactPhone,
+                  contactEmail: pii.contactEmail,
                   dateOfBirth: client.dateOfBirth
                     ? client.dateOfBirth.toISOString().slice(0, 10)
                     : null,
@@ -128,12 +130,12 @@ export default async function ClientDetailPage({ params }: PageProps) {
           <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-xs text-[var(--color-ink-3)]">Phone</dt>
-              <dd className="font-mono text-[var(--color-ink)]">{client.contactPhone}</dd>
+              <dd className="font-mono text-[var(--color-ink)]">{pii.contactPhone}</dd>
             </div>
-            {client.contactEmail && (
+            {pii.contactEmail && (
               <div>
                 <dt className="text-xs text-[var(--color-ink-3)]">Email</dt>
-                <dd className="text-[var(--color-ink)]">{client.contactEmail}</dd>
+                <dd className="text-[var(--color-ink)]">{pii.contactEmail}</dd>
               </div>
             )}
           </dl>
@@ -188,7 +190,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
       </div>
 
       <div className="mt-6">
-        <DataRightsCard clientId={client.id} clientName={client.fullName} />
+        <DataRightsCard clientId={client.id} clientName={pii.fullName} />
       </div>
     </Container>
   );

@@ -30,6 +30,7 @@ import type {
   WebAuthnTransport,
   WorkflowGoal,
 } from '@cureocity/contracts';
+import { resolveClientPii } from '@/lib/client-pii';
 
 /**
  * Prisma row → DTO mappers. Single source of truth for what crosses
@@ -41,13 +42,19 @@ function toIsoDate(d: Date | null): string | null {
   return d === null ? null : d.toISOString().slice(0, 10);
 }
 
-export function toClient(row: ClientRow): Client {
+/**
+ * Sprint 32 / 54 — async because PII is read-cut-over: the name + contact
+ * are decrypted from the envelope-encrypted columns (falling back to the
+ * plaintext twins for rows not yet backfilled). See `lib/client-pii.ts`.
+ */
+export async function toClient(row: ClientRow): Promise<Client> {
+  const pii = await resolveClientPii(row);
   return {
     id: row.id,
     psychologistId: row.psychologistId,
-    fullName: row.fullName,
-    contactPhone: row.contactPhone,
-    contactEmail: row.contactEmail,
+    fullName: pii.fullName,
+    contactPhone: pii.contactPhone,
+    contactEmail: pii.contactEmail,
     dateOfBirth: toIsoDate(row.dateOfBirth),
     presentingConcerns: row.presentingConcerns,
     preferredModality: row.preferredModality as Client['preferredModality'],

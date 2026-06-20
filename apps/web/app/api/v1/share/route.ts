@@ -22,6 +22,7 @@ import { shareChannels } from '@/lib/share-channels';
 import { buildSnapshot, SnapshotBuildError } from '@/lib/share-snapshots';
 import { WATERMARK_TAGLINE, watermarkUrl } from '@/lib/watermark';
 import { toPatientShare } from '@/lib/clinical-mappers';
+import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -64,8 +65,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       id: true,
       psychologistId: true,
       fullName: true,
+      fullNameEncrypted: true,
       contactPhone: true,
+      contactPhoneEncrypted: true,
       contactEmail: true,
+      contactEmailEncrypted: true,
       preferredLanguage: true,
       deletedAt: true,
     },
@@ -73,6 +77,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!client || client.psychologistId !== auth.value.psychologistId || client.deletedAt !== null) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
+  // Read cutover — decrypt the name + contacts (plaintext fallback) before
+  // routing the outbound message / personalising it.
+  const pii = await resolveClientPii(client);
 
   const language: ClinicalLocale = resolveLanguage(input.language, client.preferredLanguage);
 
@@ -188,11 +195,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   for (const channel of channels) {
     const toContact =
-      channel === 'WHATSAPP'
-        ? client.contactPhone
-        : channel === 'EMAIL'
-          ? client.contactEmail
-          : null;
+      channel === 'WHATSAPP' ? pii.contactPhone : channel === 'EMAIL' ? pii.contactEmail : null;
 
     if (channel === 'WHATSAPP' && !channelConfig.whatsappReady) {
       channelResults.push({
@@ -269,7 +272,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       sendResult = await sendViaChannel({
         channel,
         toContact: toContact!,
-        clientFirstName: firstName(client.fullName),
+        clientFirstName: firstName(pii.fullName),
         therapistMessage: input.therapistMessage,
         subject,
         snapshot,

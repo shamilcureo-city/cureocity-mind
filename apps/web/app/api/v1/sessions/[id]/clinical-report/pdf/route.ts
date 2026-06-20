@@ -4,6 +4,7 @@ import { ClinicalReportV1Schema } from '@cureocity/contracts';
 import { ClinicalBriefPdf } from '@/components/pdf/ClinicalBriefPdf';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -30,11 +31,16 @@ export async function GET(
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    include: { client: { select: { fullName: true } } },
+    include: { client: { select: { fullName: true, fullNameEncrypted: true } } },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+  const clientFullName = await decryptClientField(
+    session.psychologistId,
+    session.client.fullNameEncrypted,
+    session.client.fullName,
+  );
 
   const reportRow = await prisma.clinicalReport.findUnique({ where: { sessionId } });
   if (!reportRow || reportRow.status !== 'COMPLETED' || !reportRow.body) {
@@ -57,7 +63,7 @@ export async function GET(
   const buffer = await renderToBuffer(
     ClinicalBriefPdf({
       report: parsed.data,
-      clientFullName: session.client.fullName,
+      clientFullName,
       sessionId: session.id,
       scheduledAt: session.scheduledAt.toISOString(),
       generatedAt: reportRow.updatedAt.toISOString(),
@@ -80,7 +86,7 @@ export async function GET(
   });
 
   const dateStr = session.scheduledAt.toISOString().slice(0, 10);
-  const safeName = session.client.fullName
+  const safeName = clientFullName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');

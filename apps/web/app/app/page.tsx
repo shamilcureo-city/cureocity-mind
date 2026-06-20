@@ -7,6 +7,7 @@ import { FirstRunChecklist } from '@/components/app/FirstRunChecklist';
 import { RecordingShell } from '@/components/app/RecordingShell';
 import type { ClientTileEntry } from '@/components/app/ClientPicker';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import type { Session as SessionPrismaRow } from '@prisma/client';
 
@@ -19,13 +20,13 @@ export default async function RecordPage() {
   // is the patient roster. See docs/DOCTOR_VERTICAL.md.
   if (therapist.vertical === 'DOCTOR') redirect('/app/patients');
 
-  const [sessions, rawClients] = therapist
+  const [rawSessions, rawClients] = therapist
     ? await Promise.all([
         prisma.session.findMany({
           where: { psychologistId: therapist.id },
           orderBy: { scheduledAt: 'desc' },
           take: 30,
-          include: { client: { select: { fullName: true } } },
+          include: { client: { select: { fullName: true, fullNameEncrypted: true } } },
         }),
         // Sprint 23 — Client tiles need the most recent COMPLETED
         // session's `endedAt` to render "last 2d ago" copy. Inline
@@ -36,6 +37,7 @@ export default async function RecordPage() {
           select: {
             id: true,
             fullName: true,
+            fullNameEncrypted: true,
             preferredModality: true,
             isDemo: true,
             sessions: {
@@ -49,13 +51,30 @@ export default async function RecordPage() {
       ])
     : [[], []];
 
-  const clients: ClientTileEntry[] = rawClients.map((c) => ({
-    id: c.id,
-    fullName: c.fullName,
-    preferredModality: c.preferredModality,
-    lastCompletedSessionAt: c.sessions[0]?.endedAt?.toISOString() ?? null,
-    isDemo: c.isDemo,
-  }));
+  // Read cutover — decrypt client names (plaintext fallback) before the
+  // sync session list + client-tile mappers read them.
+  const sessions = await Promise.all(
+    rawSessions.map(async (s) => ({
+      ...s,
+      client: {
+        ...s.client,
+        fullName: await decryptClientField(
+          therapist.id,
+          s.client.fullNameEncrypted,
+          s.client.fullName,
+        ),
+      },
+    })),
+  );
+  const clients: ClientTileEntry[] = await Promise.all(
+    rawClients.map(async (c) => ({
+      id: c.id,
+      fullName: await decryptClientField(therapist.id, c.fullNameEncrypted, c.fullName),
+      preferredModality: c.preferredModality,
+      lastCompletedSessionAt: c.sessions[0]?.endedAt?.toISOString() ?? null,
+      isDemo: c.isDemo,
+    })),
+  );
 
   const grouped = groupByDate(sessions as SessionWithClient[]);
 

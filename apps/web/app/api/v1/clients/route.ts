@@ -41,7 +41,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const hasMore = items.length > limit;
   const trimmed = hasMore ? items.slice(0, limit) : items;
   const body: ListClientsResponse = {
-    items: trimmed.map(toClient),
+    items: await Promise.all(trimmed.map(toClient)),
     nextCursor: hasMore ? (trimmed[trimmed.length - 1]?.id ?? null) : null,
   };
   return NextResponse.json(body);
@@ -134,5 +134,5 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     return row;
   });
-  return NextResponse.json(toClient(created), { status: 201 });
+  return NextResponse.json(await toClient(created), { status: 201 });
 }

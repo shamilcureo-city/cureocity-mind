@@ -38,7 +38,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     targetId: id,
     metadata: auditMetadataFromRequest(req),
   });
-  return NextResponse.json(toClient(row));
+  return NextResponse.json(await toClient(row));
 }
 
 /**
@@ -118,5 +118,5 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
     );
     return row;
   });
-  return NextResponse.json(toClient(updated));
+  return NextResponse.json(await toClient(updated));
 }
