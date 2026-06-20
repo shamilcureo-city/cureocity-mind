@@ -7,7 +7,14 @@ import {
   type GeminiCallLogData,
   type Pass1Output,
 } from '@cureocity/llm';
-import { PENDING_SECTION_CONFIRMATIONS, type ClinicalLocale } from '@cureocity/contracts';
+import {
+  PENDING_SECTION_CONFIRMATIONS,
+  type ClinicalLocale,
+  type ClinicalOrderV1,
+  type MedicalEncounterNoteV1,
+  type MedicationOrderV1,
+} from '@cureocity/contracts';
+import { interactionWarningsByDrug } from '@cureocity/clinical';
 import {
   recordCostCircuitTrip,
   recordCostInr,
@@ -20,11 +27,7 @@ import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { encryptForTenant } from './tenant-crypto';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
-import {
-  assembleSegments,
-  transcribeChunkInline,
-  type AssemblyInput,
-} from './transcribe-segment';
+import { assembleSegments, transcribeChunkInline, type AssemblyInput } from './transcribe-segment';
 
 /**
  * Synchronous orchestrator port — runs Pass 1 → Pass 2 inline on the
@@ -54,7 +57,7 @@ export interface OrchestratorResult {
 export async function runNoteGeneration(sessionId: string): Promise<OrchestratorResult> {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    include: { client: true },
+    include: { client: true, psychologist: { select: { vertical: true } } },
   });
   if (!session) throw new Error(`Session ${sessionId} not found`);
 
@@ -167,6 +170,9 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       sessionId,
       transcript: pass1.transcript,
       speakerSegments: pass1.speakerSegments,
+      // Sprint DV3 — DOCTOR routes Pass 2 to the medical encounter note
+      // (the MEDICAL output arm) instead of the therapy SOAP/intake note.
+      vertical: session.psychologist.vertical,
       // Sprint 19 — session.kind drives Pass 2 prompt branch (intake
       // note vs treatment SOAP). modality is nullable; orchestrator
       // passes whatever the cascade picked at session-create time.
@@ -183,6 +189,67 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         }),
       },
     });
+
+    // Sprint DV3 — doctors get a medical encounter note. Store it, audit
+    // ENCOUNTER_NOTE_DRAFTED, persist the drafted orders + vital readings,
+    // and return: no therapy risk-flag handling, no Pass 3 (the medical
+    // differential is DV6). Must branch BEFORE the therapy union arms.
+    if (pass2.output.kind === 'MEDICAL') {
+      const encounterNote = pass2.output.encounterNote;
+      await persistCallLog(pass2.callLog);
+      recordGeminiCall({
+        pass: pass2.callLog.pass,
+        status: pass2.callLog.status,
+        region: pass2.callLog.region,
+        durationMs: pass2.callLog.latencyMs,
+      });
+      recordCostInr({
+        service: 'gemini-pass-2',
+        durationLabel: bucketDuration(pass1.totalDurationMs),
+        inr: pass2.callLog.costInr,
+      });
+      const pass2CostMedical = new Prisma.Decimal(pass2.callLog.costInr);
+      await prisma.noteDraft.update({
+        where: { id: draft.id },
+        data: {
+          content: encounterNote as unknown as Prisma.InputJsonValue,
+          riskSeverity: mapRiskSeverity('none'),
+          status: 'COMPLETED',
+          totalCostInr: pass1Cost.plus(pass2CostMedical),
+        },
+      });
+      await writeAudit({
+        actorType: 'SYSTEM',
+        action: 'ENCOUNTER_NOTE_DRAFTED',
+        targetType: 'NoteDraft',
+        targetId: draft.id,
+        metadata: {
+          sessionId,
+          pass1CostInr: pass1.totalCostInr,
+          pass2CostInr: pass2.callLog.costInr,
+          totalCostInr: pass1.totalCostInr + pass2.callLog.costInr,
+        },
+      });
+      // Sprint DV5 — persist the drafted Rx + clinical orders (the
+      // interaction-check runs server-side inside the helper).
+      await persistDraftedOrders(
+        sessionId,
+        session.psychologistId,
+        pass2.output.medications,
+        pass2.output.orders,
+      );
+      // Sprint DV7 — capture the note's vitals into the chronic-reading
+      // time series so the per-patient control trajectory builds itself.
+      await persistVitalReadings(
+        sessionId,
+        session.clientId,
+        session.psychologistId,
+        session.scheduledAt,
+        encounterNote.vitals,
+      );
+      return { draftId: draft.id, status: 'COMPLETED' };
+    }
+
     // Sprint 19 — Pass 2 output is a discriminated union. Read the
     // body shape via the kind discriminator.
     const pass2Body =
@@ -499,11 +566,7 @@ async function runLegacyWholeSessionPass1(args: {
     return { kind: 'no-audio' };
   }
 
-  const pass1Estimate = computeCostInr(
-    estimateAudioInputTokens(durationMs),
-    1_000,
-    FLASH_PRICING,
-  );
+  const pass1Estimate = computeCostInr(estimateAudioInputTokens(durationMs), 1_000, FLASH_PRICING);
   await checkCostCircuit({
     sessionId: args.sessionId,
     psychologistId: args.psychologistId,
@@ -515,7 +578,9 @@ async function runLegacyWholeSessionPass1(args: {
     select: { client: { select: { spokenLanguages: true } } },
   });
   const clientSpokenHints =
-    client && Array.isArray(client.client.spokenLanguages) && client.client.spokenLanguages.length > 0
+    client &&
+    Array.isArray(client.client.spokenLanguages) &&
+    client.client.spokenLanguages.length > 0
       ? client.client.spokenLanguages
       : undefined;
 
@@ -802,5 +867,231 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     console.error(`[clinical-analysis] sessionId=${args.sessionId} failed: ${message}`);
     // Non-fatal: do NOT re-throw. Pass 3 failure must not unwind
     // Pass 1/2 success.
+  }
+}
+
+/**
+ * Sprint DV5 — persist the AI-drafted Rx + clinical orders for a doctor
+ * encounter. Replaces any existing DRAFT orders (so a note re-run is
+ * clean) while leaving already-CONFIRMED orders untouched. The drug
+ * interaction-check runs here, deterministically, and stamps each
+ * medication order's `interactionWarnings`. Audits with literal action
+ * strings (the chaos test scans for these).
+ */
+export async function persistDraftedOrders(
+  sessionId: string,
+  psychologistId: string,
+  medications: MedicationOrderV1[],
+  clinicalOrders: ClinicalOrderV1[],
+): Promise<void> {
+  if (medications.length > 0) {
+    const warningsByDrug = interactionWarningsByDrug(medications.map((m) => m.drug));
+    await prisma.medicationOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+    await prisma.medicationOrder.createMany({
+      data: medications.map((m, i) => ({
+        sessionId,
+        psychologistId,
+        content: {
+          ...m,
+          interactionWarnings: warningsByDrug[i] ?? [],
+        } as unknown as Prisma.InputJsonValue,
+      })),
+    });
+    await writeAudit({
+      actorType: 'SYSTEM',
+      action: 'MEDICATION_ORDER_DRAFTED',
+      targetType: 'Session',
+      targetId: sessionId,
+      metadata: {
+        sessionId,
+        count: medications.length,
+        interactionCount: warningsByDrug.filter((w) => w.length > 0).length,
+      },
+    });
+  }
+  if (clinicalOrders.length > 0) {
+    await prisma.clinicalOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+    await prisma.clinicalOrder.createMany({
+      data: clinicalOrders.map((o) => ({
+        sessionId,
+        psychologistId,
+        content: o as unknown as Prisma.InputJsonValue,
+      })),
+    });
+    await writeAudit({
+      actorType: 'SYSTEM',
+      action: 'CLINICAL_ORDER_DRAFTED',
+      targetType: 'Session',
+      targetId: sessionId,
+      metadata: { sessionId, count: clinicalOrders.length },
+    });
+  }
+}
+
+/**
+ * Sprint DV7 — capture the medical note's vitals into the chronic-reading
+ * time series. BP + weight only (the chronic measures with a vital
+ * source; HbA1c / FBS / LDL are logged manually or from lab results).
+ * Replaces any readings already captured for this session (so a note
+ * re-run is clean). Audits with a literal action string.
+ */
+export async function persistVitalReadings(
+  sessionId: string,
+  clientId: string,
+  psychologistId: string,
+  takenAt: Date,
+  vitals: MedicalEncounterNoteV1['vitals'],
+): Promise<void> {
+  if (!vitals) return;
+  const rows: {
+    clientId: string;
+    psychologistId: string;
+    sessionId: string;
+    measure: 'BP' | 'WEIGHT';
+    value: number;
+    valueSecondary?: number;
+    unit: string;
+    takenAt: Date;
+    source: string;
+  }[] = [];
+  if (vitals.bpSystolic && vitals.bpDiastolic) {
+    rows.push({
+      clientId,
+      psychologistId,
+      sessionId,
+      measure: 'BP',
+      value: vitals.bpSystolic,
+      valueSecondary: vitals.bpDiastolic,
+      unit: 'mmHg',
+      takenAt,
+      source: 'NOTE_VITALS',
+    });
+  }
+  if (vitals.weightKg) {
+    rows.push({
+      clientId,
+      psychologistId,
+      sessionId,
+      measure: 'WEIGHT',
+      value: vitals.weightKg,
+      unit: 'kg',
+      takenAt,
+      source: 'NOTE_VITALS',
+    });
+  }
+  if (rows.length === 0) return;
+  await prisma.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
+  await prisma.clinicalReading.createMany({ data: rows });
+  await writeAudit({
+    actorType: 'SYSTEM',
+    action: 'CLINICAL_READING_RECORDED',
+    targetType: 'Session',
+    targetId: sessionId,
+    metadata: { sessionId, clientId, source: 'NOTE_VITALS', count: rows.length },
+  });
+}
+
+// ============================================================================
+// Sprint DV6 — the differential pass (doctor vertical). The medical
+// analogue of runClinicalAnalysis: encounter note + transcript →
+// DifferentialDiagnosisV1, stored in the `differentials` table. On-demand
+// (the encounter panel triggers it once the note is ready); decision-
+// support only, never auto-applied. See docs/DOCTOR_VERTICAL.md §6, §7.
+// ============================================================================
+
+export interface DifferentialArgs {
+  sessionId: string;
+  psychologistId: string;
+  language: ClinicalLocale;
+  specialty: string | null;
+  transcript: string;
+  speakerSegments: Pass1Output['speakerSegments'];
+  encounterNote: MedicalEncounterNoteV1;
+}
+
+export async function runDifferential(args: DifferentialArgs): Promise<void> {
+  await prisma.differential.upsert({
+    where: { sessionId: args.sessionId },
+    update: { status: 'IN_PROGRESS', errorMessage: null },
+    create: {
+      sessionId: args.sessionId,
+      psychologistId: args.psychologistId,
+      status: 'IN_PROGRESS',
+    },
+  });
+
+  try {
+    const estimate = computeCostInr(
+      Math.ceil(args.transcript.length / 4) + 1_000,
+      1_500,
+      PRO_PRICING,
+    );
+    await checkCostCircuit({
+      sessionId: args.sessionId,
+      psychologistId: args.psychologistId,
+      estimatedCostInr: estimate,
+    });
+
+    const router = modelRouter();
+    const result = await router.passDifferential({
+      sessionId: args.sessionId,
+      transcript: args.transcript,
+      speakerSegments: args.speakerSegments,
+      encounterNote: args.encounterNote,
+      ...(args.specialty ? { specialty: args.specialty } : {}),
+      language: args.language,
+    });
+
+    await persistCallLog(result.callLog);
+    recordGeminiCall({
+      pass: result.callLog.pass,
+      status: result.callLog.status,
+      region: result.callLog.region,
+      durationMs: result.callLog.latencyMs,
+    });
+    recordCostInr({
+      service: 'gemini-pass-9',
+      durationLabel: 'differential',
+      inr: result.callLog.costInr,
+    });
+
+    await prisma.differential.update({
+      where: { sessionId: args.sessionId },
+      data: {
+        status: 'COMPLETED',
+        body: result.output.differential as unknown as Prisma.InputJsonValue,
+        errorMessage: null,
+      },
+    });
+
+    await writeAudit({
+      actorType: 'PSYCHOLOGIST',
+      actorPsychologistId: args.psychologistId,
+      action: 'DIFFERENTIAL_GENERATED',
+      targetType: 'Session',
+      targetId: args.sessionId,
+      metadata: {
+        sessionId: args.sessionId,
+        candidateCount: result.output.differential.candidates.length,
+        codingNudgeCount: result.output.differential.codingNudges.length,
+        costInr: result.callLog.costInr,
+      },
+    });
+  } catch (e) {
+    const message = (e as Error).message;
+    await prisma.differential
+      .update({
+        where: { sessionId: args.sessionId },
+        data: { status: 'FAILED', errorMessage: message },
+      })
+      .catch(() => {
+        /* primary failure logged below */
+      });
+    if (e instanceof CostCircuitOpenError) {
+      recordCostCircuitTrip(e.meta.scope);
+    }
+    console.error(`[differential] sessionId=${args.sessionId} failed: ${message}`);
+    // Non-fatal: don't re-throw — a differential failure must not unwind
+    // the note + orders the doctor already has.
   }
 }

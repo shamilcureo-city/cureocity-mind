@@ -11,3 +11,8 @@ export * from './prescription/engine';
 export * from './instruments';
 export * from './instruments/change-score';
 export * from './crisis';
+export * from './interactions';
+export * from './specialty-templates';
+export * from './chronic';
+export * from './voice-commands';
+export * from './fhir';

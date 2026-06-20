@@ -80,6 +80,7 @@ export async function computeSessionDefaults(
       select: {
         defaultModality: true,
         defaultOutputLanguage: true,
+        vertical: true,
       },
     }),
     prisma.treatmentPlan.findFirst({
@@ -140,11 +141,16 @@ export async function computeSessionDefaults(
     kind = 'TREATMENT';
   }
 
-  // Cascade modality.
+  // Cascade modality. Sprint DV2 — a doctor encounter has no therapy
+  // modality (no CBT/EMDR concept), so the DOCTOR branch short-circuits
+  // the cascade and leaves modality null. See docs/DOCTOR_VERTICAL.md §5.
   let modality: SessionModality | null = null;
   let modalitySource: ModalitySource = 'intake-fallback';
   const planModality = readPlanModality(activePlan?.body);
-  if (planModality) {
+  if (psychologist?.vertical === 'DOCTOR') {
+    modality = null;
+    modalitySource = 'last-resort';
+  } else if (planModality) {
     modality = planModality;
     modalitySource = 'plan';
   } else if (client.preferredModality) {

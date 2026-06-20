@@ -72,3 +72,21 @@ export async function requirePageAdmin(): Promise<Psychologist> {
   if (psy.role !== 'ADMIN') redirect('/app');
   return psy;
 }
+
+/**
+ * Sprint DV1 — vertical page guards. A doctor account and a therapist
+ * account are mutually exclusive; these bounce a signed-in user who
+ * lands on the wrong vertical's surface back to /app (their own home).
+ * Both imply onboarded. See docs/DOCTOR_VERTICAL.md.
+ */
+export async function requireOnboardedDoctor(): Promise<Psychologist> {
+  const psy = await requireOnboardedPsychologist();
+  if (psy.vertical !== 'DOCTOR') redirect('/app');
+  return psy;
+}
+
+export async function requireOnboardedTherapist(): Promise<Psychologist> {
+  const psy = await requireOnboardedPsychologist();
+  if (psy.vertical !== 'THERAPIST') redirect('/app');
+  return psy;
+}

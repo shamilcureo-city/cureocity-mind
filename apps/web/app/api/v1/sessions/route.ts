@@ -51,6 +51,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // and the paid-tier rolling-30-day cap, for testing/staging deploys.
   if (!client.isDemo && isBillingEnforced()) {
     const entitlement = await getEntitlement(auth.value.psychologistId);
+    // Sprint DV8.4 — vertical-aware copy. A doctor records "encounters",
+    // a therapist records "sessions". The cap enforcement is identical
+    // (shared session-create path); only the wording differs.
+    const practitioner = await prisma.psychologist.findUnique({
+      where: { id: auth.value.psychologistId },
+      select: { vertical: true },
+    });
+    const noun = practitioner?.vertical === 'DOCTOR' ? 'encounter' : 'session';
     if (!entitlement.isPaidActive && entitlement.trialUsed >= entitlement.trialCap) {
       await writeAudit({
         actorType: 'SYSTEM',
@@ -65,7 +73,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
       return NextResponse.json(
         {
-          error: `You have used ${entitlement.trialUsed} of ${entitlement.trialCap} trial sessions. Upgrade your plan to record another.`,
+          error: `You have used ${entitlement.trialUsed} of ${entitlement.trialCap} trial ${noun}s. Upgrade your plan to record another.`,
           code: 'TRIAL_CAP_REACHED',
           upgradeUrl: '/app/settings/plan',
           entitlement,
@@ -95,7 +103,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
       return NextResponse.json(
         {
-          error: `You've recorded ${entitlement.monthlyUsed} sessions in the last 30 days — your ${planTierLabel(entitlement.plan)} plan includes ${entitlement.monthlySessionCap} a month. Upgrade to Pro for unlimited sessions.`,
+          error: `You've recorded ${entitlement.monthlyUsed} ${noun}s in the last 30 days — your ${planTierLabel(entitlement.plan)} plan includes ${entitlement.monthlySessionCap} a month. Upgrade to Pro for unlimited ${noun}s.`,
           code: 'PLAN_CAP_REACHED',
           upgradeUrl: '/app/settings/plan',
           entitlement,

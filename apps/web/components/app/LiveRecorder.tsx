@@ -21,9 +21,19 @@ interface Props {
   modality: string | null;
   source: CaptureSource;
   onFinished: () => void;
+  /// Sprint DV3 — where to navigate after the session ends. Defaults to
+  /// the therapy session workspace; the doctor encounter passes its own.
+  reviewHref?: string;
 }
 
-export function LiveRecorder({ sessionId, clientName, modality, source, onFinished }: Props) {
+export function LiveRecorder({
+  sessionId,
+  clientName,
+  modality,
+  source,
+  onFinished,
+  reviewHref,
+}: Props) {
   const router = useRouter();
   const recorder = useSessionRecorder({ sessionId, source });
   useWakeLock(recorder.state === 'recording');
@@ -73,7 +83,7 @@ export function LiveRecorder({ sessionId, clientName, modality, source, onFinish
       }).catch(() => {
         /* swallow — the polling UI surfaces real failures */
       });
-      router.push(`/app/sessions/${sessionId}`);
+      router.push(reviewHref ?? `/app/sessions/${sessionId}`);
       onFinished();
     } catch (e) {
       setEndError((e as Error).message);

@@ -67,9 +67,7 @@ export function toNoteDraft(row: NoteDraftRow): NoteDraft {
     status: row.status,
     transcript: row.transcript,
     speakerSegments:
-      row.speakerSegments === null
-        ? null
-        : (row.speakerSegments as unknown as SpeakerSegment[]),
+      row.speakerSegments === null ? null : (row.speakerSegments as unknown as SpeakerSegment[]),
     affectFeatures:
       row.affectFeatures === null ? null : (row.affectFeatures as unknown as AffectFeature[]),
     content: row.content === null ? null : (row.content as unknown as TherapyNoteV1),
@@ -243,13 +241,7 @@ export function toNoteTemplate(row: NoteTemplateRow): NoteTemplate {
   };
 }
 
-const VALID_TRANSPORTS = new Set<WebAuthnTransport>([
-  'usb',
-  'nfc',
-  'ble',
-  'internal',
-  'hybrid',
-]);
+const VALID_TRANSPORTS = new Set<WebAuthnTransport>(['usb', 'nfc', 'ble', 'internal', 'hybrid']);
 
 export function toPsychologist(row: PsychologistRow): Psychologist {
   return {
@@ -262,6 +254,9 @@ export function toPsychologist(row: PsychologistRow): Psychologist {
     rciVerifiedAt: row.rciVerifiedAt?.toISOString() ?? null,
     status: row.status,
     role: row.role,
+    vertical: row.vertical,
+    medicalRegNumber: row.medicalRegNumber,
+    specialty: row.specialty,
     headline: row.headline,
     bio: row.bio,
     photoUrl: row.photoUrl,
