@@ -410,6 +410,35 @@ clinic.
 
 **Exit.** Pilot-ready for one super-specialty clinic.
 
+**Status (built — interoperability core; ops remainder env-gated).**
+
+- **DV8.1 FHIR export — done.** `buildFhirBundle`
+  (`packages/clinical/src/fhir.ts`, 7 tests) maps the signed encounter
+  note + confirmed Rx + clinical orders to a FHIR R4 _document_ Bundle
+  (Composition + Patient + Practitioner + MedicationRequest +
+  ServiceRequest, ABHA + NMC identifiers). `GET /sessions/:id/fhir`
+  streams it as `application/fhir+json`; `ENCOUNTER_FHIR_EXPORTED` audit.
+- **DV8.2 ABDM/ABHA push — done in code, gateway env-gated.**
+  `Client.abhaAddress` (migration `…_dv8_abdm`); the ABDM adapter
+  (`apps/web/lib/abdm.ts`, mock + gateway-stub behind an interface, like
+  the notifications adapters); `POST /sessions/:id/abdm/push` links the
+  ABHA (`ABHA_LINKED`), builds the FHIR bundle, pushes via the provider
+  (`ABDM_PRESCRIPTION_PUSHED`), and returns the PHR ref. The
+  `EncounterInteropPanel` drives both from the workspace. `ABDM_BACKEND=
+mock` completes the flow in dev; the real HIP/gateway call awaits ABDM
+  sandbox creds + HIP registration (see the pilot runbook §4).
+- **DV8.3 offline — largely inherited.** The doctor batch recorder
+  reuses `useSessionRecorder` (IndexedDB chunk buffer + `initialChunkIndex`
+  resume), so a 4G drop / refresh already recovers. The live path's
+  graceful fall-back-to-batch on socket loss is the remaining DV4 item.
+- **DV8.4 billing — pending (env-gated).** Extend the Sprint-53 Razorpay
+  per-seat to the doctor vertical (trial-cap at encounter-create +
+  doctor-plan pricing). Operational once the pilot goes paid.
+- **DV8.5 hardening — runbook done.**
+  `docs/runbooks/doctor-pilot-onboarding.md` (onboarding + clinical-loop
+  smoke + safety-rail verification + the env-gated steps). Load-test +
+  security-audit doc extensions are flagged there.
+
 ---
 
 ## 2. Risks & how the sequencing mitigates them

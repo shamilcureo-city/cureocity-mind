@@ -21,6 +21,14 @@ There's also a non-alert runbook for the disaster-recovery procedure:
 [dr-postgres-restore.md](./dr-postgres-restore.md). It's exercised as
 part of the Sprint 10 DR test (PR 3).
 
+## Doctor-vertical pilot
+
+[doctor-pilot-onboarding.md](./doctor-pilot-onboarding.md) — the
+operational checklist for onboarding the first super-specialty OPD clinic
+to the doctor vertical (DV1–DV8): account provisioning, the clinical-loop
+smoke, the safety-rail verification, and the env-gated ABDM / billing
+steps still pending procurement.
+
 ## Go-live walkthrough
 
 [go-live.md](./go-live.md) — sequenced, one-time setup that takes the

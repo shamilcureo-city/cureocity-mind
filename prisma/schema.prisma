@@ -407,6 +407,11 @@ model Client {
   presentingConcerns String?
   preferredModality  String?
 
+  /// Doctor vertical — Sprint DV8. The patient's linked ABHA address /
+  /// number (Ayushman Bharat Health Account), set when the doctor pushes
+  /// to the patient's ABDM PHR. Null until linked.
+  abhaAddress String?
+
   status ClientStatus @default(ACTIVE)
 
   createdAt DateTime  @default(now())
@@ -2391,6 +2396,10 @@ enum AuditAction {
   // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
   CLINICAL_READING_RECORDED
   PATIENT_CHRONIC_REPORT_SHARED
+  // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
+  ENCOUNTER_FHIR_EXPORTED
+  ABHA_LINKED
+  ABDM_PRESCRIPTION_PUSHED
 }
 
 enum AuditActorType {

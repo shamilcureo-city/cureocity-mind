@@ -9,6 +9,7 @@ import { LiveRecorder } from './LiveRecorder';
 import { MedicalNoteView } from './MedicalNoteView';
 import { EncounterOrdersPanel } from './EncounterOrdersPanel';
 import { EncounterDifferentialPanel } from './EncounterDifferentialPanel';
+import { EncounterInteropPanel } from './EncounterInteropPanel';
 
 /**
  * Sprint DV3 — the doctor encounter workspace body. Drives the record →
@@ -260,6 +261,7 @@ export function DoctorEncounterPanel({
       </Card>
       <EncounterDifferentialPanel sessionId={sessionId} />
       <EncounterOrdersPanel sessionId={sessionId} />
+      <EncounterInteropPanel sessionId={sessionId} />
       <div className="flex flex-wrap items-center justify-end gap-3">
         {signed ? (
           <>

@@ -183,6 +183,10 @@ export const AuditActionSchema = z.enum([
   // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
   'CLINICAL_READING_RECORDED',
   'PATIENT_CHRONIC_REPORT_SHARED',
+  // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
+  'ENCOUNTER_FHIR_EXPORTED',
+  'ABHA_LINKED',
+  'ABDM_PRESCRIPTION_PUSHED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
