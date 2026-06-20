@@ -5,19 +5,19 @@ import { usePathname } from 'next/navigation';
 import { Glyph } from '@/components/app/Sidebar';
 
 // Sprint 45 — Today is the morning landing screen on phones too. Mobile
-// is capped at 5 grid cols; "My practice" drops off the bottom bar
-// (still on the desktop sidebar) since it's a self-reflection surface
-// rather than an in-session tool.
+// is capped at 5 grid cols. Sprint 57 — Dashboard takes a slot; Settings
+// drops off the bottom bar (still on the desktop footer) since it isn't an
+// in-session tool, same rationale as "My practice" dropping off earlier.
 const ITEMS: {
   href: string;
   label: string;
-  icon: 'today' | 'record' | 'clients' | 'assistant' | 'cog';
+  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'assistant' | 'cog';
 }[] = [
+  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { href: '/app/today', label: 'Today', icon: 'today' },
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
   { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
-  { href: '/app/settings', label: 'Settings', icon: 'cog' },
 ];
 
 /**
