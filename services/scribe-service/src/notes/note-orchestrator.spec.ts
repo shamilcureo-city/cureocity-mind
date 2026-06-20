@@ -129,6 +129,9 @@ function makeRouter(opts: {
     pass8: vi.fn(async () => {
       throw new Error('pass8 not used by note orchestrator');
     }),
+    passDifferential: vi.fn(async () => {
+      throw new Error('passDifferential not used by note orchestrator');
+    }),
   };
 }
 

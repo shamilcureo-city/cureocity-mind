@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { SessionModalitySchema } from './client';
+import { MedicalEncounterNoteV1Schema } from './medical-note';
 
 // ============================================================================
 // Pass 1 outputs — diarized transcript + affect features. Shipped by
@@ -109,33 +110,26 @@ export const TherapyNoteV1Schema = z.object({
  * downstream renderers + the IntakeNoteV1.mentalStatusExam string
  * contract stay simple.
  */
-const MentalStatusExamSchema = z.preprocess(
-  (val) => {
-    if (typeof val === 'string') return val;
-    if (val && typeof val === 'object') {
-      const entries = Object.entries(val as Record<string, unknown>);
-      if (entries.length === 0) return '';
-      return entries
-        .map(([k, v]) => {
-          const label = k
-            .replace(/([A-Z])/g, ' $1')
-            .replace(/^\s+/, '')
-            .replace(/^./, (c) => c.toUpperCase());
-          const text =
-            typeof v === 'string'
-              ? v.trim()
-              : v === null || v === undefined
-                ? ''
-                : JSON.stringify(v);
-          return text ? `${label}: ${text}` : '';
-        })
-        .filter(Boolean)
-        .join('\n');
-    }
-    return val;
-  },
-  z.string().min(1),
-);
+const MentalStatusExamSchema = z.preprocess((val) => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') {
+    const entries = Object.entries(val as Record<string, unknown>);
+    if (entries.length === 0) return '';
+    return entries
+      .map(([k, v]) => {
+        const label = k
+          .replace(/([A-Z])/g, ' $1')
+          .replace(/^\s+/, '')
+          .replace(/^./, (c) => c.toUpperCase());
+        const text =
+          typeof v === 'string' ? v.trim() : v === null || v === undefined ? '' : JSON.stringify(v);
+        return text ? `${label}: ${text}` : '';
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+  return val;
+}, z.string().min(1));
 
 export const IntakeNoteV1Schema = z.object({
   version: z.literal('V1'),
@@ -198,7 +192,14 @@ export type NoteRiskSeverity = z.infer<typeof NoteRiskSeveritySchema>;
  * Putting TherapyNoteV1 first nudges the union to try the
  * overwhelmingly-common case first.
  */
-export const SignedNoteContentSchema = z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]);
+export const SignedNoteContentSchema = z.union([
+  TherapyNoteV1Schema,
+  IntakeNoteV1Schema,
+  // Sprint DV3 — doctor encounter note. Last arm: therapy + intake notes
+  // match their own arms first; a medical note (no `modality`, no
+  // `subjective`/`presentingConcerns`) falls through to here.
+  MedicalEncounterNoteV1Schema,
+]);
 export type SignedNoteContent = z.infer<typeof SignedNoteContentSchema>;
 
 export const NoteDraftSchema = z.object({
@@ -258,6 +259,10 @@ export const NoteEditFieldSchema = z.enum([
   'mentalStatusExam',
   'workingHypothesis',
   'immediatePlan',
+  // Sprint DV3 — medical encounter note signable strings (assessment +
+  // plan are shared with the SOAP set above).
+  'chiefComplaint',
+  'hpi',
 ]);
 export type NoteEditField = z.infer<typeof NoteEditFieldSchema>;
 
@@ -308,10 +313,7 @@ export type ReviseIntakeNoteInput = z.infer<typeof ReviseIntakeNoteInputSchema>;
 // and break the discriminator path), so the "at least one body field"
 // check rides on top via superRefine after the kind branch is settled.
 export const ReviseNoteInputSchema = z
-  .discriminatedUnion('kind', [
-    ReviseTreatmentNoteInputSchema,
-    ReviseIntakeNoteInputSchema,
-  ])
+  .discriminatedUnion('kind', [ReviseTreatmentNoteInputSchema, ReviseIntakeNoteInputSchema])
   .superRefine((d, ctx) => {
     if (d.kind === 'TREATMENT') {
       if (!d.subjective && !d.objective && !d.assessment && !d.plan) {

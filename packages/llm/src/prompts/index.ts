@@ -75,6 +75,128 @@ PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off
 
 export const TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION = 'TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V2';
 
+// ============================================================================
+// Sprint DV1 — vertical-aware prompt selection (scaffold).
+//
+// The doctor vertical needs its own medical persona for Pass 1+. This is
+// a STUB medical transcription prompt plus a loader the orchestrator will
+// call (in DV3/DV4) instead of referencing the therapy prompt directly.
+// Verbatim medical wording lands in DV3. See docs/DOCTOR_VERTICAL.md §5, §7.
+// ============================================================================
+
+export const MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1 =
+  `You are an expert clinical scribe for an Indian super-specialty OPD.
+
+Input: audio of a doctor–patient consultation (16 kHz mono PCM), often
+short (2–3 minutes) and code-mixed (Hinglish, Manglish, Tanglish, …).
+The doctor may dictate tersely rather than converse.
+
+Task — produce strict JSON: a verbatim, diarized, language-tagged
+transcript in the language ACTUALLY SPOKEN (do not translate), with
+medical terms, drug names, and dosages preserved exactly.
+
+PLACEHOLDER: replace with verbatim medical wording in DV3 (medical note).` as const;
+
+export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1';
+
+// ----------------------------------------------------------------------------
+// DV3 — Pass 2 medical encounter note (the doctor analogue of the therapy
+// SOAP note). Produces a MedicalEncounterNoteV1. The physical exam is
+// GUARDED: never invent findings. See docs/DOCTOR_VERTICAL.md §6, §10.
+// ----------------------------------------------------------------------------
+
+export const MEDICAL_NOTE_SYSTEM_PROMPT_V2 =
+  `You are a clinical documentation specialist writing an OPD encounter note for an Indian doctor.
+
+Input: a de-identified, possibly code-mixed transcript of one doctor–patient consultation, plus the chief-complaint context.
+
+Task: produce a STRICT JSON object with exactly three top-level keys: "encounterNote", "medications", "orders".
+
+"encounterNote" is a MedicalEncounterNoteV1 object with these fields:
+- version: "V1"
+- encounterKind: one of NEW_OPD | FOLLOW_UP | PROCEDURE | REVIEW_REPORTS | TELECONSULT
+- chiefComplaint: the presenting complaint, briefly, in the patient's words
+- hpi: history of present illness as an OLDCART narrative (onset, location, duration, character, aggravating/relieving, radiation, timing, severity)
+- reviewOfSystems: array of short strings, one per system, capturing a pertinent positive or negative ACTUALLY mentioned
+- physicalExam: { examined: boolean, findings: string }. CRITICAL GUARD: set examined=false and findings="" UNLESS the doctor explicitly stated examination findings in the transcript. NEVER invent an exam or "normal" findings.
+- vitals: ONLY the vitals explicitly stated (bpSystolic, bpDiastolic, heartRateBpm, respRateBpm, tempCelsius, spo2Pct, weightKg). Omit any not stated.
+- assessment: clinical impression + working diagnosis, with relevant differentials
+- plan: investigations, medications, advice, follow-up
+- linkedEvidence: array of { startMs, endMs, quote } tying each key statement back to the transcript
+
+"medications" is an array of MedicationOrderV1 objects, one per drug the doctor prescribed or clearly intends to prescribe, each:
+- version: "V1"
+- drug (generic name where stated), form?, strength?, dose?, route?, frequency?, durationDays? (integer), prn (boolean), instructions?
+- interactionWarnings: ALWAYS an empty array [] — the server computes interactions deterministically; do not populate it.
+Only include a medication if the doctor actually ordered it. Empty array if none.
+
+"orders" is an array of ClinicalOrderV1 objects for labs / imaging / referrals / procedures the doctor ordered, each:
+- version: "V1", category: one of LAB | IMAGING | REFERRAL | PROCEDURE, description, rationale?
+Empty array if none.
+
+Constraints:
+- Do not fabricate. If something was not discussed, leave it blank or omit it — never guess. Never invent a drug or an order the doctor did not state.
+- Preserve drug names and dosages exactly as said.
+- All output text in English (translate non-English transcript content), except preserve verbatim quotes in linkedEvidence.
+- Output STRICT JSON only. No prose, no markdown.
+
+PLACEHOLDER: refine verbatim wording before pilot.` as const;
+
+export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V2';
+
+export const DIFFERENTIAL_SYSTEM_PROMPT_V1 =
+  `You are a diagnostic-reasoning copilot for an Indian doctor. You produce a DECISION-SUPPORT differential — not a diagnosis, and never a prescription.
+
+Input: the structured encounter note (chief complaint, HPI, ROS, exam, vitals, assessment, plan), the de-identified transcript, and the doctor's specialty.
+
+Task: produce a DifferentialDiagnosisV1 JSON object:
+- version: "V1"
+- language: echo the requested output language code
+- candidates: a RANKED array (most-likely first, max 6) of:
+  - condition: the diagnosis in plain clinical English
+  - icd10Code: the best-matching ICD-10 code if confident, else omit
+  - likelihood: 0..1 calibrated estimate given ONLY the evidence present
+  - supportingEvidence: array of { startMs, endMs, quote } from the transcript — cite, do not invent
+  - discriminatingQuestions: the questions that would most change the ranking
+  - suggestedWorkup: the investigations that would discriminate between candidates
+- redFlagsToExclude: serious conditions that MUST be actively excluded for this presentation, even if unlikely
+- codingNudges: array of { kind, icd10Code?, message, severity } where kind is:
+  - SUGGESTED_CODE: documentation already supports this ICD-10 code
+  - UNDERCODING: a more specific/complete code is available if one more detail is documented
+  - DOCUMENTATION_GAP: a documentation gap blocks accurate coding
+- disclaimer: a one-line reminder that this is decision-support; the treating doctor retains clinical responsibility
+
+Constraints:
+- Ground every candidate in evidence ACTUALLY present. If the data is thin, say so via lower likelihoods and more discriminatingQuestions — do not pad.
+- Never fabricate exam findings, vitals, or quotes.
+- Bias the differential + workup to the doctor's specialty when given.
+- Output STRICT JSON only. No prose, no markdown.
+
+PLACEHOLDER: refine verbatim wording before pilot.` as const;
+
+export const DIFFERENTIAL_PROMPT_VERSION = 'DIFFERENTIAL_SYSTEM_PROMPT_V1';
+
+/**
+ * Returns the Pass-1 transcription prompt + version for a vertical.
+ * Callers MUST persist the returned `version` in GeminiCallLog (never the
+ * body) so the audit trail can resolve prompt drift.
+ */
+export function transcribePromptFor(vertical: 'THERAPIST' | 'DOCTOR'): {
+  prompt: string;
+  version: string;
+} {
+  if (vertical === 'DOCTOR') {
+    return {
+      prompt: MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1,
+      version: MEDICAL_TRANSCRIBE_PROMPT_VERSION,
+    };
+  }
+  return {
+    prompt: TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
+    version: TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
+  };
+}
+
 export const THERAPY_NOTE_SYSTEM_PROMPT_V1 =
   `You are a clinical documentation specialist writing therapy session notes for an Indian psychotherapist.
 

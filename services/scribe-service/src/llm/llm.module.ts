@@ -10,6 +10,7 @@ import {
   type IPass6Backend,
   type IPass7Backend,
   type IPass8Backend,
+  type IPassDifferentialBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
@@ -18,7 +19,9 @@ import {
   MockGeminiPass6Backend,
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
+  MockGeminiDifferentialBackend,
   ModelRouter,
+  VertexGeminiDifferentialBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -53,6 +56,7 @@ const modelRouterProvider: Provider = {
     let pass6: IPass6Backend;
     let pass7: IPass7Backend;
     let pass8: IPass8Backend;
+    let passDifferential: IPassDifferentialBackend;
 
     if (!projectId) {
       logger.warn(
@@ -66,6 +70,7 @@ const modelRouterProvider: Provider = {
       pass6 = new MockGeminiPass6Backend();
       pass7 = new MockGeminiPass7Backend();
       pass8 = new MockGeminiPass8Backend();
+      passDifferential = new MockGeminiDifferentialBackend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -134,6 +139,15 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-pro-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      passDifferential = new VertexGeminiDifferentialBackend({
+        projectId,
+        location: config.get<string>('GEMINI_PRO_REGION') ?? 'us-central1',
+        model:
+          config.get<string>('GEMINI_DIFFERENTIAL_MODEL') ??
+          config.get<string>('GEMINI_PRO_MODEL') ??
+          'gemini-1.5-pro-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
@@ -146,6 +160,7 @@ const modelRouterProvider: Provider = {
       pass6,
       pass7,
       pass8,
+      passDifferential,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

@@ -48,6 +48,14 @@ enum PsychologistRole {
   ADMIN
 }
 
+// Sprint DV1 — product vertical discriminator. One system, two faces:
+// THERAPIST (psychotherapy) vs DOCTOR (super-specialty OPD scribe). See
+// docs/DOCTOR_VERTICAL.md. Append-only; never reorder existing values.
+enum PractitionerVertical {
+  THERAPIST
+  DOCTOR
+}
+
 model Psychologist {
   id            String             @id @default(cuid())
   firebaseUid   String             @unique
@@ -58,6 +66,15 @@ model Psychologist {
   rciVerifiedAt DateTime?
   status        PsychologistStatus @default(PENDING_VERIFICATION)
   role          PsychologistRole   @default(THERAPIST)
+
+  /// Sprint DV1 — product vertical (THERAPIST | DOCTOR). Drives landing,
+  /// nav, prompt + contract selection. See docs/DOCTOR_VERTICAL.md.
+  vertical         PractitionerVertical @default(THERAPIST)
+  /// Sprint DV1 — doctor credential (NMC / state medical council reg).
+  /// NULL for therapists, who use rciNumber instead.
+  medicalRegNumber String?              @unique
+  /// Sprint DV1 — doctor specialty (e.g. "Cardiology"). NULL for therapists.
+  specialty        String?
 
   // Public directory profile fields. All optional so existing rows
   // continue to validate; the directory hides rows where bio is null.
@@ -390,6 +407,11 @@ model Client {
   presentingConcerns String?
   preferredModality  String?
 
+  /// Doctor vertical — Sprint DV8. The patient's linked ABHA address /
+  /// number (Ayushman Bharat Health Account), set when the doctor pushes
+  /// to the patient's ABDM PHR. Null until linked.
+  abhaAddress String?
+
   status ClientStatus @default(ACTIVE)
 
   createdAt DateTime  @default(now())
@@ -439,6 +461,8 @@ model Client {
   safetyPlans         SafetyPlan[]
   treatmentEpisodes   TreatmentEpisode[]
   assessmentItems     AssessmentItem[]
+  // Doctor vertical — Sprint DV7. Chronic-disease reading series.
+  clinicalReadings    ClinicalReading[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -765,6 +789,13 @@ model Session {
   patientShares       PatientShare[]
   instrumentResponses InstrumentResponse[]
   safetyPlans         SafetyPlan[]
+  // Doctor vertical — Sprint DV5. Drafted/confirmed Rx + clinical orders.
+  medicationOrders    MedicationOrder[]
+  clinicalOrders      ClinicalOrder[]
+  // Doctor vertical — Sprint DV6. Differential diagnosis (reasoning copilot).
+  differential        Differential?
+  // Doctor vertical — Sprint DV7. Chronic-disease readings captured here.
+  clinicalReadings    ClinicalReading[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -795,8 +826,8 @@ model AudioChunk {
 
   uploadedAt DateTime @default(now())
 
-  session  Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  segment  TranscriptSegment?
+  session Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  segment TranscriptSegment?
 
   @@unique([sessionId, chunkIndex])
   @@index([sessionId, uploadedAt])
@@ -952,13 +983,13 @@ model BillingPayment {
   razorpayOrderId   String  @unique
   razorpayPaymentId String?
 
-  plan       BillingPlan
-  amountInr  Int
-  status     BillingPaymentStatus @default(CREATED)
+  plan        BillingPlan
+  amountInr   Int
+  status      BillingPaymentStatus @default(CREATED)
   periodStart DateTime?
   periodEnd   DateTime?
   /// Verbatim webhook event payload for audit / debugging.
-  rawEvent Json?
+  rawEvent    Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1010,6 +1041,7 @@ enum GeminiPass {
   PASS_6_CASE_BRIEFING // Sprint 22 — per-client case briefing synthesis
   PASS_7_CONCEPTUAL_MAP // Sprint 24 — Klarify-style per-client thematic graph
   PASS_8_CASE_CONSULT // Sprint 52 — second-opinion artefact for stuck cases
+  PASS_9_DIFFERENTIAL // Sprint DV6 — doctor differential diagnosis
 }
 
 enum GeminiCallStatus {
@@ -1156,6 +1188,9 @@ enum NoteEditField {
   mentalStatusExam
   workingHypothesis
   immediatePlan
+  // Sprint DV3 — medical encounter note signable string fields.
+  chiefComplaint
+  hpi
 }
 
 model NoteEdit {
@@ -1172,6 +1207,135 @@ model NoteEdit {
 
   @@index([therapyNoteId, createdAt])
   @@map("note_edits")
+}
+
+// ============================================================================
+// Doctor vertical — Sprint DV5. MedicationOrder + ClinicalOrder.
+//
+// The AI drafts these from the encounter (status DRAFT); the doctor
+// confirms each one (CONFIRMED) or discards it (DISCARDED) — nothing is
+// ever auto-prescribed. Keyed by sessionId, tenant-filtered by
+// psychologistId. `content` holds the validated MedicationOrderV1 /
+// ClinicalOrderV1 JSON. Distinct from the therapy-exercise prescription
+// engine — this is the drug Rx. See docs/DOCTOR_VERTICAL.md §6.
+// ============================================================================
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  DISCARDED
+}
+
+model MedicationOrder {
+  id             String      @id @default(cuid())
+  sessionId      String
+  psychologistId String
+  status         OrderStatus @default(DRAFT)
+
+  /// Validated MedicationOrderV1 (drug, dose, frequency, duration,
+  /// interactionWarnings[] computed server-side at draft time).
+  content Json
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  confirmedAt DateTime?
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status])
+  @@index([psychologistId])
+  @@map("medication_orders")
+}
+
+model ClinicalOrder {
+  id             String      @id @default(cuid())
+  sessionId      String
+  psychologistId String
+  status         OrderStatus @default(DRAFT)
+
+  /// Validated ClinicalOrderV1 (category, description, rationale).
+  content Json
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  confirmedAt DateTime?
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, status])
+  @@index([psychologistId])
+  @@map("clinical_orders")
+}
+
+// ============================================================================
+// Doctor vertical — Sprint DV6. Differential — the reasoning copilot's
+// output for one encounter (the medical analogue of ClinicalReport). One
+// row per session; `body` holds the validated DifferentialDiagnosisV1.
+// Decision-support only — never auto-applied to the note. See
+// docs/DOCTOR_VERTICAL.md §6, §7.
+// ============================================================================
+
+model Differential {
+  id             String          @id @default(cuid())
+  sessionId      String          @unique
+  psychologistId String
+  status         NoteDraftStatus @default(PENDING)
+
+  /// Validated DifferentialDiagnosisV1 (candidates + coding nudges).
+  body         Json?
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId])
+  @@map("differentials")
+}
+
+// ============================================================================
+// Doctor vertical — Sprint DV7. ClinicalReading — a single chronic-disease
+// measurement (BP / HbA1c / FBS / LDL / weight) in a per-patient time
+// series. Auto-captured from the medical note's vitals on note completion
+// (source NOTE_VITALS) or logged manually (source MANUAL). The control /
+// trend verdicts are computed deterministically by @cureocity/clinical.
+// See docs/DOCTOR_VERTICAL.md §9.
+// ============================================================================
+
+enum ChronicMeasure {
+  BP
+  HBA1C
+  FBS
+  LDL
+  WEIGHT
+}
+
+model ClinicalReading {
+  id             String         @id @default(cuid())
+  clientId       String
+  psychologistId String
+  sessionId      String?
+  measure        ChronicMeasure
+
+  /// Primary value (systolic for BP).
+  value          Float
+  /// Secondary value — diastolic for BP; null otherwise.
+  valueSecondary Float?
+  unit           String
+  takenAt        DateTime
+  /// 'NOTE_VITALS' (auto from the note) | 'MANUAL' (doctor-entered).
+  source         String   @default("MANUAL")
+
+  createdAt DateTime @default(now())
+
+  client  Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([clientId, measure, takenAt])
+  @@index([psychologistId])
+  @@index([sessionId])
+  @@map("clinical_readings")
 }
 
 // ============================================================================
@@ -1518,6 +1682,8 @@ enum PatientShareArtefactType {
   PROGRESS_REPORT
   INSTRUMENT_CHECKIN // Sprint 47 — interactive self-serve check-in
   SIGNED_INTAKE_NOTE // Sprint 49 — intake-note counterpart to SIGNED_NOTE
+  AFTER_VISIT_SUMMARY // Sprint DV3 — doctor after-visit summary
+  CHRONIC_PROGRESS_REPORT // Sprint DV7 — doctor chronic-disease progress report
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.
@@ -2274,6 +2440,25 @@ enum AuditAction {
   // Referral — Sprint 56 (Lever 3b).
   REFERRAL_REDEEMED
   REFERRAL_REWARDED
+  // Doctor vertical — Sprint DV3. Medical encounter-note lifecycle.
+  ENCOUNTER_NOTE_DRAFTED
+  ENCOUNTER_NOTE_SIGNED
+  // Doctor vertical — Sprint DV5. Rx + clinical-order lifecycle.
+  MEDICATION_ORDER_DRAFTED
+  MEDICATION_ORDER_CONFIRMED
+  MEDICATION_ORDER_DISCARDED
+  CLINICAL_ORDER_DRAFTED
+  CLINICAL_ORDER_CONFIRMED
+  CLINICAL_ORDER_DISCARDED
+  // Doctor vertical — Sprint DV6. Differential-diagnosis pass.
+  DIFFERENTIAL_GENERATED
+  // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
+  CLINICAL_READING_RECORDED
+  PATIENT_CHRONIC_REPORT_SHARED
+  // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
+  ENCOUNTER_FHIR_EXPORTED
+  ABHA_LINKED
+  ABDM_PRESCRIPTION_PUSHED
 }
 
 enum AuditActorType {

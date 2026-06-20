@@ -22,6 +22,8 @@ const prisma = new PrismaClient();
 
 const DEMO_PSYCHOLOGIST_UID = 'dev-firebase-uid-priya';
 const DEMO_CLIENT_UID = 'dev-client-firebase-uid-arjun';
+// Sprint DV1 — seeded DOCTOR fixture for the doctor vertical.
+const DEMO_DOCTOR_UID = 'dev-firebase-uid-doctor-meera';
 
 interface TherapistSeed {
   firebaseUid: string;
@@ -48,10 +50,8 @@ const THERAPISTS: TherapistSeed[] = [
     fullName: 'Dr. Priya Menon',
     phone: '+919876543210',
     rciNumber: 'A12345',
-    headline:
-      'Adult anxiety, perfectionism, and the kind of overthinking that wakes you at 3am.',
-    bio:
-      'I work with adults who look like they have it together on the outside, and feel anything but on the inside. My approach is grounded in cognitive behavioural therapy with strong threads of compassion-focused and ACT work woven in. I am direct, warm, and I will gently push when I see you avoiding the thing that matters. First sessions are usually about figuring out what you want to be different in six months.',
+    headline: 'Adult anxiety, perfectionism, and the kind of overthinking that wakes you at 3am.',
+    bio: 'I work with adults who look like they have it together on the outside, and feel anything but on the inside. My approach is grounded in cognitive behavioural therapy with strong threads of compassion-focused and ACT work woven in. I am direct, warm, and I will gently push when I see you avoiding the thing that matters. First sessions are usually about figuring out what you want to be different in six months.',
     specialties: ['Anxiety', 'Perfectionism', 'Burnout', 'Workplace stress'],
     languages: ['English', 'Malayalam', 'Hindi'],
     modalities: ['CBT', 'ACT', 'Compassion-focused'],
@@ -67,10 +67,8 @@ const THERAPISTS: TherapistSeed[] = [
     fullName: 'Dr. Rohan Sharma',
     phone: '+919811112233',
     rciNumber: 'A23456',
-    headline:
-      'EMDR and trauma-focused work for people who feel stuck in old patterns.',
-    bio:
-      'Most of my clients come to me after years of trying everything else. Together we slow down, notice what your nervous system has been carrying, and build the kind of safety that makes processing possible. I trained in EMDR in 2018 and have integrated parts work since. Sessions are paced for your window of tolerance, never to a clock.',
+    headline: 'EMDR and trauma-focused work for people who feel stuck in old patterns.',
+    bio: 'Most of my clients come to me after years of trying everything else. Together we slow down, notice what your nervous system has been carrying, and build the kind of safety that makes processing possible. I trained in EMDR in 2018 and have integrated parts work since. Sessions are paced for your window of tolerance, never to a clock.',
     specialties: ['Trauma', 'PTSD', 'Grief', 'Identity work'],
     languages: ['English', 'Hindi', 'Punjabi'],
     modalities: ['EMDR', 'IFS', 'Somatic'],
@@ -86,10 +84,8 @@ const THERAPISTS: TherapistSeed[] = [
     fullName: 'Aisha Khan',
     phone: '+919844455667',
     rciNumber: 'A34567',
-    headline:
-      'Couples therapy, queer-affirming, and the conversations partners keep avoiding.',
-    bio:
-      'I work with couples and individuals navigating relationships, identity, and the friction between who they are and what their family expects. I run a queer- and trans-affirming practice. Most weeks I see one or two new couples; the rest of my time is split between long-term work and short-form premarital sessions. Sliding scale available for those who need it.',
+    headline: 'Couples therapy, queer-affirming, and the conversations partners keep avoiding.',
+    bio: 'I work with couples and individuals navigating relationships, identity, and the friction between who they are and what their family expects. I run a queer- and trans-affirming practice. Most weeks I see one or two new couples; the rest of my time is split between long-term work and short-form premarital sessions. Sliding scale available for those who need it.',
     specialties: ['Couples', 'LGBTQ+ affirming', 'Family of origin', 'Premarital'],
     languages: ['English', 'Urdu', 'Hindi'],
     modalities: ['Gottman Method', 'EFT', 'Narrative'],
@@ -105,10 +101,8 @@ const THERAPISTS: TherapistSeed[] = [
     fullName: 'Samuel Joseph',
     phone: '+919633344455',
     rciNumber: 'A45678',
-    headline:
-      'Adolescents and young adults. Mood, motivation, and the messy middle of growing up.',
-    bio:
-      'Half my clients are between sixteen and twenty-five. We talk about what is actually going on at school, at home, online — and what you would want different. I keep the room private from parents while staying in honest touch with them. I am playful when that is useful, and steady when it is not.',
+    headline: 'Adolescents and young adults. Mood, motivation, and the messy middle of growing up.',
+    bio: 'Half my clients are between sixteen and twenty-five. We talk about what is actually going on at school, at home, online — and what you would want different. I keep the room private from parents while staying in honest touch with them. I am playful when that is useful, and steady when it is not.',
     specialties: ['Adolescents', 'Depression', 'Self-harm', 'School avoidance'],
     languages: ['English', 'Tamil', 'Malayalam'],
     modalities: ['CBT', 'DBT-informed', 'Solution-focused'],
@@ -124,10 +118,8 @@ const THERAPISTS: TherapistSeed[] = [
     fullName: 'Lakshmi Iyer',
     phone: '+919766654321',
     rciNumber: 'A56789',
-    headline:
-      'Long-term psychodynamic work. For clients who want to know themselves more deeply.',
-    bio:
-      'I am a psychodynamic therapist. My clients are usually adults in their thirties and forties who have done some therapy before and are ready to go further. We meet weekly, sometimes twice. The work is slower than CBT. It is also, in my experience, more durable. I am currently full but happy to recommend trusted colleagues.',
+    headline: 'Long-term psychodynamic work. For clients who want to know themselves more deeply.',
+    bio: 'I am a psychodynamic therapist. My clients are usually adults in their thirties and forties who have done some therapy before and are ready to go further. We meet weekly, sometimes twice. The work is slower than CBT. It is also, in my experience, more durable. I am currently full but happy to recommend trusted colleagues.',
     specialties: ['Psychodynamic', 'Existential', 'Midlife', 'Creative blocks'],
     languages: ['English', 'Hindi'],
     modalities: ['Psychodynamic', 'Existential'],
@@ -167,8 +159,7 @@ const SAMPLE_BOOKINGS: {
     patientEmail: 'meera.rao@example.in',
     patientPhone: '+919812345673',
     preferredAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000 + 18 * 60 * 60 * 1000),
-    message:
-      '',
+    message: '',
   },
 ];
 
@@ -269,6 +260,36 @@ async function main(): Promise<void> {
     therapistIdsByEmail.set(t.email, row.id);
     console.log(`  Therapist: ${row.fullName} (${row.id})`);
   }
+
+  // Sprint DV1 — a seeded DOCTOR fixture. Pre-onboarded (so AUTH_BYPASS
+  // can resolve it) but carries vertical=DOCTOR + a medical registration
+  // number instead of an RCI number. See docs/DOCTOR_VERTICAL.md.
+  const doctor = await prisma.psychologist.upsert({
+    where: { firebaseUid: DEMO_DOCTOR_UID },
+    update: {
+      vertical: 'DOCTOR',
+      medicalRegNumber: 'KMC-99001',
+      specialty: 'Cardiology',
+      status: 'ACTIVE',
+      onboardingCompletedAt: new Date('2024-01-15T00:00:00Z'),
+    },
+    create: {
+      firebaseUid: DEMO_DOCTOR_UID,
+      email: 'meera.nair@cureocity.mind',
+      fullName: 'Dr. Meera Nair',
+      phone: '+919876500011',
+      // rciNumber is NOT NULL + unique; doctors keep a placeholder (their
+      // real credential lives in medicalRegNumber).
+      rciNumber: `PENDING-${DEMO_DOCTOR_UID}`,
+      vertical: 'DOCTOR',
+      medicalRegNumber: 'KMC-99001',
+      specialty: 'Cardiology',
+      languages: ['English', 'Malayalam'],
+      status: 'ACTIVE',
+      onboardingCompletedAt: new Date('2024-01-15T00:00:00Z'),
+    },
+  });
+  console.log(`  Doctor: ${doctor.fullName} (${doctor.id})`);
 
   const priyaId = therapistIdsByEmail.get('priya.menon@cureocity.mind')!;
 

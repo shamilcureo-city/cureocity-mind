@@ -332,6 +332,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Sprint DV7 — chronic-disease report gets its own lifecycle audit,
+    // distinct from the generic per-channel ARTEFACT_SHARED counter.
+    if (input.artefact.artefactType === 'CHRONIC_PROGRESS_REPORT') {
+      await writeAudit({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: auth.value.psychologistId,
+        action: 'PATIENT_CHRONIC_REPORT_SHARED',
+        targetType: 'PatientShare',
+        targetId: updated.id,
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          clientId: client.id,
+          channel,
+          outcome: sendResult.outcome,
+        },
+      });
+    }
+
     channelResults.push({
       channel,
       shareId: updated.id,
@@ -475,6 +493,14 @@ function extractArtefactId(input: ShareInput): string {
     case 'SIGNED_INTAKE_NOTE':
       // Sprint 49 — sessionId is the discriminator, same as SIGNED_NOTE.
       return input.artefact.sessionId;
+    case 'AFTER_VISIT_SUMMARY':
+      // Sprint DV3 — built from the signed encounter note; sessionId is
+      // the discriminator, same posture as SIGNED_NOTE.
+      return input.artefact.sessionId;
+    case 'CHRONIC_PROGRESS_REPORT':
+      // Sprint DV7 — derived from the per-patient reading series, not a
+      // stored row; the clientId IS the artefact discriminator.
+      return input.artefact.clientId;
   }
 }
 

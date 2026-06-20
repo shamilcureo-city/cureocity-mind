@@ -127,14 +127,21 @@ export class NoteOrchestrator {
             presentingConcerns: session.client.presentingConcerns,
           }),
           ...(session.client.preferredModality !== null && {
-            preferredModality: session.client
-              .preferredModality as Parameters<typeof this.router.pass2>[0]['clientContext']['preferredModality'],
+            preferredModality: session.client.preferredModality as Parameters<
+              typeof this.router.pass2
+            >[0]['clientContext']['preferredModality'],
           }),
         },
       });
       const pass2Cost = new Prisma.Decimal(pass2.callLog.costInr);
 
       // 6. Persist Pass 2 + complete. Sprint 19: branch on discriminator.
+      // The scribe-service scaffold only serves the therapist verticals;
+      // DOCTOR (MEDICAL) encounters run through the live-gateway + apps/web
+      // path, so MEDICAL is unreachable here — guard defensively.
+      if (pass2.output.kind === 'MEDICAL') {
+        throw new Error('MEDICAL encounter notes are not handled by the scribe-service scaffold');
+      }
       const pass2Body =
         pass2.output.kind === 'INTAKE' ? pass2.output.intakeNote : pass2.output.therapyNote;
       const pass2RiskFlags = pass2Body.riskFlags;

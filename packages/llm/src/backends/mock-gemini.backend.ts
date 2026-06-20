@@ -10,6 +10,7 @@ import {
   type IPass6Backend,
   type IPass7Backend,
   type IPass8Backend,
+  type IPassDifferentialBackend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -26,6 +27,8 @@ import {
   type Pass7Output,
   type Pass8Input,
   type Pass8Output,
+  type PassDifferentialInput,
+  type PassDifferentialOutput,
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
@@ -38,8 +41,10 @@ import {
   PRE_SESSION_BRIEF_PROMPT_VERSION,
   TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
   THERAPY_NOTE_PROMPT_VERSION,
+  MEDICAL_NOTE_PROMPT_VERSION,
   THERAPY_SCRIPT_PROMPT_VERSION,
   CASE_CONSULT_PROMPT_VERSION,
+  DIFFERENTIAL_PROMPT_VERSION,
 } from '../prompts';
 
 /**
@@ -141,6 +146,99 @@ export class MockGeminiPass1Backend implements IPass1Backend {
 export class MockGeminiPass2Backend implements IPass2Backend {
   async run(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
+    const firstSeg = input.speakerSegments[0];
+
+    // Sprint DV3 — doctors get a medical encounter note (the MEDICAL arm),
+    // not a therapy SOAP/intake note. Tagged [mock] like the others.
+    if (input.vertical === 'DOCTOR') {
+      return {
+        output: {
+          kind: 'MEDICAL',
+          encounterNote: {
+            version: 'V1',
+            encounterKind: 'NEW_OPD',
+            chiefComplaint: '[mock] Exertional chest pressure ×2 days',
+            hpi: '[mock] Retrosternal pressure on exertion ×2 days, relieved by rest, no radiation reported; no associated sweating elicited. No prior cardiac history.',
+            reviewOfSystems: [
+              '[mock] Cardiovascular: exertional chest pressure',
+              '[mock] Respiratory: no breathlessness at rest',
+            ],
+            physicalExam: { examined: false, findings: '' },
+            vitals: { bpSystolic: 148, bpDiastolic: 92, heartRateBpm: 88 },
+            assessment:
+              '[mock] Exertional chest pain — rule out stable angina / ACS. Newly noted hypertension.',
+            plan: '[mock] ECG today; aspirin if no contraindication; lipid profile + fasting glucose; review in 3 days with reports.',
+            linkedEvidence: firstSeg
+              ? [
+                  {
+                    startMs: firstSeg.startMs,
+                    endMs: firstSeg.endMs,
+                    quote: firstSeg.text.slice(0, 160),
+                  },
+                ]
+              : [],
+          },
+          // Sprint DV5 — the finalizer drafts the Rx + clinical orders.
+          // Clinically coherent for the chest-pain mock; the deterministic
+          // interaction-check runs over these in the orchestrator.
+          medications: [
+            {
+              version: 'V1',
+              drug: '[mock] Aspirin',
+              form: 'tablet',
+              strength: '75 mg',
+              dose: '1 tablet',
+              route: 'oral',
+              frequency: 'once daily',
+              durationDays: 30,
+              prn: false,
+              instructions: 'After food.',
+              interactionWarnings: [],
+            },
+            {
+              version: 'V1',
+              drug: '[mock] Atorvastatin',
+              form: 'tablet',
+              strength: '40 mg',
+              dose: '1 tablet',
+              route: 'oral',
+              frequency: 'at night',
+              durationDays: 30,
+              prn: false,
+              instructions: '',
+              interactionWarnings: [],
+            },
+          ],
+          orders: [
+            {
+              version: 'V1',
+              category: 'PROCEDURE',
+              description: '[mock] 12-lead ECG today',
+              rationale: 'Exertional chest pain — screen for ischaemia.',
+            },
+            {
+              version: 'V1',
+              category: 'LAB',
+              description: '[mock] Fasting lipid profile + fasting glucose',
+              rationale: 'Cardiovascular risk stratification.',
+            },
+          ],
+        },
+        callLog: {
+          sessionId: input.sessionId,
+          pass: 'PASS_2_NOTE_GENERATION',
+          model: 'mock-pro',
+          region: 'mock-global',
+          promptVersion: MEDICAL_NOTE_PROMPT_VERSION,
+          inputTokens: input.transcript.length / 4,
+          outputTokens: 400,
+          costInr: 0,
+          latencyMs: Date.now() - start,
+          status: 'SUCCESS',
+        },
+      };
+    }
+
     // Sprint 19 — kind branches the output shape.
     const output: Pass2Output =
       input.kind === 'INTAKE'
@@ -706,11 +804,34 @@ export class MockGeminiPass7Backend implements IPass7Backend {
         },
       ],
       edges: [
-        { from: 'n2', to: 'n1', relationship: 'Approval-seeking sustains the conflicted-role pattern.' },
-        { from: 'n4', to: 'n1', relationship: 'The perfection belief amplifies the felt cost of conflicting roles.' },
-        { from: 'n3', to: 'n2', relationship: 'Holding honesty as a value creates tension with the approval-seeking pattern.' },
-        { from: 'n6', to: 'n1', relationship: 'Withdrawing is the release valve when the role-pressure becomes unbearable.' },
-        { from: 'n5', to: 'n4', relationship: 'Quiet capability is the very strength that perfection-belief reframes as never enough.' },
+        {
+          from: 'n2',
+          to: 'n1',
+          relationship: 'Approval-seeking sustains the conflicted-role pattern.',
+        },
+        {
+          from: 'n4',
+          to: 'n1',
+          relationship: 'The perfection belief amplifies the felt cost of conflicting roles.',
+        },
+        {
+          from: 'n3',
+          to: 'n2',
+          relationship:
+            'Holding honesty as a value creates tension with the approval-seeking pattern.',
+        },
+        {
+          from: 'n6',
+          to: 'n1',
+          relationship:
+            'Withdrawing is the release valve when the role-pressure becomes unbearable.',
+        },
+        {
+          from: 'n5',
+          to: 'n4',
+          relationship:
+            'Quiet capability is the very strength that perfection-belief reframes as never enough.',
+        },
       ],
       generatedAt: new Date().toISOString(),
       basedOnSessionIds: input.basedOnSessionIds,
@@ -769,7 +890,8 @@ export class MockGeminiPass8Backend implements IPass8Backend {
       evidenceBasedOptions: [
         {
           option: '[mock] Add a thought-record practice between sessions.',
-          rationale: '[mock] BA needs cognitive-restructuring scaffolding once activation is steady.',
+          rationale:
+            '[mock] BA needs cognitive-restructuring scaffolding once activation is steady.',
           indiaContextNote: null,
         },
       ],
@@ -791,6 +913,99 @@ export class MockGeminiPass8Backend implements IPass8Backend {
         region: 'mock-global',
         promptVersion: CASE_CONSULT_PROMPT_VERSION,
         inputTokens: Math.ceil(input.contextText.length / 4),
+        outputTokens: 500,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Sprint DV6 — mock differential. Deterministic DifferentialDiagnosisV1
+ * tagged `[mock]`, coherent with the chest-pain medical mock (so the
+ * doctor live + batch demo works without Vertex). Cites the first
+ * speaker segment as supporting evidence.
+ */
+export class MockGeminiDifferentialBackend implements IPassDifferentialBackend {
+  async run(
+    input: PassDifferentialInput,
+  ): Promise<{ output: PassDifferentialOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const seg = input.speakerSegments[0];
+    const evidence = seg
+      ? [{ startMs: seg.startMs, endMs: seg.endMs, quote: seg.text.slice(0, 160) }]
+      : [];
+    const output: PassDifferentialOutput = {
+      differential: {
+        version: 'V1',
+        language: input.language,
+        candidates: [
+          {
+            condition: '[mock] Stable angina (effort-related)',
+            icd10Code: 'I20.8',
+            likelihood: 0.5,
+            supportingEvidence: evidence,
+            discriminatingQuestions: [
+              'Is the pain reliably brought on by exertion and relieved by rest within minutes?',
+              'Any radiation to the arm/jaw, or associated sweating?',
+            ],
+            suggestedWorkup: [
+              'Resting ECG',
+              'Troponin if ongoing',
+              'Lipid profile',
+              'Treadmill test',
+            ],
+          },
+          {
+            condition: '[mock] Acute coronary syndrome',
+            icd10Code: 'I24.9',
+            likelihood: 0.25,
+            supportingEvidence: evidence,
+            discriminatingQuestions: ['Is the pain present at rest or worsening in frequency?'],
+            suggestedWorkup: ['12-lead ECG now', 'Serial troponins'],
+          },
+          {
+            condition: '[mock] Gastro-oesophageal reflux',
+            icd10Code: 'K21.9',
+            likelihood: 0.15,
+            supportingEvidence: [],
+            discriminatingQuestions: ['Relation to meals or lying flat? Burning quality?'],
+            suggestedWorkup: ['Trial of PPI', 'Review diet history'],
+          },
+        ],
+        redFlagsToExclude: [
+          '[mock] Acute coronary syndrome — exclude with ECG + troponin before discharge.',
+          '[mock] Aortic dissection if tearing/radiating-to-back pain.',
+        ],
+        codingNudges: [
+          {
+            kind: 'DOCUMENTATION_GAP',
+            message:
+              '[mock] No physical exam documented — record cardiovascular exam to support an I20/I24 code.',
+            severity: 'warn',
+          },
+          {
+            kind: 'SUGGESTED_CODE',
+            icd10Code: 'I10',
+            message: '[mock] BP 148/92 documented — consider coding essential hypertension (I10).',
+            severity: 'info',
+          },
+        ],
+        disclaimer:
+          '[mock] Decision-support only — not a diagnosis. The treating doctor retains clinical responsibility.',
+      },
+    };
+    return {
+      output,
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_9_DIFFERENTIAL',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: DIFFERENTIAL_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.transcript.length / 4),
         outputTokens: 500,
         costInr: 0,
         latencyMs: Date.now() - start,

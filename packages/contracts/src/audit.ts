@@ -170,6 +170,26 @@ export const AuditActionSchema = z.enum([
   // Referral — Sprint 56 (Lever 3b).
   'REFERRAL_REDEEMED',
   'REFERRAL_REWARDED',
+  // Doctor vertical — Sprint DV3. Medical encounter-note lifecycle (the
+  // doctor analogue of NOTE_DRAFT_CREATED / NOTE_SIGNED).
+  'ENCOUNTER_NOTE_DRAFTED',
+  'ENCOUNTER_NOTE_SIGNED',
+  // Doctor vertical — Sprint DV5. Rx + clinical-order lifecycle.
+  'MEDICATION_ORDER_DRAFTED',
+  'MEDICATION_ORDER_CONFIRMED',
+  'MEDICATION_ORDER_DISCARDED',
+  'CLINICAL_ORDER_DRAFTED',
+  'CLINICAL_ORDER_CONFIRMED',
+  'CLINICAL_ORDER_DISCARDED',
+  // Doctor vertical — Sprint DV6. Differential-diagnosis pass.
+  'DIFFERENTIAL_GENERATED',
+  // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
+  'CLINICAL_READING_RECORDED',
+  'PATIENT_CHRONIC_REPORT_SHARED',
+  // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
+  'ENCOUNTER_FHIR_EXPORTED',
+  'ABHA_LINKED',
+  'ABDM_PRESCRIPTION_PUSHED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
