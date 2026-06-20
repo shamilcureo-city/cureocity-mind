@@ -21,9 +21,7 @@ function formatFee(inr: number | null): string {
 }
 
 export function TherapistCard({ therapist }: { therapist: TherapistSummary }) {
-  const location = [therapist.locationCity, therapist.locationProvince]
-    .filter(Boolean)
-    .join(', ');
+  const location = [therapist.locationCity, therapist.locationProvince].filter(Boolean).join(', ');
 
   return (
     <article className="group relative flex h-full flex-col rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6 transition-colors hover:border-[var(--color-ink-3)]">

@@ -45,8 +45,6 @@ describe('SpeakerSegmentSchema (Sprint 16 — language tag)', () => {
   });
 
   it('rejects a malformed language tag', () => {
-    expect(
-      SpeakerSegmentSchema.safeParse({ ...base, language: 'Malayalam' }).success,
-    ).toBe(false);
+    expect(SpeakerSegmentSchema.safeParse({ ...base, language: 'Malayalam' }).success).toBe(false);
   });
 });

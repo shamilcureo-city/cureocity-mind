@@ -30,8 +30,7 @@ export function DirectoryFilters({ facets }: { facets: Facets }) {
     startTransition(() => router.push('/therapists'));
   }
 
-  const active =
-    Array.from(params.entries()).filter(([k]) => k !== 'page' && params.get(k)).length;
+  const active = Array.from(params.entries()).filter(([k]) => k !== 'page' && params.get(k)).length;
 
   return (
     <div className="rounded-2xl border border-[var(--color-line)] bg-white p-5">
@@ -76,10 +75,7 @@ export function DirectoryFilters({ facets }: { facets: Facets }) {
           </Select>
         </Group>
         <Group label="City">
-          <Select
-            value={params.get('city') ?? ''}
-            onChange={(e) => apply('city', e.target.value)}
-          >
+          <Select value={params.get('city') ?? ''} onChange={(e) => apply('city', e.target.value)}>
             <option value="">Anywhere</option>
             {facets.cities.map((s) => (
               <option key={s} value={s}>

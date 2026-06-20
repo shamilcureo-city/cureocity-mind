@@ -1,12 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { CreateCheckoutInputSchema, type CreateCheckoutResponse } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
-import {
-  ensureBillingAccount,
-  planAmountInr,
-  publicRazorpayKeyId,
-  razorpay,
-} from '@/lib/billing';
+import { ensureBillingAccount, planAmountInr, publicRazorpayKeyId, razorpay } from '@/lib/billing';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 

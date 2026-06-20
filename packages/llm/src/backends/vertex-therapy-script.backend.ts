@@ -6,10 +6,7 @@ import {
   Pass4OutputSchema,
   type Pass4Output,
 } from '../types';
-import {
-  THERAPY_SCRIPT_PROMPT_VERSION,
-  THERAPY_SCRIPT_SYSTEM_PROMPT_V1,
-} from '../prompts';
+import { THERAPY_SCRIPT_PROMPT_VERSION, THERAPY_SCRIPT_SYSTEM_PROMPT_V1 } from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
 
 export interface VertexGeminiProTherapyScriptOptions {
@@ -65,8 +62,14 @@ export class VertexGeminiProTherapyScriptBackend implements IPass4Backend {
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+            {
+              category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+              threshold: HarmBlockThreshold.OFF,
+            },
+            {
+              category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+              threshold: HarmBlockThreshold.OFF,
+            },
           ],
         },
       });
@@ -139,9 +142,7 @@ function buildUserMessage(input: Pass4Input): string {
         `  Modality: ${input.treatmentPlan.modality}`,
         `  Phase sequence: ${input.treatmentPlan.phaseSequence.join(' → ')}`,
         `  Goals:`,
-        ...input.treatmentPlan.goals.map(
-          (g) => `    - ${g.description} (measure: ${g.measure})`,
-        ),
+        ...input.treatmentPlan.goals.map((g) => `    - ${g.description} (measure: ${g.measure})`),
         `  Expected duration: ${input.treatmentPlan.expectedDurationSessions ?? 'n/a'} sessions`,
       ].join('\n')
     : '  (no plan)';

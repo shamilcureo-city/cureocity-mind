@@ -1,9 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import type {
-  BillingAccount,
-  BillingMeResponse,
-  BillingPayment,
-} from '@cureocity/contracts';
+import type { BillingAccount, BillingMeResponse, BillingPayment } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { ensureBillingAccount, getEntitlement } from '@/lib/billing';
 import { prisma } from '@/lib/prisma';

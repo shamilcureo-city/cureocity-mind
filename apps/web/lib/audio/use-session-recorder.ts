@@ -168,9 +168,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
         });
       };
 
-      worklet.port.onmessage = async (
-        e: MessageEvent<{ type: string; samples: Float32Array }>,
-      ) => {
+      worklet.port.onmessage = async (e: MessageEvent<{ type: string; samples: Float32Array }>) => {
         if (e.data.type !== 'frames' || !chunkerRef.current || !decimatorRef.current) return;
         const decimated = decimatorRef.current.process(e.data.samples);
         const completed = chunkerRef.current.push(decimated);

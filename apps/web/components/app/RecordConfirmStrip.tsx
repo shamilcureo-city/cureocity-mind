@@ -172,9 +172,7 @@ export function RecordConfirmStrip({
         // Pre-tick cross-border if the client has previously granted it
         // at signup — matches the on-file treatment we already give to
         // audio recording + AI note generation.
-        setCrossBorder(
-          payload.defaults.consentsAlreadyGranted.includes('CROSS_BORDER_PROCESSING'),
-        );
+        setCrossBorder(payload.defaults.consentsAlreadyGranted.includes('CROSS_BORDER_PROCESSING'));
         setExtendedRetention(false);
         const missing: Record<string, boolean> = {};
         for (const scope of payload.defaults.consentsNeeded) {
@@ -280,10 +278,7 @@ export function RecordConfirmStrip({
   }
 
   const ready =
-    !!defaults &&
-    !loading &&
-    !loadError &&
-    Object.values(missingRequired).every(Boolean);
+    !!defaults && !loading && !loadError && Object.values(missingRequired).every(Boolean);
 
   // Build the kind-aware chip line ("Treatment session · CBT · English").
   // INTAKE intentionally omits the modality chip.
@@ -306,17 +301,15 @@ export function RecordConfirmStrip({
       </button>
 
       <h2 className="font-serif text-2xl">{clientName}</h2>
-      {loading && (
-        <p className="mt-2 text-sm text-[var(--color-ink-3)]">Loading their context…</p>
-      )}
+      {loading && <p className="mt-2 text-sm text-[var(--color-ink-3)]">Loading their context…</p>}
       {loadError && <FieldError message={loadError} />}
 
       {defaults && !loading && !loadError && (
         <>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {chipParts.join(' · ')}
+          <p className="mt-1 text-sm text-[var(--color-ink-2)]">{chipParts.join(' · ')}</p>
+          <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+            {KIND_SUBLINE[defaults.kind](defaults)}
           </p>
-          <p className="mt-1 text-xs text-[var(--color-ink-3)]">{KIND_SUBLINE[defaults.kind](defaults)}</p>
 
           {mode === 'live-capture' && (
             <div className="mt-6">
@@ -364,7 +357,10 @@ export function RecordConfirmStrip({
 
           <p className="mt-5 text-xs text-[var(--color-ink-3)]">
             Audio recording and AI note are{' '}
-            {defaults.consentsAlreadyGranted.length > 0 ? 'on file from signup' : 'pending — see above'}.
+            {defaults.consentsAlreadyGranted.length > 0
+              ? 'on file from signup'
+              : 'pending — see above'}
+            .
           </p>
 
           <div className="mt-2 space-y-2">
@@ -526,4 +522,3 @@ function formatRelative(iso: string): string {
   const months = Math.round(days / 30);
   return months === 1 ? '1 month ago' : `${months} months ago`;
 }
-

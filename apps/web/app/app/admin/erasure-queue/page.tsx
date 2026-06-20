@@ -26,8 +26,8 @@ export default async function ErasureQueuePage() {
         </p>
         <h1 className="mt-2 font-serif text-3xl">Erasure queue</h1>
         <p className="mt-2 max-w-xl text-sm text-[var(--color-ink-2)]">
-          DPDP § 15 erasure requests awaiting review. Review each, then approve, reject, or
-          fulfil directly. The 30-day statutory clock starts at request createdAt.
+          DPDP § 15 erasure requests awaiting review. Review each, then approve, reject, or fulfil
+          directly. The 30-day statutory clock starts at request createdAt.
         </p>
       </header>
       <ErasureQueueClient />

@@ -62,28 +62,26 @@ export function AffectCard({ clientId, scribeBase = '/api/v1' }: Props) {
 
       {baseline.status === 'INSUFFICIENT_DATA' ? (
         <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-          {baseline.sessionsUsed} / {baseline.minSessions} sessions with affect features.
-          Baseline activates after {baseline.minSessions} sessions.
+          {baseline.sessionsUsed} / {baseline.minSessions} sessions with affect features. Baseline
+          activates after {baseline.minSessions} sessions.
         </p>
       ) : (
         <>
           <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-            Computed across {baseline.sessionsUsed} of the last {baseline.windowSessions}{' '}
-            completed sessions.
+            Computed across {baseline.sessionsUsed} of the last {baseline.windowSessions} completed
+            sessions.
           </p>
           <dl className="mt-3 grid grid-cols-2 gap-3 text-xs text-[var(--color-ink-2)]">
             <div>
               <dt className="text-[var(--color-ink-3)]">Valence (−1…+1)</dt>
               <dd className="font-mono">
-                mean {baseline.valence?.mean.toFixed(2)} · σ{' '}
-                {baseline.valence?.stddev.toFixed(2)}
+                mean {baseline.valence?.mean.toFixed(2)} · σ {baseline.valence?.stddev.toFixed(2)}
               </dd>
             </div>
             <div>
               <dt className="text-[var(--color-ink-3)]">Arousal (0…1)</dt>
               <dd className="font-mono">
-                mean {baseline.arousal?.mean.toFixed(2)} · σ{' '}
-                {baseline.arousal?.stddev.toFixed(2)}
+                mean {baseline.arousal?.mean.toFixed(2)} · σ {baseline.arousal?.stddev.toFixed(2)}
               </dd>
             </div>
           </dl>

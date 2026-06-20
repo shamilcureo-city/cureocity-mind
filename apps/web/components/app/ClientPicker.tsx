@@ -40,13 +40,7 @@ const MAX_RECENT_TILES = 6;
  *   4. Secondary actions: dictation + upload (different intent — not
  *      "record live with a client")
  */
-export function ClientPicker({
-  clients,
-  onPickClient,
-  onNewClient,
-  onDictation,
-  onUpload,
-}: Props) {
+export function ClientPicker({ clients, onPickClient, onNewClient, onDictation, onUpload }: Props) {
   const [query, setQuery] = useState('');
 
   const sorted = useMemo(() => {
@@ -62,8 +56,7 @@ export function ClientPicker({
     const cutoff = Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
     return sorted
       .filter(
-        (c) =>
-          c.lastCompletedSessionAt && new Date(c.lastCompletedSessionAt).getTime() >= cutoff,
+        (c) => c.lastCompletedSessionAt && new Date(c.lastCompletedSessionAt).getTime() >= cutoff,
       )
       .slice(0, MAX_RECENT_TILES);
   }, [sorted]);
@@ -101,9 +94,7 @@ export function ClientPicker({
 
         {showRecent && recent.length > 0 && (
           <div>
-            <p className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Recent
-            </p>
+            <p className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Recent</p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {recent.map((c) => (
                 <ClientTile key={c.id} entry={c} onPick={onPickClient} />
@@ -198,10 +189,7 @@ function ClientTile({
       className="group flex flex-col items-start rounded-2xl border border-[var(--color-line)] bg-white px-4 py-4 text-left transition-colors hover:border-[var(--color-ink)] hover:shadow-[0_18px_44px_-28px_rgba(15,27,42,0.18)]"
     >
       <span className="flex flex-wrap items-center gap-2">
-        <span
-          aria-hidden
-          className="h-2 w-2 rounded-full bg-[var(--color-accent)]"
-        />
+        <span aria-hidden className="h-2 w-2 rounded-full bg-[var(--color-accent)]" />
         <span className="font-medium text-[var(--color-ink)]">{entry.fullName}</span>
         {entry.isDemo && (
           <span className="rounded-full bg-[var(--color-warn-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--color-warn)]">
@@ -220,7 +208,8 @@ function buildSubline(entry: ClientTileEntry): string {
   // so the tile only shows what's free from the Record-page query.
   const parts: string[] = [];
   if (entry.preferredModality) parts.push(entry.preferredModality);
-  if (entry.lastCompletedSessionAt) parts.push(`last ${formatRelative(entry.lastCompletedSessionAt)}`);
+  if (entry.lastCompletedSessionAt)
+    parts.push(`last ${formatRelative(entry.lastCompletedSessionAt)}`);
   else parts.push('no sessions yet');
   return parts.join(' · ');
 }

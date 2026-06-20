@@ -1,8 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import {
-  CreateWorkflowInputSchema,
-  type ModalityStateWithHistory,
-} from '@cureocity/contracts';
+import { CreateWorkflowInputSchema, type ModalityStateWithHistory } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toModalityStateWithHistory } from '@/lib/mappers';

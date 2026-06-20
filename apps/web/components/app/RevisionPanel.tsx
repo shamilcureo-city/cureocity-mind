@@ -143,8 +143,8 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
           </button>
         </div>
         <p className="text-xs text-[var(--color-ink-3)]">
-          The original text is preserved per field as a NoteEdit row. Add a brief reason
-          so the audit log records why the revision was made.
+          The original text is preserved per field as a NoteEdit row. Add a brief reason so the
+          audit log records why the revision was made.
         </p>
         <div>
           <Label htmlFor="rev-s">Subjective</Label>
@@ -175,12 +175,7 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
         </div>
         <div>
           <Label htmlFor="rev-p">Plan</Label>
-          <Textarea
-            id="rev-p"
-            rows={4}
-            value={plan}
-            onChange={(e) => setPlan(e.target.value)}
-          />
+          <Textarea id="rev-p" rows={4} value={plan} onChange={(e) => setPlan(e.target.value)} />
         </div>
         <div>
           <Label htmlFor="rev-reason" hint="5–2000 chars · stored in audit metadata">
@@ -208,9 +203,7 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
   return (
     <div className="mt-6 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Revisions
-        </h3>
+        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Revisions</h3>
         <div className="flex items-center gap-3 text-xs">
           <button
             type="button"
@@ -239,10 +232,7 @@ export function RevisionPanel({ sessionId, note, onRevised }: Props) {
           ) : (
             <ol className="space-y-3">
               {history.map((h) => (
-                <li
-                  key={h.id}
-                  className="border-l-2 border-[var(--color-line)] pl-3 text-xs"
-                >
+                <li key={h.id} className="border-l-2 border-[var(--color-line)] pl-3 text-xs">
                   <p className="text-[var(--color-ink-3)]">
                     {new Date(h.createdAt).toLocaleString('en-GB')} · {h.field}
                   </p>

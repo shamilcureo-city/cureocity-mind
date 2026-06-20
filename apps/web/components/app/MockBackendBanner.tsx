@@ -22,8 +22,8 @@ export function MockBackendBanner({ llmBackend }: Props) {
         ⚠ Mock LLM backend active (LLM_BACKEND={llmBackend || '<unset>'})
       </p>
       <p className="mt-1 text-xs text-amber-800">
-        Real transcription is not running. Notes are deterministic placeholders. To
-        enable Vertex Gemini, set these env vars on the Vercel project and redeploy:
+        Real transcription is not running. Notes are deterministic placeholders. To enable Vertex
+        Gemini, set these env vars on the Vercel project and redeploy:
       </p>
       <ul className="mt-2 list-inside list-disc text-xs font-mono text-amber-900">
         <li>LLM_BACKEND=vertex</li>

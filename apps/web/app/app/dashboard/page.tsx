@@ -74,7 +74,10 @@ function headline(data: DashboardData): string {
     data.attention.totals.deteriorating +
     data.attention.totals.unsignedNotes +
     data.attention.totals.measuresDue;
-  const left = needs === 0 ? 'Nothing needs you right now' : `${needs} thing${needs === 1 ? '' : 's'} need${needs === 1 ? 's' : ''} you`;
+  const left =
+    needs === 0
+      ? 'Nothing needs you right now'
+      : `${needs} thing${needs === 1 ? '' : 's'} need${needs === 1 ? 's' : ''} you`;
   return `${left} · ${data.metrics.activeClients} active client${data.metrics.activeClients === 1 ? '' : 's'}`;
 }
 
@@ -154,7 +157,11 @@ function AttentionSection({ attention }: { attention: AttentionData }) {
                 key={n.sessionId}
                 href={`/app/sessions/${n.sessionId}`}
                 name={n.clientName}
-                meta={n.sessionEndedAt ? `Session ${formatDayShort(new Date(n.sessionEndedAt))}` : 'Draft ready'}
+                meta={
+                  n.sessionEndedAt
+                    ? `Session ${formatDayShort(new Date(n.sessionEndedAt))}`
+                    : 'Draft ready'
+                }
               />
             ))}
             <More total={totals.unsignedNotes} shown={unsignedNotes.length} />
@@ -231,7 +238,9 @@ function AttentionRow({
       >
         <div className="min-w-0">
           <p className="privacy-blur truncate font-medium text-[var(--color-ink)]">{name}</p>
-          <p className={`truncate text-xs ${tone === 'warn' ? 'text-[var(--color-warn)]' : 'text-[var(--color-ink-3)]'}`}>
+          <p
+            className={`truncate text-xs ${tone === 'warn' ? 'text-[var(--color-warn)]' : 'text-[var(--color-ink-3)]'}`}
+          >
             {meta}
           </p>
         </div>
@@ -245,9 +254,7 @@ function AttentionRow({
 
 function More({ total, shown }: { total: number; shown: number }) {
   if (total <= shown) return null;
-  return (
-    <li className="px-5 py-2 text-xs text-[var(--color-ink-3)]">+{total - shown} more</li>
-  );
+  return <li className="px-5 py-2 text-xs text-[var(--color-ink-3)]">+{total - shown} more</li>;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +266,11 @@ function MetricStrip({ metrics }: { metrics: DashboardMetrics }) {
     <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5" aria-label="At a glance">
       <StatTile label="Active clients" value={metrics.activeClients} />
       <StatTile label="Sessions · 7d" value={metrics.sessionsThisWeek} />
-      <StatTile label="Unsigned notes" value={metrics.unsignedNotes} warn={metrics.unsignedNotes > 0} />
+      <StatTile
+        label="Unsigned notes"
+        value={metrics.unsignedNotes}
+        warn={metrics.unsignedNotes > 0}
+      />
       <StatTile label="Open crises" value={metrics.openCrises} warn={metrics.openCrises > 0} />
       <StatTile label="Measures due" value={metrics.measuresDue} warn={metrics.measuresDue > 0} />
     </section>
@@ -350,7 +361,10 @@ function CaseloadPulseSection({ pulse }: { pulse: CaseloadPulse }) {
             </div>
             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
               {STAGE_ORDER.filter((s) => pulse.stageCounts[s] > 0).map((stage) => (
-                <span key={stage} className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink-2)]">
+                <span
+                  key={stage}
+                  className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ink-2)]"
+                >
                   <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${STAGE_BAR[stage]}`} />
                   {STAGE_LABEL[stage]} · {pulse.stageCounts[stage]}
                 </span>
@@ -534,7 +548,14 @@ function EmptyState({ psychologistId }: { psychologistId: string }) {
 
 function CheckGlyph() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
       <path d="M5 12l5 5 9-9" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );

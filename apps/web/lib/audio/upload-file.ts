@@ -40,14 +40,17 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
   await requestPersistentStorage();
 
   const arrayBuffer = await opts.file.arrayBuffer();
-  const decodeCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+  const decodeCtx = new (
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+  )();
   const decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0));
   await decodeCtx.close();
 
   // Render to 48 kHz mono via OfflineAudioContext so the polyphase
   // decimator (3:1, 48->16) sees the input it was tuned for.
   const targetMidRate = 48_000;
-  const totalSamplesAtMid = Math.ceil((decoded.duration * targetMidRate));
+  const totalSamplesAtMid = Math.ceil(decoded.duration * targetMidRate);
   const offline = new OfflineAudioContext({
     numberOfChannels: 1,
     length: totalSamplesAtMid,

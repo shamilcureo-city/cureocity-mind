@@ -82,7 +82,7 @@ export function SecuritySettingsCard() {
             displayName: begin.user.displayName,
           },
           pubKeyCredParams: [
-            { type: 'public-key', alg: -7 },   // ES256
+            { type: 'public-key', alg: -7 }, // ES256
             { type: 'public-key', alg: -257 }, // RS256
           ],
           authenticatorSelection: {
@@ -117,9 +117,7 @@ export function SecuritySettingsCard() {
             credentialId: uint8ArrayToBase64Url(new Uint8Array(cred.rawId)),
             publicKey: uint8ArrayToBase64Url(new Uint8Array(publicKey)),
             clientDataJSON: uint8ArrayToBase64Url(new Uint8Array(response.clientDataJSON)),
-            attestationObject: uint8ArrayToBase64Url(
-              new Uint8Array(response.attestationObject),
-            ),
+            attestationObject: uint8ArrayToBase64Url(new Uint8Array(response.attestationObject)),
             transports,
           }),
         },
@@ -159,9 +157,8 @@ export function SecuritySettingsCard() {
       <header className="mb-4">
         <h2 className="font-serif text-2xl">Security</h2>
         <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-          Register a platform authenticator (Touch ID, Windows Hello, security key) for
-          passwordless replay-resistant note signing. Once a credential is on file, signing
-          requires it.
+          Register a platform authenticator (Touch ID, Windows Hello, security key) for passwordless
+          replay-resistant note signing. Once a credential is on file, signing requires it.
         </p>
       </header>
 
@@ -182,8 +179,8 @@ export function SecuritySettingsCard() {
           </Button>
         </div>
         <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-          You will be prompted to confirm with your device's biometric or PIN. Cureocity does
-          not see your biometric data — only the public key.
+          You will be prompted to confirm with your device's biometric or PIN. Cureocity does not
+          see your biometric data — only the public key.
         </p>
       </section>
 
@@ -196,9 +193,7 @@ export function SecuritySettingsCard() {
       <h3 className="mt-6 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
         Registered credentials
       </h3>
-      {loading && !items && (
-        <p className="mt-2 text-sm text-[var(--color-ink-3)]">Loading…</p>
-      )}
+      {loading && !items && <p className="mt-2 text-sm text-[var(--color-ink-3)]">Loading…</p>}
       {items && items.length === 0 && (
         <p className="mt-2 text-sm text-[var(--color-ink-3)]">
           No credentials registered. Notes can still be signed (legacy mode) until you register one.
@@ -207,7 +202,10 @@ export function SecuritySettingsCard() {
       {items && items.length > 0 && (
         <ul className="mt-2 divide-y divide-[var(--color-line-soft)] border-y border-[var(--color-line-soft)]">
           {items.map((c) => (
-            <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-3 px-1 py-3 text-sm">
+            <li
+              key={c.id}
+              className="flex flex-wrap items-baseline justify-between gap-3 px-1 py-3 text-sm"
+            >
               <div>
                 <strong>{c.label ?? '(unlabelled)'}</strong>
                 <span className="ml-2 text-xs text-[var(--color-ink-3)]">
@@ -222,10 +220,7 @@ export function SecuritySettingsCard() {
                   <Badge tone="muted">revoked</Badge>
                 )}
                 {c.revokedAt === null && (
-                  <Button
-                    variant="secondary"
-                    onClick={() => void revoke(c.id)}
-                  >
+                  <Button variant="secondary" onClick={() => void revoke(c.id)}>
                     Revoke
                   </Button>
                 )}

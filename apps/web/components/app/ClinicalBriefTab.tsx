@@ -626,7 +626,8 @@ function PlanEditor({
   const problems: string[] = [];
   if (cleanPhases.length < 2) problems.push('Add at least 2 phases.');
   if (cleanPhases.length > 10) problems.push('No more than 10 phases.');
-  if (phases.some((p) => p.length > 120)) problems.push('Each phase must be 120 characters or fewer.');
+  if (phases.some((p) => p.length > 120))
+    problems.push('Each phase must be 120 characters or fewer.');
   if (cleanGoals.length < 1)
     problems.push('Add at least 1 goal with both a description and a measure.');
   if (cleanGoals.length > 8) problems.push('No more than 8 goals.');

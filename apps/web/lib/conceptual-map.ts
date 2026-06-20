@@ -70,7 +70,9 @@ export async function buildConceptualMapContext(
     const transcript = s.noteDraft?.transcript ?? null;
     if (!transcript || typeof transcript !== 'string') continue;
     sessionIds.push(s.id);
-    lines.push(`=== Session ${s.id} (${s.kind}, ended ${s.endedAt?.toISOString() ?? 'unknown'}) ===`);
+    lines.push(
+      `=== Session ${s.id} (${s.kind}, ended ${s.endedAt?.toISOString() ?? 'unknown'}) ===`,
+    );
     lines.push(truncate(transcript, 6000));
     const note = s.therapyNote?.content;
     if (note && typeof note === 'object') {

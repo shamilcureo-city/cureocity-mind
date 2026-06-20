@@ -128,22 +128,17 @@ describe('ClinicalReportV1Schema', () => {
 
 describe('ConfirmClinicalSectionInputSchema', () => {
   it('accepts action=accept with no reason or edits', () => {
-    expect(
-      ConfirmClinicalSectionInputSchema.safeParse({ action: 'accept' }).success,
-    ).toBe(true);
+    expect(ConfirmClinicalSectionInputSchema.safeParse({ action: 'accept' }).success).toBe(true);
   });
 
   it('rejects action=modify without edits', () => {
     expect(
-      ConfirmClinicalSectionInputSchema.safeParse({ action: 'modify', reason: 'tweak' })
-        .success,
+      ConfirmClinicalSectionInputSchema.safeParse({ action: 'modify', reason: 'tweak' }).success,
     ).toBe(false);
   });
 
   it('rejects action=reject without reason', () => {
-    expect(
-      ConfirmClinicalSectionInputSchema.safeParse({ action: 'reject' }).success,
-    ).toBe(false);
+    expect(ConfirmClinicalSectionInputSchema.safeParse({ action: 'reject' }).success).toBe(false);
   });
 
   it('accepts action=modify with reason + edits', () => {
@@ -184,7 +179,8 @@ describe('TherapyScriptV1Schema', () => {
         {
           id: 'orient',
           purpose: 'Set up the technique.',
-          therapistSays: "Today I'm going to walk you through a tool called cognitive restructuring.",
+          therapistSays:
+            "Today I'm going to walk you through a tool called cognitive restructuring.",
           listenFor: 'Engagement vs. hesitation.',
           branches: [
             {
@@ -237,12 +233,12 @@ describe('TherapyScriptV1Schema', () => {
   });
 
   it('rejects estimatedDurationMin outside [5, 120]', () => {
-    expect(
-      TherapyScriptV1Schema.safeParse({ ...valid, estimatedDurationMin: 3 }).success,
-    ).toBe(false);
-    expect(
-      TherapyScriptV1Schema.safeParse({ ...valid, estimatedDurationMin: 200 }).success,
-    ).toBe(false);
+    expect(TherapyScriptV1Schema.safeParse({ ...valid, estimatedDurationMin: 3 }).success).toBe(
+      false,
+    );
+    expect(TherapyScriptV1Schema.safeParse({ ...valid, estimatedDurationMin: 200 }).success).toBe(
+      false,
+    );
   });
 
   it('accepts a Malayalam-language script', () => {

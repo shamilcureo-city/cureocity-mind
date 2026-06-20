@@ -91,7 +91,12 @@ export function toExerciseAssignment(row: {
   id: string;
   clientId: string;
   psychologistId: string;
-  exerciseId: string;
+  // Sprint 51 — nullable; therapy-script rows leave this null and use
+  // customDescription + a CATALOG/THERAPY_SCRIPT source provenance.
+  exerciseId: string | null;
+  source: ExerciseAssignment['source'];
+  customDescription: string | null;
+  sourceTherapyScriptId: string | null;
   assignedAt: Date;
   dueAt: Date | null;
   status: ExerciseAssignment['status'];
@@ -106,6 +111,9 @@ export function toExerciseAssignment(row: {
     clientId: row.clientId,
     psychologistId: row.psychologistId,
     exerciseId: row.exerciseId,
+    source: row.source,
+    customDescription: row.customDescription,
+    sourceTherapyScriptId: row.sourceTherapyScriptId,
     assignedAt: row.assignedAt.toISOString(),
     dueAt: row.dueAt?.toISOString() ?? null,
     status: row.status,

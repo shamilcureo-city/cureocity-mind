@@ -1,8 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import {
-  CreateTransitionInputSchema,
-  type ModalityStateWithHistory,
-} from '@cureocity/contracts';
+import { CreateTransitionInputSchema, type ModalityStateWithHistory } from '@cureocity/contracts';
 import {
   checkCbtTransition,
   checkEmdrTransition,
@@ -42,10 +39,7 @@ export async function POST(
     return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
   }
   if (state.completedAt) {
-    return NextResponse.json(
-      { error: 'Cannot transition a completed workflow' },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: 'Cannot transition a completed workflow' }, { status: 409 });
   }
 
   // Modality-specific transition check from the clinical state machine.
@@ -58,7 +52,10 @@ export async function POST(
     }
     const check = checkCbtTransition(state.currentPhase, body.value.toPhase);
     if (!check.allowed) {
-      return NextResponse.json({ error: check.reason ?? 'Transition not allowed' }, { status: 422 });
+      return NextResponse.json(
+        { error: check.reason ?? 'Transition not allowed' },
+        { status: 422 },
+      );
     }
   } else {
     if (!isEmdrPhase(state.currentPhase) || !isEmdrPhase(body.value.toPhase)) {
@@ -76,7 +73,10 @@ export async function POST(
       hasTargets: Boolean(emdrState['hasTargets']),
     });
     if (!check.allowed) {
-      return NextResponse.json({ error: check.reason ?? 'Transition not allowed' }, { status: 422 });
+      return NextResponse.json(
+        { error: check.reason ?? 'Transition not allowed' },
+        { status: 422 },
+      );
     }
   }
 
@@ -89,7 +89,9 @@ export async function POST(
         trigger: 'PSYCHOLOGIST_MANUAL',
         reason: body.value.reason,
         psychologistId: auth.value.psychologistId,
-        evidence: (body.value.evidence ?? {}) as Parameters<typeof tx.modalityTransition.create>[0]['data']['evidence'],
+        evidence: (body.value.evidence ?? {}) as Parameters<
+          typeof tx.modalityTransition.create
+        >[0]['data']['evidence'],
       },
     });
     await tx.modalityState.update({

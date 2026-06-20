@@ -23,15 +23,13 @@ describe('BeginRegistrationInputSchema', () => {
   });
 
   it('accepts a body with a label', () => {
-    expect(
-      BeginRegistrationInputSchema.safeParse({ label: 'MacBook Touch ID' }).success,
-    ).toBe(true);
+    expect(BeginRegistrationInputSchema.safeParse({ label: 'MacBook Touch ID' }).success).toBe(
+      true,
+    );
   });
 
   it('rejects a label exceeding 80 chars', () => {
-    expect(BeginRegistrationInputSchema.safeParse({ label: 'x'.repeat(81) }).success).toBe(
-      false,
-    );
+    expect(BeginRegistrationInputSchema.safeParse({ label: 'x'.repeat(81) }).success).toBe(false);
   });
 });
 

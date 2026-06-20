@@ -42,10 +42,7 @@ export function Sidebar() {
         </ul>
       </nav>
       <div className="mt-auto px-6 py-6">
-        <Link
-          href="/"
-          className="text-xs text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
-        >
+        <Link href="/" className="text-xs text-[var(--color-ink-3)] hover:text-[var(--color-ink)]">
           ← Back to home
         </Link>
       </div>

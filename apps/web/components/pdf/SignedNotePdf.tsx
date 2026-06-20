@@ -166,9 +166,7 @@ export function SignedNotePdf(props: SignedNotePdfProps) {
         </View>
 
         <View style={[styles.riskBox, riskStyle(note.riskFlags.severity)]}>
-          <Text style={styles.riskHeading}>
-            Risk · {note.riskFlags.severity.toUpperCase()}
-          </Text>
+          <Text style={styles.riskHeading}>Risk · {note.riskFlags.severity.toUpperCase()}</Text>
           {note.riskFlags.indicators.length > 0 ? (
             note.riskFlags.indicators.map((ind, i) => (
               <View key={i} style={styles.bullet}>
@@ -203,8 +201,7 @@ export function SignedNotePdf(props: SignedNotePdfProps) {
           {props.signedBy && props.signedAt ? (
             <>
               <Text>
-                Signed by {props.signedBy} on{' '}
-                {new Date(props.signedAt).toLocaleString('en-GB')}
+                Signed by {props.signedBy} on {new Date(props.signedAt).toLocaleString('en-GB')}
               </Text>
               <Text style={{ marginTop: 2 }}>
                 Cureocity Mind · therapeutic documentation system

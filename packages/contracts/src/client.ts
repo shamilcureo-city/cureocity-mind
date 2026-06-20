@@ -58,7 +58,13 @@ export const CreateClientInputSchema = z.object({
    * Manglish speaker).
    */
   spokenLanguages: z
-    .array(z.string().min(2).max(8).regex(/^[a-z]{2}(-[A-Z]{2})?$/))
+    .array(
+      z
+        .string()
+        .min(2)
+        .max(8)
+        .regex(/^[a-z]{2}(-[A-Z]{2})?$/),
+    )
     .max(5)
     .optional(),
   consents: z
@@ -84,7 +90,13 @@ export const UpdateClientInputSchema = z
       .max(8)
       .regex(/^[a-z]{2}(-[A-Z]{2})?$/),
     spokenLanguages: z
-      .array(z.string().min(2).max(8).regex(/^[a-z]{2}(-[A-Z]{2})?$/))
+      .array(
+        z
+          .string()
+          .min(2)
+          .max(8)
+          .regex(/^[a-z]{2}(-[A-Z]{2})?$/),
+      )
       .max(5),
     status: ClientStatusSchema,
   })

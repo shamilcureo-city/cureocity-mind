@@ -62,22 +62,19 @@ function ClinicBlock({ clinic, onChanged }: { clinic: Clinic; onChanged: () => v
   const isOwner = clinic.myRole === 'OWNER';
   const [error, setError] = useState<string | null>(null);
 
-  const call = useCallback(
-    async (url: string, init: RequestInit, ok: () => void) => {
-      setError(null);
-      try {
-        const res = await fetch(url, init);
-        if (!res.ok) {
-          const d = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(d.error ?? `HTTP ${res.status}`);
-        }
-        ok();
-      } catch (e) {
-        setError((e as Error).message);
+  const call = useCallback(async (url: string, init: RequestInit, ok: () => void) => {
+    setError(null);
+    try {
+      const res = await fetch(url, init);
+      if (!res.ok) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(d.error ?? `HTTP ${res.status}`);
       }
-    },
-    [],
-  );
+      ok();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, []);
 
   return (
     <Card className="p-6">
@@ -143,7 +140,12 @@ function ClinicBlock({ clinic, onChanged }: { clinic: Clinic; onChanged: () => v
       </div>
 
       {isAdmin && (
-        <AddMemberRow clinicId={clinic.id} canGrantAdmin={isOwner} onChanged={onChanged} setError={setError} />
+        <AddMemberRow
+          clinicId={clinic.id}
+          canGrantAdmin={isOwner}
+          onChanged={onChanged}
+          setError={setError}
+        />
       )}
       {isAdmin && <MetricsSection clinicId={clinic.id} />}
       {isAdmin && clinic.members.length > 1 && (
@@ -152,8 +154,9 @@ function ClinicBlock({ clinic, onChanged }: { clinic: Clinic; onChanged: () => v
 
       {clinic.kind === 'SOLO' && (
         <p className="mt-5 text-xs text-[var(--color-ink-3)]">
-          Add a therapist&rsquo;s email below to turn this into a group clinic. Each therapist&rsquo;s
-          clients stay private to them — membership is for shared admin, not shared records.
+          Add a therapist&rsquo;s email below to turn this into a group clinic. Each
+          therapist&rsquo;s clients stay private to them — membership is for shared admin, not
+          shared records.
         </p>
       )}
       <FieldError message={error} />
@@ -176,7 +179,12 @@ function RenameRow({
     <div className="mt-5 flex max-w-md items-end gap-2">
       <div className="flex-1">
         <Label htmlFor={`name-${clinic.id}`}>Clinic name</Label>
-        <Input id={`name-${clinic.id}`} value={name} maxLength={160} onChange={(e) => setName(e.target.value)} />
+        <Input
+          id={`name-${clinic.id}`}
+          value={name}
+          maxLength={160}
+          onChange={(e) => setName(e.target.value)}
+        />
       </div>
       <Button
         disabled={busy || name.trim().length === 0 || name.trim() === clinic.name}
@@ -189,7 +197,10 @@ function RenameRow({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ name: name.trim() }),
             });
-            if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Failed');
+            if (!res.ok)
+              throw new Error(
+                ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Failed',
+              );
             onChanged();
           } catch (e) {
             setError((e as Error).message);
@@ -251,7 +262,10 @@ function AddMemberRow({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: email.trim(), role }),
               });
-              if (!res.ok) throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Failed');
+              if (!res.ok)
+                throw new Error(
+                  ((await res.json().catch(() => ({}))) as { error?: string }).error ?? 'Failed',
+                );
               setEmail('');
               onChanged();
             } catch (e) {
@@ -325,7 +339,9 @@ function MetricsSection({ clinicId }: { clinicId: string }) {
           </tbody>
         </table>
       )}
-      <p className="mt-1.5 text-xs text-[var(--color-ink-3)]">Counts only — no client names or content.</p>
+      <p className="mt-1.5 text-xs text-[var(--color-ink-3)]">
+        Counts only — no client names or content.
+      </p>
     </div>
   );
 }
@@ -343,14 +359,27 @@ function ReassignSection({
   const [toId, setToId] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
-  const memberName = (id: string) => clinic.members.find((m) => m.psychologistId === id)?.fullName ?? id;
+  const memberName = (id: string) =>
+    clinic.members.find((m) => m.psychologistId === id)?.fullName ?? id;
 
   return (
     <div className={SECTION}>
       <p className={HEADING}>Reassign a caseload (therapist departure)</p>
       <div className="flex flex-wrap items-end gap-2">
-        <MemberSelect label="From" value={fromId} onChange={setFromId} members={clinic.members} exclude={toId} />
-        <MemberSelect label="To" value={toId} onChange={setToId} members={clinic.members} exclude={fromId} />
+        <MemberSelect
+          label="From"
+          value={fromId}
+          onChange={setFromId}
+          members={clinic.members}
+          exclude={toId}
+        />
+        <MemberSelect
+          label="To"
+          value={toId}
+          onChange={setToId}
+          members={clinic.members}
+          exclude={fromId}
+        />
         <Button
           variant="secondary"
           disabled={busy || !fromId || !toId || fromId === toId}

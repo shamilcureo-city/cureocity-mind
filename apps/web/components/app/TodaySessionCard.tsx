@@ -12,13 +12,7 @@ import { RescheduleModal } from './RescheduleModal';
 export interface TodaySessionCardProps {
   session: {
     id: string;
-    status:
-      | 'SCHEDULED'
-      | 'IN_PROGRESS'
-      | 'COMPLETED'
-      | 'CANCELLED'
-      | 'NO_SHOW'
-      | 'RESCHEDULED';
+    status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'RESCHEDULED';
     scheduledAt: string;
     modality: string | null;
     kind: 'INTAKE' | 'TREATMENT' | 'REVIEW';

@@ -86,10 +86,12 @@ export function CheckinForm({
     return (
       <article className="space-y-4">
         <div className="rounded-2xl bg-[var(--color-accent-soft)] p-6 text-center">
-          <p className="font-serif text-xl text-[var(--color-ink)]">Thank you, {clientFirstName}.</p>
+          <p className="font-serif text-xl text-[var(--color-ink)]">
+            Thank you, {clientFirstName}.
+          </p>
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-            Your answers have been saved and sent to your therapist. They&apos;ll review them
-            before your next session.
+            Your answers have been saved and sent to your therapist. They&apos;ll review them before
+            your next session.
           </p>
         </div>
         {riskEndorsed && <CrisisPanel hotlines={crisisHotlines} />}
@@ -100,9 +102,9 @@ export function CheckinForm({
   return (
     <article className="space-y-5">
       <p className="text-sm text-[var(--color-ink-2)]">
-        Hi {clientFirstName}, your therapist has asked you to fill this in before your next
-        session. It takes about a minute. There are no right or wrong answers — just choose what
-        feels closest.
+        Hi {clientFirstName}, your therapist has asked you to fill this in before your next session.
+        It takes about a minute. There are no right or wrong answers — just choose what feels
+        closest.
       </p>
       <p className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 text-sm font-medium text-[var(--color-ink)]">
         {recallWindow}
@@ -156,7 +158,11 @@ export function CheckinForm({
         disabled={!allAnswered || submitting}
         className="w-full rounded-full bg-[var(--color-accent)] px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {submitting ? 'Saving…' : allAnswered ? 'Send to my therapist' : 'Answer every question to continue'}
+        {submitting
+          ? 'Saving…'
+          : allAnswered
+            ? 'Send to my therapist'
+            : 'Answer every question to continue'}
       </button>
     </article>
   );
@@ -176,8 +182,8 @@ function CrisisPanel({ hotlines }: { hotlines: CrisisHotline[] }) {
       <p className="font-serif text-lg">You don&apos;t have to go through this alone.</p>
       <p className="mt-2 text-sm leading-relaxed">
         It looks like you&apos;ve been having some really hard thoughts. That can feel heavy to
-        carry. These free, confidential lines have trained people who want to listen — you can
-        reach out right now.
+        carry. These free, confidential lines have trained people who want to listen — you can reach
+        out right now.
       </p>
       <ul className="mt-4 space-y-2">
         {hotlines.map((h) => (
@@ -195,7 +201,10 @@ function CrisisPanel({ hotlines }: { hotlines: CrisisHotline[] }) {
               <p className="text-xs">{h.description}</p>
             </div>
             <div className="text-right text-sm">
-              <a href={`tel:${h.number.replace(/[^+\d]/g, '')}`} className="font-mono font-semibold">
+              <a
+                href={`tel:${h.number.replace(/[^+\d]/g, '')}`}
+                className="font-mono font-semibold"
+              >
                 {h.number}
               </a>
               <p className="text-xs">{h.hours}</p>

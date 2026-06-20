@@ -155,8 +155,8 @@ export function IntakeRevisionPanel({ sessionId, note, onRevised }: Props) {
           </button>
         </div>
         <p className="text-xs text-[var(--color-ink-3)]">
-          The original text is preserved per field as a NoteEdit row. Add a brief reason
-          so the audit log records why the revision was made.
+          The original text is preserved per field as a NoteEdit row. Add a brief reason so the
+          audit log records why the revision was made.
         </p>
         {INTAKE_FIELDS.map((f) => (
           <div key={f.key}>
@@ -165,9 +165,7 @@ export function IntakeRevisionPanel({ sessionId, note, onRevised }: Props) {
               id={`rev-${f.key}`}
               rows={f.rows}
               value={values[f.key]}
-              onChange={(e) =>
-                setValues((v) => ({ ...v, [f.key]: e.target.value }))
-              }
+              onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
             />
           </div>
         ))}
@@ -197,9 +195,7 @@ export function IntakeRevisionPanel({ sessionId, note, onRevised }: Props) {
   return (
     <div className="mt-6 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
       <div className="flex items-baseline justify-between gap-3">
-        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Revisions
-        </h3>
+        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Revisions</h3>
         <div className="flex items-center gap-3 text-xs">
           <button
             type="button"
@@ -228,10 +224,7 @@ export function IntakeRevisionPanel({ sessionId, note, onRevised }: Props) {
           ) : (
             <ol className="space-y-3">
               {history.map((h) => (
-                <li
-                  key={h.id}
-                  className="border-l-2 border-[var(--color-line)] pl-3 text-xs"
-                >
+                <li key={h.id} className="border-l-2 border-[var(--color-line)] pl-3 text-xs">
                   <p className="text-[var(--color-ink-3)]">
                     {new Date(h.createdAt).toLocaleString('en-GB')} · {h.field}
                   </p>

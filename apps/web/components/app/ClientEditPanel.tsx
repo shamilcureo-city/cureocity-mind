@@ -186,7 +186,8 @@ export function ClientEditPanel({ client }: { client: ClientEditValues }) {
                 </Label>
                 <SpokenLanguageChips value={spokenLanguages} onChange={setSpokenLanguages} />
                 <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                  Transcription hint. Pick more than one for code-mixed speakers (Manglish: ml + en).
+                  Transcription hint. Pick more than one for code-mixed speakers (Manglish: ml +
+                  en).
                 </p>
               </div>
 

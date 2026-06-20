@@ -47,20 +47,19 @@ function formatBytes(bytes: number): string {
 }
 
 function formatActionLabel(action: string): string {
-  return action.replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+  return action
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/^\w/, (c) => c.toUpperCase());
 }
 
 export function SessionInfoTab({ data }: { data: SessionInfoData }) {
   const elapsed =
-    data.startedAt && data.endedAt
-      ? data.endedAt.getTime() - data.startedAt.getTime()
-      : null;
+    data.startedAt && data.endedAt ? data.endedAt.getTime() - data.startedAt.getTime() : null;
   return (
     <div className="space-y-6">
       <section className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
-        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Session
-        </h3>
+        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Session</h3>
         <dl className="mt-4 grid gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
           <Field label="Modality" value={data.modality} />
           <Field
@@ -147,9 +146,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
       </section>
 
       <section className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
-        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Audit trail
-        </h3>
+        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Audit trail</h3>
         {data.auditTrail.length === 0 ? (
           <p className="mt-3 text-sm text-[var(--color-ink-2)]">
             No audit events recorded for this session yet.

@@ -37,9 +37,7 @@ export async function GET(
     orderBy: { chunkIndex: 'asc' },
     select: { bytes: true },
   });
-  const pcm = Buffer.concat(
-    chunks.map((c) => (c.bytes ? Buffer.from(c.bytes) : Buffer.alloc(0))),
-  );
+  const pcm = Buffer.concat(chunks.map((c) => (c.bytes ? Buffer.from(c.bytes) : Buffer.alloc(0))));
   if (pcm.byteLength === 0) {
     return NextResponse.json({ error: 'No audio bytes for this session' }, { status: 404 });
   }

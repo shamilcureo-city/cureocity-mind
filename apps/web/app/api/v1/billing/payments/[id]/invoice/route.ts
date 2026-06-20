@@ -33,10 +33,7 @@ export async function GET(
     return NextResponse.json({ error: 'Payment not found' }, { status: 404 });
   }
   if (payment.status !== 'PAID') {
-    return NextResponse.json(
-      { error: 'Only paid payments have an invoice.' },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: 'Only paid payments have an invoice.' }, { status: 404 });
   }
 
   const psychologist = await prisma.psychologist.findUnique({

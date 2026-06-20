@@ -75,8 +75,8 @@ export async function POST(
         error:
           code === 'NOTE_NOT_READY'
             ? 'The note is still generating. Wait a moment and retry.'
-            : draft?.errorMessage ??
-              'The transcript came back empty, so no clinical analysis can run on this session. Re-record or hit Retry on the Note tab to re-run transcription.',
+            : (draft?.errorMessage ??
+              'The transcript came back empty, so no clinical analysis can run on this session. Re-record or hit Retry on the Note tab to re-run transcription.'),
         code,
       },
       { status: 409 },

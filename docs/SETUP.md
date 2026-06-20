@@ -12,21 +12,21 @@ and env var per sprint, so procurement runs in parallel with build.
 
 ## Accounts at-a-glance
 
-| Provider | Used for | First needed | Plan tier |
-|---|---|---|---|
-| **GitHub** | Repo + Actions CI | Sprint 0 | Free |
-| **Vercel** | Web hosting + edge functions + Blob | Sprint 0 | **Pro** (60 s fn budget) |
-| **Neon** | Postgres (existing) | Sprint 0 | Launch / Scale |
-| **GCP** + Vertex AI | Gemini 1.5 Flash + Pro | Sprint 2 | Pay-as-you-go |
-| **Firebase** (GCP) | Phone-OTP therapist auth | Sprint 1 (real auth: Sprint 12) | Spark / Blaze |
-| **AWS** or **GCP** KMS | Tenant key wrap for field encryption | Sprint 11 | Per-call |
-| **Stripe** | Billing (Canada / US) | Sprint 10 | Standard |
-| **Razorpay** | Billing (India) | Sprint 10 | Standard |
-| **Sentry** | Error tracking | Sprint 12 | Team |
-| **SendGrid** | Transactional email | Sprint 9–10 | Essentials |
-| Optional: **Twilio** | SMS reminders | Sprint 9+ | Pay-as-you-go |
-| Optional: **WATI** | WhatsApp reminders (India) | Sprint 9+ | Standard |
-| **Domain** | Production hostname + TLS | Sprint 12 | Registrar of choice |
+| Provider               | Used for                             | First needed                    | Plan tier                |
+| ---------------------- | ------------------------------------ | ------------------------------- | ------------------------ |
+| **GitHub**             | Repo + Actions CI                    | Sprint 0                        | Free                     |
+| **Vercel**             | Web hosting + edge functions + Blob  | Sprint 0                        | **Pro** (60 s fn budget) |
+| **Neon**               | Postgres (existing)                  | Sprint 0                        | Launch / Scale           |
+| **GCP** + Vertex AI    | Gemini 1.5 Flash + Pro               | Sprint 2                        | Pay-as-you-go            |
+| **Firebase** (GCP)     | Phone-OTP therapist auth             | Sprint 1 (real auth: Sprint 12) | Spark / Blaze            |
+| **AWS** or **GCP** KMS | Tenant key wrap for field encryption | Sprint 11                       | Per-call                 |
+| **Stripe**             | Billing (Canada / US)                | Sprint 10                       | Standard                 |
+| **Razorpay**           | Billing (India)                      | Sprint 10                       | Standard                 |
+| **Sentry**             | Error tracking                       | Sprint 12                       | Team                     |
+| **SendGrid**           | Transactional email                  | Sprint 9–10                     | Essentials               |
+| Optional: **Twilio**   | SMS reminders                        | Sprint 9+                       | Pay-as-you-go            |
+| Optional: **WATI**     | WhatsApp reminders (India)           | Sprint 9+                       | Standard                 |
+| **Domain**             | Production hostname + TLS            | Sprint 12                       | Registrar of choice      |
 
 ## Environment variables
 
@@ -36,6 +36,7 @@ settings is the source of truth in production; `.env.local` mirrors them
 in development.
 
 ### Sprint 0 — engine alive on mock
+
 ```
 # Database (Neon, set by the Vercel-Neon integration)
 DATABASE_URL=                  # pooled (PgBouncer) — runtime
@@ -56,12 +57,14 @@ LLM_BACKEND=mock               # 'mock' (default) or 'vertex'
 ```
 
 ### Sprint 1 — recording
+
 ```
 # Vercel Blob (audio chunks)
 BLOB_READ_WRITE_TOKEN=
 ```
 
 ### Sprint 2 — real Gemini
+
 ```
 LLM_BACKEND=vertex
 VERTEX_PROJECT_ID=
@@ -77,6 +80,7 @@ COST_CAP_PER_THERAPIST_MONTHLY_INR=15000
 ```
 
 ### Sprint 13–17 — Clinical co-pilot (new Gemini passes + patient sharing)
+
 ```
 # Optional per-pass model overrides — default to VERTEX_PRO_MODEL.
 VERTEX_CLINICAL_MODEL=gemini-2.5-pro       # Pass 3 (clinical analysis)
@@ -99,6 +103,7 @@ coherent `PatientShare` row + provider message id. The `/p/<token>`
 patient portal works regardless.
 
 ### Sprint 9 — clinic regions + notifications
+
 ```
 DEFAULT_CLINIC_REGION=ASIA_SOUTH       # ASIA_SOUTH | NORTH_AMERICA
 SENDGRID_API_KEY=
@@ -112,6 +117,7 @@ WATI_API_ENDPOINT=
 ```
 
 ### Sprint 10 — billing
+
 ```
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
@@ -124,6 +130,7 @@ BILLING_RETURN_URL=https://app.cureocitymind.com/app/settings/plan
 ```
 
 ### Sprint 11 — field encryption
+
 ```
 KMS_PROVIDER=aws                       # aws | gcp | local-dev
 AWS_KMS_KEY_ID=
@@ -135,6 +142,7 @@ GCP_KMS_KEY_NAME=projects/.../locations/.../keyRings/.../cryptoKeys/...
 ```
 
 ### Sprint 12 — launch
+
 ```
 SENTRY_DSN=
 NEXT_PUBLIC_SENTRY_DSN=                (public)
@@ -146,6 +154,7 @@ NEXT_PUBLIC_APP_BASE_URL=https://app.cureocitymind.com   (public)
 ## Account-by-account procurement notes
 
 ### Vercel
+
 1. Create project from this repo; pick `apps/web` as the root directory.
 2. Bind the Neon integration (auto-populates the `DATABASE_URL*` set).
 3. Switch the project to the **Pro** plan — the 60-second function
@@ -154,6 +163,7 @@ NEXT_PUBLIC_APP_BASE_URL=https://app.cureocitymind.com   (public)
    (Sprint 1).
 
 ### GCP + Vertex AI
+
 1. Create a new GCP project (`cureocity-mind-prod`).
 2. Enable APIs: Vertex AI, Cloud Storage, Cloud Logging.
 3. Create a service account with `roles/aiplatform.user`. Generate a
@@ -169,6 +179,7 @@ NEXT_PUBLIC_APP_BASE_URL=https://app.cureocitymind.com   (public)
    downgrade for cost or upgrade to a future model line.
 
 ### Firebase
+
 1. Create a Firebase project under the same GCP project.
 2. Enable **Phone** sign-in. Add `+91 65656 65656` (or any test number)
    so QA can run without real SMS in non-prod.
@@ -179,15 +190,18 @@ NEXT_PUBLIC_APP_BASE_URL=https://app.cureocitymind.com   (public)
    literal `\n` characters must be preserved.
 
 ### Neon
+
 - Existing project. For Sprint 11, enable encryption-at-rest (default
   on paid tiers) and verify the region matches the clinic's residency.
 
 ### AWS / GCP KMS (Sprint 11)
+
 - Create one Customer Master Key per region (`ap-south-1` and
   `ca-central-1`).
 - Use `LocalDevKmsProvider` until then.
 
 ### Stripe + Razorpay
+
 - One Stripe account, one Razorpay account.
 - Create products: `Seed` (10 sessions/mo), `Roots` (50), `Canopy`
   (unlimited).
@@ -195,6 +209,7 @@ NEXT_PUBLIC_APP_BASE_URL=https://app.cureocitymind.com   (public)
   `/api/v1/billing/razorpay/webhook` (Sprint 10).
 
 ### Sentry, SendGrid, domain
+
 - Create the Sentry org, install the Vercel integration so the auth
   token + DSN sync automatically.
 - SendGrid: verify the sender domain; create an API key with

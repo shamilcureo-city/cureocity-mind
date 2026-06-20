@@ -48,8 +48,11 @@ export class AdherenceService {
 
     for (const a of assignments) {
       byStatus[a.status]! += 1;
-      const existing = perEx.get(a.exerciseId) ?? {
-        exerciseId: a.exerciseId,
+      // Sprint 51 — exerciseId is null for therapy-script rows; bucket those
+      // by their customDescription (else the row id) so they still aggregate.
+      const key = a.exerciseId ?? a.customDescription ?? a.id;
+      const existing = perEx.get(key) ?? {
+        exerciseId: key,
         assigned: 0,
         completed: 0,
         lastPrescribedAt: null,
@@ -59,7 +62,7 @@ export class AdherenceService {
       if (existing.lastPrescribedAt === null || a.assignedAt > existing.lastPrescribedAt) {
         existing.lastPrescribedAt = a.assignedAt;
       }
-      perEx.set(a.exerciseId, existing);
+      perEx.set(key, existing);
     }
 
     const totalAssigned = assignments.length;

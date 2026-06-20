@@ -24,9 +24,7 @@ function client(): IEmailPort {
   const fromEmail = process.env['SENDGRID_FROM_EMAIL'];
   const fromName = process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity Mind';
   const port: IEmailPort =
-    apiKey && fromEmail
-      ? new SendGridBackend({ apiKey, fromEmail, fromName })
-      : new NoopBackend();
+    apiKey && fromEmail ? new SendGridBackend({ apiKey, fromEmail, fromName }) : new NoopBackend();
   globalThis.__cureocityWelcomeEmail = port;
   return port;
 }

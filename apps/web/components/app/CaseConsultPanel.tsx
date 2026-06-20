@@ -131,7 +131,10 @@ function ConsultBody({ consult }: { consult: CaseConsultV1 }) {
         <Section label="What's been tried">
           <ul className="space-y-2">
             {consult.whatsBeenTried.map((t, i) => (
-              <li key={i} className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+              <li
+                key={i}
+                className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3"
+              >
                 <p className="font-medium text-[var(--color-ink)]">
                   {t.approach}{' '}
                   <span className="text-xs text-[var(--color-ink-3)]">· {t.sessions} sessions</span>
@@ -147,7 +150,10 @@ function ConsultBody({ consult }: { consult: CaseConsultV1 }) {
         <Section label="Differential considerations">
           <ul className="space-y-2">
             {consult.differentialConsiderations.map((d, i) => (
-              <li key={i} className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+              <li
+                key={i}
+                className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3"
+              >
                 <p className="font-medium text-[var(--color-ink)]">
                   {d.consideration}
                   {d.icd11Code && <Badge tone="muted">{d.icd11Code}</Badge>}
@@ -170,7 +176,10 @@ function ConsultBody({ consult }: { consult: CaseConsultV1 }) {
         <Section label="Options to consider">
           <ul className="space-y-2">
             {consult.evidenceBasedOptions.map((o, i) => (
-              <li key={i} className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+              <li
+                key={i}
+                className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3"
+              >
                 <p className="font-medium text-[var(--color-ink)]">{o.option}</p>
                 <p className="mt-1 text-xs text-[var(--color-ink-2)]">{o.rationale}</p>
                 {o.indiaContextNote && (

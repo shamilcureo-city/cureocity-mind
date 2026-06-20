@@ -9,7 +9,10 @@ export function IntakeActions({ intakeId }: { intakeId: string }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
-  async function patch(status: 'MATCHED' | 'REVIEWED' | 'CLOSED', assignToSelf = false): Promise<void> {
+  async function patch(
+    status: 'MATCHED' | 'REVIEWED' | 'CLOSED',
+    assignToSelf = false,
+  ): Promise<void> {
     setError(null);
     try {
       const res = await fetch(`/api/v1/intake/${intakeId}`, {

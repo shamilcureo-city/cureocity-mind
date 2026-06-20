@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  createHash,
-  generateKeyPairSync,
-  sign as cryptoSign,
-  type KeyObject,
-} from 'node:crypto';
+import { createHash, generateKeyPairSync, sign as cryptoSign, type KeyObject } from 'node:crypto';
 import { verifyNoteSigningAssertion, type AssertionVerifyInput } from './webauthn-assertion';
 
 const RP_ID = 'app.cureocity.mind';
@@ -13,18 +8,16 @@ const FLAG_UP = 0x01;
 const FLAG_UV = 0x04;
 
 function buildAuthData(opts: { rpId?: string; flags?: number; signCount?: number }): Buffer {
-  const rpIdHash = createHash('sha256').update(opts.rpId ?? RP_ID, 'utf8').digest();
+  const rpIdHash = createHash('sha256')
+    .update(opts.rpId ?? RP_ID, 'utf8')
+    .digest();
   const flags = Buffer.from([opts.flags ?? FLAG_UP | FLAG_UV]);
   const sc = Buffer.alloc(4);
   sc.writeUInt32BE(opts.signCount ?? 0, 0);
   return Buffer.concat([rpIdHash, flags, sc]);
 }
 
-function buildClientData(opts: {
-  challenge: Buffer;
-  origin?: string;
-  type?: string;
-}): Buffer {
+function buildClientData(opts: { challenge: Buffer; origin?: string; type?: string }): Buffer {
   return Buffer.from(
     JSON.stringify({
       type: opts.type ?? 'webauthn.get',
@@ -64,9 +57,9 @@ function makeKey(type: 'ec' | 'rsa' | 'ed25519'): {
         ? generateKeyPairSync('rsa', { modulusLength: 2048 })
         : generateKeyPairSync('ed25519');
   return {
-    publicKeySpkiB64Url: (pair.publicKey.export({ format: 'der', type: 'spki' }) as Buffer).toString(
-      'base64url',
-    ),
+    publicKeySpkiB64Url: (
+      pair.publicKey.export({ format: 'der', type: 'spki' }) as Buffer
+    ).toString('base64url'),
     privateKey: pair.privateKey,
   };
 }

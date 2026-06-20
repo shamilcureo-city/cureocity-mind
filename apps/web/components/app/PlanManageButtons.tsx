@@ -55,7 +55,12 @@ export function PlanManageButtons({ status, pausedRemainingDays }: Props) {
   return (
     <div className="mt-4">
       {status === 'PAUSED' && (
-        <button type="button" className={primary} disabled={busy !== null} onClick={() => run('resume')}>
+        <button
+          type="button"
+          className={primary}
+          disabled={busy !== null}
+          onClick={() => run('resume')}
+        >
           {busy === 'resume'
             ? 'Resuming…'
             : `Resume plan${pausedRemainingDays !== null ? ` (${pausedRemainingDays} days banked)` : ''}`}
@@ -63,14 +68,24 @@ export function PlanManageButtons({ status, pausedRemainingDays }: Props) {
       )}
 
       {status === 'CANCELLED' && (
-        <button type="button" className={primary} disabled={busy !== null} onClick={() => run('resume')}>
+        <button
+          type="button"
+          className={primary}
+          disabled={busy !== null}
+          onClick={() => run('resume')}
+        >
           {busy === 'resume' ? 'Reactivating…' : 'Reactivate plan'}
         </button>
       )}
 
       {status === 'ACTIVE' && !confirmCancel && (
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={secondary} disabled={busy !== null} onClick={() => run('pause')}>
+          <button
+            type="button"
+            className={secondary}
+            disabled={busy !== null}
+            onClick={() => run('pause')}
+          >
             {busy === 'pause' ? 'Pausing…' : 'Pause plan'}
           </button>
           <button
@@ -92,10 +107,20 @@ export function PlanManageButtons({ status, pausedRemainingDays }: Props) {
             then drops you to the free trial.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className={primary} disabled={busy !== null} onClick={() => run('pause')}>
+            <button
+              type="button"
+              className={primary}
+              disabled={busy !== null}
+              onClick={() => run('pause')}
+            >
               {busy === 'pause' ? 'Pausing…' : 'Pause instead'}
             </button>
-            <button type="button" className={secondary} disabled={busy !== null} onClick={() => run('cancel')}>
+            <button
+              type="button"
+              className={secondary}
+              disabled={busy !== null}
+              onClick={() => run('cancel')}
+            >
               {busy === 'cancel' ? 'Cancelling…' : 'Cancel anyway'}
             </button>
             <button

@@ -66,8 +66,8 @@ export default function GlobalError({
             We couldn&rsquo;t load the app.
           </h1>
           <p style={{ marginTop: 12, fontSize: 14, color: '#4a5566', lineHeight: 1.5 }}>
-            Your data is safe — this is a display error. Try again, and if it keeps happening,
-            sign out and back in.
+            Your data is safe — this is a display error. Try again, and if it keeps happening, sign
+            out and back in.
           </p>
           {error.digest && (
             <p style={{ marginTop: 8, fontSize: 12, color: '#7b8694', fontFamily: 'monospace' }}>

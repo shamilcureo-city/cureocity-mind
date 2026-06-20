@@ -46,11 +46,11 @@ In the Vercel dashboard, click **Add New → Project** once.
 
 **`cureocity-mind-web`**
 
-| Setting                  | Value                                                 |
-| ------------------------ | ----------------------------------------------------- |
-| Framework Preset         | Next.js                                               |
-| Root Directory           | `apps/web`                                            |
-| Node.js Version          | 22.x                                                  |
+| Setting                  | Value                                                  |
+| ------------------------ | ------------------------------------------------------ |
+| Framework Preset         | Next.js                                                |
+| Root Directory           | `apps/web`                                             |
+| Node.js Version          | 22.x                                                   |
 | Build / Install / Output | leave defaults — `apps/web/vercel.json` overrides them |
 
 This single project hosts everything: role-selector at `/`, therapist
@@ -96,18 +96,18 @@ under `/c/*`).
 
 ### Frontend (`NEXT_PUBLIC_*`, inlined into client bundle)
 
-| Var                                       | Value                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------ |
-| `NEXT_PUBLIC_API_BASE`                    | `/api/v1` (same-origin — no scheme/host needed)                    |
-| `NEXT_PUBLIC_FIREBASE_API_KEY`            | therapist Firebase web-app config                                  |
-| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`        | therapist Firebase web-app config                                  |
-| `NEXT_PUBLIC_FIREBASE_PROJECT_ID`         | therapist Firebase web-app config                                  |
-| `NEXT_PUBLIC_FIREBASE_APP_ID`             | therapist Firebase web-app config                                  |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_API_KEY`     | patient Firebase web-app config                                    |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_AUTH_DOMAIN` | patient Firebase web-app config                                    |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_PROJECT_ID`  | patient Firebase web-app config                                    |
-| `NEXT_PUBLIC_FIREBASE_CLIENT_APP_ID`      | patient Firebase web-app config                                    |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`            | from `npx web-push generate-vapid-keys`                            |
+| Var                                       | Value                                           |
+| ----------------------------------------- | ----------------------------------------------- |
+| `NEXT_PUBLIC_API_BASE`                    | `/api/v1` (same-origin — no scheme/host needed) |
+| `NEXT_PUBLIC_FIREBASE_API_KEY`            | therapist Firebase web-app config               |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`        | therapist Firebase web-app config               |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID`         | therapist Firebase web-app config               |
+| `NEXT_PUBLIC_FIREBASE_APP_ID`             | therapist Firebase web-app config               |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_API_KEY`     | patient Firebase web-app config                 |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_AUTH_DOMAIN` | patient Firebase web-app config                 |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_PROJECT_ID`  | patient Firebase web-app config                 |
+| `NEXT_PUBLIC_FIREBASE_CLIENT_APP_ID`      | patient Firebase web-app config                 |
+| `NEXT_PUBLIC_VAPID_PUBLIC_KEY`            | from `npx web-push generate-vapid-keys`         |
 
 ## Step 4 — Prisma migrations
 

@@ -26,9 +26,7 @@ export function AdvancementBanner({ clientId, scribeBase = '/api/v1' }: Props) {
         if (!wfRes.ok) return;
         const wf = (await wfRes.json()) as { id: string; modality: string };
         if (wf.modality !== 'CBT') return;
-        const advRes = await fetch(
-          `${scribeBase}/workflows/${wf.id}/advancement-suggestion`,
-        );
+        const advRes = await fetch(`${scribeBase}/workflows/${wf.id}/advancement-suggestion`);
         if (!advRes.ok) return;
         const adv = (await advRes.json()) as AdvancementSuggestion;
         if (!cancelled && adv.suggestedPhase) setSuggestion(adv);

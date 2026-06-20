@@ -45,7 +45,8 @@ export async function PATCH(
   if (body.value.status !== 'SKIPPED' && body.value.status !== 'EXPIRED') {
     return NextResponse.json(
       {
-        error: 'Therapist can only mark assignments SKIPPED or EXPIRED. Completion is recorded by the client.',
+        error:
+          'Therapist can only mark assignments SKIPPED or EXPIRED. Completion is recorded by the client.',
       },
       { status: 422 },
     );

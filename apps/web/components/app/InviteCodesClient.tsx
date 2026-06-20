@@ -145,7 +145,9 @@ export function InviteCodesClient() {
                 >
                   {c.code}
                 </button>
-                {copied === c.code && <span className="text-xs text-[var(--color-accent)]">copied</span>}
+                {copied === c.code && (
+                  <span className="text-xs text-[var(--color-accent)]">copied</span>
+                )}
                 {c.active ? (
                   <Badge tone="accent">active</Badge>
                 ) : c.revokedAt ? (

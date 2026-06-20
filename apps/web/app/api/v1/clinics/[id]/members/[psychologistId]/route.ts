@@ -16,7 +16,10 @@ async function requireAdminOfClinic(
 ): Promise<{ ok: true; role: ClinicRole } | { ok: false; response: NextResponse }> {
   const role = await clinicRoleOf(clinicId, psychologistId);
   if (!role) {
-    return { ok: false, response: NextResponse.json({ error: 'Clinic not found' }, { status: 404 }) };
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Clinic not found' }, { status: 404 }),
+    };
   }
   if (!isClinicAdminRole(role)) {
     return {
@@ -84,7 +87,11 @@ export async function PATCH(
         action: 'CLINIC_MEMBER_ROLE_CHANGED',
         targetType: 'Clinic',
         targetId: clinicId,
-        metadata: { ...auditMetadataFromRequest(req), psychologistId: targetId, role: input.value.role },
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          psychologistId: targetId,
+          role: input.value.role,
+        },
       },
       tx,
     );

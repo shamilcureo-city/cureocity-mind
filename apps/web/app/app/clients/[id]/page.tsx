@@ -94,17 +94,15 @@ export default async function ClientDetailPage({ params }: PageProps) {
               {client.isDemo && (
                 <p className="mt-2 max-w-xl text-xs text-[var(--color-ink-3)]">
                   This is a seeded example — fabricated for the demo. Sessions, instruments, and the
-                  shared progress report are real records you can click through, but they don&rsquo;t
-                  count toward your trial allowance or practice metrics.
+                  shared progress report are real records you can click through, but they
+                  don&rsquo;t count toward your trial allowance or practice metrics.
                 </p>
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
               {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
-              {client.isDemo && (
-                <DemoClientButton demoClientId={client.id} variant="inline" />
-              )}
+              {client.isDemo && <DemoClientButton demoClientId={client.id} variant="inline" />}
               <SendCheckinButton
                 clientId={client.id}
                 hasContactPhone={!!client.contactPhone}

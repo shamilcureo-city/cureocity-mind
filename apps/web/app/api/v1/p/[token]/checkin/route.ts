@@ -69,7 +69,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   }
   const snapshot = snapParse.data;
   if (snapshot.completed) {
-    return NextResponse.json({ error: 'This check-in has already been submitted.' }, { status: 409 });
+    return NextResponse.json(
+      { error: 'This check-in has already been submitted.' },
+      { status: 409 },
+    );
   }
 
   const body = await parseJson(req, CheckinSubmitInputSchema);
