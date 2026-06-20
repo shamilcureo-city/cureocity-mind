@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { AuthedFetchProvider } from '@/components/app/AuthedFetchProvider';
 import { MobileNav } from '@/components/app/MobileNav';
 import { Sidebar, type PlanUsage } from '@/components/app/Sidebar';
 import { currentPsychologist } from '@/lib/auth-page';
@@ -40,6 +41,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--color-bg)]">
+      <AuthedFetchProvider />
       {showBypassBanner && (
         <div className="bg-[var(--color-warn-soft)] px-4 py-2 text-center text-xs text-[var(--color-warn)]">
           <strong>Demo mode</strong> — every sign-in resolves to the shared demo therapist. Set the
