@@ -6,11 +6,16 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, Textarea } from '../ui/Field';
 import { SpokenLanguageChips } from './SpokenLanguageChips';
+import { subjectNounFor } from '@/lib/vertical';
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onCreated?: (clientId: string) => void;
+  /// Sprint DV2 — controls vocabulary (client vs patient), the
+  /// post-create redirect (/app/clients vs /app/patients), and whether
+  /// the therapy "preferred modality" field shows. Defaults THERAPIST.
+  vertical?: 'THERAPIST' | 'DOCTOR';
 }
 
 /**
@@ -25,8 +30,10 @@ interface Props {
  * On success, navigates to the new client's detail page so the
  * therapist can immediately start a session or record a workflow.
  */
-export function CreateClientModal({ open, onClose, onCreated }: Props) {
+export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAPIST' }: Props) {
   const router = useRouter();
+  const isDoctor = vertical === 'DOCTOR';
+  const noun = subjectNounFor(vertical).singular;
   const [fullName, setFullName] = useState('');
   const [contactPhone, setContactPhone] = useState('+91');
   const [contactEmail, setContactEmail] = useState('');
@@ -87,7 +94,7 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
       }
       const created = (await res.json()) as { id: string };
       onCreated?.(created.id);
-      router.push(`/app/clients/${created.id}`);
+      router.push(`/app/${isDoctor ? 'patients' : 'clients'}/${created.id}`);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -103,7 +110,7 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
     >
       <Card className="w-full max-w-xl max-h-[90vh] overflow-y-auto p-7">
         <header className="flex items-baseline justify-between gap-3">
-          <h2 className="font-serif text-2xl">New client</h2>
+          <h2 className="font-serif text-2xl">{isDoctor ? 'New patient' : 'New client'}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -157,23 +164,25 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
                 onChange={(e) => setDateOfBirth(e.target.value)}
               />
             </div>
-            <div>
-              <Label htmlFor="cc-modality" hint="optional">
-                Preferred modality
-              </Label>
-              <Select
-                id="cc-modality"
-                value={preferredModality}
-                onChange={(e) =>
-                  setPreferredModality(e.target.value as 'CBT' | 'EMDR' | 'OTHER' | '')
-                }
-              >
-                <option value="">—</option>
-                <option value="CBT">CBT</option>
-                <option value="EMDR">EMDR</option>
-                <option value="OTHER">Other</option>
-              </Select>
-            </div>
+            {!isDoctor && (
+              <div>
+                <Label htmlFor="cc-modality" hint="optional">
+                  Preferred modality
+                </Label>
+                <Select
+                  id="cc-modality"
+                  value={preferredModality}
+                  onChange={(e) =>
+                    setPreferredModality(e.target.value as 'CBT' | 'EMDR' | 'OTHER' | '')
+                  }
+                >
+                  <option value="">—</option>
+                  <option value="CBT">CBT</option>
+                  <option value="EMDR">EMDR</option>
+                  <option value="OTHER">Other</option>
+                </Select>
+              </div>
+            )}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
@@ -199,13 +208,10 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
               <Label htmlFor="cc-spoken-langs" hint="optional · multi-select">
                 Typical spoken languages
               </Label>
-              <SpokenLanguageChips
-                value={spokenLanguages}
-                onChange={setSpokenLanguages}
-              />
+              <SpokenLanguageChips value={spokenLanguages} onChange={setSpokenLanguages} />
               <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                Used as a transcription hint. Pick more than one for code-mixed speakers
-                (Manglish: ml + en).
+                Used as a transcription hint. Pick more than one for code-mixed speakers (Manglish:
+                ml + en).
               </p>
             </div>
           </div>
@@ -227,8 +233,8 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
               Consents
             </legend>
             <p className="text-xs text-[var(--color-ink-2)]">
-              Audio recording, AI note generation, and cross-border processing are all required
-              for the scribe pipeline to run. Confirm the client has granted each in person.
+              Audio recording, AI note generation, and cross-border processing are all required for
+              the scribe pipeline to run. Confirm the {noun} has granted each in person.
             </p>
             <ul className="mt-2 space-y-1 text-xs text-[var(--color-ink)]">
               <li>✓ AUDIO_RECORDING</li>
@@ -253,7 +259,7 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
 
           <div className="flex justify-end gap-2">
             <Button type="submit" disabled={submitting}>
-              {submitting ? 'Creating…' : 'Create client'}
+              {submitting ? 'Creating…' : isDoctor ? 'Create patient' : 'Create client'}
             </Button>
           </div>
         </form>
@@ -261,4 +267,3 @@ export function CreateClientModal({ open, onClose, onCreated }: Props) {
     </div>
   );
 }
-

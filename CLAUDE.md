@@ -355,19 +355,21 @@ The five existing passes are the template — pick the closest analogue.
 
 ## 8. Documentation map
 
-| File                             | What it covers                                                                            |
-| -------------------------------- | ----------------------------------------------------------------------------------------- |
-| `README.md`                      | Quick getting-started + current product summary                                           |
-| `CLAUDE.md`                      | This file — operational guide + conventions                                               |
-| `docs/CLINICAL_COPILOT.md`       | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                |
-| `docs/MEASUREMENT_BASED_CARE.md` | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report               |
-| `docs/SPRINT_21.md`              | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status) |
-| `docs/EXECUTION_PLAN.md`         | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+   |
-| `docs/SETUP.md`                  | Account procurement + env var matrix per sprint                                           |
-| `docs/dpdp-data-flow.md`         | DPDP compliance data flows + DSR endpoints + cross-border                                 |
-| `docs/security-audit.md`         | OWASP top-10 + secrets + IAM matrix                                                       |
-| `docs/runbooks/README.md`        | Operational runbooks index                                                                |
-| `docs/load-test-results.md`      | Pre-pilot load test record                                                                |
+| File                              | What it covers                                                                            |
+| --------------------------------- | ----------------------------------------------------------------------------------------- |
+| `README.md`                       | Quick getting-started + current product summary                                           |
+| `CLAUDE.md`                       | This file — operational guide + conventions                                               |
+| `docs/CLINICAL_COPILOT.md`        | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                |
+| `docs/MEASUREMENT_BASED_CARE.md`  | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report               |
+| `docs/DOCTOR_VERTICAL.md`         | **Build spec** — doctor (super-specialty OPD) vertical: live-scribe pivot + reuse plan    |
+| `docs/DOCTOR_VERTICAL_SPRINTS.md` | **Sprint plan** — doctor vertical task breakdown, sprints DV0–DV8                         |
+| `docs/SPRINT_21.md`               | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status) |
+| `docs/EXECUTION_PLAN.md`          | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+   |
+| `docs/SETUP.md`                   | Account procurement + env var matrix per sprint                                           |
+| `docs/dpdp-data-flow.md`          | DPDP compliance data flows + DSR endpoints + cross-border                                 |
+| `docs/security-audit.md`          | OWASP top-10 + secrets + IAM matrix                                                       |
+| `docs/runbooks/README.md`         | Operational runbooks index                                                                |
+| `docs/load-test-results.md`       | Pre-pilot load test record                                                                |
 
 ## 9. Running the codebase locally
 
@@ -420,7 +422,7 @@ These gate a real Indian pilot. **Critical-path items live at the top.**
   Vercel production when Firebase env is missing. The only
   `dev-firebase-uid-priya` reference left is in `_archive/`. Remaining
   work is OPERATIONAL only: set `FIREBASE_PROJECT_ID/CLIENT_EMAIL/
-  PRIVATE_KEY` on the prod deployment (then bypass auto-disables).
+PRIVATE_KEY` on the prod deployment (then bypass auto-disables).
 - **PII field encryption rollout** — DUAL-WRITE DONE for every Client
   PII field: `contactPhone` + `contactEmail` (Sprint 32) and `fullName`
   (Sprint 54), across create / update / DSR-correction + the

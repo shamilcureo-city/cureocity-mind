@@ -1,0 +1,25 @@
+{
+  "name": "@cureocity/live-gateway",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Sprint DV4 — standalone WebSocket streaming gateway for the doctor live copilot. Vercel can't hold a socket, so the live path runs as its own in-region service. Runs the real pipeline (Pass 1 transcription + Pass 2 medical note + gap engine) on streamed PCM audio; LLM_BACKEND=mock for local dev, vertex for real.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --max-warnings 0 --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "@cureocity/clinical": "workspace:*",
+    "@cureocity/contracts": "workspace:*",
+    "@cureocity/llm": "workspace:*",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

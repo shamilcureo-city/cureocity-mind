@@ -40,7 +40,10 @@ export function OnboardingForm({ phone }: Props) {
   const phoneIsPlaceholder = phone.startsWith('pending:');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
+  const [vertical, setVertical] = useState<'THERAPIST' | 'DOCTOR'>('THERAPIST');
   const [rciNumber, setRciNumber] = useState('');
+  const [medicalRegNumber, setMedicalRegNumber] = useState('');
+  const [specialty, setSpecialty] = useState('');
   const [language, setLanguage] = useState('en');
   const [countryCode, setCountryCode] = useState('91');
   const [phoneDigits, setPhoneDigits] = useState('');
@@ -55,8 +58,11 @@ export function OnboardingForm({ phone }: Props) {
       const body: Record<string, unknown> = {
         fullName: fullName.trim(),
         email: email.trim(),
-        rciNumber: rciNumber.trim(),
+        vertical,
         defaultOutputLanguage: language,
+        ...(vertical === 'DOCTOR'
+          ? { medicalRegNumber: medicalRegNumber.trim(), specialty: specialty.trim() }
+          : { rciNumber: rciNumber.trim() }),
       };
       if (phoneIsPlaceholder && phoneDigits.length >= 6) {
         body['phone'] = `+${countryCode}${phoneDigits}`;
@@ -81,6 +87,36 @@ export function OnboardingForm({ phone }: Props) {
 
   return (
     <form onSubmit={submit} className="space-y-5">
+      <div>
+        <Label htmlFor="vertical-toggle">I am a</Label>
+        <div
+          id="vertical-toggle"
+          role="radiogroup"
+          aria-label="Practitioner type"
+          className="grid grid-cols-2 gap-2"
+        >
+          {(['THERAPIST', 'DOCTOR'] as const).map((v) => {
+            const selected = vertical === v;
+            return (
+              <button
+                key={v}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => setVertical(v)}
+                className={`rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
+                  selected
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                    : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-accent)]'
+                }`}
+              >
+                {v === 'THERAPIST' ? 'Therapist' : 'Doctor'}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div>
         <Label htmlFor="fullName">Full name</Label>
         <Input
@@ -111,20 +147,56 @@ export function OnboardingForm({ phone }: Props) {
         />
       </div>
 
-      <div>
-        <Label htmlFor="rciNumber" hint="RCI registration number — self-attested for now">
-          RCI number
-        </Label>
-        <Input
-          id="rciNumber"
-          required
-          minLength={3}
-          maxLength={40}
-          value={rciNumber}
-          onChange={(e) => setRciNumber(e.target.value)}
-          placeholder="A-12345"
-        />
-      </div>
+      {vertical === 'DOCTOR' ? (
+        <>
+          <div>
+            <Label
+              htmlFor="medicalRegNumber"
+              hint="NMC / state medical council registration — self-attested for now"
+            >
+              Medical registration number
+            </Label>
+            <Input
+              id="medicalRegNumber"
+              required
+              minLength={3}
+              maxLength={40}
+              value={medicalRegNumber}
+              onChange={(e) => setMedicalRegNumber(e.target.value)}
+              placeholder="e.g. KMC-12345"
+            />
+          </div>
+          <div>
+            <Label htmlFor="specialty" hint="Your super-specialty / department">
+              Specialty
+            </Label>
+            <Input
+              id="specialty"
+              required
+              minLength={2}
+              maxLength={120}
+              value={specialty}
+              onChange={(e) => setSpecialty(e.target.value)}
+              placeholder="e.g. Cardiology"
+            />
+          </div>
+        </>
+      ) : (
+        <div>
+          <Label htmlFor="rciNumber" hint="RCI registration number — self-attested for now">
+            RCI number
+          </Label>
+          <Input
+            id="rciNumber"
+            required
+            minLength={3}
+            maxLength={40}
+            value={rciNumber}
+            onChange={(e) => setRciNumber(e.target.value)}
+            placeholder="A-12345"
+          />
+        </div>
+      )}
 
       <div>
         <Label htmlFor="language" hint="Used for the notes, briefs, and patient-facing copy">
@@ -186,7 +258,13 @@ export function OnboardingForm({ phone }: Props) {
             />
           </div>
         ) : (
-          <Input id="phone" value={phone} readOnly disabled className="bg-[var(--color-surface-soft)]" />
+          <Input
+            id="phone"
+            value={phone}
+            readOnly
+            disabled
+            className="bg-[var(--color-surface-soft)]"
+          />
         )}
       </div>
 
@@ -196,8 +274,9 @@ export function OnboardingForm({ phone }: Props) {
       <FieldError message={error} />
 
       <p className="text-xs text-[var(--color-ink-3)]">
-        We&rsquo;ll review your RCI number out of band and mark it verified on your profile.
-        Recording and notes work right away — verification just adds a badge.
+        We&rsquo;ll review your {vertical === 'DOCTOR' ? 'registration number' : 'RCI number'} out
+        of band and mark it verified on your profile. Recording and notes work right away —
+        verification just adds a badge.
       </p>
     </form>
   );
