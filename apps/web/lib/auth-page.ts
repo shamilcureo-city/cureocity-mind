@@ -28,7 +28,15 @@ export async function currentPsychologist(): Promise<Psychologist | null> {
     const cookie = jar.get(SESSION_COOKIE_NAME)?.value;
     if (!cookie) return null;
     try {
-      const decoded = await auth.verifySessionCookie(cookie, true);
+      // checkRevoked is intentionally NOT passed — that flag triggers a
+      // network call to Firebase Identity Platform on every page load,
+      // and rapid sidebar navigation produces concurrent requests that
+      // can transiently fail (rate limits, network blips), causing a
+      // spurious redirect to /login. We rely on the 5-day cookie expiry
+      // and the sign-out route clearing the cookie locally. Re-enable
+      // checkRevoked (and add retry-on-transient-error) if a "sign out
+      // all devices" feature is built.
+      const decoded = await auth.verifySessionCookie(cookie);
       firebaseUid = decoded.uid;
     } catch {
       return null;

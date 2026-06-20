@@ -110,7 +110,10 @@ async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>
   const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (cookie) {
     try {
-      const decoded = await auth.verifySessionCookie(cookie, true);
+      // See auth-page.ts: checkRevoked is intentionally NOT passed.
+      // Cryptographic verify only — no network call to Firebase, no
+      // rate-limit / transient-error risk under concurrent requests.
+      const decoded = await auth.verifySessionCookie(cookie);
       return { ok: true, value: decoded.uid };
     } catch {
       return {
