@@ -84,5 +84,5 @@ export async function PATCH(
     return next;
   });
 
-  return NextResponse.json(toClient(updated));
+  return NextResponse.json(await toClient(updated));
 }
