@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
+import { PractitionerVerticalSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toPsychologist } from '@/lib/mappers';
@@ -33,28 +34,70 @@ const Iso639InlineSchema = z
   .max(8)
   .regex(/^[a-z]{2}(-[A-Z]{2})?$/, 'must be an ISO 639-1 code');
 
-const OnboardingCompleteSchema = z.object({
-  fullName: z.string().trim().min(2).max(200),
-  email: z.string().trim().email().max(320),
-  rciNumber: z
-    .string()
-    .trim()
-    .min(3)
-    .max(40)
-    // Reject the placeholder pattern even if a clever user re-submits it.
-    .refine((v) => !v.startsWith('PENDING-'), {
-      message: 'Enter your real RCI registration number',
-    }),
-  defaultOutputLanguage: Iso639InlineSchema,
-  /// Optional E.164 phone. Honoured ONLY when the current row's phone is
-  /// still the `pending:<uid>` placeholder (Google/email signup path) —
-  /// real OTP-verified phones can't be changed here.
-  phone: z
-    .string()
-    .trim()
-    .regex(/^\+\d{8,15}$/, 'must be in E.164 format (e.g. +919876543210)')
-    .optional(),
-});
+// Sprint DV1 — onboarding is now vertical-aware. Therapists supply an RCI
+// number; doctors supply a medical registration number + specialty (and
+// keep the auto-provision `PENDING-<uid>` rciNumber placeholder, which is
+// unused for their vertical). `vertical` defaults to THERAPIST so any
+// in-flight therapist client that omits it keeps working unchanged.
+const OnboardingCompleteSchema = z
+  .object({
+    fullName: z.string().trim().min(2).max(200),
+    email: z.string().trim().email().max(320),
+    vertical: PractitionerVerticalSchema.default('THERAPIST'),
+    rciNumber: z
+      .string()
+      .trim()
+      .min(3)
+      .max(40)
+      // Reject the placeholder pattern even if a clever user re-submits it.
+      .refine((v) => !v.startsWith('PENDING-'), {
+        message: 'Enter your real RCI registration number',
+      })
+      .optional(),
+    medicalRegNumber: z
+      .string()
+      .trim()
+      .min(3)
+      .max(40)
+      .refine((v) => !v.startsWith('PENDING-'), {
+        message: 'Enter your real medical registration number',
+      })
+      .optional(),
+    specialty: z.string().trim().min(2).max(120).optional(),
+    defaultOutputLanguage: Iso639InlineSchema,
+    /// Optional E.164 phone. Honoured ONLY when the current row's phone is
+    /// still the `pending:<uid>` placeholder (Google/email signup path) —
+    /// real OTP-verified phones can't be changed here.
+    phone: z
+      .string()
+      .trim()
+      .regex(/^\+\d{8,15}$/, 'must be in E.164 format (e.g. +919876543210)')
+      .optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.vertical === 'DOCTOR') {
+      if (!v.medicalRegNumber) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['medicalRegNumber'],
+          message: 'Medical registration number is required',
+        });
+      }
+      if (!v.specialty) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['specialty'],
+          message: 'Specialty is required',
+        });
+      }
+    } else if (!v.rciNumber) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['rciNumber'],
+        message: 'RCI registration number is required',
+      });
+    }
+  });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
@@ -76,6 +119,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const phoneIsPlaceholder = me.phone.startsWith('pending:');
   const willUpdatePhone = phoneIsPlaceholder && input.value.phone !== undefined;
+  const isDoctor = input.value.vertical === 'DOCTOR';
 
   let updated;
   try {
@@ -85,11 +129,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         data: {
           fullName: input.value.fullName,
           email: input.value.email.toLowerCase(),
-          rciNumber: input.value.rciNumber,
           defaultOutputLanguage: input.value.defaultOutputLanguage,
+          vertical: input.value.vertical,
+          // Doctors store a medical reg number + specialty and keep the
+          // auto-provision rciNumber placeholder (unused for their
+          // vertical). Therapists store a real rciNumber.
+          ...(isDoctor
+            ? {
+                medicalRegNumber: input.value.medicalRegNumber,
+                specialty: input.value.specialty,
+              }
+            : { rciNumber: input.value.rciNumber }),
           ...(willUpdatePhone && { phone: input.value.phone }),
           // status stays PENDING_VERIFICATION until an admin marks the
-          // RCI verified (self-attestation gate).
+          // credential verified (self-attestation gate).
           onboardingCompletedAt: new Date(),
         },
       });
@@ -106,7 +159,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             fields: [
               'fullName',
               'email',
-              'rciNumber',
+              'vertical',
+              ...(isDoctor ? ['medicalRegNumber', 'specialty'] : ['rciNumber']),
               'defaultOutputLanguage',
               ...(willUpdatePhone ? ['phone'] : []),
             ],
@@ -124,9 +178,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ? 'email'
           : target === 'rciNumber'
             ? 'RCI number'
-            : target === 'phone'
-              ? 'mobile number'
-              : target;
+            : target === 'medicalRegNumber'
+              ? 'medical registration number'
+              : target === 'phone'
+                ? 'mobile number'
+                : target;
       return NextResponse.json(
         { error: `That ${human} is already used by another account.` },
         { status: 409 },
@@ -145,7 +201,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
   } catch (e) {
-    console.error(`[onboarding] welcome email threw for psy=${updated.id}: ${(e as Error).message}`);
+    console.error(
+      `[onboarding] welcome email threw for psy=${updated.id}: ${(e as Error).message}`,
+    );
   }
 
   return NextResponse.json({ psychologist: toPsychologist(updated) });

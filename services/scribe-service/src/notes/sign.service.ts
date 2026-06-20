@@ -18,7 +18,10 @@ import { TherapyNoteV1Schema } from '@cureocity/contracts';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
-const SIGNABLE_FIELDS: readonly NoteEditField[] = ['subjective', 'objective', 'assessment', 'plan'];
+// NoteEditField now also spans intake + medical-encounter fields (Sprint
+// DV3). The signable SOAP subset is the keys that exist on a TherapyNoteV1.
+type SoapField = 'subjective' | 'objective' | 'assessment' | 'plan';
+const SIGNABLE_FIELDS: readonly SoapField[] = ['subjective', 'objective', 'assessment', 'plan'];
 
 /**
  * SignService — turns a COMPLETED NoteDraft into a signed TherapyNote.
@@ -226,21 +229,23 @@ export class SignService {
   ): void {
     const seen = new Set<NoteEditField>();
     for (const e of edits) {
-      if (!SIGNABLE_FIELDS.includes(e.field)) {
+      if (!(SIGNABLE_FIELDS as readonly NoteEditField[]).includes(e.field)) {
         throw new BadRequestException(`edit.field ${e.field} is not a signable SOAP field`);
       }
       if (seen.has(e.field)) {
         throw new BadRequestException(`Duplicate edit entry for field ${e.field}`);
       }
       seen.add(e.field);
-      if (e.before !== draft[e.field]) {
+      // The guard above guarantees e.field is one of the SOAP fields.
+      const field = e.field as SoapField;
+      if (e.before !== draft[field]) {
         throw new BadRequestException(
-          `edit.before for ${e.field} does not match the current draft text (stale draft?)`,
+          `edit.before for ${field} does not match the current draft text (stale draft?)`,
         );
       }
-      if (e.after !== final[e.field]) {
+      if (e.after !== final[field]) {
         throw new BadRequestException(
-          `edit.after for ${e.field} does not match the submitted note (inconsistent payload)`,
+          `edit.after for ${field} does not match the submitted note (inconsistent payload)`,
         );
       }
     }

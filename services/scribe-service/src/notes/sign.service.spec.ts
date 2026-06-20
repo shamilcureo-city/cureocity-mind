@@ -164,7 +164,8 @@ describe('SignService.sign', () => {
 
     expect(result.id).toBe(NOTE_ID);
     expect(result.signedBy).toBe(PSY_ID);
-    expect(result.content.assessment).toBe(editedNote.assessment);
+    // content is the SignedNoteContent union; this path signs a TREATMENT note.
+    expect((result.content as TherapyNoteV1).assessment).toBe(editedNote.assessment);
     expect(result.edits).toHaveLength(1);
     expect(result.edits[0]?.field).toBe('assessment');
     expect(deps.noteCreate).toHaveBeenCalledWith(

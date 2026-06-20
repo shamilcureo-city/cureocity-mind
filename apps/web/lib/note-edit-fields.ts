@@ -12,7 +12,7 @@ import type { NoteEditField } from '@cureocity/contracts';
  * `signableKindFor` before indexing this table.
  */
 export const SIGNABLE_FIELDS_BY_KIND: Record<
-  'TREATMENT' | 'INTAKE',
+  'TREATMENT' | 'INTAKE' | 'MEDICAL',
   readonly NoteEditField[]
 > = {
   TREATMENT: ['subjective', 'objective', 'assessment', 'plan'],
@@ -26,6 +26,10 @@ export const SIGNABLE_FIELDS_BY_KIND: Record<
     'workingHypothesis',
     'immediatePlan',
   ],
+  // Sprint DV3 — doctor encounter note. The array/object fields (ROS,
+  // physical exam, vitals, linkedEvidence) are frozen at draft; only the
+  // narrative strings are field-level signable.
+  MEDICAL: ['chiefComplaint', 'hpi', 'assessment', 'plan'],
 };
 
 export type SignableKind = keyof typeof SIGNABLE_FIELDS_BY_KIND;
@@ -38,6 +42,10 @@ export type SignableKind = keyof typeof SIGNABLE_FIELDS_BY_KIND;
  */
 export function signableKindFor(
   sessionKind: 'INTAKE' | 'TREATMENT' | 'REVIEW',
+  vertical?: 'THERAPIST' | 'DOCTOR',
 ): SignableKind {
+  // Sprint DV3 — a doctor's session signs a medical encounter note,
+  // regardless of the (therapy-shaped) session.kind.
+  if (vertical === 'DOCTOR') return 'MEDICAL';
   return sessionKind === 'INTAKE' ? 'INTAKE' : 'TREATMENT';
 }

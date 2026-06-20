@@ -93,6 +93,12 @@ function Nav() {
               {l.label}
             </a>
           ))}
+          <Link
+            href="/for-doctors"
+            className="text-sm text-[var(--color-ink-2)] transition-colors hover:text-[var(--color-ink)]"
+          >
+            For doctors
+          </Link>
         </div>
         <div className="flex items-center gap-2">
           <ButtonLink href="/login" variant="ghost" size="sm" className="hidden sm:inline-flex">
@@ -430,8 +436,8 @@ function FivePasses() {
                   The arc across sessions
                 </h3>
                 <p className="mt-3 text-[15px] leading-relaxed text-white/85">
-                  Journeys, reliable-change verdicts, and a progress report your client can
-                  actually read.
+                  Journeys, reliable-change verdicts, and a progress report your client can actually
+                  read.
                 </p>
               </div>
               <span className="mt-6 inline-flex items-center gap-2 text-sm font-medium">
@@ -688,8 +694,8 @@ function ShareSection() {
           />
           <Reveal delay={150}>
             <p className="mt-6 text-[15px] leading-relaxed text-[var(--color-ink-2)]">
-              The portal is a clean page, not an app your client has to install. They open the
-              link, read the plan, fill the check-in. You see it before the next session.
+              The portal is a clean page, not an app your client has to install. They open the link,
+              read the plan, fill the check-in. You see it before the next session.
             </p>
           </Reveal>
         </div>

@@ -9,6 +9,8 @@ import {
 import {
   INTAKE_NOTE_PROMPT_VERSION,
   INTAKE_NOTE_SYSTEM_PROMPT_V1,
+  MEDICAL_NOTE_PROMPT_VERSION,
+  MEDICAL_NOTE_SYSTEM_PROMPT_V2,
   THERAPY_NOTE_PROMPT_VERSION,
   THERAPY_NOTE_SYSTEM_PROMPT_V1,
 } from '../prompts';
@@ -50,10 +52,19 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
   async run(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
     const userMessage = buildUserMessage(input);
-    // Sprint 19 — kind drives prompt + parser branch.
+    // Sprint 19 / DV3 — vertical + kind drive the prompt + parser branch.
+    const isDoctor = input.vertical === 'DOCTOR';
     const isIntake = input.kind === 'INTAKE';
-    const systemPrompt = isIntake ? INTAKE_NOTE_SYSTEM_PROMPT_V1 : THERAPY_NOTE_SYSTEM_PROMPT_V1;
-    const promptVersion = isIntake ? INTAKE_NOTE_PROMPT_VERSION : THERAPY_NOTE_PROMPT_VERSION;
+    const systemPrompt = isDoctor
+      ? MEDICAL_NOTE_SYSTEM_PROMPT_V2
+      : isIntake
+        ? INTAKE_NOTE_SYSTEM_PROMPT_V1
+        : THERAPY_NOTE_SYSTEM_PROMPT_V1;
+    const promptVersion = isDoctor
+      ? MEDICAL_NOTE_PROMPT_VERSION
+      : isIntake
+        ? INTAKE_NOTE_PROMPT_VERSION
+        : THERAPY_NOTE_PROMPT_VERSION;
 
     try {
       const res = await this.ai.models.generateContent({
@@ -67,8 +78,14 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+            {
+              category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+              threshold: HarmBlockThreshold.OFF,
+            },
+            {
+              category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+              threshold: HarmBlockThreshold.OFF,
+            },
           ],
         },
       });
@@ -85,9 +102,14 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
       // Pass 2 prompts ask Gemini to produce the body object directly
       // (no wrapper). Wrap here with the discriminator so downstream
       // consumers see the same shape as the mock backend.
-      const output: Pass2Output = isIntake
-        ? Pass2OutputSchema.parse({ kind: 'INTAKE', intakeNote: parsed })
-        : Pass2OutputSchema.parse({ kind: input.kind, therapyNote: parsed });
+      // Sprint DV5 — the medical prompt returns { encounterNote,
+      // medications[], orders[] }. Stay tolerant of a flat note (older
+      // shape) by detecting the wrapper key.
+      const output: Pass2Output = isDoctor
+        ? Pass2OutputSchema.parse(buildMedicalOutput(parsed))
+        : isIntake
+          ? Pass2OutputSchema.parse({ kind: 'INTAKE', intakeNote: parsed })
+          : Pass2OutputSchema.parse({ kind: input.kind, therapyNote: parsed });
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
@@ -148,8 +170,32 @@ function buildUserMessage(input: Pass2Input): string {
       .map((s) => `[${s.speaker} ${s.startMs}-${s.endMs}ms] ${s.text}`)
       .join('\n'),
     '',
-    input.kind === 'INTAKE'
-      ? 'Produce IntakeNoteV1 JSON only.'
-      : 'Produce TherapyNoteV1 JSON only.',
+    input.vertical === 'DOCTOR'
+      ? 'Produce { encounterNote, medications[], orders[] } JSON only.'
+      : input.kind === 'INTAKE'
+        ? 'Produce IntakeNoteV1 JSON only.'
+        : 'Produce TherapyNoteV1 JSON only.',
   ].join('\n');
+}
+
+/**
+ * Sprint DV5 — normalise the medical Pass-2 response to the MEDICAL
+ * discriminated-union arm. The V2 prompt returns
+ * `{ encounterNote, medications[], orders[] }`; tolerate a flat note
+ * (no wrapper) so a model that ignores the envelope still yields a note.
+ */
+function buildMedicalOutput(parsed: unknown): {
+  kind: 'MEDICAL';
+  encounterNote: unknown;
+  medications: unknown[];
+  orders: unknown[];
+} {
+  const obj = (parsed ?? {}) as Record<string, unknown>;
+  const hasWrapper = obj && typeof obj === 'object' && 'encounterNote' in obj;
+  return {
+    kind: 'MEDICAL',
+    encounterNote: hasWrapper ? obj['encounterNote'] : parsed,
+    medications: hasWrapper && Array.isArray(obj['medications']) ? obj['medications'] : [],
+    orders: hasWrapper && Array.isArray(obj['orders']) ? obj['orders'] : [],
+  };
 }

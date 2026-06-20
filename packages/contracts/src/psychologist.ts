@@ -12,6 +12,12 @@ export const PsychologistStatusSchema = z.enum([
 export const PsychologistRoleSchema = z.enum(['THERAPIST', 'ADMIN']);
 export type PsychologistRole = z.infer<typeof PsychologistRoleSchema>;
 
+/// Sprint DV1 — product vertical discriminator. One system, two faces:
+/// THERAPIST (psychotherapy) vs DOCTOR (super-specialty OPD scribe).
+/// See docs/DOCTOR_VERTICAL.md.
+export const PractitionerVerticalSchema = z.enum(['THERAPIST', 'DOCTOR']);
+export type PractitionerVertical = z.infer<typeof PractitionerVerticalSchema>;
+
 export const RciNumberSchema = z
   .string()
   .regex(/^[A-Z]\d+$/, 'RCI number format: leading letter + digits (e.g. A12345)');
@@ -75,6 +81,14 @@ export const PsychologistSchema = z.object({
   rciVerifiedAt: IsoDateTimeSchema.nullable(),
   status: PsychologistStatusSchema,
   role: PsychologistRoleSchema,
+
+  /// Sprint DV1 — product vertical. Defaults to THERAPIST so every
+  /// pre-DV1 row + caller still validates without supplying it.
+  vertical: PractitionerVerticalSchema.default('THERAPIST'),
+  /// Sprint DV1 — doctor credential; NULL for therapists.
+  medicalRegNumber: z.string().nullable().default(null),
+  /// Sprint DV1 — doctor specialty; NULL for therapists.
+  specialty: z.string().nullable().default(null),
 
   // Directory profile fields (Sprint 12-era, surfaced via PATCH /me in S18).
   headline: z.string().nullable(),
