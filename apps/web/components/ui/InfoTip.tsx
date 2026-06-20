@@ -51,4 +51,3 @@ export function InfoTip({ children, hint }: Props) {
     </span>
   );
 }
-

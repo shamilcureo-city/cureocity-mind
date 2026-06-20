@@ -23,6 +23,7 @@ export function toClient(row: ClientRow): Client {
     preferredLanguage: row.preferredLanguage,
     spokenLanguages: row.spokenLanguages,
     status: row.status,
+    isDemo: row.isDemo,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };

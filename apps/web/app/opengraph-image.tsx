@@ -21,97 +21,103 @@ export default function OpengraphImage() {
   const accent = '#2d5f4d';
   const cream = '#faf7f2';
   return new ImageResponse(
-    (
+    <div
+      style={{
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        background: accent,
+        padding: '72px 80px',
+        color: cream,
+        fontFamily: 'sans-serif',
+      }}
+    >
+      {/* Soft glow accents */}
       <div
         style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          background: accent,
-          padding: '72px 80px',
-          color: cream,
-          fontFamily: 'sans-serif',
+          position: 'absolute',
+          top: -160,
+          right: -120,
+          width: 520,
+          height: 520,
+          borderRadius: 9999,
+          background: 'rgba(158,197,178,0.25)',
         }}
-      >
-        {/* Soft glow accents */}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          bottom: -200,
+          left: -100,
+          width: 460,
+          height: 460,
+          borderRadius: 9999,
+          background: 'rgba(234,217,188,0.16)',
+        }}
+      />
+
+      {/* Wordmark */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
         <div
           style={{
-            position: 'absolute',
-            top: -160,
-            right: -120,
-            width: 520,
-            height: 520,
-            borderRadius: 9999,
-            background: 'rgba(158,197,178,0.25)',
+            width: 56,
+            height: 56,
+            borderRadius: 16,
+            background: cream,
+            color: accent,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 26,
+            fontWeight: 700,
           }}
-        />
+        >
+          cm
+        </div>
+        <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: -0.5 }}>Cureocity Mind</div>
+      </div>
+
+      {/* Headline */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
         <div
           style={{
-            position: 'absolute',
-            bottom: -200,
-            left: -100,
-            width: 460,
-            height: 460,
-            borderRadius: 9999,
-            background: 'rgba(234,217,188,0.16)',
+            display: 'flex',
+            flexDirection: 'column',
+            fontSize: 76,
+            fontWeight: 700,
+            lineHeight: 1.05,
+            letterSpacing: -2,
           }}
-        />
-
-        {/* Wordmark */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-          <div
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 16,
-              background: cream,
-              color: accent,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 26,
-              fontWeight: 700,
-            }}
-          >
-            cm
-          </div>
-          <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: -0.5 }}>Cureocity Mind</div>
+        >
+          <span>Hold the session.</span>
+          <span>The paperwork writes itself.</span>
         </div>
-
-        {/* Headline */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              fontSize: 76,
-              fontWeight: 700,
-              lineHeight: 1.05,
-              letterSpacing: -2,
-            }}
-          >
-            <span>Hold the session.</span>
-            <span>The paperwork writes itself.</span>
-          </div>
-          <div style={{ fontSize: 30, color: 'rgba(250,247,242,0.82)', maxWidth: 900 }}>
-            The clinical co-pilot for Indian psychotherapists — notes, briefs, and outcomes in
-            the languages your clients actually speak.
-          </div>
-        </div>
-
-        {/* Language row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 26, fontSize: 30, color: 'rgba(250,247,242,0.9)' }}>
-          {['English', 'हिन्दी', 'മലയാളം', 'தமிழ்', 'বাংলা'].map((l, i) => (
-            <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
-              {i > 0 && <span style={{ color: 'rgba(250,247,242,0.4)' }}>·</span>}
-              <span>{l}</span>
-            </div>
-          ))}
+        <div style={{ fontSize: 30, color: 'rgba(250,247,242,0.82)', maxWidth: 900 }}>
+          The clinical co-pilot for Indian psychotherapists — notes, briefs, and outcomes in the
+          languages your clients actually speak.
         </div>
       </div>
-    ),
+
+      {/* Language row */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 26,
+          fontSize: 30,
+          color: 'rgba(250,247,242,0.9)',
+        }}
+      >
+        {['English', 'हिन्दी', 'മലയാളം', 'தமிழ்', 'বাংলা'].map((l, i) => (
+          <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 26 }}>
+            {i > 0 && <span style={{ color: 'rgba(250,247,242,0.4)' }}>·</span>}
+            <span>{l}</span>
+          </div>
+        ))}
+      </div>
+    </div>,
     size,
   );
 }

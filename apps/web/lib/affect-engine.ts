@@ -15,9 +15,7 @@ import { prisma } from './prisma';
  */
 
 export const AFFECT_MIN_SESSIONS = Number(process.env['AFFECT_BASELINE_MIN_SESSIONS'] ?? 4);
-export const AFFECT_WINDOW_SESSIONS = Number(
-  process.env['AFFECT_BASELINE_WINDOW_SESSIONS'] ?? 10,
-);
+export const AFFECT_WINDOW_SESSIONS = Number(process.env['AFFECT_BASELINE_WINDOW_SESSIONS'] ?? 10);
 export const AFFECT_SIGMA_THRESHOLD = Number(process.env['AFFECT_DEVIATION_SIGMA'] ?? 1.5);
 
 export async function loadSessionPoints(clientId: string): Promise<AffectSessionPoint[]> {
@@ -43,10 +41,7 @@ export async function loadSessionPoints(clientId: string): Promise<AffectSession
   return points;
 }
 
-export function computeBaseline(
-  clientId: string,
-  points: AffectSessionPoint[],
-): AffectBaseline {
+export function computeBaseline(clientId: string, points: AffectSessionPoint[]): AffectBaseline {
   const now = new Date().toISOString();
   if (points.length < AFFECT_MIN_SESSIONS) {
     return {
@@ -78,11 +73,7 @@ export function findDeviations(
   baseline: AffectBaseline,
   points: AffectSessionPoint[],
 ): AffectDeviation[] {
-  if (
-    baseline.status !== 'ESTABLISHED' ||
-    baseline.valence === null ||
-    baseline.arousal === null
-  ) {
+  if (baseline.status !== 'ESTABLISHED' || baseline.valence === null || baseline.arousal === null) {
     return [];
   }
   const out: AffectDeviation[] = [];

@@ -1,11 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import type {
-  TherapyScript,
-  TherapyScriptStep,
-  TherapyScriptV1,
-} from '@cureocity/contracts';
+import type { TherapyScript, TherapyScriptStep, TherapyScriptV1 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -72,8 +68,11 @@ export function TherapyLibrary({
           `/api/v1/clients/${clientId}/therapy-scripts?${params.toString()}`,
           { cache: 'no-store' },
         );
-        const data = (await res.json().catch(() => ({}))) as
-          | { script?: TherapyScript; source?: 'cache' | 'fresh'; error?: string };
+        const data = (await res.json().catch(() => ({}))) as {
+          script?: TherapyScript;
+          source?: 'cache' | 'fresh';
+          error?: string;
+        };
         if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
         if (!data.script) throw new Error('Empty response');
         setScriptData({ script: data.script, source: data.source ?? 'fresh' });
@@ -154,9 +153,7 @@ export function TherapyLibrary({
               ← back to library
             </button>
           </div>
-          {loading && (
-            <p className="mt-4 text-sm text-[var(--color-ink-3)]">Loading script…</p>
-          )}
+          {loading && <p className="mt-4 text-sm text-[var(--color-ink-3)]">Loading script…</p>}
           {error && (
             <div className="mt-4 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]">
               {error}
@@ -304,7 +301,11 @@ function ScriptPlayer({ script, source, onRefresh, refreshing, onShare }: Script
         </div>
       </header>
 
-      <ScriptBlock title="Opening (first 2-3 minutes)" text={script.openingScript} onSpeak={speak} />
+      <ScriptBlock
+        title="Opening (first 2-3 minutes)"
+        text={script.openingScript}
+        onSpeak={speak}
+      />
 
       <section>
         <h4 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Main exercise</h4>

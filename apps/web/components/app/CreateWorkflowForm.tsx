@@ -125,7 +125,9 @@ export function CreateWorkflowForm({ clientId, scribeBase = '/api/v1', onCreated
         <Textarea
           id="wf-goals"
           rows={5}
-          placeholder={'Reduce panic episodes from 4/week to 1/week\nReturn to work full-time\nRebuild sleep schedule'}
+          placeholder={
+            'Reduce panic episodes from 4/week to 1/week\nReturn to work full-time\nRebuild sleep schedule'
+          }
           value={goalsText}
           onChange={(e) => setGoalsText(e.target.value)}
         />

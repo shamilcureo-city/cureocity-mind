@@ -39,13 +39,7 @@ export function TranscriptTab({ data }: { data: TranscriptPanelData }) {
     );
   }
   if (data.status === 'FAILED' && data.errorMessage) {
-    return (
-      <EmptyState
-        title="Pass 1 failed"
-        body={data.errorMessage}
-        tone="warn"
-      />
-    );
+    return <EmptyState title="Pass 1 failed" body={data.errorMessage} tone="warn" />;
   }
   if (!data.segments || data.segments.length === 0) {
     return (

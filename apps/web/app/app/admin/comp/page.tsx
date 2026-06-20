@@ -26,8 +26,8 @@ export default async function AdminCompPage() {
         </p>
         <h1 className="mt-2 font-serif text-3xl">Comp an account</h1>
         <p className="mt-2 max-w-xl text-sm text-[var(--color-ink-2)]">
-          Bypass Razorpay and grant a therapist a paid tier for a fixed window. Every comp writes
-          a <code className="rounded bg-[var(--color-surface-soft)] px-1 text-xs">PLAN_UPGRADED</code>{' '}
+          Bypass Razorpay and grant a therapist a paid tier for a fixed window. Every comp writes a{' '}
+          <code className="rounded bg-[var(--color-surface-soft)] px-1 text-xs">PLAN_UPGRADED</code>{' '}
           audit row tagged{' '}
           <code className="rounded bg-[var(--color-surface-soft)] px-1 text-xs">comp:true</code> so
           the funnel dashboard&rsquo;s MRR card can distinguish comped accounts from real revenue.

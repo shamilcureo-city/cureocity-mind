@@ -17,9 +17,7 @@ interface CompResult {
   fullName: string;
   email: string;
   phone: string;
-  before:
-    | { plan: string; status: string; paidThroughAt: string | null }
-    | null;
+  before: { plan: string; status: string; paidThroughAt: string | null } | null;
   after: { plan: string; status: string; paidThroughAt: string };
 }
 
@@ -66,7 +64,10 @@ export function CompForm() {
       <Card className="p-6">
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="comp-phone" hint="E.164 — usually +91 + 10 digits for Indian therapists">
+            <Label
+              htmlFor="comp-phone"
+              hint="E.164 — usually +91 + 10 digits for Indian therapists"
+            >
               Phone
             </Label>
             <Input

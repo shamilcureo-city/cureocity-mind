@@ -146,7 +146,9 @@ export async function GET(
       targetId: clientId,
       metadata: {
         ...auditMetadataFromRequest(req),
-        ...(query.value.instrumentKey !== undefined && { instrumentKey: query.value.instrumentKey }),
+        ...(query.value.instrumentKey !== undefined && {
+          instrumentKey: query.value.instrumentKey,
+        }),
         rowCount: rows.length,
       },
     });

@@ -31,7 +31,9 @@ export default async function ClientDetailPage({ params }: PageProps) {
         <div>
           <h1 className="font-serif text-4xl">{c.fullName}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-[var(--color-ink-2)]">
-            <Badge tone={c.status === 'ACTIVE' ? 'accent' : 'muted'}>{c.status.toLowerCase()}</Badge>
+            <Badge tone={c.status === 'ACTIVE' ? 'accent' : 'muted'}>
+              {c.status.toLowerCase()}
+            </Badge>
             <span>{c.contactPhone}</span>
             {c.contactEmail && (
               <>
@@ -61,16 +63,11 @@ export default async function ClientDetailPage({ params }: PageProps) {
               Sessions
             </h2>
             {c.sessions.length === 0 ? (
-              <p className="mt-3 text-sm text-[var(--color-ink-3)]">
-                No sessions scheduled yet.
-              </p>
+              <p className="mt-3 text-sm text-[var(--color-ink-3)]">No sessions scheduled yet.</p>
             ) : (
               <ul className="mt-4 divide-y divide-[var(--color-line-soft)]">
                 {c.sessions.map((s) => (
-                  <li
-                    key={s.id}
-                    className="flex items-center justify-between gap-3 py-3 text-sm"
-                  >
+                  <li key={s.id} className="flex items-center justify-between gap-3 py-3 text-sm">
                     <div>
                       <p className="font-medium">{s.modality}</p>
                       <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">

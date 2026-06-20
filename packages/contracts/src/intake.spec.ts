@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  InitialAssessmentBriefV1Schema,
-  type InitialAssessmentBriefV1,
-} from './clinical';
+import { InitialAssessmentBriefV1Schema, type InitialAssessmentBriefV1 } from './clinical';
 import { IntakeNoteV1Schema, type IntakeNoteV1 } from './note';
 import { SessionKindSchema, SessionModalitySchema } from './client';
 import { CreateSessionInputSchema } from './session';
@@ -95,15 +92,11 @@ describe('IntakeNoteV1Schema', () => {
   });
 
   it('rejects an empty workingHypothesis', () => {
-    expect(
-      IntakeNoteV1Schema.safeParse({ ...valid, workingHypothesis: '' }).success,
-    ).toBe(false);
+    expect(IntakeNoteV1Schema.safeParse({ ...valid, workingHypothesis: '' }).success).toBe(false);
   });
 
   it('rejects an empty mentalStatusExam', () => {
-    expect(
-      IntakeNoteV1Schema.safeParse({ ...valid, mentalStatusExam: '' }).success,
-    ).toBe(false);
+    expect(IntakeNoteV1Schema.safeParse({ ...valid, mentalStatusExam: '' }).success).toBe(false);
   });
 
   // Regression: Gemini 2.5 Pro sometimes ignores the prompt's "single
@@ -157,7 +150,11 @@ describe('InitialAssessmentBriefV1Schema', () => {
         icd11Label: 'Panic disorder',
         confidence: 0.45,
         supportingEvidence: [
-          { quote: 'I just feel my heart racing out of nowhere.', speaker: 'client', startMs: 1200 },
+          {
+            quote: 'I just feel my heart racing out of nowhere.',
+            speaker: 'client',
+            startMs: 1200,
+          },
         ],
         gapsToFill: ['Discrete attack frequency', 'Avoidance behaviour mapped'],
       },
@@ -192,9 +189,7 @@ describe('InitialAssessmentBriefV1Schema', () => {
     expect(
       InitialAssessmentBriefV1Schema.safeParse({
         ...valid,
-        differential: [
-          { ...valid.differential[0]!, confidence: 0.95 },
-        ],
+        differential: [{ ...valid.differential[0]!, confidence: 0.95 }],
       }).success,
     ).toBe(true);
   });

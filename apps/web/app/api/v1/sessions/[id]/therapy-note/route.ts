@@ -1,9 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import {
-  IntakeNoteV1Schema,
-  TherapyNoteV1Schema,
-  type TherapyNote,
-} from '@cureocity/contracts';
+import { IntakeNoteV1Schema, TherapyNoteV1Schema, type TherapyNote } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 

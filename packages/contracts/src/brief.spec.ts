@@ -36,9 +36,7 @@ describe('PreSessionBriefV1Schema', () => {
   });
 
   it('rejects an empty contextLine', () => {
-    expect(
-      PreSessionBriefV1Schema.safeParse({ ...valid, contextLine: '' }).success,
-    ).toBe(false);
+    expect(PreSessionBriefV1Schema.safeParse({ ...valid, contextLine: '' }).success).toBe(false);
   });
 
   it('accepts a first-session brief (empty recap, no homework, no instruments)', () => {

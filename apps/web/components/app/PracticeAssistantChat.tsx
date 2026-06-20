@@ -99,8 +99,8 @@ export function PracticeAssistantChat() {
         {messages.length === 0 && (
           <div className="grid place-items-center pt-8 text-center">
             <p className="max-w-md text-sm text-[var(--color-ink-2)]">
-              Ask anything about your practice. The data the assistant sees is your roster,
-              recent sessions, active workflows, and upcoming bookings.
+              Ask anything about your practice. The data the assistant sees is your roster, recent
+              sessions, active workflows, and upcoming bookings.
             </p>
             <div className="mt-6 grid w-full max-w-lg gap-2">
               {SUGGESTED_QUESTIONS.map((q) => (
@@ -119,10 +119,7 @@ export function PracticeAssistantChat() {
         )}
 
         {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-          >
+          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                 m.role === 'user'
@@ -150,10 +147,7 @@ export function PracticeAssistantChat() {
         )}
       </div>
 
-      <form
-        onSubmit={onSubmit}
-        className="border-t border-[var(--color-line-soft)] px-6 py-4"
-      >
+      <form onSubmit={onSubmit} className="border-t border-[var(--color-line-soft)] px-6 py-4">
         <div className="flex items-center gap-2 rounded-2xl border border-[var(--color-line)] bg-white p-2">
           <input
             type="text"
@@ -173,8 +167,8 @@ export function PracticeAssistantChat() {
           </button>
         </div>
         <p className="mt-2 text-[11px] text-[var(--color-ink-3)]">
-          The assistant only sees your own clinical data. Conversations are not persisted
-          across page reloads.
+          The assistant only sees your own clinical data. Conversations are not persisted across
+          page reloads.
         </p>
       </form>
     </Card>

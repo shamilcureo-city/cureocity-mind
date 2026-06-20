@@ -1,8 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import {
-  CreateEmdrTargetInputSchema,
-  type EmdrTarget,
-} from '@cureocity/contracts';
+import { CreateEmdrTargetInputSchema, type EmdrTarget } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
@@ -60,7 +57,9 @@ export async function POST(
       await tx.modalityState.update({
         where: { id: state.id },
         data: {
-          state: { ...prevState, hasTargets: true } as unknown as Parameters<typeof tx.modalityState.update>[0]['data']['state'],
+          state: { ...prevState, hasTargets: true } as unknown as Parameters<
+            typeof tx.modalityState.update
+          >[0]['data']['state'],
         },
       });
     }

@@ -44,7 +44,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const durationMs = Number.parseInt(durationMsStr, 10);
   const sampleRate = Number.parseInt(sampleRateStr, 10);
   if (!Number.isFinite(chunkIndex) || chunkIndex < 0) {
-    return NextResponse.json({ error: 'X-Chunk-Index must be a non-negative integer' }, { status: 400 });
+    return NextResponse.json(
+      { error: 'X-Chunk-Index must be a non-negative integer' },
+      { status: 400 },
+    );
   }
   if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 60_000) {
     return NextResponse.json({ error: 'X-Duration-Ms out of range' }, { status: 400 });

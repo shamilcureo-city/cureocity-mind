@@ -61,19 +61,10 @@ export async function PATCH(
     return NextResponse.json({ error: 'Already REJECTED' }, { status: 409 });
   }
   if (body.value.status === 'APPROVED' && existing.status !== 'PENDING') {
-    return NextResponse.json(
-      { error: `Cannot APPROVE from ${existing.status}` },
-      { status: 422 },
-    );
+    return NextResponse.json({ error: `Cannot APPROVE from ${existing.status}` }, { status: 422 });
   }
-  if (
-    body.value.status === 'REJECTED' &&
-    existing.status !== 'PENDING'
-  ) {
-    return NextResponse.json(
-      { error: `Cannot REJECT from ${existing.status}` },
-      { status: 422 },
-    );
+  if (body.value.status === 'REJECTED' && existing.status !== 'PENDING') {
+    return NextResponse.json({ error: `Cannot REJECT from ${existing.status}` }, { status: 422 });
   }
 
   const now = new Date();

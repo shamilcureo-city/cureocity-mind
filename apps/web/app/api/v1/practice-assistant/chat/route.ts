@@ -303,7 +303,9 @@ async function buildContext(psychologistId: string): Promise<string> {
   });
   if (highRisk.length > 0) {
     lines.push('');
-    lines.push(`High-risk recent sessions: ${highRisk.map((s) => redactName(s.client.fullName)).join(', ')}`);
+    lines.push(
+      `High-risk recent sessions: ${highRisk.map((s) => redactName(s.client.fullName)).join(', ')}`,
+    );
   }
 
   return lines.join('\n');

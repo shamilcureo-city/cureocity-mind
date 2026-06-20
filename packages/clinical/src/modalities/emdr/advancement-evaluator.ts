@@ -155,7 +155,9 @@ function computeSignals(input: EmdrAdvancementEvaluatorInput): EmdrAdvancementSi
     currentPhase !== null && sessionsInCurrentPhase >= EMDR_MIN_SESSIONS_BY_PHASE[currentPhase];
 
   const goalAchievementRate =
-    input.goals.length === 0 ? 0 : input.goals.filter((g) => g.achieved).length / input.goals.length;
+    input.goals.length === 0
+      ? 0
+      : input.goals.filter((g) => g.achieved).length / input.goals.length;
 
   const highRiskRecent = input.recentNotes
     .slice(0, 3)
@@ -187,11 +189,7 @@ function computeSignals(input: EmdrAdvancementEvaluatorInput): EmdrAdvancementSi
   };
 }
 
-function rationaleFor(
-  from: EmdrPhase,
-  to: EmdrPhase,
-  signals: EmdrAdvancementSignals,
-): string {
+function rationaleFor(from: EmdrPhase, to: EmdrPhase, signals: EmdrAdvancementSignals): string {
   const bits: string[] = [];
   if (signals.phaseHintsAgreeAdvance) bits.push('recent session note suggested advancement');
   if (signals.goalAchievementRate >= 0.6) {

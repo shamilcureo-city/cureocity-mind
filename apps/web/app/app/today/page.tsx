@@ -64,8 +64,7 @@ export default async function TodayPage() {
   );
   const doneToday = todayRows.filter((s) => s.status === 'COMPLETED');
   const otherToday = todayRows.filter(
-    (s) =>
-      s.status === 'NO_SHOW' || s.status === 'CANCELLED' || s.status === 'RESCHEDULED',
+    (s) => s.status === 'NO_SHOW' || s.status === 'CANCELLED' || s.status === 'RESCHEDULED',
   );
 
   return (
@@ -228,8 +227,7 @@ function toCardProps(row: {
 function summary(upcoming: number, done: number): string {
   if (upcoming === 0 && done === 0) return 'No sessions on the calendar.';
   const parts: string[] = [];
-  if (upcoming > 0)
-    parts.push(`${upcoming} session${upcoming === 1 ? '' : 's'} coming up`);
+  if (upcoming > 0) parts.push(`${upcoming} session${upcoming === 1 ? '' : 's'} coming up`);
   if (done > 0) parts.push(`${done} done`);
   return parts.join(' · ');
 }

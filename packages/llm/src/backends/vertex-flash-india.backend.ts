@@ -114,8 +114,14 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+            {
+              category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+              threshold: HarmBlockThreshold.OFF,
+            },
+            {
+              category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+              threshold: HarmBlockThreshold.OFF,
+            },
           ],
         },
       });
@@ -212,10 +218,8 @@ function isTransientVertexError(e: unknown): boolean {
   const message = (e as { message?: string } | null)?.message ?? '';
   const status = (e as { status?: number } | null)?.status;
   if (typeof status === 'number' && status >= 500 && status < 600) return true;
-  return (
-    /DEADLINE_EXCEEDED|UNAVAILABLE|INTERNAL|timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|fetch failed/i.test(
-      message,
-    )
+  return /DEADLINE_EXCEEDED|UNAVAILABLE|INTERNAL|timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|fetch failed/i.test(
+    message,
   );
 }
 

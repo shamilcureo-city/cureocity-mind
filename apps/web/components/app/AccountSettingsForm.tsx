@@ -115,8 +115,10 @@ export function AccountSettingsForm({ initial }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = (await res.json().catch(() => ({}))) as
-        | { psychologist?: Psychologist; error?: string };
+      const data = (await res.json().catch(() => ({}))) as {
+        psychologist?: Psychologist;
+        error?: string;
+      };
       if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
       if (data.psychologist) {
         setOriginal(data.psychologist);
@@ -135,8 +137,8 @@ export function AccountSettingsForm({ initial }: Props) {
       <header className="mb-4">
         <h2 className="font-serif text-2xl">Account</h2>
         <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-          What clients see and how you appear in the directory. Email, phone, and RCI number
-          are managed separately for verification.
+          What clients see and how you appear in the directory. Email, phone, and RCI number are
+          managed separately for verification.
         </p>
       </header>
 
@@ -295,7 +297,9 @@ function Field({
       <label className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
         {label}
         {required && <span className="ml-1 text-[var(--color-accent)]">*</span>}
-        {hint && <span className="ml-2 normal-case text-[10px] text-[var(--color-ink-3)]">{hint}</span>}
+        {hint && (
+          <span className="ml-2 normal-case text-[10px] text-[var(--color-ink-3)]">{hint}</span>
+        )}
       </label>
       <div className="mt-1">{children}</div>
     </div>

@@ -97,14 +97,11 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
       if (!workflow) return;
       setError(null);
       try {
-        const res = await fetch(
-          `${scribeBase}/workflows/${workflow.id}/goals/${goalId}`,
-          {
-            method: 'PATCH',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ achieved }),
-          },
-        );
+        const res = await fetch(`${scribeBase}/workflows/${workflow.id}/goals/${goalId}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ achieved }),
+        });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -206,9 +203,7 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
   if (loading) {
     return (
       <section className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
-        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Workflow
-        </h3>
+        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Workflow</h3>
         <p className="mt-3 text-sm text-[var(--color-ink-3)]">Loading workflow…</p>
       </section>
     );
@@ -217,13 +212,11 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
   if (!workflow) {
     return (
       <section className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
-        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Workflow
-        </h3>
+        <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Workflow</h3>
         <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-          No clinical workflow has been started for this client yet. Workflows track CBT or
-          EMDR phase progression, goal achievement, and exercise prescription. Starting one
-          enables the advancement-suggestion engine on subsequent sessions.
+          No clinical workflow has been started for this client yet. Workflows track CBT or EMDR
+          phase progression, goal achievement, and exercise prescription. Starting one enables the
+          advancement-suggestion engine on subsequent sessions.
         </p>
         <CreateWorkflowForm
           clientId={clientId}
@@ -251,12 +244,13 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         </header>
         <p className="mt-3 font-serif text-xl">{headline}</p>
         <p className="mt-2 text-xs text-[var(--color-ink-3)]">
-          Started {new Date(workflow.startedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
+          Started{' '}
+          {new Date(workflow.startedAt).toLocaleDateString('en-IN', { dateStyle: 'medium' })}
           {workflow.goals.length > 0 && (
             <>
               {' · '}
-              {workflow.goals.filter((g) => g.achieved).length} / {workflow.goals.length}{' '}
-              goals achieved
+              {workflow.goals.filter((g) => g.achieved).length} / {workflow.goals.length} goals
+              achieved
             </>
           )}
         </p>
@@ -346,7 +340,8 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
                 className="flex items-baseline justify-between gap-3 border-b border-[var(--color-line-soft)] pb-2 last:border-b-0 last:pb-0"
               >
                 <span className="text-sm text-[var(--color-ink)]">
-                  {a.customDescription ?? (a.exerciseId ? humanExerciseId(a.exerciseId) : 'Homework')}
+                  {a.customDescription ??
+                    (a.exerciseId ? humanExerciseId(a.exerciseId) : 'Homework')}
                 </span>
                 <span className="flex items-center gap-3 text-xs text-[var(--color-ink-3)]">
                   <Badge tone="muted">{a.status.replaceAll('_', ' ').toLowerCase()}</Badge>

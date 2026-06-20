@@ -12,8 +12,8 @@ export default function PracticeAssistantPage() {
         </p>
         <h1 className="mt-2 font-serif text-3xl">Practice Assistant</h1>
         <p className="mt-2 max-w-xl text-sm text-[var(--color-ink-2)]">
-          A private AI assistant grounded in your practice. Ask about your roster, recent
-          sessions, or how to prepare for what's next.
+          A private AI assistant grounded in your practice. Ask about your roster, recent sessions,
+          or how to prepare for what's next.
         </p>
       </header>
       <PracticeAssistantChat />

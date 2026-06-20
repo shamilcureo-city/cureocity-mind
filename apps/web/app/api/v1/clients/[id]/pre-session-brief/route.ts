@@ -269,9 +269,15 @@ function extractLastSummary(
   const subjective = typeof note['subjective'] === 'string' ? (note['subjective'] as string) : '';
   const assessment = typeof note['assessment'] === 'string' ? (note['assessment'] as string) : '';
   const plan = typeof note['plan'] === 'string' ? (note['plan'] as string) : '';
-  return [subjective && `S: ${truncate(subjective, 300)}`, assessment && `A: ${truncate(assessment, 300)}`, plan && `P: ${truncate(plan, 300)}`]
-    .filter(Boolean)
-    .join(' | ') || null;
+  return (
+    [
+      subjective && `S: ${truncate(subjective, 300)}`,
+      assessment && `A: ${truncate(assessment, 300)}`,
+      plan && `P: ${truncate(plan, 300)}`,
+    ]
+      .filter(Boolean)
+      .join(' | ') || null
+  );
 }
 
 function truncate(s: string, max: number): string {

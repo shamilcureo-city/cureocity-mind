@@ -38,9 +38,7 @@ export function ErasureQueueClient() {
       // ALL → no filter param → returns PENDING per default; pass all
       // statuses explicitly.
       if (filter === 'ALL') {
-        ['PENDING', 'APPROVED', 'REJECTED', 'FULFILLED'].forEach((s) =>
-          params.append('status', s),
-        );
+        ['PENDING', 'APPROVED', 'REJECTED', 'FULFILLED'].forEach((s) => params.append('status', s));
       }
       const res = await fetch(`/api/v1/admin/erasure-queue?${params}`);
       if (!res.ok) {

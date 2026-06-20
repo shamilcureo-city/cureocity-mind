@@ -1,8 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import {
-  CreateInviteCodeInputSchema,
-  type ListInviteCodesResponse,
-} from '@cureocity/contracts';
+import { CreateInviteCodeInputSchema, type ListInviteCodesResponse } from '@cureocity/contracts';
 import { requireAdmin } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { mintInviteCode, toInviteCode } from '@/lib/invite';

@@ -18,7 +18,10 @@ export default async function DashboardHomePage() {
     );
   }
 
-  const firstName = snap.therapistName.split(' ').slice(-1)[0]!.replace(/[^A-Za-z]/g, '');
+  const firstName = snap.therapistName
+    .split(' ')
+    .slice(-1)[0]!
+    .replace(/[^A-Za-z]/g, '');
 
   return (
     <Container className="py-10 sm:py-12">
@@ -30,9 +33,7 @@ export default async function DashboardHomePage() {
           <h1 className="mt-2 font-serif text-4xl leading-tight">
             Good to see you, Dr. {firstName}.
           </h1>
-          <p className="mt-1 text-[var(--color-ink-2)]">
-            Here is what is waiting for you today.
-          </p>
+          <p className="mt-1 text-[var(--color-ink-2)]">Here is what is waiting for you today.</p>
         </div>
         <Link
           href="/therapists"
@@ -168,7 +169,11 @@ function Header2({ title, href }: { title: string; href: string }) {
 }
 
 function Empty({ text }: { text: string }) {
-  return <p className="mt-6 rounded-xl bg-[var(--color-surface-soft)] p-4 text-sm text-[var(--color-ink-3)]">{text}</p>;
+  return (
+    <p className="mt-6 rounded-xl bg-[var(--color-surface-soft)] p-4 text-sm text-[var(--color-ink-3)]">
+      {text}
+    </p>
+  );
 }
 
 function greeting(): string {

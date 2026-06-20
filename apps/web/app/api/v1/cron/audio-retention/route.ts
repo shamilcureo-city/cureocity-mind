@@ -54,7 +54,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     },
   });
 
-  const purgedSessions: Array<{ sessionId: string; clientId: string; bytes: number; chunks: number }> = [];
+  const purgedSessions: Array<{
+    sessionId: string;
+    clientId: string;
+    bytes: number;
+    chunks: number;
+  }> = [];
   for (const s of sessions) {
     if (extendedClientIds.has(s.clientId)) continue;
     const chunkIds = s.audioChunks.map((c) => c.id).filter(Boolean);

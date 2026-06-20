@@ -1,10 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import type {
-  EmdrTarget,
-  ModalityStateWithHistory,
-} from '@cureocity/contracts';
+import type { EmdrTarget, ModalityStateWithHistory } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Input, Label, Textarea } from '../ui/Field';
@@ -52,18 +49,15 @@ export function EmdrPanel({ workflow, scribeBase = '/api/v1', onWorkflowChange }
     setConfirming(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${scribeBase}/workflows/${workflow.id}/emdr/preparation-complete`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            safePlaceInstalled: true,
-            resourcesAdequate: true,
-            dissociationScreened: true,
-          }),
-        },
-      );
+      const res = await fetch(`${scribeBase}/workflows/${workflow.id}/emdr/preparation-complete`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          safePlaceInstalled: true,
+          resourcesAdequate: true,
+          dissociationScreened: true,
+        }),
+      });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -85,16 +79,15 @@ export function EmdrPanel({ workflow, scribeBase = '/api/v1', onWorkflowChange }
         </h4>
         {prepComplete ? (
           <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-            <Badge tone="accent">Complete</Badge> Safe place installed, resources
-            adequate, dissociation screened. Transitions to assessment and beyond are
-            unlocked.
+            <Badge tone="accent">Complete</Badge> Safe place installed, resources adequate,
+            dissociation screened. Transitions to assessment and beyond are unlocked.
           </p>
         ) : (
           <>
             <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-              Phase 3 (Assessment) and later phases are gated until preparation is
-              confirmed. Confirm only when safe-place installation, resource development,
-              and the dissociation screen are all complete.
+              Phase 3 (Assessment) and later phases are gated until preparation is confirmed.
+              Confirm only when safe-place installation, resource development, and the dissociation
+              screen are all complete.
             </p>
             <div className="mt-3">
               <Button onClick={confirmPreparation} disabled={confirming}>
@@ -132,8 +125,8 @@ export function EmdrPanel({ workflow, scribeBase = '/api/v1', onWorkflowChange }
 
         {targets.length === 0 ? (
           <p className="mt-3 text-sm text-[var(--color-ink-3)]">
-            No target memories identified yet. EMDR desensitization phases require at
-            least one target.
+            No target memories identified yet. EMDR desensitization phases require at least one
+            target.
           </p>
         ) : (
           <ul className="mt-3 space-y-3">
@@ -214,7 +207,10 @@ function AddTargetForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="mt-4 space-y-3 border-t border-[var(--color-line-soft)] pt-4">
+    <form
+      onSubmit={onSubmit}
+      className="mt-4 space-y-3 border-t border-[var(--color-line-soft)] pt-4"
+    >
       <div>
         <Label htmlFor="t-label">Label</Label>
         <Input
@@ -337,14 +333,11 @@ function TargetRow({
     setSaving(true);
     setErr(null);
     try {
-      const res = await fetch(
-        `${scribeBase}/workflows/${workflowId}/emdr/targets/${target.id}`,
-        {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ sudsCurrent: suds, vocCurrent: voc }),
-        },
-      );
+      const res = await fetch(`${scribeBase}/workflows/${workflowId}/emdr/targets/${target.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ sudsCurrent: suds, vocCurrent: voc }),
+      });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `HTTP ${res.status}`);

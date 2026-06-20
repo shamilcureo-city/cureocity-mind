@@ -35,11 +35,7 @@ export function Input(props: ComponentProps<'input'>) {
 
 export function Textarea(props: ComponentProps<'textarea'>) {
   return (
-    <textarea
-      rows={4}
-      {...props}
-      className={`${inputBase} resize-y ${props.className ?? ''}`}
-    />
+    <textarea rows={4} {...props} className={`${inputBase} resize-y ${props.className ?? ''}`} />
   );
 }
 

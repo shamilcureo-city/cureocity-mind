@@ -20,8 +20,25 @@ const CONCERNS = [
   'Something else',
 ] as const;
 
-const LANGUAGES = ['English', 'Hindi', 'Tamil', 'Malayalam', 'Kannada', 'Telugu', 'Marathi', 'Bengali'];
-const MODALITIES = ['No preference', 'CBT', 'Psychodynamic', 'EMDR', 'ACT', 'Mindfulness', 'Couples'];
+const LANGUAGES = [
+  'English',
+  'Hindi',
+  'Tamil',
+  'Malayalam',
+  'Kannada',
+  'Telugu',
+  'Marathi',
+  'Bengali',
+];
+const MODALITIES = [
+  'No preference',
+  'CBT',
+  'Psychodynamic',
+  'EMDR',
+  'ACT',
+  'Mindfulness',
+  'Couples',
+];
 
 const URGENCY_OPTIONS = [
   { value: 'LOW', label: 'No rush', description: 'Within the next month is fine.' },
@@ -336,11 +353,21 @@ function StepRibbon({ current }: { current: number }) {
 
 function SummaryStrip({ state }: { state: State }) {
   const chips = [
-    state.concerns.length > 0 ? `${state.concerns.length} concern${state.concerns.length === 1 ? '' : 's'}` : null,
+    state.concerns.length > 0
+      ? `${state.concerns.length} concern${state.concerns.length === 1 ? '' : 's'}`
+      : null,
     state.preferredLanguage || null,
     state.preferredModality || null,
-    state.mode === 'EITHER' ? 'In person or online' : state.mode === 'IN_PERSON' ? 'In person' : 'Online',
-    state.urgency === 'HIGH' ? 'Urgent' : state.urgency === 'MEDIUM' ? 'This week' : 'Within a month',
+    state.mode === 'EITHER'
+      ? 'In person or online'
+      : state.mode === 'IN_PERSON'
+        ? 'In person'
+        : 'Online',
+    state.urgency === 'HIGH'
+      ? 'Urgent'
+      : state.urgency === 'MEDIUM'
+        ? 'This week'
+        : 'Within a month',
   ].filter((x): x is string => x !== null);
 
   return (
