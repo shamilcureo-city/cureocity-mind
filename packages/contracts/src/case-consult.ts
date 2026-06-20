@@ -67,10 +67,7 @@ export const CaseConsultV1Schema = z.object({
   /// sees the data the consult relied on.
   whatTheDataShows: z.array(z.string().min(1).max(600)).max(10).default([]),
   /// 0-5 differential considerations to weigh.
-  differentialConsiderations: z
-    .array(CaseConsultDifferentialSchema)
-    .max(5)
-    .default([]),
+  differentialConsiderations: z.array(CaseConsultDifferentialSchema).max(5).default([]),
   /// 0-5 evidence-based options to consider next.
   evidenceBasedOptions: z.array(CaseConsultOptionSchema).max(5).default([]),
   /// 0-6 questions to bring to supervision / peer review.

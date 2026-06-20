@@ -50,8 +50,7 @@ export async function FirstRunChecklist({ psychologistId }: Props) {
     {
       label: 'Explore the example client',
       done: demoClient !== null,
-      hint:
-        'Seed a fully-arced demo client (signed intake, 5 sessions, PHQ-9 trend, progress report) to see the full co-pilot in one click.',
+      hint: 'Seed a fully-arced demo client (signed intake, 5 sessions, PHQ-9 trend, progress report) to see the full co-pilot in one click.',
       customCta: 'demo',
       demoClientId: demoClient?.id ?? null,
     },

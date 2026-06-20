@@ -56,8 +56,8 @@ export function PreferencesSettingsForm({ initial }: Props) {
       <header className="mb-4">
         <h2 className="font-serif text-2xl">Preferences</h2>
         <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-          Defaults applied when you create a session or generate a note. Per-session and
-          per-client overrides take precedence.
+          Defaults applied when you create a session or generate a note. Per-session and per-client
+          overrides take precedence.
         </p>
       </header>
 

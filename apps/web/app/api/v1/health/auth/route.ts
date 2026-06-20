@@ -61,7 +61,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         'Set FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY, or set AUTH_BYPASS=true for a demo deploy.',
     );
   } else {
-    diagnostics.push('Real per-user Firebase auth is active. Each account maps to its own therapist.');
+    diagnostics.push(
+      'Real per-user Firebase auth is active. Each account maps to its own therapist.',
+    );
   }
 
   return NextResponse.json({ config, diagnostics });

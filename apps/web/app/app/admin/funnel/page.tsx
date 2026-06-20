@@ -175,9 +175,18 @@ export default async function FunnelPage() {
       </header>
 
       <div className="mt-8 grid gap-4 sm:grid-cols-3">
-        <StatTile label="MRR" value={`₹${mrr.toLocaleString('en-IN')}`} sub={`${paid} paying therapists`} highlight />
+        <StatTile
+          label="MRR"
+          value={`₹${mrr.toLocaleString('en-IN')}`}
+          sub={`${paid} paying therapists`}
+          highlight
+        />
         <StatTile label="ARR run-rate" value={`₹${arr.toLocaleString('en-IN')}`} sub="MRR × 12" />
-        <StatTile label="Trial → paid" value={`${pct(paid)}%`} sub={`${paid} of ${signups} signups`} />
+        <StatTile
+          label="Trial → paid"
+          value={`${pct(paid)}%`}
+          sub={`${paid} of ${signups} signups`}
+        />
       </div>
 
       <Card className="mt-6 p-7">
@@ -220,7 +229,9 @@ export default async function FunnelPage() {
                 <tr key={tier} className="border-t border-[var(--color-line-soft)]">
                   <td className="py-2">{titleCase(tier)}</td>
                   <td className="py-2 text-right tabular-nums">{agg.count}</td>
-                  <td className="py-2 text-right tabular-nums">₹{agg.mrr.toLocaleString('en-IN')}</td>
+                  <td className="py-2 text-right tabular-nums">
+                    ₹{agg.mrr.toLocaleString('en-IN')}
+                  </td>
                 </tr>
               );
             })}

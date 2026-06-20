@@ -26,10 +26,7 @@ function ticketSecret(): Buffer {
   if (fromEnv && fromEnv.length >= 32) return Buffer.from(fromEnv, 'utf8');
   // Dev fallback — deterministic so reloads don't invalidate in-flight
   // registrations. Production must set WEBAUTHN_TICKET_SECRET.
-  return Buffer.from(
-    'cureocity-mind-dev-webauthn-ticket-secret-do-not-use-in-prod',
-    'utf8',
-  );
+  return Buffer.from('cureocity-mind-dev-webauthn-ticket-secret-do-not-use-in-prod', 'utf8');
 }
 
 export interface RegistrationTicketPayload {

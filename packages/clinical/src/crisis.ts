@@ -89,7 +89,9 @@ export const INDIA_CRISIS_HOTLINES: CrisisHotline[] = [
  * includes a general 24×7 line at the bottom so the patient has a
  * fallback.
  */
-export function hotlinesForCrisisKind(kind: CrisisHotline['recommendedFor'][number]): CrisisHotline[] {
+export function hotlinesForCrisisKind(
+  kind: CrisisHotline['recommendedFor'][number],
+): CrisisHotline[] {
   const matched = INDIA_CRISIS_HOTLINES.filter((h) => h.recommendedFor.includes(kind));
   const general = INDIA_CRISIS_HOTLINES.filter(
     (h) => h.recommendedFor.includes('general') && h.hours === '24×7',

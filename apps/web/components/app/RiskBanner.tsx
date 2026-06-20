@@ -42,21 +42,32 @@ export function RiskBanner({ riskFlags }: Props) {
             aria-hidden
             className={`grid h-9 w-9 shrink-0 place-items-center rounded-full ${palette.pill}`}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.73 3h16.9a2 2 0 0 0 1.73-3L13.7 3.86a2 2 0 0 0-3.4 0z" strokeLinecap="round" strokeLinejoin="round" />
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path
+                d="M12 9v4M12 17h.01M10.3 3.86 1.82 18a2 2 0 0 0 1.73 3h16.9a2 2 0 0 0 1.73-3L13.7 3.86a2 2 0 0 0-3.4 0z"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </span>
           <div>
-            <p className="font-serif text-lg">
-              Risk flag — {riskFlags.severity.toUpperCase()}
-            </p>
+            <p className="font-serif text-lg">Risk flag — {riskFlags.severity.toUpperCase()}</p>
             <p className="mt-1 text-sm">
-              The note generator flagged this session for clinical review. Do not sign off until
-              you have triaged.
+              The note generator flagged this session for clinical review. Do not sign off until you
+              have triaged.
             </p>
           </div>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${palette.pill}`}>
+        <span
+          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wider ${palette.pill}`}
+        >
           {riskFlags.severity}
         </span>
       </div>
@@ -66,10 +77,7 @@ export function RiskBanner({ riskFlags }: Props) {
           <p className="text-xs font-semibold uppercase tracking-wider">Indicators</p>
           <ul className="mt-1.5 flex flex-wrap gap-1.5">
             {riskFlags.indicators.map((i) => (
-              <li
-                key={i}
-                className="rounded-full bg-white/60 px-2.5 py-1 text-xs font-medium"
-              >
+              <li key={i} className="rounded-full bg-white/60 px-2.5 py-1 text-xs font-medium">
                 {i}
               </li>
             ))}

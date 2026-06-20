@@ -53,7 +53,11 @@ export async function PATCH(
   const updated = await prisma.$transaction(async (tx) => {
     await tx.modalityState.update({
       where: { id: state.id },
-      data: { goals: nextGoals as unknown as Parameters<typeof tx.modalityState.update>[0]['data']['goals'] },
+      data: {
+        goals: nextGoals as unknown as Parameters<
+          typeof tx.modalityState.update
+        >[0]['data']['goals'],
+      },
     });
     await writeAudit(
       {

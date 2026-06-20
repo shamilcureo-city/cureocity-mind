@@ -9,7 +9,5 @@ export function Container({
   className?: string;
   as?: 'div' | 'section' | 'header' | 'footer' | 'main' | 'nav';
 }) {
-  return (
-    <As className={`mx-auto w-full max-w-[1180px] px-6 sm:px-8 ${className}`}>{children}</As>
-  );
+  return <As className={`mx-auto w-full max-w-[1180px] px-6 sm:px-8 ${className}`}>{children}</As>;
 }

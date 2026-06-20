@@ -43,11 +43,12 @@ function Hero() {
               Now matching across India
             </Badge>
             <h1 className="font-serif text-[44px] leading-[1.05] tracking-tight sm:text-[60px]">
-              Talk to someone <span className="italic text-[var(--color-accent)]">who gets it.</span>
+              Talk to someone{' '}
+              <span className="italic text-[var(--color-accent)]">who gets it.</span>
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-2)]">
-              Tell us what is on your mind. We will match you with a vetted therapist who works
-              the way you want — same week, in your language, online or in person.
+              Tell us what is on your mind. We will match you with a vetted therapist who works the
+              way you want — same week, in your language, online or in person.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <ButtonLink href="/get-started" size="lg">
@@ -167,10 +168,7 @@ function HowItWorks() {
         </div>
         <ol className="mt-12 grid gap-6 md:grid-cols-3">
           {steps.map((s) => (
-            <li
-              key={s.step}
-              className="rounded-2xl border border-[var(--color-line)] bg-white p-7"
-            >
+            <li key={s.step} className="rounded-2xl border border-[var(--color-line)] bg-white p-7">
               <p className="font-serif text-3xl text-[var(--color-accent)]">{s.step}</p>
               <h3 className="mt-4 font-serif text-xl leading-snug">{s.title}</h3>
               <p className="mt-3 text-sm leading-relaxed text-[var(--color-ink-2)]">{s.body}</p>
@@ -250,10 +248,7 @@ function ForTherapists() {
                 { k: '92%', v: 'of our matches book a second session' },
                 { k: '7 cities', v: 'and growing — including online-only' },
               ].map((s) => (
-                <li
-                  key={s.k}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-5"
-                >
+                <li key={s.k} className="rounded-2xl border border-white/10 bg-white/5 p-5">
                   <p className="font-serif text-2xl">{s.k}</p>
                   <p className="mt-1 text-xs leading-snug text-[#cdd6cf]">{s.v}</p>
                 </li>

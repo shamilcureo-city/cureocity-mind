@@ -82,11 +82,25 @@ async function main() {
   try {
     const source = (await prisma.psychologist.findUnique({
       where: { phone: args.fromPhone },
-      select: { id: true, fullName: true, email: true, phone: true, firebaseUid: true, deletedAt: true },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        firebaseUid: true,
+        deletedAt: true,
+      },
     })) as PsyRow | null;
     const target = (await prisma.psychologist.findUnique({
       where: { firebaseUid: args.toFirebaseUid },
-      select: { id: true, fullName: true, email: true, phone: true, firebaseUid: true, deletedAt: true },
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        phone: true,
+        firebaseUid: true,
+        deletedAt: true,
+      },
     })) as PsyRow | null;
 
     if (!source) {
@@ -102,7 +116,9 @@ async function main() {
       process.exit(1);
     }
     if (source.deletedAt !== null) {
-      console.error(`✗ Source ${source.id} is already soft-deleted at ${source.deletedAt.toISOString()}.`);
+      console.error(
+        `✗ Source ${source.id} is already soft-deleted at ${source.deletedAt.toISOString()}.`,
+      );
       process.exit(1);
     }
     if (target.deletedAt !== null) {
@@ -110,11 +126,19 @@ async function main() {
       process.exit(1);
     }
 
-    console.log(`\nSource (will be archived):  ${source.fullName} <${source.email}> ${source.phone} firebaseUid=${source.firebaseUid} (${source.id})`);
-    console.log(`Target (will take over):    ${target.fullName} <${target.email}> ${target.phone} firebaseUid=${target.firebaseUid} (${target.id})`);
+    console.log(
+      `\nSource (will be archived):  ${source.fullName} <${source.email}> ${source.phone} firebaseUid=${source.firebaseUid} (${source.id})`,
+    );
+    console.log(
+      `Target (will take over):    ${target.fullName} <${target.email}> ${target.phone} firebaseUid=${target.firebaseUid} (${target.id})`,
+    );
     console.log(`\nAfter:`);
-    console.log(`  ${target.fullName} (${target.id}) — firebaseUid=${source.firebaseUid}, phone=${source.phone}, email=${source.email}`);
-    console.log(`  Source row ${source.id} archived (firebaseUid/phone/email → archived:* placeholders, deletedAt set).`);
+    console.log(
+      `  ${target.fullName} (${target.id}) — firebaseUid=${source.firebaseUid}, phone=${source.phone}, email=${source.email}`,
+    );
+    console.log(
+      `  Source row ${source.id} archived (firebaseUid/phone/email → archived:* placeholders, deletedAt set).`,
+    );
 
     if (args.dryRun) {
       console.log('\n--dry-run: no changes written.');
@@ -177,8 +201,12 @@ async function main() {
 
     console.log(`\n✓ Relinked.`);
     console.log(`  Source ${source.id} archived.`);
-    console.log(`  Target ${target.id} now reachable via firebaseUid=${source.firebaseUid} (phone=${source.phone}).`);
-    console.log(`\nYour current browser session cookie is bound to firebaseUid=${source.firebaseUid}, so a hard refresh of /app should now land you on the target row.`);
+    console.log(
+      `  Target ${target.id} now reachable via firebaseUid=${source.firebaseUid} (phone=${source.phone}).`,
+    );
+    console.log(
+      `\nYour current browser session cookie is bound to firebaseUid=${source.firebaseUid}, so a hard refresh of /app should now land you on the target row.`,
+    );
   } finally {
     await prisma.$disconnect();
   }

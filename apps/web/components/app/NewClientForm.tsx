@@ -57,8 +57,7 @@ export function NewClientForm({ onCancel, onReady }: Props) {
   // (WhatsApp + SMS routing need the canonical form), so accept spaces
   // / hyphens / parens in the input field and strip them on submit.
   const normalisedPhone = contactPhone.replace(/[\s\-()]/g, '');
-  const ready =
-    !!fullName.trim() && /^\+91\d{10}$/.test(normalisedPhone) && audioOk && noteOk;
+  const ready = !!fullName.trim() && /^\+91\d{10}$/.test(normalisedPhone) && audioOk && noteOk;
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -66,8 +65,9 @@ export function NewClientForm({ onCancel, onReady }: Props) {
     setError(null);
     setBusy(true);
     try {
-      const ackedScopes: Array<'AUDIO_RECORDING' | 'AI_NOTE_GENERATION' | 'CROSS_BORDER_PROCESSING'> =
-        [];
+      const ackedScopes: Array<
+        'AUDIO_RECORDING' | 'AI_NOTE_GENERATION' | 'CROSS_BORDER_PROCESSING'
+      > = [];
       if (audioOk) ackedScopes.push('AUDIO_RECORDING');
       if (noteOk) ackedScopes.push('AI_NOTE_GENERATION');
       if (crossBorder) ackedScopes.push('CROSS_BORDER_PROCESSING');
@@ -242,14 +242,14 @@ export function NewClientForm({ onCancel, onReady }: Props) {
               id="nc-audio"
               checked={audioOk}
               onChange={setAudioOk}
-              label="Audio recording — they&apos;ve agreed"
+              label="Audio recording — they've agreed"
               description="We record this session so the AI can draft a note."
             />
             <CheckboxRow
               id="nc-note"
               checked={noteOk}
               onChange={setNoteOk}
-              label="AI note generation — they&apos;ve agreed"
+              label="AI note generation — they've agreed"
               description="An AI processes the recording into a draft you'll review."
             />
             <CheckboxRow

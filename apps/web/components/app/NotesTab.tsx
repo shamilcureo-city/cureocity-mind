@@ -430,7 +430,11 @@ export function NotesTab({
           <Card className="p-7">
             <AdvancementBanner clientId={clientId} />
             <RiskBanner riskFlags={treatmentContent.riskFlags} />
-            <NotePreview note={treatmentContent} signedAt={note.signedAt} signedBy={note.signedBy} />
+            <NotePreview
+              note={treatmentContent}
+              signedAt={note.signedAt}
+              signedBy={note.signedBy}
+            />
             <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
               <button
                 type="button"

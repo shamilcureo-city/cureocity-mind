@@ -20,13 +20,13 @@ const SECTIONS = [
   {
     n: 2,
     title: 'Record a session',
-    body: 'From Record, pick who you\'re with. The pre-flight reads their history and works out whether this is an intake, a treatment session, or a plan review — you just confirm and start. Capture by device microphone (in person), browser-tab audio (virtual), or upload a file. Audio is chunked as you go and survives a tab refresh.',
+    body: "From Record, pick who you're with. The pre-flight reads their history and works out whether this is an intake, a treatment session, or a plan review — you just confirm and start. Capture by device microphone (in person), browser-tab audio (virtual), or upload a file. Audio is chunked as you go and survives a tab refresh.",
     cta: { href: '/app', label: 'Open Record' },
   },
   {
     n: 3,
     title: 'The AI drafts your note',
-    body: 'When you end the session the Vertex Gemini pipeline transcribes and diarizes the audio, then writes the note — a SOAP note for treatment sessions, a structured intake note for a first session. The Notes tab shows progress and reveals the draft when it\'s ready.',
+    body: "When you end the session the Vertex Gemini pipeline transcribes and diarizes the audio, then writes the note — a SOAP note for treatment sessions, a structured intake note for a first session. The Notes tab shows progress and reveals the draft when it's ready.",
     cta: null,
   },
   {
@@ -38,15 +38,27 @@ const SECTIONS = [
   {
     n: 5,
     title: 'Sign, measure, share',
-    body: 'Sign the note when it matches your judgement and download the PDF for your records. Administer PHQ-9 / GAD-7 to track change against validated thresholds, follow the client\'s Journey from intake through to discharge, and share a plain-language progress report or reflection questions with the client over WhatsApp, email, or a private portal link.',
+    body: "Sign the note when it matches your judgement and download the PDF for your records. Administer PHQ-9 / GAD-7 to track change against validated thresholds, follow the client's Journey from intake through to discharge, and share a plain-language progress report or reflection questions with the client over WhatsApp, email, or a private portal link.",
     cta: { href: '/app/clients', label: 'Pick a client' },
   },
 ] as const;
 
 const SUPPORTING_LINKS = [
-  { href: '/app/practice-assistant', label: 'Practice Assistant — chat with your practice data', desc: 'Ask "which clients haven\'t been seen in 30+ days?" and other roster-aware questions.' },
-  { href: '/app/me', label: 'My practice', desc: 'Your own tempo and decision split — for self-reflection, not comparison.' },
-  { href: '/app/admin/erasure-queue', label: 'DPDP erasure queue', desc: 'Review and resolve § 15 erasure requests within the 30-day statutory window.' },
+  {
+    href: '/app/practice-assistant',
+    label: 'Practice Assistant — chat with your practice data',
+    desc: 'Ask "which clients haven\'t been seen in 30+ days?" and other roster-aware questions.',
+  },
+  {
+    href: '/app/me',
+    label: 'My practice',
+    desc: 'Your own tempo and decision split — for self-reflection, not comparison.',
+  },
+  {
+    href: '/app/admin/erasure-queue',
+    label: 'DPDP erasure queue',
+    desc: 'Review and resolve § 15 erasure requests within the 30-day statutory window.',
+  },
 ];
 
 export default function LearnPage() {

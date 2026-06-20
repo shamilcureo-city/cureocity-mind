@@ -116,7 +116,7 @@ export class PdfsService {
     }));
 
     const exercises: TreatmentPlanExercise[] = client.exerciseAssignments.map((a) => ({
-      title: a.exerciseId.replace(/_/g, ' '),
+      title: (a.exerciseId ?? a.customDescription ?? 'exercise').replace(/_/g, ' '),
       description: a.therapistNote ?? '',
       dueAt: a.dueAt?.toISOString().slice(0, 10) ?? null,
     }));

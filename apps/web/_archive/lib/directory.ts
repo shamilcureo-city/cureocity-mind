@@ -41,7 +41,11 @@ export async function fetchPublicTherapists(
       ...(filters.acceptingOnly ? { isAcceptingNewClients: true } : {}),
     },
     select: PUBLIC_SELECT,
-    orderBy: [{ isAcceptingNewClients: 'desc' }, { yearsOfExperience: 'desc' }, { fullName: 'asc' }],
+    orderBy: [
+      { isAcceptingNewClients: 'desc' },
+      { yearsOfExperience: 'desc' },
+      { fullName: 'asc' },
+    ],
     take: limit,
   });
   return rows.map(toSummary);

@@ -5,10 +5,7 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toWebAuthnCredential } from '@/lib/mappers';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
-import {
-  verifyClientDataForRegistration,
-  verifyRegistrationTicket,
-} from '@/lib/webauthn-server';
+import { verifyClientDataForRegistration, verifyRegistrationTicket } from '@/lib/webauthn-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,10 +59,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         { status: 409 },
       );
     }
-    return NextResponse.json(
-      { error: 'Credential already registered' },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: 'Credential already registered' }, { status: 409 });
   }
 
   const created = await prisma.$transaction(async (tx) => {

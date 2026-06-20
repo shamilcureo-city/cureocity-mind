@@ -1,11 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
-import {
-  SESSION_COOKIE_MAX_AGE_MS,
-  SESSION_COOKIE_NAME,
-  isAuthBypassed,
-} from '@/lib/auth-server';
+import { SESSION_COOKIE_MAX_AGE_MS, SESSION_COOKIE_NAME, isAuthBypassed } from '@/lib/auth-server';
 import { writeAudit } from '@/lib/audit';
 import { ensurePersonalClinic } from '@/lib/clinic';
 import { firebaseAuth } from '@/lib/firebase-admin';
@@ -267,10 +263,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             : conflictField === 'email'
               ? 'An account with this email is already linked to a different sign-in method. Sign in with the original method (phone OTP or the other of Google / email).'
               : 'An account with these details is already linked to a different sign-in method.';
-        return NextResponse.json(
-          { error: human, code: 'SIGNIN_METHOD_CONFLICT' },
-          { status: 409 },
-        );
+        return NextResponse.json({ error: human, code: 'SIGNIN_METHOD_CONFLICT' }, { status: 409 });
       }
       throw e;
     }

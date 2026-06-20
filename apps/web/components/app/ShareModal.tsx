@@ -27,12 +27,12 @@ const ALL_CHANNELS: { key: PatientShareChannel; label: string; description: stri
   {
     key: 'WHATSAPP',
     label: 'WhatsApp',
-    description: 'Short message + link, sent to the client\'s number on file.',
+    description: "Short message + link, sent to the client's number on file.",
   },
   {
     key: 'EMAIL',
     label: 'Email',
-    description: 'Plain-text + link, sent to the client\'s email on file.',
+    description: "Plain-text + link, sent to the client's email on file.",
   },
   {
     key: 'PORTAL_LINK',
@@ -220,9 +220,7 @@ export function ShareModal({
                       className="mt-1 h-4 w-4"
                     />
                     <span className="flex-1">
-                      <span className="text-sm font-medium text-[var(--color-ink)]">
-                        {c.label}
-                      </span>
+                      <span className="text-sm font-medium text-[var(--color-ink)]">{c.label}</span>
                       <span className="ml-2 text-xs text-[var(--color-ink-3)]">
                         {disabledReason ?? c.description}
                       </span>
@@ -266,13 +264,7 @@ export function ShareModal({
   );
 }
 
-function ResultsView({
-  results,
-  onClose,
-}: {
-  results: ShareResultEntry[];
-  onClose: () => void;
-}) {
+function ResultsView({ results, onClose }: { results: ShareResultEntry[]; onClose: () => void }) {
   return (
     <div>
       <ul className="space-y-2">

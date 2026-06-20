@@ -101,7 +101,11 @@ export async function POST(
         tx,
       );
     });
-    return NextResponse.json({ ok: true, moved: 1, toPsychologistId: input.value.toPsychologistId });
+    return NextResponse.json({
+      ok: true,
+      moved: 1,
+      toPsychologistId: input.value.toPsychologistId,
+    });
   }
 
   // ---- Whole-caseload mode (departure) ------------------------------------

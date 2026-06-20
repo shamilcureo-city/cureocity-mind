@@ -313,12 +313,7 @@ function LoginPageInner() {
                     aria-hidden
                     className="mt-1.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--color-accent)]/15 text-[var(--color-accent)]"
                   >
-                    <svg
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      className="h-3 w-3"
-                      aria-hidden
-                    >
+                    <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3" aria-hidden>
                       <path
                         fillRule="evenodd"
                         d="M16.7 5.3a1 1 0 010 1.4l-7.5 7.5a1 1 0 01-1.4 0L3.3 9.7a1 1 0 011.4-1.4l3.8 3.8 6.8-6.8a1 1 0 011.4 0z"
@@ -445,9 +440,7 @@ function LoginPageInner() {
                     <div className="flex items-center justify-between text-xs">
                       <button
                         type="button"
-                        onClick={() =>
-                          setEmailMode(emailMode === 'signup' ? 'signin' : 'signup')
-                        }
+                        onClick={() => setEmailMode(emailMode === 'signup' ? 'signin' : 'signup')}
                         className="text-[var(--color-accent)] hover:underline"
                       >
                         {emailMode === 'signup'
@@ -544,7 +537,8 @@ function LoginPageInner() {
                 <div>
                   <h2 className="font-serif text-2xl">Enter the 6-digit code</h2>
                   <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                    Sent to <span className="font-medium text-[var(--color-ink)]">{phoneE164}</span>.
+                    Sent to <span className="font-medium text-[var(--color-ink)]">{phoneE164}</span>
+                    .
                   </p>
                 </div>
                 <div>
@@ -560,7 +554,12 @@ function LoginPageInner() {
                     required
                   />
                 </div>
-                <Button type="submit" size="lg" disabled={busy || otp.length < 6} className="w-full">
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={busy || otp.length < 6}
+                  className="w-full"
+                >
                   {busy ? 'Verifying…' : 'Verify and continue'}
                 </Button>
                 <FieldError message={error} />

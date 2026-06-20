@@ -3,11 +3,7 @@ import { BeginRegistrationInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
-import {
-  generateChallenge,
-  signRegistrationTicket,
-  ticketTtlMs,
-} from '@/lib/webauthn-server';
+import { generateChallenge, signRegistrationTicket, ticketTtlMs } from '@/lib/webauthn-server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

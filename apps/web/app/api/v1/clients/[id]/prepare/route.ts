@@ -120,10 +120,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     // catalog rows fall back to the therapist's note or the catalog
     // id stem so the panel always renders something readable.
     description:
-      a.customDescription?.trim() ||
-      a.therapistNote?.trim() ||
-      a.exerciseId ||
-      'Homework',
+      a.customDescription?.trim() || a.therapistNote?.trim() || a.exerciseId || 'Homework',
     status: a.status,
     assignedAt: a.assignedAt.toISOString(),
     completedAt: a.completedAt?.toISOString() ?? null,

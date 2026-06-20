@@ -188,7 +188,10 @@ export const PLAN_CATALOG: Record<BillingPlan, PlanSpec> = {
 };
 
 /** Marketing copy per tier — kept out of PlanSpec since it's presentational. */
-export const TIER_COPY: Record<BillingTier, { tierLabel: string; blurb: string; features: string[] }> = {
+export const TIER_COPY: Record<
+  BillingTier,
+  { tierLabel: string; blurb: string; features: string[] }
+> = {
   FREE: { tierLabel: 'Free trial', blurb: 'Try the full product on real sessions.', features: [] },
   TRAINEE: {
     tierLabel: 'Trainee',

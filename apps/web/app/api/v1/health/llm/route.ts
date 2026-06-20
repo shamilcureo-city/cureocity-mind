@@ -32,9 +32,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     LLM_BACKEND: llmBackend,
     VERTEX_PROJECT_ID_present: Boolean(process.env['VERTEX_PROJECT_ID']),
     VERTEX_PROJECT_ID_length: process.env['VERTEX_PROJECT_ID']?.length ?? 0,
-    GOOGLE_APPLICATION_CREDENTIALS_present: Boolean(
-      process.env['GOOGLE_APPLICATION_CREDENTIALS'],
-    ),
+    GOOGLE_APPLICATION_CREDENTIALS_present: Boolean(process.env['GOOGLE_APPLICATION_CREDENTIALS']),
     GOOGLE_APPLICATION_CREDENTIALS_JSON_present: Boolean(
       process.env['GOOGLE_APPLICATION_CREDENTIALS_JSON'],
     ),
@@ -49,14 +47,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Quick verdict: what will go wrong on the next generate-note?
   const diagnostics: string[] = [];
   if (llmBackend !== 'vertex') {
-    diagnostics.push(
-      `LLM_BACKEND='${llmBackend}' — set to 'vertex' to enable real transcription.`,
-    );
+    diagnostics.push(`LLM_BACKEND='${llmBackend}' — set to 'vertex' to enable real transcription.`);
   }
   if (llmBackend === 'vertex' && !vertexConfig.VERTEX_PROJECT_ID_present) {
-    diagnostics.push(
-      'VERTEX_PROJECT_ID missing — orchestrator will throw at boot.',
-    );
+    diagnostics.push('VERTEX_PROJECT_ID missing — orchestrator will throw at boot.');
   }
   if (
     llmBackend === 'vertex' &&

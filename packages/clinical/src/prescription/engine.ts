@@ -207,10 +207,7 @@ function scoreEmdrExercise(
 
   // Preparation + closure phases benefit from outcome-measure tracking
   // (analogous to CBT's engagement / consolidation bookends).
-  if (
-    exercise.category === 'outcome_measure' &&
-    (phase === 'preparation' || phase === 'closure')
-  ) {
+  if (exercise.category === 'outcome_measure' && (phase === 'preparation' || phase === 'closure')) {
     score += 3;
     rationale.push('outcome measure at phase boundary');
   }

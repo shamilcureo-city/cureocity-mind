@@ -7,10 +7,7 @@ import {
 } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
-import {
-  SIGNABLE_FIELDS_BY_KIND,
-  signableKindFor,
-} from '@/lib/note-edit-fields';
+import { SIGNABLE_FIELDS_BY_KIND, signableKindFor } from '@/lib/note-edit-fields';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -53,10 +50,7 @@ export async function POST(
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
   if (!session.therapyNote || !session.therapyNote.content) {
-    return NextResponse.json(
-      { error: 'Session has no signed note to revise.' },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: 'Session has no signed note to revise.' }, { status: 404 });
   }
 
   // Map the session kind to the note shape it actually signs. A payload
@@ -73,8 +67,7 @@ export async function POST(
     );
   }
 
-  const noteSchema =
-    signableKind === 'INTAKE' ? IntakeNoteV1Schema : TherapyNoteV1Schema;
+  const noteSchema = signableKind === 'INTAKE' ? IntakeNoteV1Schema : TherapyNoteV1Schema;
   const fields = SIGNABLE_FIELDS_BY_KIND[signableKind];
 
   // Defensive: the stored content was validated at sign time, but a

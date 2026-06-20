@@ -16,11 +16,11 @@ interface Props {
 }
 
 const CATEGORY_COLOR: Record<ConceptCategory, string> = {
-  VALUE: '#f4c95d',          // yellow
-  AFFIRMATION: '#7fbf83',    // green
-  CHALLENGE: '#e07b75',      // red
-  PATTERN: '#5ab1c9',        // blue
-  BELIEF: '#5ebaa7',         // teal
+  VALUE: '#f4c95d', // yellow
+  AFFIRMATION: '#7fbf83', // green
+  CHALLENGE: '#e07b75', // red
+  PATTERN: '#5ab1c9', // blue
+  BELIEF: '#5ebaa7', // teal
 };
 
 const CATEGORY_LABEL: Record<ConceptCategory, string> = {
@@ -178,13 +178,7 @@ interface Position {
   y: number;
 }
 
-function Graph({
-  map,
-  onSelect,
-}: {
-  map: ConceptualMapV1;
-  onSelect: (nodeId: string) => void;
-}) {
+function Graph({ map, onSelect }: { map: ConceptualMapV1; onSelect: (nodeId: string) => void }) {
   // Memoise the layout so re-renders (selection) don't re-simulate.
   const positions = useMemo(() => layoutGraph(map), [map]);
 
@@ -580,4 +574,3 @@ function formatRelative(iso: string): string {
   if (days < 30) return `${days} d ago`;
   return new Date(iso).toLocaleDateString('en-IN');
 }
-

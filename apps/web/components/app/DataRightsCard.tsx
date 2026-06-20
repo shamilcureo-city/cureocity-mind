@@ -89,25 +89,49 @@ export function DataRightsCard({ clientId, clientName }: Props) {
         <Button onClick={exportData} disabled={exporting}>
           {exporting ? 'Generating…' : '§ 11 Export data'}
         </Button>
-        <Button variant="secondary" onClick={() => setActive(active === 'correction' ? null : 'correction')}>
+        <Button
+          variant="secondary"
+          onClick={() => setActive(active === 'correction' ? null : 'correction')}
+        >
           § 12 Correction
         </Button>
-        <Button variant="secondary" onClick={() => setActive(active === 'nomination' ? null : 'nomination')}>
+        <Button
+          variant="secondary"
+          onClick={() => setActive(active === 'nomination' ? null : 'nomination')}
+        >
           § 13 Nomination
         </Button>
-        <Button variant="secondary" onClick={() => setActive(active === 'consent' ? null : 'consent')}>
+        <Button
+          variant="secondary"
+          onClick={() => setActive(active === 'consent' ? null : 'consent')}
+        >
           § 13 Withdraw consent
         </Button>
-        <Button variant="secondary" onClick={() => setActive(active === 'grievance' ? null : 'grievance')}>
+        <Button
+          variant="secondary"
+          onClick={() => setActive(active === 'grievance' ? null : 'grievance')}
+        >
           § 14 Grievance
         </Button>
-        <Button variant="secondary" onClick={() => setActive(active === 'erasure' ? null : 'erasure')}>
+        <Button
+          variant="secondary"
+          onClick={() => setActive(active === 'erasure' ? null : 'erasure')}
+        >
           § 15 Erasure
         </Button>
       </div>
 
       {active === 'erasure' && (
-        <ErasureForm submitting={submitting} onSubmit={(reason) => post('erasure', { reason }, 'Erasure request filed. Review queue at /app/admin/erasure-queue.')} />
+        <ErasureForm
+          submitting={submitting}
+          onSubmit={(reason) =>
+            post(
+              'erasure',
+              { reason },
+              'Erasure request filed. Review queue at /app/admin/erasure-queue.',
+            )
+          }
+        />
       )}
       {active === 'correction' && (
         <CorrectionForm
@@ -116,7 +140,9 @@ export function DataRightsCard({ clientId, clientName }: Props) {
             post(
               'correction',
               d,
-              `Correction applied: ${Object.keys(d).filter((k) => k !== 'reason').join(', ')}.`,
+              `Correction applied: ${Object.keys(d)
+                .filter((k) => k !== 'reason')
+                .join(', ')}.`,
             )
           }
         />
@@ -124,19 +150,29 @@ export function DataRightsCard({ clientId, clientName }: Props) {
       {active === 'nomination' && (
         <NominationForm
           submitting={submitting}
-          onSubmit={(d) => post('nomination', d, 'Nomination recorded. Prior nomination (if any) superseded.')}
+          onSubmit={(d) =>
+            post('nomination', d, 'Nomination recorded. Prior nomination (if any) superseded.')
+          }
         />
       )}
       {active === 'consent' && (
         <ConsentWithdrawalForm
           submitting={submitting}
-          onSubmit={(d) => post('consent-withdrawal', d, `Consent for ${d.scope} withdrawn. Future processing for that scope blocked.`)}
+          onSubmit={(d) =>
+            post(
+              'consent-withdrawal',
+              d,
+              `Consent for ${d.scope} withdrawn. Future processing for that scope blocked.`,
+            )
+          }
         />
       )}
       {active === 'grievance' && (
         <GrievanceForm
           submitting={submitting}
-          onSubmit={(d) => post('grievance', d, 'Grievance filed at status OPEN. Acknowledge per redressal SLA.')}
+          onSubmit={(d) =>
+            post('grievance', d, 'Grievance filed at status OPEN. Acknowledge per redressal SLA.')
+          }
         />
       )}
 
@@ -153,7 +189,13 @@ export function DataRightsCard({ clientId, clientName }: Props) {
   );
 }
 
-function ErasureForm({ submitting, onSubmit }: { submitting: boolean; onSubmit: (reason: string | undefined) => void }) {
+function ErasureForm({
+  submitting,
+  onSubmit,
+}: {
+  submitting: boolean;
+  onSubmit: (reason: string | undefined) => void;
+}) {
   const [reason, setReason] = useState('');
   return (
     <form
@@ -167,7 +209,12 @@ function ErasureForm({ submitting, onSubmit }: { submitting: boolean; onSubmit: 
         <Label htmlFor="er-reason" hint="Optional · 0–2000 chars">
           Reason supplied by the client
         </Label>
-        <Textarea id="er-reason" rows={3} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Textarea
+          id="er-reason"
+          rows={3}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
       </div>
       <div className="flex justify-end">
         <Button type="submit" disabled={submitting}>
@@ -212,13 +259,22 @@ function CorrectionForm({
           <Label htmlFor="co-phone" hint="leave blank to skip">
             New phone
           </Label>
-          <Input id="co-phone" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} />
+          <Input
+            id="co-phone"
+            value={contactPhone}
+            onChange={(e) => setContactPhone(e.target.value)}
+          />
         </div>
         <div className="md:col-span-2">
           <Label htmlFor="co-email" hint="leave blank to skip">
             New email
           </Label>
-          <Input id="co-email" type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} />
+          <Input
+            id="co-email"
+            type="email"
+            value={contactEmail}
+            onChange={(e) => setContactEmail(e.target.value)}
+          />
         </div>
       </div>
       <div>
@@ -233,7 +289,10 @@ function CorrectionForm({
         />
       </div>
       <div className="flex justify-end">
-        <Button type="submit" disabled={submitting || (!fullName && !contactPhone && !contactEmail)}>
+        <Button
+          type="submit"
+          disabled={submitting || (!fullName && !contactPhone && !contactEmail)}
+        >
           {submitting ? 'Applying…' : 'Apply correction'}
         </Button>
       </div>
@@ -275,17 +334,34 @@ function NominationForm({
         </div>
         <div>
           <Label htmlFor="nm-relation">Relation</Label>
-          <Input id="nm-relation" required value={relation} onChange={(e) => setRelation(e.target.value)} placeholder="spouse, parent, sibling…" />
+          <Input
+            id="nm-relation"
+            required
+            value={relation}
+            onChange={(e) => setRelation(e.target.value)}
+            placeholder="spouse, parent, sibling…"
+          />
         </div>
         <div>
           <Label htmlFor="nm-phone">Nominee phone</Label>
-          <Input id="nm-phone" required value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+919876543210" />
+          <Input
+            id="nm-phone"
+            required
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+919876543210"
+          />
         </div>
         <div>
           <Label htmlFor="nm-email" hint="optional">
             Nominee email
           </Label>
-          <Input id="nm-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <Input
+            id="nm-email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
         </div>
       </div>
       <div>
@@ -339,11 +415,16 @@ function ConsentWithdrawalForm({
         <Label htmlFor="cw-reason" hint="optional">
           Reason
         </Label>
-        <Textarea id="cw-reason" rows={2} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <Textarea
+          id="cw-reason"
+          rows={2}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
       </div>
       <p className="text-xs text-[var(--color-ink-3)]">
-        Withdrawal is not retroactive per DPDP. Past processing under this scope remains
-        lawful; no further processing under this scope is permitted from now on.
+        Withdrawal is not retroactive per DPDP. Past processing under this scope remains lawful; no
+        further processing under this scope is permitted from now on.
       </p>
       <div className="flex justify-end">
         <Button type="submit" disabled={submitting}>

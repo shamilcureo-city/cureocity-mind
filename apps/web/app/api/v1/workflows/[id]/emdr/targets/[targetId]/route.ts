@@ -1,8 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import {
-  UpdateEmdrTargetInputSchema,
-  type EmdrTarget,
-} from '@cureocity/contracts';
+import { UpdateEmdrTargetInputSchema, type EmdrTarget } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';

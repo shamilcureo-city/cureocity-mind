@@ -77,37 +77,39 @@ export const ConceptEdgeSchema = z.object({
 });
 export type ConceptEdge = z.infer<typeof ConceptEdgeSchema>;
 
-export const ConceptualMapV1Schema = z.object({
-  version: z.literal('V1'),
-  /** 6-18 nodes — fewer feels thin; more feels noisy. */
-  nodes: z.array(ConceptNodeSchema).min(0).max(18),
-  /**
-   * 0-30 edges. Every edge endpoint must reference a node id from the
-   * `nodes` array — enforced by a refinement on the wrapping schema.
-   */
-  edges: z.array(ConceptEdgeSchema).max(30),
-  generatedAt: IsoDateTimeSchema,
-  /** Session IDs the prompt actually saw — server-controlled (route fills in). */
-  basedOnSessionIds: z.array(z.string()).max(100),
-}).superRefine((map, ctx) => {
-  const ids = new Set(map.nodes.map((n) => n.id));
-  for (const [i, e] of map.edges.entries()) {
-    if (!ids.has(e.from)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['edges', i, 'from'],
-        message: `edge.from "${e.from}" does not reference a known node id`,
-      });
+export const ConceptualMapV1Schema = z
+  .object({
+    version: z.literal('V1'),
+    /** 6-18 nodes — fewer feels thin; more feels noisy. */
+    nodes: z.array(ConceptNodeSchema).min(0).max(18),
+    /**
+     * 0-30 edges. Every edge endpoint must reference a node id from the
+     * `nodes` array — enforced by a refinement on the wrapping schema.
+     */
+    edges: z.array(ConceptEdgeSchema).max(30),
+    generatedAt: IsoDateTimeSchema,
+    /** Session IDs the prompt actually saw — server-controlled (route fills in). */
+    basedOnSessionIds: z.array(z.string()).max(100),
+  })
+  .superRefine((map, ctx) => {
+    const ids = new Set(map.nodes.map((n) => n.id));
+    for (const [i, e] of map.edges.entries()) {
+      if (!ids.has(e.from)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['edges', i, 'from'],
+          message: `edge.from "${e.from}" does not reference a known node id`,
+        });
+      }
+      if (!ids.has(e.to)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['edges', i, 'to'],
+          message: `edge.to "${e.to}" does not reference a known node id`,
+        });
+      }
     }
-    if (!ids.has(e.to)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['edges', i, 'to'],
-        message: `edge.to "${e.to}" does not reference a known node id`,
-      });
-    }
-  }
-});
+  });
 export type ConceptualMapV1 = z.infer<typeof ConceptualMapV1Schema>;
 
 /** Response from GET /clients/[id]/conceptual-map. */

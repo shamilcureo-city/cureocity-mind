@@ -81,8 +81,8 @@ export function RescheduleModal({
             Reschedule {clientName}
           </h2>
           <p className="mt-1 text-xs text-[var(--color-ink-2)]">
-            The current slot becomes <strong>RESCHEDULED</strong> and a new SCHEDULED session
-            opens at the new time. Both stay on the record.
+            The current slot becomes <strong>RESCHEDULED</strong> and a new SCHEDULED session opens
+            at the new time. Both stay on the record.
           </p>
         </header>
         <form onSubmit={submit} className="space-y-4">

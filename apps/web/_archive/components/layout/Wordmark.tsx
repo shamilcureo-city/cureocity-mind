@@ -11,9 +11,7 @@ export function Wordmark({ inverted = false }: { inverted?: boolean }) {
       <span
         aria-hidden
         className={`grid h-8 w-8 place-items-center rounded-full font-serif text-base ${
-          inverted
-            ? 'bg-white text-[var(--color-accent)]'
-            : 'bg-[var(--color-accent)] text-white'
+          inverted ? 'bg-white text-[var(--color-accent)]' : 'bg-[var(--color-accent)] text-white'
         }`}
       >
         cm
