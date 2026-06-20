@@ -17,6 +17,7 @@ import { NotesTab } from '@/components/app/NotesTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs, type TabKey } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
+import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 
@@ -81,15 +82,19 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       client: {
         select: {
           fullName: true,
+          fullNameEncrypted: true,
           preferredLanguage: true,
           contactPhone: true,
+          contactPhoneEncrypted: true,
           contactEmail: true,
+          contactEmailEncrypted: true,
           isDemo: true,
         },
       },
     },
   });
   if (!session) notFound();
+  const pii = await resolveClientPii({ ...session.client, psychologistId: session.psychologistId });
 
   const sessionKind: SessionKind = session.kind;
   const isIntake = sessionKind === 'INTAKE';
@@ -103,7 +108,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="flex flex-wrap items-center gap-3 font-serif text-3xl">
-            {session.client.fullName}
+            {pii.fullName}
             {session.client.isDemo && <Badge tone="warn">Example</Badge>}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
@@ -134,8 +139,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             sessionStatus={session.status}
             sessionKind={sessionKind}
             clientId={session.clientId}
-            clientHasContactPhone={!!session.client.contactPhone}
-            clientHasContactEmail={!!session.client.contactEmail}
+            clientHasContactPhone={!!pii.contactPhone}
+            clientHasContactEmail={!!pii.contactEmail}
           />
         )}
         {tab === 'copilot' && (
@@ -143,9 +148,9 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             sessionId={id}
             clientId={session.clientId}
             psychologistId={session.psychologistId}
-            clientName={session.client.fullName}
-            clientHasContactPhone={!!session.client.contactPhone}
-            clientHasContactEmail={!!session.client.contactEmail}
+            clientName={pii.fullName}
+            clientHasContactPhone={!!pii.contactPhone}
+            clientHasContactEmail={!!pii.contactEmail}
             preferredLanguage={session.client.preferredLanguage}
             sessionKind={sessionKind}
             sub={sub}

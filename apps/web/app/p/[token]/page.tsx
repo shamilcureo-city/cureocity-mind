@@ -9,6 +9,7 @@ import { hotlinesForCrisisKind } from '@cureocity/clinical';
 import { CheckinForm } from '@/components/portal/CheckinForm';
 import { HomeworkDoneButton } from '@/components/portal/HomeworkDoneButton';
 import { writeAudit } from '@/lib/audit';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import { WATERMARK_TAGLINE, watermarkUrl } from '@/lib/watermark';
 
@@ -55,11 +56,18 @@ export default async function PortalPage({ params }: PageProps) {
       openedAt: true,
       expiresAt: true,
       status: true,
-      client: { select: { fullName: true } },
+      client: { select: { fullName: true, fullNameEncrypted: true } },
       psychologist: { select: { fullName: true } },
     },
   });
   if (!row) notFound();
+  // Read cutover — the share row carries psychologistId, so the portal can
+  // decrypt the client's name (plaintext fallback) for the greeting.
+  const clientFullName = await decryptClientField(
+    row.psychologistId,
+    row.client.fullNameEncrypted,
+    row.client.fullName,
+  );
 
   const now = new Date();
   const expired = row.expiresAt.getTime() < now.getTime();
@@ -119,7 +127,7 @@ export default async function PortalPage({ params }: PageProps) {
         <section className="mt-8">
           <SnapshotView
             snapshot={snapshot}
-            clientFirstName={firstName(row.client.fullName)}
+            clientFirstName={firstName(clientFullName)}
             token={token}
           />
         </section>

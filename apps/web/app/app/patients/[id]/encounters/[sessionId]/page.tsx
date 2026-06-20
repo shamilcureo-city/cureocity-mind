@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
 import { DoctorEncounterPanel } from '@/components/app/DoctorEncounterPanel';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -29,12 +30,17 @@ export default async function EncounterWorkspacePage({
       status: true,
       psychologistId: true,
       clientId: true,
-      client: { select: { fullName: true } },
+      client: { select: { fullName: true, fullNameEncrypted: true } },
     },
   });
   if (!session || session.psychologistId !== doctor.id || session.clientId !== clientId) {
     notFound();
   }
+  const clientFullName = await decryptClientField(
+    session.psychologistId,
+    session.client.fullNameEncrypted,
+    session.client.fullName,
+  );
 
   return (
     <Container className="py-10">
@@ -42,7 +48,7 @@ export default async function EncounterWorkspacePage({
         href={`/app/patients/${clientId}`}
         className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
-        ← {session.client.fullName}
+        ← {clientFullName}
       </Link>
       <header className="mb-6 mt-3 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">Encounter</h1>
@@ -61,7 +67,7 @@ export default async function EncounterWorkspacePage({
       <DoctorEncounterPanel
         sessionId={session.id}
         clientId={clientId}
-        clientName={session.client.fullName}
+        clientName={clientFullName}
         sessionStatus={session.status}
       />
     </Container>
