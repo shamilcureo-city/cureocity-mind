@@ -4,6 +4,12 @@ import { Card } from '@/components/ui/Card';
 import { TodaySessionCard } from '@/components/app/TodaySessionCard';
 import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
+import {
+  computeDayBoundaries,
+  formatDayHeader,
+  formatDayShort,
+  formatIstTime as formatTime,
+} from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -216,56 +222,8 @@ function toCardProps(row: {
 }
 
 // ---------------------------------------------------------------------------
-// Day-boundary + formatting helpers (IST).
+// Summary line (IST date helpers now live in @/lib/ist).
 // ---------------------------------------------------------------------------
-
-/**
- * IST is UTC+5:30 with no DST. Compute today's start/end in IST as
- * UTC Date instances so a Prisma `gte`/`lt` filter behaves correctly
- * regardless of the server's local timezone (Vercel = UTC).
- */
-const IST_OFFSET_MIN = 5 * 60 + 30;
-
-function computeDayBoundaries() {
-  const now = new Date();
-  // What day is it in IST right now? Shift by IST offset, then read
-  // the calendar parts; reshift back to UTC for the boundaries.
-  const ist = new Date(now.getTime() + IST_OFFSET_MIN * 60_000);
-  const istY = ist.getUTCFullYear();
-  const istM = ist.getUTCMonth();
-  const istD = ist.getUTCDate();
-  const startOfToday = new Date(Date.UTC(istY, istM, istD) - IST_OFFSET_MIN * 60_000);
-  const endOfToday = new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000);
-  const startOfTomorrow = endOfToday;
-  const lookAheadEnd = new Date(startOfTomorrow.getTime() + 3 * 24 * 60 * 60 * 1000);
-  return { startOfToday, endOfToday, startOfTomorrow, lookAheadEnd };
-}
-
-function formatDayHeader(d: Date): string {
-  return d.toLocaleDateString('en-IN', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    timeZone: 'Asia/Kolkata',
-  });
-}
-
-function formatDayShort(d: Date): string {
-  return d.toLocaleDateString('en-IN', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'Asia/Kolkata',
-  });
-}
-
-function formatTime(d: Date): string {
-  return d.toLocaleTimeString('en-IN', {
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'Asia/Kolkata',
-  });
-}
 
 function summary(upcoming: number, done: number): string {
   if (upcoming === 0 && done === 0) return 'No sessions on the calendar.';

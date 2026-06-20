@@ -36,6 +36,23 @@ body {
 }
 
 /* ============================================================================
+   Privacy mode (Sprint 57). PrivacyModeToggle adds `.privacy-on` to <body>;
+   any element tagged `.privacy-blur` (client names + concern snippets on the
+   dashboard) is blurred until hovered/focused, so the therapist can reveal a
+   single row without turning the whole mode off. Token-driven, no new colours.
+   ========================================================================== */
+.privacy-blur {
+  transition: filter 0.12s ease;
+}
+body.privacy-on .privacy-blur {
+  filter: blur(5px);
+}
+body.privacy-on .privacy-blur:hover,
+body.privacy-on .privacy-blur:focus-within {
+  filter: none;
+}
+
+/* ============================================================================
    Landing page (lp-*) — Sprint 34.
 
    The marketing page at `/` is the only consumer. Everything is CSS-driven:

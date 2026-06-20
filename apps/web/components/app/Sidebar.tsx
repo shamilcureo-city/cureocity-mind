@@ -7,13 +7,16 @@ import { isPaidPlan, planTierLabel, type BillingPlan } from '@cureocity/contract
 interface NavItem {
   href: string;
   label: string;
-  icon: 'today' | 'record' | 'clients' | 'templates' | 'assistant' | 'learn' | 'me';
+  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'templates' | 'assistant' | 'learn' | 'me';
 }
 
 const PRIMARY: NavItem[] = [
-  // Sprint 45 — Today is the first nav item: the screen a therapist opens
-  // each morning. Record stays for walk-ins / dictation; Today is the
-  // calendar-driven entry point.
+  // Sprint 57 — Dashboard is the practice-wide triage hub ("what needs me
+  // across my whole caseload"). Today (below) stays the time-ordered agenda
+  // and remains the post-login landing.
+  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
+  // Sprint 45 — Today: the screen a therapist opens each morning. Record
+  // stays for walk-ins / dictation; Today is the calendar-driven entry point.
   { href: '/app/today', label: 'Today', icon: 'today' },
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
@@ -166,6 +169,7 @@ export function Glyph({
   kind,
 }: {
   kind:
+    | 'dashboard'
     | 'today'
     | 'record'
     | 'clients'
@@ -179,6 +183,7 @@ export function Glyph({
     | 'signout';
 }) {
   const paths: Record<typeof kind, string> = {
+    dashboard: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     today: 'M3 9h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM8 3v4M16 3v4M9 14h2v2H9z',
     record: 'M12 4a4 4 0 0 1 4 4v4a4 4 0 0 1-8 0V8a4 4 0 0 1 4-4zM5 12a7 7 0 0 0 14 0M12 19v3',
     clients: 'M16 14a4 4 0 1 0-8 0M3 21v-1a5 5 0 0 1 5-5h8a5 5 0 0 1 5 5v1',
