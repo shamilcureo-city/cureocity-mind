@@ -6,13 +6,13 @@ to the doctor vertical (DV1–DV8). Pairs with `docs/DOCTOR_VERTICAL.md`
 
 ## 0. Pre-flight (per environment)
 
-| Concern      | Dev                                         | Pilot / prod                                                                                                         |
-| ------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Auth         | `AUTH_BYPASS=true` → seeded doctor fixture  | Real Firebase (`FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY`) — bypass auto-disables                                |
-| LLM          | `LLM_BACKEND=mock` (no creds)               | `LLM_BACKEND=vertex` + `VERTEX_PROJECT_ID` + `GOOGLE_APPLICATION_CREDENTIALS[_JSON]`; Pass 1 in `asia-south1` (DPDP) |
-| Live gateway | `pnpm --filter @cureocity/live-gateway dev` | Deploy `services/live-gateway` in-region (asia-south1); set `NEXT_PUBLIC_LIVE_GATEWAY_URL`                           |
-| ABDM         | `ABDM_BACKEND=mock` (default)               | `ABDM_BACKEND=gateway` + ABDM sandbox creds + HIP registration (see §4)                                              |
-| DB           | local Postgres                              | run `prisma migrate deploy` (DV1–DV8 migrations included)                                                            |
+| Concern      | Dev                                         | Pilot / prod                                                                                                                                     |
+| ------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Auth         | `AUTH_BYPASS=true` → seeded doctor fixture  | Real Firebase (`FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY`) — bypass auto-disables                                                            |
+| LLM          | `LLM_BACKEND=mock` (no creds)               | `LLM_BACKEND=vertex` + `VERTEX_PROJECT_ID` + `GOOGLE_APPLICATION_CREDENTIALS[_JSON]`; Pass 1 in `asia-south1` (DPDP)                             |
+| Live gateway | `pnpm --filter @cureocity/live-gateway dev` | Deploy `services/live-gateway` in-region (asia-south1); set `NEXT_PUBLIC_LIVE_GATEWAY_URL` + `LIVE_GATEWAY_SECRET` (same value on app + gateway) |
+| ABDM         | `ABDM_BACKEND=mock` (default)               | `ABDM_BACKEND=gateway` + ABDM sandbox creds + HIP registration (see §4)                                                                          |
+| DB           | local Postgres                              | run `prisma migrate deploy` (DV1–DV8 migrations included)                                                                                        |
 
 ## 1. Provision the doctor account
 
@@ -75,12 +75,14 @@ trial cap at **encounter-create** and add doctor-plan pricing
   log the row.
 - `docs/security-audit.md` now carries the **doctor-vertical surfaces**
   section (FHIR egress audit `ENCOUNTER_FHIR_EXPORTED`, ABDM push,
-  chronic readings, the live-socket auth TODO).
+  chronic readings, the live-socket token auth).
 - File this runbook + the two above with the clinic before go-live.
 
-> **Pilot-blocking from the security review:** the live gateway socket is
-> currently unauthenticated. Gate it behind a short-lived practitioner
-> token before any real-patient pilot.
+> **Live socket auth (DV8 hardening — done):** the `start` command
+> carries a short-lived HMAC token (`POST /sessions/:id/live-token`); the
+> gateway verifies it. **Set `LIVE_GATEWAY_SECRET` to the same value on
+> both the app and the gateway** before the pilot — when unset the
+> gateway runs open (dev only).
 
 ## 7. Rollback
 

@@ -84,12 +84,27 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
     type: z.literal('start'),
     sessionId: z.string().optional(),
     specialty: z.string().optional(),
+    /**
+     * Sprint DV8 hardening — a short-lived signed token proving the
+     * caller is the authenticated practitioner who owns `sessionId`
+     * (minted by POST /sessions/:id/live-token). The gateway verifies it
+     * before streaming. Optional in dev (gateway skips verification when
+     * LIVE_GATEWAY_SECRET is unset); required in prod.
+     */
+    token: z.string().optional(),
   }),
   z.object({ type: z.literal('stop') }),
 ]);
 export type LiveGatewayCommand = z.infer<typeof LiveGatewayCommandSchema>;
 
-export const LiveGatewayStateSchema = z.enum(['connected', 'listening', 'finalizing', 'done']);
+export const LiveGatewayStateSchema = z.enum([
+  'connected',
+  'listening',
+  'finalizing',
+  'done',
+  // Sprint DV8 hardening — the start token was missing/invalid/expired.
+  'unauthorized',
+]);
 export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 
 /// Gateway → client events: the three rails + lifecycle status + (DV6.4)

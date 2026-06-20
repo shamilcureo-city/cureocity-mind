@@ -84,7 +84,7 @@ export function DoctorLiveEncounter({
     };
   }, []);
 
-  function start(): void {
+  async function start(): Promise<void> {
     setError(null);
     setTranscript('');
     setNote({});
@@ -93,6 +93,17 @@ export function DoctorLiveEncounter({
     setShownData({});
     setFinalNote(null);
     setPhase('connecting');
+
+    // Sprint DV8 hardening — mint a short-lived token so the gateway can
+    // verify we own this session. In dev the gateway runs open, so a
+    // failed mint is non-fatal.
+    let token: string | undefined;
+    try {
+      const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, { method: 'POST' });
+      if (r.ok) token = ((await r.json()) as { token?: string }).token;
+    } catch {
+      /* dev gateway runs open */
+    }
 
     let ws: WebSocket;
     try {
@@ -105,7 +116,14 @@ export function DoctorLiveEncounter({
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'start', sessionId, ...(specialty ? { specialty } : {}) }));
+      ws.send(
+        JSON.stringify({
+          type: 'start',
+          sessionId,
+          ...(specialty ? { specialty } : {}),
+          ...(token ? { token } : {}),
+        }),
+      );
       void stream.start().catch((e: Error) => {
         setError(`Microphone unavailable: ${e.message}`);
         setPhase('error');
@@ -136,6 +154,10 @@ export function DoctorLiveEncounter({
           if (event.state === 'listening') setPhase('listening');
           else if (event.state === 'finalizing') setPhase('finalizing');
           else if (event.state === 'done') setPhase('done');
+          else if (event.state === 'unauthorized') {
+            setPhase('error');
+            setError('The live session could not be authorised. Reload the page and try again.');
+          }
           break;
         case 'transcript':
           setTranscript((prev) => (prev ? `${prev} ${event.delta.text}` : event.delta.text));
@@ -179,7 +201,7 @@ export function DoctorLiveEncounter({
         </div>
         <div className="flex gap-2">
           {finalNote || phase === 'done' ? (
-            <Button onClick={start} variant="secondary">
+            <Button onClick={() => void start()} variant="secondary">
               New consult
             </Button>
           ) : live ? (
@@ -187,7 +209,7 @@ export function DoctorLiveEncounter({
               End consult
             </Button>
           ) : (
-            <Button onClick={start} disabled={phase === 'connecting'}>
+            <Button onClick={() => void start()} disabled={phase === 'connecting'}>
               {phase === 'connecting' ? 'Connecting…' : 'Start live consult'}
             </Button>
           )}

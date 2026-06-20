@@ -1,5 +1,6 @@
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { LiveGatewayCommandSchema, type LiveGatewayEvent } from '@cureocity/contracts';
+import { authRequired, verifyStartToken } from './auth';
 import { buildBackends } from './llm';
 import { LiveSession } from './live-session';
 
@@ -39,6 +40,13 @@ wss.on('connection', (ws) => {
     if (!parsed.success) return;
     const cmd = parsed.data;
     if (cmd.type === 'start') {
+      // Sprint DV8 hardening — verify the practitioner token before
+      // streaming (no-op in dev when LIVE_GATEWAY_SECRET is unset).
+      if (!verifyStartToken(cmd.token, cmd.sessionId)) {
+        send(ws, { type: 'status', state: 'unauthorized' });
+        ws.close();
+        return;
+      }
       session?.dispose();
       session = new LiveSession(
         cmd.sessionId ?? `live-${Date.now()}`,
@@ -57,7 +65,7 @@ wss.on('connection', (ws) => {
 });
 
 console.log(
-  `[live-gateway] streaming gateway listening on ws://localhost:${PORT} (LLM_BACKEND=${backends.backend})`,
+  `[live-gateway] streaming gateway listening on ws://localhost:${PORT} (LLM_BACKEND=${backends.backend}, auth=${authRequired() ? 'required' : 'open (dev)'})`,
 );
 
 function send(ws: WebSocket, event: LiveGatewayEvent): void {
