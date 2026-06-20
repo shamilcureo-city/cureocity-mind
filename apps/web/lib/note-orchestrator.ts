@@ -27,6 +27,7 @@ import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { encryptForTenant } from './tenant-crypto';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
+import { assembleSegments, transcribeChunkInline, type AssemblyInput } from './transcribe-segment';
 
 /**
  * Synchronous orchestrator port — runs Pass 1 → Pass 2 inline on the
@@ -78,52 +79,19 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
   });
 
   try {
-    const { audioBytes, durationMs } = await fetchAudio(sessionId);
     const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
-    if (audioBytes.byteLength === 0 && llmBackend !== 'mock') {
+    const pass1 = await runOrAssemblePass1({
+      sessionId,
+      psychologistId: session.psychologistId,
+      llmBackend,
+    });
+    if (pass1.kind === 'no-audio') {
       throw new Error(
         'No audio chunks reached storage for this session. Record at least one 30-second chunk and end the session again — the orchestrator skips empty sessions to avoid an unnecessary Gemini bill.',
       );
     }
 
-    // Pass 1 cost-guard pre-check
-    const pass1Estimate = computeCostInr(
-      estimateAudioInputTokens(durationMs),
-      1_000,
-      FLASH_PRICING,
-    );
-    await checkCostCircuit({
-      sessionId,
-      psychologistId: session.psychologistId,
-      estimatedCostInr: pass1Estimate,
-    });
-
-    const router = modelRouter();
-    const clientSpokenHints =
-      Array.isArray(session.client.spokenLanguages) && session.client.spokenLanguages.length > 0
-        ? session.client.spokenLanguages
-        : undefined;
-    const pass1 = await router.pass1({
-      sessionId,
-      audioBytes,
-      durationMs,
-      ...(clientSpokenHints && {
-        hints: { spokenLanguageHints: clientSpokenHints },
-      }),
-    });
-    await persistCallLog(pass1.callLog);
-    recordGeminiCall({
-      pass: pass1.callLog.pass,
-      status: pass1.callLog.status,
-      region: pass1.callLog.region,
-      durationMs: pass1.callLog.latencyMs,
-    });
-    recordCostInr({
-      service: 'gemini-pass-1',
-      durationLabel: bucketDuration(durationMs),
-      inr: pass1.callLog.costInr,
-    });
-    const pass1Cost = new Prisma.Decimal(pass1.callLog.costInr);
+    const pass1Cost = new Prisma.Decimal(pass1.totalCostInr);
 
     // Sprint 54 — dual-write the envelope-encrypted transcript. The
     // verbatim session transcript is the most sensitive clinical
@@ -134,7 +102,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // catch it up later), exactly as the plaintext column behaves today.
     let transcriptEncrypted: string | null = null;
     try {
-      transcriptEncrypted = await encryptForTenant(session.psychologistId, pass1.output.transcript);
+      transcriptEncrypted = await encryptForTenant(session.psychologistId, pass1.transcript);
     } catch (e) {
       console.warn(
         `[note-orchestrator] transcript encryption failed for session=${sessionId}; storing plaintext only: ${(e as Error).message}`,
@@ -144,10 +112,10 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     await prisma.noteDraft.update({
       where: { id: draft.id },
       data: {
-        transcript: pass1.output.transcript,
+        transcript: pass1.transcript,
         transcriptEncrypted,
-        speakerSegments: pass1.output.speakerSegments as unknown as Prisma.InputJsonValue,
-        affectFeatures: pass1.output.affectFeatures as unknown as Prisma.InputJsonValue,
+        speakerSegments: pass1.speakerSegments as unknown as Prisma.InputJsonValue,
+        affectFeatures: pass1.affectFeatures as unknown as Prisma.InputJsonValue,
         totalCostInr: pass1Cost,
       },
     });
@@ -156,10 +124,10 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // the Session row. Used by the UI to show language badges +
     // by Pass 4 to choose the verbatim therapistSays language when
     // the client has no spokenLanguages on file.
-    if (pass1.output.detectedLanguages.length > 0) {
+    if (pass1.detectedLanguages.length > 0) {
       await prisma.session.update({
         where: { id: sessionId },
-        data: { spokenLanguages: pass1.output.detectedLanguages },
+        data: { spokenLanguages: pass1.detectedLanguages },
       });
     }
 
@@ -171,12 +139,8 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // first real prod intake (2026-06-16). Fail loudly + retryably
     // instead, and skip the Pass 2 bill. Retry re-runs Pass 1 (the
     // idempotency check short-circuits only when transcriptChars > 0).
-    if (pass1.output.transcript.trim().length === 0) {
-      const pass1Errored = pass1.callLog.status === 'ERROR';
-      const detail =
-        pass1Errored && pass1.callLog.errorMessage
-          ? ` Transcription error: ${pass1.callLog.errorMessage}.`
-          : '';
+    if (pass1.transcript.trim().length === 0) {
+      const detail = pass1.errorMessage ? ` Transcription error: ${pass1.errorMessage}.` : '';
       const message =
         `Transcription came back empty.${detail} The recording likely had no audible speech — ` +
         `check your microphone / input device and that you weren't muted — or the model returned ` +
@@ -191,7 +155,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
 
     // Pass 2 cost-guard pre-check
     const pass2Estimate = computeCostInr(
-      Math.ceil(pass1.output.transcript.length / 4),
+      Math.ceil(pass1.transcript.length / 4),
       1_500,
       PRO_PRICING,
     );
@@ -201,10 +165,11 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       estimatedCostInr: pass2Estimate,
     });
 
+    const router = modelRouter();
     const pass2 = await router.pass2({
       sessionId,
-      transcript: pass1.output.transcript,
-      speakerSegments: pass1.output.speakerSegments,
+      transcript: pass1.transcript,
+      speakerSegments: pass1.speakerSegments,
       // Sprint DV3 — DOCTOR routes Pass 2 to the medical encounter note
       // (the MEDICAL output arm) instead of the therapy SOAP/intake note.
       vertical: session.psychologist.vertical,
@@ -224,10 +189,11 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         }),
       },
     });
+
     // Sprint DV3 — doctors get a medical encounter note. Store it, audit
-    // ENCOUNTER_NOTE_DRAFTED, and return: there is no therapy risk-flag
-    // handling and no Pass 3 (the medical differential is DV6). This must
-    // branch BEFORE the therapy-only union arms are read below.
+    // ENCOUNTER_NOTE_DRAFTED, persist the drafted orders + vital readings,
+    // and return: no therapy risk-flag handling, no Pass 3 (the medical
+    // differential is DV6). Must branch BEFORE the therapy union arms.
     if (pass2.output.kind === 'MEDICAL') {
       const encounterNote = pass2.output.encounterNote;
       await persistCallLog(pass2.callLog);
@@ -239,7 +205,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       });
       recordCostInr({
         service: 'gemini-pass-2',
-        durationLabel: bucketDuration(durationMs),
+        durationLabel: bucketDuration(pass1.totalDurationMs),
         inr: pass2.callLog.costInr,
       });
       const pass2CostMedical = new Prisma.Decimal(pass2.callLog.costInr);
@@ -259,14 +225,13 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         targetId: draft.id,
         metadata: {
           sessionId,
-          pass1CostInr: pass1.callLog.costInr,
+          pass1CostInr: pass1.totalCostInr,
           pass2CostInr: pass2.callLog.costInr,
-          totalCostInr: pass1.callLog.costInr + pass2.callLog.costInr,
+          totalCostInr: pass1.totalCostInr + pass2.callLog.costInr,
         },
       });
-      // Sprint DV5 — persist the drafted Rx + clinical orders. The
-      // medication interaction-check runs deterministically server-side
-      // here (never client-supplied), stamping each order's warnings.
+      // Sprint DV5 — persist the drafted Rx + clinical orders (the
+      // interaction-check runs server-side inside the helper).
       await persistDraftedOrders(
         sessionId,
         session.psychologistId,
@@ -299,7 +264,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     });
     recordCostInr({
       service: 'gemini-pass-2',
-      durationLabel: bucketDuration(durationMs),
+      durationLabel: bucketDuration(pass1.totalDurationMs),
       inr: pass2.callLog.costInr,
     });
     const pass2Cost = new Prisma.Decimal(pass2.callLog.costInr);
@@ -326,9 +291,11 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       targetId: draft.id,
       metadata: {
         sessionId,
-        pass1CostInr: pass1.callLog.costInr,
+        pass1Source: pass1.source,
+        pass1SegmentCount: pass1.segmentCount,
+        pass1CostInr: pass1.totalCostInr,
         pass2CostInr: pass2.callLog.costInr,
-        totalCostInr: pass1.callLog.costInr + pass2.callLog.costInr,
+        totalCostInr: pass1.totalCostInr + pass2.callLog.costInr,
         riskSeverity,
       },
     });
@@ -364,8 +331,8 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       kind: session.kind,
       modality: session.modality,
       presentingConcerns: session.client.presentingConcerns,
-      transcript: pass1.output.transcript,
-      speakerSegments: pass1.output.speakerSegments,
+      transcript: pass1.transcript,
+      speakerSegments: pass1.speakerSegments,
       // Sprint 19 — note shape depends on session.kind. Pass 3 prompt
       // branches on its own kind input; we pass the body opaquely.
       note: pass2Body,
@@ -448,6 +415,210 @@ async function fetchAudio(sessionId: string): Promise<{ audioBytes: Buffer; dura
   return { audioBytes: Buffer.concat(buffers), durationMs: totalDurationMs };
 }
 
+// ============================================================================
+// Sprint 57 — Pass 1 input gathering.
+//
+// runOrAssemblePass1 produces the same logical Pass 1 output (transcript +
+// per-utterance speakerSegments + affectFeatures + detectedLanguages) by
+// three escalating paths:
+//
+//   1. ASSEMBLED — every AudioChunk already has a COMPLETED
+//      TranscriptSegment from the per-chunk transcribe-on-arrival hook.
+//      No new model call; we just stitch the segments.
+//   2. BACKSTOP — some chunks have a segment, some don't (or some FAILED).
+//      Transcribe the missing ones inline now, then assemble.
+//   3. LEGACY — zero TranscriptSegment rows for this session: the recording
+//      pre-dates the transcribe-on-arrival deploy. Fall back to the single
+//      whole-session Pass 1 call so old sessions still produce notes.
+// ============================================================================
+
+type Pass1Result =
+  | {
+      kind: 'ready';
+      source: 'assembled' | 'backstop' | 'legacy';
+      transcript: string;
+      speakerSegments: Pass1Output['speakerSegments'];
+      affectFeatures: Pass1Output['affectFeatures'];
+      detectedLanguages: string[];
+      totalCostInr: number;
+      totalDurationMs: number;
+      segmentCount: number;
+      errorMessage?: string;
+    }
+  | { kind: 'no-audio' };
+
+async function runOrAssemblePass1(args: {
+  sessionId: string;
+  psychologistId: string;
+  llmBackend: string;
+}): Promise<Pass1Result> {
+  const chunks = await prisma.audioChunk.findMany({
+    where: { sessionId: args.sessionId },
+    orderBy: { chunkIndex: 'asc' },
+    select: { id: true, chunkIndex: true, durationMs: true, sizeBytes: true },
+  });
+  if (chunks.length === 0 && args.llmBackend !== 'mock') {
+    return { kind: 'no-audio' };
+  }
+
+  const segments = await prisma.transcriptSegment.findMany({
+    where: { sessionId: args.sessionId },
+    orderBy: { chunkIndex: 'asc' },
+  });
+
+  // Legacy path: this session never went through transcribe-on-arrival
+  // (recorded before Sprint 57). Single whole-session Pass 1 call.
+  if (segments.length === 0) {
+    return await runLegacyWholeSessionPass1({
+      sessionId: args.sessionId,
+      psychologistId: args.psychologistId,
+      llmBackend: args.llmBackend,
+    });
+  }
+
+  // Backstop: transcribe any chunk that doesn't have a COMPLETED segment.
+  // updateMany'd attempts inside transcribeChunkInline give us bounded retry
+  // semantics; we stop after one pass and fall back to legacy if too many
+  // are still missing (function-budget safety on Hobby).
+  const segmentByChunkIndex = new Map(segments.map((s) => [s.chunkIndex, s]));
+  const missing = chunks.filter((c) => {
+    const seg = segmentByChunkIndex.get(c.chunkIndex);
+    return !seg || seg.status !== 'COMPLETED';
+  });
+
+  // Parallel backstop: each call is small + independent, so running them
+  // concurrently keeps the orchestrator well inside the Hobby 60s budget
+  // even when many chunks need rescue. Vertex Flash handles the per-tenant
+  // QPS comfortably for the ~16-window worst case. Bounded at 8 concurrent
+  // so a freak 60-chunk session doesn't blow the function's memory ceiling.
+  const BACKSTOP_CONCURRENCY = 8;
+  for (let i = 0; i < missing.length; i += BACKSTOP_CONCURRENCY) {
+    const batch = missing.slice(i, i + BACKSTOP_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((chunk) =>
+        transcribeChunkInline({
+          sessionId: args.sessionId,
+          chunkIndex: chunk.chunkIndex,
+        }),
+      ),
+    );
+    for (let j = 0; j < results.length; j++) {
+      const r = results[j];
+      const chunk = batch[j];
+      if (r && r.status === 'failed' && chunk) {
+        console.warn(
+          `[note-orchestrator] backstop failed sessionId=${args.sessionId} chunkIndex=${chunk.chunkIndex}: ${r.reason}`,
+        );
+      }
+    }
+  }
+
+  // Re-read after backstop so we pick up the freshly-completed segments.
+  const refreshed = await prisma.transcriptSegment.findMany({
+    where: { sessionId: args.sessionId, status: 'COMPLETED' },
+    orderBy: { chunkIndex: 'asc' },
+  });
+  const durationByChunkIndex = new Map(chunks.map((c) => [c.chunkIndex, c.durationMs]));
+
+  const assemblyInput: AssemblyInput[] = refreshed.map((seg) => ({
+    chunkIndex: seg.chunkIndex,
+    durationMs: durationByChunkIndex.get(seg.chunkIndex) ?? 0,
+    transcript: seg.transcript ?? '',
+    speakerSegments: (seg.speakerSegments ?? []) as Pass1Output['speakerSegments'],
+    affectFeatures: (seg.affectFeatures ?? []) as Pass1Output['affectFeatures'],
+    detectedLanguages: seg.detectedLanguages ?? [],
+    costInr: Number(seg.costInr),
+    latencyMs: seg.latencyMs,
+  }));
+  const assembled = assembleSegments(assemblyInput);
+
+  const totalDurationMs = chunks.reduce((sum, c) => sum + c.durationMs, 0);
+  return {
+    kind: 'ready',
+    source: missing.length === 0 ? 'assembled' : 'backstop',
+    transcript: assembled.transcript,
+    speakerSegments: assembled.speakerSegments,
+    affectFeatures: assembled.affectFeatures,
+    detectedLanguages: assembled.detectedLanguages,
+    totalCostInr: assembled.totalCostInr,
+    totalDurationMs,
+    segmentCount: assembled.segmentCount,
+    ...(missing.length > 0 && {
+      errorMessage: `Backstop transcribed ${missing.length} of ${chunks.length} window(s) at End — pre-arrival path missed them.`,
+    }),
+  };
+}
+
+/**
+ * Legacy whole-session Pass 1 call. Preserved for sessions recorded before
+ * the Sprint 57 transcribe-on-arrival deploy (their AudioChunks have no
+ * TranscriptSegment rows). On Hobby this remains the single biggest risk
+ * for a 60s function reap, but it only affects legacy sessions that already
+ * worked (or already failed) under the old behavior.
+ */
+async function runLegacyWholeSessionPass1(args: {
+  sessionId: string;
+  psychologistId: string;
+  llmBackend: string;
+}): Promise<Pass1Result> {
+  const { audioBytes, durationMs } = await fetchAudio(args.sessionId);
+  if (audioBytes.byteLength === 0 && args.llmBackend !== 'mock') {
+    return { kind: 'no-audio' };
+  }
+
+  const pass1Estimate = computeCostInr(estimateAudioInputTokens(durationMs), 1_000, FLASH_PRICING);
+  await checkCostCircuit({
+    sessionId: args.sessionId,
+    psychologistId: args.psychologistId,
+    estimatedCostInr: pass1Estimate,
+  });
+
+  const client = await prisma.session.findUnique({
+    where: { id: args.sessionId },
+    select: { client: { select: { spokenLanguages: true } } },
+  });
+  const clientSpokenHints =
+    client &&
+    Array.isArray(client.client.spokenLanguages) &&
+    client.client.spokenLanguages.length > 0
+      ? client.client.spokenLanguages
+      : undefined;
+
+  const router = modelRouter();
+  const pass1 = await router.pass1({
+    sessionId: args.sessionId,
+    audioBytes,
+    durationMs,
+    ...(clientSpokenHints && { hints: { spokenLanguageHints: clientSpokenHints } }),
+  });
+  await persistCallLog(pass1.callLog);
+  recordGeminiCall({
+    pass: pass1.callLog.pass,
+    status: pass1.callLog.status,
+    region: pass1.callLog.region,
+    durationMs: pass1.callLog.latencyMs,
+  });
+  recordCostInr({
+    service: 'gemini-pass-1',
+    durationLabel: bucketDuration(durationMs),
+    inr: pass1.callLog.costInr,
+  });
+
+  return {
+    kind: 'ready',
+    source: 'legacy',
+    transcript: pass1.output.transcript,
+    speakerSegments: pass1.output.speakerSegments,
+    affectFeatures: pass1.output.affectFeatures,
+    detectedLanguages: pass1.output.detectedLanguages,
+    totalCostInr: pass1.callLog.costInr,
+    totalDurationMs: durationMs,
+    segmentCount: 0,
+    ...(pass1.callLog.status === 'ERROR' &&
+      pass1.callLog.errorMessage !== undefined && { errorMessage: pass1.callLog.errorMessage }),
+  };
+}
+
 async function persistCallLog(log: GeminiCallLogData): Promise<void> {
   await prisma.geminiCallLog.create({
     data: {
@@ -463,127 +634,6 @@ async function persistCallLog(log: GeminiCallLogData): Promise<void> {
       status: log.status,
       ...(log.errorMessage !== undefined && { errorMessage: log.errorMessage }),
     },
-  });
-}
-
-/**
- * Sprint DV5 — persist the AI-drafted Rx + clinical orders for a doctor
- * encounter. Replaces any existing DRAFT orders (so a note re-run is
- * clean) while leaving already-CONFIRMED orders untouched. The drug
- * interaction-check runs here, deterministically, and stamps each
- * medication order's `interactionWarnings`. Audits with literal action
- * strings (the chaos test scans for these).
- */
-async function persistDraftedOrders(
-  sessionId: string,
-  psychologistId: string,
-  medications: MedicationOrderV1[],
-  clinicalOrders: ClinicalOrderV1[],
-): Promise<void> {
-  if (medications.length > 0) {
-    const warningsByDrug = interactionWarningsByDrug(medications.map((m) => m.drug));
-    await prisma.medicationOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
-    await prisma.medicationOrder.createMany({
-      data: medications.map((m, i) => ({
-        sessionId,
-        psychologistId,
-        content: {
-          ...m,
-          interactionWarnings: warningsByDrug[i] ?? [],
-        } as unknown as Prisma.InputJsonValue,
-      })),
-    });
-    await writeAudit({
-      actorType: 'SYSTEM',
-      action: 'MEDICATION_ORDER_DRAFTED',
-      targetType: 'Session',
-      targetId: sessionId,
-      metadata: {
-        sessionId,
-        count: medications.length,
-        interactionCount: warningsByDrug.filter((w) => w.length > 0).length,
-      },
-    });
-  }
-  if (clinicalOrders.length > 0) {
-    await prisma.clinicalOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
-    await prisma.clinicalOrder.createMany({
-      data: clinicalOrders.map((o) => ({
-        sessionId,
-        psychologistId,
-        content: o as unknown as Prisma.InputJsonValue,
-      })),
-    });
-    await writeAudit({
-      actorType: 'SYSTEM',
-      action: 'CLINICAL_ORDER_DRAFTED',
-      targetType: 'Session',
-      targetId: sessionId,
-      metadata: { sessionId, count: clinicalOrders.length },
-    });
-  }
-}
-
-/**
- * Sprint DV7 — capture the medical note's vitals into the chronic-reading
- * time series. BP + weight only (the chronic measures with a vital
- * source; HbA1c / FBS / LDL are logged manually or from lab results).
- * Replaces any readings already captured for this session (so a note
- * re-run is clean). Audits with a literal action string.
- */
-async function persistVitalReadings(
-  sessionId: string,
-  clientId: string,
-  psychologistId: string,
-  takenAt: Date,
-  vitals: MedicalEncounterNoteV1['vitals'],
-): Promise<void> {
-  if (!vitals) return;
-  const rows: {
-    clientId: string;
-    psychologistId: string;
-    sessionId: string;
-    measure: 'BP' | 'WEIGHT';
-    value: number;
-    valueSecondary?: number;
-    unit: string;
-    takenAt: Date;
-    source: string;
-  }[] = [];
-  if (vitals.bpSystolic && vitals.bpDiastolic) {
-    rows.push({
-      clientId,
-      psychologistId,
-      sessionId,
-      measure: 'BP',
-      value: vitals.bpSystolic,
-      valueSecondary: vitals.bpDiastolic,
-      unit: 'mmHg',
-      takenAt,
-      source: 'NOTE_VITALS',
-    });
-  }
-  if (vitals.weightKg) {
-    rows.push({
-      clientId,
-      psychologistId,
-      sessionId,
-      measure: 'WEIGHT',
-      value: vitals.weightKg,
-      unit: 'kg',
-      takenAt,
-      source: 'NOTE_VITALS',
-    });
-  }
-  if (rows.length === 0) return;
-  await prisma.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
-  await prisma.clinicalReading.createMany({ data: rows });
-  await writeAudit({
-    actorType: 'SYSTEM',
-    action: 'CLINICAL_READING_RECORDED',
-    targetType: 'Session',
-    targetId: sessionId,
-    metadata: { sessionId, clientId, source: 'NOTE_VITALS', count: rows.length },
   });
 }
 
@@ -818,6 +868,127 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     // Non-fatal: do NOT re-throw. Pass 3 failure must not unwind
     // Pass 1/2 success.
   }
+}
+
+/**
+ * Sprint DV5 — persist the AI-drafted Rx + clinical orders for a doctor
+ * encounter. Replaces any existing DRAFT orders (so a note re-run is
+ * clean) while leaving already-CONFIRMED orders untouched. The drug
+ * interaction-check runs here, deterministically, and stamps each
+ * medication order's `interactionWarnings`. Audits with literal action
+ * strings (the chaos test scans for these).
+ */
+async function persistDraftedOrders(
+  sessionId: string,
+  psychologistId: string,
+  medications: MedicationOrderV1[],
+  clinicalOrders: ClinicalOrderV1[],
+): Promise<void> {
+  if (medications.length > 0) {
+    const warningsByDrug = interactionWarningsByDrug(medications.map((m) => m.drug));
+    await prisma.medicationOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+    await prisma.medicationOrder.createMany({
+      data: medications.map((m, i) => ({
+        sessionId,
+        psychologistId,
+        content: {
+          ...m,
+          interactionWarnings: warningsByDrug[i] ?? [],
+        } as unknown as Prisma.InputJsonValue,
+      })),
+    });
+    await writeAudit({
+      actorType: 'SYSTEM',
+      action: 'MEDICATION_ORDER_DRAFTED',
+      targetType: 'Session',
+      targetId: sessionId,
+      metadata: {
+        sessionId,
+        count: medications.length,
+        interactionCount: warningsByDrug.filter((w) => w.length > 0).length,
+      },
+    });
+  }
+  if (clinicalOrders.length > 0) {
+    await prisma.clinicalOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+    await prisma.clinicalOrder.createMany({
+      data: clinicalOrders.map((o) => ({
+        sessionId,
+        psychologistId,
+        content: o as unknown as Prisma.InputJsonValue,
+      })),
+    });
+    await writeAudit({
+      actorType: 'SYSTEM',
+      action: 'CLINICAL_ORDER_DRAFTED',
+      targetType: 'Session',
+      targetId: sessionId,
+      metadata: { sessionId, count: clinicalOrders.length },
+    });
+  }
+}
+
+/**
+ * Sprint DV7 — capture the medical note's vitals into the chronic-reading
+ * time series. BP + weight only (the chronic measures with a vital
+ * source; HbA1c / FBS / LDL are logged manually or from lab results).
+ * Replaces any readings already captured for this session (so a note
+ * re-run is clean). Audits with a literal action string.
+ */
+async function persistVitalReadings(
+  sessionId: string,
+  clientId: string,
+  psychologistId: string,
+  takenAt: Date,
+  vitals: MedicalEncounterNoteV1['vitals'],
+): Promise<void> {
+  if (!vitals) return;
+  const rows: {
+    clientId: string;
+    psychologistId: string;
+    sessionId: string;
+    measure: 'BP' | 'WEIGHT';
+    value: number;
+    valueSecondary?: number;
+    unit: string;
+    takenAt: Date;
+    source: string;
+  }[] = [];
+  if (vitals.bpSystolic && vitals.bpDiastolic) {
+    rows.push({
+      clientId,
+      psychologistId,
+      sessionId,
+      measure: 'BP',
+      value: vitals.bpSystolic,
+      valueSecondary: vitals.bpDiastolic,
+      unit: 'mmHg',
+      takenAt,
+      source: 'NOTE_VITALS',
+    });
+  }
+  if (vitals.weightKg) {
+    rows.push({
+      clientId,
+      psychologistId,
+      sessionId,
+      measure: 'WEIGHT',
+      value: vitals.weightKg,
+      unit: 'kg',
+      takenAt,
+      source: 'NOTE_VITALS',
+    });
+  }
+  if (rows.length === 0) return;
+  await prisma.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
+  await prisma.clinicalReading.createMany({ data: rows });
+  await writeAudit({
+    actorType: 'SYSTEM',
+    action: 'CLINICAL_READING_RECORDED',
+    targetType: 'Session',
+    targetId: sessionId,
+    metadata: { sessionId, clientId, source: 'NOTE_VITALS', count: rows.length },
+  });
 }
 
 // ============================================================================

@@ -779,6 +779,7 @@ model Session {
   client              Client               @relation(fields: [clientId], references: [id])
   psychologist        Psychologist         @relation(fields: [psychologistId], references: [id])
   audioChunks         AudioChunk[]
+  transcriptSegments  TranscriptSegment[]
   geminiCallLogs      GeminiCallLog[]
   noteDraft           NoteDraft?
   therapyNote         TherapyNote?
@@ -825,11 +826,66 @@ model AudioChunk {
 
   uploadedAt DateTime @default(now())
 
-  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session  Session            @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  segment  TranscriptSegment?
 
   @@unique([sessionId, chunkIndex])
   @@index([sessionId, uploadedAt])
   @@map("audio_chunks")
+}
+
+// ============================================================================
+// TranscriptSegment — Sprint 57 transcribe-on-arrival.
+// One row per AudioChunk holds the Pass 1 output for that 30s window so the
+// orchestrator can assemble a finished transcript at "End session" instead of
+// running Pass 1 on the whole session at once. Lifecycle:
+//   PENDING      — row exists, transcription not started
+//   TRANSCRIBING — in flight (claimed by an upload-route after() or a backstop)
+//   COMPLETED    — transcript + per-window speakerSegments persisted
+//   FAILED       — Gemini errored; the backstop at End retries
+// ============================================================================
+
+model TranscriptSegment {
+  id           String                  @id @default(cuid())
+  sessionId    String
+  audioChunkId String                  @unique
+  chunkIndex   Int
+  status       TranscriptSegmentStatus @default(PENDING)
+
+  // Pass 1 output for THIS window only. timestamps in speakerSegments /
+  // affectFeatures are RELATIVE to the start of this chunk; the orchestrator
+  // offsets them by the cumulative duration of prior chunks at assembly.
+  transcript        String?  @db.Text
+  speakerSegments   Json?
+  affectFeatures    Json?
+  detectedLanguages String[] @default([])
+
+  model     String?
+  region    String?
+  costInr   Decimal @default(0) @db.Decimal(10, 4)
+  latencyMs Int     @default(0)
+
+  attempts     Int     @default(0)
+  errorMessage String? @db.Text
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  session    Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  audioChunk AudioChunk @relation(fields: [audioChunkId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, chunkIndex])
+  @@index([sessionId, status])
+  @@map("transcript_segments")
+}
+
+enum TranscriptSegmentStatus {
+  PENDING
+  TRANSCRIBING
+  COMPLETED
+  FAILED
 }
 
 // ============================================================================
@@ -2208,6 +2264,9 @@ enum AuditAction {
 
   // Audio + notes (scribe-service, Sprint 2)
   AUDIO_CHUNK_UPLOADED
+  // Sprint 57 — transcribe-on-arrival lifecycle.
+  TRANSCRIPT_SEGMENT_TRANSCRIBED
+  TRANSCRIPT_SEGMENT_FAILED
   NOTE_DRAFT_CREATED
   NOTE_DRAFT_VIEWED
   NOTE_SIGNED

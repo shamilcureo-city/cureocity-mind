@@ -21,6 +21,9 @@ export const AuditActionSchema = z.enum([
   'SESSION_NO_SHOW',
   'SESSION_RESCHEDULED',
   'AUDIO_CHUNK_UPLOADED',
+  // Sprint 57 — transcribe-on-arrival.
+  'TRANSCRIPT_SEGMENT_TRANSCRIBED',
+  'TRANSCRIPT_SEGMENT_FAILED',
   'NOTE_DRAFT_CREATED',
   'NOTE_DRAFT_VIEWED',
   'NOTE_SIGNED',

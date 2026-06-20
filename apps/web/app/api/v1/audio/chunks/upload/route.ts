@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, after, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
+import { transcribeChunkInline } from '@/lib/transcribe-segment';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -120,12 +121,38 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     console.info(
       `[audio-chunks-upload] ok sessionId=${sessionId} chunkIndex=${chunkIndex} size=${bytes.byteLength}`,
     );
+    // Sprint 57 — transcribe-on-arrival. Fire-and-forget Pass 1 on this one
+    // window via Next.js `after()` so the recorder's next request isn't
+    // blocked. The orchestrator backstop at "End session" re-tries any
+    // chunk this misses (network blip, Vertex 5xx, function reaped).
+    after(async () => {
+      try {
+        const result = await transcribeChunkInline({ sessionId, chunkIndex });
+        console.info(
+          `[audio-chunks-upload] transcribe sessionId=${sessionId} chunkIndex=${chunkIndex} ${result.status}`,
+        );
+      } catch (e) {
+        console.error(
+          `[audio-chunks-upload] transcribe threw sessionId=${sessionId} chunkIndex=${chunkIndex}: ${(e as Error).message}`,
+        );
+      }
+    });
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
       console.info(
         `[audio-chunks-upload] duplicate (idempotent) sessionId=${sessionId} chunkIndex=${chunkIndex}`,
       );
+      // Re-trigger transcription for the duplicate too — the original
+      // attempt may have completed the AudioChunk insert but had its
+      // after() callback killed before transcription ran.
+      after(async () => {
+        try {
+          await transcribeChunkInline({ sessionId, chunkIndex });
+        } catch {
+          /* swallow — the orchestrator backstop will retry */
+        }
+      });
       return NextResponse.json({ ok: true, deduplicated: true });
     }
     const err = e as { name?: string; message?: string };

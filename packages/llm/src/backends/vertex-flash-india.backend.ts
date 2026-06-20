@@ -19,6 +19,21 @@ export interface VertexGeminiFlashIndiaOptions {
   model?: string;
   /** Path to a service-account JSON key, or use ADC if undefined. */
   saKeyPath?: string;
+  /**
+   * Sprint 57 — HTTP timeout in milliseconds for each Vertex call.
+   * Bounded so a stalled call surfaces as a clean error inside the
+   * function budget instead of getting reaped by the platform (Vercel
+   * Hobby = 60s function cap regardless of maxDuration).
+   * Default: 50s — leaves ~10s of headroom for retry + caller overhead.
+   */
+  timeoutMs?: number;
+  /**
+   * Sprint 57 — total attempts including the first. One bounded retry
+   * (so default 2) turns a transient Vertex 5xx into recovery instead of
+   * a user-facing failure. Idempotent + cheap because per-chunk calls
+   * are small (~3-5s).
+   */
+  maxAttempts?: number;
 }
 
 /**
@@ -36,10 +51,14 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
   private readonly ai: GoogleGenAI;
   private readonly modelName: string;
   private readonly region: string;
+  private readonly timeoutMs: number;
+  private readonly maxAttempts: number;
 
   constructor(opts: VertexGeminiFlashIndiaOptions) {
     this.modelName = opts.model ?? 'gemini-2.5-flash';
     this.region = opts.location ?? 'asia-south1';
+    this.timeoutMs = opts.timeoutMs ?? 50_000;
+    this.maxAttempts = Math.max(1, opts.maxAttempts ?? 2);
     if (opts.saKeyPath) {
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] = opts.saKeyPath;
     }
@@ -47,6 +66,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
       vertexai: true,
       project: opts.projectId,
       location: this.region,
+      httpOptions: { timeout: this.timeoutMs },
     });
   }
 
@@ -56,7 +76,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
 
     try {
       const wavBytes = wrapPcmInWav(input.audioBytes, 16000, 1, 16);
-      const res = await this.ai.models.generateContent({
+      const res = await this.callWithRetry({
         model: this.modelName,
         contents: [
           {
@@ -159,6 +179,44 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
       };
     }
   }
+
+  /**
+   * Sprint 57 — bounded retry on a transient Vertex blip. Retries only on
+   * what looks transient (5xx, DEADLINE_EXCEEDED, UNAVAILABLE, network).
+   * Hard rejects (4xx, INVALID_ARGUMENT, safety blocks) surface immediately
+   * so we don't waste budget retrying a request that will never succeed.
+   * Total wall time is bounded by the configured timeoutMs × maxAttempts.
+   */
+  private async callWithRetry(
+    req: Parameters<GoogleGenAI['models']['generateContent']>[0],
+  ): Promise<Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>> {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        return await this.ai.models.generateContent(req);
+      } catch (e) {
+        lastError = e;
+        if (attempt >= this.maxAttempts || !isTransientVertexError(e)) {
+          throw e;
+        }
+        // Small jittered backoff. Cheap insurance against a hot retry storm.
+        const backoffMs = 400 * attempt + Math.floor(Math.random() * 200);
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Vertex retry exhausted');
+  }
+}
+
+function isTransientVertexError(e: unknown): boolean {
+  const message = (e as { message?: string } | null)?.message ?? '';
+  const status = (e as { status?: number } | null)?.status;
+  if (typeof status === 'number' && status >= 500 && status < 600) return true;
+  return (
+    /DEADLINE_EXCEEDED|UNAVAILABLE|INTERNAL|timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|fetch failed/i.test(
+      message,
+    )
+  );
 }
 
 function buildHintsBlock(hints: Pass1Input['hints']): string {
