@@ -13,6 +13,7 @@ import {
   INITIAL_ASSESSMENT_SYSTEM_PROMPT_V1,
 } from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
+import { normalisePass3Output } from './pass3-normalise';
 
 export interface VertexGeminiProClinicalOptions {
   projectId: string;
@@ -92,12 +93,17 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
         );
       }
       const parsed: unknown = JSON.parse(text);
+      // Defensive normaliser — Gemini occasionally drifts from the
+      // canonical crisis-flag enums ("suicidal-ideation-risk" vs
+      // "suicidal_ideation", "moderate" vs "medium"). Map known synonyms
+      // before the strict Zod parse so the whole brief isn't rejected.
+      const normalised: unknown = normalisePass3Output(parsed);
       // Pass 3 prompts ask for the body directly (no wrapper). Wrap
       // with the discriminator so consumers see the discriminated
       // union shape.
       const output: Pass3Output = isIntake
-        ? Pass3OutputSchema.parse({ kind: 'INTAKE', initialAssessmentBrief: parsed })
-        : Pass3OutputSchema.parse({ kind: input.kind, clinicalReport: parsed });
+        ? Pass3OutputSchema.parse({ kind: 'INTAKE', initialAssessmentBrief: normalised })
+        : Pass3OutputSchema.parse({ kind: input.kind, clinicalReport: normalised });
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
