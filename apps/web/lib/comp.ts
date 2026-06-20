@@ -67,7 +67,10 @@ export function isCompTier(s: string): s is CompTier {
 
 export async function compAccount(args: CompArgs): Promise<CompResult> {
   if (!isCompTier(args.tier)) {
-    throw new CompError('BAD_TIER', `Unknown tier ${args.tier}; expected one of ${TIERS.join('|')}`);
+    throw new CompError(
+      'BAD_TIER',
+      `Unknown tier ${args.tier}; expected one of ${TIERS.join('|')}`,
+    );
   }
   const psy = await prisma.psychologist.findUnique({
     where: { phone: args.phone },

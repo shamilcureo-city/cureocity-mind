@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  PatientShareSnapshotSchema,
-  PatientShareTokenSchema,
-  ShareInputSchema,
-} from './share';
+import { PatientShareSnapshotSchema, PatientShareTokenSchema, ShareInputSchema } from './share';
 
 describe('PatientShareTokenSchema', () => {
   it('accepts a 22-char base64url token', () => {

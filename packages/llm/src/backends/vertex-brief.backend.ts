@@ -6,10 +6,7 @@ import {
   Pass5OutputSchema,
   type Pass5Output,
 } from '../types';
-import {
-  PRE_SESSION_BRIEF_PROMPT_VERSION,
-  PRE_SESSION_BRIEF_SYSTEM_PROMPT_V1,
-} from '../prompts';
+import { PRE_SESSION_BRIEF_PROMPT_VERSION, PRE_SESSION_BRIEF_SYSTEM_PROMPT_V1 } from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
 
 export interface VertexGeminiProBriefOptions {
@@ -59,8 +56,14 @@ export class VertexGeminiProBriefBackend implements IPass5Backend {
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-            { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+            {
+              category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+              threshold: HarmBlockThreshold.OFF,
+            },
+            {
+              category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+              threshold: HarmBlockThreshold.OFF,
+            },
           ],
         },
       });
@@ -133,9 +136,7 @@ function buildUserMessage(input: Pass5Input): string {
         `  Modality: ${input.treatmentPlan.modality}`,
         `  Phase sequence: ${input.treatmentPlan.phaseSequence.join(' → ')}`,
         `  Goals:`,
-        ...input.treatmentPlan.goals.map(
-          (g) => `    - ${g.description} (measure: ${g.measure})`,
-        ),
+        ...input.treatmentPlan.goals.map((g) => `    - ${g.description} (measure: ${g.measure})`),
         `  Expected duration: ${input.treatmentPlan.expectedDurationSessions ?? 'n/a'} sessions`,
         ...(input.treatmentPlan.sessionsSoFar !== undefined
           ? [`  Sessions completed so far: ${input.treatmentPlan.sessionsSoFar}`]
@@ -147,12 +148,16 @@ function buildUserMessage(input: Pass5Input): string {
     : '(no homework assigned)';
   const crises =
     input.openCrises && input.openCrises.length > 0
-      ? input.openCrises.map((c) => `  - ${c.kind} (severity ${c.severity}, last seen ${c.lastSeenAt})`).join('\n')
+      ? input.openCrises
+          .map((c) => `  - ${c.kind} (severity ${c.severity}, last seen ${c.lastSeenAt})`)
+          .join('\n')
       : '  (none open)';
   const instruments =
     input.latestInstruments && input.latestInstruments.length > 0
       ? input.latestInstruments
-          .map((i) => `  - ${i.instrumentKey}: score ${i.score} (${i.severity}, ${i.administeredAt})`)
+          .map(
+            (i) => `  - ${i.instrumentKey}: score ${i.score} (${i.severity}, ${i.administeredAt})`,
+          )
           .join('\n')
       : '  (none on file)';
   return [

@@ -1,9 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import type {
-  AdvancementSuggestion,
-  TherapyNoteV1,
-  WorkflowGoal,
-} from '@cureocity/contracts';
+import type { AdvancementSuggestion, TherapyNoteV1, WorkflowGoal } from '@cureocity/contracts';
 import { evaluateCbtAdvancement, evaluateEmdrAdvancement } from '@cureocity/clinical';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
@@ -38,8 +34,7 @@ export async function GET(
   }
   // "Sessions in the current phase" = sessions that ended after the most
   // recent transition (or since workflow start if no transitions yet).
-  const phaseStartedAt =
-    state.transitions[0]?.occurredAt ?? state.startedAt;
+  const phaseStartedAt = state.transitions[0]?.occurredAt ?? state.startedAt;
   const sessionsInCurrentPhase = await prisma.session.count({
     where: {
       clientId: state.clientId,

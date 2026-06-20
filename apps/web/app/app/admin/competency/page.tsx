@@ -72,10 +72,7 @@ export default async function CompetencyPage() {
         prisma.auditLog.findMany({
           where: {
             actorPsychologistId: p.id,
-            OR: [
-              { action: 'CLINICAL_REPORT_GENERATED' },
-              { action: 'CLINICAL_SECTION_CONFIRMED' },
-            ],
+            OR: [{ action: 'CLINICAL_REPORT_GENERATED' }, { action: 'CLINICAL_SECTION_CONFIRMED' }],
           },
           select: { action: true, createdAt: true, targetId: true, metadata: true },
           orderBy: { createdAt: 'asc' },
@@ -92,9 +89,12 @@ export default async function CompetencyPage() {
         else tally.accepted++;
       }
       const totalConfirmations = tally.accepted + tally.modified + tally.rejected;
-      const acceptedPct = totalConfirmations === 0 ? 0 : Math.round((tally.accepted * 100) / totalConfirmations);
-      const modifiedPct = totalConfirmations === 0 ? 0 : Math.round((tally.modified * 100) / totalConfirmations);
-      const rejectedPct = totalConfirmations === 0 ? 0 : Math.round((tally.rejected * 100) / totalConfirmations);
+      const acceptedPct =
+        totalConfirmations === 0 ? 0 : Math.round((tally.accepted * 100) / totalConfirmations);
+      const modifiedPct =
+        totalConfirmations === 0 ? 0 : Math.round((tally.modified * 100) / totalConfirmations);
+      const rejectedPct =
+        totalConfirmations === 0 ? 0 : Math.round((tally.rejected * 100) / totalConfirmations);
 
       const medianMs = computeMedianConfirmationLatencyMs(confirmationLatencies);
 
@@ -131,9 +131,9 @@ export default async function CompetencyPage() {
         </p>
         <h1 className="mt-2 font-serif text-3xl">Competency dashboard</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-ink-2)]">
-          Per-therapist roll-up of clinical co-pilot signal — how often AI suggestions are
-          accepted, modified, or rejected, time-to-confirm, crisis surface, and patient-share
-          activity. Useful for pilot evaluation; private to clinic owners post-Sprint 9.
+          Per-therapist roll-up of clinical co-pilot signal — how often AI suggestions are accepted,
+          modified, or rejected, time-to-confirm, crisis surface, and patient-share activity. Useful
+          for pilot evaluation; private to clinic owners post-Sprint 9.
         </p>
       </header>
 
@@ -164,9 +164,15 @@ export default async function CompetencyPage() {
                 </td>
                 <td className="px-3 py-3 text-right">{r.sessions}</td>
                 <td className="px-3 py-3 text-right">{r.clinicalReports}</td>
-                <td className="px-3 py-3 text-right">{r.confirmations.accepted ? `${r.acceptedPct}%` : '—'}</td>
-                <td className="px-3 py-3 text-right">{r.confirmations.modified ? `${r.modifiedPct}%` : '—'}</td>
-                <td className="px-3 py-3 text-right">{r.confirmations.rejected ? `${r.rejectedPct}%` : '—'}</td>
+                <td className="px-3 py-3 text-right">
+                  {r.confirmations.accepted ? `${r.acceptedPct}%` : '—'}
+                </td>
+                <td className="px-3 py-3 text-right">
+                  {r.confirmations.modified ? `${r.modifiedPct}%` : '—'}
+                </td>
+                <td className="px-3 py-3 text-right">
+                  {r.confirmations.rejected ? `${r.rejectedPct}%` : '—'}
+                </td>
                 <td className="px-3 py-3 text-right">{formatLatency(r.medianConfirmMs)}</td>
                 <td className="px-3 py-3 text-right">{r.crisisFlagAudits}</td>
                 <td className="px-3 py-3 text-right">{r.therapyScripts}</td>
@@ -206,7 +212,8 @@ function computeMedianConfirmationLatencyMs(
       continue;
     }
     if (r.action === 'CLINICAL_SECTION_CONFIRMED') {
-      const reportId = (r.metadata as { clinicalReportId?: string } | null)?.clinicalReportId ??
+      const reportId =
+        (r.metadata as { clinicalReportId?: string } | null)?.clinicalReportId ??
         // older rows stored the report id as targetId directly
         r.targetId;
       const start = generated.get(reportId);

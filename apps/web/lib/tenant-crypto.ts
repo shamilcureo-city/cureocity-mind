@@ -61,9 +61,7 @@ function instance(): TenantCrypto {
     // S32 Phase 2 — asia-south1 region procurement decides the deployment
     // story. Until then any non-local backend hard-fails at startup so we
     // never silently fall through to the dev KMS in prod.
-    throw new Error(
-      'KMS_BACKEND=aws-kms is not yet wired in apps/web — pending S32 Phase 2.',
-    );
+    throw new Error('KMS_BACKEND=aws-kms is not yet wired in apps/web — pending S32 Phase 2.');
   } else {
     kms = new LocalDevKmsProvider();
   }
@@ -78,10 +76,7 @@ function instance(): TenantCrypto {
 }
 
 /** Encrypts `plaintext` for the given psychologist tenant. */
-export async function encryptForTenant(
-  psychologistId: string,
-  plaintext: string,
-): Promise<string> {
+export async function encryptForTenant(psychologistId: string, plaintext: string): Promise<string> {
   const tc = instance();
   const dek = await getOrCreateDek(psychologistId);
   return tc.encryptor.encrypt(plaintext, dek);
@@ -176,10 +171,7 @@ async function provisionNewDek(psychologistId: string): Promise<UnwrappedDataKey
   return plaintext;
 }
 
-async function persistWrappedKey(
-  psychologistId: string,
-  wrapped: WrappedDataKey,
-): Promise<void> {
+async function persistWrappedKey(psychologistId: string, wrapped: WrappedDataKey): Promise<void> {
   await prisma.psychologistTenantKey.create({
     data: {
       psychologistId,

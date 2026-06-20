@@ -41,7 +41,9 @@ export function SessionWorkspaceTabs({
       {tabs.map((t) => {
         const isActive = t.key === active;
         const href =
-          t.key === 'notes' ? `/app/sessions/${sessionId}` : `/app/sessions/${sessionId}?tab=${t.key}`;
+          t.key === 'notes'
+            ? `/app/sessions/${sessionId}`
+            : `/app/sessions/${sessionId}?tab=${t.key}`;
         return (
           <Link
             key={t.key}

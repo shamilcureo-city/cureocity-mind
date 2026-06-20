@@ -89,7 +89,9 @@ export function PreparePanel({ clientId, defaultOpen = false }: Props) {
               {error}
             </p>
           )}
-          {data && <PrepareBody data={data} onGenerate={generateFreshBrief} generating={generating} />}
+          {data && (
+            <PrepareBody data={data} onGenerate={generateFreshBrief} generating={generating} />
+          )}
         </div>
       )}
     </div>
@@ -149,7 +151,9 @@ function PrepareBody({
             Next best action
           </p>
           <p className="mt-1 font-medium text-[var(--color-ink)]">{journey.nextBestAction.title}</p>
-          <p className="mt-0.5 text-xs text-[var(--color-ink-2)]">{journey.nextBestAction.detail}</p>
+          <p className="mt-0.5 text-xs text-[var(--color-ink-2)]">
+            {journey.nextBestAction.detail}
+          </p>
           {journey.nextBestAction.ctaHref && (
             <Link
               href={journey.nextBestAction.ctaHref}
@@ -178,11 +182,7 @@ function PrepareBody({
               disabled={generating}
               className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-medium text-[var(--color-ink-2)] hover:text-[var(--color-ink)] disabled:opacity-60"
             >
-              {generating
-                ? 'Generating…'
-                : cachedBrief
-                  ? 'Regenerate'
-                  : 'Generate fresh brief'}
+              {generating ? 'Generating…' : cachedBrief ? 'Regenerate' : 'Generate fresh brief'}
             </button>
           </div>
         </div>

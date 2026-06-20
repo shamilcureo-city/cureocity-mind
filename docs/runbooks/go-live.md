@@ -215,9 +215,11 @@ runs (e.g. testing reminders/dunning from your laptop):
 # Generate
 openssl rand -base64 32
 ```
+
 Set on Vercel: `CRON_SECRET=<the value>`
 
 Then you can poke either cron yourself:
+
 ```bash
 curl -H "authorization: Bearer $CRON_SECRET" \
   https://app.cureocitymind.com/api/v1/cron/billing-reminders
@@ -271,6 +273,7 @@ Get them in before any therapist downloads.
 ```
 PILOT_INVITE_REQUIRED=true          # signup requires an invite code
 ```
+
 Generate codes from `POST /api/v1/admin/invite-codes` (admin auth).
 Hand them out to your first 100 cold-DM responders. This keeps the
 fire hose off until you know the product holds up under real load.
@@ -283,7 +286,6 @@ fire hose off until you know the product holds up under real load.
    `vercel-db-setup.sh`, and goes live.
 2. **Smoke checks** (run these in order, fix anything red before
    continuing):
-
    - [ ] `curl https://app.cureocitymind.com/api/v1/health` → `200`
    - [ ] Sign up a test therapist via phone OTP. Confirm they land
          on `/app` (not `/login`).
@@ -304,6 +306,7 @@ fire hose off until you know the product holds up under real load.
 
 The encryption dual-write is already on (`tenant-crypto.ts`). What
 remains:
+
 1. Set `KMS_BACKEND=aws-kms` + procure an AWS KMS CMK in asia-south1.
 2. Flip the read path on the PII fields (`Client.contactPhone`,
    `contactEmail`, `fullName`) to read the encrypted column. This is
@@ -332,6 +335,7 @@ Every morning, open these in order:
 
 If anything alarms, the alert-specific runbooks in this folder are
 the next stop:
+
 - High HTTP error rate → `high-http-error-rate.md`
 - Cost circuit tripped → `cost-circuit-tripped.md`
 - Audit writes stalled → `audit-writes-stalled.md`

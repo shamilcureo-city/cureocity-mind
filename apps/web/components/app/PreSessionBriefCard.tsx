@@ -93,7 +93,9 @@ function BriefBody({ brief }: { brief: PreSessionBriefV1 }) {
 
       {brief.carryoverCrisis.length > 0 && (
         <div className="rounded-2xl border-2 border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm">
-          <strong className="text-[var(--color-warn)]">Open crisis flag(s) — start with a safety check:</strong>
+          <strong className="text-[var(--color-warn)]">
+            Open crisis flag(s) — start with a safety check:
+          </strong>
           <ul className="mt-2 list-disc pl-5 text-[var(--color-ink-2)]">
             {brief.carryoverCrisis.map((c, i) => (
               <li key={i}>
@@ -141,9 +143,7 @@ function BriefBody({ brief }: { brief: PreSessionBriefV1 }) {
 
       {brief.homeworkStatus && (
         <Section label="Homework from last session">
-          <p className="text-sm text-[var(--color-ink)]">
-            {brief.homeworkStatus.description}
-          </p>
+          <p className="text-sm text-[var(--color-ink)]">{brief.homeworkStatus.description}</p>
           <p className="mt-1 text-xs text-[var(--color-ink-3)]">
             Outcome: {brief.homeworkStatus.outcome}
             {brief.homeworkStatus.notes ? ` · ${brief.homeworkStatus.notes}` : ''}

@@ -1,11 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { PreSessionBriefV1Schema } from './brief';
-import {
-  JourneyActivePlanSchema,
-  JourneyStageSchema,
-  NextBestActionSchema,
-} from './journey';
+import { JourneyActivePlanSchema, JourneyStageSchema, NextBestActionSchema } from './journey';
 import { InstrumentChangeSchema } from './instrument';
 
 /**

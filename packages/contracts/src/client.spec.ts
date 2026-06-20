@@ -50,12 +50,12 @@ describe('CreateClientInputSchema', () => {
   });
 
   it('accepts preferredLanguage = "ml" and "en"', () => {
-    expect(
-      CreateClientInputSchema.safeParse({ ...valid, preferredLanguage: 'ml' }).success,
-    ).toBe(true);
-    expect(
-      CreateClientInputSchema.safeParse({ ...valid, preferredLanguage: 'en' }).success,
-    ).toBe(true);
+    expect(CreateClientInputSchema.safeParse({ ...valid, preferredLanguage: 'ml' }).success).toBe(
+      true,
+    );
+    expect(CreateClientInputSchema.safeParse({ ...valid, preferredLanguage: 'en' }).success).toBe(
+      true,
+    );
   });
 
   it('rejects a malformed preferredLanguage', () => {

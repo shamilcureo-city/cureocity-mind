@@ -205,9 +205,7 @@ export async function PATCH(
 // strictly so the UI never persists an unreadable section body.
 // ============================================================================
 
-type EditsResult =
-  | { ok: true; edits: unknown }
-  | { ok: false; response: NextResponse };
+type EditsResult = { ok: true; edits: unknown } | { ok: false; response: NextResponse };
 
 function parseSectionEdits(section: ClinicalSectionKey, edits: unknown): EditsResult {
   let schema: z.ZodTypeAny;
@@ -264,7 +262,10 @@ function parseConfirmations(raw: unknown): ClinicalSectionConfirmations {
 function resolveDiagnosisBody(
   report: ClinicalReportV1,
   edits: unknown,
-): { diagnosisCandidates: ClinicalReportV1['diagnosisCandidates']; primaryDiagnosisIndex: number | null } {
+): {
+  diagnosisCandidates: ClinicalReportV1['diagnosisCandidates'];
+  primaryDiagnosisIndex: number | null;
+} {
   if (edits && typeof edits === 'object' && 'diagnosisCandidates' in edits) {
     return edits as {
       diagnosisCandidates: ClinicalReportV1['diagnosisCandidates'];
@@ -284,7 +285,9 @@ function resolvePlanBody(report: ClinicalReportV1, edits: unknown): ClinicalTrea
   return report.treatmentPlan;
 }
 
-function highestCrisisSeverity(report: ClinicalReportV1): 'none' | 'low' | 'medium' | 'high' | 'critical' {
+function highestCrisisSeverity(
+  report: ClinicalReportV1,
+): 'none' | 'low' | 'medium' | 'high' | 'critical' {
   let max: 'none' | 'low' | 'medium' | 'high' | 'critical' = 'none';
   const rank = { none: 0, low: 1, medium: 2, high: 3, critical: 4 };
   for (const flag of report.crisisFlags) {

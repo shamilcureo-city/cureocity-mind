@@ -36,16 +36,10 @@ export async function POST(
     return NextResponse.json({ error: 'Workflow not found' }, { status: 404 });
   }
   if (state.modality !== 'EMDR') {
-    return NextResponse.json(
-      { error: 'preparation-complete is EMDR-only' },
-      { status: 422 },
-    );
+    return NextResponse.json({ error: 'preparation-complete is EMDR-only' }, { status: 422 });
   }
   if (state.completedAt) {
-    return NextResponse.json(
-      { error: 'Cannot update a completed workflow' },
-      { status: 409 },
-    );
+    return NextResponse.json({ error: 'Cannot update a completed workflow' }, { status: 409 });
   }
 
   const prevState = (state.state as Record<string, unknown>) ?? {};
@@ -62,7 +56,11 @@ export async function POST(
   const updated = await prisma.$transaction(async (tx) => {
     await tx.modalityState.update({
       where: { id: state.id },
-      data: { state: nextState as unknown as Parameters<typeof tx.modalityState.update>[0]['data']['state'] },
+      data: {
+        state: nextState as unknown as Parameters<
+          typeof tx.modalityState.update
+        >[0]['data']['state'],
+      },
     });
     await writeAudit(
       {

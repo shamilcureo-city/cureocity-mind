@@ -109,11 +109,11 @@ export async function createDemoClient(
   //    so a schema drift fails loudly without leaving partial rows.
   // ------------------------------------------------------------------
   const intakeBody: IntakeNoteV1 = IntakeNoteV1Schema.parse(buildIntakeNote());
-  const initialBrief: InitialAssessmentBriefV1 =
-    InitialAssessmentBriefV1Schema.parse(buildInitialAssessmentBrief());
+  const initialBrief: InitialAssessmentBriefV1 = InitialAssessmentBriefV1Schema.parse(
+    buildInitialAssessmentBrief(),
+  );
   const treatmentBody: TherapyNoteV1 = TherapyNoteV1Schema.parse(buildTreatmentNote());
-  const clinicalReportBody: ClinicalReportV1 =
-    ClinicalReportV1Schema.parse(buildClinicalReport());
+  const clinicalReportBody: ClinicalReportV1 = ClinicalReportV1Schema.parse(buildClinicalReport());
   const planBody: ClinicalTreatmentPlan = ClinicalTreatmentPlanSchema.parse(buildTreatmentPlan());
   const scriptBody: TherapyScriptV1 = TherapyScriptV1Schema.parse(buildTherapyScript());
 
@@ -264,7 +264,9 @@ export async function createDemoClient(
       // one carries the ACCEPTED confirmations (that's where the
       // diagnosis + plan were locked in).
       const confirmations: ClinicalSectionConfirmations =
-        i === 0 ? buildAcceptedConfirmations(firstTreatmentDate, psychologistId) : PENDING_SECTION_CONFIRMATIONS;
+        i === 0
+          ? buildAcceptedConfirmations(firstTreatmentDate, psychologistId)
+          : PENDING_SECTION_CONFIRMATIONS;
 
       const report = await tx.clinicalReport.create({
         data: {
@@ -298,8 +300,7 @@ export async function createDemoClient(
         sessionId: firstTreatmentSessionId,
         clinicalReportId: firstTreatmentReportId,
         icd11Code: '6A70.1',
-        icd11Label:
-          'Single episode depressive disorder, moderate, without psychotic symptoms',
+        icd11Label: 'Single episode depressive disorder, moderate, without psychotic symptoms',
         confidence: 0.78,
         supportingEvidence: clinicalReportBody.diagnosisCandidates[0]!
           .supportingEvidence as unknown as Prisma.InputJsonValue,
@@ -606,8 +607,7 @@ function buildInitialAssessmentBrief(): InitialAssessmentBriefV1 {
     differential: [
       {
         icd11Code: '6A70.1',
-        icd11Label:
-          'Single episode depressive disorder, moderate, without psychotic symptoms',
+        icd11Label: 'Single episode depressive disorder, moderate, without psychotic symptoms',
         confidence: 0.7,
         supportingEvidence: [
           {
@@ -617,8 +617,7 @@ function buildInitialAssessmentBrief(): InitialAssessmentBriefV1 {
             startMs: 0,
           },
           {
-            quote:
-              "I can't seem to focus at work for more than ten minutes at a stretch.",
+            quote: "I can't seem to focus at work for more than ten minutes at a stretch.",
             speaker: 'client',
             startMs: 0,
           },
@@ -682,8 +681,7 @@ function buildTreatmentNote(): TherapyNoteV1 {
       'Engaged, on-time. Affect slightly brighter than previous session. PHQ-9 administered (score recorded separately in the trend). No risk flags.',
     assessment:
       'Continuing response to behavioural activation + cognitive restructuring. Engagement strong. No new risk indicators. Plan continues per phase.',
-    plan:
-      'Maintain BA schedule: three walks, one social contact, one valued activity. Add one thought-record per low-mood episode. Re-administer PHQ-9 in two sessions.',
+    plan: 'Maintain BA schedule: three walks, one social contact, one valued activity. Add one thought-record per low-mood episode. Re-administer PHQ-9 in two sessions.',
     riskFlags: {
       severity: 'none',
       indicators: [],
@@ -706,8 +704,7 @@ function buildClinicalReport(): ClinicalReportV1 {
     diagnosisCandidates: [
       {
         icd11Code: '6A70.1',
-        icd11Label:
-          'Single episode depressive disorder, moderate, without psychotic symptoms',
+        icd11Label: 'Single episode depressive disorder, moderate, without psychotic symptoms',
         confidence: 0.78,
         supportingEvidence: [
           {
@@ -737,8 +734,7 @@ function buildClinicalReport(): ClinicalReportV1 {
     recommendedTherapies: [
       {
         name: 'Behavioural Activation',
-        rationale:
-          'Already engaged; continue while the activity-mood link is strengthening.',
+        rationale: 'Already engaged; continue while the activity-mood link is strengthening.',
         evidenceSummary:
           'First-line evidence for moderate depression; effect sizes comparable to CBT.',
         whenInPlan: 'Active treatment',

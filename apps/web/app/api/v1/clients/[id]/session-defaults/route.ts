@@ -1,9 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
-import {
-  SessionDefaultsError,
-  computeSessionDefaults,
-} from '@/lib/session-defaults';
+import { SessionDefaultsError, computeSessionDefaults } from '@/lib/session-defaults';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

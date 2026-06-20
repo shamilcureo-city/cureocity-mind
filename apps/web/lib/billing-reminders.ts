@@ -86,8 +86,7 @@ export function renewalCopy({
   return {
     subject: subjectLead,
     textBody,
-    whatsappTemplate:
-      process.env['WATI_TEMPLATE_RENEWAL_REMINDER'] ?? 'cureocity_renewal_reminder',
+    whatsappTemplate: process.env['WATI_TEMPLATE_RENEWAL_REMINDER'] ?? 'cureocity_renewal_reminder',
     whatsappParams: [tierLabel, String(day), dateStr],
   };
 }

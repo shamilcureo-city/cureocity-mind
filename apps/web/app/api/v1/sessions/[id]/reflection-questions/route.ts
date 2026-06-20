@@ -56,10 +56,7 @@ export async function GET(
 
   const noteJson = session.therapyNote?.content ?? session.noteDraft?.content;
   if (!noteJson) {
-    return NextResponse.json(
-      { error: 'No note exists for this session yet.' },
-      { status: 404 },
-    );
+    return NextResponse.json({ error: 'No note exists for this session yet.' }, { status: 404 });
   }
   const note = noteJson as unknown as TherapyNoteV1;
   const language = session.client.preferredLanguage || 'en';
@@ -94,8 +91,14 @@ export async function GET(
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.OFF },
+        {
+          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+          threshold: HarmBlockThreshold.OFF,
+        },
+        {
+          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+          threshold: HarmBlockThreshold.OFF,
+        },
       ],
     },
   });

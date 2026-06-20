@@ -78,7 +78,9 @@ export default function ForTherapistsPage() {
               ].map((it) => (
                 <Card key={it.title} className="p-6">
                   <h3 className="font-serif text-xl">{it.title}</h3>
-                  <p className="mt-3 text-sm leading-relaxed text-[var(--color-ink-2)]">{it.body}</p>
+                  <p className="mt-3 text-sm leading-relaxed text-[var(--color-ink-2)]">
+                    {it.body}
+                  </p>
                 </Card>
               ))}
             </div>
@@ -102,15 +104,24 @@ export default function ForTherapistsPage() {
               </div>
               <ul className="mt-10 grid gap-4 sm:grid-cols-2">
                 {[
-                  ['Matching inbox', 'Three matches a week, on average. Decline what does not fit.'],
-                  ['Booking auto-pilot', 'We confirm intros, send reminders, and handle reschedules.'],
-                  ['Note assist (optional)', 'Sign off the draft. We never store an unsigned note.'],
-                  ['DPDP-ready audit log', 'Every read and write is logged. Yours to export, yours to delete.'],
+                  [
+                    'Matching inbox',
+                    'Three matches a week, on average. Decline what does not fit.',
+                  ],
+                  [
+                    'Booking auto-pilot',
+                    'We confirm intros, send reminders, and handle reschedules.',
+                  ],
+                  [
+                    'Note assist (optional)',
+                    'Sign off the draft. We never store an unsigned note.',
+                  ],
+                  [
+                    'DPDP-ready audit log',
+                    'Every read and write is logged. Yours to export, yours to delete.',
+                  ],
                 ].map(([t, b]) => (
-                  <li
-                    key={t}
-                    className="rounded-2xl border border-white/10 bg-white/5 p-5"
-                  >
+                  <li key={t} className="rounded-2xl border border-white/10 bg-white/5 p-5">
                     <p className="font-serif text-lg">{t}</p>
                     <p className="mt-2 text-sm text-[#cdd6cf]">{b}</p>
                   </li>

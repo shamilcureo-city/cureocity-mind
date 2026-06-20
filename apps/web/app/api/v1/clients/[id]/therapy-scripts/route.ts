@@ -7,10 +7,7 @@ import {
   type ClinicalTreatmentPlan,
   GenerateTherapyScriptQuerySchema,
 } from '@cureocity/contracts';
-import {
-  recordCostInr,
-  recordGeminiCall,
-} from '@cureocity/observability/metrics';
+import { recordCostInr, recordGeminiCall } from '@cureocity/observability/metrics';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toTherapyScript } from '@/lib/clinical-mappers';
@@ -70,10 +67,7 @@ export async function GET(
   // therapist when creating the client) and falls back to the output
   // language. The therapist reads "therapistSays" aloud to the
   // client, so this needs to match what the client understands.
-  const spokenLanguage: ClinicalLocale = pickSpokenLanguage(
-    client.spokenLanguages,
-    language,
-  );
+  const spokenLanguage: ClinicalLocale = pickSpokenLanguage(client.spokenLanguages, language);
 
   // Pull grounding context: active primary diagnosis + active plan +
   // last-session summary. None are required; the prompt copes with
@@ -99,9 +93,7 @@ export async function GET(
     }),
   ]);
 
-  const planBody = activePlan
-    ? (activePlan.body as unknown as ClinicalTreatmentPlan)
-    : null;
+  const planBody = activePlan ? (activePlan.body as unknown as ClinicalTreatmentPlan) : null;
   const planSummary = planBody
     ? {
         modality: planBody.modality,
@@ -258,7 +250,10 @@ export async function GET(
 // ============================================================================
 
 function extractLastSummary(
-  session: { noteDraft: { content: unknown } | null; therapyNote: { content: unknown } | null } | null,
+  session: {
+    noteDraft: { content: unknown } | null;
+    therapyNote: { content: unknown } | null;
+  } | null,
 ): string | null {
   const noteContent = session?.therapyNote?.content ?? session?.noteDraft?.content ?? null;
   if (!noteContent || typeof noteContent !== 'object') return null;

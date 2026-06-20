@@ -105,7 +105,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ? renewalCopy({ day, tierLabel, renewalDate: a.paidThroughAt, amountInr })
       : dunningCopy({ day, tierLabel, lapsedDate: a.paidThroughAt, amountInr });
 
-    const result = await dispatch({ channels, email: psy.email, phone: psy.phone, copy, errors, ctx: a.psychologistId });
+    const result = await dispatch({
+      channels,
+      email: psy.email,
+      phone: psy.phone,
+      copy,
+      errors,
+      ctx: a.psychologistId,
+    });
     if (result.email) sent.email++;
     if (result.whatsapp) sent.whatsapp++;
 

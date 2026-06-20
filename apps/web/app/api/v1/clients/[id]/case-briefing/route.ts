@@ -3,7 +3,11 @@ import { CaseBriefingV1Schema, type CaseBriefingV1 } from '@cureocity/contracts'
 import { recordGeminiCall } from '@cureocity/observability/metrics';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
-import { buildDeterministicCaseBriefing, gatherInputs, serialiseContext } from '@/lib/case-briefing';
+import {
+  buildDeterministicCaseBriefing,
+  gatherInputs,
+  serialiseContext,
+} from '@/lib/case-briefing';
 import { JourneyError } from '@/lib/journey';
 import { modelRouter } from '@/lib/llm';
 import { prisma } from '@/lib/prisma';

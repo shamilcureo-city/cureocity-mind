@@ -1,9 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { Prisma } from '@prisma/client';
-import {
-  RazorpayWebhookEventSchema,
-  type BillingPlan,
-} from '@cureocity/contracts';
+import { RazorpayWebhookEventSchema, type BillingPlan } from '@cureocity/contracts';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { nextPaidThroughAt, razorpay } from '@/lib/billing';
 import { grantReferrerRewardOnConversion } from '@/lib/referral';
@@ -52,9 +49,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const meta = auditMetadataFromRequest(req);
   const orderId =
-    event.payload?.payment?.entity?.order_id ??
-    event.payload?.order?.entity?.id ??
-    null;
+    event.payload?.payment?.entity?.order_id ?? event.payload?.order?.entity?.id ?? null;
 
   try {
     if (event.event === 'payment.captured' || event.event === 'order.paid') {

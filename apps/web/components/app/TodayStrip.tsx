@@ -93,11 +93,7 @@ function computeInstrumentChip(
   const c = journey.instrumentChanges[0];
   if (!c) return null;
   const arrow =
-    c.verdict === 'reliable_improvement'
-      ? '↓'
-      : c.verdict === 'deterioration'
-        ? '↑'
-        : '·';
+    c.verdict === 'reliable_improvement' ? '↓' : c.verdict === 'deterioration' ? '↑' : '·';
   const tone: 'accent' | 'warn' | undefined =
     c.verdict === 'reliable_improvement'
       ? 'accent'

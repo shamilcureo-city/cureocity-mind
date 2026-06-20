@@ -9,7 +9,11 @@ import { CuidSchema, IsoDateTimeSchema } from './common';
  * downstream prompt construction and diff-tracking.
  */
 export const TemplateSectionSchema = z.object({
-  id: z.string().min(1).max(64).regex(/^[a-z0-9_]+$/, 'lowercase letters / digits / underscores only'),
+  id: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9_]+$/, 'lowercase letters / digits / underscores only'),
   title: z.string().min(1).max(200),
   hint: z.string().max(1000).optional(),
 });

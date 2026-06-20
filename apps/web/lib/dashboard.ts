@@ -149,10 +149,20 @@ export async function buildDashboard(
       where: { psychologistId, status: 'COMPLETED', endedAt: { gte: since7d }, ...nonDemo },
     }),
     prisma.session.count({
-      where: { psychologistId, noteDraft: { status: 'COMPLETED' }, therapyNote: { is: null }, ...nonDemo },
+      where: {
+        psychologistId,
+        noteDraft: { status: 'COMPLETED' },
+        therapyNote: { is: null },
+        ...nonDemo,
+      },
     }),
     prisma.session.findMany({
-      where: { psychologistId, noteDraft: { status: 'COMPLETED' }, therapyNote: { is: null }, ...nonDemo },
+      where: {
+        psychologistId,
+        noteDraft: { status: 'COMPLETED' },
+        therapyNote: { is: null },
+        ...nonDemo,
+      },
       orderBy: { endedAt: 'desc' },
       take: HERO_FETCH,
       select: { id: true, clientId: true, endedAt: true, client: { select: { fullName: true } } },
@@ -270,7 +280,10 @@ export async function buildDashboard(
         reason: 'REVIEW_DUE',
         lastAdministeredAt: c.lastMeasureAt?.toISOString() ?? null,
       });
-    } else if (c.lastMeasureAt && c.lastMeasureAt < new Date(now.getTime() - MEASURE_STALE_DAYS * 86_400_000)) {
+    } else if (
+      c.lastMeasureAt &&
+      c.lastMeasureAt < new Date(now.getTime() - MEASURE_STALE_DAYS * 86_400_000)
+    ) {
       measuresDue.push({
         clientId: id,
         clientName: nameById.get(id) ?? 'Client',
@@ -378,7 +391,12 @@ function foldCandidateData(
   candidateIds: string[],
   completedRows: { clientId: string; endedAt: Date | null }[],
   planRows: { clientId: string; confirmedAt: Date }[],
-  instrumentRows: { clientId: string; instrumentKey: string; score: number; administeredAt: Date }[],
+  instrumentRows: {
+    clientId: string;
+    instrumentKey: string;
+    score: number;
+    administeredAt: Date;
+  }[],
 ): Map<string, CandidateSignals> {
   // Index the raw rows by client.
   const completedByClient = new Map<string, Date[]>();
@@ -391,7 +409,8 @@ function foldCandidateData(
   // First (latest-version) plan confirmedAt per client.
   const planConfirmedByClient = new Map<string, Date>();
   for (const p of planRows) {
-    if (!planConfirmedByClient.has(p.clientId)) planConfirmedByClient.set(p.clientId, p.confirmedAt);
+    if (!planConfirmedByClient.has(p.clientId))
+      planConfirmedByClient.set(p.clientId, p.confirmedAt);
   }
   // Instrument series per (client, key), already ordered asc by query.
   const seriesByClient = new Map<string, Map<InstrumentKey, { score: number; at: Date }[]>>();
@@ -444,7 +463,10 @@ function foldCandidateData(
           deteriorations.push({ key, delta: change.delta });
         }
         if (change.isRemission) anyRemission = true;
-        if (change.isRemission && (change.verdict === 'reliable_improvement' || change.isResponse)) {
+        if (
+          change.isRemission &&
+          (change.verdict === 'reliable_improvement' || change.isResponse)
+        ) {
           dischargeReady = true;
         }
       }
@@ -492,7 +514,13 @@ function deriveStageLite(input: {
 }
 
 function groupRecentByDate(
-  rows: { id: string; clientId: string; clientName: string; scheduledAt: Date; modality: string | null }[],
+  rows: {
+    id: string;
+    clientId: string;
+    clientName: string;
+    scheduledAt: Date;
+    modality: string | null;
+  }[],
 ): RecentSessionGroup[] {
   const groups = new Map<string, RecentSessionGroup>();
   for (const r of rows) {
@@ -522,7 +550,18 @@ function groupRecentByDate(
 export function greetingNameFrom(fullName: string): string {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return 'there';
-  const honorifics = new Set(['dr', 'dr.', 'mr', 'mr.', 'ms', 'ms.', 'mrs', 'mrs.', 'prof', 'prof.']);
+  const honorifics = new Set([
+    'dr',
+    'dr.',
+    'mr',
+    'mr.',
+    'ms',
+    'ms.',
+    'mrs',
+    'mrs.',
+    'prof',
+    'prof.',
+  ]);
   if (parts.length >= 2 && honorifics.has(parts[0]!.toLowerCase())) {
     return `${parts[0]} ${parts[1]}`;
   }

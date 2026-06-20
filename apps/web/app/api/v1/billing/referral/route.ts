@@ -2,11 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { ReferralStatus } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
-import {
-  REFERRED_FREE_DAYS,
-  REFERRER_REWARD_DAYS,
-  ensureReferralCode,
-} from '@/lib/referral';
+import { REFERRED_FREE_DAYS, REFERRER_REWARD_DAYS, ensureReferralCode } from '@/lib/referral';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

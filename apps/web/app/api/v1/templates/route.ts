@@ -45,7 +45,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         psychologistId: auth.value.psychologistId,
         name: body.value.name,
         ...(body.value.description !== undefined && { description: body.value.description }),
-        sections: body.value.sections as unknown as Parameters<typeof tx.noteTemplate.create>[0]['data']['sections'],
+        sections: body.value.sections as unknown as Parameters<
+          typeof tx.noteTemplate.create
+        >[0]['data']['sections'],
         isDefault: body.value.isDefault ?? false,
       },
     });

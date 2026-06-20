@@ -255,8 +255,8 @@ function CompletedBrief({
           ))}
         </ul>
         <p className="mt-3 text-xs italic text-[var(--color-ink-3)]">
-          AI confidence stays low at intake by design — none of these are confirmed. Treat them as
-          a starting point for the next 1-2 sessions.
+          AI confidence stays low at intake by design — none of these are confirmed. Treat them as a
+          starting point for the next 1-2 sessions.
         </p>
       </Card>
 

@@ -63,9 +63,17 @@ export class ChunkUploader {
       if (res.ok) return { status: 'ok' };
       const errorBody = await res.text().catch(() => '');
       if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
-        return { status: 'permanent', error: errorBody || `HTTP ${res.status}`, httpStatus: res.status };
+        return {
+          status: 'permanent',
+          error: errorBody || `HTTP ${res.status}`,
+          httpStatus: res.status,
+        };
       }
-      return { status: 'transient', error: errorBody || `HTTP ${res.status}`, httpStatus: res.status };
+      return {
+        status: 'transient',
+        error: errorBody || `HTTP ${res.status}`,
+        httpStatus: res.status,
+      };
     } catch (e) {
       const err = e as { message?: string };
       return { status: 'transient', error: err.message ?? String(e) };

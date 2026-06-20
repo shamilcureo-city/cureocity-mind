@@ -48,8 +48,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(result);
   } catch (e) {
     if (e instanceof CompError) {
-      const status =
-        e.code === 'PSY_NOT_FOUND' ? 404 : e.code === 'PSY_DELETED' ? 410 : 400;
+      const status = e.code === 'PSY_NOT_FOUND' ? 404 : e.code === 'PSY_DELETED' ? 410 : 400;
       return NextResponse.json({ error: e.message, code: e.code }, { status });
     }
     throw e;

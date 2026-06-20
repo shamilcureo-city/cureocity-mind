@@ -159,7 +159,10 @@ export function HeroDemo() {
       {/* Transcript line (code-mix) */}
       <p
         className="mt-3 min-h-10 rounded-xl bg-[var(--color-surface-soft)] px-3 py-2 text-[13px] leading-relaxed text-[var(--color-ink-2)]"
-        style={{ opacity: phase === 'listening' || reduced ? 1 : 0.45, transition: 'opacity 0.5s ease' }}
+        style={{
+          opacity: phase === 'listening' || reduced ? 1 : 0.45,
+          transition: 'opacity 0.5s ease',
+        }}
       >
         <span className="mr-2 inline-block rounded bg-white px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
           hi-en
