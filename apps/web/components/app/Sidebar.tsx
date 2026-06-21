@@ -158,10 +158,9 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
 }
 
 function FooterLinks() {
-  const items: { href: string; label: string; icon: 'cog' | 'help' | 'signout' }[] = [
+  const items: { href: string; label: string; icon: 'cog' | 'help' }[] = [
     { href: '/app/settings', label: 'Settings', icon: 'cog' },
     { href: '/app/learn', label: 'Get Help', icon: 'help' },
-    { href: '/api/v1/auth/signout', label: 'Sign out', icon: 'signout' },
   ];
   return (
     <ul className="mt-4 space-y-1">
@@ -176,6 +175,25 @@ function FooterLinks() {
           </Link>
         </li>
       ))}
+      {/*
+        Sign-out MUST be a POST form, not a <Link>. As a GET link Next.js
+        prefetched /api/v1/auth/signout when the sidebar mounted (or when
+        the user hovered nearby), which cleared the session cookie out from
+        under a live user — the "rapid sidebar clicks bounce me to login"
+        symptom. A method="POST" form is never prefetched by browsers or
+        Next, and the signout route is paired (POST-only).
+      */}
+      <li>
+        <form method="POST" action="/api/v1/auth/signout">
+          <button
+            type="submit"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)]"
+          >
+            <Glyph kind="signout" />
+            Sign out
+          </button>
+        </form>
+      </li>
     </ul>
   );
 }
