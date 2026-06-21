@@ -2,7 +2,12 @@ import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Psychologist } from '@prisma/client';
 import { firebaseAuth } from './firebase-admin';
-import { SESSION_COOKIE_NAME, bypassFirebaseUid, isAuthBypassed } from './auth-server';
+import {
+  SESSION_COOKIE_NAME,
+  bypassFirebaseUid,
+  isAuthBypassed,
+  verifyWithRetry,
+} from './auth-server';
 import { prisma } from './prisma';
 
 /**
@@ -23,28 +28,42 @@ export async function currentPsychologist(): Promise<Psychologist | null> {
     firebaseUid = bypassFirebaseUid();
   } else {
     const auth = firebaseAuth();
-    if (!auth) return null; // production fail-closed — no demo fallback
+    if (!auth) {
+      console.warn('[auth-page] firebaseAuth() is null — admin not configured');
+      return null; // production fail-closed — no demo fallback
+    }
     const jar = await cookies();
     const cookie = jar.get(SESSION_COOKIE_NAME)?.value;
-    if (!cookie) return null;
+    if (!cookie) {
+      // No cookie at all on this request. Usually a genuinely logged-out
+      // visitor — but if it shows up mid-session it means the cookie
+      // isn't being sent on the navigation, which is worth seeing.
+      console.warn('[auth-page] no __session cookie on request');
+      return null;
+    }
     try {
-      // checkRevoked is intentionally NOT passed — that flag triggers a
-      // network call to Firebase Identity Platform on every page load,
-      // and rapid sidebar navigation produces concurrent requests that
-      // can transiently fail (rate limits, network blips), causing a
-      // spurious redirect to /login. We rely on the 5-day cookie expiry
-      // and the sign-out route clearing the cookie locally. Re-enable
-      // checkRevoked (and add retry-on-transient-error) if a "sign out
-      // all devices" feature is built.
-      const decoded = await auth.verifySessionCookie(cookie);
+      // checkRevoked is intentionally NOT passed (no per-request revocation
+      // network call). verifyWithRetry absorbs transient public-key-fetch
+      // failures so rapid concurrent navigation doesn't spuriously bounce a
+      // valid session to /login. Genuine expiry/invalid still throws.
+      const decoded = await verifyWithRetry(() => auth.verifySessionCookie(cookie));
       firebaseUid = decoded.uid;
-    } catch {
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code ?? 'unknown';
+      console.warn(`[auth-page] verifySessionCookie failed code=${code}`);
       return null;
     }
   }
 
   const psy = await prisma.psychologist.findUnique({ where: { firebaseUid } });
-  if (!psy || psy.deletedAt !== null) return null;
+  if (!psy) {
+    console.warn(`[auth-page] no psychologist row for uid=${firebaseUid}`);
+    return null;
+  }
+  if (psy.deletedAt !== null) {
+    console.warn(`[auth-page] psychologist soft-deleted uid=${firebaseUid}`);
+    return null;
+  }
   return psy;
 }
 
