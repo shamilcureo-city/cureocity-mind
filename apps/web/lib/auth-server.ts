@@ -78,6 +78,52 @@ export interface AuthenticatedClient {
 
 type Resolved<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
 
+/**
+ * Firebase Admin token/cookie verification fetches Google's public
+ * signing keys over the network (cached after the first call). On a cold
+ * function instance, several concurrent requests — e.g. rapid sidebar
+ * navigation firing ~5 RSC requests at once — can race that first fetch,
+ * and a transient failure makes verify throw. Callers treat any throw as
+ * "invalid session" and redirect to /login, so a brief key-fetch blip
+ * logs the user out mid-click. (This is the bug behind "rapid clicks
+ * bounce me to the login page" that survived dropping checkRevoked.)
+ *
+ * This wrapper retries TRANSIENT errors (network / internal) but fails
+ * fast on GENUINE auth failures (expired / revoked / malformed) — those
+ * must still log the user out. Up to 3 attempts with short backoff; the
+ * first successful fetch warms the SDK key cache for the siblings.
+ */
+const GENUINE_TOKEN_FAILURES = new Set<string>([
+  'auth/id-token-expired',
+  'auth/id-token-revoked',
+  'auth/invalid-id-token',
+  'auth/session-cookie-expired',
+  'auth/session-cookie-revoked',
+  'auth/invalid-session-cookie',
+  'auth/argument-error',
+]);
+
+export async function verifyWithRetry<T>(verify: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await verify();
+    } catch (error) {
+      lastError = error;
+      const code = (error as { code?: string } | null)?.code ?? '';
+      // Genuine auth failure — do not retry; propagate so the caller
+      // logs the user out.
+      if (GENUINE_TOKEN_FAILURES.has(code)) throw error;
+      // Transient (key fetch / internal error). Back off briefly and
+      // retry; the first success populates the SDK key cache for siblings.
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 60 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError;
+}
+
 async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>> {
   if (isAuthBypassed()) {
     return { ok: true, value: DEV_BYPASS_FIREBASE_UID };
@@ -97,9 +143,13 @@ async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>
   const header = req.headers.get('authorization');
   if (header?.startsWith('Bearer ')) {
     try {
-      const decoded = await auth.verifyIdToken(header.substring('Bearer '.length));
+      const decoded = await verifyWithRetry(() =>
+        auth.verifyIdToken(header.substring('Bearer '.length)),
+      );
       return { ok: true, value: decoded.uid };
-    } catch {
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code ?? 'unknown';
+      console.warn(`[auth-server] verifyIdToken failed code=${code}`);
       return {
         ok: false,
         response: NextResponse.json({ error: 'Invalid token' }, { status: 401 }),
@@ -110,12 +160,15 @@ async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>
   const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
   if (cookie) {
     try {
-      // See auth-page.ts: checkRevoked is intentionally NOT passed.
-      // Cryptographic verify only — no network call to Firebase, no
-      // rate-limit / transient-error risk under concurrent requests.
-      const decoded = await auth.verifySessionCookie(cookie);
+      // checkRevoked is intentionally NOT passed (no per-request
+      // revocation network call). verifyWithRetry absorbs transient
+      // public-key-fetch failures under concurrent requests so a brief
+      // blip doesn't 401 a valid session.
+      const decoded = await verifyWithRetry(() => auth.verifySessionCookie(cookie));
       return { ok: true, value: decoded.uid };
-    } catch {
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code ?? 'unknown';
+      console.warn(`[auth-server] verifySessionCookie failed code=${code}`);
       return {
         ok: false,
         response: NextResponse.json({ error: 'Session expired — sign in again' }, { status: 401 }),
