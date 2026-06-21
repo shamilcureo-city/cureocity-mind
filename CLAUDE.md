@@ -352,24 +352,59 @@ The five existing passes are the template — pick the closest analogue.
   is the most recent — UNLESS a completed session happened after the
   close (a returning client stays active, the discharge becomes part of
   the history).
+- **Auth/session — read `docs/AUTH_SESSION.md` before touching
+  `apps/web/lib/auth-*.ts`, the login/onboarding flow, or sign-out.** The
+  load-bearing rules from the 2026-06-20/21 incident:
+  - **Any route with a side effect MUST be POST-only, never reachable by
+    `GET`.** A `GET /api/v1/auth/signout` behind a `<Link>` got
+    _prefetched_ by Next and silently cleared the `__session` cookie —
+    the root cause of "rapid sidebar clicks bounce me to /login".
+    Sign-out is now a `<form method="POST">` + POST-only route (303).
+  - **Pages authenticate via the `__session` cookie ONLY** (a server
+    component can't read a Bearer header off a `<Link>` nav). API routes
+    accept cookie OR `Authorization: Bearer`. In-app client `/api/v1`
+    fetches get the Bearer automatically via `AuthedFetchProvider`
+    (mounted in the `/app` layout; it monkey-patches `window.fetch`).
+  - **Deleting/wiping a `Psychologist` row invalidates that user's live
+    cookie** — it verifies, but `findUnique` returns null → bounce to
+    `/login`. Recovery: sign in again (re-provisions the row).
+  - `verifySessionCookie` is called **without** `checkRevoked` (no
+    per-request Firebase network call; no "sign out all devices"
+    feature) and wrapped in `verifyWithRetry` for transient key-fetch
+    races. Every redirect-to-login branch logs its cause
+    (`[auth-page] …` / `[auth-server] …`) — grep Vercel runtime logs to
+    diagnose; don't guess.
+- **`prisma db seed` is NOT run on prod deploys** (removed from
+  `scripts/vercel-db-setup.sh`): it injects the demo fixtures, whose
+  fixed emails/RCI numbers collide with real signups (the onboarding
+  "email already used by another account" 409). The script also
+  **self-heals a P3009** stuck-migration freeze (rolls back the failed
+  migration + retries once — safe only because every migration is
+  idempotent). Run seed manually for local dev.
+- **Pass 3 crisis-flag enum drift is normalised** before the Zod parse in
+  `packages/llm/src/backends/pass3-normalise.ts` (`suicidal-ideation-risk`
+  → `suicidal_ideation`, `moderate` → `medium`, …); unknown values still
+  fail validation (clinical safety). Any new Pass-3 backend must route its
+  raw JSON through `normalisePass3Output` before parsing.
 
 ## 8. Documentation map
 
-| File                              | What it covers                                                                            |
-| --------------------------------- | ----------------------------------------------------------------------------------------- |
-| `README.md`                       | Quick getting-started + current product summary                                           |
-| `CLAUDE.md`                       | This file — operational guide + conventions                                               |
-| `docs/CLINICAL_COPILOT.md`        | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                |
-| `docs/MEASUREMENT_BASED_CARE.md`  | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report               |
-| `docs/DOCTOR_VERTICAL.md`         | **Build spec** — doctor (super-specialty OPD) vertical: live-scribe pivot + reuse plan    |
-| `docs/DOCTOR_VERTICAL_SPRINTS.md` | **Sprint plan** — doctor vertical task breakdown, sprints DV0–DV8                         |
-| `docs/SPRINT_21.md`               | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status) |
-| `docs/EXECUTION_PLAN.md`          | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+   |
-| `docs/SETUP.md`                   | Account procurement + env var matrix per sprint                                           |
-| `docs/dpdp-data-flow.md`          | DPDP compliance data flows + DSR endpoints + cross-border                                 |
-| `docs/security-audit.md`          | OWASP top-10 + secrets + IAM matrix                                                       |
-| `docs/runbooks/README.md`         | Operational runbooks index                                                                |
-| `docs/load-test-results.md`       | Pre-pilot load test record                                                                |
+| File                              | What it covers                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `README.md`                       | Quick getting-started + current product summary                                                                                                                             |
+| `CLAUDE.md`                       | This file — operational guide + conventions                                                                                                                                 |
+| `docs/CLINICAL_COPILOT.md`        | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                                                                                                  |
+| `docs/MEASUREMENT_BASED_CARE.md`  | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report                                                                                                 |
+| `docs/DOCTOR_VERTICAL.md`         | **Build spec** — doctor (super-specialty OPD) vertical: live-scribe pivot + reuse plan                                                                                      |
+| `docs/DOCTOR_VERTICAL_SPRINTS.md` | **Sprint plan** — doctor vertical task breakdown, sprints DV0–DV8                                                                                                           |
+| `docs/SPRINT_21.md`               | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status)                                                                                   |
+| `docs/EXECUTION_PLAN.md`          | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+                                                                                     |
+| `docs/SETUP.md`                   | Account procurement + env var matrix per sprint                                                                                                                             |
+| `docs/dpdp-data-flow.md`          | DPDP compliance data flows + DSR endpoints + cross-border                                                                                                                   |
+| `docs/security-audit.md`          | OWASP top-10 + secrets + IAM matrix                                                                                                                                         |
+| `docs/AUTH_SESSION.md`            | **Auth & session model** — `__session` cookie, page vs API guards, Bearer self-heal, the sign-out-must-be-POST rule, "bounced to /login" troubleshooting (2026-06 incident) |
+| `docs/runbooks/README.md`         | Operational runbooks index                                                                                                                                                  |
+| `docs/load-test-results.md`       | Pre-pilot load test record                                                                                                                                                  |
 
 ## 9. Running the codebase locally
 
@@ -390,25 +425,29 @@ all run with deterministic mocks. No GCP creds needed for dev.
 
 ## 10. Critical files / where to look first
 
-| When you want to…                                | Start here                                                                                                             |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Add a new API endpoint                           | `apps/web/app/api/v1/sessions/[id]/note/modify/route.ts` (the canonical pattern)                                       |
-| Add a new Gemini pass                            | `packages/llm/src/backends/vertex-pro-global.backend.ts` + this CLAUDE.md § 5                                          |
-| Add a new tab on the session detail page         | `apps/web/app/app/sessions/[id]/page.tsx` + `apps/web/components/app/SessionWorkspaceTabs.tsx`                         |
-| Add a new audit action                           | `packages/contracts/src/audit.ts` + this CLAUDE.md § 6                                                                 |
-| Change the SOAP note shape                       | `packages/contracts/src/note.ts` (`TherapyNoteV1Schema`)                                                               |
-| Change the intake note shape                     | `packages/contracts/src/note.ts` (`IntakeNoteV1Schema`)                                                                |
-| Change the Clinical Brief shape                  | `packages/contracts/src/clinical.ts` (`ClinicalReportV1Schema`)                                                        |
-| Change the Initial Assessment Brief shape        | `packages/contracts/src/clinical.ts` (`InitialAssessmentBriefV1Schema`)                                                |
-| Add a UI primitive                               | Don't. Compose existing ones in `apps/web/components/ui/`                                                              |
-| Add a patient-facing share artefact type         | `packages/contracts/src/share.ts` + `apps/web/lib/share-snapshots.ts` + `apps/web/app/p/[token]/page.tsx`              |
-| Curate a new scored instrument                   | `packages/clinical/src/instruments/index.ts` + add tests                                                               |
-| Add a new India crisis hotline                   | `packages/clinical/src/crisis.ts`                                                                                      |
-| Edit the session-start cascade                   | `apps/web/lib/session-defaults.ts` + `apps/web/app/api/v1/clients/[id]/session-defaults/route.ts`                      |
-| Change the Journey hub / reliable-change verdict | `apps/web/lib/journey.ts` + `packages/clinical/src/instruments/change-score.ts`                                        |
-| Change the Progress Report copy                  | `apps/web/lib/progress-report.ts` (deterministic — no LLM) + portal render branch in `apps/web/app/p/[token]/page.tsx` |
-| Open / close a treatment episode                 | `apps/web/app/api/v1/sessions/route.ts` (opens) + `apps/web/app/api/v1/clients/[id]/discharge/route.ts` (closes)       |
-| Toggle a goal status                             | `apps/web/app/api/v1/treatment-plans/[id]/goals/[index]/route.ts`                                                      |
+| When you want to…                                | Start here                                                                                                                    |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Add a new API endpoint                           | `apps/web/app/api/v1/sessions/[id]/note/modify/route.ts` (the canonical pattern)                                              |
+| Add a new Gemini pass                            | `packages/llm/src/backends/vertex-pro-global.backend.ts` + this CLAUDE.md § 5                                                 |
+| Add a new tab on the session detail page         | `apps/web/app/app/sessions/[id]/page.tsx` + `apps/web/components/app/SessionWorkspaceTabs.tsx`                                |
+| Add a new audit action                           | `packages/contracts/src/audit.ts` + this CLAUDE.md § 6                                                                        |
+| Change the SOAP note shape                       | `packages/contracts/src/note.ts` (`TherapyNoteV1Schema`)                                                                      |
+| Change the intake note shape                     | `packages/contracts/src/note.ts` (`IntakeNoteV1Schema`)                                                                       |
+| Change the Clinical Brief shape                  | `packages/contracts/src/clinical.ts` (`ClinicalReportV1Schema`)                                                               |
+| Change the Initial Assessment Brief shape        | `packages/contracts/src/clinical.ts` (`InitialAssessmentBriefV1Schema`)                                                       |
+| Add a UI primitive                               | Don't. Compose existing ones in `apps/web/components/ui/`                                                                     |
+| Add a patient-facing share artefact type         | `packages/contracts/src/share.ts` + `apps/web/lib/share-snapshots.ts` + `apps/web/app/p/[token]/page.tsx`                     |
+| Curate a new scored instrument                   | `packages/clinical/src/instruments/index.ts` + add tests                                                                      |
+| Add a new India crisis hotline                   | `packages/clinical/src/crisis.ts`                                                                                             |
+| Edit the session-start cascade                   | `apps/web/lib/session-defaults.ts` + `apps/web/app/api/v1/clients/[id]/session-defaults/route.ts`                             |
+| Change the Journey hub / reliable-change verdict | `apps/web/lib/journey.ts` + `packages/clinical/src/instruments/change-score.ts`                                               |
+| Change the Progress Report copy                  | `apps/web/lib/progress-report.ts` (deterministic — no LLM) + portal render branch in `apps/web/app/p/[token]/page.tsx`        |
+| Open / close a treatment episode                 | `apps/web/app/api/v1/sessions/route.ts` (opens) + `apps/web/app/api/v1/clients/[id]/discharge/route.ts` (closes)              |
+| Toggle a goal status                             | `apps/web/app/api/v1/treatment-plans/[id]/goals/[index]/route.ts`                                                             |
+| Debug auth / "bounced to /login"                 | `docs/AUTH_SESSION.md` (log-line → cause table) + `apps/web/lib/auth-page.ts` + `apps/web/lib/auth-server.ts`                 |
+| Add a route with a side effect                   | Make it **POST-only** (prefetchers fire `GET`). Pattern: `apps/web/app/api/v1/auth/signout/route.ts`                          |
+| Make a client component call `/api/v1`           | Just `fetch('/api/v1/...')` — `AuthedFetchProvider` adds the Bearer token (`apps/web/components/app/AuthedFetchProvider.tsx`) |
+| Change the Pass-3 crisis-flag normaliser         | `packages/llm/src/backends/pass3-normalise.ts` (+ its spec) — wired into `vertex-clinical.backend.ts`                         |
 
 ## 11. What's NOT in scope (still on the backlog)
 
@@ -416,13 +455,17 @@ These gate a real Indian pilot. **Critical-path items live at the top.**
 
 **Pilot-blocking (security + identity — needs your env to verify):**
 
-- **Real Firebase auth cutover** — DONE IN CODE (Sprint 31+).
+- **Real Firebase auth cutover** — DONE IN CODE (Sprint 31+) and now
+  **exercised live in prod** end-to-end (real Google sign-in → onboard →
+  record → notes) as of the 2026-06-20/21 session-auth incident.
   `currentPsychologist()` + the API guards verify the real `__session`
   Firebase cookie / Bearer token; `isAuthBypassed()` fails closed on
-  Vercel production when Firebase env is missing. The only
-  `dev-firebase-uid-priya` reference left is in `_archive/`. Remaining
-  work is OPERATIONAL only: set `FIREBASE_PROJECT_ID/CLIENT_EMAIL/
-PRIVATE_KEY` on the prod deployment (then bypass auto-disables).
+  Vercel production when Firebase env is missing. The session path was
+  hardened during the incident (redirect-cookie mint, Bearer self-heal,
+  verify-retry, **sign-out-must-be-POST**) — see `docs/AUTH_SESSION.md`.
+  Remaining work is OPERATIONAL only: set `FIREBASE_PROJECT_ID/
+CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
+  auto-disables).
 - **PII field encryption rollout** — DUAL-WRITE DONE for every Client
   PII field: `contactPhone` + `contactEmail` (Sprint 32) and `fullName`
   (Sprint 54), across create / update / DSR-correction + the
