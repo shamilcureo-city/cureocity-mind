@@ -2,6 +2,10 @@ import type { ReactNode } from 'react';
 import { AuthedFetchProvider } from '@/components/app/AuthedFetchProvider';
 import { MobileNav } from '@/components/app/MobileNav';
 import { Sidebar, type PlanUsage } from '@/components/app/Sidebar';
+import { HelpButton } from '@/components/app/HelpButton';
+import { WelcomeOverlay } from '@/components/app/WelcomeOverlay';
+import { LEARN_TOPICS, LEARN_GROUPS } from '@/lib/learn-content';
+import { CLINICAL_GLOSSARY, type GlossaryEntry } from '@/lib/clinical-glossary';
 import { currentPsychologist } from '@/lib/auth-page';
 import { isAuthBypassed } from '@/lib/auth-server';
 import { getEntitlement } from '@/lib/billing';
@@ -39,6 +43,19 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // on Vercel where it implies a real misconfiguration.
   const showBypassBanner = isAuthBypassed() && process.env['VERCEL'] === '1';
 
+  // Sprint 61 — serializable help index for the floating "?" button:
+  // every Learn topic + every glossary word, searchable from any screen.
+  const helpTopics = LEARN_TOPICS.map((t) => ({
+    slug: t.slug,
+    title: t.title,
+    lede: t.lede,
+    groupTitle: LEARN_GROUPS.find((g) => g.key === t.group)?.title ?? '',
+  }));
+  const helpWords = Object.entries(CLINICAL_GLOSSARY).map(([key, raw]) => {
+    const e: GlossaryEntry = raw;
+    return { key, plainTitle: e.plainTitle, term: e.term, what: e.what };
+  });
+
   return (
     <div className="flex min-h-screen flex-col bg-[var(--color-bg)]">
       <AuthedFetchProvider />
@@ -58,6 +75,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <div className="flex flex-1 flex-col pb-16 md:pb-0">{children}</div>
         <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
       </div>
+      <HelpButton topics={helpTopics} words={helpWords} />
+      <WelcomeOverlay />
     </div>
   );
 }

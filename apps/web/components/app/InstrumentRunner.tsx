@@ -5,7 +5,7 @@ import type { InstrumentResponse } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { InlineExplainer } from './EduHeading';
+import { HelpNote, InlineExplainer } from './EduHeading';
 import { glossary } from '../../lib/clinical-glossary';
 
 interface CatalogItem {
@@ -264,7 +264,12 @@ export function InstrumentRunner({ clientId }: Props) {
       </div>
 
       {history.length === 0 ? (
-        <p className="mt-5 text-sm text-[var(--color-ink-3)]">No instruments administered yet.</p>
+        <div className="mt-5">
+          <HelpNote title="No scores yet — capture a starting point">
+            Pick a questionnaire above and fill it in with the client. The first score becomes your
+            baseline, so every later one shows how things are changing.
+          </HelpNote>
+        </div>
       ) : (
         <>
           <h3 className="mt-6 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">

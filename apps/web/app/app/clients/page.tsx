@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClientsHeader } from '@/components/app/ClientsHeader';
 import { ClientSearchControls } from '@/components/app/ClientSearchControls';
+import { HelpNote } from '@/components/app/EduHeading';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
@@ -102,9 +103,23 @@ export default async function ClientsPage({
           <span>Last session</span>
         </div>
         {pageRows.length === 0 ? (
-          <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-            {filtered ? 'No clients match your search.' : 'No clients yet.'}
-          </p>
+          filtered ? (
+            <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
+              No clients match your search.
+            </p>
+          ) : (
+            <div className="px-5 py-8">
+              <HelpNote title="No clients yet — this is where you start">
+                Add your first client (just a name and phone), then you can record a session.{' '}
+                <Link
+                  href="/app/learn/add-a-client"
+                  className="text-[var(--color-accent)] underline"
+                >
+                  How adding a client works →
+                </Link>
+              </HelpNote>
+            </div>
+          )
         ) : (
           <ul className="divide-y divide-[var(--color-line-soft)]">
             {pageRows.map((c) => (
