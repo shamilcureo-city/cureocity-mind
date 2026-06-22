@@ -58,10 +58,10 @@ export function RiskBanner({ riskFlags }: Props) {
             </svg>
           </span>
           <div>
-            <p className="font-serif text-lg">Risk flag — {riskFlags.severity.toUpperCase()}</p>
+            <p className="font-serif text-lg">Safety flag — {riskFlags.severity.toUpperCase()}</p>
             <p className="mt-1 text-sm">
-              The note generator flagged this session for clinical review. Do not sign off until you
-              have triaged.
+              Something in this session needs your clinical attention. Please don't sign off until
+              you have looked into it.
             </p>
           </div>
         </div>
@@ -94,10 +94,10 @@ export function RiskBanner({ riskFlags }: Props) {
           href="#crisis"
           className="rounded-full bg-white/70 px-3 py-1 font-medium underline-offset-2 hover:underline"
         >
-          Crisis resources
+          Crisis helplines
         </a>
         <span className="rounded-full bg-white/40 px-3 py-1">
-          Logged as <code className="font-mono text-[11px]">CRISIS_FLAG_RAISED</code>
+          Saved to this client's safety record
         </span>
       </div>
     </aside>

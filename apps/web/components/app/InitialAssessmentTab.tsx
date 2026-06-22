@@ -12,6 +12,8 @@ import type {
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { InlineExplainer } from './EduHeading';
+import { glossary, type GlossaryKey } from '../../lib/clinical-glossary';
 
 interface Props {
   sessionId: string;
@@ -159,9 +161,8 @@ export function InitialAssessmentTab({ sessionId, clientId, reportEnvelope, init
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Initial assessment is being prepared…</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Generating the initial assessment in the background. This usually takes 30-60 seconds
-          after the intake note completes. If it’s been longer, the background run may have been
-          killed by the serverless cap — re-run it now.
+          Preparing the first-session reading in the background — usually about a minute after the
+          note is ready. If it's taking longer, it may have stopped early; just re-run it.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <Button onClick={() => void generate()} disabled={generating}>
@@ -222,11 +223,14 @@ function CompletedBrief({
     <div className="space-y-6">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h2 className="font-serif text-2xl">Initial assessment</h2>
+          <h2 className="font-serif text-2xl">{glossary('initialAssessment').plainTitle}</h2>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-ink-2)]">
-            AI decision-support for an intake. Wider differential than a treatment-session brief —
-            the goal is to narrow it over the next few sessions, not to commit to a plan yet.
+            The AI's first, wide read after a first session. The aim is to narrow it down over the
+            next few sessions — not to decide everything today.
           </p>
+          <div className="mt-2">
+            <InlineExplainer entry={glossary('initialAssessment')} />
+          </div>
         </div>
         <Button variant="secondary" onClick={() => void onRegenerate()} disabled={regenerating}>
           {regenerating ? 'Regenerating…' : 'Regenerate'}
@@ -238,7 +242,7 @@ function CompletedBrief({
       )}
 
       <Card className="p-6">
-        <SectionHeader title="Working hypothesis" />
+        <SectionHeader title="Working hypothesis" explain="intake.workingHypothesis" />
         <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
           {brief.workingHypothesis}
         </p>
@@ -247,7 +251,8 @@ function CompletedBrief({
       <Card className="p-6">
         <SectionHeader
           title="Possible diagnoses — still narrowing"
-          subtitle={`${brief.differential.length} candidate${brief.differential.length === 1 ? '' : 's'} · differential`}
+          explain="differential"
+          subtitle={`${brief.differential.length} candidate${brief.differential.length === 1 ? '' : 's'}`}
         />
         <ul className="mt-3 space-y-3">
           {brief.differential.map((c, i) => (
@@ -261,10 +266,7 @@ function CompletedBrief({
       </Card>
 
       <Card className="p-6">
-        <SectionHeader
-          title="Questions to answer next"
-          subtitle="what's still missing before a working diagnosis"
-        />
+        <SectionHeader title="Questions to answer next" explain="assessmentGaps" />
         {brief.assessmentGaps.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
             No outstanding questions — the AI thinks the picture is clear enough.
@@ -287,6 +289,7 @@ function CompletedBrief({
       <Card className="p-6">
         <SectionHeader
           title="Case formulation"
+          explain="formulation"
           subtitle={brief.language !== 'en' ? `language: ${brief.language}` : undefined}
         />
         <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--color-ink)]">
@@ -295,7 +298,7 @@ function CompletedBrief({
       </Card>
 
       <Card className="p-6">
-        <SectionHeader title="Recommended therapies" />
+        <SectionHeader title="Recommended therapies" explain="recommendedTherapies" />
         {brief.recommendedTherapies.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
             No first-line therapies recommended — the differential is too uncertain.
@@ -310,7 +313,7 @@ function CompletedBrief({
       </Card>
 
       <Card className="p-6">
-        <SectionHeader title="Recommended scored instruments" />
+        <SectionHeader title="Recommended scored instruments" explain="instruments" />
         {brief.recommendedInstruments.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
             No specific instruments recommended.
@@ -440,13 +443,31 @@ function CrisisBanner({
   );
 }
 
-function SectionHeader({ title, subtitle }: { title: string; subtitle?: string }) {
+function SectionHeader({
+  title,
+  subtitle,
+  explain,
+}: {
+  title: string;
+  subtitle?: string;
+  /// Optional plain-language explainer (Sprint 59).
+  explain?: GlossaryKey;
+}) {
+  const entry = explain ? glossary(explain) : null;
   return (
     <header className="flex flex-wrap items-baseline justify-between gap-2">
       <div>
-        <h3 className="font-serif text-xl">{title}</h3>
+        <h3 className="font-serif text-xl">{entry ? entry.plainTitle : title}</h3>
+        {entry?.term && (
+          <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">{entry.term}</p>
+        )}
         {subtitle && (
           <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">{subtitle}</p>
+        )}
+        {entry && (
+          <div className="mt-1.5">
+            <InlineExplainer entry={entry} />
+          </div>
         )}
       </div>
       <p className="text-xs italic text-[var(--color-ink-3)]">

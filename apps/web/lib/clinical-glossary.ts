@@ -33,6 +33,10 @@ export interface GlossaryEntry {
   why?: string;
   /** Optional: one tiny, concrete example. */
   example?: string;
+  /** Optional: slug of the Learn-Center topic that goes deeper. Reserved
+   *  for S60 (the hub) — entries can carry it now; "Read more →" renders
+   *  once the hub exists. */
+  relatedTopic?: string;
 }
 
 export const CLINICAL_GLOSSARY = {
@@ -159,6 +163,95 @@ export const CLINICAL_GLOSSARY = {
     term: 'Patient share',
     what: 'Share a plain, client-friendly version — homework, a summary or a progress update — over WhatsApp, email or a private link.',
     why: 'The client only ever sees what you choose to send. Your clinical notes stay private to you.',
+  },
+
+  // ---- The clinical brief (the AI's reading of the session) ----------
+  clinicalBrief: {
+    plainTitle: "The AI's reading of the session",
+    term: 'Clinical brief',
+    what: "A second opinion from the AI — what it thinks might be going on, what's still unclear, and what could help. You accept, edit, or reject each part.",
+    why: 'It is a helper, not the boss. You are the clinician; nothing is added to the record until you confirm it.',
+  },
+  initialAssessment: {
+    plainTitle: 'First-session reading',
+    term: 'Initial assessment',
+    what: "The AI's first, wide read after an intake — a shortlist of possibilities to explore, not a decision. The aim is to narrow it over the next sessions.",
+  },
+  diagnosis: {
+    plainTitle: 'Diagnosis ideas',
+    term: 'Diagnosis candidates (ICD-11)',
+    what: 'The conditions the AI thinks best fit what it heard, each with an official WHO code (ICD-11). One can be marked the main one.',
+    why: 'Only what you confirm is saved to the client. Codes make your records consistent and shareable with other professionals.',
+  },
+  differential: {
+    plainTitle: 'The shortlist of possibilities',
+    term: 'Differential',
+    what: 'Several conditions that could explain what you are seeing, kept side by side until you can rule some in and others out.',
+    why: 'Holding a few options early — instead of jumping to one — is exactly how careful assessment works.',
+  },
+  aiConfidence: {
+    plainTitle: 'How sure the AI is',
+    term: 'AI confidence',
+    what: 'A rough percentage for how strongly the evidence in this session points to that idea. Low early on is normal and expected.',
+  },
+  supportingEvidence: {
+    plainTitle: 'The proof behind it',
+    term: 'Supporting evidence',
+    what: 'The exact lines from the session the AI is leaning on, with who said them and when — so you can check its reasoning yourself.',
+  },
+  assessmentGaps: {
+    plainTitle: "What's still to find out",
+    term: 'Assessment gaps',
+    what: 'The questions still worth asking before you can be confident — each with a short reason why it matters.',
+    why: 'These carry forward as a checklist, so nothing important quietly gets forgotten between sessions.',
+  },
+  formulation: {
+    plainTitle: 'The bigger picture',
+    term: 'Case formulation',
+    what: "A short story of why this person is struggling — what set it off, what keeps it going, and their strengths. Not a label; the 'why' behind the work.",
+    why: 'It turns a list of symptoms into a map you can actually plan treatment from.',
+  },
+  treatmentPlan: {
+    plainTitle: 'The plan ahead',
+    term: 'Treatment plan',
+    what: 'The approach, the stages you expect to move through, and clear goals — each with a way to tell whether it is working.',
+    why: 'A written plan you can revisit keeps the work focused and lets you show progress over time.',
+  },
+  recommendedTherapies: {
+    plainTitle: 'Suggested approaches',
+    term: 'Recommended therapies',
+    what: 'Therapy methods that tend to help with this kind of difficulty, each with a short reason and the evidence behind it.',
+  },
+  crisisFlags: {
+    plainTitle: 'Safety alerts',
+    term: 'Crisis flags',
+    what: 'Moments in the session that may point to risk — to the client or others. Shown first, with India helpline numbers, so they are never missed.',
+    why: 'When something serious shows up, it deserves your attention before anything else on the page.',
+  },
+
+  // ---- Measuring progress --------------------------------------------
+  instruments: {
+    plainTitle: 'Quick questionnaires',
+    term: 'Scored instruments (PHQ-9, GAD-7)',
+    what: 'Short, well-tested checklists the client answers to put a number on how they are doing — PHQ-9 for low mood, GAD-7 for anxiety.',
+    why: 'A number you can repeat each visit is the clearest way to see whether things are actually getting better.',
+  },
+  baseline: {
+    plainTitle: 'The starting score',
+    term: 'Baseline',
+    what: 'The first score you record, near the start of the work. Every later score is compared against it.',
+    why: 'Without a starting point there is nothing to measure change against — so capture it early.',
+  },
+  reliableChange: {
+    plainTitle: 'Real, not random, change',
+    term: 'Reliable change',
+    what: "A drop big enough that it's very unlikely to be chance or a bad day — a genuine shift, judged against validated thresholds.",
+  },
+  diagnosisHistory: {
+    plainTitle: 'How the diagnosis has changed',
+    term: 'Diagnosis history',
+    what: 'A timeline of the diagnoses you have confirmed for this client — the current one, and the earlier ones it replaced.',
+    why: 'Seeing how your understanding evolved is good practice, and useful if the case is ever reviewed or handed over.',
   },
 } satisfies Record<string, GlossaryEntry>;
 
