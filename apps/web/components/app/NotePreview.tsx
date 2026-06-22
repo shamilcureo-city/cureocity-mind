@@ -2,6 +2,8 @@
 
 import type { TherapyNoteV1 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { EduSection, InlineExplainer } from './EduHeading';
+import { glossary } from '../../lib/clinical-glossary';
 
 interface Props {
   note: TherapyNoteV1;
@@ -49,14 +51,14 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
         )}
       </header>
 
-      <Section heading="Summary">
+      <EduSection term="soap.summary">
         <p className="whitespace-pre-line">{note.subjective}</p>
         {note.objective.trim() && (
           <p className="mt-3 whitespace-pre-line text-[var(--color-ink-2)]">{note.objective}</p>
         )}
-      </Section>
+      </EduSection>
 
-      <Section heading="Session Topics">
+      <EduSection term="soap.topics">
         {topics.length === 0 ? (
           <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
         ) : (
@@ -72,9 +74,9 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
             ))}
           </ul>
         )}
-      </Section>
+      </EduSection>
 
-      <Section heading="Plan">
+      <EduSection term="soap.plan">
         {planItems.length === 0 ? (
           <p className="text-[var(--color-ink-2)]">{note.plan}</p>
         ) : (
@@ -92,7 +94,7 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
             ))}
           </ul>
         )}
-      </Section>
+      </EduSection>
 
       {note.modalitySpecific && Object.keys(note.modalitySpecific).length > 0 && (
         <Section heading={`${note.modality} specifics`}>
@@ -104,9 +106,14 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
 
       {note.phaseHints.length > 0 && (
         <footer className="border-t border-[var(--color-line-soft)] pt-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-            Phase hints
-          </p>
+          <InlineExplainer
+            entry={glossary('phaseHints')}
+            label={
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                {glossary('phaseHints').plainTitle}
+              </span>
+            }
+          />
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {note.phaseHints.map((h, i) => (
               <li key={i}>

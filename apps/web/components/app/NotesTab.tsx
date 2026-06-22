@@ -22,6 +22,8 @@ import { MockBackendBanner } from './MockBackendBanner';
 import { IntakeRevisionPanel } from './IntakeRevisionPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { ShareModal } from './ShareModal';
+import { HelpNote, InlineExplainer } from './EduHeading';
+import { glossary } from '../../lib/clinical-glossary';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -291,14 +293,20 @@ export function NotesTab({
   if (phase.kind === 'ready-to-generate') {
     return (
       <Card className="p-10 text-center">
-        <p className="font-serif text-xl">Recording ended. Ready to draft the note.</p>
+        <p className="font-serif text-xl">Recording saved. Ready to write your note.</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Pass 1 transcribes + diarizes; Pass 2 writes the clinical draft. Usually 10–30 seconds.
-          You can edit before signing.
+          We’ll turn the recording into a clear, written note for you. This usually takes 10–30
+          seconds, and you can change anything before you save it.
         </p>
+        <div className="mx-auto mt-5 max-w-md">
+          <HelpNote title="Nothing is final yet">
+            The note is just a first draft to save you typing. You stay in control — read it, edit
+            it, and only you decide what it says.
+          </HelpNote>
+        </div>
         <div className="mt-5">
           <Button onClick={triggerGeneration} disabled={generating}>
-            {generating ? 'Starting…' : 'Generate note'}
+            {generating ? 'Starting…' : 'Write my note'}
           </Button>
         </div>
       </Card>
@@ -509,6 +517,12 @@ export function NotesTab({
               </Button>
               {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
             </div>
+            <div className="mt-3">
+              <InlineExplainer
+                entry={glossary('action.sign')}
+                label="New here? See what “sign off” does"
+              />
+            </div>
           </Card>
           <IntakeModifyPanel
             sessionId={sessionId}
@@ -551,6 +565,12 @@ export function NotesTab({
             </Button>
             {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
           </div>
+          <div className="mt-3">
+            <InlineExplainer
+              entry={glossary('action.sign')}
+              label="New here? See what “sign off” does"
+            />
+          </div>
         </Card>
         <ModifyPanel
           disabled={false}
@@ -583,9 +603,9 @@ function GeneratingState({
   onResume: () => void;
 }) {
   const steps = [
-    { key: 'PENDING', label: 'Setting up the run' },
-    { key: 'IN_PROGRESS', label: 'Transcribing + drafting' },
-    { key: 'COMPLETED', label: 'Done' },
+    { key: 'PENDING', label: 'Getting started' },
+    { key: 'IN_PROGRESS', label: 'Turning speech into a note' },
+    { key: 'COMPLETED', label: 'Ready for you' },
   ] as const;
   const idx = steps.findIndex((s) => s.key === draft.status);
   return (
@@ -593,10 +613,10 @@ function GeneratingState({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="font-serif text-xl">
-            <span className="inline-block animate-pulse">●</span> Generating note…
+            <span className="inline-block animate-pulse">●</span> Writing your note…
           </p>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            Pass 1 (transcribe + diarize) then Pass 2 (clinical draft). Polling every 2 seconds.
+            Turning the recording into a clear, written note. This usually takes 10–30 seconds.
           </p>
         </div>
         <Badge tone="warn">{draft.status.replace(/_/g, ' ').toLowerCase()}</Badge>
@@ -656,12 +676,17 @@ function NoteFooter({
   region: string;
 }) {
   return (
-    <dl className="mt-6 grid grid-cols-2 gap-3 border-t border-[var(--color-line-soft)] pt-5 text-xs text-[var(--color-ink-3)] sm:grid-cols-4">
-      <Stat label="Cost" value={costInr === '—' ? '—' : `₹${costInr}`} />
-      <Stat label="Segments" value={String(chunkCount)} />
-      <Stat label="Transcript" value={`${transcriptChars} chars`} />
-      <Stat label="Backend" value={region} />
-    </dl>
+    <details className="mt-6 border-t border-[var(--color-line-soft)] pt-4 text-xs text-[var(--color-ink-3)]">
+      <summary className="cursor-pointer select-none font-medium text-[var(--color-ink-3)] hover:text-[var(--color-ink-2)]">
+        Session details
+      </summary>
+      <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Stat label="AI cost" value={costInr === '—' ? '—' : `₹${costInr}`} />
+        <Stat label="Speech parts" value={String(chunkCount)} />
+        <Stat label="Words captured" value={`${transcriptChars} characters`} />
+        <Stat label="Mode" value={region} />
+      </dl>
+    </details>
   );
 }
 
