@@ -160,7 +160,7 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
 function FooterLinks() {
   const items: { href: string; label: string; icon: 'cog' | 'help' }[] = [
     { href: '/app/settings', label: 'Settings', icon: 'cog' },
-    { href: '/app/learn', label: 'Get Help', icon: 'help' },
+    { href: '/app/learn#help', label: 'Get Help', icon: 'help' },
   ];
   return (
     <ul className="mt-4 space-y-1">
