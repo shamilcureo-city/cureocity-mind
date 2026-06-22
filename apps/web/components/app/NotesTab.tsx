@@ -24,6 +24,8 @@ import { RevisionPanel } from './RevisionPanel';
 import { ShareModal } from './ShareModal';
 import { HelpNote, InlineExplainer } from './EduHeading';
 import { glossary } from '../../lib/clinical-glossary';
+import { NoteReadiness } from './NoteReadiness';
+import { checkIntakeNoteReadiness, checkTreatmentNoteReadiness } from '../../lib/note-readiness';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -507,6 +509,7 @@ export function NotesTab({
               transcriptChars={phase.draft.transcript?.length ?? 0}
               region={llmBackend}
             />
+            <NoteReadiness items={checkIntakeNoteReadiness(intakeNote)} />
             <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
               {/* Sprint 49 — intake notes can now be signed at parity with TREATMENT. */}
               <Button onClick={triggerSignOff} disabled={signing}>
@@ -556,6 +559,7 @@ export function NotesTab({
             transcriptChars={phase.draft.transcript?.length ?? 0}
             region={llmBackend}
           />
+          <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
           <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
             <Button onClick={triggerSignOff} disabled={signing}>
               {signing ? 'Signing…' : 'Sign off'}
