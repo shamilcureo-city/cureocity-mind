@@ -2459,6 +2459,8 @@ enum AuditAction {
   ENCOUNTER_FHIR_EXPORTED
   ABHA_LINKED
   ABDM_PRESCRIPTION_PUSHED
+  // Case file export — Sprint 65.
+  CASE_FILE_EXPORTED
 }
 
 enum AuditActorType {

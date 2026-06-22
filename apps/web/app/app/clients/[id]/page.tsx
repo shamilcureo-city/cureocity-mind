@@ -190,6 +190,26 @@ export default async function ClientDetailPage({ params }: PageProps) {
       </div>
 
       <div className="mt-6">
+        <Card className="p-5">
+          <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+            Case documents
+          </h3>
+          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+            The whole chart — diagnoses, plan, scores and session history — as one PDF, for a
+            referral, supervision, or the client&apos;s own records.
+          </p>
+          <div className="mt-3">
+            <a
+              href={`/api/v1/clients/${client.id}/case-file/pdf`}
+              className="inline-block rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+            >
+              Download case file (PDF)
+            </a>
+          </div>
+        </Card>
+      </div>
+
+      <div className="mt-6">
         <DataRightsCard clientId={client.id} clientName={pii.fullName} />
       </div>
     </Container>

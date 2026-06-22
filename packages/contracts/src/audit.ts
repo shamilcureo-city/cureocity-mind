@@ -190,6 +190,9 @@ export const AuditActionSchema = z.enum([
   'ENCOUNTER_FHIR_EXPORTED',
   'ABHA_LINKED',
   'ABDM_PRESCRIPTION_PUSHED',
+  // Case file export — Sprint 65. The therapist downloads the whole
+  // client chart (diagnoses + plans + measures + sessions) as one PDF.
+  'CASE_FILE_EXPORTED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
