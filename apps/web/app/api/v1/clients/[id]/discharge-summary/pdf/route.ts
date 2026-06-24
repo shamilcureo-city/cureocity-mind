@@ -159,10 +159,14 @@ function shapeGoals(
   const b = (body ?? {}) as { goals?: unknown };
   if (!Array.isArray(b.goals)) return [];
   const statusByIndex = new Map(progress.map((p) => [p.goalIndex, p.status]));
+  // Keep the RAW index: TreatmentGoalProgress.goalIndex is keyed by the
+  // position in the unfiltered goals array (the goal-PATCH route stores the
+  // URL index against goals.length), so capture i BEFORE filtering or a
+  // malformed earlier goal would shift every later goal's status.
   return b.goals
-    .map((g) => g as { description?: unknown; measure?: unknown })
-    .filter((g) => typeof g.description === 'string' && typeof g.measure === 'string')
-    .map((g, i) => ({
+    .map((g, i) => ({ g: g as { description?: unknown; measure?: unknown }, i }))
+    .filter(({ g }) => typeof g.description === 'string' && typeof g.measure === 'string')
+    .map(({ g, i }) => ({
       description: g.description as string,
       measure: g.measure as string,
       status: normaliseStatus(statusByIndex.get(i)),

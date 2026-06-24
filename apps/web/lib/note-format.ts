@@ -58,9 +58,14 @@ export function formatNoteSections(note: TherapyNoteV1, format: NoteFormat): For
         { heading: 'The plan', term: 'Plan', body: p },
       ];
     case 'BIRP':
+      // A SOAP note has no dedicated "intervention performed" field, so
+      // BIRP is approximated: Behaviour = how the client presented,
+      // Intervention/"what was worked on" draws on your read + the plan
+      // (NOT the assessment alone mislabelled as "what you did"), Response
+      // = the client's own account, Plan = next steps.
       return [
-        { heading: 'What you observed', term: 'Behaviour', body: o || s },
-        { heading: 'What you did', term: 'Intervention', body: a },
+        { heading: 'What the client presented', term: 'Behaviour', body: join(o, s) },
+        { heading: 'What was worked on', term: 'Intervention', body: join(a, p) },
         { heading: 'How they responded', term: 'Response', body: s },
         { heading: 'The plan', term: 'Plan', body: p },
       ];
