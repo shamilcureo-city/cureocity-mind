@@ -2265,6 +2265,34 @@ enum LetterKind {
 }
 
 // ============================================================================
+// ProblemListItem — Sprint 67c. A maintained, editable per-client problem
+// list (seeded from the Case Briefing, then therapist-owned). A stable
+// clinical artefact, distinct from the auto-synthesised briefing. Scalar
+// owner FKs keep the migration self-contained.
+// ============================================================================
+
+model ProblemListItem {
+  id             String        @id @default(cuid())
+  clientId       String
+  psychologistId String
+  title          String
+  detail         String?       @db.Text
+  status         ProblemStatus @default(ACTIVE)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+
+  @@index([clientId, status])
+  @@map("problem_list_items")
+}
+
+enum ProblemStatus {
+  ACTIVE
+  RESOLVED
+}
+
+// ============================================================================
 // AuditLog — append-only. Polymorphic target via (targetType, targetId).
 // Every state-changing endpoint writes one row. Read access surface added in
 // Sprint 9 with admin role (gap G9).
@@ -2500,6 +2528,10 @@ enum AuditAction {
   DISCHARGE_SUMMARY_EXPORTED
   // Letters — Sprint 66. A therapist-authored letter (referral / support).
   LETTER_GENERATED
+  // Problem list — Sprint 67c. Per-client maintained problem list.
+  PROBLEM_LIST_ITEM_ADDED
+  PROBLEM_LIST_ITEM_UPDATED
+  PROBLEM_LIST_ITEM_REMOVED
 }
 
 enum AuditActorType {

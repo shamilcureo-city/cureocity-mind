@@ -198,6 +198,10 @@ export const AuditActionSchema = z.enum([
   'DISCHARGE_SUMMARY_EXPORTED',
   // Letters — Sprint 66. A therapist-authored letter (referral / support).
   'LETTER_GENERATED',
+  // Problem list — Sprint 67c. Per-client maintained problem list.
+  'PROBLEM_LIST_ITEM_ADDED',
+  'PROBLEM_LIST_ITEM_UPDATED',
+  'PROBLEM_LIST_ITEM_REMOVED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

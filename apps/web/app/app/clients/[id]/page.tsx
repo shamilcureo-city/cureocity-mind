@@ -8,6 +8,7 @@ import { DemoClientButton } from '@/components/app/DemoClientButton';
 import { SendCheckinButton } from '@/components/app/SendCheckinButton';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { LetterComposer } from '@/components/app/LetterComposer';
+import { ProblemList } from '@/components/app/ProblemList';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
@@ -79,6 +80,28 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
   const episodeClosed =
     latestEpisode?.status === 'DISCHARGED' || latestEpisode?.status === 'TRANSFERRED';
+
+  // Sprint 67c — the maintained problem list.
+  const problems = await prisma.problemListItem.findMany({
+    where: { clientId: client.id },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      detail: true,
+      status: true,
+      createdAt: true,
+      resolvedAt: true,
+    },
+  });
+  const initialProblems = problems.map((p) => ({
+    id: p.id,
+    title: p.title,
+    detail: p.detail,
+    status: p.status,
+    createdAt: p.createdAt.toISOString(),
+    resolvedAt: p.resolvedAt?.toISOString() ?? null,
+  }));
 
   return (
     <Container className="py-10">
@@ -161,6 +184,19 @@ export default async function ClientDetailPage({ params }: PageProps) {
               </p>
             </section>
           )}
+        </Card>
+      </div>
+
+      <div className="mt-6">
+        <Card className="p-5">
+          <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+            Problem list
+          </h3>
+          <p className="mb-3 mt-1 text-sm text-[var(--color-ink-2)]">
+            The main difficulties you&apos;re working on — your own running list, kept across
+            sessions.
+          </p>
+          <ProblemList clientId={client.id} initialItems={initialProblems} />
         </Card>
       </div>
 
