@@ -196,6 +196,8 @@ export const AuditActionSchema = z.enum([
   // Discharge / treatment summary export — Sprint 65b. A clinician-facing
   // end-of-episode summary (distinct from the patient Progress Report).
   'DISCHARGE_SUMMARY_EXPORTED',
+  // Letters — Sprint 66. A therapist-authored letter (referral / support).
+  'LETTER_GENERATED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

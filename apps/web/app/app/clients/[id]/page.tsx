@@ -7,6 +7,7 @@ import { ClientEditPanel } from '@/components/app/ClientEditPanel';
 import { DemoClientButton } from '@/components/app/DemoClientButton';
 import { SendCheckinButton } from '@/components/app/SendCheckinButton';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
+import { LetterComposer } from '@/components/app/LetterComposer';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
@@ -225,6 +226,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
                   : 'Download treatment summary (PDF)'}
               </a>
             )}
+            <LetterComposer clientId={client.id} />
           </div>
         </Card>
       </div>

@@ -2230,6 +2230,41 @@ model EmdrTarget {
 }
 
 // ============================================================================
+// Letter — Sprint 66. Therapist-authored letters (referral to a
+// psychiatrist/GP, attendance, fitness-to-work/study, general support).
+// Body is composed deterministically from a template + case data, edited
+// by the therapist, then rendered to a credential-stamped PDF. Scalar
+// owner FKs (no relations) keep the migration self-contained.
+// ============================================================================
+
+model Letter {
+  id             String     @id @default(cuid())
+  clientId       String
+  psychologistId String
+  kind           LetterKind
+
+  /// Addressee line, e.g. "Dr. A. Sharma" or "To whom it may concern".
+  recipient String
+  /// Short subject / re-line.
+  subject String
+  /// The letter body — paragraphs separated by blank lines.
+  body String @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@map("letters")
+}
+
+enum LetterKind {
+  REFERRAL
+  ATTENDANCE
+  FITNESS
+  SUPPORT
+}
+
+// ============================================================================
 // AuditLog — append-only. Polymorphic target via (targetType, targetId).
 // Every state-changing endpoint writes one row. Read access surface added in
 // Sprint 9 with admin role (gap G9).
@@ -2463,6 +2498,8 @@ enum AuditAction {
   CASE_FILE_EXPORTED
   // Discharge / treatment summary export — Sprint 65b.
   DISCHARGE_SUMMARY_EXPORTED
+  // Letters — Sprint 66. A therapist-authored letter (referral / support).
+  LETTER_GENERATED
 }
 
 enum AuditActorType {
