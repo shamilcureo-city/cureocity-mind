@@ -506,6 +506,9 @@ function QuickActions() {
         <ButtonLink href="/app/clients" variant="secondary" size="sm">
           Clients
         </ButtonLink>
+        <ButtonLink href="/app/notes-due" variant="secondary" size="sm">
+          Notes to finish
+        </ButtonLink>
         <ButtonLink href="/app/me" variant="secondary" size="sm">
           My practice
         </ButtonLink>
