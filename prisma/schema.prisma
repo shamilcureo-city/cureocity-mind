@@ -2461,6 +2461,8 @@ enum AuditAction {
   ABDM_PRESCRIPTION_PUSHED
   // Case file export — Sprint 65.
   CASE_FILE_EXPORTED
+  // Discharge / treatment summary export — Sprint 65b.
+  DISCHARGE_SUMMARY_EXPORTED
 }
 
 enum AuditActorType {
