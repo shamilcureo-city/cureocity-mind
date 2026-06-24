@@ -40,3 +40,4 @@ export * from './chronic';
 export * from './abdm';
 export * from './letter';
 export * from './problem';
+export * from './note-review';

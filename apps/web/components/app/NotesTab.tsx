@@ -26,6 +26,7 @@ import { HelpNote, InlineExplainer } from './EduHeading';
 import { glossary } from '../../lib/clinical-glossary';
 import { NoteReadiness } from './NoteReadiness';
 import { checkIntakeNoteReadiness, checkTreatmentNoteReadiness } from '../../lib/note-readiness';
+import { NoteReviewPanel } from './NoteReviewPanel';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -426,6 +427,7 @@ export function NotesTab({
                 })
               }
             />
+            <NoteReviewPanel sessionId={sessionId} />
           </Card>
         </>
       );
@@ -486,6 +488,7 @@ export function NotesTab({
               transcriptChars={initialDraft?.transcript?.length ?? 0}
               region="signed"
             />
+            <NoteReviewPanel sessionId={sessionId} />
           </Card>
           <ModifyPanel disabled={true} sessionId={sessionId} note={treatmentContent} />
         </div>

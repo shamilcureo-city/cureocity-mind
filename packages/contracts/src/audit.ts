@@ -202,6 +202,8 @@ export const AuditActionSchema = z.enum([
   'PROBLEM_LIST_ITEM_ADDED',
   'PROBLEM_LIST_ITEM_UPDATED',
   'PROBLEM_LIST_ITEM_REMOVED',
+  // Supervision review — Sprint 68. A signed note was reviewed in supervision.
+  'NOTE_REVIEW_RECORDED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

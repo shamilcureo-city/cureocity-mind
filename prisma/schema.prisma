@@ -2293,6 +2293,29 @@ enum ProblemStatus {
 }
 
 // ============================================================================
+// NoteReview — Sprint 68. A record that a signed note was reviewed in
+// supervision (reviewer name + optional feedback + date). Captures the
+// supervision/medico-legal artefact without a full multi-account
+// supervisor-relationship system. Scalar owner FKs keep it self-contained.
+// ============================================================================
+
+model NoteReview {
+  id             String  @id @default(cuid())
+  sessionId      String
+  therapyNoteId  String
+  psychologistId String
+  reviewerName   String
+  reviewerNote   String? @db.Text
+  reviewedAt     DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([psychologistId, createdAt])
+  @@map("note_reviews")
+}
+
+// ============================================================================
 // AuditLog — append-only. Polymorphic target via (targetType, targetId).
 // Every state-changing endpoint writes one row. Read access surface added in
 // Sprint 9 with admin role (gap G9).
@@ -2532,6 +2555,8 @@ enum AuditAction {
   PROBLEM_LIST_ITEM_ADDED
   PROBLEM_LIST_ITEM_UPDATED
   PROBLEM_LIST_ITEM_REMOVED
+  // Supervision review — Sprint 68.
+  NOTE_REVIEW_RECORDED
 }
 
 enum AuditActorType {
