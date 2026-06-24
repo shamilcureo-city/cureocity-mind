@@ -6,6 +6,7 @@ import {
   type GlossaryEntry,
   type GlossaryKey,
 } from '../../lib/clinical-glossary';
+import { resolveGlossaryEntry, useLocale } from '../../lib/locale';
 
 /**
  * Sprint 58 — the plain-language education layer.
@@ -75,7 +76,8 @@ function ToggleButton({
  * bare-heading `Section` helpers in the note previews.
  */
 export function EduSection({ term, children }: { term: GlossaryKey; children: ReactNode }) {
-  const entry = CLINICAL_GLOSSARY[term];
+  const locale = useLocale();
+  const entry = resolveGlossaryEntry(CLINICAL_GLOSSARY[term], locale);
   const [open, setOpen] = useState(false);
   const id = useId();
   const panelId = `edu-${id}`;
@@ -106,6 +108,8 @@ export function EduSection({ term, children }: { term: GlossaryKey; children: Re
  * (e.g. a footer label, or "what does sign-off mean?").
  */
 export function InlineExplainer({ entry, label }: { entry: GlossaryEntry; label?: ReactNode }) {
+  const locale = useLocale();
+  const resolved = resolveGlossaryEntry(entry, locale);
   const [open, setOpen] = useState(false);
   const id = useId();
   const panelId = `edu-inline-${id}`;
@@ -115,7 +119,7 @@ export function InlineExplainer({ entry, label }: { entry: GlossaryEntry; label?
         {label && <span className="text-xs text-[var(--color-ink-3)]">{label}</span>}
         <ToggleButton open={open} onClick={() => setOpen((v) => !v)} controls={panelId} />
       </div>
-      {open && <ExplainerPanel entry={entry} id={panelId} />}
+      {open && <ExplainerPanel entry={resolved} id={panelId} />}
     </div>
   );
 }

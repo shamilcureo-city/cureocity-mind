@@ -37,6 +37,15 @@ export interface GlossaryEntry {
    *  for S60 (the hub) — entries can carry it now; "Read more →" renders
    *  once the hub exists. */
   relatedTopic?: string;
+  /** Optional: human-validated translations (Sprint 69). English is the
+   *  base; a locale overlays it field-by-field. NEVER machine-translated —
+   *  populated only by a clinician-reviewed pass. */
+  translations?: Partial<
+    Record<
+      'hi' | 'ml',
+      { plainTitle?: string; term?: string; what?: string; why?: string; example?: string }
+    >
+  >;
 }
 
 export const CLINICAL_GLOSSARY = {

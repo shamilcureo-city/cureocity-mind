@@ -3,6 +3,7 @@ import { Container } from '@/components/ui/Container';
 import { LEARN_GROUPS, topicsByGroup, LEARN_TOPICS } from '@/lib/learn-content';
 import { CLINICAL_GLOSSARY } from '@/lib/clinical-glossary';
 import { LearnSearch, type SearchTopic, type SearchWord } from '@/components/app/learn/LearnSearch';
+import { LanguageToggle } from '@/components/app/LanguageToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,9 +51,12 @@ export default function LearnPage() {
   return (
     <Container className="py-10">
       <header className="mb-7">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
-          Learn &amp; Help
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
+            Learn &amp; Help
+          </p>
+          <LanguageToggle />
+        </div>
         <h1 className="mt-2 font-serif text-3xl">Everything, explained simply</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-ink-2)]">
           Short, plain-language guides to every part of the app — no jargon, no rush. Search for
