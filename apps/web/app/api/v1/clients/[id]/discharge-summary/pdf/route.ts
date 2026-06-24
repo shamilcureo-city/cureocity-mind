@@ -8,6 +8,7 @@ import {
 } from '@/components/pdf/DischargeSummaryPdf';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -38,6 +39,11 @@ export async function GET(
     select: {
       psychologistId: true,
       fullName: true,
+      fullNameEncrypted: true,
+      contactPhone: true,
+      contactPhoneEncrypted: true,
+      contactEmail: true,
+      contactEmailEncrypted: true,
       dateOfBirth: true,
       presentingConcerns: true,
     },
@@ -45,6 +51,7 @@ export async function GET(
   if (!client || client.psychologistId !== psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
+  const pii = await resolveClientPii(client);
 
   const episode = await prisma.treatmentEpisode.findFirst({
     where: { clientId },
@@ -90,7 +97,7 @@ export async function GET(
   ]);
 
   const props: DischargeSummaryPdfProps = {
-    clientFullName: client.fullName,
+    clientFullName: pii.fullName,
     ageYears: ageFromDob(client.dateOfBirth),
     preparedBy: psychologist?.fullName ?? 'Clinician',
     rciNumber: psychologist?.rciNumber ?? '—',
@@ -125,7 +132,7 @@ export async function GET(
   });
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  const safeName = client.fullName
+  const safeName = pii.fullName
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');

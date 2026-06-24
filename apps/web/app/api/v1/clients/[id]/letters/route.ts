@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { CreateLetterInputSchema, type Letter } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 import { composeLetter } from '@/lib/letter-templates';
@@ -31,11 +32,22 @@ export async function POST(
 
   const client = await prisma.client.findUnique({
     where: { id: clientId },
-    select: { psychologistId: true, deletedAt: true, fullName: true, presentingConcerns: true },
+    select: {
+      psychologistId: true,
+      deletedAt: true,
+      fullName: true,
+      fullNameEncrypted: true,
+      contactPhone: true,
+      contactPhoneEncrypted: true,
+      contactEmail: true,
+      contactEmailEncrypted: true,
+      presentingConcerns: true,
+    },
   });
   if (!client || client.deletedAt !== null || client.psychologistId !== psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
+  const pii = await resolveClientPii(client);
 
   const [psychologist, diagnosis, completedSessions, firstSession, lastSession] = await Promise.all(
     [
@@ -63,7 +75,7 @@ export async function POST(
   );
 
   const composed = composeLetter(dto.value.kind, {
-    clientFullName: client.fullName,
+    clientFullName: pii.fullName,
     therapistFullName: psychologist?.fullName ?? 'Clinician',
     rciNumber: psychologist?.rciNumber ?? '—',
     diagnosis: diagnosis

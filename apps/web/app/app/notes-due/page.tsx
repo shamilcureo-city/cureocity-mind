@@ -4,6 +4,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { HelpNote } from '@/components/app/EduHeading';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -60,18 +61,24 @@ export default async function NotesDuePage() {
       id: true,
       scheduledAt: true,
       kind: true,
-      client: { select: { fullName: true } },
+      client: { select: { fullName: true, fullNameEncrypted: true } },
       noteDraft: { select: { status: true } },
     },
   });
 
-  const rows = sessions.map((s) => ({
-    id: s.id,
-    clientName: s.client.fullName,
-    scheduledAt: s.scheduledAt,
-    kind: s.kind,
-    bucket: bucketFor(s.noteDraft?.status),
-  }));
+  const rows = await Promise.all(
+    sessions.map(async (s) => ({
+      id: s.id,
+      clientName: await decryptClientField(
+        therapist.id,
+        s.client.fullNameEncrypted,
+        s.client.fullName,
+      ),
+      scheduledAt: s.scheduledAt,
+      kind: s.kind,
+      bucket: bucketFor(s.noteDraft?.status),
+    })),
+  );
 
   const grouped = ORDER.map((b) => ({
     bucket: b,

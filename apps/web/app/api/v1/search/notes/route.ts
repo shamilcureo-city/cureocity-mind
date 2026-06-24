@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { requirePsychologistId } from '@/lib/auth-server';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       scheduledAt: Date;
       kind: string;
       fullName: string;
+      fullNameEncrypted: string | null;
       contentText: string;
     }[]
   >(Prisma.sql`
@@ -43,6 +45,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
            s."scheduledAt" AS "scheduledAt",
            s."kind"::text AS "kind",
            c."fullName" AS "fullName",
+           c."fullNameEncrypted" AS "fullNameEncrypted",
            tn."content"::text AS "contentText"
     FROM "therapy_notes" tn
     JOIN "sessions" s ON s."id" = tn."sessionId"
@@ -54,14 +57,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     LIMIT 30
   `);
 
-  const results = rows.map((r) => ({
-    sessionId: r.sessionId,
-    clientId: r.clientId,
-    clientName: r.fullName,
-    scheduledAt: r.scheduledAt.toISOString(),
-    kind: r.kind,
-    snippet: snippet(r.contentText, q),
-  }));
+  const results = await Promise.all(
+    rows.map(async (r) => ({
+      sessionId: r.sessionId,
+      clientId: r.clientId,
+      clientName: await decryptClientField(
+        auth.value.psychologistId,
+        r.fullNameEncrypted,
+        r.fullName,
+      ),
+      scheduledAt: r.scheduledAt.toISOString(),
+      kind: r.kind,
+      snippet: snippet(r.contentText, q),
+    })),
+  );
 
   return NextResponse.json({ results, query: q });
 }
