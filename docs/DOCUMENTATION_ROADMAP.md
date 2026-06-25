@@ -22,12 +22,14 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 ## Phase 1 — Plain-language everywhere (education)
 
 ### S58 — Inline education foundation ✅ (shipped: `dbf359a`)
+
 - ✅ Glossary (`lib/clinical-glossary.ts`) + `EduSection` / `InlineExplainer`
   / `HelpNote` (`components/app/EduHeading.tsx`).
 - ✅ SOAP + intake note views lead plain-first; de-jargoned the
   generate / sign / processing copy; technical footer collapsed.
 
 ### S59 — Education on every clinical surface
+
 - ☐ Wire `EduSection` / `InlineExplainer` into: Clinical Brief, Initial
   Assessment, Measures (PHQ-9/GAD-7), Case Briefing, Diagnosis History,
   Risk banner, Share modal, Journey.
@@ -39,6 +41,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 - Files: `lib/clinical-glossary.ts`, the listed components. No migration.
 
 ### S60 — The Learn & Help Center (navigable hub) ★
+
 - ☐ Typed content registry `lib/learn-content.ts` (groups → topics →
   sections) + registry-integrity unit test (no dangling refs).
 - ☐ Rebuild `app/app/learn/page.tsx` (hub) + `learn/[topic]/page.tsx`
@@ -49,6 +52,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 - ☐ Resolve every inline "Read more →".
 
 ### S61 — Welcome + guided tour + "?" help
+
 - ☐ First-run welcome overlay (4–5 calm cards), gated by a per-therapist
   `hasSeenWelcome` flag (Psychologist column + migration +
   `WELCOME_DISMISSED` audit), localStorage fast-path.
@@ -62,6 +66,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 ## Phase 2 — Making the note better (A)
 
 ### S62 — Note-format choice + "Is this note ready?" check ★
+
 - ☐ **Note-format library:** SOAP / DAP / BIRP / GIRP / narrative; a
   per-therapist default + per-client override; a plain "Which should I
   pick?" helper. Generalise the note contract to a discriminated union by
@@ -77,6 +82,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
   `NOTE_FORMAT_CHANGED`.
 
 ### S63 — Smarter editing
+
 - ☐ **Learn-from-edits style profile:** mine the existing `NoteEdit`
   trail (before/after per field) → a per-therapist style profile (length,
   person/tense, habitual adds/cuts) that conditions the next Pass 2 draft.
@@ -89,6 +95,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
   `NOTE_ADDENDUM_ADDED` audit; surfaced on the record + PDF.
 
 ### S64 — Note depth & continuity
+
 - ☐ **Process notes vs progress notes:** a separate private "process
   notes" space kept out of the official + shareable record. New
   `ProcessNote` model (psychologist-private; never in any `PatientShare`).
@@ -103,6 +110,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 ## Phase 3 — Making the case a document (B)
 
 ### S65 — Case file + discharge summary
+
 - ☐ **Full case-file PDF export:** one chronological document — intake →
   every note → diagnosis history → plan versions → instrument trajectory
   → shares → discharge. New `GET /clients/[id]/case-file/pdf`
@@ -112,6 +120,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
   flow. New artefact + `DISCHARGE_SUMMARY_GENERATED` audit.
 
 ### S66 — Letters (referral + supporting)
+
 - ☐ **Referral letter** to a psychiatrist/GP (MHCA medication-referral
   need), generated from the cumulative record, signed, credential-stamped.
 - ☐ **Supporting letters:** attendance, fitness-to-work/study,
@@ -120,6 +129,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 - Dependency: credential/RCI stamping (shared with S65) must land here.
 
 ### S67 — Find & manage
+
 - ☐ **Problem list:** a stable, editable per-client problem list (seeded
   from the Case Briefing, then therapist-owned). New `ProblemListItem`.
 - ☐ **Cross-note search:** full-text over a client's notes + caseload
@@ -130,6 +140,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
   or a dashboard card.
 
 ### S68 — Collaboration
+
 - ☐ **Supervisor co-sign / review:** route a note to a supervisor for
   feedback or co-sign (trainee notes co-signed by a licensed clinician —
   India M.Phil supervised-hours reality). Needs a light supervisor
@@ -140,11 +151,13 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 ## Phase 4 — Reach, trust, and the learning loop
 
 ### S69 — Multilingual education
+
 - ☐ Locale-key the glossary + Learn registry (en default → Hindi +
   Hinglish/Manglish, expandable). Human-validated copy only — no machine
   translation. Toggle on help surfaces; clean fallback to English.
 
 ### S70 — Compliance & interop
+
 - ☐ **Credential / RCI stamping everywhere** an export leaves the app
   (notes, letters, receipts) — if not already shipped with S65/S66.
 - ☐ **Amendment-visible record:** surface "amended on X" on the note
@@ -154,6 +167,7 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
   health ID for interop/portability.
 
 ### S71 — Learn from confusion
+
 - ☐ **Help telemetry:** count which "What's this?" / topics open most
   (a `HELP_VIEWED` observability counter, no PII) → simplify what
   confuses, surface it earlier.
@@ -163,12 +177,14 @@ Legend: ✅ shipped · ◐ partially exists in product · ☐ to build.
 ---
 
 ## What's already in the product (don't rebuild)
+
 - ◐ Per-signed-note PDF export · field-level post-sign revision
   (`NoteEdit`) · cumulative diagnosis + plan history · Case Briefing
   (Pass 6) synthesis · patient-facing Progress Report · WebAuthn signing.
   The roadmap above extends these rather than duplicating them.
 
 ## Cross-cutting conventions (apply to every sprint)
+
 - Contracts-first (Zod in `packages/contracts`); validate at the boundary.
 - Audit every state-changing endpoint with a literal action string + a
   wired writer (audit-coverage chaos test).

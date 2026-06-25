@@ -71,18 +71,18 @@ Left-hand **section navigation** inside Learn (sticky on desktop, a
 collapsible menu on mobile), grouped the way a therapist's day flows —
 NOT the way the code is organised:
 
-| Group | Topics |
-| --- | --- |
-| **Getting started** | What this app does · Add your first client · Consent & recording |
-| **Recording a session** | Before you press record · During the session · If something goes wrong |
-| **Your notes** | What a session note is · The four parts (SOAP), in plain words · The first-session record (intake) · Editing & fixing a note · Signing a note (and why) |
-| **Understanding the AI** | What the AI does (and doesn't) · The clinical brief & diagnosis ideas · Why it shows evidence · You're always in charge |
-| **Measuring progress** | PHQ-9 & GAD-7 in plain words · What "real change" means · The client's journey |
-| **Sharing with clients** | What you can send · WhatsApp / email / link · What the client can and can't see |
-| **Safety** | Safety flags · Safety plans · India crisis helplines |
-| **Privacy & the law** | How data is kept safe (DPDP) · Your client's rights · Recording consent |
-| **Your practice** | Billing & your plan · The Assistant · Settings |
-| **Words explained** | The full plain-language glossary |
+| Group                    | Topics                                                                                                                                                  |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Getting started**      | What this app does · Add your first client · Consent & recording                                                                                        |
+| **Recording a session**  | Before you press record · During the session · If something goes wrong                                                                                  |
+| **Your notes**           | What a session note is · The four parts (SOAP), in plain words · The first-session record (intake) · Editing & fixing a note · Signing a note (and why) |
+| **Understanding the AI** | What the AI does (and doesn't) · The clinical brief & diagnosis ideas · Why it shows evidence · You're always in charge                                 |
+| **Measuring progress**   | PHQ-9 & GAD-7 in plain words · What "real change" means · The client's journey                                                                          |
+| **Sharing with clients** | What you can send · WhatsApp / email / link · What the client can and can't see                                                                         |
+| **Safety**               | Safety flags · Safety plans · India crisis helplines                                                                                                    |
+| **Privacy & the law**    | How data is kept safe (DPDP) · Your client's rights · Recording consent                                                                                 |
+| **Your practice**        | Billing & your plan · The Assistant · Settings                                                                                                          |
+| **Words explained**      | The full plain-language glossary                                                                                                                        |
 
 ### 3.2 Page anatomy (the "big clarity" pattern)
 
@@ -184,7 +184,7 @@ high-clarity hub in §3. This is the centerpiece.
 
 - **Content registry:** `apps/web/lib/learn-content.ts` — a typed model:
   `LearnGroup[] → LearnTopic { slug, title, lede, oneLiner, sections:
-  LearnSection[], related[], tryIt?, glossaryRefs[] }`. Deterministic,
+LearnSection[], related[], tryIt?, glossaryRefs[] }`. Deterministic,
   unit-testable, version-controlled. (A test asserts every `relatedTopic`
   in the glossary resolves to a real topic, and every topic's
   `glossaryRefs` exist — the same "no dangling reference" discipline as

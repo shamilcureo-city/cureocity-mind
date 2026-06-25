@@ -13,20 +13,20 @@ connection — see **§3** for what that means and how to land it.
 
 ## 1. What shipped
 
-| Sprint | Commit | What | DB? |
-| --- | --- | --- | --- |
-| S58 | `dbf359a` | Inline plain-language education on the session notes (glossary + `EduSection`/`InlineExplainer`/`HelpNote`; de-jargoned the flow) | no |
-| S59 | `7ea291f` | Education on every clinical surface (Clinical Brief, Initial Assessment, Measures, Risk, Diagnosis history) + ~18 glossary terms | no |
-| S60 | `0d0cfcb` | The navigable **Learn & Help Center** (`/app/learn` hub, `/app/learn/[topic]`, `/app/learn/words`, search) | no |
-| S61 | `0e2ade6` | First-run **welcome overlay**, persistent **"?" help button**, route-aware help, empty-state sweep | no* |
-| S62a | `9fb1b0c` | **"Is this note ready?"** pre-sign completeness check | no |
-| S62b | `52b3b3e` | **Note-format view** (SOAP / DAP / BIRP / Narrative) — deterministic re-map | no |
-| S65 | `3e9ca5b` | **Case-file PDF** export (whole chart) | **migration** |
-| S65b | `a658808` | **Discharge / treatment summary** PDF | **migration** |
-| S66 | `a419430` | **Referral & supporting letters** (compose + PDF) | **migration** |
-| S67a | `a47409b` | **Cross-note search** (`/app/search`) | no |
-| S67b | `ff6dd00` | **Documentation worklist** (`/app/notes-due`) | no |
-| S67c | `2617ce5` | **Per-client problem list** | **migration** |
+| Sprint | Commit    | What                                                                                                                              | DB?           |
+| ------ | --------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| S58    | `dbf359a` | Inline plain-language education on the session notes (glossary + `EduSection`/`InlineExplainer`/`HelpNote`; de-jargoned the flow) | no            |
+| S59    | `7ea291f` | Education on every clinical surface (Clinical Brief, Initial Assessment, Measures, Risk, Diagnosis history) + ~18 glossary terms  | no            |
+| S60    | `0d0cfcb` | The navigable **Learn & Help Center** (`/app/learn` hub, `/app/learn/[topic]`, `/app/learn/words`, search)                        | no            |
+| S61    | `0e2ade6` | First-run **welcome overlay**, persistent **"?" help button**, route-aware help, empty-state sweep                                | no\*          |
+| S62a   | `9fb1b0c` | **"Is this note ready?"** pre-sign completeness check                                                                             | no            |
+| S62b   | `52b3b3e` | **Note-format view** (SOAP / DAP / BIRP / Narrative) — deterministic re-map                                                       | no            |
+| S65    | `3e9ca5b` | **Case-file PDF** export (whole chart)                                                                                            | **migration** |
+| S65b   | `a658808` | **Discharge / treatment summary** PDF                                                                                             | **migration** |
+| S66    | `a419430` | **Referral & supporting letters** (compose + PDF)                                                                                 | **migration** |
+| S67a   | `a47409b` | **Cross-note search** (`/app/search`)                                                                                             | no            |
+| S67b   | `ff6dd00` | **Documentation worklist** (`/app/notes-due`)                                                                                     | no            |
+| S67c   | `2617ce5` | **Per-client problem list**                                                                                                       | **migration** |
 
 \* S61's welcome dismissal uses **localStorage** (the roadmap-sanctioned
 fast-path); the durable DB flag is a deferred follow-up (§4).
@@ -40,7 +40,7 @@ Four append-only migrations, all idempotent / standard:
 - `prisma/migrations/20260725000000_sprint65b_discharge_summary` — adds
   `DISCHARGE_SUMMARY_EXPORTED` audit value.
 - `prisma/migrations/20260726000000_sprint66_letters` — `LetterKind` enum
-  + `letters` table + `LETTER_GENERATED` audit value.
+  - `letters` table + `LETTER_GENERATED` audit value.
 - `prisma/migrations/20260727000000_sprint67c_problem_list` —
   `ProblemStatus` enum + `problem_list_items` table + 3 audit values.
 
@@ -80,7 +80,7 @@ Quality-bar reasons (runtime-unverifiable here, or out of scope):
 - **PDF-per-format** — the in-app note **Format** switch (S62b) is a view;
   `GET …/note/pdf` still renders SOAP. Thread the format through the PDF
   route + a generalized PDF component.
-- **Native per-format generation** — retraining Pass 2 to *write* DAP/BIRP
+- **Native per-format generation** — retraining Pass 2 to _write_ DAP/BIRP
   natively (vs. re-mapping). Needs GCP + a note-contract union; higher
   blast radius across sign/edit/share — deferred deliberately.
 - **Durable welcome flag** — replace S61's localStorage with a per-
