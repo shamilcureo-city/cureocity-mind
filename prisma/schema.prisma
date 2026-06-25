@@ -2246,9 +2246,9 @@ model Letter {
   /// Addressee line, e.g. "Dr. A. Sharma" or "To whom it may concern".
   recipient String
   /// Short subject / re-line.
-  subject String
+  subject   String
   /// The letter body — paragraphs separated by blank lines.
-  body String @db.Text
+  body      String @db.Text
 
   createdAt DateTime @default(now())
 
@@ -2300,12 +2300,12 @@ enum ProblemStatus {
 // ============================================================================
 
 model NoteReview {
-  id             String  @id @default(cuid())
+  id             String   @id @default(cuid())
   sessionId      String
   therapyNoteId  String
   psychologistId String
   reviewerName   String
-  reviewerNote   String? @db.Text
+  reviewerNote   String?  @db.Text
   reviewedAt     DateTime
 
   createdAt DateTime @default(now())
