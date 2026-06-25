@@ -1,7 +1,18 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { TherapyNoteV1 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { EduSection, InlineExplainer } from './EduHeading';
+import { glossary } from '../../lib/clinical-glossary';
+import {
+  formatNoteSections,
+  isNoteFormat,
+  NOTE_FORMATS,
+  NOTE_FORMAT_HELP,
+  NOTE_FORMAT_LABEL,
+  type NoteFormat,
+} from '../../lib/note-format';
 
 interface Props {
   note: TherapyNoteV1;
@@ -9,25 +20,38 @@ interface Props {
   signedBy?: string | null;
 }
 
+const FORMAT_KEY = 'cm.noteFormat';
+
 /**
  * Renders a TherapyNoteV1 in a clinician-friendly long-form layout.
  *
- * Visual hierarchy:
- *   Summary             (subjective + objective as one prose block)
- *   Session Topics      (assessment broken into bullets)
- *   Plan                (plan as a checklist)
- *   Modality specifics  (optional, for CBT/EMDR-specific extracts)
- *   Phase hints         (small chips at the bottom)
- *
- * Sprint 4 introduces an editing toolbar + AI "modify your note" chat
- * panel that re-writes the underlying TherapyNoteV1 and surfaces a diff;
- * Sprint 7 layers note-type templates (BASE / SOAP / DAP) over this same
- * data shape. For now the layout is read-mostly with an inline edit
- * affordance per field.
+ * Sprint 62b — a format switch (SOAP / DAP / BIRP / Narrative) lets the
+ * therapist read the same note arranged the way they write. SOAP keeps the
+ * rich, education-annotated layout; the others are a deterministic re-map
+ * of the same content (see lib/note-format.ts). The choice is remembered
+ * per-device (localStorage); it never changes what's stored or signed.
  */
 export function NotePreview({ note, signedAt, signedBy }: Props) {
   const topics = extractTopics(note.assessment);
   const planItems = extractTopics(note.plan);
+
+  const [format, setFormat] = useState<NoteFormat>('SOAP');
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(FORMAT_KEY);
+      if (isNoteFormat(saved)) setFormat(saved);
+    } catch {
+      // localStorage unavailable — stay on SOAP.
+    }
+  }, []);
+  function pick(f: NoteFormat): void {
+    setFormat(f);
+    try {
+      window.localStorage.setItem(FORMAT_KEY, f);
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <article className="space-y-8">
@@ -49,50 +73,77 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
         )}
       </header>
 
-      <Section heading="Summary">
-        <p className="whitespace-pre-line">{note.subjective}</p>
-        {note.objective.trim() && (
-          <p className="mt-3 whitespace-pre-line text-[var(--color-ink-2)]">{note.objective}</p>
-        )}
-      </Section>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Format</span>
+        {NOTE_FORMATS.map((f) => (
+          <button
+            key={f}
+            type="button"
+            onClick={() => pick(f)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              format === f
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink-3)]'
+            }`}
+          >
+            {NOTE_FORMAT_LABEL[f]}
+          </button>
+        ))}
+        <InlineExplainer entry={NOTE_FORMAT_HELP} label="Which should I pick?" />
+      </div>
 
-      <Section heading="Session Topics">
-        {topics.length === 0 ? (
-          <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
-        ) : (
-          <ul className="space-y-2">
-            {topics.map((t, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <span
-                  aria-hidden
-                  className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-                />
-                <span>{t}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+      {format === 'SOAP' ? (
+        <>
+          <EduSection term="soap.summary">
+            <p className="whitespace-pre-line">{note.subjective}</p>
+            {note.objective.trim() && (
+              <p className="mt-3 whitespace-pre-line text-[var(--color-ink-2)]">{note.objective}</p>
+            )}
+          </EduSection>
 
-      <Section heading="Plan">
-        {planItems.length === 0 ? (
-          <p className="text-[var(--color-ink-2)]">{note.plan}</p>
-        ) : (
-          <ul className="space-y-2">
-            {planItems.map((t, i) => (
-              <li key={i} className="flex items-start gap-2">
-                <span
-                  aria-hidden
-                  className="mt-1.5 grid h-4 w-4 shrink-0 place-items-center rounded border border-[var(--color-line)] bg-white text-[10px] text-[var(--color-ink-3)]"
-                >
-                  ◯
-                </span>
-                <span>{t}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+          <EduSection term="soap.topics">
+            {topics.length === 0 ? (
+              <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
+            ) : (
+              <ul className="space-y-2">
+                {topics.map((t, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span
+                      aria-hidden
+                      className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                    />
+                    <span>{t}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </EduSection>
+
+          <EduSection term="soap.plan">
+            {planItems.length === 0 ? (
+              <p className="text-[var(--color-ink-2)]">{note.plan}</p>
+            ) : (
+              <ul className="space-y-2">
+                {planItems.map((t, i) => (
+                  <li key={i} className="flex items-start gap-2">
+                    <span
+                      aria-hidden
+                      className="mt-1.5 grid h-4 w-4 shrink-0 place-items-center rounded border border-[var(--color-line)] bg-white text-[10px] text-[var(--color-ink-3)]"
+                    >
+                      ◯
+                    </span>
+                    <span>{t}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </EduSection>
+        </>
+      ) : (
+        formatNoteSections(note, format).map((sec, i) => (
+          <FormatSectionView key={i} heading={sec.heading} term={sec.term} body={sec.body} />
+        ))
+      )}
 
       {note.modalitySpecific && Object.keys(note.modalitySpecific).length > 0 && (
         <Section heading={`${note.modality} specifics`}>
@@ -104,9 +155,14 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
 
       {note.phaseHints.length > 0 && (
         <footer className="border-t border-[var(--color-line-soft)] pt-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-            Phase hints
-          </p>
+          <InlineExplainer
+            entry={glossary('phaseHints')}
+            label={
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                {glossary('phaseHints').plainTitle}
+              </span>
+            }
+          />
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {note.phaseHints.map((h, i) => (
               <li key={i}>
@@ -130,6 +186,29 @@ function Section({ heading, children }: { heading: string; children: React.React
     <section>
       <h3 className="font-serif text-xl">{heading}</h3>
       <div className="mt-2 text-[15px] leading-relaxed text-[var(--color-ink)]">{children}</div>
+    </section>
+  );
+}
+
+/** A non-SOAP format section: plain title + small clinical term + prose. */
+function FormatSectionView({
+  heading,
+  term,
+  body,
+}: {
+  heading: string;
+  term?: string;
+  body: string;
+}) {
+  return (
+    <section>
+      <h3 className="font-serif text-xl leading-tight text-[var(--color-ink)]">{heading}</h3>
+      {term && (
+        <p className="mt-0.5 text-xs uppercase tracking-wider text-[var(--color-ink-3)]">{term}</p>
+      )}
+      <div className="mt-2.5 whitespace-pre-line text-[15px] leading-relaxed text-[var(--color-ink)]">
+        {body.trim() ? body : <span className="text-[var(--color-ink-3)]">—</span>}
+      </div>
     </section>
   );
 }

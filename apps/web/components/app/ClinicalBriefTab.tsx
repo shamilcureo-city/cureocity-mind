@@ -16,6 +16,8 @@ import { ClinicalTreatmentPlanSchema } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { InlineExplainer } from './EduHeading';
+import { glossary, type GlossaryKey } from '../../lib/clinical-glossary';
 
 interface Props {
   sessionId: string;
@@ -120,9 +122,8 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Clinical brief is being prepared…</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Generating the clinical brief in the background. This usually takes 30-60 seconds after
-          the note completes. If it’s been longer, the background run may have been killed by the
-          serverless cap — re-run it now.
+          Preparing the brief in the background — this usually takes about a minute after the note
+          is ready. If it's taking longer, it may have stopped early; just re-run it.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
           <Button onClick={() => void generate()} disabled={generating}>
@@ -188,11 +189,14 @@ function CompletedBrief({
     <div className="space-y-6">
       <header className="flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h2 className="font-serif text-2xl">Clinical brief</h2>
+          <h2 className="font-serif text-2xl">{glossary('clinicalBrief').plainTitle}</h2>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-ink-2)]">
-            AI decision-support, generated from this session's transcript and the client's prior
-            confirmed history. Review each section and accept, edit, or reject.
+            A second opinion the AI drafts from this session and the client's confirmed history.
+            Read each part and accept, edit, or reject it — you decide what's true.
           </p>
+          <div className="mt-2">
+            <InlineExplainer entry={glossary('clinicalBrief')} />
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <a
@@ -286,9 +290,14 @@ function CrisisBanner({
       role="alert"
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-serif text-xl">
-          {tone === 'critical' ? 'Crisis flags detected' : 'Crisis review'}
-        </h3>
+        <div>
+          <h3 className="font-serif text-xl">
+            {tone === 'critical' ? 'Safety alerts to check' : 'Safety review'}
+          </h3>
+          <div className="mt-1">
+            <InlineExplainer entry={glossary('crisisFlags')} />
+          </div>
+        </div>
         <Badge tone={tone === 'critical' ? 'warn' : 'muted'}>severity: {highest}</Badge>
       </div>
       <ul className="mt-3 space-y-3">
@@ -355,11 +364,7 @@ function DiagnosisSection({
   confirmation: ClinicalSectionConfirmation;
 }) {
   return (
-    <SectionCard
-      title="Diagnosis"
-      subtitle="the working diagnosis — what the AI sees as the best fit right now"
-      confirmation={confirmation}
-    >
+    <SectionCard title="Diagnosis" explain="diagnosis" confirmation={confirmation}>
       {candidates.length === 0 ? (
         <p className="text-sm text-[var(--color-ink-2)]">
           The AI did not propose any diagnosis candidates — evidence too thin.
@@ -437,7 +442,7 @@ function AssessmentGapsSection({
   confirmation: ClinicalSectionConfirmation;
 }) {
   return (
-    <SectionCard title="Assessment gaps" confirmation={confirmation}>
+    <SectionCard title="Assessment gaps" explain="assessmentGaps" confirmation={confirmation}>
       {gaps.length === 0 ? (
         <p className="text-sm text-[var(--color-ink-2)]">
           No open assessment questions — diagnosis can proceed.
@@ -473,6 +478,7 @@ function FormulationSection({
   return (
     <SectionCard
       title="Case formulation"
+      explain="formulation"
       confirmation={confirmation}
       subtitle={language !== 'en' ? `language: ${language}` : undefined}
     >
@@ -501,7 +507,7 @@ function PlanSection({
   const edited = editedPlanFromConfirmation(confirmation);
   const shown = edited ?? plan;
   return (
-    <SectionCard title="Treatment plan" confirmation={confirmation}>
+    <SectionCard title="Treatment plan" explain="treatmentPlan" confirmation={confirmation}>
       {edited && (
         <p className="-mt-2 mb-3 inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-accent)]">
           Showing your edited plan
@@ -893,7 +899,11 @@ function TherapiesSection({
   confirmation: ClinicalSectionConfirmation;
 }) {
   return (
-    <SectionCard title="Recommended therapies" confirmation={confirmation}>
+    <SectionCard
+      title="Recommended therapies"
+      explain="recommendedTherapies"
+      confirmation={confirmation}
+    >
       {therapies.length === 0 ? (
         <p className="text-sm text-[var(--color-ink-2)]">
           No specific therapies recommended for this session.
@@ -927,25 +937,40 @@ function TherapiesSection({
 function SectionCard({
   title,
   subtitle,
+  explain,
   confirmation,
   children,
 }: {
   title: string;
   subtitle?: string;
+  /// Optional plain-language explainer (Sprint 59) — renders a friendly
+  /// "What's this?" under the heading for non-jargon-fluent therapists.
+  explain?: GlossaryKey;
   confirmation: ClinicalSectionConfirmation;
   children: React.ReactNode;
 }) {
+  const entry = explain ? glossary(explain) : null;
   return (
     <Card className="p-6">
       <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 className="font-serif text-xl">{title}</h3>
+          <h3 className="font-serif text-xl">{entry ? entry.plainTitle : title}</h3>
+          {entry?.term && (
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              {entry.term}
+            </p>
+          )}
           {subtitle && (
             <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">{subtitle}</p>
           )}
         </div>
         <ConfirmationBadge confirmation={confirmation} />
       </header>
+      {entry && (
+        <div className="mb-3">
+          <InlineExplainer entry={entry} />
+        </div>
+      )}
       <p className="mb-4 text-xs italic text-[var(--color-ink-3)]">
         AI suggestion. You are the clinician. Verify before acting.
       </p>

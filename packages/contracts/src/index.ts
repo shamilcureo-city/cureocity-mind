@@ -38,3 +38,6 @@ export * from './medication-order';
 export * from './aftervisit';
 export * from './chronic';
 export * from './abdm';
+export * from './letter';
+export * from './problem';
+export * from './note-review';

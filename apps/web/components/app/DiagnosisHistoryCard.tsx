@@ -1,5 +1,7 @@
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
+import { InlineExplainer } from './EduHeading';
+import { glossary } from '../../lib/clinical-glossary';
 
 export interface DiagnosisHistoryRow {
   id: string;
@@ -33,12 +35,13 @@ export function DiagnosisHistoryCard({ diagnoses }: Props) {
   return (
     <Card className="overflow-hidden">
       <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
-        <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-          Diagnosis history
-        </h2>
+        <h2 className="font-serif text-lg">{glossary('diagnosisHistory').plainTitle}</h2>
         <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-          Confirmed from the Clinical Brief and kept cumulatively.
+          The diagnoses you've confirmed for this client, kept over time.
         </p>
+        <div className="mt-2">
+          <InlineExplainer entry={glossary('diagnosisHistory')} />
+        </div>
       </header>
 
       <div className="px-5 py-4">

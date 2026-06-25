@@ -2230,6 +2230,92 @@ model EmdrTarget {
 }
 
 // ============================================================================
+// Letter — Sprint 66. Therapist-authored letters (referral to a
+// psychiatrist/GP, attendance, fitness-to-work/study, general support).
+// Body is composed deterministically from a template + case data, edited
+// by the therapist, then rendered to a credential-stamped PDF. Scalar
+// owner FKs (no relations) keep the migration self-contained.
+// ============================================================================
+
+model Letter {
+  id             String     @id @default(cuid())
+  clientId       String
+  psychologistId String
+  kind           LetterKind
+
+  /// Addressee line, e.g. "Dr. A. Sharma" or "To whom it may concern".
+  recipient String
+  /// Short subject / re-line.
+  subject   String
+  /// The letter body — paragraphs separated by blank lines.
+  body      String @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([psychologistId, createdAt])
+  @@map("letters")
+}
+
+enum LetterKind {
+  REFERRAL
+  ATTENDANCE
+  FITNESS
+  SUPPORT
+}
+
+// ============================================================================
+// ProblemListItem — Sprint 67c. A maintained, editable per-client problem
+// list (seeded from the Case Briefing, then therapist-owned). A stable
+// clinical artefact, distinct from the auto-synthesised briefing. Scalar
+// owner FKs keep the migration self-contained.
+// ============================================================================
+
+model ProblemListItem {
+  id             String        @id @default(cuid())
+  clientId       String
+  psychologistId String
+  title          String
+  detail         String?       @db.Text
+  status         ProblemStatus @default(ACTIVE)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+
+  @@index([clientId, status])
+  @@map("problem_list_items")
+}
+
+enum ProblemStatus {
+  ACTIVE
+  RESOLVED
+}
+
+// ============================================================================
+// NoteReview — Sprint 68. A record that a signed note was reviewed in
+// supervision (reviewer name + optional feedback + date). Captures the
+// supervision/medico-legal artefact without a full multi-account
+// supervisor-relationship system. Scalar owner FKs keep it self-contained.
+// ============================================================================
+
+model NoteReview {
+  id             String   @id @default(cuid())
+  sessionId      String
+  therapyNoteId  String
+  psychologistId String
+  reviewerName   String
+  reviewerNote   String?  @db.Text
+  reviewedAt     DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([psychologistId, createdAt])
+  @@map("note_reviews")
+}
+
+// ============================================================================
 // AuditLog — append-only. Polymorphic target via (targetType, targetId).
 // Every state-changing endpoint writes one row. Read access surface added in
 // Sprint 9 with admin role (gap G9).
@@ -2459,6 +2545,18 @@ enum AuditAction {
   ENCOUNTER_FHIR_EXPORTED
   ABHA_LINKED
   ABDM_PRESCRIPTION_PUSHED
+  // Case file export — Sprint 65.
+  CASE_FILE_EXPORTED
+  // Discharge / treatment summary export — Sprint 65b.
+  DISCHARGE_SUMMARY_EXPORTED
+  // Letters — Sprint 66. A therapist-authored letter (referral / support).
+  LETTER_GENERATED
+  // Problem list — Sprint 67c. Per-client maintained problem list.
+  PROBLEM_LIST_ITEM_ADDED
+  PROBLEM_LIST_ITEM_UPDATED
+  PROBLEM_LIST_ITEM_REMOVED
+  // Supervision review — Sprint 68.
+  NOTE_REVIEW_RECORDED
 }
 
 enum AuditActorType {

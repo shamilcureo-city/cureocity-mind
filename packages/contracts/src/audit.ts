@@ -190,6 +190,20 @@ export const AuditActionSchema = z.enum([
   'ENCOUNTER_FHIR_EXPORTED',
   'ABHA_LINKED',
   'ABDM_PRESCRIPTION_PUSHED',
+  // Case file export — Sprint 65. The therapist downloads the whole
+  // client chart (diagnoses + plans + measures + sessions) as one PDF.
+  'CASE_FILE_EXPORTED',
+  // Discharge / treatment summary export — Sprint 65b. A clinician-facing
+  // end-of-episode summary (distinct from the patient Progress Report).
+  'DISCHARGE_SUMMARY_EXPORTED',
+  // Letters — Sprint 66. A therapist-authored letter (referral / support).
+  'LETTER_GENERATED',
+  // Problem list — Sprint 67c. Per-client maintained problem list.
+  'PROBLEM_LIST_ITEM_ADDED',
+  'PROBLEM_LIST_ITEM_UPDATED',
+  'PROBLEM_LIST_ITEM_REMOVED',
+  // Supervision review — Sprint 68. A signed note was reviewed in supervision.
+  'NOTE_REVIEW_RECORDED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

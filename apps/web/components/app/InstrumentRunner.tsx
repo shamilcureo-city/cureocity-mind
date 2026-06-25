@@ -5,6 +5,8 @@ import type { InstrumentResponse } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { HelpNote, InlineExplainer } from './EduHeading';
+import { glossary } from '../../lib/clinical-glossary';
 
 interface CatalogItem {
   id: string;
@@ -242,11 +244,14 @@ export function InstrumentRunner({ clientId }: Props) {
       )}
       <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h2 className="font-serif text-2xl">Scored instruments</h2>
+          <h2 className="font-serif text-2xl">{glossary('instruments').plainTitle}</h2>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            Validated screeners (PHQ-9, GAD-7). Administered + scored on this page; the result feeds
-            the pre-session brief.
+            Short, well-tested checklists (PHQ-9 for low mood, GAD-7 for anxiety). Fill one in here;
+            the score is saved so you can track change over time.
           </p>
+          <div className="mt-2">
+            <InlineExplainer entry={glossary('instruments')} />
+          </div>
         </div>
       </header>
 
@@ -259,7 +264,12 @@ export function InstrumentRunner({ clientId }: Props) {
       </div>
 
       {history.length === 0 ? (
-        <p className="mt-5 text-sm text-[var(--color-ink-3)]">No instruments administered yet.</p>
+        <div className="mt-5">
+          <HelpNote title="No scores yet — capture a starting point">
+            Pick a questionnaire above and fill it in with the client. The first score becomes your
+            baseline, so every later one shows how things are changing.
+          </HelpNote>
+        </div>
       ) : (
         <>
           <h3 className="mt-6 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">

@@ -2,6 +2,7 @@
 
 import type { IntakeNoteV1 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { EduSection } from './EduHeading';
 
 interface Props {
   note: IntakeNoteV1;
@@ -44,55 +45,43 @@ export function IntakeNotePreview({ note, signedAt, signedBy }: Props) {
         )}
       </header>
 
-      <Section heading="Presenting concerns">
+      <EduSection term="intake.presentingConcerns">
         <p className="whitespace-pre-line">{note.presentingConcerns}</p>
-      </Section>
+      </EduSection>
 
-      <Section heading="History of present illness">
+      <EduSection term="intake.hpi">
         <p className="whitespace-pre-line">{note.historyOfPresentingIllness}</p>
-      </Section>
+      </EduSection>
 
       {note.pastPsychiatricHistory.trim() && (
-        <Section heading="Past psychiatric history">
+        <EduSection term="intake.pastPsychiatricHistory">
           <p className="whitespace-pre-line">{note.pastPsychiatricHistory}</p>
-        </Section>
+        </EduSection>
       )}
 
       {note.familyHistory.trim() && (
-        <Section heading="Family history">
+        <EduSection term="intake.familyHistory">
           <p className="whitespace-pre-line">{note.familyHistory}</p>
-        </Section>
+        </EduSection>
       )}
 
       {note.socialHistory.trim() && (
-        <Section heading="Social history">
+        <EduSection term="intake.socialHistory">
           <p className="whitespace-pre-line">{note.socialHistory}</p>
-        </Section>
+        </EduSection>
       )}
 
-      <Section heading="Mental status exam">
+      <EduSection term="intake.mentalStatusExam">
         <p className="whitespace-pre-line">{note.mentalStatusExam}</p>
-      </Section>
+      </EduSection>
 
-      <Section heading="Working hypothesis">
+      <EduSection term="intake.workingHypothesis">
         <p className="whitespace-pre-line">{note.workingHypothesis}</p>
-        <p className="mt-2 text-xs italic text-[var(--color-ink-3)]">
-          The Pass 3 initial-assessment brief expands this into a differential with citations.
-        </p>
-      </Section>
+      </EduSection>
 
-      <Section heading="Immediate plan">
+      <EduSection term="intake.immediatePlan">
         <p className="whitespace-pre-line">{note.immediatePlan}</p>
-      </Section>
+      </EduSection>
     </article>
-  );
-}
-
-function Section({ heading, children }: { heading: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h3 className="font-serif text-xl">{heading}</h3>
-      <div className="mt-2 text-[15px] leading-relaxed text-[var(--color-ink)]">{children}</div>
-    </section>
   );
 }

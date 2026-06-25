@@ -12,7 +12,16 @@ import {
 interface NavItem {
   href: string;
   label: string;
-  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'templates' | 'assistant' | 'learn' | 'me';
+  icon:
+    | 'dashboard'
+    | 'today'
+    | 'record'
+    | 'clients'
+    | 'templates'
+    | 'assistant'
+    | 'learn'
+    | 'me'
+    | 'search';
 }
 
 const PRIMARY: NavItem[] = [
@@ -25,6 +34,7 @@ const PRIMARY: NavItem[] = [
   { href: '/app/today', label: 'Today', icon: 'today' },
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
+  { href: '/app/search', label: 'Search', icon: 'search' },
   { href: '/app/templates', label: 'Templates', icon: 'templates' },
   { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
   { href: '/app/me', label: 'My practice', icon: 'me' },
@@ -160,7 +170,7 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
 function FooterLinks() {
   const items: { href: string; label: string; icon: 'cog' | 'help' }[] = [
     { href: '/app/settings', label: 'Settings', icon: 'cog' },
-    { href: '/app/learn', label: 'Get Help', icon: 'help' },
+    { href: '/app/learn#help', label: 'Get Help', icon: 'help' },
   ];
   return (
     <ul className="mt-4 space-y-1">
@@ -210,6 +220,7 @@ export function Glyph({
     | 'assistant'
     | 'learn'
     | 'me'
+    | 'search'
     | 'gift'
     | 'cog'
     | 'help'
@@ -227,6 +238,7 @@ export function Glyph({
       'M12 3v3M12 18v3M5 12H2M22 12h-3M5.6 5.6 3.5 3.5M18.4 5.6 20.5 3.5M5.6 18.4 3.5 20.5M18.4 18.4 20.5 20.5',
     learn: 'M4 5h12a3 3 0 0 1 3 3v11a2 2 0 0 0-2-2H4V5zM4 17h12',
     me: 'M3 12h3l3-8 4 16 3-8h5',
+    search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
     gift: 'M3 9h18v4H3zM12 9v13M5 13v8h14v-8M8 9c0-2 1-4 4-4s4 2 4 4',
     cog: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
     help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',

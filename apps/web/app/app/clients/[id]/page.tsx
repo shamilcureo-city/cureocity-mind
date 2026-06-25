@@ -7,6 +7,8 @@ import { ClientEditPanel } from '@/components/app/ClientEditPanel';
 import { DemoClientButton } from '@/components/app/DemoClientButton';
 import { SendCheckinButton } from '@/components/app/SendCheckinButton';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
+import { LetterComposer } from '@/components/app/LetterComposer';
+import { ProblemList } from '@/components/app/ProblemList';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
@@ -68,6 +70,38 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
 
   const age = client.dateOfBirth ? calcAge(client.dateOfBirth) : null;
+
+  // Sprint 65b — only offer the discharge/treatment summary once the
+  // client has at least one episode of care.
+  const latestEpisode = await prisma.treatmentEpisode.findFirst({
+    where: { clientId: client.id },
+    orderBy: { openedAt: 'desc' },
+    select: { status: true },
+  });
+  const episodeClosed =
+    latestEpisode?.status === 'DISCHARGED' || latestEpisode?.status === 'TRANSFERRED';
+
+  // Sprint 67c — the maintained problem list.
+  const problems = await prisma.problemListItem.findMany({
+    where: { clientId: client.id },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      title: true,
+      detail: true,
+      status: true,
+      createdAt: true,
+      resolvedAt: true,
+    },
+  });
+  const initialProblems = problems.map((p) => ({
+    id: p.id,
+    title: p.title,
+    detail: p.detail,
+    status: p.status,
+    createdAt: p.createdAt.toISOString(),
+    resolvedAt: p.resolvedAt?.toISOString() ?? null,
+  }));
 
   return (
     <Container className="py-10">
@@ -154,6 +188,19 @@ export default async function ClientDetailPage({ params }: PageProps) {
       </div>
 
       <div className="mt-6">
+        <Card className="p-5">
+          <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+            Problem list
+          </h3>
+          <p className="mb-3 mt-1 text-sm text-[var(--color-ink-2)]">
+            The main difficulties you&apos;re working on — your own running list, kept across
+            sessions.
+          </p>
+          <ProblemList clientId={client.id} initialItems={initialProblems} />
+        </Card>
+      </div>
+
+      <div className="mt-6">
         <Card className="overflow-hidden">
           <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
             <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Sessions</h3>
@@ -186,6 +233,37 @@ export default async function ClientDetailPage({ params }: PageProps) {
               ))}
             </ul>
           )}
+        </Card>
+      </div>
+
+      <div className="mt-6">
+        <Card className="p-5">
+          <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+            Case documents
+          </h3>
+          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+            The whole chart — diagnoses, plan, scores and session history — as one PDF, for a
+            referral, supervision, or the client&apos;s own records.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              href={`/api/v1/clients/${client.id}/case-file/pdf`}
+              className="inline-block rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+            >
+              Download case file (PDF)
+            </a>
+            {latestEpisode && (
+              <a
+                href={`/api/v1/clients/${client.id}/discharge-summary/pdf`}
+                className="inline-block rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+              >
+                {episodeClosed
+                  ? 'Download discharge summary (PDF)'
+                  : 'Download treatment summary (PDF)'}
+              </a>
+            )}
+            <LetterComposer clientId={client.id} />
+          </div>
         </Card>
       </div>
 
