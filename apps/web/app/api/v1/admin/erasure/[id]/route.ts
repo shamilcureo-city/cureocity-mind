@@ -95,6 +95,25 @@ export async function PATCH(
           presentingConcerns: null,
         },
       });
+
+      // DPDP erasure must also clear PII the client's name/detail lives in
+      // outside the Client row. These tables use scalar clientId/sessionId
+      // FKs with no cascade, so they survive a Client soft-delete on their
+      // own: Letter.body bakes in the client's full name (letter-templates),
+      // problem_list_items hold free-text clinical detail, and note_reviews
+      // carry a reviewer's free-text note. Delete them in the same tx.
+      await tx.letter.deleteMany({ where: { clientId: existing.client.id } });
+      await tx.problemListItem.deleteMany({ where: { clientId: existing.client.id } });
+      const clientSessions = await tx.session.findMany({
+        where: { clientId: existing.client.id },
+        select: { id: true },
+      });
+      if (clientSessions.length > 0) {
+        await tx.noteReview.deleteMany({
+          where: { sessionId: { in: clientSessions.map((s) => s.id) } },
+        });
+      }
+
       await writeAudit(
         {
           actorType: 'PSYCHOLOGIST',

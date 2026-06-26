@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { LetterPdf } from '@/components/pdf/LetterPdf';
 import { requirePsychologistId } from '@/lib/auth-server';
+import { safeFileSlug } from '@/lib/doc-format';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -55,11 +56,7 @@ export async function GET(
   );
 
   const dateStr = letter.createdAt.toISOString().slice(0, 10);
-  const safeSubject = letter.subject
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
+  const safeSubject = safeFileSlug(letter.subject, 40);
   const filename = `letter-${safeSubject}-${dateStr}.pdf`;
 
   return new Response(new Uint8Array(buffer), {

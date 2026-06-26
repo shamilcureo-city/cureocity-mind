@@ -1,4 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatPdfDate, formatPdfDateTime } from '@/lib/doc-format';
 
 /**
  * Sprint 65b — the clinician-facing discharge / treatment summary.
@@ -27,7 +28,13 @@ export interface DischargeOutcome {
   lastAt: string;
   /** lastScore - firstScore (negative = improvement on PHQ-9/GAD-7). */
   change: number;
-  direction: 'improved' | 'worse' | 'no-change';
+  /**
+   * 'improved'/'worse' are only emitted for instruments KNOWN to be
+   * lower-is-better (symptom scales). 'changed' is the polarity-neutral
+   * fallback for any instrument whose direction-of-good isn't known, so the
+   * summary never claims an improvement/worsening it can't justify.
+   */
+  direction: 'improved' | 'worse' | 'no-change' | 'changed';
 }
 
 export interface DischargeSummaryPdfProps {
@@ -107,11 +114,7 @@ const styles = StyleSheet.create({
 });
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return formatPdfDate(iso);
 }
 
 const GOAL_LABEL: Record<DischargeGoal['status'], string> = {
@@ -124,6 +127,7 @@ const DIRECTION_LABEL: Record<DischargeOutcome['direction'], string> = {
   improved: 'improved',
   worse: 'worsened',
   'no-change': 'no change',
+  changed: 'changed',
 };
 
 export function DischargeSummaryPdf(props: DischargeSummaryPdfProps) {
@@ -247,7 +251,7 @@ export function DischargeSummaryPdf(props: DischargeSummaryPdfProps) {
         <View style={styles.signatureBlock}>
           <Text>
             Prepared by {props.preparedBy} (RCI {props.rciNumber}) on{' '}
-            {new Date(props.generatedAt).toLocaleString('en-GB')}
+            {formatPdfDateTime(props.generatedAt)}
           </Text>
           <Text style={{ marginTop: 2 }}>
             Cureocity Mind · clinical documentation. Confidential — handle under DPDP.

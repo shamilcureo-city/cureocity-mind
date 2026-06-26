@@ -1,4 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatPdfDate } from '@/lib/doc-format';
 
 /**
  * Sprint 66 — a formal therapist letter (referral / supporting).
@@ -59,11 +60,7 @@ export function LetterPdf(props: LetterPdfProps) {
     .split(/\n\s*\n/)
     .map((p) => p.trim())
     .filter(Boolean);
-  const dateStr = new Date(props.generatedAt).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  });
+  const dateStr = formatPdfDate(props.generatedAt, { month: 'long' });
   return (
     <Document
       title={`Letter — ${props.subject}`}

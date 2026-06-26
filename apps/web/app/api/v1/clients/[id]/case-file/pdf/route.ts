@@ -4,6 +4,7 @@ import { CaseFilePdf, type CaseFilePdfProps } from '@/components/pdf/CaseFilePdf
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { resolveClientPii } from '@/lib/client-pii';
+import { ageFromDob, safeFileSlug } from '@/lib/doc-format';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -160,10 +161,7 @@ export async function GET(
   });
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  const safeName = pii.fullName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  const safeName = safeFileSlug(pii.fullName);
   const filename = `case-file-${safeName}-${dateStr}.pdf`;
 
   return new Response(new Uint8Array(buffer), {
@@ -175,15 +173,6 @@ export async function GET(
       'Cache-Control': 'private, no-store',
     },
   });
-}
-
-function ageFromDob(dob: Date | null): number | null {
-  if (!dob) return null;
-  const now = new Date();
-  let age = now.getFullYear() - dob.getFullYear();
-  const m = now.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
-  return age >= 0 && age < 150 ? age : null;
 }
 
 /** Defensive shaping of the stored TreatmentPlan.body JSON. */
