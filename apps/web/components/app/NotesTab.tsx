@@ -17,6 +17,7 @@ import { IntakeNotePreview } from './IntakeNotePreview';
 import { IntakeModifyPanel } from './IntakeModifyPanel';
 import { NotePreview } from './NotePreview';
 import { NoteToolbar } from './NoteToolbar';
+import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
@@ -58,6 +59,9 @@ interface Props {
   /// Sprint 70 — shown in the note toolbar (client chip + language flag).
   clientName: string;
   noteLanguage: string;
+  /// Sprint 70 — the session's chosen note template (drives the picker +
+  /// which structure Pass 2 writes the note into). Null = built-in SOAP.
+  noteTemplateId: string | null;
 }
 
 type Phase =
@@ -95,6 +99,7 @@ export function NotesTab({
   llmBackend,
   clientName,
   noteLanguage,
+  noteTemplateId,
 }: Props) {
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
   // notes use IntakeNoteV1, which doesn't yet have a sign DTO or edit
@@ -559,6 +564,14 @@ export function NotesTab({
             noteText={therapyNoteToText(note)}
             signed={false}
           />
+          <div className="mb-5">
+            <TemplatePicker
+              sessionId={sessionId}
+              currentTemplateId={noteTemplateId}
+              disabled={generating}
+              onApply={triggerGeneration}
+            />
+          </div>
           <RiskBanner riskFlags={note.riskFlags} />
           <NotePreview note={note} />
           <NoteFooter
