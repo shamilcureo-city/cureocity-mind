@@ -67,6 +67,10 @@ model Psychologist {
   status        PsychologistStatus @default(PENDING_VERIFICATION)
   role          PsychologistRole   @default(THERAPIST)
 
+  /// First-run welcome dismissed — durable, per-therapist replacement for
+  /// the per-device localStorage flag. Set via POST /psychologists/me/welcome.
+  hasSeenWelcome Boolean @default(false)
+
   /// Sprint DV1 — product vertical (THERAPIST | DOCTOR). Drives landing,
   /// nav, prompt + contract selection. See docs/DOCTOR_VERTICAL.md.
   vertical         PractitionerVertical @default(THERAPIST)
@@ -2284,6 +2288,9 @@ model ProblemListItem {
   resolvedAt DateTime?
 
   @@index([clientId, status])
+  // The client page lists problems ordered by createdAt desc; without this
+  // the (clientId, status) index can't serve the sort.
+  @@index([clientId, createdAt])
   @@map("problem_list_items")
 }
 
@@ -2557,6 +2564,8 @@ enum AuditAction {
   PROBLEM_LIST_ITEM_REMOVED
   // Supervision review — Sprint 68.
   NOTE_REVIEW_RECORDED
+  // First-run welcome dismissed (durable per-therapist flag).
+  WELCOME_DISMISSED
 }
 
 enum AuditActorType {
