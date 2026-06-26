@@ -11,8 +11,9 @@ import type {
 } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { Badge } from '../ui/Badge';
 import { CheckboxRow, FieldError, Label, Select } from '../ui/Field';
+import { InlineExplainer } from './EduHeading';
+import { glossary } from '../../lib/clinical-glossary';
 import { type RecordReady, SCRIPT_VERSION } from './record-types';
 import { UpgradeModal } from './UpgradeModal';
 import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
@@ -54,15 +55,17 @@ const KIND_SUBLINE: Record<SessionKind, (defaults: SessionDefaults) => string> =
   REVIEW: () => 'Re-evaluation due — review the plan with them today.',
 };
 
+// Plain-language names alongside the acronym, so a therapist who doesn't
+// recognise an abbreviation still understands the option.
 const MODALITY_OPTIONS: { value: SessionModality; label: string }[] = [
-  { value: 'CBT', label: 'CBT' },
-  { value: 'EMDR', label: 'EMDR' },
-  { value: 'ACT', label: 'ACT' },
-  { value: 'IFS', label: 'IFS' },
-  { value: 'PSYCHODYNAMIC', label: 'Psychodynamic' },
-  { value: 'MI', label: 'MI' },
-  { value: 'MBCT', label: 'MBCT' },
-  { value: 'SUPPORTIVE', label: 'Supportive' },
+  { value: 'CBT', label: 'CBT — Cognitive Behavioural Therapy' },
+  { value: 'EMDR', label: 'EMDR — Eye Movement Desensitisation & Reprocessing' },
+  { value: 'ACT', label: 'ACT — Acceptance & Commitment Therapy' },
+  { value: 'IFS', label: 'IFS — Internal Family Systems' },
+  { value: 'PSYCHODYNAMIC', label: 'Psychodynamic therapy' },
+  { value: 'MI', label: 'MI — Motivational Interviewing' },
+  { value: 'MBCT', label: 'MBCT — Mindfulness-Based Cognitive Therapy' },
+  { value: 'SUPPORTIVE', label: 'Supportive counselling' },
   { value: 'OTHER', label: 'Other' },
 ];
 
@@ -141,8 +144,6 @@ export function RecordConfirmStrip({
     variant: 'TRIAL_CAP' | 'PLAN_CAP';
     entitlement: BillingEntitlement;
   } | null>(null);
-  const [crossBorder, setCrossBorder] = useState(false);
-  const [extendedRetention, setExtendedRetention] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -169,11 +170,6 @@ export function RecordConfirmStrip({
         setDefaults(payload.defaults);
         setModality(payload.defaults.modality);
         setLanguage(payload.defaults.language);
-        // Pre-tick cross-border if the client has previously granted it
-        // at signup — matches the on-file treatment we already give to
-        // audio recording + AI note generation.
-        setCrossBorder(payload.defaults.consentsAlreadyGranted.includes('CROSS_BORDER_PROCESSING'));
-        setExtendedRetention(false);
         const missing: Record<string, boolean> = {};
         for (const scope of payload.defaults.consentsNeeded) {
           if (scope === 'AUDIO_RECORDING' || scope === 'AI_NOTE_GENERATION') {
@@ -233,15 +229,17 @@ export function RecordConfirmStrip({
         modality: SessionModality | null;
       };
 
-      // Per-session consent: re-ack everything granted at signup plus
-      // anything the therapist ticked.
+      // Per-session consent: re-ack everything already granted (at signup or
+      // on the client's record) plus anything the therapist ticked here. The
+      // data-residency / retention consents are NOT a per-session decision —
+      // they're the client's standing consent (captured with a proper
+      // explanation when the client is added), so we simply honour whatever
+      // is on file rather than re-prompting a therapist who can't be expected
+      // to weigh data-residency per session.
       const acked = new Set<ConsentScope>(defaults.consentsAlreadyGranted);
       for (const [scope, ticked] of Object.entries(missingRequired)) {
         if (ticked) acked.add(scope as ConsentScope);
       }
-      if (crossBorder) acked.add('CROSS_BORDER_PROCESSING');
-      else acked.delete('CROSS_BORDER_PROCESSING');
-      if (extendedRetention) acked.add('DATA_RETENTION_EXTENDED');
 
       const consentRes = await fetch(`/api/v1/sessions/${sessionRow.id}/consent`, {
         method: 'POST',
@@ -355,30 +353,11 @@ export function RecordConfirmStrip({
             </div>
           )}
 
-          <p className="mt-5 text-xs text-[var(--color-ink-3)]">
-            Audio recording and AI note are{' '}
+          <p className="mt-5 text-xs leading-relaxed text-[var(--color-ink-3)]">
             {defaults.consentsAlreadyGranted.length > 0
-              ? 'on file from signup'
-              : 'pending — see above'}
-            .
+              ? 'Recording and AI notes were agreed at signup. Everything stays private and in India, and the recording is deleted after 30 days.'
+              : 'Recording and AI-note consent is pending — please tick the boxes above before you start.'}
           </p>
-
-          <div className="mt-2 space-y-2">
-            <CheckboxRow
-              id="rcs-cross-border"
-              checked={crossBorder}
-              onChange={setCrossBorder}
-              label="Today's note can be processed outside India"
-              description="We use a global model when our India region is constrained."
-            />
-            <CheckboxRow
-              id="rcs-extended-retention"
-              checked={extendedRetention}
-              onChange={setExtendedRetention}
-              label="Keep raw audio past 30 days"
-              description="By default we delete the recording after 30 days."
-            />
-          </div>
 
           <FieldError message={submitError} />
 
@@ -405,7 +384,10 @@ export function RecordConfirmStrip({
             <div className="mt-5 grid gap-4 border-t border-[var(--color-line-soft)] pt-5 sm:grid-cols-2">
               {!isIntake && (
                 <div>
-                  <Label htmlFor="rcs-modality">Modality</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="rcs-modality">Therapy style</Label>
+                    <InlineExplainer entry={glossary('modality')} label="What's this?" />
+                  </div>
                   <Select
                     id="rcs-modality"
                     value={modality ?? ''}
@@ -439,12 +421,6 @@ export function RecordConfirmStrip({
                 </Select>
                 <p className="mt-1 text-xs text-[var(--color-ink-3)]">Their preferred language.</p>
               </div>
-            </div>
-          )}
-
-          {Object.keys(missingRequired).length === 0 && (
-            <div className="mt-5">
-              <Badge tone="muted">Script {SCRIPT_VERSION}</Badge>
             </div>
           )}
         </>
