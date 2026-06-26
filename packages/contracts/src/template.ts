@@ -48,3 +48,12 @@ export const UpdateNoteTemplateInputSchema = z
   })
   .refine((d) => Object.keys(d).length > 0, { message: 'at least one field must be provided' });
 export type UpdateNoteTemplateInput = z.infer<typeof UpdateNoteTemplateInputSchema>;
+
+/**
+ * Sprint 70 — apply a template to a session (then the note is re-generated
+ * into it). `null` = the built-in SOAP structure (clears the template).
+ */
+export const ApplyNoteTemplateInputSchema = z.object({
+  templateId: z.string().min(1).nullable(),
+});
+export type ApplyNoteTemplateInput = z.infer<typeof ApplyNoteTemplateInputSchema>;

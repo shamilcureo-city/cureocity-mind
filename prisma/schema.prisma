@@ -2572,6 +2572,8 @@ enum AuditAction {
   NOTE_REVIEW_RECORDED
   // First-run welcome dismissed (durable per-therapist flag).
   WELCOME_DISMISSED
+  // A note template was applied to a session (note re-generated to it).
+  NOTE_TEMPLATE_APPLIED
 }
 
 enum AuditActorType {

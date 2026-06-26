@@ -143,6 +143,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientHasContactEmail={!!pii.contactEmail}
             clientName={pii.fullName}
             noteLanguage={session.language}
+            noteTemplateId={session.noteTemplateId}
           />
         )}
         {tab === 'copilot' && (
@@ -175,6 +176,7 @@ async function NotesTabPanel({
   clientHasContactEmail,
   clientName,
   noteLanguage,
+  noteTemplateId,
 }: {
   sessionId: string;
   sessionStatus: SessionStatus;
@@ -184,6 +186,7 @@ async function NotesTabPanel({
   clientHasContactEmail: boolean;
   clientName: string;
   noteLanguage: string;
+  noteTemplateId: string | null;
 }) {
   const [draftRow, signedRow] = await Promise.all([
     prisma.noteDraft.findUnique({ where: { sessionId } }),
@@ -229,6 +232,7 @@ async function NotesTabPanel({
       llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
       clientName={clientName}
       noteLanguage={noteLanguage}
+      noteTemplateId={noteTemplateId}
     />
   );
 }

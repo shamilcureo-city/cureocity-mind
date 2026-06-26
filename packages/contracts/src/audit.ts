@@ -206,6 +206,9 @@ export const AuditActionSchema = z.enum([
   'NOTE_REVIEW_RECORDED',
   // First-run welcome dismissed — durable per-therapist flag.
   'WELCOME_DISMISSED',
+  // Sprint 70 — a note template was applied to a session (the note is
+  // re-generated into that template's structure).
+  'NOTE_TEMPLATE_APPLIED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
