@@ -160,10 +160,21 @@ export class Pass2BackendError extends Error {
 }
 
 function buildUserMessage(input: Pass2Input): string {
+  // Sprint 70 — when a note template is chosen, list its sections so the
+  // model also fills `templateSections` (in addition to the SOAP fields).
+  const templateBlock =
+    input.template && input.kind !== 'INTAKE'
+      ? [
+          '',
+          `Note template "${input.template.name}" — also produce templateSections for exactly these titles, in order:`,
+          ...input.template.sections.map((s) => `- ${s.title}${s.hint ? ` (${s.hint})` : ''}`),
+        ]
+      : [];
   return [
     `Session kind: ${input.kind}`,
     `Modality: ${input.modality ?? '(not yet chosen — intake / investigative)'}`,
     `Presenting concerns: ${input.clientContext.presentingConcerns ?? '(none recorded)'}`,
+    ...templateBlock,
     '',
     'Transcript (with speaker tags):',
     input.speakerSegments

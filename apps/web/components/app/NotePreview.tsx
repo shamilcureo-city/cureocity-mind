@@ -44,6 +44,9 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
   // (the readable layout) when present; otherwise fall back to the SOAP view.
   const hasSummary = Boolean(note.summary && note.summary.trim());
   const hasNamedTopics = Boolean(note.topics && note.topics.length > 0);
+  // Sprint 70 — when the session used a note template, Pass 2 produced the
+  // note in that template's sections; show them as the primary view.
+  const hasTemplateSections = Boolean(note.templateSections && note.templateSections.length > 0);
 
   const [format, setFormat] = useState<NoteFormat>('SOAP');
   const [verbosity, setVerbosity] = useState<NoteVerbosity>('DETAILED');
@@ -94,160 +97,188 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
         )}
       </header>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Format</span>
-        {NOTE_FORMATS.map((f) => (
-          <button
-            key={f}
-            type="button"
-            onClick={() => pick(f)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${
-              format === f
-                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink-3)]'
-            }`}
-          >
-            {NOTE_FORMAT_LABEL[f]}
-          </button>
-        ))}
-        <InlineExplainer entry={NOTE_FORMAT_HELP} label="Which should I pick?" />
-      </div>
-
-      {format === 'SOAP' && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Detail</span>
-          {NOTE_VERBOSITIES.map((v) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => pickVerbosity(v)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                verbosity === v
-                  ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                  : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink-3)]'
-              }`}
-            >
-              {NOTE_VERBOSITY_LABEL[v]}
-            </button>
+      {hasTemplateSections ? (
+        <div className="space-y-6">
+          {note.templateSections!.map((s, i) => (
+            <section key={i}>
+              <h3 className="font-serif text-xl leading-tight text-[var(--color-ink)]">
+                {s.title}
+              </h3>
+              <p className="mt-2 whitespace-pre-line text-[15px] leading-relaxed text-[var(--color-ink)]">
+                {s.body.trim() ? s.body : '—'}
+              </p>
+            </section>
           ))}
-          <InlineExplainer entry={NOTE_VERBOSITY_HELP} label="How much detail?" />
         </div>
-      )}
-
-      {format === 'SOAP' ? (
+      ) : (
         <>
-          {/* Sprint 70 — readable layout: a plain "Summary" + named "Session
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Format
+            </span>
+            {NOTE_FORMATS.map((f) => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => pick(f)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                  format === f
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                    : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink-3)]'
+                }`}
+              >
+                {NOTE_FORMAT_LABEL[f]}
+              </button>
+            ))}
+            <InlineExplainer entry={NOTE_FORMAT_HELP} label="Which should I pick?" />
+          </div>
+
+          {format === 'SOAP' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Detail
+              </span>
+              {NOTE_VERBOSITIES.map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => pickVerbosity(v)}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                    verbosity === v
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                      : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink-3)]'
+                  }`}
+                >
+                  {NOTE_VERBOSITY_LABEL[v]}
+                </button>
+              ))}
+              <InlineExplainer entry={NOTE_VERBOSITY_HELP} label="How much detail?" />
+            </div>
+          )}
+
+          {format === 'SOAP' ? (
+            <>
+              {/* Sprint 70 — readable layout: a plain "Summary" + named "Session
               topics" when the note carries them (the reference template);
               older notes without these fields fall back to the SOAP sections,
               and the SOAP fields stay authoritative underneath. */}
-          <EduSection term={hasSummary ? 'note.summary' : 'soap.summary'}>
-            {hasSummary ? (
-              <p className="whitespace-pre-line text-[15px] leading-relaxed">{note.summary}</p>
-            ) : (
-              <>
-                <p className="whitespace-pre-line">{note.subjective}</p>
-                {note.objective.trim() && (
-                  <p className="mt-3 whitespace-pre-line text-[var(--color-ink-2)]">
-                    {note.objective}
-                  </p>
+              <EduSection term={hasSummary ? 'note.summary' : 'soap.summary'}>
+                {hasSummary ? (
+                  <p className="whitespace-pre-line text-[15px] leading-relaxed">{note.summary}</p>
+                ) : (
+                  <>
+                    <p className="whitespace-pre-line">{note.subjective}</p>
+                    {note.objective.trim() && (
+                      <p className="mt-3 whitespace-pre-line text-[var(--color-ink-2)]">
+                        {note.objective}
+                      </p>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </EduSection>
+              </EduSection>
 
-          {verbosity !== 'BRIEF' && (
-            <EduSection term={hasNamedTopics ? 'note.sessionTopics' : 'soap.topics'}>
-              {hasNamedTopics ? (
-                <div className="space-y-5">
-                  {note.topics!.map((t, i) => (
-                    <section key={i}>
-                      <h4 className="font-serif text-base text-[var(--color-ink)]">{t.title}</h4>
-                      {t.points.length > 0 && (
-                        <ul className="mt-2 space-y-1.5">
-                          {t.points.map((p, j) => (
-                            <li key={j} className="flex items-start gap-2 text-[var(--color-ink)]">
-                              <span
-                                aria-hidden
-                                className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-                              />
-                              <span>{p}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </section>
-                  ))}
-                </div>
-              ) : topics.length === 0 ? (
-                <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
-              ) : (
-                <ul className="space-y-2">
-                  {topics.map((t, i) => (
-                    <li key={i} className="flex items-start gap-2">
-                      <span
-                        aria-hidden
-                        className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-                      />
-                      <span>{t}</span>
-                    </li>
-                  ))}
-                </ul>
+              {verbosity !== 'BRIEF' && (
+                <EduSection term={hasNamedTopics ? 'note.sessionTopics' : 'soap.topics'}>
+                  {hasNamedTopics ? (
+                    <div className="space-y-5">
+                      {note.topics!.map((t, i) => (
+                        <section key={i}>
+                          <h4 className="font-serif text-base text-[var(--color-ink)]">
+                            {t.title}
+                          </h4>
+                          {t.points.length > 0 && (
+                            <ul className="mt-2 space-y-1.5">
+                              {t.points.map((p, j) => (
+                                <li
+                                  key={j}
+                                  className="flex items-start gap-2 text-[var(--color-ink)]"
+                                >
+                                  <span
+                                    aria-hidden
+                                    className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                                  />
+                                  <span>{p}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </section>
+                      ))}
+                    </div>
+                  ) : topics.length === 0 ? (
+                    <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {topics.map((t, i) => (
+                        <li key={i} className="flex items-start gap-2">
+                          <span
+                            aria-hidden
+                            className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                          />
+                          <span>{t}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </EduSection>
               )}
-            </EduSection>
-          )}
 
-          <EduSection term="soap.plan">
-            {planItems.length === 0 ? (
-              <p className="text-[var(--color-ink-2)]">{note.plan}</p>
-            ) : (
-              <ul className="space-y-2">
-                {planItems.map((t, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span
-                      aria-hidden
-                      className="mt-1.5 grid h-4 w-4 shrink-0 place-items-center rounded border border-[var(--color-line)] bg-white text-[10px] text-[var(--color-ink-3)]"
-                    >
-                      ◯
-                    </span>
-                    <span>{t}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </EduSection>
+              <EduSection term="soap.plan">
+                {planItems.length === 0 ? (
+                  <p className="text-[var(--color-ink-2)]">{note.plan}</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {planItems.map((t, i) => (
+                      <li key={i} className="flex items-start gap-2">
+                        <span
+                          aria-hidden
+                          className="mt-1.5 grid h-4 w-4 shrink-0 place-items-center rounded border border-[var(--color-line)] bg-white text-[10px] text-[var(--color-ink-3)]"
+                        >
+                          ◯
+                        </span>
+                        <span>{t}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </EduSection>
 
-          {/* Very detailed adds the underlying clinical prose. Only when the
+              {/* Very detailed adds the underlying clinical prose. Only when the
               readable layout is active (else the SOAP view already shows it,
               so this would duplicate). */}
-          {verbosity === 'VERY_DETAILED' && (hasSummary || hasNamedTopics) && (
-            <Section heading="Full clinical detail">
-              <div className="space-y-3 text-sm text-[var(--color-ink-2)]">
-                <p className="whitespace-pre-line">
-                  <span className="font-medium text-[var(--color-ink)]">
-                    What the client shared ·{' '}
-                  </span>
-                  {note.subjective}
-                </p>
-                {note.objective.trim() && (
-                  <p className="whitespace-pre-line">
-                    <span className="font-medium text-[var(--color-ink)]">
-                      What you observed ·{' '}
-                    </span>
-                    {note.objective}
-                  </p>
-                )}
-                <p className="whitespace-pre-line">
-                  <span className="font-medium text-[var(--color-ink)]">Your assessment · </span>
-                  {note.assessment}
-                </p>
-              </div>
-            </Section>
+              {verbosity === 'VERY_DETAILED' && (hasSummary || hasNamedTopics) && (
+                <Section heading="Full clinical detail">
+                  <div className="space-y-3 text-sm text-[var(--color-ink-2)]">
+                    <p className="whitespace-pre-line">
+                      <span className="font-medium text-[var(--color-ink)]">
+                        What the client shared ·{' '}
+                      </span>
+                      {note.subjective}
+                    </p>
+                    {note.objective.trim() && (
+                      <p className="whitespace-pre-line">
+                        <span className="font-medium text-[var(--color-ink)]">
+                          What you observed ·{' '}
+                        </span>
+                        {note.objective}
+                      </p>
+                    )}
+                    <p className="whitespace-pre-line">
+                      <span className="font-medium text-[var(--color-ink)]">
+                        Your assessment ·{' '}
+                      </span>
+                      {note.assessment}
+                    </p>
+                  </div>
+                </Section>
+              )}
+            </>
+          ) : (
+            formatNoteSections(note, format).map((sec, i) => (
+              <FormatSectionView key={i} heading={sec.heading} term={sec.term} body={sec.body} />
+            ))
           )}
         </>
-      ) : (
-        formatNoteSections(note, format).map((sec, i) => (
-          <FormatSectionView key={i} heading={sec.heading} term={sec.term} body={sec.body} />
-        ))
       )}
 
       {note.modalitySpecific && Object.keys(note.modalitySpecific).length > 0 && (
