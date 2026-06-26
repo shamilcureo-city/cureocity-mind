@@ -92,6 +92,17 @@ export const CLINICAL_GLOSSARY = {
     term: 'Plan (the “P” in SOAP)',
     what: 'What happens next — homework, what to focus on next time, any referrals, and when you will meet again.',
   },
+  // ---- Readable note layout (Sprint 70) ------------------------------
+  'note.summary': {
+    plainTitle: 'Summary',
+    term: 'Session summary',
+    what: 'A short, plain-language recap of the whole session in a few sentences — the gist, before the detail.',
+  },
+  'note.sessionTopics': {
+    plainTitle: 'Session topics',
+    term: 'Themes discussed',
+    what: 'The main things that came up this session, each with a clear heading and a few supporting points — so the note reads theme by theme rather than as one block.',
+  },
 
   // ---- Intake-note sections ------------------------------------------
   'intake.presentingConcerns': {

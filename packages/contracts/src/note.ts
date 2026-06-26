@@ -69,6 +69,26 @@ export const TherapyNoteV1Schema = z.object({
   objective: z.string().min(1),
   assessment: z.string().min(1),
   plan: z.string().min(1),
+  /**
+   * Sprint 70 — a plain-language synthesis of the session (2–4 sentences),
+   * rendered as the lead "Summary" of the note. Optional + additive: notes
+   * written before this field simply fall back to the SOAP sections, and the
+   * SOAP fields above remain authoritative for diagnosis / PDF / sign-off.
+   */
+  summary: z.string().optional(),
+  /**
+   * Sprint 70 — named "Session Topics": each a titled theme from the session
+   * with a few supporting bullets, for a readable note layout. Optional +
+   * additive; absent on older notes (the view falls back to SOAP).
+   */
+  topics: z
+    .array(
+      z.object({
+        title: z.string().min(1),
+        points: z.array(z.string()).default([]),
+      }),
+    )
+    .optional(),
   riskFlags: z.object({
     severity: RiskSeveritySchema,
     indicators: z.array(z.string()).default([]),

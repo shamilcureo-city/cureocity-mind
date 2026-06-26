@@ -209,6 +209,8 @@ Task: produce a TherapyNoteV1 JSON object with these fields:
 - objective: clinician's observations (affect, behaviour, engagement)
 - assessment: clinical formulation, progress against treatment goals
 - plan: agreed next steps, homework, next-session focus
+- summary: a plain-language synthesis of the session in 2-4 sentences, written so a non-specialist could follow it (no jargon)
+- topics: the session's main themes as an array, each { title: a short descriptive heading naming the theme (e.g. "Guilt about lying to daughter", "Accepting herself"), points: 2-4 concise bullet strings supporting that theme }
 - riskFlags: { severity: none|low|medium|high|critical, indicators: string[], details?: string }
 - modalitySpecific: structured output for the modality
     * CBT: thought records, cognitive distortions identified, behavioural experiments
