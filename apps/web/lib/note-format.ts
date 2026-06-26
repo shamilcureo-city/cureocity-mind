@@ -25,6 +25,38 @@ export function isNoteFormat(v: string | null | undefined): v is NoteFormat {
   return v === 'SOAP' || v === 'DAP' || v === 'BIRP' || v === 'NARRATIVE';
 }
 
+/**
+ * Sprint 70 — note verbosity (the "Detailed" dropdown in the reference).
+ * Like the format switch, this is a VIEW density control — it changes how
+ * much of the same note is shown, with no model call or change to what's
+ * stored. (True re-generation at a length is the GCP-dependent follow-up,
+ * same as native per-format generation.)
+ *
+ * - BRIEF        → the Summary + the plan, at a glance
+ * - DETAILED     → Summary + Session topics + plan (the default)
+ * - VERY_DETAILED→ Detailed + the underlying clinical prose (subjective /
+ *                  objective / full assessment)
+ */
+export type NoteVerbosity = 'BRIEF' | 'DETAILED' | 'VERY_DETAILED';
+
+export const NOTE_VERBOSITIES: NoteVerbosity[] = ['BRIEF', 'DETAILED', 'VERY_DETAILED'];
+
+export const NOTE_VERBOSITY_LABEL: Record<NoteVerbosity, string> = {
+  BRIEF: 'Brief',
+  DETAILED: 'Detailed',
+  VERY_DETAILED: 'Very detailed',
+};
+
+export function isNoteVerbosity(v: string | null | undefined): v is NoteVerbosity {
+  return v === 'BRIEF' || v === 'DETAILED' || v === 'VERY_DETAILED';
+}
+
+export const NOTE_VERBOSITY_HELP = {
+  plainTitle: 'How much detail',
+  what: 'Shows the same note at the length you want: Brief is a quick glance (summary + plan), Detailed is the full readable note, and Very detailed also shows the underlying clinical wording.',
+  why: 'It only changes how much is shown on screen — never what was written or stored. Remembered on this device.',
+};
+
 export interface FormatSection {
   /** Plain-language heading. */
   heading: string;
