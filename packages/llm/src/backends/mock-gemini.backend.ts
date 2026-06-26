@@ -278,6 +278,24 @@ export class MockGeminiPass2Backend implements IPass2Backend {
               assessment:
                 '[mock] Continued progress on anxiety management; address avoidance of work meetings next session.',
               plan: '[mock] Continue thought records; introduce graded exposure hierarchy.',
+              summary:
+                '[mock] The client reported modest gains in managing anxiety and partial follow-through on home practice. Avoidance of work meetings remains the main obstacle. The plan continues thought records and adds a graded exposure hierarchy.',
+              topics: [
+                {
+                  title: '[mock] Managing anxiety day to day',
+                  points: [
+                    'Reported feeling calmer than the previous session.',
+                    'Used thought records a few times during the week.',
+                  ],
+                },
+                {
+                  title: '[mock] Avoidance of work meetings',
+                  points: [
+                    'Still skips meetings when anxiety spikes.',
+                    'Agreed to build a graded exposure plan next session.',
+                  ],
+                },
+              ],
               riskFlags: { severity: 'none', indicators: [] },
               modalitySpecific: { mock: true },
               phaseHints: [

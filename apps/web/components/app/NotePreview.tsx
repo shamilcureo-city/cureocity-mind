@@ -34,6 +34,10 @@ const FORMAT_KEY = 'cm.noteFormat';
 export function NotePreview({ note, signedAt, signedBy }: Props) {
   const topics = extractTopics(note.assessment);
   const planItems = extractTopics(note.plan);
+  // Sprint 70 — prefer the model's plain summary + named session topics
+  // (the readable layout) when present; otherwise fall back to the SOAP view.
+  const hasSummary = Boolean(note.summary && note.summary.trim());
+  const hasNamedTopics = Boolean(note.topics && note.topics.length > 0);
 
   const [format, setFormat] = useState<NoteFormat>('SOAP');
   useEffect(() => {
@@ -94,15 +98,48 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
 
       {format === 'SOAP' ? (
         <>
-          <EduSection term="soap.summary">
-            <p className="whitespace-pre-line">{note.subjective}</p>
-            {note.objective.trim() && (
-              <p className="mt-3 whitespace-pre-line text-[var(--color-ink-2)]">{note.objective}</p>
+          {/* Sprint 70 — readable layout: a plain "Summary" + named "Session
+              topics" when the note carries them (the reference template);
+              older notes without these fields fall back to the SOAP sections,
+              and the SOAP fields stay authoritative underneath. */}
+          <EduSection term={hasSummary ? 'note.summary' : 'soap.summary'}>
+            {hasSummary ? (
+              <p className="whitespace-pre-line text-[15px] leading-relaxed">{note.summary}</p>
+            ) : (
+              <>
+                <p className="whitespace-pre-line">{note.subjective}</p>
+                {note.objective.trim() && (
+                  <p className="mt-3 whitespace-pre-line text-[var(--color-ink-2)]">
+                    {note.objective}
+                  </p>
+                )}
+              </>
             )}
           </EduSection>
 
-          <EduSection term="soap.topics">
-            {topics.length === 0 ? (
+          <EduSection term={hasNamedTopics ? 'note.sessionTopics' : 'soap.topics'}>
+            {hasNamedTopics ? (
+              <div className="space-y-5">
+                {note.topics!.map((t, i) => (
+                  <section key={i}>
+                    <h4 className="font-serif text-base text-[var(--color-ink)]">{t.title}</h4>
+                    {t.points.length > 0 && (
+                      <ul className="mt-2 space-y-1.5">
+                        {t.points.map((p, j) => (
+                          <li key={j} className="flex items-start gap-2 text-[var(--color-ink)]">
+                            <span
+                              aria-hidden
+                              className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                            />
+                            <span>{p}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
+                ))}
+              </div>
+            ) : topics.length === 0 ? (
               <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
             ) : (
               <ul className="space-y-2">
