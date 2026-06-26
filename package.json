@@ -25,7 +25,8 @@
     "db:reset": "prisma migrate reset --force",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "db:validate": "prisma validate && prisma format --check"
+    "db:validate": "prisma validate && prisma format --check",
+    "db:check-migrations": "node scripts/check-migration-idempotency.mjs"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"

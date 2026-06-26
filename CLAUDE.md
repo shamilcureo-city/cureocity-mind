@@ -163,8 +163,27 @@ There are no shared records across therapists in V1.
 ### Per-sprint prisma migrations
 
 Each sprint owns a single migration directory named
-`YYYYMMDDHHMMSS_sprint<N>_<description>`. Append-only enum values use
-`ALTER TYPE ... ADD VALUE IF NOT EXISTS` so re-runs are idempotent.
+`YYYYMMDDHHMMSS_sprint<N>_<description>`.
+
+**Every migration MUST be idempotent (safe to replay).** The P3009 self-heal
+in `scripts/vercel-db-setup.sh` rolls back a failed migration and re-runs its
+SQL; a bare `CREATE`/`ADD` then fails with "already exists" and wedges every
+deploy (the 2026-06-20 incident). So all DDL uses the guarded form:
+
+- `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`,
+  `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+- `ALTER TYPE ... ADD VALUE IF NOT EXISTS` for new enum values
+- a brand-new enum type wrapped in a guard block:
+  ```sql
+  DO $$ BEGIN CREATE TYPE "Foo" AS ENUM ('A', 'B');
+  EXCEPTION WHEN duplicate_object THEN null; END $$;
+  ```
+
+`pnpm db:check-migrations` (`scripts/check-migration-idempotency.mjs`, wired
+into CI) enforces this for every migration dated on/after the convention
+cutoff. **Never edit an already-applied migration** to fix it — that changes
+its Prisma checksum and trips drift detection. Fix it forward in a new,
+guarded migration instead.
 
 ### Mappers
 
