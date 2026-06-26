@@ -8,10 +8,15 @@ import { glossary } from '../../lib/clinical-glossary';
 import {
   formatNoteSections,
   isNoteFormat,
+  isNoteVerbosity,
   NOTE_FORMATS,
   NOTE_FORMAT_HELP,
   NOTE_FORMAT_LABEL,
+  NOTE_VERBOSITIES,
+  NOTE_VERBOSITY_HELP,
+  NOTE_VERBOSITY_LABEL,
   type NoteFormat,
+  type NoteVerbosity,
 } from '../../lib/note-format';
 
 interface Props {
@@ -21,6 +26,7 @@ interface Props {
 }
 
 const FORMAT_KEY = 'cm.noteFormat';
+const VERBOSITY_KEY = 'cm.noteVerbosity';
 
 /**
  * Renders a TherapyNoteV1 in a clinician-friendly long-form layout.
@@ -40,18 +46,29 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
   const hasNamedTopics = Boolean(note.topics && note.topics.length > 0);
 
   const [format, setFormat] = useState<NoteFormat>('SOAP');
+  const [verbosity, setVerbosity] = useState<NoteVerbosity>('DETAILED');
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(FORMAT_KEY);
-      if (isNoteFormat(saved)) setFormat(saved);
+      const savedFormat = window.localStorage.getItem(FORMAT_KEY);
+      if (isNoteFormat(savedFormat)) setFormat(savedFormat);
+      const savedVerbosity = window.localStorage.getItem(VERBOSITY_KEY);
+      if (isNoteVerbosity(savedVerbosity)) setVerbosity(savedVerbosity);
     } catch {
-      // localStorage unavailable — stay on SOAP.
+      // localStorage unavailable — stay on the defaults.
     }
   }, []);
   function pick(f: NoteFormat): void {
     setFormat(f);
     try {
       window.localStorage.setItem(FORMAT_KEY, f);
+    } catch {
+      // ignore
+    }
+  }
+  function pickVerbosity(v: NoteVerbosity): void {
+    setVerbosity(v);
+    try {
+      window.localStorage.setItem(VERBOSITY_KEY, v);
     } catch {
       // ignore
     }
@@ -96,6 +113,27 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
         <InlineExplainer entry={NOTE_FORMAT_HELP} label="Which should I pick?" />
       </div>
 
+      {format === 'SOAP' && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Detail</span>
+          {NOTE_VERBOSITIES.map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => pickVerbosity(v)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium ${
+                verbosity === v
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                  : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-ink-3)]'
+              }`}
+            >
+              {NOTE_VERBOSITY_LABEL[v]}
+            </button>
+          ))}
+          <InlineExplainer entry={NOTE_VERBOSITY_HELP} label="How much detail?" />
+        </div>
+      )}
+
       {format === 'SOAP' ? (
         <>
           {/* Sprint 70 — readable layout: a plain "Summary" + named "Session
@@ -117,44 +155,46 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
             )}
           </EduSection>
 
-          <EduSection term={hasNamedTopics ? 'note.sessionTopics' : 'soap.topics'}>
-            {hasNamedTopics ? (
-              <div className="space-y-5">
-                {note.topics!.map((t, i) => (
-                  <section key={i}>
-                    <h4 className="font-serif text-base text-[var(--color-ink)]">{t.title}</h4>
-                    {t.points.length > 0 && (
-                      <ul className="mt-2 space-y-1.5">
-                        {t.points.map((p, j) => (
-                          <li key={j} className="flex items-start gap-2 text-[var(--color-ink)]">
-                            <span
-                              aria-hidden
-                              className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-                            />
-                            <span>{p}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-                ))}
-              </div>
-            ) : topics.length === 0 ? (
-              <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
-            ) : (
-              <ul className="space-y-2">
-                {topics.map((t, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span
-                      aria-hidden
-                      className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
-                    />
-                    <span>{t}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </EduSection>
+          {verbosity !== 'BRIEF' && (
+            <EduSection term={hasNamedTopics ? 'note.sessionTopics' : 'soap.topics'}>
+              {hasNamedTopics ? (
+                <div className="space-y-5">
+                  {note.topics!.map((t, i) => (
+                    <section key={i}>
+                      <h4 className="font-serif text-base text-[var(--color-ink)]">{t.title}</h4>
+                      {t.points.length > 0 && (
+                        <ul className="mt-2 space-y-1.5">
+                          {t.points.map((p, j) => (
+                            <li key={j} className="flex items-start gap-2 text-[var(--color-ink)]">
+                              <span
+                                aria-hidden
+                                className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                              />
+                              <span>{p}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </section>
+                  ))}
+                </div>
+              ) : topics.length === 0 ? (
+                <p className="text-[var(--color-ink-2)]">{note.assessment}</p>
+              ) : (
+                <ul className="space-y-2">
+                  {topics.map((t, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <span
+                        aria-hidden
+                        className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]"
+                      />
+                      <span>{t}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </EduSection>
+          )}
 
           <EduSection term="soap.plan">
             {planItems.length === 0 ? (
@@ -175,6 +215,34 @@ export function NotePreview({ note, signedAt, signedBy }: Props) {
               </ul>
             )}
           </EduSection>
+
+          {/* Very detailed adds the underlying clinical prose. Only when the
+              readable layout is active (else the SOAP view already shows it,
+              so this would duplicate). */}
+          {verbosity === 'VERY_DETAILED' && (hasSummary || hasNamedTopics) && (
+            <Section heading="Full clinical detail">
+              <div className="space-y-3 text-sm text-[var(--color-ink-2)]">
+                <p className="whitespace-pre-line">
+                  <span className="font-medium text-[var(--color-ink)]">
+                    What the client shared ·{' '}
+                  </span>
+                  {note.subjective}
+                </p>
+                {note.objective.trim() && (
+                  <p className="whitespace-pre-line">
+                    <span className="font-medium text-[var(--color-ink)]">
+                      What you observed ·{' '}
+                    </span>
+                    {note.objective}
+                  </p>
+                )}
+                <p className="whitespace-pre-line">
+                  <span className="font-medium text-[var(--color-ink)]">Your assessment · </span>
+                  {note.assessment}
+                </p>
+              </div>
+            </Section>
+          )}
         </>
       ) : (
         formatNoteSections(note, format).map((sec, i) => (
