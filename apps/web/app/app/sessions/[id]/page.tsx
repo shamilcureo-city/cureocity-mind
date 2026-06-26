@@ -141,6 +141,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientId={session.clientId}
             clientHasContactPhone={!!pii.contactPhone}
             clientHasContactEmail={!!pii.contactEmail}
+            clientName={pii.fullName}
+            noteLanguage={session.language}
           />
         )}
         {tab === 'copilot' && (
@@ -171,6 +173,8 @@ async function NotesTabPanel({
   clientId,
   clientHasContactPhone,
   clientHasContactEmail,
+  clientName,
+  noteLanguage,
 }: {
   sessionId: string;
   sessionStatus: SessionStatus;
@@ -178,6 +182,8 @@ async function NotesTabPanel({
   clientId: string;
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
+  clientName: string;
+  noteLanguage: string;
 }) {
   const [draftRow, signedRow] = await Promise.all([
     prisma.noteDraft.findUnique({ where: { sessionId } }),
@@ -221,6 +227,8 @@ async function NotesTabPanel({
       clientHasContactPhone={clientHasContactPhone}
       clientHasContactEmail={clientHasContactEmail}
       llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
+      clientName={clientName}
+      noteLanguage={noteLanguage}
     />
   );
 }
