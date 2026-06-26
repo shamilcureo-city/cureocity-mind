@@ -211,6 +211,7 @@ Task: produce a TherapyNoteV1 JSON object with these fields:
 - plan: agreed next steps, homework, next-session focus
 - summary: a plain-language synthesis of the session in 2-4 sentences, written so a non-specialist could follow it (no jargon)
 - topics: the session's main themes as an array, each { title: a short descriptive heading naming the theme (e.g. "Guilt about lying to daughter", "Accepting herself"), points: 2-4 concise bullet strings supporting that theme }
+- templateSections: ONLY when a "Note template" with section titles is given below — an array of { title: exactly the template section title, body: that section written from the transcript in clinical prose }. Cover every template section in order. Omit this field entirely when no template is provided. The SOAP fields above are still required regardless.
 - riskFlags: { severity: none|low|medium|high|critical, indicators: string[], details?: string }
 - modalitySpecific: structured output for the modality
     * CBT: thought records, cognitive distortions identified, behavioural experiments

@@ -296,6 +296,16 @@ export class MockGeminiPass2Backend implements IPass2Backend {
                   ],
                 },
               ],
+              // Sprint 70 — when a template is chosen, echo a mock section
+              // per template title so the templated view is verifiable in dev.
+              ...(input.template
+                ? {
+                    templateSections: input.template.sections.map((s) => ({
+                      title: s.title,
+                      body: `[mock] ${s.title}: drawn from the session for this client.`,
+                    })),
+                  }
+                : {}),
               riskFlags: { severity: 'none', indicators: [] },
               modalitySpecific: { mock: true },
               phaseHints: [

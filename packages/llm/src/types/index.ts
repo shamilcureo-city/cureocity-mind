@@ -134,6 +134,16 @@ export interface Pass2Input {
     presentingConcerns?: string;
     preferredModality?: SessionModality;
   };
+  /**
+   * Sprint 70 — the note template chosen for this session. When present, the
+   * backend additionally produces `templateSections` (title + body) shaped to
+   * these section titles, alongside the standard SOAP fields. Omitted → the
+   * built-in SOAP structure only.
+   */
+  template?: {
+    name: string;
+    sections: { title: string; hint?: string }[];
+  };
 }
 
 /**

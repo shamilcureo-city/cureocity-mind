@@ -751,6 +751,12 @@ model Session {
   kind     SessionKind      @default(TREATMENT)
   status   SessionStatus    @default(SCHEDULED)
 
+  /// Sprint 70 — the note template chosen for this session's note. Scalar FK
+  /// (no relation, like Letter) to a NoteTemplate; null = the built-in SOAP
+  /// structure. When set, Pass 2 also produces `templateSections` shaped to
+  /// the template, in addition to the authoritative SOAP fields.
+  noteTemplateId String?
+
   scheduledAt DateTime
   startedAt   DateTime?
   endedAt     DateTime?

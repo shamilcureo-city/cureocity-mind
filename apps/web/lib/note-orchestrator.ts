@@ -165,11 +165,31 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       estimatedCostInr: pass2Estimate,
     });
 
+    // Sprint 70 — load the session's chosen note template (if any) so Pass 2
+    // also renders the note into that template's sections (additive — the
+    // SOAP fields are still produced and stay authoritative for Pass 3 / PDF).
+    const noteTemplate = session.noteTemplateId
+      ? await prisma.noteTemplate.findUnique({ where: { id: session.noteTemplateId } })
+      : null;
+    const templateArg =
+      noteTemplate && Array.isArray(noteTemplate.sections)
+        ? {
+            template: {
+              name: noteTemplate.name,
+              sections: (noteTemplate.sections as { title: string; hint?: string }[]).map((s) => ({
+                title: s.title,
+                ...(s.hint ? { hint: s.hint } : {}),
+              })),
+            },
+          }
+        : {};
+
     const router = modelRouter();
     const pass2 = await router.pass2({
       sessionId,
       transcript: pass1.transcript,
       speakerSegments: pass1.speakerSegments,
+      ...templateArg,
       // Sprint DV3 — DOCTOR routes Pass 2 to the medical encounter note
       // (the MEDICAL output arm) instead of the therapy SOAP/intake note.
       vertical: session.psychologist.vertical,

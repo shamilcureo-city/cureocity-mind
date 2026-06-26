@@ -89,6 +89,21 @@ export const TherapyNoteV1Schema = z.object({
       }),
     )
     .optional(),
+  /**
+   * Sprint 70 — when the session has a note template, Pass 2 also renders the
+   * note into that template's named sections here (title + prose body), in
+   * ADDITION to the authoritative SOAP fields above. Optional + additive:
+   * notes generated without a template (or before this) simply omit it, and
+   * diagnosis / PDF / sign-off keep reading the SOAP fields.
+   */
+  templateSections: z
+    .array(
+      z.object({
+        title: z.string().min(1),
+        body: z.string(),
+      }),
+    )
+    .optional(),
   riskFlags: z.object({
     severity: RiskSeveritySchema,
     indicators: z.array(z.string()).default([]),
