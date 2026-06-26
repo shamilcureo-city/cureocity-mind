@@ -28,7 +28,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ results: [], query: q });
   }
 
-  const like = `%${q}%`;
+  // Escape LIKE metacharacters in the user's query so `100%` or `a_b` match
+  // literally instead of `%`/`_` acting as wildcards. Backslash is Postgres'
+  // default ILIKE escape char; escape it first so the others stay literal.
+  const escaped = q.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const like = `%${escaped}%`;
   const rows = await prisma.$queryRaw<
     {
       sessionId: string;

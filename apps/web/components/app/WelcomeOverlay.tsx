@@ -8,9 +8,14 @@ import Link from 'next/link';
  *
  * Shown once, the first time a therapist opens the app, to set
  * expectations gently: what this is, how a session flows, who's in
- * charge, and where help lives. Dismissal is remembered in localStorage
- * (the fast-path); a durable per-therapist `hasSeenWelcome` flag + a
- * `WELCOME_DISMISSED` audit is the documented follow-up.
+ * charge, and where help lives.
+ *
+ * Dismissal is durable: `serverSeen` comes from the per-therapist
+ * `hasSeenWelcome` column, and dismissing POSTs to record it (audited
+ * `WELCOME_DISMISSED`) so it stays dismissed on every device. localStorage
+ * is kept only as an instant client-side fast-path (no flash before the
+ * server flag is known, and it still suppresses the overlay if the POST
+ * fails).
  *
  * Renders nothing on the server / until mounted, so there's no flash and
  * no hydration mismatch.
@@ -41,24 +46,31 @@ const POINTS: { emoji: string; title: string; body: string }[] = [
   },
 ];
 
-export function WelcomeOverlay() {
+export function WelcomeOverlay({ serverSeen = false }: { serverSeen?: boolean }) {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
+    // Durably dismissed on the account — never show, regardless of device.
+    if (serverSeen) return;
     try {
       if (window.localStorage.getItem(STORAGE_KEY) !== 'seen') setShow(true);
     } catch {
       // localStorage unavailable (private mode etc.) — just don't show.
     }
-  }, []);
+  }, [serverSeen]);
 
   function dismiss(): void {
     try {
       window.localStorage.setItem(STORAGE_KEY, 'seen');
     } catch {
-      // ignore — worst case it shows again next time.
+      // ignore — the durable POST below is the source of truth.
     }
     setShow(false);
+    // Persist durably so it stays dismissed on every other device too.
+    // Fire-and-forget; AuthedFetchProvider attaches the bearer token.
+    void fetch('/api/v1/psychologists/me/welcome', { method: 'POST' }).catch(() => {
+      // best-effort — the localStorage flag still suppresses it on this device.
+    });
   }
 
   if (!show) return null;

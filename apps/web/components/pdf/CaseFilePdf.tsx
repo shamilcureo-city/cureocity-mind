@@ -1,4 +1,5 @@
 import { Document, Page, StyleSheet, Text, View } from '@react-pdf/renderer';
+import { formatPdfDate, formatPdfDateTime } from '@/lib/doc-format';
 
 /**
  * Sprint 65 — the consolidated clinical case file.
@@ -138,11 +139,7 @@ const styles = StyleSheet.create({
 });
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  return formatPdfDate(iso);
 }
 
 export function CaseFilePdf(props: CaseFilePdfProps) {
@@ -320,7 +317,7 @@ export function CaseFilePdf(props: CaseFilePdfProps) {
         <View style={styles.signatureBlock}>
           <Text>
             Prepared by {props.preparedBy} (RCI {props.rciNumber}) on{' '}
-            {new Date(props.generatedAt).toLocaleString('en-GB')}
+            {formatPdfDateTime(props.generatedAt)}
           </Text>
           <Text style={{ marginTop: 2 }}>
             Cureocity Mind · clinical documentation. Confidential — handle under DPDP.

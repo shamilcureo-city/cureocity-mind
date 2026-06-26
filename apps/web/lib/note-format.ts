@@ -58,14 +58,17 @@ export function formatNoteSections(note: TherapyNoteV1, format: NoteFormat): For
         { heading: 'The plan', term: 'Plan', body: p },
       ];
     case 'BIRP':
-      // A SOAP note has no dedicated "intervention performed" field, so
-      // BIRP is approximated: Behaviour = how the client presented,
-      // Intervention/"what was worked on" draws on your read + the plan
-      // (NOT the assessment alone mislabelled as "what you did"), Response
-      // = the client's own account, Plan = next steps.
+      // A SOAP note has no dedicated "intervention performed" field, so BIRP
+      // is a best-effort 1:1 re-map with NO field shown twice: Behaviour =
+      // what was observed (objective), Intervention/"what was worked on" is
+      // approximated from your clinical read (assessment), Response = the
+      // client's own account (subjective), Plan = next steps. Earlier this
+      // duplicated subjective into both Behaviour and Response, and the plan
+      // into both Intervention and Plan — which read like a rendering bug on
+      // a real note. Each SOAP field now maps to exactly one BIRP section.
       return [
-        { heading: 'What the client presented', term: 'Behaviour', body: join(o, s) },
-        { heading: 'What was worked on', term: 'Intervention', body: join(a, p) },
+        { heading: 'What the client presented', term: 'Behaviour', body: o },
+        { heading: 'What was worked on', term: 'Intervention', body: a },
         { heading: 'How they responded', term: 'Response', body: s },
         { heading: 'The plan', term: 'Plan', body: p },
       ];

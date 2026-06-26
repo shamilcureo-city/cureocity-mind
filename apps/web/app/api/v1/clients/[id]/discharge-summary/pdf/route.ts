@@ -9,6 +9,7 @@ import {
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { resolveClientPii } from '@/lib/client-pii';
+import { ageFromDob, safeFileSlug } from '@/lib/doc-format';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -132,10 +133,7 @@ export async function GET(
   });
 
   const dateStr = new Date().toISOString().slice(0, 10);
-  const safeName = pii.fullName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
+  const safeName = safeFileSlug(pii.fullName);
   const filename = `discharge-summary-${safeName}-${dateStr}.pdf`;
 
   return new Response(new Uint8Array(buffer), {
@@ -147,15 +145,6 @@ export async function GET(
       'Cache-Control': 'private, no-store',
     },
   });
-}
-
-function ageFromDob(dob: Date | null): number | null {
-  if (!dob) return null;
-  const now = new Date();
-  let age = now.getFullYear() - dob.getFullYear();
-  const m = now.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
-  return age >= 0 && age < 150 ? age : null;
 }
 
 /** Map plan goals to their per-goal achievement status (side-table). */
@@ -184,6 +173,13 @@ function normaliseStatus(raw: string | undefined): DischargeGoal['status'] {
   return raw === 'ACHIEVED' || raw === 'IN_PROGRESS' ? raw : 'NOT_STARTED';
 }
 
+// Instruments where a LOWER score is the better outcome (symptom /
+// disability scales). Only these get an 'improved'/'worse' label; any other
+// instrument (e.g. a future wellbeing scale where higher is better) falls
+// back to the polarity-neutral 'changed' so the summary never asserts a
+// direction it can't justify. Compared case-insensitively.
+const LOWER_IS_BETTER_INSTRUMENTS = new Set(['PHQ9', 'GAD7', 'PCL5', 'WHODAS2']);
+
 /** First → last score per instrument, with a plain direction. */
 function shapeOutcomes(
   rows: { instrumentKey: string; score: number; administeredAt: Date }[],
@@ -200,9 +196,9 @@ function shapeOutcomes(
     const last = list[list.length - 1];
     if (!first || !last) continue;
     const change = last.score - first.score;
-    // PHQ-9 / GAD-7 and the other symptom scales here are lower-is-better.
+    const lowerIsBetter = LOWER_IS_BETTER_INSTRUMENTS.has(key.toUpperCase());
     const direction: DischargeOutcome['direction'] =
-      change < 0 ? 'improved' : change > 0 ? 'worse' : 'no-change';
+      change === 0 ? 'no-change' : !lowerIsBetter ? 'changed' : change < 0 ? 'improved' : 'worse';
     out.push({
       instrumentKey: key,
       firstScore: first.score,
