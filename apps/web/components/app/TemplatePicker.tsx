@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { builtinTemplatesByCategory } from '../../lib/builtin-templates';
 
 /**
  * Sprint 70 (template library, phase B) — the "BASE" picker on the note.
@@ -93,12 +94,25 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, onApply
         className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-medium text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)] disabled:opacity-60"
       >
         <option value="">Built-in (SOAP)</option>
-        {items.map((t) => (
-          <option key={t.id} value={t.id}>
-            {t.name}
-            {t.isDefault ? ' (default)' : ''}
-          </option>
+        {builtinTemplatesByCategory().map((g) => (
+          <optgroup key={g.category} label={g.category}>
+            {g.templates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </optgroup>
         ))}
+        {items.length > 0 && (
+          <optgroup label="Your templates">
+            {items.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+                {t.isDefault ? ' (default)' : ''}
+              </option>
+            ))}
+          </optgroup>
+        )}
       </select>
       <Link href="/app/templates" className="text-xs text-[var(--color-accent)] underline">
         ＋ Create
