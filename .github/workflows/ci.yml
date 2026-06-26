@@ -57,6 +57,9 @@ jobs:
           DATABASE_URL: postgresql://x:x@x:5432/x
         run: pnpm db:validate
 
+      - name: Check migration idempotency
+        run: pnpm db:check-migrations
+
       - name: Check formatting
         run: pnpm format:check
 
