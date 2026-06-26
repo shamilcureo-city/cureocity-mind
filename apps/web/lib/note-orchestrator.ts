@@ -22,6 +22,7 @@ import {
   recordGeminiCall,
 } from '@cureocity/observability/metrics';
 import { reconcileAssessmentItems } from './assessment-items';
+import { isBuiltinTemplateId, resolveBuiltinTemplate } from './builtin-templates';
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { encryptForTenant } from './tenant-crypto';
@@ -165,24 +166,34 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       estimatedCostInr: pass2Estimate,
     });
 
-    // Sprint 70 — load the session's chosen note template (if any) so Pass 2
-    // also renders the note into that template's sections (additive — the
-    // SOAP fields are still produced and stay authoritative for Pass 3 / PDF).
-    const noteTemplate = session.noteTemplateId
-      ? await prisma.noteTemplate.findUnique({ where: { id: session.noteTemplateId } })
-      : null;
-    const templateArg =
-      noteTemplate && Array.isArray(noteTemplate.sections)
-        ? {
-            template: {
-              name: noteTemplate.name,
-              sections: (noteTemplate.sections as { title: string; hint?: string }[]).map((s) => ({
-                title: s.title,
-                ...(s.hint ? { hint: s.hint } : {}),
-              })),
-            },
-          }
-        : {};
+    // Sprint 70 — resolve the session's chosen note template (a built-in from
+    // the static catalog, or the therapist's own DB template) so Pass 2 also
+    // renders the note into its sections (additive — the SOAP fields are still
+    // produced and stay authoritative for Pass 3 / PDF).
+    let resolvedTemplate: {
+      name: string;
+      sections: { title: string; hint?: string }[];
+    } | null = null;
+    if (session.noteTemplateId) {
+      if (isBuiltinTemplateId(session.noteTemplateId)) {
+        const builtin = resolveBuiltinTemplate(session.noteTemplateId);
+        if (builtin) resolvedTemplate = { name: builtin.name, sections: builtin.sections };
+      } else {
+        const row = await prisma.noteTemplate.findUnique({
+          where: { id: session.noteTemplateId },
+        });
+        if (row && Array.isArray(row.sections)) {
+          resolvedTemplate = {
+            name: row.name,
+            sections: (row.sections as { title: string; hint?: string }[]).map((s) => ({
+              title: s.title,
+              ...(s.hint ? { hint: s.hint } : {}),
+            })),
+          };
+        }
+      }
+    }
+    const templateArg = resolvedTemplate ? { template: resolvedTemplate } : {};
 
     const router = modelRouter();
     const pass2 = await router.pass2({

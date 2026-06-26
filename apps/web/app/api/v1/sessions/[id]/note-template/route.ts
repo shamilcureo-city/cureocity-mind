@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { ApplyNoteTemplateInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { isBuiltinTemplateId, resolveBuiltinTemplate } from '@/lib/builtin-templates';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -37,14 +38,21 @@ export async function POST(
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 
-  // A chosen template must belong to the requesting therapist.
+  // A built-in template (from the static catalog) is available to everyone;
+  // a custom template must belong to the requesting therapist.
   if (dto.value.templateId !== null) {
-    const tpl = await prisma.noteTemplate.findUnique({
-      where: { id: dto.value.templateId },
-      select: { psychologistId: true },
-    });
-    if (!tpl || tpl.psychologistId !== auth.value.psychologistId) {
-      return NextResponse.json({ error: 'Template not found' }, { status: 404 });
+    if (isBuiltinTemplateId(dto.value.templateId)) {
+      if (!resolveBuiltinTemplate(dto.value.templateId)) {
+        return NextResponse.json({ error: 'Template not found' }, { status: 404 });
+      }
+    } else {
+      const tpl = await prisma.noteTemplate.findUnique({
+        where: { id: dto.value.templateId },
+        select: { psychologistId: true },
+      });
+      if (!tpl || tpl.psychologistId !== auth.value.psychologistId) {
+        return NextResponse.json({ error: 'Template not found' }, { status: 404 });
+      }
     }
   }
 
