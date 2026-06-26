@@ -16,6 +16,8 @@ import { Badge } from '../ui/Badge';
 import { IntakeNotePreview } from './IntakeNotePreview';
 import { IntakeModifyPanel } from './IntakeModifyPanel';
 import { NotePreview } from './NotePreview';
+import { NoteToolbar } from './NoteToolbar';
+import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
@@ -53,6 +55,9 @@ interface Props {
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
   llmBackend: string;
+  /// Sprint 70 — shown in the note toolbar (client chip + language flag).
+  clientName: string;
+  noteLanguage: string;
 }
 
 type Phase =
@@ -88,6 +93,8 @@ export function NotesTab({
   clientHasContactPhone,
   clientHasContactEmail,
   llmBackend,
+  clientName,
+  noteLanguage,
 }: Props) {
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
   // notes use IntakeNoteV1, which doesn't yet have a sign DTO or edit
@@ -386,28 +393,20 @@ export function NotesTab({
         <>
           <MockBackendBanner llmBackend={llmBackend} />
           <Card className="p-7">
+            <NoteToolbar
+              sessionId={sessionId}
+              clientName={clientName}
+              noteLanguage={noteLanguage}
+              noteText={intakeNoteToText(signedIntake)}
+              signed
+              onShare={() => setShareOpen(true)}
+            />
             <RiskBanner riskFlags={signedIntake.riskFlags} />
             <IntakeNotePreview
               note={signedIntake}
               signedAt={note.signedAt}
               signedBy={note.signedBy}
             />
-            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShareOpen(true)}
-                className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
-              >
-                Send to patient
-              </button>
-              <a
-                href={`/api/v1/sessions/${sessionId}/note/pdf`}
-                download
-                className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-              >
-                Download PDF
-              </a>
-            </div>
             <ShareModal
               open={shareOpen}
               onClose={() => setShareOpen(false)}
@@ -440,6 +439,14 @@ export function NotesTab({
         <MockBackendBanner llmBackend={llmBackend} />
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
           <Card className="p-7">
+            <NoteToolbar
+              sessionId={sessionId}
+              clientName={clientName}
+              noteLanguage={noteLanguage}
+              noteText={therapyNoteToText(treatmentContent)}
+              signed
+              onShare={() => setShareOpen(true)}
+            />
             <AdvancementBanner clientId={clientId} />
             <RiskBanner riskFlags={treatmentContent.riskFlags} />
             <NotePreview
@@ -447,22 +454,6 @@ export function NotesTab({
               signedAt={note.signedAt}
               signedBy={note.signedBy}
             />
-            <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setShareOpen(true)}
-                className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
-              >
-                Send to patient
-              </button>
-              <a
-                href={`/api/v1/sessions/${sessionId}/note/pdf`}
-                download
-                className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-              >
-                Download PDF
-              </a>
-            </div>
             <ShareModal
               open={shareOpen}
               onClose={() => setShareOpen(false)}
@@ -504,6 +495,13 @@ export function NotesTab({
         <MockBackendBanner llmBackend={llmBackend} />
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
           <Card className="p-7">
+            <NoteToolbar
+              sessionId={sessionId}
+              clientName={clientName}
+              noteLanguage={noteLanguage}
+              noteText={intakeNoteToText(intakeNote)}
+              signed={false}
+            />
             <RiskBanner riskFlags={intakeNote.riskFlags} />
             <IntakeNotePreview note={intakeNote} />
             <NoteFooter
@@ -554,6 +552,13 @@ export function NotesTab({
       <MockBackendBanner llmBackend={llmBackend} />
       <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <Card className="p-7">
+          <NoteToolbar
+            sessionId={sessionId}
+            clientName={clientName}
+            noteLanguage={noteLanguage}
+            noteText={therapyNoteToText(note)}
+            signed={false}
+          />
           <RiskBanner riskFlags={note.riskFlags} />
           <NotePreview note={note} />
           <NoteFooter
