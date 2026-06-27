@@ -19,6 +19,12 @@ import { NotePreview } from './NotePreview';
 import { NoteToolbar } from './NoteToolbar';
 import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
+import {
+  NOTE_VERBOSITIES,
+  NOTE_VERBOSITY_LABEL,
+  isNoteVerbosity,
+  type NoteVerbosity,
+} from '../../lib/note-format';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
@@ -111,6 +117,24 @@ export function NotesTab({
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  // View density for the note ("Detailed" dropdown in the toolbar). Per-device.
+  const [verbosity, setVerbosity] = useState<NoteVerbosity>('DETAILED');
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem('cm.noteVerbosity');
+      if (isNoteVerbosity(saved)) setVerbosity(saved);
+    } catch {
+      // localStorage unavailable — keep the default.
+    }
+  }, []);
+  function pickVerbosity(v: NoteVerbosity): void {
+    setVerbosity(v);
+    try {
+      window.localStorage.setItem('cm.noteVerbosity', v);
+    } catch {
+      // ignore
+    }
+  }
   const [shareOpen, setShareOpen] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Stall detection for the generating phase. `slow` latches true once
@@ -451,6 +475,7 @@ export function NotesTab({
               noteText={therapyNoteToText(treatmentContent)}
               signed
               onShare={() => setShareOpen(true)}
+              leftControls={<VerbosityDropdown value={verbosity} onChange={pickVerbosity} />}
             />
             <AdvancementBanner clientId={clientId} />
             <RiskBanner riskFlags={treatmentContent.riskFlags} />
@@ -458,6 +483,7 @@ export function NotesTab({
               note={treatmentContent}
               signedAt={note.signedAt}
               signedBy={note.signedBy}
+              verbosity={verbosity}
             />
             <ShareModal
               open={shareOpen}
@@ -563,17 +589,20 @@ export function NotesTab({
             noteLanguage={noteLanguage}
             noteText={therapyNoteToText(note)}
             signed={false}
+            leftControls={
+              <>
+                <TemplatePicker
+                  sessionId={sessionId}
+                  currentTemplateId={noteTemplateId}
+                  disabled={generating}
+                  onApply={triggerGeneration}
+                />
+                <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
+              </>
+            }
           />
-          <div className="mb-5">
-            <TemplatePicker
-              sessionId={sessionId}
-              currentTemplateId={noteTemplateId}
-              disabled={generating}
-              onApply={triggerGeneration}
-            />
-          </div>
           <RiskBanner riskFlags={note.riskFlags} />
-          <NotePreview note={note} />
+          <NotePreview note={note} verbosity={verbosity} />
           <NoteFooter
             costInr={phase.draft.totalCostInr}
             chunkCount={phase.draft.speakerSegments?.length ?? 0}
@@ -686,6 +715,35 @@ function GeneratingState({
         </div>
       )}
     </Card>
+  );
+}
+
+/** Compact "Detailed ▾" view-density dropdown for the note toolbar. */
+function VerbosityDropdown({
+  value,
+  onChange,
+}: {
+  value: NoteVerbosity;
+  onChange: (v: NoteVerbosity) => void;
+}) {
+  return (
+    <label className="relative inline-flex items-center">
+      <span className="sr-only">Detail level</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as NoteVerbosity)}
+        className="appearance-none rounded-full border border-[var(--color-line)] bg-white py-1.5 pl-3.5 pr-8 text-sm font-medium text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)]"
+      >
+        {NOTE_VERBOSITIES.map((v) => (
+          <option key={v} value={v}>
+            {NOTE_VERBOSITY_LABEL[v]}
+          </option>
+        ))}
+      </select>
+      <span aria-hidden className="pointer-events-none absolute right-3 text-[var(--color-ink-3)]">
+        ▾
+      </span>
+    </label>
   );
 }
 
