@@ -62,7 +62,7 @@ export function NotePreview({ note, signedAt, signedBy, verbosity = 'DETAILED' }
             <div className="space-y-5">
               {note.topics!.map((t, i) => (
                 <div key={i}>
-                  <h4 className="font-serif text-lg text-[var(--color-ink)]">{t.title}</h4>
+                  <h4 className="text-lg font-bold text-[var(--color-ink)]">{t.title}</h4>
                   {t.points.length > 0 && (
                     <ul className="mt-2 space-y-1.5">
                       {t.points.map((p, j) => (
@@ -140,7 +140,7 @@ export function NotePreview({ note, signedAt, signedBy, verbosity = 'DETAILED' }
 function Section({ heading, children }: { heading: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="font-serif text-2xl text-[var(--color-ink)]">{heading}</h3>
+      <h3 className="text-2xl font-bold tracking-tight text-[var(--color-ink)]">{heading}</h3>
       <div className="mt-3 text-[15px] leading-relaxed text-[var(--color-ink)]">{children}</div>
     </section>
   );
@@ -148,7 +148,7 @@ function Section({ heading, children }: { heading: string; children: ReactNode }
 
 function Dot() {
   return (
-    <span aria-hidden className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-accent)]" />
+    <span aria-hidden className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--color-ink-3)]" />
   );
 }
 

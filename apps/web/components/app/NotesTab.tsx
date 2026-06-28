@@ -19,6 +19,7 @@ import { NotePreview } from './NotePreview';
 import { NoteToolbar } from './NoteToolbar';
 import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
+import { isBuiltinTemplateId, resolveBuiltinTemplate } from '../../lib/builtin-templates';
 import {
   NOTE_VERBOSITIES,
   NOTE_VERBOSITY_LABEL,
@@ -308,6 +309,9 @@ export function NotesTab({
     }
   }, [phase, sessionId]);
 
+  // Short label for the AI panel's document chip ("Note (BASE)").
+  const templateLabel = resolveTemplateLabel(noteTemplateId);
+
   // ----- Render -----
 
   if (phase.kind === 'awaiting-end') {
@@ -512,7 +516,13 @@ export function NotesTab({
             />
             <NoteReviewPanel sessionId={sessionId} />
           </Card>
-          <ModifyPanel disabled={true} sessionId={sessionId} note={treatmentContent} />
+          <ModifyPanel
+            disabled={true}
+            sessionId={sessionId}
+            note={treatmentContent}
+            clientName={clientName}
+            templateLabel={templateLabel}
+          />
         </div>
       </>
     );
@@ -630,6 +640,8 @@ export function NotesTab({
           disabled={false}
           sessionId={sessionId}
           note={phase.draft.content as TherapyNoteV1}
+          clientName={clientName}
+          templateLabel={templateLabel}
           onModified={(next) =>
             setPhase({
               kind: 'completed',
@@ -782,21 +794,34 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-const QUICK_INSTRUCTIONS = [
-  'Change to paragraph format',
-  'Remove all client names',
-  'Make more concise',
-  'Expand the plan with concrete steps',
+type SuggestKind = 'paragraph' | 'eye-off' | 'concise' | 'expand';
+
+const QUICK_INSTRUCTIONS: { label: string; icon: SuggestKind }[] = [
+  { label: 'Change to paragraph format', icon: 'paragraph' },
+  { label: 'Remove all client names', icon: 'eye-off' },
+  { label: 'Make more concise', icon: 'concise' },
+  { label: 'Expand the plan with concrete steps', icon: 'expand' },
 ];
 
+/**
+ * The note's AI side panel — a chat-style "modify your note" surface
+ * matching the reference: a "New chat" header, suggestion chips, a centred
+ * prompt with a document-context chip, and a composer with a Send button.
+ * Submitting (a chip or typed instruction) calls the note/modify endpoint;
+ * the model only rewrites existing SOAP content, it doesn't invent any.
+ */
 function ModifyPanel({
   disabled,
   sessionId,
+  clientName,
+  templateLabel,
   onModified,
 }: {
   disabled: boolean;
   sessionId: string;
   note: TherapyNoteV1;
+  clientName: string;
+  templateLabel: string;
   onModified?: (next: TherapyNoteV1) => void;
 }) {
   const [instruction, setInstruction] = useState('');
@@ -833,78 +858,167 @@ function ModifyPanel({
     [disabled, onModified, sessionId],
   );
 
-  return (
-    <Card className="flex h-full flex-col p-6">
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]">
-        AI assistant
-      </p>
-      <h3 className="mt-1 font-serif text-2xl">Modify your note</h3>
-      <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-        {disabled
-          ? 'The note is signed — use the Revisions panel below to record an edit.'
-          : 'Tell the scribe what to change — “make it more concise”, “rewrite the plan as bullets”, “remove client names”.'}
-      </p>
+  function reset(): void {
+    setInstruction('');
+    setError(null);
+    setLastChanged(null);
+  }
 
-      <div className="mt-5 grid gap-2">
-        {QUICK_INSTRUCTIONS.map((q) => (
-          <button
-            key={q}
-            type="button"
-            disabled={disabled || pending}
-            onClick={() => void submit(q)}
-            className="flex items-center justify-between rounded-xl border border-[var(--color-line)] bg-white px-4 py-2.5 text-left text-sm text-[var(--color-ink)] hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] disabled:cursor-not-allowed disabled:text-[var(--color-ink-3)] disabled:opacity-70 disabled:hover:border-[var(--color-line)] disabled:hover:bg-white"
-          >
-            {q}
-            <span className="text-xs text-[var(--color-ink-3)]">→</span>
-          </button>
-        ))}
+  return (
+    <Card className="flex h-full flex-col p-5">
+      {/* Header — New chat / clear */}
+      <div className="flex items-center justify-between border-b border-[var(--color-line-soft)] pb-3">
+        <button
+          type="button"
+          onClick={reset}
+          className="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-ink)]"
+        >
+          New chat
+          <span aria-hidden className="text-xs text-[var(--color-ink-3)]">
+            ▾
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={reset}
+          aria-label="Clear chat"
+          className="grid h-7 w-7 place-items-center rounded-full text-[var(--color-ink-3)] transition-colors hover:bg-[var(--color-surface-soft)] hover:text-[var(--color-ink)]"
+        >
+          <PanelIcon kind="close" />
+        </button>
       </div>
 
-      {lastChanged && lastChanged.length > 0 && (
-        <p className="mt-3 text-xs text-[var(--color-accent)]">Updated: {lastChanged.join(', ')}</p>
-      )}
-      {lastChanged && lastChanged.length === 0 && (
-        <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-          Model ran but no SOAP fields changed.
-        </p>
-      )}
-      {error && <p className="mt-3 text-xs text-[var(--color-warn)]">{error}</p>}
+      {/* Conversation area — feedback + quick suggestions */}
+      <div className="flex flex-1 flex-col justify-end gap-3 py-6">
+        {disabled && (
+          <p className="text-center text-xs text-[var(--color-ink-3)]">
+            This note is signed. Use the Revisions panel below to record an edit.
+          </p>
+        )}
+        {lastChanged && lastChanged.length > 0 && (
+          <p className="rounded-xl bg-[var(--color-accent-soft)] px-3 py-2 text-xs text-[var(--color-accent)]">
+            Updated: {lastChanged.join(', ')}
+          </p>
+        )}
+        {lastChanged && lastChanged.length === 0 && (
+          <p className="text-xs text-[var(--color-ink-3)]">Model ran but no fields changed.</p>
+        )}
+        {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
 
-      <div className="mt-auto pt-6">
+        {!disabled && (
+          <div className="grid gap-2">
+            {QUICK_INSTRUCTIONS.map((q) => (
+              <button
+                key={q.label}
+                type="button"
+                disabled={pending}
+                onClick={() => void submit(q.label)}
+                className="flex items-center gap-2.5 rounded-xl border border-[var(--color-line)] bg-white px-3.5 py-2.5 text-left text-sm text-[var(--color-ink)] transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] disabled:opacity-60"
+              >
+                <span className="text-[var(--color-ink-3)]">
+                  <PanelIcon kind={q.icon} />
+                </span>
+                {q.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Composer — prompt + document chip + input */}
+      <div>
+        <p className="text-center text-base font-semibold text-[var(--color-ink)]">
+          How would you like to modify your note?
+        </p>
+        <div className="mt-3 flex justify-center">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs text-[var(--color-ink-2)]">
+            <PanelIcon kind="doc" />
+            {clientName} — Note ({templateLabel})
+          </span>
+        </div>
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
             void submit(instruction);
           }}
-          className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-3 text-sm text-[var(--color-ink-3)]"
+          className="mt-3 rounded-2xl border border-[var(--color-line)] bg-white p-3"
         >
-          <p>How would you like to modify your note?</p>
-          <div className="mt-2 flex items-center gap-2 rounded-xl bg-white p-2">
-            <input
-              type="text"
-              placeholder={pending ? 'Modifying…' : 'Enter modifications here'}
-              disabled={disabled || pending}
-              value={instruction}
-              onChange={(e) => setInstruction(e.target.value)}
-              className="flex-1 bg-transparent text-sm text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-3)]"
-            />
+          <input
+            type="text"
+            placeholder={
+              disabled
+                ? 'Signed — use Revisions below to edit'
+                : pending
+                  ? 'Modifying…'
+                  : 'Make modifications to your note here'
+            }
+            disabled={disabled || pending}
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            className="w-full bg-transparent text-sm text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-3)]"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] px-2.5 py-1 text-xs text-[var(--color-ink-3)]">
+              <PanelIcon kind="doc" />
+              {templateLabel}
+            </span>
             <button
               type="submit"
               disabled={disabled || pending || instruction.trim().length < 3}
               aria-label="Send"
-              className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+              className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-40"
             >
-              ↑
+              <PanelIcon kind="send" />
             </button>
           </div>
         </form>
+        <p className="mt-3 text-center text-[11px] text-[var(--color-ink-3)]">
+          The AI only rewrites — it won’t invent clinical content. Severity + modality are
+          preserved.
+        </p>
       </div>
-      <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-        Word of warning: the model only rewrites — it won't invent new clinical content. Severity +
-        modality are preserved verbatim.
-      </p>
     </Card>
   );
+}
+
+/** Line-icons for the AI panel (suggestion chips + composer controls). */
+function PanelIcon({ kind }: { kind: SuggestKind | 'close' | 'doc' | 'send' }) {
+  const paths: Record<SuggestKind | 'close' | 'doc' | 'send', string> = {
+    paragraph: 'M4 6h16M4 10h16M4 14h10M4 18h7',
+    'eye-off':
+      'M3 3l18 18M10.6 10.6a2 2 0 0 0 2.83 2.83M9.4 5.2A9 9 0 0 1 12 5c5 0 9 4.5 9 7a12 12 0 0 1-2 2.6M5.2 7.3A12 12 0 0 0 3 12c0 2.5 4 7 9 7a9 9 0 0 0 2.3-.3',
+    concise: 'M4 9h12M4 13h16M4 17h8',
+    expand: 'M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5',
+    close: 'M6 6l12 12M18 6L6 18',
+    doc: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5zM14 3v5h5',
+    send: 'M12 19V5M5 12l7-7 7 7',
+  };
+  return (
+    <svg
+      aria-hidden
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d={paths[kind]} />
+    </svg>
+  );
+}
+
+/** A short label for the AI panel's document chip — "BASE" for the
+ *  built-in SOAP default, otherwise the chosen template's name. */
+function resolveTemplateLabel(noteTemplateId: string | null): string {
+  if (!noteTemplateId) return 'BASE';
+  if (isBuiltinTemplateId(noteTemplateId)) {
+    return resolveBuiltinTemplate(noteTemplateId)?.name ?? 'Template';
+  }
+  return 'Template';
 }
 
 function derivePhase(
