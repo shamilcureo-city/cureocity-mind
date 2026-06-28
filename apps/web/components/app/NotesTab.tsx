@@ -16,6 +16,7 @@ import { Badge } from '../ui/Badge';
 import { IntakeNotePreview } from './IntakeNotePreview';
 import { IntakeModifyPanel } from './IntakeModifyPanel';
 import { NotePreview } from './NotePreview';
+import { NoteEditor } from './NoteEditor';
 import { NoteToolbar } from './NoteToolbar';
 import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
@@ -153,6 +154,10 @@ export function NotesTab({
   const [noteLang, setNoteLang] = useState(noteLanguage);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  // Direct manual edit of the draft note (pre-sign).
+  const [editing, setEditing] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Stall detection for the generating phase. `slow` latches true once
   // a run has sat past its threshold, flipping the spinner into a
@@ -384,6 +389,38 @@ export function NotesTab({
       }
     },
     [phase, sessionId, noteLang, translating],
+  );
+
+  // Save a manual edit of the draft note (PUT note-draft, pre-sign).
+  const saveEdit = useCallback(
+    async (next: TherapyNoteV1): Promise<void> => {
+      if (phase.kind !== 'completed') return;
+      const draft = phase.draft;
+      setSavingEdit(true);
+      setEditError(null);
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: next }),
+        });
+        if (!res.ok) {
+          const b = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(b.error ?? `Save failed (${res.status})`);
+        }
+        const b = (await res.json()) as { note: TherapyNoteV1 };
+        setPhase({
+          kind: 'completed',
+          draft: { ...draft, content: b.note as unknown as NoteDraft['content'] },
+        });
+        setEditing(false);
+      } catch (e) {
+        setEditError((e as Error).message);
+      } finally {
+        setSavingEdit(false);
+      }
+    },
+    [phase, sessionId],
   );
 
   // Short label for the AI panel's document chip ("Note (BASE)").
@@ -672,19 +709,19 @@ export function NotesTab({
             clientName={clientName}
             noteText={therapyNoteToText(note)}
             signed={false}
-            onShare={signAndShare}
+            onShare={editing ? undefined : signAndShare}
             leftControls={
               <>
                 <TemplatePicker
                   sessionId={sessionId}
                   currentTemplateId={noteTemplateId}
-                  disabled={generating || translating}
+                  disabled={generating || translating || editing}
                   onApply={triggerGeneration}
                 />
                 <LanguagePicker
                   value={noteLang}
                   onChange={translateTo}
-                  disabled={translating || generating}
+                  disabled={translating || generating || editing}
                 />
                 <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
               </>
@@ -694,33 +731,51 @@ export function NotesTab({
             <p className="mb-4 text-xs text-[var(--color-warn)]">{translateError}</p>
           )}
           <RiskBanner riskFlags={note.riskFlags} />
-          <NotePreview note={note} verbosity={verbosity} />
-          <NoteFooter
-            costInr={phase.draft.totalCostInr}
-            chunkCount={phase.draft.speakerSegments?.length ?? 0}
-            transcriptChars={phase.draft.transcript?.length ?? 0}
-            region={llmBackend}
-          />
-          <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
-          <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-            <Button onClick={triggerSignOff} disabled={signing}>
-              {signing ? 'Signing…' : 'Sign off'}
-            </Button>
-            <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
-              Re-generate
-            </Button>
-            {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
-          </div>
-          <div className="mt-3">
-            <InlineExplainer
-              entry={glossary('action.sign')}
-              label="New here? See what “sign off” does"
+          {editing ? (
+            <NoteEditor
+              note={note}
+              saving={savingEdit}
+              error={editError}
+              onSave={saveEdit}
+              onCancel={() => {
+                setEditing(false);
+                setEditError(null);
+              }}
             />
-          </div>
+          ) : (
+            <>
+              <NotePreview note={note} verbosity={verbosity} />
+              <NoteFooter
+                costInr={phase.draft.totalCostInr}
+                chunkCount={phase.draft.speakerSegments?.length ?? 0}
+                transcriptChars={phase.draft.transcript?.length ?? 0}
+                region={llmBackend}
+              />
+              <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
+              <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
+                <Button onClick={triggerSignOff} disabled={signing}>
+                  {signing ? 'Signing…' : 'Sign off'}
+                </Button>
+                <Button variant="secondary" onClick={() => setEditing(true)} disabled={translating}>
+                  Edit note
+                </Button>
+                <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
+                  Re-generate
+                </Button>
+                {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
+              </div>
+              <div className="mt-3">
+                <InlineExplainer
+                  entry={glossary('action.sign')}
+                  label="New here? See what “sign off” does"
+                />
+              </div>
+            </>
+          )}
         </Card>
         <ModifyPanel
           disabled={false}
-          busy={translating}
+          busy={translating || editing}
           sessionId={sessionId}
           note={phase.draft.content as TherapyNoteV1}
           clientName={clientName}

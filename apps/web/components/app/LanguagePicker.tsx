@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+// (focus handled via the input's autoFocus on mount; no focus effect needed)
 import {
   NOTE_LANGUAGES,
   noteLanguage,
@@ -29,7 +30,6 @@ export function LanguagePicker({ value, onChange, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const wrapRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Close on outside-click / Escape.
   useEffect(() => {
@@ -48,9 +48,9 @@ export function LanguagePicker({ value, onChange, disabled }: Props) {
     };
   }, [open]);
 
+  // Reset the search when the popover closes.
   useEffect(() => {
-    if (open) inputRef.current?.focus();
-    else setQuery('');
+    if (!open) setQuery('');
   }, [open]);
 
   const q = query.trim().toLowerCase();
@@ -94,7 +94,7 @@ export function LanguagePicker({ value, onChange, disabled }: Props) {
       {open && (
         <div className="absolute left-0 z-30 mt-1.5 w-64 rounded-xl border border-[var(--color-line)] bg-white p-2 shadow-[0_12px_30px_rgba(15,27,42,0.13)]">
           <input
-            ref={inputRef}
+            autoFocus
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
