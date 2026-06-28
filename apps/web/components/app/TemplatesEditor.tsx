@@ -2,18 +2,46 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { NoteTemplate, TemplateSection } from '@cureocity/contracts';
+import { builtinTemplatesByCategory, type BuiltinTemplate } from '../../lib/builtin-templates';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Input, Label, Textarea } from '../ui/Field';
 
-type EditTarget = { kind: 'new' } | { kind: 'edit'; template: NoteTemplate } | null;
+/** A pre-filled starting point for the create modal (e.g. from a built-in). */
+type TemplateSeed = { name: string; description?: string; sections: TemplateSection[] };
+
+type EditTarget =
+  | { kind: 'new'; seed?: TemplateSeed }
+  | { kind: 'edit'; template: NoteTemplate }
+  | null;
 
 const DEFAULT_SECTIONS: TemplateSection[] = [
   { id: 'summary', title: 'Summary' },
   { id: 'session_topics', title: 'Session Topics' },
   { id: 'plan', title: 'Plan' },
 ];
+
+/** title → a stable lowercase_underscore section id. */
+function slugifySectionId(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+/** Map a read-only built-in into an editable custom-template seed. */
+function builtinSeed(t: BuiltinTemplate): TemplateSeed {
+  return {
+    name: t.name,
+    description: `Based on the built-in ${t.name} template.`,
+    sections: t.sections.map((s, i) => ({
+      id: slugifySectionId(s.title) || `section_${i + 1}`,
+      title: s.title,
+      ...(s.hint ? { hint: s.hint } : {}),
+    })),
+  };
+}
 
 export function TemplatesEditor() {
   const [items, setItems] = useState<NoteTemplate[]>([]);
@@ -81,7 +109,7 @@ export function TemplatesEditor() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-10">
       <div className="flex justify-end">
         <Button onClick={() => setTarget({ kind: 'new' })}>+ Create template</Button>
       </div>
@@ -92,77 +120,135 @@ export function TemplatesEditor() {
         </Card>
       )}
 
-      {loading ? (
-        <Card className="p-10 text-center text-sm text-[var(--color-ink-3)]">Loading…</Card>
-      ) : items.length === 0 ? (
-        <Card className="p-10 text-center">
-          <p className="font-serif text-xl">No custom templates yet.</p>
-          <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-            New notes use the built-in SOAP layout. Create a template if you want a different
-            structure (e.g. DAP, BIRP, intake-specific).
-          </p>
-        </Card>
-      ) : (
-        <ul className="space-y-3">
-          {items.map((t) => (
-            <li key={t.id}>
-              <Card className="p-5">
-                <header className="flex flex-wrap items-baseline justify-between gap-3">
-                  <div>
-                    <h3 className="font-serif text-lg">{t.name}</h3>
-                    {t.description && (
-                      <p className="mt-1 text-sm text-[var(--color-ink-2)]">{t.description}</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {t.isDefault && <Badge tone="accent">Default</Badge>}
-                    <Badge tone="muted">
-                      {t.sections.length} section{t.sections.length === 1 ? '' : 's'}
-                    </Badge>
-                  </div>
-                </header>
+      {/* Built-in catalog — always available. These aren't DB rows, so they
+          can't be edited or deleted, but "use as a starting point" seeds a
+          new custom template from one. */}
+      <section>
+        <h2 className="font-serif text-xl">Built-in templates</h2>
+        <p className="mt-1 max-w-2xl text-sm text-[var(--color-ink-2)]">
+          Ready-made note structures, always available. Pick one on a note from the{' '}
+          <span className="font-medium text-[var(--color-ink)]">BASE</span> menu, or use one as a
+          starting point for your own.
+        </p>
+        <div className="mt-4 space-y-6">
+          {builtinTemplatesByCategory().map((group) => (
+            <div key={group.category}>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+                {group.category}
+              </h3>
+              <ul className="mt-2 grid gap-3 md:grid-cols-2">
+                {group.templates.map((t) => (
+                  <li key={t.id}>
+                    <Card className="flex h-full flex-col p-5">
+                      <header className="flex items-baseline justify-between gap-3">
+                        <h4 className="font-serif text-lg">{t.name}</h4>
+                        <Badge tone="muted">
+                          {t.sections.length} section{t.sections.length === 1 ? '' : 's'}
+                        </Badge>
+                      </header>
+                      <ul className="mt-3 flex flex-wrap gap-1 text-xs">
+                        {t.sections.map((s) => (
+                          <li
+                            key={s.title}
+                            className="rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[var(--color-ink-2)]"
+                          >
+                            {s.title}
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-auto flex justify-end border-t border-[var(--color-line-soft)] pt-3">
+                        <button
+                          type="button"
+                          onClick={() => setTarget({ kind: 'new', seed: builtinSeed(t) })}
+                          className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs text-[var(--color-ink)] hover:border-[var(--color-accent)]"
+                        >
+                          use as a starting point
+                        </button>
+                      </div>
+                    </Card>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      </section>
 
-                <ul className="mt-3 flex flex-wrap gap-1 text-xs">
-                  {t.sections.map((s) => (
-                    <li
-                      key={s.id}
-                      className="rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[var(--color-ink-2)]"
-                    >
-                      {s.title}
-                    </li>
-                  ))}
-                </ul>
+      {/* The therapist's own editable templates. */}
+      <section>
+        <h2 className="font-serif text-xl">Your templates</h2>
+        {loading ? (
+          <Card className="mt-4 p-10 text-center text-sm text-[var(--color-ink-3)]">Loading…</Card>
+        ) : items.length === 0 ? (
+          <Card className="mt-4 p-10 text-center">
+            <p className="font-serif text-xl">No custom templates yet.</p>
+            <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
+              New notes use the built-in SOAP layout. Create a template — or start from a built-in
+              above — if you want a different structure.
+            </p>
+          </Card>
+        ) : (
+          <ul className="mt-4 space-y-3">
+            {items.map((t) => (
+              <li key={t.id}>
+                <Card className="p-5">
+                  <header className="flex flex-wrap items-baseline justify-between gap-3">
+                    <div>
+                      <h3 className="font-serif text-lg">{t.name}</h3>
+                      {t.description && (
+                        <p className="mt-1 text-sm text-[var(--color-ink-2)]">{t.description}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {t.isDefault && <Badge tone="accent">Default</Badge>}
+                      <Badge tone="muted">
+                        {t.sections.length} section{t.sections.length === 1 ? '' : 's'}
+                      </Badge>
+                    </div>
+                  </header>
 
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--color-line-soft)] pt-3 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => setTarget({ kind: 'edit', template: t })}
-                    className="rounded-full bg-[var(--color-ink)] px-3 py-1 text-[var(--color-surface)] hover:bg-[var(--color-ink-2)]"
-                  >
-                    edit
-                  </button>
-                  {!t.isDefault && (
+                  <ul className="mt-3 flex flex-wrap gap-1 text-xs">
+                    {t.sections.map((s) => (
+                      <li
+                        key={s.id}
+                        className="rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[var(--color-ink-2)]"
+                      >
+                        {s.title}
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-[var(--color-line-soft)] pt-3 text-xs">
                     <button
                       type="button"
-                      onClick={() => void setDefault(t.id)}
-                      className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-[var(--color-ink)] hover:border-[var(--color-accent)]"
+                      onClick={() => setTarget({ kind: 'edit', template: t })}
+                      className="rounded-full bg-[var(--color-ink)] px-3 py-1 text-[var(--color-surface)] hover:bg-[var(--color-ink-2)]"
                     >
-                      set default
+                      edit
                     </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void remove(t.id)}
-                    className="ml-auto text-[var(--color-warn)] hover:underline"
-                  >
-                    delete
-                  </button>
-                </div>
-              </Card>
-            </li>
-          ))}
-        </ul>
-      )}
+                    {!t.isDefault && (
+                      <button
+                        type="button"
+                        onClick={() => void setDefault(t.id)}
+                        className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-[var(--color-ink)] hover:border-[var(--color-accent)]"
+                      >
+                        set default
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void remove(t.id)}
+                      className="ml-auto text-[var(--color-warn)] hover:underline"
+                    >
+                      delete
+                    </button>
+                  </div>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {target && (
         <TemplateModal
@@ -183,18 +269,20 @@ function TemplateModal({
   onClose,
   onSaved,
 }: {
-  target: { kind: 'new' } | { kind: 'edit'; template: NoteTemplate };
+  target: { kind: 'new'; seed?: TemplateSeed } | { kind: 'edit'; template: NoteTemplate };
   onClose: () => void;
   onSaved: () => void;
 }) {
   const isEdit = target.kind === 'edit';
-  const initial = isEdit ? target.template : null;
-  const [name, setName] = useState(initial?.name ?? '');
-  const [description, setDescription] = useState(initial?.description ?? '');
-  const [sections, setSections] = useState<TemplateSection[]>(
-    initial?.sections ?? DEFAULT_SECTIONS,
+  const seed = target.kind === 'new' ? target.seed : undefined;
+  const [name, setName] = useState(isEdit ? target.template.name : (seed?.name ?? ''));
+  const [description, setDescription] = useState(
+    isEdit ? (target.template.description ?? '') : (seed?.description ?? ''),
   );
-  const [isDefault, setIsDefault] = useState(initial?.isDefault ?? false);
+  const [sections, setSections] = useState<TemplateSection[]>(
+    isEdit ? target.template.sections : (seed?.sections ?? DEFAULT_SECTIONS),
+  );
+  const [isDefault, setIsDefault] = useState(isEdit ? target.template.isDefault : false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -270,7 +358,11 @@ function TemplateModal({
       <Card className="max-h-[92vh] w-full max-w-2xl overflow-y-auto p-7">
         <header className="flex items-baseline justify-between gap-3">
           <h2 className="font-serif text-2xl">
-            {isEdit ? `Edit ${target.template.name}` : 'New template'}
+            {isEdit
+              ? `Edit ${target.template.name}`
+              : seed
+                ? `New template from ${seed.name}`
+                : 'New template'}
           </h2>
           <button
             type="button"
