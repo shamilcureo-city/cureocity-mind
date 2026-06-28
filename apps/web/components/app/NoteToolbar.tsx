@@ -1,23 +1,21 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 
 /**
- * Sprint 70 — the note action toolbar (the icon row above the note, matching
- * the reference template). Consolidates the actions that used to sit as
- * scattered buttons below the note: a "Review diagnosis" shortcut to the AI
- * Copilot, Copy, Download PDF, a language indicator, a signed/draft lock
- * indicator, and Share. Read-only affordances (language, lock) are indicators
- * only — switching language and the post-sign revise flow live elsewhere.
+ * Sprint 70 (redesign) — the clean note toolbar matching the reference: the
+ * `BASE ▾` / `Detailed ▾` controls (passed in as `leftControls`) on the left,
+ * an icon-only action cluster on the right, and a small client avatar at the
+ * far right. No text labels; tooltips carry the meaning.
  */
 
-const LANG: Record<string, { flag: string; label: string }> = {
-  en: { flag: '🇬🇧', label: 'English' },
-  hi: { flag: '🇮🇳', label: 'Hindi' },
-  ml: { flag: '🇮🇳', label: 'Malayalam' },
-  ta: { flag: '🇮🇳', label: 'Tamil' },
-  bn: { flag: '🇮🇳', label: 'Bengali' },
+const LANG_FLAG: Record<string, string> = {
+  en: '🇬🇧',
+  hi: '🇮🇳',
+  ml: '🇮🇳',
+  ta: '🇮🇳',
+  bn: '🇮🇳',
 };
 
 interface Props {
@@ -29,10 +27,12 @@ interface Props {
   signed: boolean;
   /** Opens the Share modal — only wired (and shown) for signed notes. */
   onShare?: () => void;
+  /** The BASE (template) + Detailed (verbosity) controls, rendered on the left. */
+  leftControls?: ReactNode;
 }
 
 const ICON_BTN =
-  'inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white px-3 py-1.5 text-sm text-[var(--color-ink-2)] transition-colors hover:border-[var(--color-ink-3)] hover:text-[var(--color-ink)]';
+  'grid h-9 w-9 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)] transition-colors hover:border-[var(--color-ink-3)] hover:text-[var(--color-ink)]';
 
 export function NoteToolbar({
   sessionId,
@@ -41,6 +41,7 @@ export function NoteToolbar({
   noteText,
   signed,
   onShare,
+  leftControls,
 }: Props) {
   const [copied, setCopied] = useState(false);
 
@@ -54,29 +55,30 @@ export function NoteToolbar({
     }
   }
 
-  const lang = LANG[noteLanguage] ?? { flag: '🌐', label: noteLanguage };
+  const flag = LANG_FLAG[noteLanguage] ?? '🌐';
 
   return (
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line-soft)] pb-4">
-      <div className="flex items-center gap-2">
-        <span
-          aria-hidden
-          className="grid h-7 w-7 place-items-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]"
-        >
-          {initials(clientName)}
-        </span>
-        <span className="text-sm font-medium text-[var(--color-ink)]">{clientName}</span>
-      </div>
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2">{leftControls}</div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Link href={`/app/sessions/${sessionId}?tab=copilot`} className={ICON_BTN}>
+      <div className="flex items-center gap-1.5">
+        <Link
+          href={`/app/sessions/${sessionId}?tab=copilot`}
+          className={ICON_BTN}
+          title="Review diagnosis"
+          aria-label="Review diagnosis"
+        >
           <Icon kind="review" />
-          <span className="hidden sm:inline">Review diagnosis</span>
         </Link>
 
-        <button type="button" onClick={copy} className={ICON_BTN} aria-label="Copy note text">
+        <button
+          type="button"
+          onClick={copy}
+          className={`${ICON_BTN} ${copied ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : ''}`}
+          title={copied ? 'Copied' : 'Copy note'}
+          aria-label="Copy note"
+        >
           <Icon kind="copy" />
-          <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
         </button>
 
         {signed && (
@@ -84,22 +86,21 @@ export function NoteToolbar({
             href={`/api/v1/sessions/${sessionId}/note/pdf`}
             download
             className={ICON_BTN}
+            title="Download PDF"
             aria-label="Download PDF"
           >
             <Icon kind="download" />
-            <span className="hidden sm:inline">PDF</span>
           </a>
         )}
 
-        <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white px-3 py-1.5 text-sm text-[var(--color-ink-3)]"
-          title={`Note language: ${lang.label}`}
-        >
-          <span aria-hidden>{lang.flag}</span>
+        <span className={`${ICON_BTN} cursor-default`} title={`Note language: ${noteLanguage}`}>
+          <span aria-hidden className="text-sm">
+            {flag}
+          </span>
         </span>
 
         <span
-          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-line)] bg-white px-3 py-1.5 text-sm text-[var(--color-ink-3)]"
+          className={`${ICON_BTN} cursor-default`}
           title={signed ? 'Signed — locked' : 'Draft — still editable'}
         >
           <Icon kind={signed ? 'lock' : 'unlock'} />
@@ -109,12 +110,21 @@ export function NoteToolbar({
           <button
             type="button"
             onClick={onShare}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+            title="Share with patient"
+            aria-label="Share with patient"
           >
             <Icon kind="share" />
-            Share
           </button>
         )}
+
+        <span
+          aria-hidden
+          title={clientName}
+          className="ml-1 grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]"
+        >
+          {initials(clientName)}
+        </span>
       </div>
     </div>
   );
