@@ -142,9 +142,12 @@ export function TemplatesEditor() {
                     <Card className="flex h-full flex-col p-5">
                       <header className="flex items-baseline justify-between gap-3">
                         <h4 className="font-serif text-lg">{t.name}</h4>
-                        <Badge tone="muted">
-                          {t.sections.length} section{t.sections.length === 1 ? '' : 's'}
-                        </Badge>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {t.recommended && <Badge tone="accent">Recommended</Badge>}
+                          <Badge tone="muted">
+                            {t.sections.length} section{t.sections.length === 1 ? '' : 's'}
+                          </Badge>
+                        </div>
                       </header>
                       <ul className="mt-3 flex flex-wrap gap-1 text-xs">
                         {t.sections.map((s) => (

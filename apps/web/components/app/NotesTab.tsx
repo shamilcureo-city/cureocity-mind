@@ -26,6 +26,7 @@ import {
   isNoteVerbosity,
   type NoteVerbosity,
 } from '../../lib/note-format';
+import { noteLanguageLabel, noteLanguagesByGroup } from '../../lib/note-languages';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
@@ -137,6 +138,17 @@ export function NotesTab({
     }
   }
   const [shareOpen, setShareOpen] = useState(false);
+  // The note's current display language (translated on demand from the
+  // toolbar's language picker). Seeded from the session's output language.
+  // Session-local on purpose: the translated *content* is persisted into the
+  // draft, but this language tag is not written back to session.language — a
+  // report translated to the client's language shouldn't silently change the
+  // therapist's working language for other passes (e.g. the next pre-session
+  // brief). So a reload re-seeds this from session.language; the persisted
+  // note content stays in whatever language it was last translated to.
+  const [noteLang, setNoteLang] = useState(noteLanguage);
+  const [translating, setTranslating] = useState(false);
+  const [translateError, setTranslateError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Stall detection for the generating phase. `slow` latches true once
   // a run has sat past its threshold, flipping the spinner into a
@@ -226,6 +238,11 @@ export function NotesTab({
 
   const triggerGeneration = useCallback(async (): Promise<void> => {
     setGenerating(true);
+    // A fresh draft comes back in the session's original language, so reset
+    // the language indicator (otherwise it would still claim the last
+    // translated language).
+    setNoteLang(noteLanguage);
+    setTranslateError(null);
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
         method: 'POST',
@@ -261,7 +278,7 @@ export function NotesTab({
     } finally {
       setGenerating(false);
     }
-  }, [sessionId, pollOnce, phase.kind]);
+  }, [sessionId, pollOnce, phase.kind, noteLanguage]);
 
   // Manual recovery from a stalled run. Re-runs the orchestrator, which
   // is idempotent: it resets the draft to IN_PROGRESS and re-drafts from
@@ -308,6 +325,43 @@ export function NotesTab({
       setSigning(false);
     }
   }, [phase, sessionId]);
+
+  // Translate the completed draft into another language via the same
+  // model-rewrite endpoint the AI panel uses (Vertex-only, pre-sign). The
+  // translation is persisted into the draft, so sign + share carry it.
+  const translateTo = useCallback(
+    async (code: string): Promise<void> => {
+      if (phase.kind !== 'completed' || code === noteLang || translating) return;
+      const draft = phase.draft;
+      const label = noteLanguageLabel(code);
+      setTranslating(true);
+      setTranslateError(null);
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/note/modify`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            instruction: `Translate every text field of this note into ${label}. Output all narrative text in ${label}, keeping the exact JSON structure, all clinical content, risk severity, and meaning identical. Translate only — do not add, remove, summarise, or re-interpret anything. Leave proper names unchanged.`,
+          }),
+        });
+        if (!res.ok) {
+          const b = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(b.error ?? `Translation failed (${res.status})`);
+        }
+        const b = (await res.json()) as { note: TherapyNoteV1 };
+        setPhase({
+          kind: 'completed',
+          draft: { ...draft, content: b.note as unknown as NoteDraft['content'] },
+        });
+        setNoteLang(code);
+      } catch (e) {
+        setTranslateError((e as Error).message);
+      } finally {
+        setTranslating(false);
+      }
+    },
+    [phase, sessionId, noteLang, translating],
+  );
 
   // Short label for the AI panel's document chip ("Note (BASE)").
   const templateLabel = resolveTemplateLabel(noteTemplateId);
@@ -475,7 +529,7 @@ export function NotesTab({
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
-              noteLanguage={noteLanguage}
+              noteLanguage={noteLang}
               noteText={therapyNoteToText(treatmentContent)}
               signed
               onShare={() => setShareOpen(true)}
@@ -596,7 +650,7 @@ export function NotesTab({
           <NoteToolbar
             sessionId={sessionId}
             clientName={clientName}
-            noteLanguage={noteLanguage}
+            noteLanguage={noteLang}
             noteText={therapyNoteToText(note)}
             signed={false}
             leftControls={
@@ -604,13 +658,21 @@ export function NotesTab({
                 <TemplatePicker
                   sessionId={sessionId}
                   currentTemplateId={noteTemplateId}
-                  disabled={generating}
+                  disabled={generating || translating}
                   onApply={triggerGeneration}
+                />
+                <LanguageDropdown
+                  value={noteLang}
+                  onChange={translateTo}
+                  disabled={translating || generating}
                 />
                 <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
               </>
             }
           />
+          {translateError && (
+            <p className="mb-4 text-xs text-[var(--color-warn)]">{translateError}</p>
+          )}
           <RiskBanner riskFlags={note.riskFlags} />
           <NotePreview note={note} verbosity={verbosity} />
           <NoteFooter
@@ -638,6 +700,7 @@ export function NotesTab({
         </Card>
         <ModifyPanel
           disabled={false}
+          busy={translating}
           sessionId={sessionId}
           note={phase.draft.content as TherapyNoteV1}
           clientName={clientName}
@@ -759,6 +822,50 @@ function VerbosityDropdown({
   );
 }
 
+/**
+ * Compact language picker for the note toolbar. Selecting a language
+ * translates the whole note into it (via the modify endpoint) and shows it
+ * in that language — so the therapist can share the report to the client in
+ * their own language. English first, then India-first language groups.
+ */
+function LanguageDropdown({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (code: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="relative inline-flex items-center">
+      <span className="sr-only">Note language</span>
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+        title="Translate the note into another language"
+        className="appearance-none rounded-full border border-[var(--color-line)] bg-white py-1.5 pl-3.5 pr-8 text-sm font-medium text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)] disabled:opacity-60"
+      >
+        <option value="en">English</option>
+        {noteLanguagesByGroup().map((g) => (
+          <optgroup key={g.group} label={`${g.group} languages`}>
+            {g.languages.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+                {l.native ? ` · ${l.native}` : ''}
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+      <span aria-hidden className="pointer-events-none absolute right-3 text-[var(--color-ink-3)]">
+        {disabled ? '…' : '🌐'}
+      </span>
+    </label>
+  );
+}
+
 function NoteFooter({
   costInr,
   chunkCount,
@@ -812,12 +919,16 @@ const QUICK_INSTRUCTIONS: { label: string; icon: SuggestKind }[] = [
  */
 function ModifyPanel({
   disabled,
+  busy,
   sessionId,
   clientName,
   templateLabel,
   onModified,
 }: {
   disabled: boolean;
+  /** Another note-mutating op (e.g. a translation) is in flight — gate
+   *  edits so two concurrent /note/modify calls can't clobber each other. */
+  busy?: boolean;
   sessionId: string;
   note: TherapyNoteV1;
   clientName: string;
@@ -828,10 +939,11 @@ function ModifyPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastChanged, setLastChanged] = useState<string[] | null>(null);
+  const blocked = disabled || Boolean(busy);
 
   const submit = useCallback(
     async (text: string) => {
-      if (!text.trim() || disabled || !onModified) return;
+      if (!text.trim() || disabled || busy || !onModified) return;
       setPending(true);
       setError(null);
       setLastChanged(null);
@@ -855,7 +967,7 @@ function ModifyPanel({
         setPending(false);
       }
     },
-    [disabled, onModified, sessionId],
+    [disabled, busy, onModified, sessionId],
   );
 
   function reset(): void {
@@ -911,7 +1023,7 @@ function ModifyPanel({
               <button
                 key={q.label}
                 type="button"
-                disabled={pending}
+                disabled={pending || blocked}
                 onClick={() => void submit(q.label)}
                 className="flex items-center gap-2.5 rounded-xl border border-[var(--color-line)] bg-white px-3.5 py-2.5 text-left text-sm text-[var(--color-ink)] transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] disabled:opacity-60"
               >
@@ -949,11 +1061,13 @@ function ModifyPanel({
             placeholder={
               disabled
                 ? 'Signed — use Revisions below to edit'
-                : pending
-                  ? 'Modifying…'
-                  : 'Make modifications to your note here'
+                : busy
+                  ? 'Translating…'
+                  : pending
+                    ? 'Modifying…'
+                    : 'Make modifications to your note here'
             }
-            disabled={disabled || pending}
+            disabled={blocked || pending}
             value={instruction}
             onChange={(e) => setInstruction(e.target.value)}
             className="w-full bg-transparent text-sm text-[var(--color-ink)] outline-none placeholder:text-[var(--color-ink-3)]"
@@ -965,7 +1079,7 @@ function ModifyPanel({
             </span>
             <button
               type="submit"
-              disabled={disabled || pending || instruction.trim().length < 3}
+              disabled={blocked || pending || instruction.trim().length < 3}
               aria-label="Send"
               className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-40"
             >

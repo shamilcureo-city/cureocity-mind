@@ -21,6 +21,8 @@ export interface BuiltinTemplate {
   name: string;
   /** Group heading in the picker. */
   category: string;
+  /** The house-style flagship — surfaced first + badged "Recommended". */
+  recommended?: boolean;
   sections: BuiltinTemplateSection[];
 }
 
@@ -31,6 +33,50 @@ export function isBuiltinTemplateId(id: string): boolean {
 }
 
 export const BUILTIN_TEMPLATES: BuiltinTemplate[] = [
+  // ---- Cureocity flagship -------------------------------------------------
+  // The recommended, house-style clinical note: precise + detailed, the one
+  // we lead with. Shows first in the catalog and the BASE menu.
+  {
+    id: 'builtin:cureocity',
+    name: 'Cureocity clinical note',
+    category: 'Cureocity',
+    recommended: true,
+    sections: [
+      { title: 'Summary', hint: 'A precise 3–5 sentence clinical synopsis of the session' },
+      {
+        title: 'Presentation & mental state',
+        hint: 'How the client presented today — appearance, affect, mood, and any mental-state observations',
+      },
+      {
+        title: 'Session themes',
+        hint: 'The main themes explored, each as a short titled theme with the key content discussed',
+      },
+      {
+        title: 'Clinical formulation',
+        hint: 'Your working understanding — links between the presentation, history, and maintaining factors',
+      },
+      {
+        title: 'Risk & safety',
+        hint: 'Any risk indicators raised and the safety position at the end of this session (state "no risk indicators noted" if none)',
+      },
+      {
+        title: 'Interventions this session',
+        hint: 'Specific techniques / modality work applied, with the clinical rationale',
+      },
+      {
+        title: 'Client response & progress',
+        hint: 'How the client responded, and movement relative to previous sessions',
+      },
+      {
+        title: 'Homework & between-session plan',
+        hint: 'Agreed practice or tasks before the next session',
+      },
+      {
+        title: 'Plan & next steps',
+        hint: 'Focus for the next session and any follow-up actions',
+      },
+    ],
+  },
   // ---- Progress notes (format-shaped) -------------------------------------
   {
     id: 'builtin:dap',
