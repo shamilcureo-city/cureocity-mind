@@ -88,6 +88,7 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, onApply
             {g.templates.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
+                {t.recommended ? ' ★' : ''}
               </option>
             ))}
           </optgroup>
