@@ -26,7 +26,8 @@ import {
   isNoteVerbosity,
   type NoteVerbosity,
 } from '../../lib/note-format';
-import { noteLanguageLabel, noteLanguagesByGroup } from '../../lib/note-languages';
+import { noteLanguageLabel } from '../../lib/note-languages';
+import { LanguagePicker } from './LanguagePicker';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
@@ -138,6 +139,9 @@ export function NotesTab({
     }
   }
   const [shareOpen, setShareOpen] = useState(false);
+  // Sharing requires a signed note, so a Share on an unsigned draft signs
+  // first and then opens the share modal once the sign lands.
+  const [pendingShare, setPendingShare] = useState(false);
   // The note's current display language (translated on demand from the
   // toolbar's language picker). Seeded from the session's output language.
   // Session-local on purpose: the translated *content* is persisted into the
@@ -321,10 +325,29 @@ export function NotesTab({
       setPhase({ kind: 'signed', note: signed });
     } catch (e) {
       setSignError((e as Error).message);
+      setPendingShare(false);
     } finally {
       setSigning(false);
     }
   }, [phase, sessionId]);
+
+  // Share from an unsigned draft: sign first, then open the share modal once
+  // the sign lands (the share snapshot is built from the signed note).
+  const signAndShare = useCallback((): void => {
+    if (phase.kind === 'signed') {
+      setShareOpen(true);
+      return;
+    }
+    setPendingShare(true);
+    void triggerSignOff();
+  }, [phase.kind, triggerSignOff]);
+
+  useEffect(() => {
+    if (phase.kind === 'signed' && pendingShare) {
+      setShareOpen(true);
+      setPendingShare(false);
+    }
+  }, [phase.kind, pendingShare]);
 
   // Translate the completed draft into another language via the same
   // model-rewrite endpoint the AI panel uses (Vertex-only, pre-sign). The
@@ -483,7 +506,6 @@ export function NotesTab({
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
-              noteLanguage={noteLanguage}
               noteText={intakeNoteToText(signedIntake)}
               signed
               onShare={() => setShareOpen(true)}
@@ -529,7 +551,6 @@ export function NotesTab({
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
-              noteLanguage={noteLang}
               noteText={therapyNoteToText(treatmentContent)}
               signed
               onShare={() => setShareOpen(true)}
@@ -593,7 +614,6 @@ export function NotesTab({
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
-              noteLanguage={noteLanguage}
               noteText={intakeNoteToText(intakeNote)}
               signed={false}
             />
@@ -650,9 +670,9 @@ export function NotesTab({
           <NoteToolbar
             sessionId={sessionId}
             clientName={clientName}
-            noteLanguage={noteLang}
             noteText={therapyNoteToText(note)}
             signed={false}
+            onShare={signAndShare}
             leftControls={
               <>
                 <TemplatePicker
@@ -661,7 +681,7 @@ export function NotesTab({
                   disabled={generating || translating}
                   onApply={triggerGeneration}
                 />
-                <LanguageDropdown
+                <LanguagePicker
                   value={noteLang}
                   onChange={translateTo}
                   disabled={translating || generating}
@@ -817,50 +837,6 @@ function VerbosityDropdown({
       </select>
       <span aria-hidden className="pointer-events-none absolute right-3 text-[var(--color-ink-3)]">
         ▾
-      </span>
-    </label>
-  );
-}
-
-/**
- * Compact language picker for the note toolbar. Selecting a language
- * translates the whole note into it (via the modify endpoint) and shows it
- * in that language — so the therapist can share the report to the client in
- * their own language. English first, then India-first language groups.
- */
-function LanguageDropdown({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string;
-  onChange: (code: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="relative inline-flex items-center">
-      <span className="sr-only">Note language</span>
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        title="Translate the note into another language"
-        className="appearance-none rounded-full border border-[var(--color-line)] bg-white py-1.5 pl-3.5 pr-8 text-sm font-medium text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)] disabled:opacity-60"
-      >
-        <option value="en">English</option>
-        {noteLanguagesByGroup().map((g) => (
-          <optgroup key={g.group} label={`${g.group} languages`}>
-            {g.languages.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label}
-                {l.native ? ` · ${l.native}` : ''}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-      <span aria-hidden className="pointer-events-none absolute right-3 text-[var(--color-ink-3)]">
-        {disabled ? '…' : '🌐'}
       </span>
     </label>
   );
