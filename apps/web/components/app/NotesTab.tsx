@@ -16,6 +16,7 @@ import { Badge } from '../ui/Badge';
 import { IntakeNotePreview } from './IntakeNotePreview';
 import { IntakeModifyPanel } from './IntakeModifyPanel';
 import { NotePreview } from './NotePreview';
+import { NoteEditor } from './NoteEditor';
 import { NoteToolbar } from './NoteToolbar';
 import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
@@ -26,7 +27,8 @@ import {
   isNoteVerbosity,
   type NoteVerbosity,
 } from '../../lib/note-format';
-import { noteLanguageLabel, noteLanguagesByGroup } from '../../lib/note-languages';
+import { noteLanguageLabel } from '../../lib/note-languages';
+import { LanguagePicker } from './LanguagePicker';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
@@ -138,6 +140,9 @@ export function NotesTab({
     }
   }
   const [shareOpen, setShareOpen] = useState(false);
+  // Sharing requires a signed note, so a Share on an unsigned draft signs
+  // first and then opens the share modal once the sign lands.
+  const [pendingShare, setPendingShare] = useState(false);
   // The note's current display language (translated on demand from the
   // toolbar's language picker). Seeded from the session's output language.
   // Session-local on purpose: the translated *content* is persisted into the
@@ -149,6 +154,10 @@ export function NotesTab({
   const [noteLang, setNoteLang] = useState(noteLanguage);
   const [translating, setTranslating] = useState(false);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  // Direct manual edit of the draft note (pre-sign).
+  const [editing, setEditing] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Stall detection for the generating phase. `slow` latches true once
   // a run has sat past its threshold, flipping the spinner into a
@@ -321,10 +330,29 @@ export function NotesTab({
       setPhase({ kind: 'signed', note: signed });
     } catch (e) {
       setSignError((e as Error).message);
+      setPendingShare(false);
     } finally {
       setSigning(false);
     }
   }, [phase, sessionId]);
+
+  // Share from an unsigned draft: sign first, then open the share modal once
+  // the sign lands (the share snapshot is built from the signed note).
+  const signAndShare = useCallback((): void => {
+    if (phase.kind === 'signed') {
+      setShareOpen(true);
+      return;
+    }
+    setPendingShare(true);
+    void triggerSignOff();
+  }, [phase.kind, triggerSignOff]);
+
+  useEffect(() => {
+    if (phase.kind === 'signed' && pendingShare) {
+      setShareOpen(true);
+      setPendingShare(false);
+    }
+  }, [phase.kind, pendingShare]);
 
   // Translate the completed draft into another language via the same
   // model-rewrite endpoint the AI panel uses (Vertex-only, pre-sign). The
@@ -361,6 +389,38 @@ export function NotesTab({
       }
     },
     [phase, sessionId, noteLang, translating],
+  );
+
+  // Save a manual edit of the draft note (PUT note-draft, pre-sign).
+  const saveEdit = useCallback(
+    async (next: TherapyNoteV1): Promise<void> => {
+      if (phase.kind !== 'completed') return;
+      const draft = phase.draft;
+      setSavingEdit(true);
+      setEditError(null);
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: next }),
+        });
+        if (!res.ok) {
+          const b = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(b.error ?? `Save failed (${res.status})`);
+        }
+        const b = (await res.json()) as { note: TherapyNoteV1 };
+        setPhase({
+          kind: 'completed',
+          draft: { ...draft, content: b.note as unknown as NoteDraft['content'] },
+        });
+        setEditing(false);
+      } catch (e) {
+        setEditError((e as Error).message);
+      } finally {
+        setSavingEdit(false);
+      }
+    },
+    [phase, sessionId],
   );
 
   // Short label for the AI panel's document chip ("Note (BASE)").
@@ -483,7 +543,6 @@ export function NotesTab({
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
-              noteLanguage={noteLanguage}
               noteText={intakeNoteToText(signedIntake)}
               signed
               onShare={() => setShareOpen(true)}
@@ -529,7 +588,6 @@ export function NotesTab({
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
-              noteLanguage={noteLang}
               noteText={therapyNoteToText(treatmentContent)}
               signed
               onShare={() => setShareOpen(true)}
@@ -593,7 +651,6 @@ export function NotesTab({
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
-              noteLanguage={noteLanguage}
               noteText={intakeNoteToText(intakeNote)}
               signed={false}
             />
@@ -650,21 +707,21 @@ export function NotesTab({
           <NoteToolbar
             sessionId={sessionId}
             clientName={clientName}
-            noteLanguage={noteLang}
             noteText={therapyNoteToText(note)}
             signed={false}
+            onShare={editing ? undefined : signAndShare}
             leftControls={
               <>
                 <TemplatePicker
                   sessionId={sessionId}
                   currentTemplateId={noteTemplateId}
-                  disabled={generating || translating}
+                  disabled={generating || translating || editing}
                   onApply={triggerGeneration}
                 />
-                <LanguageDropdown
+                <LanguagePicker
                   value={noteLang}
                   onChange={translateTo}
-                  disabled={translating || generating}
+                  disabled={translating || generating || editing}
                 />
                 <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
               </>
@@ -674,33 +731,51 @@ export function NotesTab({
             <p className="mb-4 text-xs text-[var(--color-warn)]">{translateError}</p>
           )}
           <RiskBanner riskFlags={note.riskFlags} />
-          <NotePreview note={note} verbosity={verbosity} />
-          <NoteFooter
-            costInr={phase.draft.totalCostInr}
-            chunkCount={phase.draft.speakerSegments?.length ?? 0}
-            transcriptChars={phase.draft.transcript?.length ?? 0}
-            region={llmBackend}
-          />
-          <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
-          <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-            <Button onClick={triggerSignOff} disabled={signing}>
-              {signing ? 'Signing…' : 'Sign off'}
-            </Button>
-            <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
-              Re-generate
-            </Button>
-            {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
-          </div>
-          <div className="mt-3">
-            <InlineExplainer
-              entry={glossary('action.sign')}
-              label="New here? See what “sign off” does"
+          {editing ? (
+            <NoteEditor
+              note={note}
+              saving={savingEdit}
+              error={editError}
+              onSave={saveEdit}
+              onCancel={() => {
+                setEditing(false);
+                setEditError(null);
+              }}
             />
-          </div>
+          ) : (
+            <>
+              <NotePreview note={note} verbosity={verbosity} />
+              <NoteFooter
+                costInr={phase.draft.totalCostInr}
+                chunkCount={phase.draft.speakerSegments?.length ?? 0}
+                transcriptChars={phase.draft.transcript?.length ?? 0}
+                region={llmBackend}
+              />
+              <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
+              <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
+                <Button onClick={triggerSignOff} disabled={signing}>
+                  {signing ? 'Signing…' : 'Sign off'}
+                </Button>
+                <Button variant="secondary" onClick={() => setEditing(true)} disabled={translating}>
+                  Edit note
+                </Button>
+                <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
+                  Re-generate
+                </Button>
+                {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
+              </div>
+              <div className="mt-3">
+                <InlineExplainer
+                  entry={glossary('action.sign')}
+                  label="New here? See what “sign off” does"
+                />
+              </div>
+            </>
+          )}
         </Card>
         <ModifyPanel
           disabled={false}
-          busy={translating}
+          busy={translating || editing}
           sessionId={sessionId}
           note={phase.draft.content as TherapyNoteV1}
           clientName={clientName}
@@ -817,50 +892,6 @@ function VerbosityDropdown({
       </select>
       <span aria-hidden className="pointer-events-none absolute right-3 text-[var(--color-ink-3)]">
         ▾
-      </span>
-    </label>
-  );
-}
-
-/**
- * Compact language picker for the note toolbar. Selecting a language
- * translates the whole note into it (via the modify endpoint) and shows it
- * in that language — so the therapist can share the report to the client in
- * their own language. English first, then India-first language groups.
- */
-function LanguageDropdown({
-  value,
-  onChange,
-  disabled,
-}: {
-  value: string;
-  onChange: (code: string) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="relative inline-flex items-center">
-      <span className="sr-only">Note language</span>
-      <select
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        title="Translate the note into another language"
-        className="appearance-none rounded-full border border-[var(--color-line)] bg-white py-1.5 pl-3.5 pr-8 text-sm font-medium text-[var(--color-ink)] outline-none focus:border-[var(--color-accent)] disabled:opacity-60"
-      >
-        <option value="en">English</option>
-        {noteLanguagesByGroup().map((g) => (
-          <optgroup key={g.group} label={`${g.group} languages`}>
-            {g.languages.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label}
-                {l.native ? ` · ${l.native}` : ''}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-      <span aria-hidden className="pointer-events-none absolute right-3 text-[var(--color-ink-3)]">
-        {disabled ? '…' : '🌐'}
       </span>
     </label>
   );

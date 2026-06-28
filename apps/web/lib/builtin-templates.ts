@@ -28,6 +28,9 @@ export interface BuiltinTemplate {
 
 export const BUILTIN_TEMPLATE_PREFIX = 'builtin:';
 
+/** The house default for new sessions (the flagship Cureocity note). */
+export const DEFAULT_BUILTIN_TEMPLATE_ID = 'builtin:cureocity';
+
 export function isBuiltinTemplateId(id: string): boolean {
   return id.startsWith(BUILTIN_TEMPLATE_PREFIX);
 }

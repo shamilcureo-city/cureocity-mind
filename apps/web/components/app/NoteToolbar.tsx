@@ -10,24 +10,17 @@ import Link from 'next/link';
  * far right. No text labels; tooltips carry the meaning.
  */
 
-const LANG_FLAG: Record<string, string> = {
-  en: '🇬🇧',
-  hi: '🇮🇳',
-  ml: '🇮🇳',
-  ta: '🇮🇳',
-  bn: '🇮🇳',
-};
-
 interface Props {
   sessionId: string;
   clientName: string;
-  noteLanguage: string;
   /** Plain-text rendering of the note, for the Copy action. */
   noteText: string;
   signed: boolean;
-  /** Opens the Share modal — only wired (and shown) for signed notes. */
+  /** Opens the Share flow. When present on an unsigned note the handler
+   *  signs first, then shares (so the report is finalised before it goes out). */
   onShare?: () => void;
-  /** The BASE (template) + Detailed (verbosity) controls, rendered on the left. */
+  /** The BASE (template) + language + Detailed controls, rendered on the left.
+   *  The note language now lives in that language control, not a flag here. */
   leftControls?: ReactNode;
 }
 
@@ -37,7 +30,6 @@ const ICON_BTN =
 export function NoteToolbar({
   sessionId,
   clientName,
-  noteLanguage,
   noteText,
   signed,
   onShare,
@@ -54,8 +46,6 @@ export function NoteToolbar({
       // clipboard unavailable — no-op
     }
   }
-
-  const flag = LANG_FLAG[noteLanguage] ?? '🌐';
 
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -93,12 +83,6 @@ export function NoteToolbar({
           </a>
         )}
 
-        <span className={`${ICON_BTN} cursor-default`} title={`Note language: ${noteLanguage}`}>
-          <span aria-hidden className="text-sm">
-            {flag}
-          </span>
-        </span>
-
         <span
           className={`${ICON_BTN} cursor-default`}
           title={signed ? 'Signed — locked' : 'Draft — still editable'}
@@ -106,13 +90,13 @@ export function NoteToolbar({
           <Icon kind={signed ? 'lock' : 'unlock'} />
         </span>
 
-        {signed && onShare && (
+        {onShare && (
           <button
             type="button"
             onClick={onShare}
             className="grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
-            title="Share with patient"
-            aria-label="Share with patient"
+            title={signed ? 'Share with patient' : 'Sign & share with patient'}
+            aria-label={signed ? 'Share with patient' : 'Sign and share with patient'}
           >
             <Icon kind="share" />
           </button>

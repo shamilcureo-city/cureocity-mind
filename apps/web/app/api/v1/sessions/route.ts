@@ -11,6 +11,7 @@ import {
   modalityWasOverridden,
 } from '@/lib/session-defaults';
 import { parseJson } from '@/lib/validate';
+import { DEFAULT_BUILTIN_TEMPLATE_ID } from '@/lib/builtin-templates';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -128,7 +129,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const overridden = modalityWasOverridden(defaults.modality, submittedModality);
 
   // Sprint 70 — default the session's note template to the therapist's
-  // default template (if any). null keeps the built-in SOAP structure.
+  // own default template if they have one; otherwise fall back to the
+  // house flagship (Cureocity clinical note) rather than plain SOAP.
   const defaultTemplate = await prisma.noteTemplate.findFirst({
     where: { psychologistId: auth.value.psychologistId, isDefault: true },
     select: { id: true },
@@ -143,7 +145,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         kind: defaults.kind,
         status: 'SCHEDULED',
         scheduledAt: new Date(dto.value.scheduledAt),
-        noteTemplateId: defaultTemplate?.id ?? null,
+        noteTemplateId: defaultTemplate?.id ?? DEFAULT_BUILTIN_TEMPLATE_ID,
       },
     });
     await writeAudit(

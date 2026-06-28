@@ -79,17 +79,3 @@ export function noteLanguage(code: string): NoteLanguage | undefined {
 export function noteLanguageLabel(code: string): string {
   return BY_CODE.get(code)?.label ?? code.toUpperCase();
 }
-
-/**
- * Languages grouped for the picker, in India-first order. English is handled
- * separately (rendered as the leading default option), so it's excluded here.
- */
-export function noteLanguagesByGroup(): { group: NoteLanguageGroup; languages: NoteLanguage[] }[] {
-  const order: NoteLanguageGroup[] = ['Indian', 'Middle East', 'World'];
-  return order
-    .map((group) => ({
-      group,
-      languages: NOTE_LANGUAGES.filter((l) => l.group === group && l.code !== 'en'),
-    }))
-    .filter((g) => g.languages.length > 0);
-}
