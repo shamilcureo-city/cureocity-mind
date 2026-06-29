@@ -1035,7 +1035,7 @@ function ModifyPanel({
       <div className="flex flex-1 flex-col justify-end gap-3 py-6">
         {disabled && (
           <p className="text-center text-xs text-[var(--color-ink-3)]">
-            This note is signed. Use the Revisions panel below to record an edit.
+            This note is signed. Use “Edit note” in the Version history below to change it.
           </p>
         )}
         {lastChanged && lastChanged.length > 0 && (
@@ -1091,7 +1091,7 @@ function ModifyPanel({
             type="text"
             placeholder={
               disabled
-                ? 'Signed — use Revisions below to edit'
+                ? 'Signed — use “Edit note” below'
                 : busy
                   ? 'Translating…'
                   : pending
