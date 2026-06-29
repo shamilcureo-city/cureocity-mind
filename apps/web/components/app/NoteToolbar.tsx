@@ -38,12 +38,10 @@ export function NoteToolbar({
   const [copied, setCopied] = useState(false);
 
   async function copy(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(noteText);
+    const ok = await copyText(noteText);
+    if (ok) {
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable — no-op
+      setTimeout(() => setCopied(false), 1800);
     }
   }
 
@@ -64,11 +62,11 @@ export function NoteToolbar({
         <button
           type="button"
           onClick={copy}
-          className={`${ICON_BTN} ${copied ? 'border-[var(--color-accent)] text-[var(--color-accent)]' : ''}`}
-          title={copied ? 'Copied' : 'Copy note'}
-          aria-label="Copy note"
+          className={`${ICON_BTN} ${copied ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : ''}`}
+          title={copied ? 'Copied!' : 'Copy note'}
+          aria-label={copied ? 'Copied' : 'Copy note'}
         >
-          <Icon kind="copy" />
+          <Icon kind={copied ? 'check' : 'copy'} />
         </button>
 
         {signed && (
@@ -122,10 +120,45 @@ function initials(name: string): string {
   return (first + last).toUpperCase();
 }
 
-function Icon({ kind }: { kind: 'review' | 'copy' | 'download' | 'share' | 'lock' | 'unlock' }) {
+/**
+ * Copy text to the clipboard, falling back to a hidden-textarea + execCommand
+ * when the async Clipboard API is unavailable or blocked (older WebViews,
+ * non-secure contexts). Returns whether the copy succeeded.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through to the legacy path
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+function Icon({
+  kind,
+}: {
+  kind: 'review' | 'copy' | 'check' | 'download' | 'share' | 'lock' | 'unlock';
+}) {
   const paths: Record<typeof kind, string> = {
     review: 'M3 12h4l2 6 4-12 2 6h6',
     copy: 'M9 9h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zM5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
+    check: 'M5 13l4 4L19 7',
     download: 'M12 3v12M8 11l4 4 4-4M5 21h14',
     share: 'M12 16V4M8 8l4-4 4 4M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7',
     lock: 'M6 11V8a6 6 0 1 1 12 0v3M5 11h14v9H5z',
