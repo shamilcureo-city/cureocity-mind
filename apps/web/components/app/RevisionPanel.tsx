@@ -19,10 +19,21 @@ interface Props {
 }
 
 const FIELD_LABEL: Record<string, string> = {
+  // SOAP (treatment / review) fields.
   subjective: 'What the client shared',
   objective: 'What you observed',
   assessment: 'Assessment',
   plan: 'Plan',
+  // Intake fields — same friendly headings the note itself shows, so the
+  // shared Version history block reads cleanly for intake notes too.
+  presentingConcerns: 'Why they came',
+  historyOfPresentingIllness: 'The story so far',
+  pastPsychiatricHistory: 'Past mental-health care',
+  familyHistory: 'Family background',
+  socialHistory: 'Life & circumstances',
+  mentalStatusExam: 'Mental state today',
+  workingHypothesis: 'Working hypothesis',
+  immediatePlan: 'The plan',
 };
 
 /**

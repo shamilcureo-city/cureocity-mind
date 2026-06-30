@@ -14,9 +14,9 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { IntakeNotePreview } from './IntakeNotePreview';
-import { IntakeModifyPanel } from './IntakeModifyPanel';
 import { NotePreview } from './NotePreview';
 import { NoteEditor } from './NoteEditor';
+import { IntakeNoteEditor } from './IntakeNoteEditor';
 import { NoteToolbar } from './NoteToolbar';
 import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
@@ -32,7 +32,6 @@ import { LanguagePicker } from './LanguagePicker';
 import { RiskBanner } from './RiskBanner';
 import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
-import { IntakeRevisionPanel } from './IntakeRevisionPanel';
 import { RevisionPanel } from './RevisionPanel';
 import { ShareModal } from './ShareModal';
 import { HelpNote, InlineExplainer } from './EduHeading';
@@ -81,7 +80,11 @@ type Phase =
   | { kind: 'awaiting-end'; status: SessionStatus }
   | { kind: 'ready-to-generate' }
   | { kind: 'generating'; draft: NoteDraft }
-  | { kind: 'completed'; draft: NoteDraft }
+  // `reopened` marks a signed note that's been unlocked for editing (Sprint
+  // 71). It edits in the "completed" state, but Template / Re-generate are
+  // hidden — re-drafting from audio would discard the signed content — and
+  // signing again re-locks rather than creating a fresh note.
+  | { kind: 'completed'; draft: NoteDraft; reopened?: boolean }
   | { kind: 'signed'; note: TherapyNote }
   | { kind: 'failed'; draft: NoteDraft; error: string }
   | { kind: 'error'; message: string };
@@ -367,6 +370,7 @@ export function NotesTab({
     async (code: string): Promise<void> => {
       if (phase.kind !== 'completed' || code === noteLang || translating) return;
       const draft = phase.draft;
+      const reopened = phase.reopened;
       const label = noteLanguageLabel(code);
       setTranslating(true);
       setTranslateError(null);
@@ -382,10 +386,14 @@ export function NotesTab({
           const b = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(b.error ?? `Translation failed (${res.status})`);
         }
-        const b = (await res.json()) as { note: TherapyNoteV1 };
+        // The modify route is kind-aware — it returns whichever shape it was
+        // given (TherapyNoteV1 or IntakeNoteV1). Stored back as opaque draft
+        // content so this path serves both note kinds.
+        const b = (await res.json()) as { note: unknown };
         setPhase({
           kind: 'completed',
-          draft: { ...draft, content: b.note as unknown as NoteDraft['content'] },
+          draft: { ...draft, content: b.note as NoteDraft['content'] },
+          reopened,
         });
         setNoteLang(code);
       } catch (e) {
@@ -397,11 +405,14 @@ export function NotesTab({
     [phase, sessionId, noteLang, translating],
   );
 
-  // Save a manual edit of the draft note (PUT note-draft, pre-sign).
+  // Save a manual edit of the draft note (PUT note-draft). Kind-agnostic —
+  // the route validates against IntakeNoteV1 / TherapyNoteV1 by session kind.
+  // Works pre-sign and on a re-opened (unlocked) signed note.
   const saveEdit = useCallback(
-    async (next: TherapyNoteV1): Promise<void> => {
+    async (next: TherapyNoteV1 | IntakeNoteV1): Promise<void> => {
       if (phase.kind !== 'completed') return;
       const draft = phase.draft;
+      const reopened = phase.reopened;
       setSavingEdit(true);
       setEditError(null);
       try {
@@ -414,10 +425,11 @@ export function NotesTab({
           const b = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(b.error ?? `Save failed (${res.status})`);
         }
-        const b = (await res.json()) as { note: TherapyNoteV1 };
+        const b = (await res.json()) as { note: unknown };
         setPhase({
           kind: 'completed',
-          draft: { ...draft, content: b.note as unknown as NoteDraft['content'] },
+          draft: { ...draft, content: b.note as NoteDraft['content'] },
+          reopened,
         });
         setEditing(false);
       } catch (e) {
@@ -456,7 +468,11 @@ export function NotesTab({
         createdAt: note.createdAt,
         updatedAt: note.createdAt,
       };
-      setPhase({ kind: 'completed', draft: { ...base, status: 'COMPLETED', content } });
+      setPhase({
+        kind: 'completed',
+        draft: { ...base, status: 'COMPLETED', content },
+        reopened: true,
+      });
       setNoteLang(noteLanguage);
     } catch (e) {
       setSignError((e as Error).message);
@@ -465,8 +481,11 @@ export function NotesTab({
     }
   }, [phase, sessionId, unlocking, initialDraft, noteLanguage]);
 
-  // Short label for the AI panel's document chip ("Note (BASE)").
+  // Short label for the AI panel's document chip ("Note (BASE)"). Templates
+  // don't apply to intake (it's a fixed eight-section shape), so the chip
+  // reads "Intake note" there rather than a misleading template name.
   const templateLabel = resolveTemplateLabel(noteTemplateId);
+  const aiDocLabel = isIntake ? 'Intake note' : templateLabel;
 
   // ----- Render -----
 
@@ -567,13 +586,13 @@ export function NotesTab({
 
   if (phase.kind === 'signed') {
     const note = phase.note;
+    // Signed notes share one layout for both kinds: the read-only note with
+    // a Version-history block ("Edit note" → unlock → re-sign) on the left,
+    // and the AI panel (disabled until re-opened) on the right.
     if (isIntake) {
-      // Sprint 49 — share + PDF; Sprint 55 — post-sign revision via
-      // IntakeRevisionPanel (kind: 'INTAKE' on /note/edit).
-      // Re-parse so a legacy/object-shaped mentalStatusExam is flattened
-      // to a string before it reaches the revision textareas (the server
-      // does the same on revise). Fall back to the raw cast so a drifted
-      // row still renders.
+      // Re-parse so a legacy/object-shaped mentalStatusExam is flattened to a
+      // string before render. Fall back to the raw cast so a drifted row still
+      // renders rather than throwing.
       const parsedIntake = IntakeNoteV1Schema.safeParse(note.content);
       const signedIntake = parsedIntake.success
         ? parsedIntake.data
@@ -581,41 +600,48 @@ export function NotesTab({
       return (
         <>
           <MockBackendBanner llmBackend={llmBackend} />
-          <Card className="p-7">
-            <NoteToolbar
+          <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+            <Card className="p-7">
+              <NoteToolbar
+                sessionId={sessionId}
+                clientName={clientName}
+                noteText={intakeNoteToText(signedIntake)}
+                signed
+                onShare={() => setShareOpen(true)}
+                leftControls={<VerbosityDropdown value={verbosity} onChange={pickVerbosity} />}
+              />
+              <RiskBanner riskFlags={signedIntake.riskFlags} />
+              <IntakeNotePreview
+                note={signedIntake}
+                signedAt={note.signedAt}
+                signedBy={note.signedBy}
+                verbosity={verbosity}
+              />
+              <ShareModal
+                open={shareOpen}
+                onClose={() => setShareOpen(false)}
+                clientId={clientId}
+                hasContactPhone={clientHasContactPhone}
+                hasContactEmail={clientHasContactEmail}
+                artefact={{ artefactType: 'SIGNED_INTAKE_NOTE', sessionId }}
+                artefactLabel="Signed intake note"
+              />
+              <RevisionPanel sessionId={sessionId} onUnlock={unlockNote} unlocking={unlocking} />
+              <NoteFooter
+                costInr={initialDraft?.totalCostInr ?? '—'}
+                chunkCount={initialDraft?.speakerSegments?.length ?? 0}
+                transcriptChars={initialDraft?.transcript?.length ?? 0}
+                region="signed"
+              />
+              <NoteReviewPanel sessionId={sessionId} />
+            </Card>
+            <ModifyPanel
+              disabled={true}
               sessionId={sessionId}
               clientName={clientName}
-              noteText={intakeNoteToText(signedIntake)}
-              signed
-              onShare={() => setShareOpen(true)}
+              templateLabel={aiDocLabel}
             />
-            <RiskBanner riskFlags={signedIntake.riskFlags} />
-            <IntakeNotePreview
-              note={signedIntake}
-              signedAt={note.signedAt}
-              signedBy={note.signedBy}
-            />
-            <ShareModal
-              open={shareOpen}
-              onClose={() => setShareOpen(false)}
-              clientId={clientId}
-              hasContactPhone={clientHasContactPhone}
-              hasContactEmail={clientHasContactEmail}
-              artefact={{ artefactType: 'SIGNED_INTAKE_NOTE', sessionId }}
-              artefactLabel="Signed intake note"
-            />
-            <IntakeRevisionPanel
-              sessionId={sessionId}
-              note={{ ...note, content: signedIntake }}
-              onRevised={(nextContent) =>
-                setPhase({
-                  kind: 'signed',
-                  note: { ...note, content: nextContent },
-                })
-              }
-            />
-            <NoteReviewPanel sessionId={sessionId} />
-          </Card>
+          </div>
         </>
       );
     }
@@ -664,18 +690,19 @@ export function NotesTab({
           <ModifyPanel
             disabled={true}
             sessionId={sessionId}
-            note={treatmentContent}
             clientName={clientName}
-            templateLabel={templateLabel}
+            templateLabel={aiDocLabel}
           />
         </div>
       </>
     );
   }
 
-  // completed
+  // completed — intake. Mirrors the treatment completed layout minus the
+  // template picker (intake is a fixed eight-section shape, no templates).
   if (isIntake) {
     const intakeNote = phase.draft.content as unknown as IntakeNoteV1;
+    const reopened = phase.reopened ?? false;
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
@@ -686,43 +713,67 @@ export function NotesTab({
               clientName={clientName}
               noteText={intakeNoteToText(intakeNote)}
               signed={false}
+              onShare={editing ? undefined : signAndShare}
+              leftControls={
+                <>
+                  <LanguagePicker
+                    value={noteLang}
+                    onChange={translateTo}
+                    disabled={translating || generating || editing}
+                  />
+                  <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
+                </>
+              }
             />
+            {translateError && (
+              <p className="mb-4 text-xs text-[var(--color-warn)]">{translateError}</p>
+            )}
             <RiskBanner riskFlags={intakeNote.riskFlags} />
-            <IntakeNotePreview note={intakeNote} />
-            <NoteFooter
-              costInr={phase.draft.totalCostInr}
-              chunkCount={phase.draft.speakerSegments?.length ?? 0}
-              transcriptChars={phase.draft.transcript?.length ?? 0}
-              region={llmBackend}
-            />
-            <NoteReadiness items={checkIntakeNoteReadiness(intakeNote)} />
-            <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-              {/* Sprint 49 — intake notes can now be signed at parity with TREATMENT. */}
-              <Button onClick={triggerSignOff} disabled={signing}>
-                {signing ? 'Signing…' : 'Sign off'}
-              </Button>
-              <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
-                Re-generate
-              </Button>
-              {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
-            </div>
-            <div className="mt-3">
-              <InlineExplainer
-                entry={glossary('action.sign')}
-                label="New here? See what “sign off” does"
+            {editing ? (
+              <IntakeNoteEditor
+                note={intakeNote}
+                saving={savingEdit}
+                error={editError}
+                onSave={saveEdit}
+                onCancel={() => {
+                  setEditing(false);
+                  setEditError(null);
+                }}
               />
-            </div>
+            ) : (
+              <>
+                <IntakeNotePreview note={intakeNote} verbosity={verbosity} />
+                <NoteFooter
+                  costInr={phase.draft.totalCostInr}
+                  chunkCount={phase.draft.speakerSegments?.length ?? 0}
+                  transcriptChars={phase.draft.transcript?.length ?? 0}
+                  region={llmBackend}
+                />
+                <NoteReadiness items={checkIntakeNoteReadiness(intakeNote)} />
+                <NoteActions
+                  signing={signing}
+                  generating={generating}
+                  translating={translating}
+                  reopened={reopened}
+                  signError={signError}
+                  onSign={triggerSignOff}
+                  onEdit={() => setEditing(true)}
+                  onRegenerate={triggerGeneration}
+                />
+              </>
+            )}
           </Card>
-          <IntakeModifyPanel
+          <ModifyPanel
+            disabled={false}
+            busy={translating || editing}
             sessionId={sessionId}
-            note={intakeNote}
+            clientName={clientName}
+            templateLabel={aiDocLabel}
             onModified={(next) =>
               setPhase({
                 kind: 'completed',
-                draft: {
-                  ...phase.draft,
-                  content: next as unknown as NoteDraft['content'],
-                },
+                draft: { ...phase.draft, content: next as NoteDraft['content'] },
+                reopened,
               })
             }
           />
@@ -731,7 +782,9 @@ export function NotesTab({
     );
   }
 
+  // completed — treatment.
   const note = phase.draft.content as TherapyNoteV1;
+  const reopened = phase.reopened ?? false;
   return (
     <>
       <MockBackendBanner llmBackend={llmBackend} />
@@ -745,12 +798,16 @@ export function NotesTab({
             onShare={editing ? undefined : signAndShare}
             leftControls={
               <>
-                <TemplatePicker
-                  sessionId={sessionId}
-                  currentTemplateId={noteTemplateId}
-                  disabled={generating || translating || editing}
-                  onApply={triggerGeneration}
-                />
+                {/* Template / Re-generate re-draft from audio, which would
+                    discard a re-opened signed note — so hide the picker there. */}
+                {!reopened && (
+                  <TemplatePicker
+                    sessionId={sessionId}
+                    currentTemplateId={noteTemplateId}
+                    disabled={generating || translating || editing}
+                    onApply={triggerGeneration}
+                  />
+                )}
                 <LanguagePicker
                   value={noteLang}
                   onChange={translateTo}
@@ -785,24 +842,16 @@ export function NotesTab({
                 region={llmBackend}
               />
               <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
-              <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-                <Button onClick={triggerSignOff} disabled={signing}>
-                  {signing ? 'Signing…' : 'Sign off'}
-                </Button>
-                <Button variant="secondary" onClick={() => setEditing(true)} disabled={translating}>
-                  Edit note
-                </Button>
-                <Button variant="secondary" onClick={triggerGeneration} disabled={generating}>
-                  Re-generate
-                </Button>
-                {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
-              </div>
-              <div className="mt-3">
-                <InlineExplainer
-                  entry={glossary('action.sign')}
-                  label="New here? See what “sign off” does"
-                />
-              </div>
+              <NoteActions
+                signing={signing}
+                generating={generating}
+                translating={translating}
+                reopened={reopened}
+                signError={signError}
+                onSign={triggerSignOff}
+                onEdit={() => setEditing(true)}
+                onRegenerate={triggerGeneration}
+              />
             </>
           )}
         </Card>
@@ -810,16 +859,13 @@ export function NotesTab({
           disabled={false}
           busy={translating || editing}
           sessionId={sessionId}
-          note={phase.draft.content as TherapyNoteV1}
           clientName={clientName}
-          templateLabel={templateLabel}
+          templateLabel={aiDocLabel}
           onModified={(next) =>
             setPhase({
               kind: 'completed',
-              draft: {
-                ...phase.draft,
-                content: next as unknown as NoteDraft['content'],
-              },
+              draft: { ...phase.draft, content: next as NoteDraft['content'] },
+              reopened,
             })
           }
         />
@@ -898,6 +944,64 @@ function GeneratingState({
         </div>
       )}
     </Card>
+  );
+}
+
+/**
+ * The Sign / Edit / Re-generate action row + sign-off explainer, shared by
+ * the completed treatment and intake notes so they stay byte-identical. A
+ * re-opened (unlocked) signed note hides Re-generate and re-labels Sign as
+ * "re-lock", and swaps the first-timer explainer for a re-lock hint.
+ */
+function NoteActions({
+  signing,
+  generating,
+  translating,
+  reopened,
+  signError,
+  onSign,
+  onEdit,
+  onRegenerate,
+}: {
+  signing: boolean;
+  generating: boolean;
+  translating: boolean;
+  reopened: boolean;
+  signError: string | null;
+  onSign: () => void;
+  onEdit: () => void;
+  onRegenerate: () => void;
+}) {
+  return (
+    <>
+      <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
+        <Button onClick={onSign} disabled={signing}>
+          {signing ? 'Signing…' : reopened ? 'Sign & re-lock' : 'Sign off'}
+        </Button>
+        <Button variant="secondary" onClick={onEdit} disabled={translating}>
+          Edit note
+        </Button>
+        {!reopened && (
+          <Button variant="secondary" onClick={onRegenerate} disabled={generating}>
+            Re-generate
+          </Button>
+        )}
+        {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
+      </div>
+      {reopened ? (
+        <p className="mt-3 text-xs text-[var(--color-ink-3)]">
+          You re-opened a signed note. Make your changes, then Sign again to re-lock it — each
+          version you save is kept in the history below.
+        </p>
+      ) : (
+        <div className="mt-3">
+          <InlineExplainer
+            entry={glossary('action.sign')}
+            label="New here? See what “sign off” does"
+          />
+        </div>
+      )}
+    </>
   );
 }
 
@@ -994,10 +1098,12 @@ function ModifyPanel({
    *  edits so two concurrent /note/modify calls can't clobber each other. */
   busy?: boolean;
   sessionId: string;
-  note: TherapyNoteV1;
   clientName: string;
+  /** Document-context chip label ("BASE", a template name, or "Intake note"). */
   templateLabel: string;
-  onModified?: (next: TherapyNoteV1) => void;
+  /** Kind-agnostic: the /note/modify route returns whichever shape it was
+   *  given, so this serves both treatment (SOAP) and intake notes. */
+  onModified?: (next: TherapyNoteV1 | IntakeNoteV1) => void;
 }) {
   const [instruction, setInstruction] = useState('');
   const [pending, setPending] = useState(false);
@@ -1021,7 +1127,10 @@ function ModifyPanel({
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `HTTP ${res.status}`);
         }
-        const body = (await res.json()) as { note: TherapyNoteV1; changedFields: string[] };
+        const body = (await res.json()) as {
+          note: TherapyNoteV1 | IntakeNoteV1;
+          changedFields: string[];
+        };
         onModified(body.note);
         setLastChanged(body.changedFields);
         setInstruction('');
@@ -1207,9 +1316,10 @@ function derivePhase(
 ): Phase {
   if (note && noteLocked) return { kind: 'signed', note };
   // Sprint 71 — an unlocked signed note edits in the "completed" state; the
-  // draft was synced to the signed content on unlock.
+  // draft was synced to the signed content on unlock. `reopened` keeps the
+  // focused-edit affordances (no Template / Re-generate) on reload too.
   if (note && !noteLocked && draft?.status === 'COMPLETED' && draft.content) {
-    return { kind: 'completed', draft };
+    return { kind: 'completed', draft, reopened: true };
   }
   if (note) return { kind: 'signed', note };
   if (draft?.status === 'COMPLETED' && draft.content) return { kind: 'completed', draft };

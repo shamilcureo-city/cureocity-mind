@@ -76,15 +76,19 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
       psychologistId: true,
       kind: true,
       noteDraft: { select: { id: true, content: true, status: true } },
-      therapyNote: { select: { id: true } },
+      therapyNote: { select: { id: true, locked: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
-  if (session.therapyNote) {
+  // Sprint 71 — a signed note is editable only after it's been re-opened
+  // ("Edit note" → POST /note/unlock flips locked → false and syncs the
+  // draft to the signed content). A LOCKED signed note rejects draft edits;
+  // an UNLOCKED one accepts them so the unlock → edit → re-sign cycle works.
+  if (session.therapyNote && session.therapyNote.locked) {
     return NextResponse.json(
-      { error: 'Note is signed. Use POST /note/edit to record a revision instead.' },
+      { error: 'Note is signed and locked. Re-open it with “Edit note” before editing.' },
       { status: 409 },
     );
   }
