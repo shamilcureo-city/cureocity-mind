@@ -226,6 +226,7 @@ async function NotesTabPanel({
       sessionKind={sessionKind}
       initialDraft={draft}
       initialNote={signedNote}
+      noteLocked={signedRow?.locked ?? true}
       clientId={clientId}
       clientHasContactPhone={clientHasContactPhone}
       clientHasContactEmail={clientHasContactEmail}

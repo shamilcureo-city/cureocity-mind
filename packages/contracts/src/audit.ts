@@ -27,6 +27,7 @@ export const AuditActionSchema = z.enum([
   'NOTE_DRAFT_CREATED',
   'NOTE_DRAFT_VIEWED',
   'NOTE_SIGNED',
+  'NOTE_UNLOCKED',
   'COST_CIRCUIT_TRIPPED',
   'CRISIS_FLAG_RAISED',
   'WORKFLOW_CREATED',

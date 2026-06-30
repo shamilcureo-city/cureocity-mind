@@ -58,6 +58,9 @@ interface Props {
   sessionKind: SessionKind;
   initialDraft: NoteDraft | null;
   initialNote: TherapyNote | null;
+  /// Sprint 71 — false when a signed note has been re-opened for editing,
+  /// so the note renders in the editable (completed) state instead of signed.
+  noteLocked: boolean;
   clientId: string;
   /// Sprint 43 — real contact availability so the share modal greys
   /// out channels the client can't receive on. Previously hardcoded
@@ -103,6 +106,7 @@ export function NotesTab({
   sessionKind,
   initialDraft,
   initialNote,
+  noteLocked,
   clientId,
   clientHasContactPhone,
   clientHasContactEmail,
@@ -116,7 +120,7 @@ export function NotesTab({
   // surface. Render-only for v1.
   const isIntake = sessionKind === 'INTAKE';
   const [phase, setPhase] = useState<Phase>(() =>
-    derivePhase(sessionStatus, initialDraft, initialNote),
+    derivePhase(sessionStatus, initialDraft, initialNote, noteLocked),
   );
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
@@ -158,6 +162,8 @@ export function NotesTab({
   const [editing, setEditing] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  // Sprint 71 — re-opening a signed note for editing.
+  const [unlocking, setUnlocking] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Stall detection for the generating phase. `slow` latches true once
   // a run has sat past its threshold, flipping the spinner into a
@@ -423,6 +429,42 @@ export function NotesTab({
     [phase, sessionId],
   );
 
+  // Re-open a signed note for editing: unlock server-side, then drop into the
+  // editable "completed" state using the signed content as the draft.
+  const unlockNote = useCallback(async (): Promise<void> => {
+    if (phase.kind !== 'signed' || unlocking) return;
+    const note = phase.note;
+    setUnlocking(true);
+    try {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/note/unlock`, { method: 'POST' });
+      if (!res.ok) {
+        const b = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(b.error ?? `Unlock failed (${res.status})`);
+      }
+      const content = note.content as unknown as NoteDraft['content'];
+      const base: NoteDraft = initialDraft ?? {
+        id: note.draftId,
+        sessionId,
+        status: 'COMPLETED',
+        transcript: null,
+        speakerSegments: null,
+        affectFeatures: null,
+        content,
+        riskSeverity: null,
+        totalCostInr: '0',
+        errorMessage: null,
+        createdAt: note.createdAt,
+        updatedAt: note.createdAt,
+      };
+      setPhase({ kind: 'completed', draft: { ...base, status: 'COMPLETED', content } });
+      setNoteLang(noteLanguage);
+    } catch (e) {
+      setSignError((e as Error).message);
+    } finally {
+      setUnlocking(false);
+    }
+  }, [phase, sessionId, unlocking, initialDraft, noteLanguage]);
+
   // Short label for the AI panel's document chip ("Note (BASE)").
   const templateLabel = resolveTemplateLabel(noteTemplateId);
 
@@ -610,16 +652,7 @@ export function NotesTab({
               artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
               artefactLabel="Signed session note"
             />
-            <RevisionPanel
-              sessionId={sessionId}
-              note={{ ...note, content: treatmentContent }}
-              onRevised={(nextContent) =>
-                setPhase({
-                  kind: 'signed',
-                  note: { ...note, content: nextContent },
-                })
-              }
-            />
+            <RevisionPanel sessionId={sessionId} onUnlock={unlockNote} unlocking={unlocking} />
             <NoteFooter
               costInr={initialDraft?.totalCostInr ?? '—'}
               chunkCount={initialDraft?.speakerSegments?.length ?? 0}
@@ -1170,7 +1203,14 @@ function derivePhase(
   sessionStatus: SessionStatus,
   draft: NoteDraft | null,
   note: TherapyNote | null,
+  noteLocked: boolean,
 ): Phase {
+  if (note && noteLocked) return { kind: 'signed', note };
+  // Sprint 71 — an unlocked signed note edits in the "completed" state; the
+  // draft was synced to the signed content on unlock.
+  if (note && !noteLocked && draft?.status === 'COMPLETED' && draft.content) {
+    return { kind: 'completed', draft };
+  }
   if (note) return { kind: 'signed', note };
   if (draft?.status === 'COMPLETED' && draft.content) return { kind: 'completed', draft };
   if (draft?.status === 'FAILED') {

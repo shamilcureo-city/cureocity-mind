@@ -1158,6 +1158,12 @@ model TherapyNote {
   signedAt DateTime
   signedBy String
 
+  // Sprint 71 — a signed note can be UNLOCKED back into the editable
+  // (completed-draft) state so the therapist can use the full template /
+  // language / edit toolbar, then re-sign. `locked = true` is the normal
+  // signed-and-final state; `false` means it's been re-opened for editing.
+  locked Boolean @default(true)
+
   // Non-repudiation proof — WebAuthn assertion captured at sign time.
   // The challenge bound into the assertion is sha256Hex(payload); the
   // server re-computed that hash on receipt and compared. Stored so an
@@ -2369,6 +2375,8 @@ enum AuditAction {
   NOTE_DRAFT_CREATED
   NOTE_DRAFT_VIEWED
   NOTE_SIGNED
+  // Sprint 71 — a signed note re-opened for editing.
+  NOTE_UNLOCKED
 
   // Cost + risk (scribe-service, Sprint 2)
   COST_CIRCUIT_TRIPPED
