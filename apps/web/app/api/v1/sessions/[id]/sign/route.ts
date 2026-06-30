@@ -208,16 +208,20 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       { status: 400 },
     );
   }
+  // Sprint 71 — a LOCKED signed note is final; an UNLOCKED one is being
+  // re-opened for editing, so signing again re-locks it (an update, not a
+  // duplicate insert).
   const existing = await prisma.therapyNote.findUnique({
     where: { sessionId },
-    select: { id: true },
+    select: { id: true, locked: true, content: true },
   });
-  if (existing) {
+  if (existing && existing.locked) {
     return NextResponse.json(
       { error: 'Therapy note already signed for this session' },
       { status: 409 },
     );
   }
+  const isResign = existing !== null;
 
   // Sprint 49 — parse both draft + final note against the kind-keyed
   // schema. An INTAKE session whose draft happens to validate against
@@ -230,25 +234,41 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   const editsError = validateEdits(draftContent, finalNote, edits, signableFields);
   if (editsError) return editsError;
 
+  // On a re-sign (an unlocked note signed again), the version-history delta is
+  // computed from the PRIOR signed content — not the editable draft — so the
+  // trail records what changed across the unlock → edit → re-sign cycle.
+  const reSignEdits: Array<{ field: NoteEditField; before: string; after: string }> = [];
+  if (existing) {
+    const prior = noteSchema.parse(existing.content) as SignedNoteContent;
+    for (const field of signableFields) {
+      const before = readField(prior, field);
+      const after = readField(finalNote, field);
+      if (typeof before === 'string' && typeof after === 'string' && before !== after) {
+        reSignEdits.push({ field, before, after });
+      }
+    }
+  }
+  const editsToWrite = existing ? reSignEdits : edits;
+
   const created = await prisma.$transaction(async (tx) => {
-    const note = await tx.therapyNote.create({
-      data: {
-        sessionId,
-        draftId: draft.id,
-        version: finalNote.version,
-        content: finalNote as unknown as object,
-        signedAt: new Date(input.value.signedAt),
-        signedBy: auth.value.psychologistId,
-        signCredentialId: input.value.assertion?.credentialId ?? null,
-        signClientDataJsonB64u: input.value.assertion?.clientDataJSON ?? null,
-        signAuthenticatorDataB64u: input.value.assertion?.authenticatorData ?? null,
-        signSignatureB64u: input.value.assertion?.signature ?? null,
-        signChallengeHashHex: input.value.assertion?.challengeHashHex ?? recomputed,
-      },
-    });
-    if (edits.length > 0) {
+    const noteData = {
+      version: finalNote.version,
+      content: finalNote as unknown as object,
+      signedAt: new Date(input.value.signedAt),
+      signedBy: auth.value.psychologistId,
+      locked: true,
+      signCredentialId: input.value.assertion?.credentialId ?? null,
+      signClientDataJsonB64u: input.value.assertion?.clientDataJSON ?? null,
+      signAuthenticatorDataB64u: input.value.assertion?.authenticatorData ?? null,
+      signSignatureB64u: input.value.assertion?.signature ?? null,
+      signChallengeHashHex: input.value.assertion?.challengeHashHex ?? recomputed,
+    };
+    const note = existing
+      ? await tx.therapyNote.update({ where: { id: existing.id }, data: noteData })
+      : await tx.therapyNote.create({ data: { sessionId, draftId: draft.id, ...noteData } });
+    if (editsToWrite.length > 0) {
       await tx.noteEdit.createMany({
-        data: edits.map((e) => ({
+        data: editsToWrite.map((e) => ({
           therapyNoteId: note.id,
           field: e.field,
           before: e.before,
@@ -265,7 +285,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         ...auditMetadataFromRequest(req),
         sessionId,
         draftId: draft.id,
-        editedFields: edits.map((e) => e.field),
+        editedFields: editsToWrite.map((e) => e.field),
+        resign: isResign,
         payloadHashHex: recomputed,
         webauthnUsed: input.value.assertion !== undefined,
         webauthnEnforced: credentialBump !== null,
