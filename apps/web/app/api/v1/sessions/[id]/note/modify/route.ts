@@ -87,15 +87,18 @@ export async function POST(
       psychologistId: true,
       kind: true,
       noteDraft: { select: { id: true, content: true, status: true } },
-      therapyNote: { select: { id: true } },
+      therapyNote: { select: { id: true, locked: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
-  if (session.therapyNote) {
+  // Sprint 71 — AI-modify (and translate, which reuses this route) writes the
+  // editable draft, so it's allowed pre-sign OR on a re-opened (unlocked)
+  // signed note. A LOCKED signed note is final until "Edit note" unlocks it.
+  if (session.therapyNote && session.therapyNote.locked) {
     return NextResponse.json(
-      { error: 'Note is signed. Use POST /note/edit to record a revision instead.' },
+      { error: 'Note is signed and locked. Re-open it with “Edit note” before modifying.' },
       { status: 409 },
     );
   }

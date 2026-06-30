@@ -52,6 +52,17 @@ export async function POST(
   if (!session.therapyNote || !session.therapyNote.content) {
     return NextResponse.json({ error: 'Session has no signed note to revise.' }, { status: 404 });
   }
+  // Sprint 71 — a LOCKED signed note must not be mutated through this
+  // WebAuthn-bypassing direct-revision path. The canonical edit flow is
+  // "Edit note" (unlock → edit the draft → re-sign, which re-applies the
+  // WebAuthn assertion). Refuse a locked note so the only way to change a
+  // signed clinical record is back through the signing gate.
+  if (session.therapyNote.locked) {
+    return NextResponse.json(
+      { error: 'Note is locked. Re-open it with “Edit note” and re-sign to record changes.' },
+      { status: 409 },
+    );
+  }
 
   // Map the session kind to the note shape it actually signs. A payload
   // addressed to the other shape usually means a stale UI tab — reject
