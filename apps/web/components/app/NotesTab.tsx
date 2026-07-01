@@ -481,6 +481,34 @@ export function NotesTab({
     }
   }, [phase, sessionId, unlocking, initialDraft, noteLanguage]);
 
+  // A signed note now shows the language + template pickers too, so the
+  // toolbar is the same whether the note is a draft or signed. Using either
+  // one first re-opens (unlocks) the note, then applies the change — the
+  // note lands in the editable state and the therapist re-signs to re-lock.
+  const [pendingLang, setPendingLang] = useState<string | null>(null);
+  useEffect(() => {
+    if (phase.kind === 'completed' && pendingLang) {
+      const code = pendingLang;
+      setPendingLang(null);
+      void translateTo(code);
+    }
+  }, [phase.kind, pendingLang, translateTo]);
+
+  const signedTranslate = useCallback(
+    (code: string): void => {
+      if (unlocking) return;
+      setPendingLang(code);
+      void unlockNote();
+    },
+    [unlocking, unlockNote],
+  );
+  const signedApplyTemplate = useCallback(async (): Promise<void> => {
+    // TemplatePicker has already written the new session template; re-open
+    // the signed note and re-generate it into that format for review + re-sign.
+    await unlockNote();
+    await triggerGeneration();
+  }, [unlockNote, triggerGeneration]);
+
   // Short label for the AI panel's document chip ("Note (BASE)"). For a
   // standard intake (no template) the chip reads "Initial assessment"; a
   // templated intake or a treatment note shows the chosen template's name.
@@ -608,7 +636,23 @@ export function NotesTab({
                 noteText={intakeNoteToText(signedIntake)}
                 signed
                 onShare={() => setShareOpen(true)}
-                leftControls={<VerbosityDropdown value={verbosity} onChange={pickVerbosity} />}
+                leftControls={
+                  <>
+                    <TemplatePicker
+                      sessionId={sessionId}
+                      currentTemplateId={noteTemplateId}
+                      kind="INTAKE"
+                      disabled={unlocking || translating}
+                      onApply={signedApplyTemplate}
+                    />
+                    <LanguagePicker
+                      value={noteLang}
+                      onChange={signedTranslate}
+                      disabled={unlocking || translating}
+                    />
+                    <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
+                  </>
+                }
               />
               <RiskBanner riskFlags={signedIntake.riskFlags} />
               <IntakeNotePreview
@@ -659,7 +703,23 @@ export function NotesTab({
               noteText={therapyNoteToText(treatmentContent)}
               signed
               onShare={() => setShareOpen(true)}
-              leftControls={<VerbosityDropdown value={verbosity} onChange={pickVerbosity} />}
+              leftControls={
+                <>
+                  <TemplatePicker
+                    sessionId={sessionId}
+                    currentTemplateId={noteTemplateId}
+                    kind="TREATMENT"
+                    disabled={unlocking || translating}
+                    onApply={signedApplyTemplate}
+                  />
+                  <LanguagePicker
+                    value={noteLang}
+                    onChange={signedTranslate}
+                    disabled={unlocking || translating}
+                  />
+                  <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
+                </>
+              }
             />
             <AdvancementBanner clientId={clientId} />
             <RiskBanner riskFlags={treatmentContent.riskFlags} />
