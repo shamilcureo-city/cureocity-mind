@@ -71,6 +71,10 @@ interface Props {
   /// Sprint 70 — shown in the note toolbar (client chip + language flag).
   clientName: string;
   noteLanguage: string;
+  /// Sprint 72 — the client's preferred language (ISO). Seeds the Share
+  /// dialog's language selector so a shared note is delivered in the
+  /// client's language without touching the signed record.
+  clientPreferredLanguage: string;
   /// Sprint 70 — the session's chosen note template (drives the picker +
   /// which structure Pass 2 writes the note into). Null = built-in SOAP.
   noteTemplateId: string | null;
@@ -116,6 +120,7 @@ export function NotesTab({
   llmBackend,
   clientName,
   noteLanguage,
+  clientPreferredLanguage,
   noteTemplateId,
 }: Props) {
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
@@ -669,6 +674,7 @@ export function NotesTab({
                 hasContactEmail={clientHasContactEmail}
                 artefact={{ artefactType: 'SIGNED_INTAKE_NOTE', sessionId }}
                 artefactLabel="Signed intake note"
+                defaultLanguage={clientPreferredLanguage}
               />
               <RevisionPanel sessionId={sessionId} onUnlock={unlockNote} unlocking={unlocking} />
               <NoteFooter
@@ -737,6 +743,7 @@ export function NotesTab({
               hasContactEmail={clientHasContactEmail}
               artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
               artefactLabel="Signed session note"
+              defaultLanguage={clientPreferredLanguage}
             />
             <RevisionPanel sessionId={sessionId} onUnlock={unlockNote} unlocking={unlocking} />
             <NoteFooter

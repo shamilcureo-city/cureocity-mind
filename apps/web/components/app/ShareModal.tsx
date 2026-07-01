@@ -21,6 +21,32 @@ interface ShareModalProps {
   artefact: ShareArtefactRef;
   /** Short label shown in the modal header. */
   artefactLabel: string;
+  /**
+   * The client's preferred language (raw ISO). When provided, the modal
+   * shows a language selector (defaulting to it) so the therapist can see /
+   * choose the language the client receives — a signed note is translated
+   * into it without touching the record. Omitted → no selector, and the
+   * server keeps defaulting to the client's preferred language as before.
+   */
+  defaultLanguage?: string;
+}
+
+// The languages a share can be delivered in (ClinicalLocale). Kept as plain
+// data so this client component doesn't pull in the Zod enum.
+const SHARE_LANGUAGES: { code: string; label: string }[] = [
+  { code: 'en', label: 'English' },
+  { code: 'ml', label: 'Malayalam' },
+  { code: 'hi', label: 'Hindi' },
+  { code: 'ta', label: 'Tamil' },
+  { code: 'bn', label: 'Bengali' },
+];
+
+function coerceShareLanguage(v: string | undefined): string {
+  return SHARE_LANGUAGES.some((l) => l.code === v) ? (v as string) : 'en';
+}
+
+function shareLanguageLabel(code: string): string {
+  return SHARE_LANGUAGES.find((l) => l.code === code)?.label ?? 'English';
 }
 
 const ALL_CHANNELS: { key: PatientShareChannel; label: string; description: string }[] = [
@@ -65,12 +91,15 @@ export function ShareModal({
   hasContactEmail,
   artefact,
   artefactLabel,
+  defaultLanguage,
 }: ShareModalProps) {
+  const showLanguage = defaultLanguage !== undefined;
   const [selected, setSelected] = useState<Record<PatientShareChannel, boolean>>({
     WHATSAPP: hasContactPhone,
     EMAIL: hasContactEmail,
     PORTAL_LINK: !hasContactPhone && !hasContactEmail,
   });
+  const [language, setLanguage] = useState<string>(() => coerceShareLanguage(defaultLanguage));
   const [therapistMessage, setTherapistMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +119,11 @@ export function ShareModal({
       setBusy(false);
     }
   }, [open]);
+
+  // Seed the language from the client's preference each time the modal opens.
+  useEffect(() => {
+    if (open) setLanguage(coerceShareLanguage(defaultLanguage));
+  }, [open, defaultLanguage]);
 
   // Load channel config when the modal opens; drop selections for
   // channels the server can't deliver on so the therapist never sends
@@ -149,6 +183,7 @@ export function ShareModal({
           clientId,
           channels: selectedChannels,
           ...(therapistMessage.trim().length > 0 && { therapistMessage: therapistMessage.trim() }),
+          ...(showLanguage && { language }),
           artefact,
         }),
       });
@@ -162,7 +197,7 @@ export function ShareModal({
     } finally {
       setBusy(false);
     }
-  }, [artefact, clientId, selectedChannels, therapistMessage]);
+  }, [artefact, clientId, selectedChannels, therapistMessage, showLanguage, language]);
 
   if (!open) return null;
 
@@ -271,6 +306,33 @@ export function ShareModal({
               />
             </section>
 
+            {showLanguage && (
+              <section className="mt-4">
+                <label
+                  htmlFor="share-language"
+                  className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+                >
+                  Language the client receives
+                </label>
+                <select
+                  id="share-language"
+                  value={language}
+                  onChange={(e) => setLanguage(e.target.value)}
+                  className="mt-2 w-full rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3 text-sm text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                >
+                  {SHARE_LANGUAGES.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1.5 text-xs text-[var(--color-ink-3)]">
+                  The note is translated into this language for the client. Your signed record stays
+                  unchanged.
+                </p>
+              </section>
+            )}
+
             {selectedChannels.length > 0 && (
               <section className="mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
                 <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
@@ -289,6 +351,12 @@ export function ShareModal({
                     </li>
                   ))}
                 </ul>
+                {showLanguage && (
+                  <p className="mt-3 text-sm text-[var(--color-ink)]">
+                    In <strong>{shareLanguageLabel(language)}</strong>
+                    {language !== 'en' ? ' (translated for the client)' : ''}.
+                  </p>
+                )}
               </section>
             )}
 
