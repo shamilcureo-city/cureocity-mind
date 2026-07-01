@@ -113,6 +113,10 @@ function riskStyle(severity: string) {
 export function SignedNotePdf(props: SignedNotePdfProps) {
   const { note } = props;
   const durationMin = props.durationMs ? Math.round(props.durationMs / 60_000) : null;
+  // Sprint 72 — when the note was written into a template, the clinician's
+  // PDF renders that template's sections (the authoritative SOAP fields stay
+  // in the record underneath). Mirrors the on-screen note + IntakeNotePdf.
+  const hasTemplateSections = Boolean(note.templateSections && note.templateSections.length > 0);
   return (
     <Document
       title={`Session note — ${props.clientFullName}`}
@@ -148,22 +152,33 @@ export function SignedNotePdf(props: SignedNotePdfProps) {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Subjective</Text>
-          <Text style={styles.body}>{note.subjective}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Objective</Text>
-          <Text style={styles.body}>{note.objective}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Assessment</Text>
-          <Text style={styles.body}>{note.assessment}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Plan</Text>
-          <Text style={styles.body}>{note.plan}</Text>
-        </View>
+        {hasTemplateSections ? (
+          note.templateSections!.map((s, i) => (
+            <View key={i} style={styles.section}>
+              <Text style={styles.sectionHeading}>{s.title}</Text>
+              <Text style={styles.body}>{s.body.trim() ? s.body : '—'}</Text>
+            </View>
+          ))
+        ) : (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Subjective</Text>
+              <Text style={styles.body}>{note.subjective}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Objective</Text>
+              <Text style={styles.body}>{note.objective}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Assessment</Text>
+              <Text style={styles.body}>{note.assessment}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Plan</Text>
+              <Text style={styles.body}>{note.plan}</Text>
+            </View>
+          </>
+        )}
 
         <View style={[styles.riskBox, riskStyle(note.riskFlags.severity)]}>
           <Text style={styles.riskHeading}>Risk · {note.riskFlags.severity.toUpperCase()}</Text>

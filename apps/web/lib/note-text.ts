@@ -3,10 +3,21 @@ import type { IntakeNoteV1, TherapyNoteV1 } from '@cureocity/contracts';
 /**
  * Plain-text renderings of a note for the toolbar "Copy" action — what a
  * therapist would paste into their own EMR / email. Mirrors the readable
- * on-screen layout: the Summary + named Session Topics when present, else
- * the SOAP sections.
+ * on-screen layout: a chosen template's sections when present, else the
+ * Summary + named Session Topics, else the SOAP sections.
  */
+function templateSectionsToText(
+  sections: { title: string; body: string }[] | undefined | null,
+): string | null {
+  if (!sections || sections.length === 0) return null;
+  return sections
+    .map((s) => `${s.title.toUpperCase()}\n${s.body.trim() ? s.body.trim() : '—'}`)
+    .join('\n\n');
+}
+
 export function therapyNoteToText(note: TherapyNoteV1): string {
+  const templated = templateSectionsToText(note.templateSections);
+  if (templated) return templated;
   const parts: string[] = [];
 
   if (note.summary && note.summary.trim()) {
@@ -33,6 +44,8 @@ export function therapyNoteToText(note: TherapyNoteV1): string {
 }
 
 export function intakeNoteToText(note: IntakeNoteV1): string {
+  const templated = templateSectionsToText(note.templateSections);
+  if (templated) return templated;
   const rows: [string, string][] = [
     ['PRESENTING CONCERNS', note.presentingConcerns],
     ['HISTORY OF PRESENTING ILLNESS', note.historyOfPresentingIllness],

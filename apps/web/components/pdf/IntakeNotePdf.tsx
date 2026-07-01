@@ -116,6 +116,9 @@ function riskStyle(severity: string) {
 export function IntakeNotePdf(props: IntakeNotePdfProps) {
   const { note } = props;
   const durationMin = props.durationMs ? Math.round(props.durationMs / 60_000) : null;
+  // Sprint 72 — a templated intake renders its template's sections here; the
+  // authoritative eight intake fields stay in the record underneath.
+  const hasTemplateSections = Boolean(note.templateSections && note.templateSections.length > 0);
   return (
     <Document
       title={`Intake note — ${props.clientFullName}`}
@@ -147,38 +150,49 @@ export function IntakeNotePdf(props: IntakeNotePdfProps) {
           </View>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Presenting concerns</Text>
-          <Text style={styles.body}>{note.presentingConcerns}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>History of presenting illness</Text>
-          <Text style={styles.body}>{note.historyOfPresentingIllness}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Past psychiatric history</Text>
-          <Text style={styles.body}>{note.pastPsychiatricHistory}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Family history</Text>
-          <Text style={styles.body}>{note.familyHistory}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Social history</Text>
-          <Text style={styles.body}>{note.socialHistory}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Mental status exam</Text>
-          <Text style={styles.body}>{note.mentalStatusExam}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Working hypothesis</Text>
-          <Text style={styles.body}>{note.workingHypothesis}</Text>
-        </View>
-        <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Immediate plan</Text>
-          <Text style={styles.body}>{note.immediatePlan}</Text>
-        </View>
+        {hasTemplateSections ? (
+          note.templateSections!.map((s, i) => (
+            <View key={i} style={styles.section}>
+              <Text style={styles.sectionHeading}>{s.title}</Text>
+              <Text style={styles.body}>{s.body.trim() ? s.body : '—'}</Text>
+            </View>
+          ))
+        ) : (
+          <>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Presenting concerns</Text>
+              <Text style={styles.body}>{note.presentingConcerns}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>History of presenting illness</Text>
+              <Text style={styles.body}>{note.historyOfPresentingIllness}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Past psychiatric history</Text>
+              <Text style={styles.body}>{note.pastPsychiatricHistory}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Family history</Text>
+              <Text style={styles.body}>{note.familyHistory}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Social history</Text>
+              <Text style={styles.body}>{note.socialHistory}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Mental status exam</Text>
+              <Text style={styles.body}>{note.mentalStatusExam}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Working hypothesis</Text>
+              <Text style={styles.body}>{note.workingHypothesis}</Text>
+            </View>
+            <View style={styles.section}>
+              <Text style={styles.sectionHeading}>Immediate plan</Text>
+              <Text style={styles.body}>{note.immediatePlan}</Text>
+            </View>
+          </>
+        )}
 
         <View style={[styles.riskBox, riskStyle(note.riskFlags.severity)]}>
           <Text style={styles.riskHeading}>Risk · {note.riskFlags.severity.toUpperCase()}</Text>
