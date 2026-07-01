@@ -143,6 +143,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientHasContactEmail={!!pii.contactEmail}
             clientName={pii.fullName}
             noteLanguage={session.language}
+            clientPreferredLanguage={session.client.preferredLanguage}
             noteTemplateId={session.noteTemplateId}
           />
         )}
@@ -176,6 +177,7 @@ async function NotesTabPanel({
   clientHasContactEmail,
   clientName,
   noteLanguage,
+  clientPreferredLanguage,
   noteTemplateId,
 }: {
   sessionId: string;
@@ -186,6 +188,7 @@ async function NotesTabPanel({
   clientHasContactEmail: boolean;
   clientName: string;
   noteLanguage: string;
+  clientPreferredLanguage: string;
   noteTemplateId: string | null;
 }) {
   const [draftRow, signedRow] = await Promise.all([
@@ -233,6 +236,7 @@ async function NotesTabPanel({
       llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
       clientName={clientName}
       noteLanguage={noteLanguage}
+      clientPreferredLanguage={clientPreferredLanguage}
       noteTemplateId={noteTemplateId}
     />
   );
