@@ -54,7 +54,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
               <Link
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={`flex flex-col items-center gap-1 px-1 py-2.5 text-[10px] ${
+                className={`flex flex-col items-center gap-1 px-1 py-2.5 text-xs ${
                   active ? 'font-medium text-[var(--color-accent)]' : 'text-[var(--color-ink-2)]'
                 }`}
               >

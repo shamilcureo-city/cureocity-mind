@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { AdvancementSuggestion } from '@cureocity/contracts';
+import { confidenceHint } from '../../lib/instrument-plain-language';
 
 interface Props {
   clientId: string;
@@ -48,7 +49,7 @@ export function AdvancementBanner({ clientId, scribeBase = '/api/v1' }: Props) {
         <span className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
           Workflow suggestion
         </span>
-        <span className="text-xs text-[var(--color-ink-3)]">
+        <span className="cursor-help text-xs text-[var(--color-ink-3)]" title={confidenceHint}>
           confidence {(suggestion.confidence * 100).toFixed(0)}%
         </span>
       </div>

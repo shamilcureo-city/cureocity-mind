@@ -94,7 +94,7 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
               <li key={item.href}>
                 <Link
                   href={item.href}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors ${
+                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                     active
                       ? 'bg-white font-medium text-[var(--color-ink)] shadow-sm'
                       : 'text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)]'
@@ -178,7 +178,7 @@ function FooterLinks() {
         <li key={it.href}>
           <Link
             href={it.href}
-            className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)]"
+            className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
           >
             <Glyph kind={it.icon} />
             {it.label}
@@ -197,7 +197,7 @@ function FooterLinks() {
         <form method="POST" action="/api/v1/auth/signout">
           <button
             type="submit"
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)]"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
           >
             <Glyph kind="signout" />
             Sign out

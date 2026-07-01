@@ -261,6 +261,15 @@ function CompletedBrief({
   );
 }
 
+// India crisis hotlines shared in the safety banner. Numbers stay in
+// their published, human-readable form for display; the tel: href
+// strips formatting so it dials on mobile.
+const CRISIS_HOTLINES: { name: string; number: string; hours: string }[] = [
+  { name: 'iCall (TISS)', number: '9152987821', hours: 'Mon-Sat, 8am-10pm' },
+  { name: 'Vandrevala Foundation', number: '1860-2662-345', hours: '24×7' },
+  { name: 'NIMHANS Helpline', number: '080-46110007', hours: '24×7' },
+];
+
 // ============================================================================
 // Crisis banner — top-of-page with India hotline numbers. Mandatory
 // acknowledge before the rest of the brief is interactive.
@@ -322,10 +331,20 @@ function CrisisBanner({
       </ul>
       <div className="mt-5 rounded-xl bg-white/60 p-4 text-sm">
         <p className="font-medium">India crisis support — share with the client today:</p>
-        <ul className="mt-2 space-y-1 text-[var(--color-ink-2)]">
-          <li>iCall (TISS) — 9152987821 (Mon-Sat, 8am-10pm)</li>
-          <li>Vandrevala Foundation — 1860-2662-345 (24×7)</li>
-          <li>NIMHANS Helpline — 080-46110007 (24×7)</li>
+        <ul className="mt-2 space-y-2 text-[var(--color-ink-2)]">
+          {CRISIS_HOTLINES.map((h) => (
+            <li key={h.name} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span>{h.name}</span>
+              <a
+                href={`tel:${h.number.replace(/[^+\d]/g, '')}`}
+                aria-label={`Call ${h.name} on ${h.number}`}
+                className="font-mono font-medium text-[var(--color-accent)] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
+              >
+                {h.number}
+              </a>
+              <span className="text-xs text-[var(--color-ink-3)]">{h.hours}</span>
+            </li>
+          ))}
         </ul>
       </div>
       <div className="mt-5 flex items-center gap-3">

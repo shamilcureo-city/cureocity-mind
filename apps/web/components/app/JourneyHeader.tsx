@@ -14,6 +14,7 @@ import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { DischargeModal } from './DischargeModal';
 import { ShareModal } from './ShareModal';
+import { severityLabel, phq9Plain, gad7Plain } from '../../lib/instrument-plain-language';
 
 interface Props {
   journey: JourneySummary;
@@ -42,14 +43,6 @@ const STAGE_ORDER: JourneyStage[] = [
   'REVIEW_DUE',
   'DISCHARGE_READY',
 ];
-
-const SEVERITY_LABEL: Record<string, string> = {
-  minimal: 'minimal',
-  mild: 'mild',
-  moderate: 'moderate',
-  moderately_severe: 'mod-severe',
-  severe: 'severe',
-};
 
 const VERDICT_LABEL: Record<ChangeVerdict, string> = {
   reliable_improvement: 'Improving',
@@ -107,7 +100,7 @@ export function JourneyHeader({
             <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
               Current best fit
               <span className="ml-2 normal-case tracking-normal text-[10px] text-[var(--color-ink-3)]">
-                (working diagnosis)
+                (provisional — may change as you learn more)
               </span>
             </p>
             <p className="mt-1 text-sm">
@@ -205,7 +198,7 @@ export function JourneyHeader({
               Plan goals{journey.activePlan.modality ? ` · ${journey.activePlan.modality}` : ''}
             </p>
             <p className="text-xs font-medium text-[var(--color-ink-2)]">
-              {journey.activePlan.goalsAchieved} of {journey.activePlan.goalsTotal} achieved
+              {goalBreakdown(journey.activePlan.goals)}
             </p>
           </div>
           <ul className="mt-2 space-y-1.5">
@@ -265,7 +258,12 @@ function InstrumentTrend({ change }: { change: InstrumentChange }) {
         <p className="text-sm font-medium">
           {INSTRUMENT_LABEL[change.instrumentKey] ?? change.instrumentKey}
         </p>
-        <Badge tone={tone}>{VERDICT_LABEL[change.verdict]}</Badge>
+        <div className="text-right">
+          <Badge tone={tone}>{VERDICT_LABEL[change.verdict]}</Badge>
+          <p className="mt-0.5 text-[11px] text-[var(--color-ink-3)] tabular-nums">
+            {change.baselineScore} → {change.latestScore}
+          </p>
+        </div>
       </div>
       <p className="mt-1 text-sm text-[var(--color-ink-2)]">
         <span className="font-mono text-base text-[var(--color-ink)]">{change.baselineScore}</span>
@@ -273,6 +271,11 @@ function InstrumentTrend({ change }: { change: InstrumentChange }) {
         <span className="mx-1.5 text-[var(--color-ink-3)]">→</span>
         <span className="font-mono text-base text-[var(--color-ink)]">{change.latestScore}</span>
         <span className="text-[var(--color-ink-3)]"> ({severity(change.latestSeverityKey)})</span>
+      </p>
+      <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+        {change.instrumentKey === 'PHQ9'
+          ? phq9Plain(change.latestScore, change.latestSeverityKey)
+          : gad7Plain(change.latestScore, change.latestSeverityKey)}
       </p>
       <div className="mt-2 flex flex-wrap gap-1.5">
         {change.isResponse && (
@@ -442,7 +445,16 @@ function NextActionCard({ action, onDismiss }: { action: NextBestAction; onDismi
 }
 
 function severity(key: string): string {
-  return SEVERITY_LABEL[key] ?? key.replace(/_/g, ' ');
+  return severityLabel(key);
+}
+
+// Plain "N achieved · N in progress · N not started" readout, so the
+// therapist sees the whole spread rather than only the achieved count.
+function goalBreakdown(goals: { status: TreatmentGoalStatus }[]): string {
+  const achieved = goals.filter((g) => g.status === 'ACHIEVED').length;
+  const inProgress = goals.filter((g) => g.status === 'IN_PROGRESS').length;
+  const notStarted = goals.filter((g) => g.status === 'NOT_STARTED').length;
+  return `${achieved} achieved · ${inProgress} in progress · ${notStarted} not started`;
 }
 
 function formatRelative(iso: string): string {

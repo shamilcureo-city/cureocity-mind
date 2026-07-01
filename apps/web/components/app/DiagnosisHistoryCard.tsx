@@ -2,6 +2,7 @@ import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { InlineExplainer } from './EduHeading';
 import { glossary } from '../../lib/clinical-glossary';
+import { confidenceHint } from '../../lib/instrument-plain-language';
 
 export interface DiagnosisHistoryRow {
   id: string;
@@ -95,7 +96,9 @@ function DiagnosisRow({ d, current }: { d: DiagnosisHistoryRow; current: boolean
       </div>
       <div className="flex items-center gap-2">
         {d.isPrimary && current && <Badge tone="accent">primary</Badge>}
-        <Badge tone="muted">confidence {(d.confidence * 100).toFixed(0)}%</Badge>
+        <span title={confidenceHint}>
+          <Badge tone="muted">confidence {(d.confidence * 100).toFixed(0)}%</Badge>
+        </span>
       </div>
     </li>
   );

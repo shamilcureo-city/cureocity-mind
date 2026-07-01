@@ -18,6 +18,9 @@ export function PreferencesSettingsForm({ initial }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  const dirty =
+    language !== initial.defaultOutputLanguage || (modality || null) !== initial.defaultModality;
+
   const submit = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -31,7 +34,6 @@ export function PreferencesSettingsForm({ initial }: Props) {
         payload['defaultModality'] = modality || null;
       }
       if (Object.keys(payload).length === 0) {
-        setError('No changes to save.');
         return;
       }
       const res = await fetch('/api/v1/psychologists/me', {
@@ -115,7 +117,7 @@ export function PreferencesSettingsForm({ initial }: Props) {
       )}
 
       <div className="mt-6 flex justify-end border-t border-[var(--color-line-soft)] pt-4">
-        <Button onClick={() => void submit()} disabled={busy}>
+        <Button onClick={() => void submit()} disabled={busy || !dirty}>
           {busy ? 'Saving…' : 'Save preferences'}
         </Button>
       </div>

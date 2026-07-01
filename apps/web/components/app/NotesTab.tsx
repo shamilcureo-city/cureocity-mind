@@ -1064,9 +1064,9 @@ function NoteFooter({
         Session details
       </summary>
       <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="AI cost" value={costInr === '—' ? '—' : `₹${costInr}`} />
-        <Stat label="Speech parts" value={String(chunkCount)} />
-        <Stat label="Words captured" value={`${transcriptChars} characters`} />
+        <Stat label="Cost" value={costInr === '—' ? '—' : `₹${costInr}`} />
+        <Stat label="Audio segments" value={String(chunkCount)} />
+        <Stat label="Characters" value={`${transcriptChars} characters`} />
         <Stat label="Mode" value={region} />
       </dl>
     </details>
@@ -1199,7 +1199,9 @@ function ModifyPanel({
           </p>
         )}
         {lastChanged && lastChanged.length === 0 && (
-          <p className="text-xs text-[var(--color-ink-3)]">Model ran but no fields changed.</p>
+          <p className="text-xs text-[var(--color-ink-3)]">
+            No changes were needed — try a more specific instruction.
+          </p>
         )}
         {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
 

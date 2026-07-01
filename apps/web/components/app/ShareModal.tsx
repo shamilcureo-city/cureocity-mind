@@ -41,6 +41,22 @@ const ALL_CHANNELS: { key: PatientShareChannel; label: string; description: stri
   },
 ];
 
+/**
+ * Plain-language destination line for the pre-send preview. The modal
+ * only knows *whether* a phone/email is on file (not the literal
+ * value), so we describe the destination rather than print it.
+ */
+function previewDestination(channel: PatientShareChannel): string {
+  switch (channel) {
+    case 'WHATSAPP':
+      return 'WhatsApp — to the phone number on file';
+    case 'EMAIL':
+      return 'Email — to the email address on file';
+    case 'PORTAL_LINK':
+      return 'Portal link only — nothing is sent; copy the link to share yourself';
+  }
+}
+
 export function ShareModal({
   open,
   onClose,
@@ -170,7 +186,7 @@ export function ShareModal({
             type="button"
             onClick={onClose}
             aria-label="close"
-            className="text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
+            className="-mr-1.5 -mt-1.5 grid h-9 w-9 place-items-center rounded-full text-sm text-[var(--color-ink-2)] transition-colors hover:bg-[var(--color-surface-soft)] hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
           >
             ✕
           </button>
@@ -204,12 +220,12 @@ export function ShareModal({
                 return (
                   <label
                     key={c.key}
-                    className={`flex items-start gap-3 rounded-xl border p-3 ${
+                    className={`flex items-start gap-3 rounded-xl border p-4 ${
                       disabled
-                        ? 'cursor-not-allowed border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] opacity-50'
+                        ? 'cursor-not-allowed border-[var(--color-line-soft)] bg-[var(--color-surface-soft)]'
                         : selected[c.key]
-                          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-                          : 'border-[var(--color-line-soft)] bg-white/40 hover:border-[var(--color-ink)]'
+                          ? 'cursor-pointer border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                          : 'cursor-pointer border-[var(--color-line-soft)] bg-white/40 hover:border-[var(--color-ink)]'
                     }`}
                   >
                     <input
@@ -217,13 +233,25 @@ export function ShareModal({
                       checked={selected[c.key]}
                       disabled={disabled}
                       onChange={() => toggle(c.key)}
-                      className="mt-1 h-4 w-4"
+                      className="mt-0.5 h-5 w-5 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
                     />
                     <span className="flex-1">
-                      <span className="text-sm font-medium text-[var(--color-ink)]">{c.label}</span>
-                      <span className="ml-2 text-xs text-[var(--color-ink-3)]">
-                        {disabledReason ?? c.description}
+                      <span
+                        className={`block text-sm font-medium ${
+                          disabled ? 'text-[var(--color-ink-2)]' : 'text-[var(--color-ink)]'
+                        }`}
+                      >
+                        {c.label}
                       </span>
+                      <span className="mt-0.5 block text-xs text-[var(--color-ink-3)]">
+                        {c.description}
+                      </span>
+                      {disabledReason && (
+                        <span className="mt-2 flex items-start gap-1.5 rounded-lg bg-[var(--color-warn-soft)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-warn)]">
+                          <span aria-hidden="true">⚠</span>
+                          <span>{disabledReason}</span>
+                        </span>
+                      )}
                     </span>
                   </label>
                 );
@@ -242,6 +270,27 @@ export function ShareModal({
                 className="mt-2 w-full rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3 text-sm"
               />
             </section>
+
+            {selectedChannels.length > 0 && (
+              <section className="mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+                <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                  Before you send
+                </p>
+                <p className="mt-2 text-sm text-[var(--color-ink)]">
+                  Sending <strong>{artefactLabel}</strong> to the client via:
+                </p>
+                <ul className="mt-2 space-y-1 text-sm text-[var(--color-ink-2)]">
+                  {selectedChannels.map((ch) => (
+                    <li key={ch} className="flex items-baseline gap-2">
+                      <span aria-hidden="true" className="text-[var(--color-accent)]">
+                        •
+                      </span>
+                      <span>{previewDestination(ch)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             {error && (
               <div className="mt-4 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-sm text-[var(--color-warn)]">

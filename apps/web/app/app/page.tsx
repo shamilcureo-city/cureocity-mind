@@ -97,8 +97,15 @@ export default async function RecordPage() {
             <Card className="p-10 text-center">
               <p className="font-serif text-xl">No sessions yet.</p>
               <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-                Pick a capture mode above to start your first recording.
+                Pick a capture mode above to record the first session — or open a client to add a
+                PHQ-9 / GAD-7 baseline before you begin.
               </p>
+              <Link
+                href="/app/clients"
+                className="mt-4 inline-flex items-center rounded-full border border-[var(--color-line)] bg-white px-4 py-1.5 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
+              >
+                View clients
+              </Link>
             </Card>
           ) : (
             <div className="space-y-6">

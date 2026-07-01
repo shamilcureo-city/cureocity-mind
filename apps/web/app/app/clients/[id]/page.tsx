@@ -209,9 +209,18 @@ export default async function ClientDetailPage({ params }: PageProps) {
             </p>
           </header>
           {client.sessions.length === 0 ? (
-            <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-              No sessions yet. Start one from Record in the navigation.
-            </p>
+            <div className="px-5 py-8 text-center">
+              <p className="text-sm text-[var(--color-ink-2)]">
+                No sessions yet. Record the first session, or add a PHQ-9 / GAD-7 baseline to start
+                tracking progress.
+              </p>
+              <Link
+                href="/app"
+                className="mt-3 inline-flex items-center rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
+              >
+                Record a session
+              </Link>
+            </div>
           ) : (
             <ul className="divide-y divide-[var(--color-line-soft)]">
               {client.sessions.map((s) => (
