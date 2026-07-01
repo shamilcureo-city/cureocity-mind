@@ -7,6 +7,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { HelpNote, InlineExplainer } from './EduHeading';
 import { glossary } from '../../lib/clinical-glossary';
+import { severityLabel, phq9Plain, gad7Plain } from '../../lib/instrument-plain-language';
 
 interface CatalogItem {
   id: string;
@@ -222,8 +223,8 @@ export function InstrumentRunner({ clientId }: Props) {
               </span>
               <div>
                 <p className="font-serif text-lg">
-                  Risk item endorsed — {riskAlert.instrumentKey}
-                  {riskAlert.itemNumber ? ` item ${riskAlert.itemNumber}` : ''}
+                  Risk item endorsed —{' '}
+                  {riskItemLabel(riskAlert.instrumentKey, riskAlert.itemNumber)}
                 </p>
                 <p className="mt-1 text-sm">
                   The client endorsed thoughts of self-harm. Conduct a full risk assessment and
@@ -289,13 +290,16 @@ export function InstrumentRunner({ clientId }: Props) {
                     </span>
                     <span className="ml-2">
                       score {h.score} ·{' '}
-                      <Badge tone={severityTone(h.severity)}>{h.severity.replace(/_/g, ' ')}</Badge>
+                      <Badge tone={severityTone(h.severity)}>{severityLabel(h.severity)}</Badge>
                       {h.administrationMode === 'SELF' && (
                         <Badge tone="muted" className="ml-1.5">
                           self check-in
                         </Badge>
                       )}
                     </span>
+                    <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
+                      {plainForInstrument(h.instrumentKey, h.score, h.severity)}
+                    </p>
                   </div>
                   <span className="text-xs text-[var(--color-ink-3)]">
                     {new Date(h.administeredAt).toLocaleString('en-IN', {
@@ -319,6 +323,24 @@ export function InstrumentRunner({ clientId }: Props) {
       )}
     </Card>
   );
+}
+
+// Human-readable risk item label — "PHQ-9 item 9 (thoughts of self-harm)"
+// instead of a bare instrument key + number.
+function riskItemLabel(instrumentKey: string, itemNumber: number | null): string {
+  const label =
+    instrumentKey === 'PHQ9' ? 'PHQ-9' : instrumentKey === 'GAD7' ? 'GAD-7' : instrumentKey;
+  const item = itemNumber ? `${label} item ${itemNumber}` : label;
+  // PHQ-9 item 9 is the suicidality item; name it plainly.
+  if (instrumentKey === 'PHQ9' && itemNumber === 9) {
+    return `${item} (thoughts of self-harm)`;
+  }
+  return item;
+}
+
+// Route a stored administration to the right plain-language sentence.
+function plainForInstrument(instrumentKey: string, score: number, severity: string): string {
+  return instrumentKey === 'GAD7' ? gad7Plain(score, severity) : phq9Plain(score, severity);
 }
 
 function severityTone(severity: string): 'accent' | 'warn' | 'muted' | 'default' {

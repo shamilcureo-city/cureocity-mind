@@ -100,6 +100,8 @@ export function AccountSettingsForm({ initial }: Props) {
     setSaved(false);
   }, []);
 
+  const dirty = Object.keys(diffPayload(original, state)).length > 0;
+
   const submit = useCallback(async () => {
     setBusy(true);
     setError(null);
@@ -107,7 +109,6 @@ export function AccountSettingsForm({ initial }: Props) {
     try {
       const payload = diffPayload(original, state);
       if (Object.keys(payload).length === 0) {
-        setError('No changes to save.');
         return;
       }
       const res = await fetch('/api/v1/psychologists/me', {
@@ -273,7 +274,7 @@ export function AccountSettingsForm({ initial }: Props) {
       )}
 
       <div className="mt-6 flex justify-end border-t border-[var(--color-line-soft)] pt-4">
-        <Button onClick={() => void submit()} disabled={busy}>
+        <Button onClick={() => void submit()} disabled={busy || !dirty}>
           {busy ? 'Saving…' : 'Save profile'}
         </Button>
       </div>

@@ -1,21 +1,23 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-bg:           #faf7f2;
-  --color-surface:      #ffffff;
+  --color-bg: #faf7f2;
+  --color-surface: #ffffff;
   --color-surface-soft: #f4efe7;
-  --color-ink:          #0f1b2a;
-  --color-ink-2:        #4a5566;
-  --color-ink-3:        #7b8694;
-  --color-line:         #e6e2d8;
-  --color-line-soft:    #ede9df;
-  --color-accent:       #2d5f4d;
+  --color-ink: #0f1b2a;
+  --color-ink-2: #4a5566;
+  --color-ink-3: #7b8694;
+  --color-line: #e6e2d8;
+  --color-line-soft: #ede9df;
+  --color-accent: #2d5f4d;
   --color-accent-hover: #23493b;
-  --color-accent-soft:  #e8f0eb;
-  --color-warn:         #b86a3c;
-  --color-warn-soft:    #fbe9dc;
+  --color-accent-soft: #e8f0eb;
+  --color-warn: #b86a3c;
+  --color-warn-soft: #fbe9dc;
+  --color-warn-border: #e5c39c;
+  --color-warn-bg: #fbe9dc;
   --font-serif: 'Fraunces', 'Iowan Old Style', 'Source Serif Pro', Georgia, serif;
-  --font-sans:  'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
 html,
@@ -27,8 +29,12 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-.font-serif { font-family: var(--font-serif); }
-.font-sans  { font-family: var(--font-sans);  }
+.font-serif {
+  font-family: var(--font-serif);
+}
+.font-sans {
+  font-family: var(--font-sans);
+}
 
 ::selection {
   background: var(--color-accent);
@@ -83,16 +89,28 @@ html {
 
 /* ---- Hero aurora -------------------------------------------------------- */
 @keyframes lp-drift-a {
-  from { transform: translate(-8%, -4%) scale(1); }
-  to   { transform: translate(10%, 8%) scale(1.18); }
+  from {
+    transform: translate(-8%, -4%) scale(1);
+  }
+  to {
+    transform: translate(10%, 8%) scale(1.18);
+  }
 }
 @keyframes lp-drift-b {
-  from { transform: translate(6%, 10%) scale(1.1); }
-  to   { transform: translate(-10%, -6%) scale(0.94); }
+  from {
+    transform: translate(6%, 10%) scale(1.1);
+  }
+  to {
+    transform: translate(-10%, -6%) scale(0.94);
+  }
 }
 @keyframes lp-drift-c {
-  from { transform: translate(0, 6%) scale(0.95) rotate(0deg); }
-  to   { transform: translate(-6%, -10%) scale(1.12) rotate(8deg); }
+  from {
+    transform: translate(0, 6%) scale(0.95) rotate(0deg);
+  }
+  to {
+    transform: translate(-6%, -10%) scale(1.12) rotate(8deg);
+  }
 }
 .lp-blob {
   position: absolute;
@@ -100,9 +118,15 @@ html {
   filter: blur(70px);
   pointer-events: none;
 }
-.lp-blob-a { animation: lp-drift-a 21s ease-in-out infinite alternate; }
-.lp-blob-b { animation: lp-drift-b 26s ease-in-out infinite alternate; }
-.lp-blob-c { animation: lp-drift-c 18s ease-in-out infinite alternate; }
+.lp-blob-a {
+  animation: lp-drift-a 21s ease-in-out infinite alternate;
+}
+.lp-blob-b {
+  animation: lp-drift-b 26s ease-in-out infinite alternate;
+}
+.lp-blob-c {
+  animation: lp-drift-c 18s ease-in-out infinite alternate;
+}
 
 /* ---- Headline underline flourish ---------------------------------------- */
 .lp-flourish path {
@@ -111,13 +135,19 @@ html {
   animation: lp-flourish-draw 1.1s cubic-bezier(0.6, 0, 0.2, 1) 0.5s forwards;
 }
 @keyframes lp-flourish-draw {
-  to { stroke-dashoffset: 0; }
+  to {
+    stroke-dashoffset: 0;
+  }
 }
 
 /* ---- Hero demo: waveform ------------------------------------------------- */
 @keyframes lp-wave {
-  from { transform: scaleY(0.22); }
-  to   { transform: scaleY(1); }
+  from {
+    transform: scaleY(0.22);
+  }
+  to {
+    transform: scaleY(1);
+  }
 }
 .lp-wavebar {
   transform-origin: center;
@@ -128,15 +158,28 @@ html {
   animation-delay: var(--lp-bar-delay, 0ms);
 }
 @keyframes lp-rec-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }
-.lp-rec-dot { animation: lp-rec-pulse 1.4s ease-in-out infinite; }
+.lp-rec-dot {
+  animation: lp-rec-pulse 1.4s ease-in-out infinite;
+}
 
 /* ---- Hero demo: typing caret + signed badge ------------------------------ */
 @keyframes lp-caret {
-  0%, 49% { opacity: 1; }
-  50%, 100% { opacity: 0; }
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
 }
 .lp-caret {
   display: inline-block;
@@ -147,16 +190,30 @@ html {
   animation: lp-caret 0.9s step-end infinite;
 }
 @keyframes lp-pop {
-  0% { opacity: 0; transform: scale(0.6); }
-  70% { transform: scale(1.06); }
-  100% { opacity: 1; transform: scale(1); }
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  70% {
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
-.lp-pop { animation: lp-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
+.lp-pop {
+  animation: lp-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
 
 /* ---- Floating chips ------------------------------------------------------ */
 @keyframes lp-float {
-  from { transform: translateY(-6px); }
-  to   { transform: translateY(8px); }
+  from {
+    transform: translateY(-6px);
+  }
+  to {
+    transform: translateY(8px);
+  }
 }
 .lp-float {
   animation: lp-float var(--lp-float-dur, 6s) ease-in-out infinite alternate;
@@ -165,8 +222,12 @@ html {
 
 /* ---- Language marquee ---------------------------------------------------- */
 @keyframes lp-marquee {
-  from { transform: translateX(0); }
-  to   { transform: translateX(-50%); }
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
 }
 .lp-marquee-track {
   display: flex;
@@ -215,14 +276,18 @@ html {
   transition: opacity 0.45s ease;
   transition-delay: calc(var(--lp-stage-i, 0) * 0.22s);
 }
-.lp-in .lp-stage { opacity: 1; }
+.lp-in .lp-stage {
+  opacity: 1;
+}
 .lp-stage-bar {
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 0.45s ease;
   transition-delay: calc(var(--lp-stage-i, 0) * 0.22s + 0.1s);
 }
-.lp-in .lp-stage-bar { transform: scaleX(1); }
+.lp-in .lp-stage-bar {
+  transform: scaleX(1);
+}
 
 /* ---- Chat bubbles pop-in on reveal --------------------------------------- */
 .lp-bubble {
@@ -253,13 +318,17 @@ html {
 
 /* ---- Reduced motion: everything lands instantly --------------------------- */
 @media (prefers-reduced-motion: reduce) {
-  html { scroll-behavior: auto; }
+  html {
+    scroll-behavior: auto;
+  }
   [data-lp-reveal] {
     opacity: 1;
     transform: none;
     transition: none;
   }
-  .lp-blob-a, .lp-blob-b, .lp-blob-c,
+  .lp-blob-a,
+  .lp-blob-b,
+  .lp-blob-c,
   .lp-live .lp-wavebar,
   .lp-rec-dot,
   .lp-caret,
@@ -271,12 +340,24 @@ html {
     animation: none;
     stroke-dashoffset: 0;
   }
-  .lp-spark-path { stroke-dashoffset: 0; transition: none; }
-  .lp-spark-dot, .lp-spark-verdict, .lp-stage, .lp-bubble {
+  .lp-spark-path {
+    stroke-dashoffset: 0;
+    transition: none;
+  }
+  .lp-spark-dot,
+  .lp-spark-verdict,
+  .lp-stage,
+  .lp-bubble {
     opacity: 1;
     transform: none;
     transition: none;
   }
-  .lp-stage-bar { transform: scaleX(1); transition: none; }
-  .lp-lift, .lp-lift:hover { transform: none; }
+  .lp-stage-bar {
+    transform: scaleX(1);
+    transition: none;
+  }
+  .lp-lift,
+  .lp-lift:hover {
+    transform: none;
+  }
 }

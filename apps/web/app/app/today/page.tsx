@@ -112,7 +112,7 @@ export default async function TodayPage() {
       </header>
 
       <section className="mt-6">
-        <h2 className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
           Now &amp; upcoming
         </h2>
         {nowAndUpcoming.length === 0 ? (
@@ -134,7 +134,7 @@ export default async function TodayPage() {
 
       {doneToday.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
             Done today
           </h2>
           <ul className="space-y-3">
@@ -149,7 +149,7 @@ export default async function TodayPage() {
 
       {otherToday.length > 0 && (
         <section className="mt-8">
-          <h2 className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
             No-shows &amp; cancellations
           </h2>
           <ul className="space-y-3">
@@ -163,7 +163,7 @@ export default async function TodayPage() {
       )}
 
       <section className="mt-10">
-        <h2 className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
           Looking ahead — next 3 days
         </h2>
         {upcomingRows.length === 0 ? (

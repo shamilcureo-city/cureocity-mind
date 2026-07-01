@@ -42,6 +42,12 @@ export function OnboardingForm({ phone }: Props) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [vertical, setVertical] = useState<'THERAPIST' | 'DOCTOR'>('THERAPIST');
+  // The vertical drives which registration fields show and how the account is
+  // provisioned, so make the therapist confirm the choice explicitly rather
+  // than silently defaulting. `vertical` keeps its concrete default for the
+  // payload; this flag just gates submit until the user has actually picked.
+  const [verticalChosen, setVerticalChosen] = useState(false);
+  const [verticalError, setVerticalError] = useState<string | null>(null);
   const [rciNumber, setRciNumber] = useState('');
   const [medicalRegNumber, setMedicalRegNumber] = useState('');
   const [specialty, setSpecialty] = useState('');
@@ -50,10 +56,15 @@ export function OnboardingForm({ phone }: Props) {
   const [phoneDigits, setPhoneDigits] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
     setError(null);
+    if (!verticalChosen) {
+      setVerticalError('Please choose whether you are a therapist or a doctor.');
+      return;
+    }
     setBusy(true);
     try {
       const body: Record<string, unknown> = {
@@ -104,6 +115,7 @@ export function OnboardingForm({ phone }: Props) {
         const errBody = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(errBody?.error ?? `Could not save (${res.status}).`);
       }
+      setSaved(true);
       router.replace('/app');
       router.refresh();
     } catch (e) {
@@ -116,23 +128,30 @@ export function OnboardingForm({ phone }: Props) {
   return (
     <form onSubmit={submit} className="space-y-5">
       <div>
-        <Label htmlFor="vertical-toggle">I am a</Label>
+        <Label htmlFor="vertical-toggle">
+          I am a<span className="ml-1 text-[var(--color-accent)]">*</span>
+        </Label>
         <div
           id="vertical-toggle"
           role="radiogroup"
           aria-label="Practitioner type"
+          aria-required="true"
           className="grid grid-cols-2 gap-2"
         >
           {(['THERAPIST', 'DOCTOR'] as const).map((v) => {
-            const selected = vertical === v;
+            const selected = verticalChosen && vertical === v;
             return (
               <button
                 key={v}
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                onClick={() => setVertical(v)}
-                className={`rounded-xl border px-4 py-3 text-sm font-medium transition-colors ${
+                onClick={() => {
+                  setVertical(v);
+                  setVerticalChosen(true);
+                  setVerticalError(null);
+                }}
+                className={`rounded-xl border px-4 py-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                   selected
                     ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                     : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-accent)]'
@@ -143,6 +162,7 @@ export function OnboardingForm({ phone }: Props) {
             );
           })}
         </div>
+        <FieldError message={verticalError} />
       </div>
 
       <div>
@@ -296,10 +316,32 @@ export function OnboardingForm({ phone }: Props) {
         )}
       </div>
 
-      <Button type="submit" size="lg" disabled={busy} className="w-full">
-        {busy ? 'Saving…' : 'Finish setup'}
+      <Button type="submit" size="lg" disabled={busy || saved} className="w-full">
+        {busy ? 'Saving…' : saved ? 'Profile saved' : 'Finish setup'}
       </Button>
-      <FieldError message={error} />
+      {saved ? (
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 rounded-xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3 text-sm font-medium text-[var(--color-accent)]"
+        >
+          <svg
+            aria-hidden
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          Profile saved — taking you in…
+        </div>
+      ) : (
+        <FieldError message={error} />
+      )}
 
       <p className="text-xs text-[var(--color-ink-3)]">
         We&rsquo;ll review your {vertical === 'DOCTOR' ? 'registration number' : 'RCI number'} out

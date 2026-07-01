@@ -24,8 +24,15 @@ interface Props {
   leftControls?: ReactNode;
 }
 
-const ICON_BTN =
-  'grid h-9 w-9 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)] transition-colors hover:border-[var(--color-ink-3)] hover:text-[var(--color-ink)]';
+const FOCUS_RING =
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2';
+
+const ICON_BTN = `grid h-9 w-9 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)] transition-colors hover:border-[var(--color-ink-3)] hover:text-[var(--color-ink)] ${FOCUS_RING}`;
+
+// A non-interactive status chip (lock/unlock). Same footprint as ICON_BTN but
+// without hover/focus affordances — it reports state, it isn't a control.
+const STATUS_CHIP =
+  'grid h-9 w-9 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)]';
 
 export function NoteToolbar({
   sessionId,
@@ -82,8 +89,10 @@ export function NoteToolbar({
         )}
 
         <span
-          className={`${ICON_BTN} cursor-default`}
+          role="status"
+          className={STATUS_CHIP}
           title={signed ? 'Signed — locked' : 'Draft — still editable'}
+          aria-label={signed ? 'Signed — locked' : 'Draft — still editable'}
         >
           <Icon kind={signed ? 'lock' : 'unlock'} />
         </span>
@@ -92,7 +101,7 @@ export function NoteToolbar({
           <button
             type="button"
             onClick={onShare}
-            className="grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+            className={`grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)] ${FOCUS_RING}`}
             title={signed ? 'Share with patient' : 'Sign & share with patient'}
             aria-label={signed ? 'Share with patient' : 'Sign and share with patient'}
           >

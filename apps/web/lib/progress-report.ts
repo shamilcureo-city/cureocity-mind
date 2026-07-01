@@ -186,8 +186,8 @@ function composeNarrative(key: InstrumentKey, change: InstrumentChange): string 
   switch (change.verdict) {
     case 'reliable_improvement':
       verdictSentence = change.isRemission
-        ? 'That is a meaningful change — your symptoms are now in the everyday range.'
-        : `That is a meaningful improvement (about ${formatPercent(change.percentChange)} lower).`;
+        ? 'That is a real, meaningful improvement — your symptoms are now in the everyday range.'
+        : `That is a real, meaningful improvement (about ${formatPercent(change.percentChange)} lower).`;
       break;
     case 'no_reliable_change':
       verdictSentence = change.isRemission

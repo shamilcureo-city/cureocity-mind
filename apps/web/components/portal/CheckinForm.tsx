@@ -177,7 +177,7 @@ function CrisisPanel({ hotlines }: { hotlines: CrisisHotline[] }) {
   return (
     <section
       role="alert"
-      className="rounded-2xl border-2 border-[#9f1f1f] bg-[#fbe1de] p-5 text-[#7f1010]"
+      className="rounded-2xl border-2 border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-5 text-[var(--color-warn)]"
     >
       <p className="font-serif text-lg">You don&apos;t have to go through this alone.</p>
       <p className="mt-2 text-sm leading-relaxed">
@@ -194,6 +194,7 @@ function CrisisPanel({ hotlines }: { hotlines: CrisisHotline[] }) {
             <div>
               <a
                 href={`tel:${h.number.replace(/[^+\d]/g, '')}`}
+                aria-label={`Call ${h.name} on ${h.number}`}
                 className="text-base font-semibold underline"
               >
                 {h.name}
@@ -203,7 +204,8 @@ function CrisisPanel({ hotlines }: { hotlines: CrisisHotline[] }) {
             <div className="text-right text-sm">
               <a
                 href={`tel:${h.number.replace(/[^+\d]/g, '')}`}
-                className="font-mono font-semibold"
+                aria-label={`Call ${h.name} on ${h.number}`}
+                className="font-mono font-semibold underline"
               >
                 {h.number}
               </a>
