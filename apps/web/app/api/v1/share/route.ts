@@ -20,6 +20,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { shareChannels } from '@/lib/share-channels';
 import { buildSnapshot, SnapshotBuildError } from '@/lib/share-snapshots';
+import { translateForShare } from '@/lib/share-translate';
 import { WATERMARK_TAGLINE, watermarkUrl } from '@/lib/watermark';
 import { toPatientShare } from '@/lib/clinical-mappers';
 import { resolveClientPii } from '@/lib/client-pii';
@@ -103,6 +104,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const { snapshot, subject, sessionId } = snapshotResult;
+
+  // Sprint 72 — translate the patient-facing note text into the client's
+  // language for the shared copy, WITHOUT touching the signed record. The
+  // therapist keeps their note in their working language; the client reads
+  // it in theirs. Fail-safe (see translateForShare): a translation miss
+  // leaves the original text, it never blocks the share.
+  await translateSnapshotForClient(snapshot, language);
 
   // Sprint 51 — homework loop. When sharing a therapy script with
   // assignHomework (default true), persist the script's `homework`
@@ -467,6 +475,39 @@ function escapeHtml(s: string): string {
 // ============================================================================
 // Helpers.
 // ============================================================================
+
+/**
+ * Translate the patient-facing text of a note snapshot into the client's
+ * language, in place. Only the shared copy is affected — the signed note is
+ * untouched. Other artefact kinds already localise via their own builders
+ * (pre-translated instrument catalog, plain-language composers) or don't carry
+ * free-text worth translating here.
+ */
+async function translateSnapshotForClient(
+  snapshot: PatientShareSnapshot,
+  language: ClinicalLocale,
+): Promise<void> {
+  if (language === 'en') return;
+  if (snapshot.kind === 'SIGNED_NOTE') {
+    const [subjective, objective, assessment, plan] = await translateForShare(
+      [snapshot.subjective, snapshot.objective, snapshot.assessment, snapshot.plan],
+      language,
+    );
+    snapshot.subjective = subjective ?? snapshot.subjective;
+    snapshot.objective = objective ?? snapshot.objective;
+    snapshot.assessment = assessment ?? snapshot.assessment;
+    snapshot.plan = plan ?? snapshot.plan;
+  } else if (snapshot.kind === 'SIGNED_INTAKE_NOTE') {
+    // Translate each section's title + body together, preserving order.
+    const flat = snapshot.sections.flatMap((s) => [s.title, s.body]);
+    const translated = await translateForShare(flat, language);
+    snapshot.sections = snapshot.sections.map((s, i) => ({
+      ...s,
+      title: translated[i * 2] ?? s.title,
+      body: translated[i * 2 + 1] ?? s.body,
+    }));
+  }
+}
 
 function generateShareToken(): string {
   // 16 bytes → 22 base64url chars (matches ClientClaimToken convention).
