@@ -498,10 +498,13 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   `JournalEntry.contentEncrypted` column exists but has no live
   `apps/web` write path (journal creation is a patient-app /
   continuity-service concern) — nothing to wire there yet.
-- **WebAuthn-bound signing** — sign route accepts `assertion` as
-  optional. Sprint 18 introduced per-account WebAuthn registration;
-  next is making the assertion required once any credential is
-  registered (partial — currently enforced only if registrations exist).
+- **WebAuthn-bound signing** — the sign route requires + cryptographically
+  verifies an `assertion` whenever the account has ≥1 registered credential
+  (Sprint 18 → 33). Sprint 72 added `REQUIRE_WEBAUTHN_SIGNING=true` (env,
+  default off, skipped under auth bypass): when set, an account with **no**
+  registered passkey is refused (403) until it enrols — forcing enrollment
+  before signing. Remaining work is OPERATIONAL: flip the flag on in prod
+  once pilot therapists have registered a passkey.
 
 **Big features (need scoping before a blanket build):**
 
