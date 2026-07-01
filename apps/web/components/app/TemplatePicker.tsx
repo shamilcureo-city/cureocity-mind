@@ -22,11 +22,15 @@ interface Props {
   sessionId: string;
   currentTemplateId: string | null;
   disabled?: boolean;
+  /** Sprint 72 — INTAKE relabels the no-template default row to "Initial
+   *  assessment (standard)" (the standard eight-section intake) instead of
+   *  "Built-in (SOAP)", which is meaningless for a first assessment. */
+  kind?: 'INTAKE' | 'TREATMENT';
   /** Applied → the parent re-generates the note (e.g. triggerGeneration). */
   onApply: () => void | Promise<void>;
 }
 
-export function TemplatePicker({ sessionId, currentTemplateId, disabled, onApply }: Props) {
+export function TemplatePicker({ sessionId, currentTemplateId, disabled, kind, onApply }: Props) {
   const router = useRouter();
   const [items, setItems] = useState<CustomTemplate[]>([]);
   const [applying, setApplying] = useState(false);
@@ -34,6 +38,8 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, onApply
   const wrapRef = useRef<HTMLDivElement>(null);
 
   const activeId = currentTemplateId ?? '';
+  // The no-template default: the standard intake for INTAKE, plain SOAP else.
+  const standardLabel = kind === 'INTAKE' ? 'Initial assessment (standard)' : 'Built-in (SOAP)';
 
   useEffect(() => {
     let cancelled = false;
@@ -69,7 +75,7 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, onApply
   }, [open]);
 
   function nameFor(id: string): string {
-    if (!id) return 'Built-in (SOAP)';
+    if (!id) return standardLabel;
     const builtin = resolveBuiltinTemplate(id);
     if (builtin) return builtin.name;
     return items.find((x) => x.id === id)?.name ?? 'Template';
@@ -109,7 +115,7 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, onApply
 
       {open && (
         <div className="absolute left-0 z-30 mt-1.5 max-h-[420px] w-80 overflow-y-auto rounded-xl border border-[var(--color-line)] bg-white p-1.5 shadow-[0_12px_30px_rgba(15,27,42,0.13)]">
-          <Row label="Built-in (SOAP)" active={activeId === ''} onClick={() => void apply(null)} />
+          <Row label={standardLabel} active={activeId === ''} onClick={() => void apply(null)} />
 
           {builtinTemplatesByCategory().map((g) => (
             <div key={g.category}>

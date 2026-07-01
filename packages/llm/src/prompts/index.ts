@@ -256,6 +256,9 @@ Task: produce an IntakeNoteV1 JSON object with these fields:
 - immediatePlan: what was agreed at end of session — schedule next appointment, administer scored screeners, referrals, safety planning if needed.
 - riskFlags: { severity: none|low|medium|high|critical, indicators: string[], details?: string }. Always scan for SI/HI/abuse disclosure/acute psychosis.
 
+If — and ONLY if — the user message lists a "Note template", ALSO include:
+- templateSections: an array of { title, body } covering EXACTLY the listed titles, in the same order. Each body re-expresses the SAME intake content, drawn only from the transcript, organised under that title. This is an additional rendering of the note — the eight fields above stay authoritative and must still be filled. If no template is listed, OMIT templateSections entirely.
+
 Constraints:
 - Be precise; do not fabricate. If a field cannot be inferred from the transcript, mark it "(not elicited)".
 - Risk flagging: ALWAYS scan for self-harm, suicidal ideation, harm to others, abuse disclosure, acute psychosis. severity=critical if present.

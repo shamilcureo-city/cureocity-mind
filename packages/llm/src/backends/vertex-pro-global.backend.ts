@@ -161,15 +161,17 @@ export class Pass2BackendError extends Error {
 
 function buildUserMessage(input: Pass2Input): string {
   // Sprint 70 — when a note template is chosen, list its sections so the
-  // model also fills `templateSections` (in addition to the SOAP fields).
-  const templateBlock =
-    input.template && input.kind !== 'INTAKE'
-      ? [
-          '',
-          `Note template "${input.template.name}" — also produce templateSections for exactly these titles, in order:`,
-          ...input.template.sections.map((s) => `- ${s.title}${s.hint ? ` (${s.hint})` : ''}`),
-        ]
-      : [];
+  // model also fills `templateSections` (in addition to the SOAP / intake
+  // fields). Sprint 72 — this now applies to INTAKE too: the authoritative
+  // eight intake fields are still produced, and the template render is added
+  // on top so an intake can be shaped into any chosen format.
+  const templateBlock = input.template
+    ? [
+        '',
+        `Note template "${input.template.name}" — also produce templateSections for exactly these titles, in order:`,
+        ...input.template.sections.map((s) => `- ${s.title}${s.hint ? ` (${s.hint})` : ''}`),
+      ]
+    : [];
   return [
     `Session kind: ${input.kind}`,
     `Modality: ${input.modality ?? '(not yet chosen — intake / investigative)'}`,

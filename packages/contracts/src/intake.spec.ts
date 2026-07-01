@@ -99,6 +99,31 @@ describe('IntakeNoteV1Schema', () => {
     expect(IntakeNoteV1Schema.safeParse({ ...valid, mentalStatusExam: '' }).success).toBe(false);
   });
 
+  it('accepts optional templateSections (Sprint 72 — additive)', () => {
+    const parsed = IntakeNoteV1Schema.safeParse({
+      ...valid,
+      templateSections: [
+        { title: 'Presenting concern', body: 'Recurrent panic since role change.' },
+        { title: 'Formulation', body: 'Panic disorder with anticipatory anxiety.' },
+      ],
+    });
+    expect(parsed.success).toBe(true);
+    // The authoritative eight fields survive alongside the template render.
+    if (parsed.success) {
+      expect(parsed.data.workingHypothesis).toBe(valid.workingHypothesis);
+      expect(parsed.data.templateSections).toHaveLength(2);
+    }
+  });
+
+  it('rejects a templateSections entry with an empty title', () => {
+    expect(
+      IntakeNoteV1Schema.safeParse({
+        ...valid,
+        templateSections: [{ title: '', body: 'x' }],
+      }).success,
+    ).toBe(false);
+  });
+
   // Regression: Gemini 2.5 Pro sometimes ignores the prompt's "single
   // prose string" instruction for MSE and returns a structured object
   // keyed by exam element. The preprocess flattens it to a string

@@ -131,10 +131,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Sprint 70 — default the session's note template to the therapist's
   // own default template if they have one; otherwise fall back to the
   // house flagship (Cureocity clinical note) rather than plain SOAP.
+  // Sprint 72 — INTAKE sessions default to the standard initial-assessment
+  // format (null template); the treatment-shaped flagship/custom defaults
+  // don't fit a first assessment. The therapist can still pick a template
+  // for an intake from the note toolbar if they want one.
   const defaultTemplate = await prisma.noteTemplate.findFirst({
     where: { psychologistId: auth.value.psychologistId, isDefault: true },
     select: { id: true },
   });
+  const defaultNoteTemplateId =
+    defaults.kind === 'INTAKE' ? null : (defaultTemplate?.id ?? DEFAULT_BUILTIN_TEMPLATE_ID);
 
   const created = await prisma.$transaction(async (tx) => {
     const row = await tx.session.create({
@@ -145,7 +151,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         kind: defaults.kind,
         status: 'SCHEDULED',
         scheduledAt: new Date(dto.value.scheduledAt),
-        noteTemplateId: defaultTemplate?.id ?? DEFAULT_BUILTIN_TEMPLATE_ID,
+        noteTemplateId: defaultNoteTemplateId,
       },
     });
     await writeAudit(

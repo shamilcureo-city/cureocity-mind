@@ -22,6 +22,23 @@ export function IntakeNotePreview({ note, signedAt, signedBy, verbosity = 'DETAI
   // BRIEF shows just the core of the intake; DETAILED/VERY_DETAILED add the
   // optional history sections (skipping any that are empty).
   const brief = verbosity === 'BRIEF';
+  const hasTemplateSections = Boolean(note.templateSections && note.templateSections.length > 0);
+
+  // Sprint 72 — an intake generated into a chosen template renders that
+  // template's sections. The eight canonical fields stay authoritative
+  // underneath (assessment brief / sign-off / PDF read them).
+  if (hasTemplateSections) {
+    return (
+      <article className="space-y-7">
+        {note.templateSections!.map((s, i) => (
+          <Section key={i} heading={s.title}>
+            <p className="whitespace-pre-line">{s.body.trim() ? s.body : '—'}</p>
+          </Section>
+        ))}
+        <SignedFooter signedAt={signedAt} signedBy={signedBy} />
+      </article>
+    );
+  }
 
   return (
     <article className="space-y-7">

@@ -195,6 +195,22 @@ export const IntakeNoteV1Schema = z.object({
   /// Usually: schedule assessment session, administer screeners,
   /// referrals.
   immediatePlan: z.string().min(1),
+  /**
+   * Sprint 72 — when the therapist chooses a note template for an intake
+   * session, Pass 2 also renders the intake into that template's named
+   * sections here (title + prose body), in ADDITION to the authoritative
+   * eight fields above. Optional + additive: a standard intake (no template)
+   * simply omits it, and Pass 3 / sign-off / PDF keep reading the eight
+   * fields. Mirrors TherapyNoteV1.templateSections.
+   */
+  templateSections: z
+    .array(
+      z.object({
+        title: z.string().min(1),
+        body: z.string(),
+      }),
+    )
+    .optional(),
   riskFlags: z.object({
     severity: RiskSeveritySchema,
     indicators: z.array(z.string()).default([]),
