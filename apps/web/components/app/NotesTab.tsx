@@ -481,11 +481,11 @@ export function NotesTab({
     }
   }, [phase, sessionId, unlocking, initialDraft, noteLanguage]);
 
-  // Short label for the AI panel's document chip ("Note (BASE)"). Templates
-  // don't apply to intake (it's a fixed eight-section shape), so the chip
-  // reads "Intake note" there rather than a misleading template name.
+  // Short label for the AI panel's document chip ("Note (BASE)"). For a
+  // standard intake (no template) the chip reads "Initial assessment"; a
+  // templated intake or a treatment note shows the chosen template's name.
   const templateLabel = resolveTemplateLabel(noteTemplateId);
-  const aiDocLabel = isIntake ? 'Intake note' : templateLabel;
+  const aiDocLabel = isIntake && !noteTemplateId ? 'Initial assessment' : templateLabel;
 
   // ----- Render -----
 
@@ -716,6 +716,19 @@ export function NotesTab({
               onShare={editing ? undefined : signAndShare}
               leftControls={
                 <>
+                  {/* Templates are opt-in for intake — the standard
+                      initial-assessment format is the null-template default.
+                      Hidden when re-opened (re-drafting would discard signed
+                      content), same as treatment. */}
+                  {!reopened && (
+                    <TemplatePicker
+                      sessionId={sessionId}
+                      currentTemplateId={noteTemplateId}
+                      kind="INTAKE"
+                      disabled={generating || translating || editing}
+                      onApply={triggerGeneration}
+                    />
+                  )}
                   <LanguagePicker
                     value={noteLang}
                     onChange={translateTo}

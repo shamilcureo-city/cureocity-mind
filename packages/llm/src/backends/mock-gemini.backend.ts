@@ -261,6 +261,17 @@ export class MockGeminiPass2Backend implements IPass2Backend {
                 '[mock] Working hypothesis: panic disorder with anticipatory anxiety and developing avoidance. Rule out adjustment disorder + generalised anxiety. Substance use not contributory at present.',
               immediatePlan:
                 '[mock] Schedule next session for structured assessment. Administer PHQ-9 + GAD-7 at next visit. Provide psychoeducation handout on panic cycle.',
+              // Sprint 72 — when a template is chosen for an intake, echo a
+              // mock section per template title so the templated intake view
+              // is verifiable in dev (mirrors the treatment mock).
+              ...(input.template
+                ? {
+                    templateSections: input.template.sections.map((s) => ({
+                      title: s.title,
+                      body: `[mock] ${s.title}: drawn from the intake session for this client.`,
+                    })),
+                  }
+                : {}),
               riskFlags: { severity: 'none', indicators: [] },
             },
           }

@@ -39,6 +39,10 @@ const FIELDS = [
 type FieldKey = (typeof FIELDS)[number]['key'];
 
 export function IntakeNoteEditor({ note, saving, error, onSave, onCancel }: Props) {
+  // Sprint 72 — an intake generated into a template edits its template
+  // sections (what's shown); the eight canonical fields stay untouched
+  // underneath. A standard intake edits the eight fields directly.
+  const hasTemplateSections = Boolean(note.templateSections && note.templateSections.length > 0);
   const [values, setValues] = useState<Record<FieldKey, string>>(() =>
     FIELDS.reduce(
       (acc, f) => {
@@ -48,9 +52,19 @@ export function IntakeNoteEditor({ note, saving, error, onSave, onCancel }: Prop
       {} as Record<FieldKey, string>,
     ),
   );
+  const [sections, setSections] = useState(() =>
+    (note.templateSections ?? []).map((s) => ({ title: s.title, body: s.body })),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
 
   function save(): void {
+    if (hasTemplateSections) {
+      void onSave({
+        ...note,
+        templateSections: sections.map((s) => ({ title: s.title, body: s.body })),
+      });
+      return;
+    }
     const emptyRequired = FIELDS.find((f) => f.required && !values[f.key].trim());
     if (emptyRequired) {
       setLocalError(`“${emptyRequired.label}” can’t be empty.`);
@@ -62,16 +76,31 @@ export function IntakeNoteEditor({ note, saving, error, onSave, onCancel }: Prop
 
   return (
     <div className="space-y-6">
-      {FIELDS.map((f) => (
-        <Field key={f.key} label={f.label}>
-          <textarea
-            rows={f.rows}
-            value={values[f.key]}
-            onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-            className={FIELD}
-          />
-        </Field>
-      ))}
+      {hasTemplateSections
+        ? sections.map((s, i) => (
+            <Field key={i} label={s.title}>
+              <textarea
+                rows={4}
+                value={s.body}
+                onChange={(e) =>
+                  setSections((prev) =>
+                    prev.map((x, j) => (j === i ? { ...x, body: e.target.value } : x)),
+                  )
+                }
+                className={FIELD}
+              />
+            </Field>
+          ))
+        : FIELDS.map((f) => (
+            <Field key={f.key} label={f.label}>
+              <textarea
+                rows={f.rows}
+                value={values[f.key]}
+                onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                className={FIELD}
+              />
+            </Field>
+          ))}
 
       {(localError ?? error) && (
         <p className="text-sm text-[var(--color-warn)]">{localError ?? error}</p>
