@@ -1,17 +1,17 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Container } from '@/components/ui/Container';
 import { DoctorLiveEncounter } from '@/components/app/DoctorLiveEncounter';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Sprint DV4 — the live copilot. Doctor-guarded + ownership checked; the
- * live UX itself is driven by the standalone WebSocket gateway, which
- * runs the real pipeline (Pass 1 transcription + Pass 2 medical note +
- * gap engine) on streamed mic audio. See services/live-gateway +
+ * live UX itself is driven by the standalone WebSocket gateway, which runs
+ * the real pipeline (Pass 1 transcription + Pass 2 medical note + gap
+ * engine) on streamed mic audio. See services/live-gateway +
  * docs/DOCTOR_VERTICAL.md §4.
  */
 export default async function LiveEncounterPage({
@@ -24,32 +24,57 @@ export default async function LiveEncounterPage({
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { id: true, psychologistId: true, clientId: true },
+    select: {
+      id: true,
+      psychologistId: true,
+      clientId: true,
+      client: {
+        select: { fullName: true, fullNameEncrypted: true, dateOfBirth: true },
+      },
+    },
   });
   if (!session || session.psychologistId !== doctor.id || session.clientId !== clientId) {
     notFound();
   }
 
+  const name = await decryptClientField(
+    session.psychologistId,
+    session.client.fullNameEncrypted,
+    session.client.fullName,
+  );
+
   return (
-    <Container className="py-10">
+    <div className="mx-auto max-w-[1440px] px-6 py-8">
       <Link
         href={`/app/patients/${clientId}/encounters/${sessionId}`}
         className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
         ← Encounter
       </Link>
-      <header className="mb-6 mt-3">
+      <div className="mb-4 mt-3 flex items-center gap-2">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-accent)]">
           Live copilot
         </p>
-        <h1 className="mt-2 font-serif text-3xl">The note writes itself, while you consult.</h1>
-        <p className="mt-2 max-w-2xl text-sm text-[var(--color-ink-2)]">
-          Your mic streams to the in-region gateway: the transcript and the structured note build in
-          real time, and red flags surface mid-consult. Audio is streamed for transcription, not
-          stored. End the consult to get the finished note.
-        </p>
-      </header>
-      <DoctorLiveEncounter sessionId={sessionId} clientId={clientId} specialty={doctor.specialty} />
-    </Container>
+        <span className="text-xs text-[var(--color-ink-3)]">
+          · transcript + note build in real time · audio is streamed, not stored
+        </span>
+      </div>
+
+      <DoctorLiveEncounter
+        sessionId={sessionId}
+        clientId={clientId}
+        specialty={doctor.specialty}
+        patient={{ name, age: ageFrom(session.client.dateOfBirth) }}
+      />
+    </div>
   );
+}
+
+function ageFrom(dob: Date | null): number | null {
+  if (!dob) return null;
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age -= 1;
+  return age >= 0 && age < 150 ? age : null;
 }
