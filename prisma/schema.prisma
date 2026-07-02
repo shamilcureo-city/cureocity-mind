@@ -1129,6 +1129,10 @@ model NoteDraft {
   content      Json?
   riskSeverity NoteRiskSeverity?
 
+  /// Sprint DS5 — the signable Rx pad (RxPadV1) assembled from the live
+  /// consult, stored alongside the note + signed together.
+  rxPad Json?
+
   // Cost rollup across Pass 1 + Pass 2 (and any retries).
   totalCostInr Decimal @default(0) @db.Decimal(10, 4)
 

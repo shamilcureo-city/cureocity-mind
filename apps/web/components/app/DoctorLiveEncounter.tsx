@@ -10,6 +10,8 @@ import {
   type MedicalEncounterNoteV1,
   type MeterSummary,
   type PartialStructuredNote,
+  type RxPadDraft,
+  type RxPadV1,
   type Utterance,
   type VoiceCommand,
 } from '@cureocity/contracts';
@@ -65,6 +67,11 @@ export function DoctorLiveEncounter({
   // Sprint DS4 — differential candidates the doctor added to the assessment.
   const [assessmentAdds, setAssessmentAdds] = useState<string[]>([]);
   const assessmentRef = useRef<string[]>([]);
+  // Sprint DS5 — the Rx pad assembling live + the doctor's per-med confirms.
+  const [rxPad, setRxPad] = useState<RxPadDraft | null>(null);
+  const [confirmedDrugs, setConfirmedDrugs] = useState<Set<string>>(new Set());
+  const rxFinalRef = useRef<RxPadV1 | null>(null);
+  const confirmedRef = useRef<Set<string>>(new Set());
   const [gaps, setGaps] = useState<EncounterGap[]>([]);
   const [commands, setCommands] = useState<VoiceCommand[]>([]);
   const [shownData, setShownData] = useState<Record<string, string>>({});
@@ -116,19 +123,36 @@ export function DoctorLiveEncounter({
     void relaySuggestion('acted', dxId, 'DIFFERENTIAL', label);
   }
 
+  // Sprint DS5 — confirm a pending Rx row (confirm-first). The overlay
+  // survives the gateway's idempotent re-emits + is audited.
+  function confirmMed(drug: string): void {
+    const key =
+      drug
+        .replace(/^\s*\[mock\]\s*/i, '')
+        .toLowerCase()
+        .split(/\s+/)[0] ?? drug;
+    setConfirmedDrugs((prev) => {
+      const next = new Set(prev).add(key);
+      confirmedRef.current = next;
+      return next;
+    });
+    void relaySuggestion('acted', `rx:${key}`, 'GAP', `Confirm Rx: ${drug}`);
+  }
+
   // Sprint DV9 — persist the finalized live note as a draft the doctor can
   // sign from the encounter workspace (parity with the batch path).
   async function persistLiveNote(
     note: MedicalEncounterNoteV1,
     medications: unknown[],
     orders: unknown[],
+    rx: RxPadV1 | null,
   ): Promise<void> {
     setSaveState('saving');
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ note, medications, orders }),
+        body: JSON.stringify({ note, medications, orders, ...(rx ? { rxPad: rx } : {}) }),
       });
       setSaveState(res.ok ? 'saved' : 'error');
     } catch {
@@ -225,6 +249,10 @@ export function DoctorLiveEncounter({
     setReasoning(null);
     setAssessmentAdds([]);
     assessmentRef.current = [];
+    setRxPad(null);
+    setConfirmedDrugs(new Set());
+    confirmedRef.current = new Set();
+    rxFinalRef.current = null;
     setGaps([]);
     setCommands([]);
     setShownData({});
@@ -346,6 +374,10 @@ export function DoctorLiveEncounter({
           }
           break;
         }
+        case 'rxDraft':
+          // Sprint DS5 — the Rx pad assembling live (idempotent snapshot).
+          setRxPad(event.rxPad);
+          break;
         case 'note':
           setNote(event.partial);
           break;
@@ -374,7 +406,11 @@ export function DoctorLiveEncounter({
                 }
               : event.note;
           setFinalNote(merged);
-          void persistLiveNote(merged, event.medications, event.orders);
+          // Sprint DS5 — fold the doctor's confirms into the final Rx pad.
+          const finalRx = event.rxPad ? confirmRxPad(event.rxPad, confirmedRef.current) : null;
+          if (finalRx) setRxPad(finalRx);
+          rxFinalRef.current = finalRx;
+          void persistLiveNote(merged, event.medications, event.orders, finalRx);
           break;
         }
       }
@@ -479,12 +515,20 @@ export function DoctorLiveEncounter({
             refs={transcriptRefs}
             listening={phase === 'listening'}
           />
-          <NotePanel
-            note={note}
-            specialty={specialty}
-            live={phase === 'listening'}
-            assessmentAdds={assessmentAdds}
-          />
+          <div className="space-y-4">
+            <RxPadPanel
+              rxPad={rxPad}
+              confirmedDrugs={confirmedDrugs}
+              onConfirm={confirmMed}
+              live={live}
+            />
+            <NotePanel
+              note={note}
+              specialty={specialty}
+              live={phase === 'listening'}
+              assessmentAdds={assessmentAdds}
+            />
+          </div>
           <LiveRail
             reasoning={reasoning}
             findings={findings}
@@ -816,6 +860,161 @@ function DifferentialZone({
         </ul>
       )}
     </Card>
+  );
+}
+
+// Sprint DS5 — the Rx-first artifact assembling live. Continued meds carry
+// forward; AI/voice-drafted rows land pending until the doctor confirms.
+function RxPadPanel({
+  rxPad,
+  confirmedDrugs,
+  onConfirm,
+  live,
+}: {
+  rxPad: RxPadDraft | null;
+  confirmedDrugs: Set<string>;
+  onConfirm: (drug: string) => void;
+  live: boolean;
+}) {
+  const meds = rxPad?.meds ?? [];
+  const investigations = rxPad?.investigations ?? [];
+  const advice = rxPad?.adviceLines ?? [];
+  const empty = !rxPad || (meds.length === 0 && investigations.length === 0 && advice.length === 0);
+  return (
+    <PanelShell
+      title="Prescription ℞"
+      right={
+        live ? (
+          <span className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--color-accent)]">
+            assembling
+          </span>
+        ) : undefined
+      }
+    >
+      {empty ? (
+        <Empty>The prescription assembles here as you decide on medications and orders.</Empty>
+      ) : (
+        <div className="space-y-4">
+          {rxPad?.dxLine && (
+            <div>
+              <SectionLabel>Diagnosis</SectionLabel>
+              <p className="mt-1 text-[14px] font-medium text-[var(--color-ink)]">
+                {clean(rxPad.dxLine) ?? rxPad.dxLine}
+              </p>
+            </div>
+          )}
+          {(rxPad?.vitalsLine || (rxPad?.allergies?.length ?? 0) > 0) && (
+            <p className="text-[12px] text-[var(--color-ink-3)]">
+              {rxPad?.vitalsLine}
+              {rxPad?.allergies && rxPad.allergies.length > 0 && (
+                <span className="ml-2 text-[var(--color-warn)]">
+                  ⚠ Allergies: {rxPad.allergies.join(', ')}
+                </span>
+              )}
+            </p>
+          )}
+
+          {meds.length > 0 && (
+            <div>
+              <SectionLabel>Medications</SectionLabel>
+              <ul className="mt-1.5 divide-y divide-[var(--color-line-soft)] rounded-xl border border-[var(--color-line-soft)]">
+                {meds.map((m, i) => {
+                  const confirmed = m.status === 'confirmed' || confirmedDrugs.has(medKey(m.drug));
+                  return (
+                    <li key={`${m.drug}-${i}`} className="flex items-center gap-2 px-3 py-2">
+                      <span
+                        aria-hidden
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                          confirmed ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-warn)]'
+                        }`}
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="text-[13.5px] font-semibold text-[var(--color-ink)]">
+                          {clean(m.drug) ?? m.drug}
+                        </span>
+                        {m.strength && (
+                          <span className="text-[13px] text-[var(--color-ink-2)]">
+                            {' '}
+                            {m.strength}
+                          </span>
+                        )}
+                        <span className="ml-2 text-[12px] text-[var(--color-ink-3)]">
+                          {[m.frequency, m.timing, m.durationDays ? `${m.durationDays}d` : null]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </span>
+                        {m.warnings.length > 0 && (
+                          <span className="ml-2 text-[11px] text-[var(--color-warn)]">
+                            ⚠ {m.warnings[0]}
+                          </span>
+                        )}
+                      </span>
+                      {m.continued ? (
+                        <span className="shrink-0 rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+                          continued
+                        </span>
+                      ) : confirmed ? (
+                        <span className="shrink-0 text-[11px] font-semibold text-[var(--color-accent)]">
+                          ✓ confirmed
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onConfirm(m.drug)}
+                          className="shrink-0 rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--color-accent)] hover:brightness-95"
+                        >
+                          Confirm
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+
+          {investigations.length > 0 && (
+            <div>
+              <SectionLabel>Investigations</SectionLabel>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {investigations.map((inv) => (
+                  <span
+                    key={inv.name}
+                    className="rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-2.5 py-1 text-xs"
+                    title={inv.rationale}
+                  >
+                    {inv.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {advice.length > 0 && (
+            <div>
+              <SectionLabel>Advice</SectionLabel>
+              <ul className="mt-1 space-y-0.5">
+                {advice.map((a) => (
+                  <li key={a} className="text-[13.5px] leading-relaxed text-[var(--color-ink)]">
+                    • {a}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {rxPad?.followUp?.when && (
+            <div>
+              <SectionLabel>Follow-up</SectionLabel>
+              <p className="mt-1 text-[13.5px] text-[var(--color-ink)]">
+                {rxPad.followUp.when}
+                {rxPad.followUp.withWhat ? ` · ${rxPad.followUp.withWhat}` : ''}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </PanelShell>
   );
 }
 
@@ -1300,6 +1499,24 @@ function clean(s?: string): string | undefined {
   if (!s) return undefined;
   const t = s.replace(MOCK_TAG, '').trim();
   return t.length ? t : undefined;
+}
+
+// Sprint DS5 — dedup key for a drug (first significant word, lowercased).
+function medKey(drug: string): string {
+  return drug.replace(MOCK_TAG, '').toLowerCase().split(/\s+/)[0] ?? drug;
+}
+
+// Sprint DS5 — fold the doctor's confirmations into the final pad so the
+// persisted Rx reflects what they actually signed off.
+function confirmRxPad(pad: RxPadV1, confirmed: Set<string>): RxPadV1 {
+  return {
+    ...pad,
+    meds: pad.meds.map((m) =>
+      m.status === 'pending' && confirmed.has(medKey(m.drug))
+        ? { ...m, status: 'confirmed' as const }
+        : m,
+    ),
+  };
 }
 
 function fmtTime(s: number): string {

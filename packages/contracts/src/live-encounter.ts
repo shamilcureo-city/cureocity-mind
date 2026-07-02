@@ -3,6 +3,7 @@ import { ClinicalFindingSchema, PatientContextSchema } from './case-state';
 import { LiveReasoningSchema } from './live-reasoning';
 import { EvidenceRefSchema, MedicalEncounterNoteV1Schema } from './medical-note';
 import { ClinicalOrderV1Schema, MedicationOrderV1Schema } from './medication-order';
+import { RxPadDraftSchema, RxPadV1Schema } from './rx-pad';
 
 /**
  * Sprint DV1 scaffold — the streaming / live contracts (Rails 1–3 of the
@@ -199,6 +200,8 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   // Sprint DS2 — the live clinical reasoning snapshot (differential +
   // ask-next + red flags). Full snapshot, idempotent render.
   z.object({ type: z.literal('reasoning'), reasoning: LiveReasoningSchema }),
+  // Sprint DS5 — the Rx pad assembling live (partial). Idempotent render.
+  z.object({ type: z.literal('rxDraft'), rxPad: RxPadDraftSchema }),
   // Sprint DV9 — the closing note carries the drafted Rx + clinical
   // orders too, so the browser can persist a complete encounter (parity
   // with the batch path) for the doctor to sign.
@@ -207,6 +210,9 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
     note: MedicalEncounterNoteV1Schema,
     medications: z.array(MedicationOrderV1Schema).default([]),
     orders: z.array(ClinicalOrderV1Schema).default([]),
+    // Sprint DS5 — the finalized Rx pad, assembled from the note + drafted
+    // meds/orders + patient context. The browser persists it with the note.
+    rxPad: RxPadV1Schema.optional(),
   }),
   z.object({ type: z.literal('command'), command: VoiceCommandSchema }),
 ]);
@@ -222,6 +228,8 @@ export const LiveNoteInputSchema = z.object({
   note: MedicalEncounterNoteV1Schema,
   medications: z.array(MedicationOrderV1Schema).default([]),
   orders: z.array(ClinicalOrderV1Schema).default([]),
+  // Sprint DS5 — the finalized Rx pad stored alongside the draft note.
+  rxPad: RxPadV1Schema.optional(),
 });
 export type LiveNoteInput = z.infer<typeof LiveNoteInputSchema>;
 

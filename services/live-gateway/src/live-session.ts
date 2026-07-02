@@ -6,7 +6,9 @@ import type {
   MedicalEncounterNoteV1,
   MedicationOrderV1,
   PatientContext,
+  RxPadV1,
   Utterance,
+  VoiceCommand,
 } from '@cureocity/contracts';
 import type { SpeakerSegment } from '@cureocity/llm';
 import {
@@ -23,6 +25,7 @@ import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
 import { ReasoningScheduler } from './reasoning-loop';
+import { assembleRxPad } from './rx-pad';
 import { bytesToMs, DEFAULT_WINDOW_OPTIONS, nextWindowBoundary, type WindowOptions } from './vad';
 
 /**
@@ -99,6 +102,10 @@ export class LiveSession {
   private latestNote: MedicalEncounterNoteV1 | null = null;
   private latestMedications: MedicationOrderV1[] = [];
   private latestOrders: ClinicalOrderV1[] = [];
+  /** Sprint DS5 — voice-command meds/orders accumulated for the Rx pad. */
+  private readonly voiceCommands: VoiceCommand[] = [];
+  /** Last Rx-pad JSON emitted, to suppress identical re-emits. */
+  private lastRxJson = '';
 
   constructor(
     sessionId: string,
@@ -212,6 +219,7 @@ export class LiveSession {
     for (const command of parseVoiceCommands(this.cumulativeTranscript())) {
       if (this.seenCommands.has(command.raw)) continue;
       this.seenCommands.add(command.raw);
+      this.voiceCommands.push(command); // DS5 — feed the Rx pad
       this.emit({ type: 'command', command });
     }
 
@@ -379,6 +387,7 @@ export class LiveSession {
         note,
         medications: this.latestMedications,
         orders: this.latestOrders,
+        rxPad: this.assembleRx(), // DS5 — the finalized signable pad
       });
       return;
     }
@@ -409,6 +418,25 @@ export class LiveSession {
         },
       });
     }
+
+    // Sprint DS5 — the Rx pad assembling live. Emit only when it changed.
+    const rxPad = this.assembleRx();
+    const rxJson = JSON.stringify(rxPad);
+    if (rxJson !== this.lastRxJson) {
+      this.lastRxJson = rxJson;
+      this.emit({ type: 'rxDraft', rxPad });
+    }
+  }
+
+  /** Sprint DS5 — assemble the current Rx pad from the note + meds + context. */
+  private assembleRx(): RxPadV1 {
+    return assembleRxPad({
+      patient: this.caseStore.snapshot.patient,
+      note: this.latestNote,
+      medications: this.latestMedications,
+      orders: this.latestOrders,
+      voiceCommands: this.voiceCommands,
+    });
   }
 
   /** Doctor ended the consult: flush the tail, close the note, report. */
@@ -485,6 +513,7 @@ export class LiveSession {
       note: this.latestNote,
       medications: this.latestMedications,
       orders: this.latestOrders,
+      rxPad: this.assembleRx(),
     });
   }
 

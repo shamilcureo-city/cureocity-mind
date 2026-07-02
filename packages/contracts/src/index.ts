@@ -32,10 +32,12 @@ export * from './clinic';
 
 // Sprint DV1 — doctor vertical scaffolds (see docs/DOCTOR_VERTICAL.md).
 export * from './medical-note';
-// Sprint DS1/DS2 — reasoning substrate + live reasoning; exported before
-// live-encounter (which imports from them) to keep the CJS eval order clean.
+// Sprint DS1/DS2/DS5 — reasoning substrate + live reasoning + Rx pad;
+// exported before live-encounter (which imports from them) to keep the CJS
+// eval order clean.
 export * from './case-state';
 export * from './live-reasoning';
+export * from './rx-pad';
 export * from './live-encounter';
 export * from './differential';
 export * from './medication-order';
