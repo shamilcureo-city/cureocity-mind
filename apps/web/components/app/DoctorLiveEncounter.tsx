@@ -6,6 +6,7 @@ import {
   LiveGatewayEventSchema,
   type EncounterGap,
   type MedicalEncounterNoteV1,
+  type MeterSummary,
   type PartialStructuredNote,
   type VoiceCommand,
 } from '@cureocity/contracts';
@@ -44,6 +45,10 @@ export function DoctorLiveEncounter({
   patient?: { name?: string | null; age?: number | null } | null;
 }) {
   const wsRef = useRef<WebSocket | null>(null);
+  // Sprint DS0 — the gateway meters the consult and emits `meter` events;
+  // we keep the latest and relay it once the consult is done.
+  const latestMeterRef = useRef<MeterSummary | null>(null);
+  const meteredRef = useRef(false);
   const [phase, setPhase] = useState<Phase>('idle');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [note, setNote] = useState<PartialStructuredNote>({});
@@ -81,6 +86,23 @@ export function DoctorLiveEncounter({
       setSaveState(res.ok ? 'saved' : 'error');
     } catch {
       setSaveState('error');
+    }
+  }
+
+  // Sprint DS0 — relay the gateway's per-consult meter so it lands as a
+  // LiveConsultMetric row (the gateway itself can't touch the DB). Fired
+  // once, when the consult is done. Best-effort — never blocks the doctor.
+  async function persistMeter(summary: MeterSummary): Promise<void> {
+    if (meteredRef.current) return;
+    meteredRef.current = true;
+    try {
+      await fetch(`/api/v1/sessions/${sessionId}/live-metric`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(summary),
+      });
+    } catch {
+      /* telemetry is best-effort */
     }
   }
 
@@ -130,6 +152,8 @@ export function DoctorLiveEncounter({
     setFinalNote(null);
     setSaveState('idle');
     setElapsed(0);
+    latestMeterRef.current = null;
+    meteredRef.current = false;
     setPhase('connecting');
 
     // Sprint DV8 hardening — mint a short-lived token so the gateway can
@@ -191,14 +215,24 @@ export function DoctorLiveEncounter({
         case 'status':
           if (event.state === 'listening') setPhase('listening');
           else if (event.state === 'finalizing') setPhase('finalizing');
-          else if (event.state === 'done') setPhase('done');
-          else if (event.state === 'unauthorized') {
+          else if (event.state === 'done') {
+            setPhase('done');
+            // The final meter arrives just before `done`; relay it now.
+            if (latestMeterRef.current) void persistMeter(latestMeterRef.current);
+          } else if (event.state === 'unauthorized') {
             setPhase('error');
             setError('The live session could not be authorised. Reload the page and try again.');
           }
           break;
         case 'transcript':
           setTurns((prev) => appendTurn(prev, event.delta.speaker, event.delta.text));
+          break;
+        case 'utterance':
+          // The durable per-window record (DS1 will consume it); the
+          // transcript delta above already drives the running display.
+          break;
+        case 'meter':
+          latestMeterRef.current = event.summary;
           break;
         case 'note':
           setNote(event.partial);

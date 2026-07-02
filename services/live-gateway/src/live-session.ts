@@ -4,6 +4,7 @@ import type {
   LiveGatewayEvent,
   MedicalEncounterNoteV1,
   MedicationOrderV1,
+  Utterance,
 } from '@cureocity/contracts';
 import type { SpeakerSegment } from '@cureocity/llm';
 import {
@@ -14,32 +15,39 @@ import {
 } from '@cureocity/clinical';
 import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
+import { ConsultMeter } from './meter';
+import { bytesToMs, DEFAULT_WINDOW_OPTIONS, nextWindowBoundary, type WindowOptions } from './vad';
 
 /**
- * Sprint DV4 (full) — the real live encounter session.
+ * Sprint DV4 (full) + DS0 rework — the real live encounter session.
  *
- * This is NOT a scripted mock. The browser streams raw PCM audio frames
- * (16 kHz mono signed 16-bit LE) over the socket; on a fixed cadence we
- * run the SAME proven pipeline the batch path uses:
+ * The browser streams raw PCM audio frames (16 kHz mono s16le) over the
+ * socket. The DS0 change is the transcription cadence:
  *
- *   Rail 1 — Pass 1 (transcription) on the rolling audio buffer → the
- *            growing transcript.
+ *   BEFORE — every 4s we re-transcribed the ENTIRE rolling buffer. At
+ *            minute 20 that re-sent 20 minutes of audio: per-tick tokens,
+ *            cost and latency grew without bound (O(n²) in consult length).
+ *
+ *   NOW    — the stream is segmented at silence boundaries (see vad.ts)
+ *            into bounded ~15–30s windows, and Pass 1 transcribes each NEW
+ *            window exactly once. We keep an ordered list of Utterances;
+ *            the cumulative transcript is just their text joined. Total
+ *            transcription work is O(n). A ConsultMeter records tokens /
+ *            cost / latency per call and the gateway emits a `meter` event.
+ *
+ * The three rails are unchanged in spirit:
+ *   Rail 1 — Pass 1 (transcription) per window → the growing transcript.
  *   Rail 2 — Pass 2 (vertical=DOCTOR → MedicalEncounterNoteV1) on the
- *            transcript so far → the note building itself.
- *   Rail 3 — the deterministic gap / red-flag engine (gaps.ts) over the
- *            transcript + the building note.
+ *            cumulative transcript once per window → the note building.
+ *   Rail 3 — the deterministic gap / red-flag / interaction engine.
  *
- * With LLM_BACKEND=mock this runs locally (deterministic backends, no
- * creds). With LLM_BACKEND=vertex it is genuinely real: real audio →
- * real Vertex transcription → real Gemini note → real flags. The only
- * thing layered on top later is token-streaming ASR for lower latency
- * (docs/DOCTOR_VERTICAL.md §4.3); the clinical substance is real today.
+ * With LLM_BACKEND=mock this runs locally (deterministic, no creds); with
+ * vertex it is genuinely real. See docs/DOCTOR_VERTICAL.md §4 +
+ * docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS0.
  */
 
-const SAMPLE_RATE = 16_000;
-const BYTES_PER_SAMPLE = 2; // signed 16-bit LE, mono
-/** How often we re-run the pipeline on the rolling buffer. */
-const CYCLE_MS = 4_000;
+/** How often we check whether a window is ready to close. */
+const CYCLE_MS = 3_000;
 
 type Emit = (event: LiveGatewayEvent) => void;
 
@@ -48,17 +56,28 @@ export class LiveSession {
   private readonly backends: LiveBackends;
   private readonly sessionId: string;
   private readonly specialty: string | null;
+  private readonly windowOpts: WindowOptions;
+  private readonly meter = new ConsultMeter();
 
-  private audio: Buffer[] = [];
+  /** Un-flushed audio (bytes not yet transcribed into an utterance). */
+  private pending: Buffer = Buffer.alloc(0);
+  /** All-time bytes received, for wall offsets. */
   private totalBytes = 0;
+  /** All-time bytes already transcribed (the window cursor). */
+  private flushedBytes = 0;
+  /** Monotonic window counter, for stable utterance ids. */
+  private windowIndex = 0;
 
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
-  private dirty = false;
   private stopped = false;
+  private startedAtMs = 0;
 
-  /** Cumulative transcript already emitted, for computing the next delta. */
-  private lastTranscript = '';
+  /** Ordered finalized windows — the source of truth for the transcript. */
+  private readonly utterances: Utterance[] = [];
+  /** Accumulated diarized segments (wall-offset), fed to Pass 2. */
+  private readonly segments: SpeakerSegment[] = [];
+
   /** Last note JSON we emitted, to suppress identical re-emits. */
   private lastNoteJson = '';
   /** Gap messages already surfaced, so each flag fires once. */
@@ -67,95 +86,196 @@ export class LiveSession {
   private readonly seenCommands = new Set<string>();
   /** The most recent structured note, used as the final if none newer. */
   private latestNote: MedicalEncounterNoteV1 | null = null;
-  /** The most recent drafted Rx + orders, sent with the final note. */
   private latestMedications: MedicationOrderV1[] = [];
   private latestOrders: ClinicalOrderV1[] = [];
 
-  constructor(sessionId: string, specialty: string | null, backends: LiveBackends, emit: Emit) {
+  constructor(
+    sessionId: string,
+    specialty: string | null,
+    backends: LiveBackends,
+    emit: Emit,
+    windowOpts: WindowOptions = DEFAULT_WINDOW_OPTIONS,
+  ) {
     this.sessionId = sessionId;
     this.specialty = specialty;
     this.backends = backends;
     this.emit = emit;
+    this.windowOpts = windowOpts;
   }
 
   start(): void {
+    this.startedAtMs = Date.now();
     this.emit({ type: 'status', state: 'listening' });
-    this.timer = setInterval(() => void this.tick(), CYCLE_MS);
+    this.timer = setInterval(() => void this.pump(), CYCLE_MS);
+  }
+
+  /** Per-window Pass-1 input tokens, in order (telemetry + O(n) tests). */
+  get transcribeTokenSamples(): readonly number[] {
+    return this.meter.transcribeInputTokens;
   }
 
   /** Append a chunk of PCM audio streamed from the browser. */
   pushAudio(chunk: Buffer): void {
     if (this.stopped || chunk.length === 0) return;
-    this.audio.push(chunk);
+    // `pending` stays bounded — each closed window slices its prefix off, so
+    // this concat is over ~one window of audio, not the whole consult.
+    this.pending = Buffer.concat([this.pending, chunk]);
     this.totalBytes += chunk.length;
-    this.dirty = true;
   }
 
-  private durationMs(): number {
-    return Math.round((this.totalBytes / BYTES_PER_SAMPLE / SAMPLE_RATE) * 1000);
-  }
-
-  /** Run the pipeline once on the rolling buffer (Rails 1-3). */
-  private async tick(): Promise<void> {
-    if (this.busy || !this.dirty || this.stopped || this.totalBytes === 0) return;
+  /**
+   * Close every window the un-flushed tail is ready for. Driven by the tick
+   * timer in prod; called directly by tests. Re-entrancy is guarded so a
+   * slow Pass 1 can't overlap the next tick — extra windows just wait for
+   * the current call to drain them.
+   */
+  async pump(): Promise<void> {
+    if (this.busy || this.stopped) return;
     this.busy = true;
-    this.dirty = false;
     try {
-      await this.runPipeline(false);
+      for (;;) {
+        if (this.stopped) break;
+        // Cheap guard before any silence scan: nothing to close yet.
+        if (bytesToMs(this.pending.length) < this.windowOpts.minWindowMs) break;
+        const boundary = nextWindowBoundary(this.pending, this.windowOpts);
+        if (!boundary) break;
+        // Snapshot the window before any await; pushAudio only appends past it.
+        const windowPcm = this.pending.subarray(0, boundary.endByte);
+        await this.processWindow(windowPcm, boundary.durationMs, boundary.endByte);
+      }
     } catch (err) {
-      console.error('[live-gateway] tick failed:', (err as Error).message);
+      console.error('[live-gateway] window failed:', (err as Error).message);
     } finally {
       this.busy = false;
     }
   }
 
   /**
-   * Transcribe the rolling buffer, structure it, and flag gaps — emitting
-   * only what's new. `isFinal` marks the closing pass after the doctor
-   * ends the consult.
+   * Transcribe one finalized window (Pass 1 on JUST this window), append
+   * the utterance, then rebuild the note + flags on the cumulative
+   * transcript. Advances the flush cursor and trims `pending`.
    */
-  private async runPipeline(isFinal: boolean): Promise<void> {
-    const audioBytes = Buffer.concat(this.audio, this.totalBytes);
+  private async processWindow(
+    windowPcm: Buffer,
+    durationMs: number,
+    consumedBytes: number,
+  ): Promise<void> {
+    const tStartMs = bytesToMs(this.flushedBytes);
 
+    const t0 = Date.now();
     const pass1 = await this.backends.pass1.run({
       sessionId: this.sessionId,
-      audioBytes,
-      durationMs: this.durationMs(),
+      audioBytes: windowPcm,
+      durationMs,
     });
-    const transcript = pass1.output.transcript;
-    const segments = pass1.output.speakerSegments;
+    this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
+    this.meter.markWindow();
 
-    this.emitTranscriptDelta(transcript, segments);
+    // Advance the cursor + trim the buffer (pending may have grown during
+    // the await; slicing keeps the leftover + any newly-pushed audio).
+    this.flushedBytes += consumedBytes;
+    this.pending = this.pending.subarray(consumedBytes);
+    const tEndMs = bytesToMs(this.flushedBytes);
 
-    // Sprint DV6.4 — recognised voice commands (transcript-only, so they
-    // surface even before the note structures). The doctor confirms them.
-    if (!isFinal) {
-      for (const command of parseVoiceCommands(transcript)) {
-        if (this.seenCommands.has(command.raw)) continue;
-        this.seenCommands.add(command.raw);
-        this.emit({ type: 'command', command });
-      }
+    const utterance = this.commitUtterance(
+      pass1.output.transcript,
+      pass1.output.speakerSegments,
+      tStartMs,
+      tEndMs,
+    );
+    this.emit({
+      type: 'transcript',
+      delta: {
+        text: utterance.text,
+        isFinal: true,
+        speaker: utterance.speaker,
+        startMs: tStartMs,
+        endMs: tEndMs,
+      },
+    });
+    this.emit({ type: 'utterance', utterance });
+
+    // Recognised voice commands (transcript-only). The doctor confirms them.
+    for (const command of parseVoiceCommands(this.cumulativeTranscript())) {
+      if (this.seenCommands.has(command.raw)) continue;
+      this.seenCommands.add(command.raw);
+      this.emit({ type: 'command', command });
     }
 
+    await this.runNote(false);
+    this.emit({ type: 'meter', summary: this.meterSummary() });
+  }
+
+  /** Append one utterance + its (wall-offset) segments. */
+  private commitUtterance(
+    transcript: string,
+    segments: SpeakerSegment[],
+    tStartMs: number,
+    tEndMs: number,
+  ): Utterance {
+    for (const seg of segments) {
+      this.segments.push({ ...seg, startMs: seg.startMs + tStartMs, endMs: seg.endMs + tStartMs });
+    }
+    const last = segments[segments.length - 1];
+    const utterance: Utterance = {
+      id: `u${++this.windowIndex}`,
+      speaker: mapSpeaker(last?.speaker),
+      text: transcript.trim(),
+      tStartMs,
+      tEndMs,
+    };
+    this.utterances.push(utterance);
+    return utterance;
+  }
+
+  private cumulativeTranscript(): string {
+    return this.utterances
+      .map((u) => u.text)
+      .filter((t) => t.length > 0)
+      .join(' ');
+  }
+
+  /**
+   * Rebuild the structured note (Pass 2) on the cumulative transcript and
+   * run the deterministic flags. `isFinal` emits the closing `final` event
+   * (note + drafted Rx + orders) instead of an incremental `note`.
+   */
+  private async runNote(isFinal: boolean): Promise<void> {
+    const transcript = this.cumulativeTranscript();
+    if (transcript.length === 0) {
+      if (isFinal) this.emitFinalFromLatest();
+      return;
+    }
+
+    const t0 = Date.now();
     const pass2 = await this.backends.pass2.run({
       sessionId: this.sessionId,
       transcript,
-      speakerSegments: segments,
+      speakerSegments: this.segments,
       kind: 'TREATMENT',
       modality: null,
       vertical: 'DOCTOR',
       clientContext: {},
     });
+    this.meter.recordNote(pass2.callLog, Date.now() - t0);
 
-    if (pass2.output.kind !== 'MEDICAL') return; // defensive — DOCTOR always MEDICAL
+    if (pass2.output.kind !== 'MEDICAL') {
+      // Defensive — DOCTOR always MEDICAL. Fall back to whatever we had.
+      if (isFinal) this.emitFinalFromLatest();
+      return;
+    }
     const note = pass2.output.encounterNote;
-    const medications = pass2.output.medications;
     this.latestNote = note;
-    this.latestMedications = medications;
+    this.latestMedications = pass2.output.medications;
     this.latestOrders = pass2.output.orders;
 
     if (isFinal) {
-      this.emit({ type: 'final', note, medications, orders: pass2.output.orders });
+      this.emit({
+        type: 'final',
+        note,
+        medications: this.latestMedications,
+        orders: this.latestOrders,
+      });
       return;
     }
 
@@ -171,9 +291,8 @@ export class LiveSession {
       this.emit({ type: 'gap', gap: gap satisfies EncounterGap });
     }
 
-    // Sprint DV5 — Rail-3 💊 flag. Deterministic interaction-check over
-    // the drafted Rx, emitted as a DRUG_INTERACTION gap.
-    for (const interaction of checkInteractions(medications.map((m) => m.drug))) {
+    // Rail-3 💊 — deterministic interaction-check over the drafted Rx.
+    for (const interaction of checkInteractions(this.latestMedications.map((m) => m.drug))) {
       const message = formatInteraction(interaction);
       if (this.seenGaps.has(message)) continue;
       this.seenGaps.add(message);
@@ -188,42 +307,65 @@ export class LiveSession {
     }
   }
 
-  /** Emit the transcript suffix when cumulative, else the whole new text. */
-  private emitTranscriptDelta(transcript: string, segments: SpeakerSegment[]): void {
-    let deltaText = transcript;
-    if (this.lastTranscript && transcript.startsWith(this.lastTranscript)) {
-      deltaText = transcript.slice(this.lastTranscript.length);
-    }
-    deltaText = deltaText.trim();
-    if (deltaText.length === 0) return;
-    this.lastTranscript = transcript;
-
-    const last = segments[segments.length - 1];
-    const speaker =
-      last?.speaker === 'therapist' ? 'doctor' : last?.speaker === 'client' ? 'patient' : 'unknown';
-    this.emit({
-      type: 'transcript',
-      delta: { text: deltaText, isFinal: false, speaker },
-    });
-  }
-
-  /** Doctor ended the consult: run a closing pass on the full audio. */
+  /** Doctor ended the consult: flush the tail, close the note, report. */
   async finalize(): Promise<void> {
     if (this.stopped) return;
-    this.stopAudio();
+    this.stopAudio(); // sets `stopped` → any in-flight pump loop exits after its window
+    await this.waitIdle();
     this.emit({ type: 'status', state: 'finalizing' });
     try {
-      if (this.totalBytes > 0) {
-        await this.runPipeline(true);
-      } else if (this.latestNote) {
-        this.emitFinalFromLatest();
+      // Transcribe whatever remains as the final window (may be short).
+      if (this.pending.length > 0) {
+        const tail = this.pending;
+        const durationMs = bytesToMs(tail.length);
+        const consumed = tail.length;
+        this.pending = Buffer.alloc(0);
+        const tStartMs = bytesToMs(this.flushedBytes);
+        const t0 = Date.now();
+        const pass1 = await this.backends.pass1.run({
+          sessionId: this.sessionId,
+          audioBytes: tail,
+          durationMs,
+        });
+        this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
+        this.meter.markWindow();
+        this.flushedBytes += consumed;
+        const tEndMs = bytesToMs(this.flushedBytes);
+        const utterance = this.commitUtterance(
+          pass1.output.transcript,
+          pass1.output.speakerSegments,
+          tStartMs,
+          tEndMs,
+        );
+        this.emit({
+          type: 'transcript',
+          delta: {
+            text: utterance.text,
+            isFinal: true,
+            speaker: utterance.speaker,
+            startMs: tStartMs,
+            endMs: tEndMs,
+          },
+        });
+        this.emit({ type: 'utterance', utterance });
       }
+      await this.runNote(true);
     } catch (err) {
       console.error('[live-gateway] finalize failed:', (err as Error).message);
       this.emitFinalFromLatest();
     } finally {
+      this.emit({ type: 'meter', summary: this.meterSummary() });
       this.emit({ type: 'status', state: 'done' });
     }
+  }
+
+  private meterSummary() {
+    return this.meter.summary(this.sessionId, this.backends.backend, Date.now() - this.startedAtMs);
+  }
+
+  /** Wait for any in-flight `pump()` window to finish before finalizing. */
+  private async waitIdle(): Promise<void> {
+    while (this.busy) await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
 
   private emitFinalFromLatest(): void {
@@ -246,9 +388,15 @@ export class LiveSession {
 
   dispose(): void {
     this.stopAudio();
-    this.audio = [];
+    this.pending = Buffer.alloc(0);
     this.totalBytes = 0;
   }
+}
+
+function mapSpeaker(speaker: SpeakerSegment['speaker'] | undefined): Utterance['speaker'] {
+  if (speaker === 'therapist') return 'doctor';
+  if (speaker === 'client') return 'patient';
+  return 'unknown';
 }
 
 /** Map a drug-interaction severity to the EncounterGap severity scale. */

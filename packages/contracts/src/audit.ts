@@ -210,6 +210,9 @@ export const AuditActionSchema = z.enum([
   // Sprint 70 — a note template was applied to a session (the note is
   // re-generated into that template's structure).
   'NOTE_TEMPLATE_APPLIED',
+  // Doctor vertical — Sprint DS0. A live consult's token / cost / latency
+  // meter was persisted (relayed from the streaming gateway on consult end).
+  'LIVE_CONSULT_METERED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

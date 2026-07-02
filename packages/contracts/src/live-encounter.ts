@@ -18,6 +18,27 @@ export const LiveTranscriptDeltaSchema = z.object({
 });
 export type LiveTranscriptDelta = z.infer<typeof LiveTranscriptDeltaSchema>;
 
+/**
+ * Sprint DS0 — a finalized transcript window. The gateway no longer
+ * re-transcribes the whole rolling buffer every cycle (that was O(n²) in
+ * audio length + tokens). Instead it segments the stream at silence
+ * boundaries (see services/live-gateway/src/vad.ts) and runs Pass 1 on
+ * each NEW ~15–30s window exactly once, appending one Utterance per
+ * window. Utterances are the durable record DS1's CaseState composer
+ * consumes; the cumulative transcript is just their `text` joined.
+ */
+export const UtteranceSchema = z.object({
+  /** Stable per-consult id (monotonic window index, e.g. "u1"). */
+  id: z.string(),
+  speaker: z.enum(['doctor', 'patient', 'unknown']).default('unknown'),
+  text: z.string(),
+  /** Window start offset from consult start, in ms. */
+  tStartMs: z.number().int().nonnegative(),
+  /** Window end offset from consult start, in ms. */
+  tEndMs: z.number().int().nonnegative(),
+});
+export type Utterance = z.infer<typeof UtteranceSchema>;
+
 /// Rail 2 — the incremental structured note, emitted repeatedly during
 /// the consult. A partial of the final encounter note.
 export const PartialStructuredNoteSchema = MedicalEncounterNoteV1Schema.partial();
@@ -72,6 +93,37 @@ export const VoiceCommandSchema = z.discriminatedUnion('kind', [
 export type VoiceCommand = z.infer<typeof VoiceCommandSchema>;
 
 // ============================================================================
+// Sprint DS0 — per-consult token / cost / latency meter. The gateway can't
+// touch the DB (no prisma dep — it's a standalone socket service), so it
+// EMITS this summary as a `meter` event and the browser relays it to
+// POST /sessions/:id/live-metric, which persists a LiveConsultMetric row.
+// This is how we hold the unit economics honest: ≤ ₹2 / consult, transcript
+// p95 ≤ 2s. costInr is a plain number (INR, ≤ 4 dp) — the DB column is the
+// Decimal. Latencies are whole ms.
+// ============================================================================
+export const MeterSummarySchema = z.object({
+  sessionId: z.string(),
+  /** 'mock' | 'vertex' — which backend produced these numbers. */
+  backend: z.string(),
+  /** Finalized transcription windows so far. */
+  windows: z.number().int().nonnegative(),
+  pass1Calls: z.number().int().nonnegative(),
+  pass2Calls: z.number().int().nonnegative(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  costInr: z.number().nonnegative(),
+  /** Pass-1 (transcription) latency percentiles across windows. */
+  transcriptP50Ms: z.number().int().nonnegative(),
+  transcriptP95Ms: z.number().int().nonnegative(),
+  /** Pass-2 (note) latency percentiles across windows. */
+  noteP50Ms: z.number().int().nonnegative(),
+  noteP95Ms: z.number().int().nonnegative(),
+  /** Wall-clock since the consult started. */
+  elapsedMs: z.number().int().nonnegative(),
+});
+export type MeterSummary = z.infer<typeof MeterSummarySchema>;
+
+// ============================================================================
 // Sprint DV4 — live gateway wire protocol. The doctor's browser opens a
 // WebSocket to the streaming gateway (a standalone in-region service —
 // Vercel can't hold a socket). The gateway streams the three rails +
@@ -113,8 +165,17 @@ export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
+  // Sprint DS0 — a finalized transcript window, emitted once per window as
+  // the durable record (stable id + precise ms bounds). The `transcript`
+  // delta still drives the running display; `utterance` is what DS1 builds
+  // CaseState from.
+  z.object({ type: z.literal('utterance'), utterance: UtteranceSchema }),
   z.object({ type: z.literal('note'), partial: PartialStructuredNoteSchema }),
   z.object({ type: z.literal('gap'), gap: EncounterGapSchema }),
+  // Sprint DS0 — per-consult token / cost / latency rollup. Emitted after
+  // each window + once at the end; the browser relays the last one to the
+  // live-metric route.
+  z.object({ type: z.literal('meter'), summary: MeterSummarySchema }),
   // Sprint DV9 — the closing note carries the drafted Rx + clinical
   // orders too, so the browser can persist a complete encounter (parity
   // with the batch path) for the doctor to sign.

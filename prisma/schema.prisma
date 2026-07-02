@@ -2334,6 +2334,39 @@ model NoteReview {
   @@map("note_reviews")
 }
 
+/// Sprint DS0 — per-consult token / cost / latency meter for the doctor
+/// live copilot. The streaming gateway can't touch the DB, so the browser
+/// relays the gateway's meter summary to POST /sessions/:id/live-metric,
+/// which writes one row per consult. Telemetry only (scalar keys, no FK) —
+/// it holds the unit economics honest: ≤ ₹2 / consult, transcript p95 ≤ 2s.
+model LiveConsultMetric {
+  id             String @id @default(cuid())
+  sessionId      String
+  psychologistId String
+
+  /// 'mock' | 'vertex' — which backend produced these numbers.
+  backend String
+
+  windows      Int
+  pass1Calls   Int
+  pass2Calls   Int
+  inputTokens  Int
+  outputTokens Int
+  costInr      Decimal @db.Decimal(10, 4)
+
+  transcriptP50Ms Int
+  transcriptP95Ms Int
+  noteP50Ms       Int
+  noteP95Ms       Int
+  elapsedMs       Int
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([psychologistId, createdAt])
+  @@map("live_consult_metrics")
+}
+
 // ============================================================================
 // AuditLog — append-only. Polymorphic target via (targetType, targetId).
 // Every state-changing endpoint writes one row. Read access surface added in
@@ -2582,6 +2615,8 @@ enum AuditAction {
   WELCOME_DISMISSED
   // A note template was applied to a session (note re-generated to it).
   NOTE_TEMPLATE_APPLIED
+  // Doctor vertical — Sprint DS0. Live consult token/cost/latency meter persisted.
+  LIVE_CONSULT_METERED
 }
 
 enum AuditActorType {
