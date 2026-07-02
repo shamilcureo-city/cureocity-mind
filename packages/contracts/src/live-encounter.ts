@@ -180,6 +180,9 @@ export const LiveGatewayStateSchema = z.enum([
   'done',
   // Sprint DV8 hardening — the start token was missing/invalid/expired.
   'unauthorized',
+  // Sprint DS8 hardening — the node is at its concurrent-session cap; the
+  // client is shed gracefully and asked to retry.
+  'busy',
 ]);
 export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 

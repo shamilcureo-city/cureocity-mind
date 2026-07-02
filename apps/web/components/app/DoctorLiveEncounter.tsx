@@ -379,6 +379,12 @@ export function DoctorLiveEncounter({
           } else if (event.state === 'unauthorized') {
             setPhase('error');
             setError('The live session could not be authorised. Reload the page and try again.');
+          } else if (event.state === 'busy') {
+            // Sprint DS8 — the gateway node is at its session cap; shed cleanly.
+            setPhase('error');
+            setError(
+              'The live copilot is at capacity right now. Wait a moment and press Start again.',
+            );
           }
           break;
         case 'transcript':
