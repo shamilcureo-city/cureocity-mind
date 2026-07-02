@@ -17,8 +17,9 @@ export default async function RecordPage() {
   const therapist = await requireOnboardedPsychologist();
 
   // Sprint DV2 — doctors don't use the therapy record surface; their home
-  // is the patient roster. See docs/DOCTOR_VERTICAL.md.
-  if (therapist.vertical === 'DOCTOR') redirect('/app/patients');
+  // is the clinic queue (Sprint DS7 made the OPD queue the landing page,
+  // superseding the patient roster). See docs/DOCTOR_SCRIBE_V2_SPRINTS.md.
+  if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
 
   const [rawSessions, rawClients] = therapist
     ? await Promise.all([

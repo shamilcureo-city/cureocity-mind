@@ -19,6 +19,7 @@ import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { MedicalNoteView } from './MedicalNoteView';
+import { TurnoverBar } from './TurnoverBar';
 
 /**
  * Sprint DV4 (full) — the live copilot. Streams real mic audio to the
@@ -51,11 +52,16 @@ export function DoctorLiveEncounter({
   clientId,
   specialty,
   patient,
+  autoStart = false,
 }: {
   sessionId: string;
   clientId?: string;
   specialty?: string | null;
   patient?: { name?: string | null; age?: number | null } | null;
+  // Sprint DS7 — the clinic flow arrives here already committed (queue →
+  // flash → live), so kick off the mic without a second tap. Best-effort:
+  // if the browser needs a gesture, the StartPanel button is the fallback.
+  autoStart?: boolean;
 }) {
   const wsRef = useRef<WebSocket | null>(null);
   // Sprint DS0 — the gateway meters the consult and emits `meter` events;
@@ -264,6 +270,17 @@ export function DoctorLiveEncounter({
       void streamRef.current.stop();
     };
   }, []);
+
+  // Sprint DS7 — auto-start the consult once when arriving via the clinic
+  // flow (queue → flash → here). Fires a single time from the idle phase.
+  // `start` is a stable hoisted closure, deliberately not a dep.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStart && !autoStartedRef.current && phase === 'idle') {
+      autoStartedRef.current = true;
+      void start();
+    }
+  }, [autoStart, phase]);
 
   async function start(): Promise<void> {
     setError(null);
@@ -571,12 +588,17 @@ export function DoctorLiveEncounter({
       )}
 
       {finalNote ? (
-        <FinalNote
-          note={finalNote}
-          saveState={saveState}
-          clientId={clientId}
-          sessionId={sessionId}
-        />
+        <>
+          <FinalNote
+            note={finalNote}
+            saveState={saveState}
+            clientId={clientId}
+            sessionId={sessionId}
+          />
+          {/* Sprint DS7 — arm the next token so consults chain without a
+              detour back to the queue. */}
+          <TurnoverBar currentSessionId={sessionId} />
+        </>
       ) : phase === 'idle' || phase === 'connecting' ? (
         <StartPanel connecting={phase === 'connecting'} />
       ) : (
@@ -1619,6 +1641,30 @@ function commandRec(c: VoiceCommand, shownData: Record<string, string>): Rec {
       severity: 'info',
       rank: 2,
     };
+  }
+  // Sprint DS7 — clinic-flow control heard mid-consult. Surfaced only; the
+  // doctor still ends + signs. The turnover bar (after the note lands) is
+  // where the queue actually advances.
+  if (c.kind === 'NEXT_PATIENT') {
+    return c.hold
+      ? {
+          kind: 'NEXT_PATIENT',
+          kindLabel: 'Voice command · Queue',
+          title: 'Holding on this patient',
+          detail: 'Heard “wait” — the next patient won’t be armed until you end.',
+          tone: 'command',
+          severity: 'info',
+          rank: 3,
+        }
+      : {
+          kind: 'NEXT_PATIENT',
+          kindLabel: 'Voice command · Queue',
+          title: 'Ready for the next patient',
+          detail: 'Heard “next patient” — end & sign to advance the queue.',
+          tone: 'command',
+          severity: 'info',
+          rank: 3,
+        };
   }
   const resolved = shownData[c.measure];
   return {

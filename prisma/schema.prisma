@@ -783,6 +783,13 @@ model Session {
   // Examples: ["en"], ["ml", "en"], ["hi", "en"], ["en", "ml", "hi"].
   spokenLanguages String[] @default([])
 
+  /// Sprint DS7 — OPD token for the clinic queue. Auto-assigned
+  /// server-side at session-create for the DOCTOR vertical (next integer
+  /// among that doctor's sessions scheduled today); null for therapist
+  /// rows + anything created before DS7. Drives the queue ordering on
+  /// /app/clinic. See docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS7.
+  tokenNumber Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -810,6 +817,9 @@ model Session {
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
   @@index([psychologistId, status, scheduledAt])
+  // Sprint DS7 — the clinic-queue read: today's sessions for a doctor,
+  // ordered by token.
+  @@index([psychologistId, scheduledAt, tokenNumber])
   @@map("sessions")
 }
 

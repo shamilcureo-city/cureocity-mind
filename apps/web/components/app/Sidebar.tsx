@@ -21,7 +21,8 @@ interface NavItem {
     | 'assistant'
     | 'learn'
     | 'me'
-    | 'search';
+    | 'search'
+    | 'clinic';
 }
 
 const PRIMARY: NavItem[] = [
@@ -46,6 +47,9 @@ const PRIMARY: NavItem[] = [
 // therapy-shaped Today/Record surfaces are dropped until the doctor
 // encounter workspace lands (DV3/DV4). See docs/DOCTOR_VERTICAL.md.
 const DOCTOR_PRIMARY: NavItem[] = [
+  // Sprint DS7 — the OPD queue is the doctor's landing page (per-consult
+  // activation is the binding constraint). Patients roster sits below it.
+  { href: '/app/clinic', label: 'Clinic', icon: 'clinic' },
   { href: '/app/patients', label: 'Patients', icon: 'clients' },
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
@@ -221,6 +225,7 @@ export function Glyph({
     | 'learn'
     | 'me'
     | 'search'
+    | 'clinic'
     | 'gift'
     | 'cog'
     | 'help'
@@ -239,6 +244,7 @@ export function Glyph({
     learn: 'M4 5h12a3 3 0 0 1 3 3v11a2 2 0 0 0-2-2H4V5zM4 17h12',
     me: 'M3 12h3l3-8 4 16 3-8h5',
     search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
+    clinic: 'M4 6h16M4 12h16M4 18h9M4 6v12',
     gift: 'M3 9h18v4H3zM12 9v13M5 13v8h14v-8M8 9c0-2 1-4 4-4s4 2 4 4',
     cog: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
     help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',

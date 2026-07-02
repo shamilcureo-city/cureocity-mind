@@ -64,6 +64,33 @@ describe('parseVoiceCommands — SHOW_DATA', () => {
   });
 });
 
+describe('parseVoiceCommands — NEXT_PATIENT (DS7)', () => {
+  it('parses "next patient" as an advance', () => {
+    const [cmd] = parseVoiceCommands('Alright, next patient please.');
+    expect(cmd).toMatchObject({ kind: 'NEXT_PATIENT', hold: false });
+  });
+
+  it('parses "call in the next one" as an advance', () => {
+    const [cmd] = parseVoiceCommands('We are done here — call in the next one.');
+    expect(cmd).toMatchObject({ kind: 'NEXT_PATIENT', hold: false });
+  });
+
+  it('parses "wait before the next" as a hold', () => {
+    const [cmd] = parseVoiceCommands('Wait before the next patient, I need a minute.');
+    expect(cmd).toMatchObject({ kind: 'NEXT_PATIENT', hold: true });
+  });
+
+  it('parses "hold the queue" as a hold', () => {
+    const [cmd] = parseVoiceCommands('Hold the queue for a moment.');
+    expect(cmd).toMatchObject({ kind: 'NEXT_PATIENT', hold: true });
+  });
+
+  it('does NOT fire on a bare "next" or "wait" in ordinary speech', () => {
+    expect(parseVoiceCommands('Take the next dose after food.')).toEqual([]);
+    expect(parseVoiceCommands('Wait, does it hurt when I press here?')).toEqual([]);
+  });
+});
+
 describe('parseVoiceCommands — general', () => {
   it('finds multiple commands across a transcript and dedupes', () => {
     const cmds = parseVoiceCommands(

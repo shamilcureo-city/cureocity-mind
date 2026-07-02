@@ -92,6 +92,16 @@ export const VoiceCommandSchema = z.discriminatedUnion('kind', [
     raw: z.string(),
     measure: z.enum(['BP', 'HBA1C', 'FBS', 'LDL', 'WEIGHT']),
   }),
+  // Sprint DS7 — clinic-flow control spoken near the end of a consult.
+  // "next patient" / "call the next one" advances the queue; "wait" /
+  // "hold on" holds the turnover. Surfaced as a command; the doctor still
+  // ends + signs — nothing auto-advances mid-consult.
+  z.object({
+    kind: z.literal('NEXT_PATIENT'),
+    raw: z.string(),
+    /** true = "wait"/"hold on" — stay on this patient, don't advance. */
+    hold: z.boolean().default(false),
+  }),
 ]);
 export type VoiceCommand = z.infer<typeof VoiceCommandSchema>;
 

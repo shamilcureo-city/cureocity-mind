@@ -12,7 +12,7 @@ import { Glyph } from '@/components/app/Sidebar';
 const ITEMS: {
   href: string;
   label: string;
-  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'assistant' | 'cog';
+  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'assistant' | 'cog' | 'clinic';
 }[] = [
   { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { href: '/app/today', label: 'Today', icon: 'today' },
@@ -22,8 +22,9 @@ const ITEMS: {
 ];
 
 // Sprint DV2 — doctor bottom bar: the patient roster + settings. See
-// docs/DOCTOR_VERTICAL.md.
+// docs/DOCTOR_VERTICAL.md. Sprint DS7 — Clinic (the OPD queue) leads.
 const DOCTOR_ITEMS: typeof ITEMS = [
+  { href: '/app/clinic', label: 'Clinic', icon: 'clinic' },
   { href: '/app/patients', label: 'Patients', icon: 'clients' },
   { href: '/app/settings', label: 'Settings', icon: 'cog' },
 ];

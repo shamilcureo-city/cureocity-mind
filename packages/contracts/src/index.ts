@@ -29,6 +29,9 @@ export * from './safety-plan';
 export * from './webauthn';
 export * from './invite';
 export * from './clinic';
+// Sprint DS7 — OPD token queue (the zero-click clinic flow); a leaf schema,
+// distinct from the multi-tenant Clinic org model above.
+export * from './clinic-queue';
 
 // Sprint DV1 — doctor vertical scaffolds (see docs/DOCTOR_VERTICAL.md).
 export * from './medical-note';

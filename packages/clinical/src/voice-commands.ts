@@ -84,6 +84,25 @@ function clauses(transcript: string): string[] {
 function parseClause(clause: string): VoiceCommand | null {
   const lower = clause.toLowerCase();
 
+  // NEXT_PATIENT (DS7) — clinic-flow control. Conservative: only fires on
+  // explicit queue phrases, never a bare "next" or "wait" (both recur in
+  // ordinary consult speech). Hold ("wait before the next") wins over
+  // advance when both could match.
+  if (
+    /\bhold (?:the )?(?:queue|token|next)\b/.test(lower) ||
+    /\bwait (?:before|on|for) (?:the )?next\b/.test(lower) ||
+    /\bdon'?t (?:call|send) (?:in )?(?:the )?next\b/.test(lower)
+  ) {
+    return { kind: 'NEXT_PATIENT', raw: clause, hold: true };
+  }
+  if (
+    /\bnext (?:patient|case|one)\b/.test(lower) ||
+    /\bcall (?:in )?(?:the )?next\b/.test(lower) ||
+    /\bsend in (?:the )?next\b/.test(lower)
+  ) {
+    return { kind: 'NEXT_PATIENT', raw: clause, hold: false };
+  }
+
   // ADD_MEDICATION — needs a dosing signal so plain "add a note" is ignored.
   const medTrigger = /\b(add|start|prescribe|give|put (?:him|her|them) on)\b/.exec(lower);
   const strengthMatch = STRENGTH_RE.exec(clause);

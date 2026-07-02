@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { DoctorLiveEncounter } from '@/components/app/DoctorLiveEncounter';
+import { LiveEncounterFlow } from '@/components/app/LiveEncounterFlow';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
@@ -13,14 +13,21 @@ export const dynamic = 'force-dynamic';
  * the real pipeline (Pass 1 transcription + Pass 2 medical note + gap
  * engine) on streamed mic audio. See services/live-gateway +
  * docs/DOCTOR_VERTICAL.md §4.
+ *
+ * Sprint DS7 — arriving from the clinic queue with `?flash=1` plays the
+ * 3-second context flash first, then auto-starts the mic (zero-click flow).
  */
 export default async function LiveEncounterPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; sessionId: string }>;
+  searchParams: Promise<{ flash?: string }>;
 }) {
   const doctor = await requireOnboardedDoctor();
   const { id: clientId, sessionId } = await params;
+  const { flash } = await searchParams;
+  const showFlash = flash === '1';
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -60,11 +67,12 @@ export default async function LiveEncounterPage({
         </span>
       </div>
 
-      <DoctorLiveEncounter
+      <LiveEncounterFlow
         sessionId={sessionId}
         clientId={clientId}
         specialty={doctor.specialty}
         patient={{ name, age: ageFrom(session.client.dateOfBirth) }}
+        showFlash={showFlash}
       />
     </div>
   );
