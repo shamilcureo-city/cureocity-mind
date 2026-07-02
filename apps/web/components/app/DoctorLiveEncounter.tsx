@@ -37,6 +37,15 @@ const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localho
 
 type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'error';
 
+// Sprint DS6 — a critical item that gates the close: a red flag /
+// contraindicated interaction (`RED_FLAG`) or an urgent differential
+// (`DIFFERENTIAL`). Its `key` matches the acted-items + audit key.
+interface GateItem {
+  key: string;
+  label: string;
+  kind: 'RED_FLAG' | 'DIFFERENTIAL';
+}
+
 export function DoctorLiveEncounter({
   sessionId,
   clientId,
@@ -72,6 +81,11 @@ export function DoctorLiveEncounter({
   const [confirmedDrugs, setConfirmedDrugs] = useState<Set<string>>(new Set());
   const rxFinalRef = useRef<RxPadV1 | null>(null);
   const confirmedRef = useRef<Set<string>>(new Set());
+  // Sprint DS6 — one-tap actions: which suggestions the doctor has acted on,
+  // + the before-you-close gate for unacted critical items.
+  const [actedItems, setActedItems] = useState<Set<string>>(new Set());
+  const [gateOpen, setGateOpen] = useState(false);
+  const [gateReason, setGateReason] = useState('');
   const [gaps, setGaps] = useState<EncounterGap[]>([]);
   const [commands, setCommands] = useState<VoiceCommand[]>([]);
   const [shownData, setShownData] = useState<Record<string, string>>({});
@@ -121,6 +135,18 @@ export function DoctorLiveEncounter({
       return next;
     });
     void relaySuggestion('acted', dxId, 'DIFFERENTIAL', label);
+    markActed(`dx:${dxId}`); // DS6 — acting on an urgent dx clears the gate
+  }
+
+  // Sprint DS6 — a one-tap action on a suggestion: mark it acted (clears the
+  // gate for critical items) + audit it. `relay` avoids a double audit when
+  // the caller already relayed (e.g. add-to-assessment).
+  function markActed(
+    key: string,
+    opts?: { kind?: 'RED_FLAG' | 'GAP' | 'DIFFERENTIAL'; label?: string },
+  ): void {
+    setActedItems((prev) => new Set(prev).add(key));
+    if (opts) void relaySuggestion('acted', key, opts.kind ?? 'GAP', opts.label);
   }
 
   // Sprint DS5 — confirm a pending Rx row (confirm-first). The overlay
@@ -253,6 +279,9 @@ export function DoctorLiveEncounter({
     setConfirmedDrugs(new Set());
     confirmedRef.current = new Set();
     rxFinalRef.current = null;
+    setActedItems(new Set());
+    setGateOpen(false);
+    setGateReason('');
     setGaps([]);
     setCommands([]);
     setShownData({});
@@ -422,6 +451,49 @@ export function DoctorLiveEncounter({
     wsRef.current?.send(JSON.stringify({ type: 'stop' }));
   }
 
+  // Sprint DS6 — the items that gate the close: red flags, contraindicated
+  // interactions, and urgent differentials. Nothing else EVER gates.
+  const criticalItems: GateItem[] = [
+    ...gaps
+      .filter(
+        (g) =>
+          g.kind === 'RED_FLAG' || (g.kind === 'DRUG_INTERACTION' && g.severity === 'critical'),
+      )
+      .map((g) => ({ key: `flag:${g.message}`, label: g.message, kind: 'RED_FLAG' as const })),
+    ...(reasoning?.differential ?? [])
+      .filter((d) => d.urgent)
+      .map((d) => ({
+        key: `dx:${d.id}`,
+        label: clean(d.label) ?? d.label,
+        kind: 'DIFFERENTIAL' as const,
+      })),
+  ];
+  const criticalUnacted = criticalItems.filter((i) => !actedItems.has(i.key));
+
+  // The doctor pressed "End": gate on unacted critical items, else close.
+  function attemptEnd(): void {
+    if (criticalUnacted.length > 0) setGateOpen(true);
+    else stop();
+  }
+  // "Addressed — record my reason": audit each unacted critical item with the
+  // reason (stored in audit metadata) and close.
+  function addressAllWithReason(): void {
+    const reason = gateReason.trim() || 'addressed at gate';
+    for (const item of criticalUnacted) {
+      void relaySuggestion('dismissed', item.key, item.kind, reason);
+      setActedItems((prev) => new Set(prev).add(item.key));
+    }
+    setGateReason('');
+    setGateOpen(false);
+    stop();
+  }
+  // Every critical item is acted — close cleanly from inside the gate.
+  function endFromGate(): void {
+    setGateReason('');
+    setGateOpen(false);
+    stop();
+  }
+
   const recs = rankRecommendations(gaps, commands, shownData);
   const criticalOpen = recs.some((r) => r.severity === 'critical');
 
@@ -481,7 +553,7 @@ export function DoctorLiveEncounter({
               New consult
             </Button>
           ) : live ? (
-            <Button onClick={stop} className="bg-[var(--color-warn)] hover:bg-[#a25b30]">
+            <Button onClick={attemptEnd} className="bg-[var(--color-warn)] hover:bg-[#a25b30]">
               End &amp; review note
             </Button>
           ) : (
@@ -540,8 +612,23 @@ export function DoctorLiveEncounter({
             onEvidence={highlightEvidence}
             onAddToAssessment={addToAssessment}
             addedToAssessment={assessmentAdds}
+            onAct={markActed}
+            actedItems={actedItems}
           />
         </div>
+      )}
+
+      {gateOpen && (
+        <GateScreen
+          items={criticalItems}
+          actedItems={actedItems}
+          reason={gateReason}
+          onReason={setGateReason}
+          onAddress={(item) => markActed(item.key, { kind: item.kind, label: item.label })}
+          onRecordReason={addressAllWithReason}
+          onBack={() => setGateOpen(false)}
+          onEnd={endFromGate}
+        />
       )}
     </div>
   );
@@ -657,6 +744,8 @@ function LiveRail({
   onEvidence,
   onAddToAssessment,
   addedToAssessment,
+  onAct,
+  actedItems,
 }: {
   reasoning: LiveReasoning | null;
   findings: ClinicalFinding[];
@@ -668,6 +757,11 @@ function LiveRail({
   onEvidence: (findingIds: string[]) => void;
   onAddToAssessment: (dxId: string, label: string) => void;
   addedToAssessment: string[];
+  onAct: (
+    key: string,
+    opts?: { kind?: 'RED_FLAG' | 'GAP' | 'DIFFERENTIAL'; label?: string },
+  ) => void;
+  actedItems: Set<string>;
 }) {
   return (
     <div className="space-y-4">
@@ -680,7 +774,7 @@ function LiveRail({
         onAddToAssessment={onAddToAssessment}
         addedToAssessment={addedToAssessment}
       />
-      <CopilotRail recs={recs} criticalOpen={criticalOpen} />
+      <CopilotRail recs={recs} criticalOpen={criticalOpen} onAct={onAct} actedItems={actedItems} />
     </div>
   );
 }
@@ -1107,7 +1201,20 @@ function NotePanel({
   );
 }
 
-function CopilotRail({ recs, criticalOpen }: { recs: Rec[]; criticalOpen: boolean }) {
+function CopilotRail({
+  recs,
+  criticalOpen,
+  onAct,
+  actedItems,
+}: {
+  recs: Rec[];
+  criticalOpen: boolean;
+  onAct: (
+    key: string,
+    opts?: { kind?: 'RED_FLAG' | 'GAP' | 'DIFFERENTIAL'; label?: string },
+  ) => void;
+  actedItems: Set<string>;
+}) {
   return (
     <Card className="flex flex-col overflow-hidden bg-gradient-to-b from-white to-[var(--color-surface-soft)] p-0">
       <div className="flex items-center gap-2 border-b border-[var(--color-line-soft)] px-5 py-3.5">
@@ -1124,7 +1231,15 @@ function CopilotRail({ recs, criticalOpen }: { recs: Rec[]; criticalOpen: boolea
             ranked by urgency.
           </div>
         ) : (
-          recs.map((r, i) => <CopilotCard key={`${r.kind}-${i}`} rec={r} isNew={i === 0} />)
+          recs.map((r, i) => (
+            <CopilotCard
+              key={`${r.kind}-${i}`}
+              rec={r}
+              isNew={i === 0}
+              acted={r.action ? actedItems.has(r.action.key) : false}
+              onAct={onAct}
+            />
+          ))
         )}
       </div>
       {criticalOpen && (
@@ -1136,7 +1251,20 @@ function CopilotRail({ recs, criticalOpen }: { recs: Rec[]; criticalOpen: boolea
   );
 }
 
-function CopilotCard({ rec, isNew }: { rec: Rec; isNew: boolean }) {
+function CopilotCard({
+  rec,
+  isNew,
+  acted,
+  onAct,
+}: {
+  rec: Rec;
+  isNew: boolean;
+  acted: boolean;
+  onAct: (
+    key: string,
+    opts?: { kind?: 'RED_FLAG' | 'GAP' | 'DIFFERENTIAL'; label?: string },
+  ) => void;
+}) {
   const s = REC_STYLES[rec.tone];
   return (
     <div
@@ -1157,7 +1285,7 @@ function CopilotCard({ rec, isNew }: { rec: Rec; isNew: boolean }) {
         <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: s.color }}>
           {rec.kindLabel}
         </span>
-        {isNew && (
+        {isNew && !acted && (
           <span className="ml-auto rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-[9.5px] font-extrabold tracking-wide text-[var(--color-accent)]">
             JUST NOW
           </span>
@@ -1169,6 +1297,24 @@ function CopilotCard({ rec, isNew }: { rec: Rec; isNew: boolean }) {
       {rec.detail && (
         <p className="mt-1 text-[12px] leading-snug text-[var(--color-ink-3)]">{rec.detail}</p>
       )}
+      {/* Sprint DS6 — one-tap action on a copilot card. An explicit tap is the
+          confirmation (nothing auto-applies); acting clears the close gate for
+          critical items + audits it. */}
+      {rec.action &&
+        (acted ? (
+          <span className="mt-2.5 inline-flex items-center gap-1 text-[11.5px] font-semibold text-[var(--color-accent)]">
+            ✓ Actioned
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onAct(rec.action!.key, { kind: rec.action!.kind, label: rec.title })}
+            className="mt-2.5 rounded-full px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110"
+            style={{ background: s.color }}
+          >
+            {rec.action.verb}
+          </button>
+        ))}
     </div>
   );
 }
@@ -1214,11 +1360,157 @@ function FinalNote({
   );
 }
 
+// Sprint DS6 — the before-you-close gate. Shown when the doctor presses End
+// while a critical item (red flag, contraindicated interaction, urgent
+// differential) still has no action on record. Two honest exits: address each
+// item one-tap, or close anyway with a recorded reason (into the audit trail).
+// Nothing non-critical ever reaches this screen.
+function GateScreen({
+  items,
+  actedItems,
+  reason,
+  onReason,
+  onAddress,
+  onRecordReason,
+  onBack,
+  onEnd,
+}: {
+  items: GateItem[];
+  actedItems: Set<string>;
+  reason: string;
+  onReason: (v: string) => void;
+  onAddress: (item: GateItem) => void;
+  onRecordReason: () => void;
+  onBack: () => void;
+  onEnd: () => void;
+}) {
+  const unacted = items.filter((i) => !actedItems.has(i.key));
+  const resolved = items.filter((i) => actedItems.has(i.key));
+  const clear = unacted.length === 0;
+  const many = unacted.length > 1;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <Card className="w-full max-w-lg overflow-hidden p-0">
+        <div
+          className={`border-b px-6 py-4 ${
+            clear
+              ? 'border-[var(--color-line-soft)] bg-[var(--color-accent-soft)]'
+              : 'border-[#f0c5bd] bg-[var(--color-crit-soft,#fbe4e0)]'
+          }`}
+        >
+          <h2
+            className={`font-serif text-xl ${clear ? 'text-[var(--color-accent)]' : 'text-[#c0392b]'}`}
+          >
+            {clear ? 'All critical items addressed' : 'Before you close'}
+          </h2>
+          <p
+            className={`mt-1 text-[13px] ${clear ? 'text-[var(--color-ink-2)]' : 'text-[#8a3527]'}`}
+          >
+            {clear
+              ? 'Every red flag and urgent possibility has an action on record. You can end the consult.'
+              : `${unacted.length} critical item${many ? 's have' : ' has'} no action yet. Address ${
+                  many ? 'them' : 'it'
+                }, or close anyway with a reason for the record.`}
+          </p>
+        </div>
+
+        <div className="space-y-4 px-6 py-5">
+          {unacted.length > 0 && (
+            <ul className="space-y-2">
+              {unacted.map((item) => (
+                <li
+                  key={item.key}
+                  className="flex items-start gap-3 rounded-xl border border-[#f0c5bd] bg-white px-3.5 py-2.5"
+                >
+                  <span className="mt-0.5 shrink-0 rounded-full bg-[#fbe4e0] px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-[#c0392b]">
+                    {item.kind === 'RED_FLAG' ? 'Flag' : 'Urgent'}
+                  </span>
+                  <span className="flex-1 text-[13px] leading-snug text-[var(--color-ink)]">
+                    {item.label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onAddress(item)}
+                    className="shrink-0 rounded-full bg-[var(--color-accent)] px-3 py-1 text-[12px] font-semibold text-white hover:brightness-110"
+                  >
+                    Address now
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {resolved.length > 0 && (
+            <div>
+              <SectionLabel>Addressed</SectionLabel>
+              <ul className="mt-1.5 space-y-1">
+                {resolved.map((item) => (
+                  <li
+                    key={item.key}
+                    className="flex items-center gap-2 text-[12.5px] text-[var(--color-ink-3)]"
+                  >
+                    <span className="font-bold text-[var(--color-accent)]">✓</span>
+                    <span className="line-through">{item.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {!clear && (
+            <div>
+              <SectionLabel>Closing without acting? Record your reason</SectionLabel>
+              <textarea
+                value={reason}
+                onChange={(e) => onReason(e.target.value)}
+                rows={2}
+                placeholder="e.g. advised to attend ER directly; documented in the referral letter."
+                className="mt-1.5 w-full rounded-xl border border-[var(--color-line)] px-3 py-2 text-[13px] outline-none focus:border-[var(--color-accent)]"
+              />
+              <p className="mt-1 text-[11px] text-[var(--color-ink-3)]">
+                Saved to the audit trail against each open item.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-6 py-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-[13px] font-medium text-[var(--color-ink-2)] hover:underline"
+          >
+            ← Back to consult
+          </button>
+          {clear ? (
+            <Button onClick={onEnd}>End consult</Button>
+          ) : (
+            <Button onClick={onRecordReason} className="bg-[var(--color-warn)] hover:bg-[#a25b30]">
+              Record reason &amp; end
+            </Button>
+          )}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Recommendation ranking (gaps + voice commands → one ranked feed)   */
 /* ------------------------------------------------------------------ */
 
 type Tone = 'crit' | 'warn' | 'interaction' | 'coding' | 'command' | 'info';
+// Sprint DS6 — a one-tap action a copilot card offers. `key` matches the
+// acted-items + gate key; `kind` is the audit class.
+interface RecAction {
+  key: string;
+  kind: 'RED_FLAG' | 'GAP';
+  verb: string;
+}
 interface Rec {
   kind: string;
   kindLabel: string;
@@ -1227,6 +1519,7 @@ interface Rec {
   tone: Tone;
   severity: 'critical' | 'warn' | 'info';
   rank: number;
+  action?: RecAction;
 }
 
 function rankRecommendations(
@@ -1244,6 +1537,9 @@ function rankRecommendations(
         tone: 'crit',
         severity: 'critical',
         rank: 0,
+        // Sprint DS6 — key matches the gate's `flag:${message}`; acting on a
+        // red flag here clears it from the before-you-close gate.
+        action: { key: `flag:${g.message}`, kind: 'RED_FLAG', verb: 'Acknowledge & document' },
       });
     } else if (g.kind === 'DRUG_INTERACTION') {
       out.push({
@@ -1253,6 +1549,8 @@ function rankRecommendations(
         tone: 'interaction',
         severity: sevOf(g),
         rank: 1,
+        // Same `flag:` key — a critical interaction gates the close too.
+        action: { key: `flag:${g.message}`, kind: 'RED_FLAG', verb: 'Reviewed — proceed' },
       });
     } else if (g.kind === 'CODING') {
       out.push({
@@ -1262,6 +1560,8 @@ function rankRecommendations(
         tone: 'coding',
         severity: 'info',
         rank: 4,
+        // Coding never gates; the action is a convenience acknowledgement.
+        action: { key: `coding:${g.message}`, kind: 'GAP', verb: 'Apply code' },
       });
     } else {
       out.push({
