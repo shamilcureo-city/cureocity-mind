@@ -147,14 +147,15 @@ describe('CaseStateStore', () => {
 });
 
 describe('CaseStateStore.applyReasoning (DS2 differential citation gate)', () => {
-  it('keeps candidates that cite a real finding + bumps the reasoning version', () => {
+  it('keeps candidates that cite a real finding + bumps the reasoning version on commit', () => {
     const store = seededStore(['f1', 'f2']);
-    const res = store.applyReasoning([
+    store.applyReasoning([
       dx({ id: 'd1', likelihood: 'high', evidenceFor: ['f1'] }),
       dx({ id: 'd2', likelihood: 'low', evidenceFor: ['f2'] }),
     ]);
-    expect(res.changed).toBe(true);
-    expect(res.version).toBe(1);
+    const committed = store.commitReasoning();
+    expect(committed.changed).toBe(true);
+    expect(committed.version).toBe(1);
     expect(store.differential.map((d) => d.id)).toEqual(['d1', 'd2']);
     expect(store.reasoning.version).toBe(1);
   });
@@ -256,8 +257,9 @@ describe('CaseStateStore.applyReasoning (DS2 differential citation gate)', () =>
   it('is idempotent — re-applying the same reasoning does not bump the version', () => {
     const store = seededStore(['f1']);
     store.applyReasoning([dx({ id: 'd1', evidenceFor: ['f1'] })]);
-    const res2 = store.applyReasoning([dx({ id: 'd1', evidenceFor: ['f1'] })]);
-    expect(res2.changed).toBe(false);
+    expect(store.commitReasoning().changed).toBe(true);
+    store.applyReasoning([dx({ id: 'd1', evidenceFor: ['f1'] })]);
+    expect(store.commitReasoning().changed).toBe(false);
     expect(store.reasoning.version).toBe(1);
   });
 });

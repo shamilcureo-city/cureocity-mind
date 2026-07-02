@@ -1,4 +1,5 @@
 import type {
+  AskNextItem,
   ClinicalOrderV1,
   EncounterGap,
   LiveGatewayEvent,
@@ -12,6 +13,9 @@ import {
   checkInteractions,
   formatInteraction,
   parseVoiceCommands,
+  resolveSpecialtyTemplate,
+  templateAskNext,
+  type EncounterCompletenessInput,
   type InteractionSeverity,
 } from '@cureocity/clinical';
 import { CaseStateStore } from './case-state';
@@ -240,6 +244,7 @@ export class LiveSession {
         sessionId: this.sessionId,
         caseState: this.caseStore.snapshot,
         previousDifferential: this.caseStore.differential,
+        openQuestions: this.caseStore.openQuestions,
         newUtterances,
         ...(this.specialty ? { specialty: this.specialty } : {}),
       });
@@ -257,16 +262,49 @@ export class LiveSession {
         });
       }
 
-      const reasoned = this.caseStore.applyReasoning(
+      // DS2 differential (citation-gated) + DS3 ask-next (differential-driven
+      // + answered) then the deterministic template-driven questions.
+      this.caseStore.applyReasoning(
         res.output.differential,
         res.output.askNext,
         res.output.redFlags,
+        res.output.answeredQuestionIds,
       );
-      if (reasoned.changed) {
+      this.caseStore.applyTemplateGaps(this.templateAskNextFromNote());
+
+      if (this.caseStore.commitReasoning().changed) {
         this.emit({ type: 'reasoning', reasoning: this.caseStore.reasoning });
+        this.caseStore.markAskEmitted();
       }
     } catch (err) {
       console.error('[live-gateway] reasoning pass failed:', (err as Error).message);
+    }
+  }
+
+  /** Sprint DS3 — deterministic template-completeness questions from the note. */
+  private templateAskNextFromNote(): AskNextItem[] {
+    const template = resolveSpecialtyTemplate(this.specialty);
+    if (!template) return [];
+    const note = this.latestNote;
+    const input: EncounterCompletenessInput = {
+      hpi: note?.hpi ?? '',
+      reviewOfSystems: note?.reviewOfSystems ?? [],
+      examined: note?.physicalExam?.examined ?? false,
+      examFindings: note?.physicalExam?.findings ?? '',
+      presentVitals: presentVitalIds(note),
+    };
+    return templateAskNext(input, template);
+  }
+
+  /**
+   * Sprint DS3 — the doctor dismissed an "ask next" question. Persist it for
+   * the consult (never re-suggest) and re-emit the reasoning snapshot.
+   */
+  dismissQuestion(questionId: string): void {
+    this.caseStore.dismissAsk(questionId);
+    if (this.caseStore.commitReasoning().changed) {
+      this.emit({ type: 'reasoning', reasoning: this.caseStore.reasoning });
+      this.caseStore.markAskEmitted();
     }
   }
 
@@ -463,6 +501,17 @@ export class LiveSession {
     this.pending = Buffer.alloc(0);
     this.totalBytes = 0;
   }
+}
+
+/** Map a note's recorded vitals to the template vital ids (bp / hr / weight). */
+function presentVitalIds(note: MedicalEncounterNoteV1 | null): string[] {
+  const v = note?.vitals;
+  if (!v) return [];
+  const ids: string[] = [];
+  if (v.bpSystolic && v.bpDiastolic) ids.push('bp');
+  if (v.heartRateBpm) ids.push('hr');
+  if (v.weightKg) ids.push('weight');
+  return ids;
 }
 
 function mapSpeaker(speaker: SpeakerSegment['speaker'] | undefined): Utterance['speaker'] {

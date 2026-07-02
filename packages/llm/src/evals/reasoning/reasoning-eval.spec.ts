@@ -19,6 +19,8 @@ describe('reasoning eval harness', () => {
     // The keyword-routed mock should recover the primary dx for every case.
     expect(report.primaryHits).toBe(12);
     expect(report.meanTop3Recall).toBeGreaterThan(0.8);
+    // DS3 — must-ask questions recovered ≥80% (the ask-next acceptance).
+    expect(report.meanAskRecall).toBeGreaterThanOrEqual(0.8);
     // Nothing uncited ever renders (post-gate invariant).
     expect(report.allRenderedCited).toBe(true);
     expect(report.totalDroppedDx).toBe(0);

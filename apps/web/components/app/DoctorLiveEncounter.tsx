@@ -51,6 +51,8 @@ export function DoctorLiveEncounter({
   // we keep the latest and relay it once the consult is done.
   const latestMeterRef = useRef<MeterSummary | null>(null);
   const meteredRef = useRef(false);
+  // Sprint DS3 — suggestion ids we've already audited as SHOWN, so each fires once.
+  const shownSuggestionsRef = useRef<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>('idle');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [note, setNote] = useState<PartialStructuredNote>({});
@@ -110,6 +112,32 @@ export function DoctorLiveEncounter({
     }
   }
 
+  // Sprint DS3 — relay a live copilot suggestion lifecycle event so it lands
+  // one audit row (the gateway can't touch the DB). Best-effort.
+  async function relaySuggestion(
+    event: 'shown' | 'acted' | 'dismissed' | 'autoresolved',
+    suggestionId: string,
+    kind: 'DIFFERENTIAL' | 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
+    label?: string,
+  ): Promise<void> {
+    try {
+      await fetch(`/api/v1/sessions/${sessionId}/live-suggestion`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ event, suggestionId, kind, ...(label ? { label } : {}) }),
+      });
+    } catch {
+      /* audit is best-effort */
+    }
+  }
+
+  // Sprint DS3 — the doctor dismissed an ask-next question: tell the gateway
+  // (so it never re-suggests) + audit it.
+  function dismissQuestion(id: string, label?: string): void {
+    wsRef.current?.send(JSON.stringify({ type: 'dismiss', questionId: id }));
+    void relaySuggestion('dismissed', id, 'ASK_NEXT', label);
+  }
+
   // Resolve a SHOW_DATA command against the patient's chronic readings.
   async function resolveShowData(measure: string): Promise<void> {
     if (!clientId) return;
@@ -160,6 +188,7 @@ export function DoctorLiveEncounter({
     setElapsed(0);
     latestMeterRef.current = null;
     meteredRef.current = false;
+    shownSuggestionsRef.current = new Set();
     setPhase('connecting');
 
     // Sprint DV8 hardening — mint a short-lived token so the gateway can
@@ -248,11 +277,28 @@ export function DoctorLiveEncounter({
           // build the differential + evidence UI on top of these.
           setFindings(event.findings);
           break;
-        case 'reasoning':
+        case 'reasoning': {
           // Sprint DS2 — the live differential + ask-next snapshot (idempotent).
           // DS4 turns this into the persistent clinical-picture panel.
           setReasoning(event.reasoning);
+          // Sprint DS3 — audit each suggestion SHOWN once; audit auto-resolves.
+          const seen = shownSuggestionsRef.current;
+          for (const d of event.reasoning.differential) {
+            if (!seen.has(d.id)) {
+              seen.add(d.id);
+              void relaySuggestion('shown', d.id, 'DIFFERENTIAL', d.label);
+            }
+          }
+          for (const q of event.reasoning.askNext) {
+            if (q.status === 'answered') {
+              void relaySuggestion('autoresolved', q.id, 'ASK_NEXT', q.question);
+            } else if (!seen.has(q.id)) {
+              seen.add(q.id);
+              void relaySuggestion('shown', q.id, 'ASK_NEXT', q.question);
+            }
+          }
           break;
+        }
         case 'note':
           setNote(event.partial);
           break;
@@ -374,7 +420,12 @@ export function DoctorLiveEncounter({
           <NotePanel note={note} specialty={specialty} live={phase === 'listening'} />
           <div className="space-y-4">
             {reasoning && (reasoning.differential.length > 0 || reasoning.askNext.length > 0) && (
-              <DifferentialPreview reasoning={reasoning} findings={findings} />
+              <DifferentialPreview
+                reasoning={reasoning}
+                findings={findings}
+                onDismiss={dismissQuestion}
+                onAsked={(id, label) => void relaySuggestion('acted', id, 'ASK_NEXT', label)}
+              />
             )}
             <CopilotRail recs={recs} criticalOpen={criticalOpen} />
           </div>
@@ -512,9 +563,13 @@ const TREND_GLYPH: Record<LiveReasoning['differential'][number]['trend'], string
 function DifferentialPreview({
   reasoning,
   findings,
+  onDismiss,
+  onAsked,
 }: {
   reasoning: LiveReasoning;
   findings: ClinicalFinding[];
+  onDismiss: (id: string, label?: string) => void;
+  onAsked: (id: string, label?: string) => void;
 }) {
   const labelOf = (id: string) => findings.find((f) => f.id === id)?.label;
   return (
@@ -530,15 +585,56 @@ function DifferentialPreview({
           <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--color-ink-3)]">
             Ask next
           </p>
-          <div className="space-y-1.5">
-            {reasoning.askNext.map((q) => (
-              <div key={q.id} className="text-[12.5px] leading-snug">
-                <span className="font-medium text-[var(--color-ink)]">
-                  {clean(q.question) ?? q.question}
-                </span>
-                {q.why && <span className="text-[var(--color-ink-3)]"> — {q.why}</span>}
-              </div>
-            ))}
+          <div className="space-y-2">
+            {reasoning.askNext.map((q) => {
+              const answered = q.status === 'answered';
+              return (
+                <div key={q.id} className="group flex items-start gap-2 text-[12.5px] leading-snug">
+                  <span className={answered ? '' : 'flex-1'}>
+                    {answered && (
+                      <span className="mr-1 font-bold text-[var(--color-accent)]">✓</span>
+                    )}
+                    <span
+                      className={
+                        answered
+                          ? 'text-[var(--color-ink-3)] line-through'
+                          : 'font-medium text-[var(--color-ink)]'
+                      }
+                    >
+                      {clean(q.question) ?? q.question}
+                    </span>
+                    {!answered && q.why && (
+                      <span className="text-[var(--color-ink-3)]"> — {q.why}</span>
+                    )}
+                    {q.source === 'TEMPLATE' && !answered && (
+                      <span className="ml-1 text-[9.5px] uppercase tracking-wide text-[var(--color-ink-3)]">
+                        · template
+                      </span>
+                    )}
+                  </span>
+                  {!answered && (
+                    <span className="ml-auto flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => onAsked(q.id, q.question)}
+                        className="rounded px-1 text-[11px] font-semibold text-[var(--color-accent)] hover:underline"
+                        title="Mark as asked"
+                      >
+                        asked
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDismiss(q.id, q.question)}
+                        className="rounded px-1 text-[11px] text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
+                        title="Dismiss"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

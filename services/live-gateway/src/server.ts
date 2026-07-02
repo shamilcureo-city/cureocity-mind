@@ -59,6 +59,9 @@ wss.on('connection', (ws) => {
       session.start();
     } else if (cmd.type === 'stop') {
       void session?.finalize();
+    } else if (cmd.type === 'dismiss') {
+      // Sprint DS3 — the doctor dismissed an ask-next question.
+      session?.dismissQuestion(cmd.questionId);
     }
   });
 

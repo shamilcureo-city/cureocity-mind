@@ -213,6 +213,12 @@ export const AuditActionSchema = z.enum([
   // Doctor vertical — Sprint DS0. A live consult's token / cost / latency
   // meter was persisted (relayed from the streaming gateway on consult end).
   'LIVE_CONSULT_METERED',
+  // Doctor vertical — Sprint DS3. Live copilot suggestion lifecycle (shown /
+  // acted / dismissed / auto-resolved) — the safety trail + pilot dataset.
+  'LIVE_SUGGESTION_SHOWN',
+  'LIVE_SUGGESTION_ACTED',
+  'LIVE_SUGGESTION_DISMISSED',
+  'LIVE_SUGGESTION_AUTORESOLVED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

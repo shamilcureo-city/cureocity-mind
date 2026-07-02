@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   missingTemplateElements,
   resolveSpecialtyTemplate,
+  templateAskNext,
   type EncounterCompletenessInput,
 } from './specialty-templates';
 
@@ -65,5 +66,34 @@ describe('missingTemplateElements', () => {
   it('suppresses a vitals nudge when the vital is recorded', () => {
     const gaps = missingTemplateElements({ ...EMPTY, presentVitals: ['bp', 'hr'] }, cardiology);
     expect(gaps.some((g) => g.category === 'VITALS')).toBe(false);
+  });
+
+  it('carries the element label on each gap (DS3)', () => {
+    const gaps = missingTemplateElements(EMPTY, cardiology);
+    expect(gaps.find((g) => g.elementId === 'exertion')?.label).toBe('Relation to exertion');
+  });
+});
+
+describe('templateAskNext (DS3)', () => {
+  const cardiology = resolveSpecialtyTemplate('cardiology');
+
+  it('returns [] when there is no template', () => {
+    expect(templateAskNext(EMPTY, null)).toEqual([]);
+  });
+
+  it('maps completeness gaps to ask-next items (source TEMPLATE, priority normal, open)', () => {
+    const items = templateAskNext(EMPTY, cardiology);
+    expect(items.length).toBeGreaterThan(0);
+    for (const it of items) {
+      expect(it.source).toBe('TEMPLATE');
+      expect(it.priority).toBe('normal');
+      expect(it.status).toBe('open');
+      expect(it.id.startsWith('t-')).toBe(true);
+      expect(it.question.endsWith('?')).toBe(true);
+    }
+    // A recorded vital drops its question.
+    const withBp = templateAskNext({ ...EMPTY, presentVitals: ['bp'] }, cardiology);
+    expect(withBp.some((i) => i.id === 't-vitals-bp')).toBe(false);
+    expect(items.some((i) => i.id === 't-vitals-bp')).toBe(true);
   });
 });

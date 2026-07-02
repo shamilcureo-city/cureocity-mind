@@ -491,6 +491,11 @@ export interface PassReasoningInput {
   caseState: CaseState;
   /** The previous differential — so the model preserves ids + sets trend. */
   previousDifferential: LiveDifferentialItem[];
+  /**
+   * Sprint DS3 — the currently-open ask-next questions, so the model doesn't
+   * repeat them and can report which the new utterances answered.
+   */
+  openQuestions?: { id: string; question: string }[];
   /** Only the utterances added since the last pass — incremental. */
   newUtterances: Utterance[];
   specialty?: string;

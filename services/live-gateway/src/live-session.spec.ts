@@ -4,6 +4,10 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
+  type GeminiCallLogData,
+  type IPassReasoningBackend,
+  type PassReasoningInput,
+  type PassReasoningOutput,
 } from '@cureocity/llm';
 import { LiveSession } from './live-session';
 import type { LiveBackends } from './llm';
@@ -109,8 +113,13 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
         expect(d.evidenceFor.length).toBeGreaterThan(0);
         for (const id of d.evidenceFor) expect(knownFindingIds.has(id)).toBe(true);
       }
-      // Ask-next present + capped at 3 open.
-      expect(lastReasoning.reasoning.askNext.length).toBeLessThanOrEqual(3);
+      // Ask-next present; never more than 3 OPEN differential-driven (DS3).
+      const openDifferential = lastReasoning.reasoning.askNext.filter(
+        (a) => a.source === 'DIFFERENTIAL' && a.status === 'open',
+      );
+      expect(openDifferential.length).toBeLessThanOrEqual(3);
+      // Template-driven questions interleave too (specialty = Cardiology).
+      expect(lastReasoning.reasoning.askNext.some((a) => a.source === 'TEMPLATE')).toBe(true);
       expect(lastReasoning.reasoning.version).toBeGreaterThan(0);
     }
 
@@ -146,6 +155,111 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
     expect(Math.abs(last - first) / first).toBeLessThanOrEqual(0.2);
 
     session.dispose();
+  });
+
+  it('auto-resolves an ask-next question the next reasoning cycle reports answered (DS3)', async () => {
+    // The mock ASR text is fixed, so drive auto-resolution with a scripted
+    // reasoning backend: cycle 1 opens q1, cycle 2 reports it answered.
+    const fakeLog: GeminiCallLogData = {
+      sessionId: 's',
+      pass: 'PASS_11_REASONING',
+      model: 'test',
+      region: 'test',
+      promptVersion: 'test',
+      inputTokens: 1,
+      outputTokens: 1,
+      costInr: 0,
+      latencyMs: 0,
+      status: 'SUCCESS',
+    };
+    const dx = [
+      {
+        id: 'd1',
+        label: 'ACS',
+        likelihood: 'high' as const,
+        trend: 'new' as const,
+        urgent: true,
+        evidenceFor: ['f1'],
+        evidenceAgainst: [],
+      },
+    ];
+    class ScriptedReasoning implements IPassReasoningBackend {
+      calls = 0;
+      async run(
+        input: PassReasoningInput,
+      ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }> {
+        this.calls += 1;
+        const anchor = input.newUtterances[0]!;
+        const findings =
+          this.calls === 1
+            ? [
+                {
+                  id: 'f1',
+                  kind: 'symptom' as const,
+                  label: 'chest pain',
+                  utteranceIds: [anchor.id],
+                  polarity: 'present' as const,
+                },
+              ]
+            : [];
+        const askNext =
+          this.calls === 1
+            ? [
+                {
+                  id: 'q1',
+                  question: 'Does the pain radiate to the arm?',
+                  why: 'ACS vs MSK',
+                  targetDxIds: ['d1'],
+                  source: 'DIFFERENTIAL' as const,
+                  priority: 'high' as const,
+                  status: 'open' as const,
+                },
+              ]
+            : [];
+        return {
+          output: {
+            findings,
+            answeredQuestionIds: this.calls >= 2 ? ['q1'] : [],
+            differential: dx,
+            askNext,
+            redFlags: [],
+          },
+          callLog: fakeLog,
+        };
+      }
+    }
+
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-resolve',
+      null,
+      {
+        backend: 'mock',
+        pass1: new MockGeminiPass1Backend(),
+        pass2: new MockGeminiPass2Backend(),
+        reasoning: new ScriptedReasoning(),
+      },
+      (e) => events.push(e),
+      OPTS,
+    );
+    session.start();
+    session.pushAudio(BLOCK);
+    await session.pump(); // cycle 1 — q1 opens
+    await session.finalize(); // cycle 2 — q1 answered
+
+    const reasoningEvents = events.filter((e) => e.type === 'reasoning');
+    const sawOpen = reasoningEvents.some(
+      (e) =>
+        e.type === 'reasoning' &&
+        e.reasoning.askNext.some((q) => q.id === 'q1' && q.status === 'open'),
+    );
+    const sawAnswered = reasoningEvents.some(
+      (e) =>
+        e.type === 'reasoning' &&
+        e.reasoning.askNext.some((q) => q.id === 'q1' && q.status === 'answered'),
+    );
+    expect(sawOpen).toBe(true);
+    expect(sawAnswered).toBe(true);
   });
 
   it('finalizes cleanly with no audio (no window ever closed)', async () => {

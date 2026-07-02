@@ -1144,6 +1144,26 @@ function detectMockDomain(text: string): MockDomain {
   return 'cardio';
 }
 
+/** An open question is "answered" if the new speech mentions its key words. */
+function detectMockAnswers(
+  newText: string,
+  openQuestions: { id: string; question: string }[],
+): string[] {
+  const hay = newText.toLowerCase();
+  const answered: string[] = [];
+  for (const q of openQuestions) {
+    const keywords = q.question
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 5 && !STOPWORDS.has(w));
+    if (keywords.some((k) => hay.includes(k))) answered.push(q.id);
+  }
+  return answered;
+}
+
+const STOPWORDS = new Set(['about', 'there', 'their', 'would', 'which', 'these', 'those']);
+
 interface MockReasoningTemplate {
   findings: Omit<PassReasoningOutput['findings'][number], 'utteranceIds'>[];
   differential: Omit<PassReasoningOutput['differential'][number], 'trend'>[];
@@ -1370,18 +1390,19 @@ export class MockGeminiReasoningBackend implements IPassReasoningBackend {
   ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }> {
     const start = Date.now();
     const anchor = input.newUtterances[0];
-    const corpus = [
-      ...input.newUtterances.map((u) => u.text),
-      ...input.caseState.findings.map((f) => f.label),
-    ].join(' ');
+    const newText = input.newUtterances.map((u) => u.text).join(' ');
+    const corpus = [newText, ...input.caseState.findings.map((f) => f.label)].join(' ');
     const seenDx = new Set(input.previousDifferential.map((d) => d.id));
+    // Sprint DS3 — deterministic auto-resolution: if a new utterance mentions a
+    // keyword from an open question, report that question as answered.
+    const answeredQuestionIds = detectMockAnswers(newText, input.openQuestions ?? []);
 
     const output: PassReasoningOutput = anchor
       ? (() => {
           const tpl = MOCK_REASONING[detectMockDomain(corpus)];
           return {
             findings: tpl.findings.map((f) => ({ ...f, utteranceIds: [anchor.id] })),
-            answeredQuestionIds: [],
+            answeredQuestionIds,
             differential: tpl.differential.map((d) => ({
               ...d,
               trend: seenDx.has(d.id) ? ('steady' as const) : ('new' as const),
@@ -1390,7 +1411,7 @@ export class MockGeminiReasoningBackend implements IPassReasoningBackend {
             redFlags: tpl.redFlags,
           };
         })()
-      : { findings: [], answeredQuestionIds: [], differential: [], askNext: [], redFlags: [] };
+      : { findings: [], answeredQuestionIds, differential: [], askNext: [], redFlags: [] };
 
     return {
       output,

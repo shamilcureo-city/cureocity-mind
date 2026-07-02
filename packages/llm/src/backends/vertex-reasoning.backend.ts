@@ -153,6 +153,11 @@ function buildUserMessage(input: PassReasoningInput): string {
       ? input.previousDifferential.map((d) => `- ${d.id} · ${d.label} · ${d.likelihood}`).join('\n')
       : '(none yet — this is the first pass)',
     '',
+    'Currently-open ask-next questions (id · question) — do NOT repeat these; report any these utterances answer in answeredQuestionIds:',
+    input.openQuestions && input.openQuestions.length
+      ? input.openQuestions.map((q) => `- ${q.id} · ${q.question}`).join('\n')
+      : '(none open)',
+    '',
     'NEW utterances since last pass (utteranceId · speaker · text):',
     input.newUtterances.map((u) => `- ${u.id} · ${u.speaker} · ${u.text}`).join('\n'),
     '',

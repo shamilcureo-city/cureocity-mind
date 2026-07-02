@@ -156,6 +156,9 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
     context: PatientContextSchema.optional(),
   }),
   z.object({ type: z.literal('stop') }),
+  // Sprint DS3 — the doctor dismissed an "ask next" question. The gateway
+  // marks it dismissed for the rest of the consult (never re-suggested).
+  z.object({ type: z.literal('dismiss'), questionId: z.string() }),
 ]);
 export type LiveGatewayCommand = z.infer<typeof LiveGatewayCommandSchema>;
 
@@ -221,3 +224,20 @@ export const LiveNoteInputSchema = z.object({
   orders: z.array(ClinicalOrderV1Schema).default([]),
 });
 export type LiveNoteInput = z.infer<typeof LiveNoteInputSchema>;
+
+/**
+ * Sprint DS3 — POST /sessions/:id/live-suggestion body. The browser relays
+ * live copilot suggestion lifecycle events (the gateway can't touch the DB)
+ * so each shown / acted / dismissed / auto-resolved event lands one audit
+ * row — the safety trail + the pilot dataset.
+ */
+export const LiveSuggestionEventSchema = z.object({
+  event: z.enum(['shown', 'acted', 'dismissed', 'autoresolved']),
+  /** Stable id of the suggestion (differential id, ask-next id, …). */
+  suggestionId: z.string(),
+  /** What kind of suggestion, for analytics. */
+  kind: z.enum(['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP']).default('ASK_NEXT'),
+  /** Optional human label, stored in the audit metadata. */
+  label: z.string().optional(),
+});
+export type LiveSuggestionEvent = z.infer<typeof LiveSuggestionEventSchema>;

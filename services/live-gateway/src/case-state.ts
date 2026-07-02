@@ -7,6 +7,7 @@ import type {
   LiveRedFlag,
   PatientContext,
 } from '@cureocity/contracts';
+import { AskNextManager } from './ask-next';
 
 /**
  * Sprint DS1 — the per-consult CaseState store (the reasoning substrate).
@@ -43,18 +44,6 @@ export interface ApplyFindingsResult {
   changed: boolean;
 }
 
-export interface ApplyReasoningResult {
-  /** Differential candidates that survived the citation gate + cap. */
-  differential: LiveDifferentialItem[];
-  /** Candidates dropped because no cited finding resolves. */
-  dropped: LiveDifferentialItem[];
-  /** True if the reasoning snapshot changed (→ worth emitting). */
-  changed: boolean;
-  version: number;
-}
-
-/** Cap on OPEN differential-driven ask-next questions (alert-fatigue rule). */
-const MAX_OPEN_ASK_NEXT = 3;
 /** Cap on rendered differential candidates. */
 const MAX_DIFFERENTIAL = 5;
 
@@ -62,12 +51,13 @@ export class CaseStateStore {
   private state: CaseState;
   private readonly knownUtteranceIds = new Set<string>();
 
-  // Sprint DS2 — the reasoning snapshot (kept alongside CaseState, not part
-  // of the CaseState contract). Monotonic `reasoningVersion` for idempotent
-  // client render + drop-superseded.
+  // Sprint DS2/DS3 — the reasoning snapshot (kept alongside CaseState, not
+  // part of the CaseState contract). Monotonic `reasoningVersion` for
+  // idempotent client render + drop-superseded. The ask-next stream is
+  // managed by AskNextManager (DS3).
   private dx: LiveDifferentialItem[] = [];
-  private ask: AskNextItem[] = [];
   private flags: LiveRedFlag[] = [];
+  private readonly askManager = new AskNextManager();
   private reasoningVersion = 0;
   private lastReasoningJson = '';
 
@@ -106,10 +96,20 @@ export class CaseStateStore {
   get reasoning(): LiveReasoning {
     return {
       differential: this.dx,
-      askNext: this.ask,
+      askNext: this.askManager.feed(),
       redFlags: this.flags,
       version: this.reasoningVersion,
     };
+  }
+
+  /** Sprint DS3 — the open differential-driven questions for the model prompt. */
+  get openQuestions(): { id: string; question: string }[] {
+    return this.askManager.openForModel();
+  }
+
+  /** Clear the just-answered ✓ buffer once the snapshot has been emitted. */
+  markAskEmitted(): void {
+    this.askManager.markEmitted();
   }
 
   /**
@@ -154,12 +154,12 @@ export class CaseStateStore {
   }
 
   /**
-   * Sprint DS2 — apply a reasoning pass output. The CITATION GATE for the
+   * Sprint DS2/DS3 — apply a reasoning pass output (mutate only; call
+   * `commitReasoning` after to publish). The CITATION GATE for the
    * differential: each candidate's `evidenceFor` is filtered to real finding
    * ids and the candidate is DROPPED if none survive (uncited dx never
-   * render). Then cap at 5, keep ≤3 open differential-driven questions
-   * (alert-fatigue), and filter red-flag/ask-next references to live ids.
-   * Bumps the monotonic reasoning version iff the snapshot changed.
+   * render). Then cap at 5. Ask-next (differential-driven) + answered ids are
+   * fed to the AskNextManager; red-flag references filtered to live ids.
    *
    * Call `applyFindings` FIRST for the same pass so this validates against
    * the freshly-merged finding set.
@@ -168,7 +168,8 @@ export class CaseStateStore {
     differential: LiveDifferentialItem[],
     askNext: AskNextItem[] = [],
     redFlags: LiveRedFlag[] = [],
-  ): ApplyReasoningResult {
+    answeredQuestionIds: string[] = [],
+  ): { differential: LiveDifferentialItem[]; dropped: LiveDifferentialItem[] } {
     const knownFindingIds = new Set(this.state.findings.map((f) => f.id));
 
     const kept: LiveDifferentialItem[] = [];
@@ -185,28 +186,51 @@ export class CaseStateStore {
         evidenceAgainst: d.evidenceAgainst.filter((id) => knownFindingIds.has(id)),
       });
     }
-    const cappedDx = kept.slice(0, MAX_DIFFERENTIAL);
-    const keptDxIds = new Set(cappedDx.map((d) => d.id));
+    this.dx = kept.slice(0, MAX_DIFFERENTIAL);
+    const keptDxIds = new Set(this.dx.map((d) => d.id));
 
-    const openAsk = askNext
-      .filter((a) => a.status === 'open')
-      .map((a) => ({ ...a, targetDxIds: a.targetDxIds.filter((id) => keptDxIds.has(id)) }))
-      .slice(0, MAX_OPEN_ASK_NEXT);
+    // Auto-resolve BEFORE ingesting the new differential set so an answered
+    // question isn't immediately re-added by the same cycle's output.
+    this.askManager.resolveAnswered(answeredQuestionIds);
+    this.askManager.ingestDifferential(
+      askNext.filter((a) => a.status === 'open'),
+      keptDxIds,
+    );
 
-    const cleanFlags = redFlags.map((r) => ({
+    this.flags = redFlags.map((r) => ({
       ...r,
       findingIds: r.findingIds.filter((id) => knownFindingIds.has(id)),
     }));
 
-    const json = JSON.stringify({ d: cappedDx, a: openAsk, f: cleanFlags });
-    const changed = json !== this.lastReasoningJson;
-    if (changed) {
-      this.lastReasoningJson = json;
-      this.dx = cappedDx;
-      this.ask = openAsk;
-      this.flags = cleanFlags;
-      this.reasoningVersion += 1;
-    }
-    return { differential: cappedDx, dropped, changed, version: this.reasoningVersion };
+    return { differential: this.dx, dropped };
+  }
+
+  /** Sprint DS3 — merge the deterministic template-driven questions (mutate). */
+  applyTemplateGaps(templateAskNext: AskNextItem[]): void {
+    this.askManager.ingestTemplate(templateAskNext);
+  }
+
+  /** Sprint DS3 — the doctor dismissed a question (mutate). */
+  dismissAsk(id: string): void {
+    this.askManager.dismiss(id);
+  }
+
+  /**
+   * Publish the current reasoning snapshot: bump the monotonic version iff the
+   * stable picture (differential + open ask-next + red flags) changed, OR a
+   * question was just answered (the ✓ needs one emit). Returns whether the
+   * caller should emit + `markAskEmitted`.
+   */
+  commitReasoning(): { changed: boolean; version: number } {
+    const stableJson = JSON.stringify({
+      d: this.dx,
+      a: this.askManager.openFeed(),
+      f: this.flags,
+    });
+    const stableChanged = stableJson !== this.lastReasoningJson;
+    const changed = stableChanged || this.askManager.hasJustAnswered();
+    if (stableChanged) this.lastReasoningJson = stableJson;
+    if (changed) this.reasoningVersion += 1;
+    return { changed, version: this.reasoningVersion };
   }
 }

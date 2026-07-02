@@ -2619,6 +2619,11 @@ enum AuditAction {
   NOTE_TEMPLATE_APPLIED
   // Doctor vertical — Sprint DS0. Live consult token/cost/latency meter persisted.
   LIVE_CONSULT_METERED
+  // Doctor vertical — Sprint DS3. Live copilot suggestion lifecycle.
+  LIVE_SUGGESTION_SHOWN
+  LIVE_SUGGESTION_ACTED
+  LIVE_SUGGESTION_DISMISSED
+  LIVE_SUGGESTION_AUTORESOLVED
 }
 
 enum AuditActorType {
