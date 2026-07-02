@@ -11,9 +11,11 @@ import {
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
+  MockGeminiReasoningBackend,
   ModelRouter,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
+  VertexGeminiReasoningBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -156,6 +158,15 @@ function build(): IModelRouter {
           process.env['VERTEX_FLASH_MODEL'] ??
           'gemini-2.5-flash',
       }),
+      // Sprint DS2 — combined live reasoning. Flash in asia-south1 (DPDP).
+      passReasoning: new VertexGeminiReasoningBackend({
+        projectId: project,
+        location: flashRegion,
+        model:
+          process.env['VERTEX_REASONING_MODEL'] ??
+          process.env['VERTEX_FLASH_MODEL'] ??
+          'gemini-2.5-flash',
+      }),
     });
   }
   console.info(
@@ -172,6 +183,7 @@ function build(): IModelRouter {
     pass8: new MockGeminiPass8Backend(),
     passDifferential: new MockGeminiDifferentialBackend(),
     passFindings: new MockGeminiFindingsBackend(),
+    passReasoning: new MockGeminiReasoningBackend(),
   });
 }
 

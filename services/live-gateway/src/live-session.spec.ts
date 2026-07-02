@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { LiveGatewayEventSchema, type LiveGatewayEvent } from '@cureocity/contracts';
 import {
-  MockGeminiFindingsBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
+  MockGeminiReasoningBackend,
 } from '@cureocity/llm';
 import { LiveSession } from './live-session';
 import type { LiveBackends } from './llm';
@@ -34,7 +34,7 @@ function mockBackends(): LiveBackends {
     backend: 'mock',
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
-    findings: new MockGeminiFindingsBackend(),
+    reasoning: new MockGeminiReasoningBackend(),
   };
 }
 
@@ -81,6 +81,7 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
       events.flatMap((e) => (e.type === 'utterance' ? [e.utterance.id] : [])),
     );
     const lastFinding = findingEvents[findingEvents.length - 1]!;
+    let knownFindingIds = new Set<string>();
     if (lastFinding.type === 'finding') {
       // Converges to the mock's stable set (f1/f2/f3), not N×windows dupes.
       expect(lastFinding.findings.length).toBe(3);
@@ -91,6 +92,26 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
         expect(f.utteranceIds.length).toBeGreaterThan(0);
         for (const id of f.utteranceIds) expect(knownUtteranceIds.has(id)).toBe(true);
       }
+      knownFindingIds = new Set(lastFinding.findings.map((f) => f.id));
+    }
+
+    // Sprint DS2 — the differential appears, is ranked + capped, urgent-marked,
+    // and every rendered candidate cites a REAL finding id (the citation gate).
+    const reasoningEvents = events.filter((e) => e.type === 'reasoning');
+    expect(reasoningEvents.length).toBeGreaterThan(0);
+    const lastReasoning = reasoningEvents[reasoningEvents.length - 1]!;
+    if (lastReasoning.type === 'reasoning') {
+      const dx = lastReasoning.reasoning.differential;
+      expect(dx.length).toBeGreaterThanOrEqual(1);
+      expect(dx.length).toBeLessThanOrEqual(5);
+      expect(dx.some((d) => d.urgent)).toBe(true);
+      for (const d of dx) {
+        expect(d.evidenceFor.length).toBeGreaterThan(0);
+        for (const id of d.evidenceFor) expect(knownFindingIds.has(id)).toBe(true);
+      }
+      // Ask-next present + capped at 3 open.
+      expect(lastReasoning.reasoning.askNext.length).toBeLessThanOrEqual(3);
+      expect(lastReasoning.reasoning.version).toBeGreaterThan(0);
     }
 
     await session.finalize();

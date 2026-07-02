@@ -11,6 +11,7 @@ import {
   type IPass8Backend,
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
+  type IPassReasoningBackend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -31,6 +32,8 @@ import {
   type PassDifferentialOutput,
   type PassFindingsInput,
   type PassFindingsOutput,
+  type PassReasoningInput,
+  type PassReasoningOutput,
 } from './types';
 
 export interface ModelRouterOptions {
@@ -46,6 +49,8 @@ export interface ModelRouterOptions {
   passDifferential: IPassDifferentialBackend;
   /** Sprint DS1 — live findings extractor (the reasoning substrate). */
   passFindings: IPassFindingsBackend;
+  /** Sprint DS2 — combined live reasoning (findings + differential + ask-next). */
+  passReasoning: IPassReasoningBackend;
   /** Called after every backend call with the resulting call-log row. */
   onCallLog?: (log: GeminiCallLogData) => Promise<void> | void;
 }
@@ -113,6 +118,14 @@ export class ModelRouter implements IModelRouter {
     input: PassFindingsInput,
   ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }> {
     const result = await this.opts.passFindings.run(input);
+    await this.opts.onCallLog?.(result.callLog);
+    return result;
+  }
+
+  async passReasoning(
+    input: PassReasoningInput,
+  ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }> {
+    const result = await this.opts.passReasoning.run(input);
     await this.opts.onCallLog?.(result.callLog);
     return result;
   }

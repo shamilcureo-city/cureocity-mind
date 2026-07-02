@@ -6,6 +6,7 @@ import {
   LiveGatewayEventSchema,
   type ClinicalFinding,
   type EncounterGap,
+  type LiveReasoning,
   type MedicalEncounterNoteV1,
   type MeterSummary,
   type PartialStructuredNote,
@@ -54,6 +55,7 @@ export function DoctorLiveEncounter({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [note, setNote] = useState<PartialStructuredNote>({});
   const [findings, setFindings] = useState<ClinicalFinding[]>([]);
+  const [reasoning, setReasoning] = useState<LiveReasoning | null>(null);
   const [gaps, setGaps] = useState<EncounterGap[]>([]);
   const [commands, setCommands] = useState<VoiceCommand[]>([]);
   const [shownData, setShownData] = useState<Record<string, string>>({});
@@ -149,6 +151,7 @@ export function DoctorLiveEncounter({
     setTurns([]);
     setNote({});
     setFindings([]);
+    setReasoning(null);
     setGaps([]);
     setCommands([]);
     setShownData({});
@@ -244,6 +247,11 @@ export function DoctorLiveEncounter({
           // Sprint DS1 — the current findings snapshot (idempotent). DS2/DS4
           // build the differential + evidence UI on top of these.
           setFindings(event.findings);
+          break;
+        case 'reasoning':
+          // Sprint DS2 — the live differential + ask-next snapshot (idempotent).
+          // DS4 turns this into the persistent clinical-picture panel.
+          setReasoning(event.reasoning);
           break;
         case 'note':
           setNote(event.partial);
@@ -364,7 +372,12 @@ export function DoctorLiveEncounter({
             {findings.length > 0 && <FindingsPanel findings={findings} />}
           </div>
           <NotePanel note={note} specialty={specialty} live={phase === 'listening'} />
-          <CopilotRail recs={recs} criticalOpen={criticalOpen} />
+          <div className="space-y-4">
+            {reasoning && (reasoning.differential.length > 0 || reasoning.askNext.length > 0) && (
+              <DifferentialPreview reasoning={reasoning} findings={findings} />
+            )}
+            <CopilotRail recs={recs} criticalOpen={criticalOpen} />
+          </div>
         </div>
       )}
     </div>
@@ -478,6 +491,102 @@ function FindingsPanel({ findings }: { findings: ClinicalFinding[] }) {
         ))}
       </ul>
     </PanelShell>
+  );
+}
+
+// Sprint DS2 — the live differential + ask-next preview. A compact,
+// evidence-cited clinical picture; DS4 turns this into the persistent panel
+// with rank animation + evidence→transcript highlighting.
+const LIKELIHOOD_PCT: Record<LiveReasoning['differential'][number]['likelihood'], number> = {
+  high: 90,
+  moderate: 55,
+  low: 25,
+};
+const TREND_GLYPH: Record<LiveReasoning['differential'][number]['trend'], string> = {
+  new: '•',
+  up: '↑',
+  down: '↓',
+  steady: '→',
+};
+
+function DifferentialPreview({
+  reasoning,
+  findings,
+}: {
+  reasoning: LiveReasoning;
+  findings: ClinicalFinding[];
+}) {
+  const labelOf = (id: string) => findings.find((f) => f.id === id)?.label;
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center gap-2 border-b border-[var(--color-line-soft)] px-5 py-3.5">
+        <span className="h-2 w-2 rounded-full bg-[#2f5aa8] ring-4 ring-[#dbe6f7]" />
+        <h2 className="text-xs font-bold uppercase tracking-wider text-[#2f5aa8]">Differential</h2>
+        <span className="ml-auto text-[11px] text-[var(--color-ink-3)]">evidence-cited · live</span>
+      </div>
+
+      {reasoning.askNext.length > 0 && (
+        <div className="border-b border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-4 py-3">
+          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--color-ink-3)]">
+            Ask next
+          </p>
+          <div className="space-y-1.5">
+            {reasoning.askNext.map((q) => (
+              <div key={q.id} className="text-[12.5px] leading-snug">
+                <span className="font-medium text-[var(--color-ink)]">
+                  {clean(q.question) ?? q.question}
+                </span>
+                {q.why && <span className="text-[var(--color-ink-3)]"> — {q.why}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <ul className="divide-y divide-[var(--color-line-soft)]">
+        {reasoning.differential.map((d) => (
+          <li key={d.id} className="px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="text-[13.5px] font-semibold text-[var(--color-ink)]">
+                {clean(d.label) ?? d.label}
+              </span>
+              {d.urgent && (
+                <span className="rounded-full bg-[#fbe4e0] px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-[#c0392b]">
+                  Urgent
+                </span>
+              )}
+              <span className="ml-auto text-[12px] text-[var(--color-ink-3)]" title={d.trend}>
+                {TREND_GLYPH[d.trend]}
+              </span>
+            </div>
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
+                <span
+                  className="block h-full rounded-full bg-[#2f5aa8]"
+                  style={{ width: `${LIKELIHOOD_PCT[d.likelihood]}%` }}
+                />
+              </span>
+              <span className="text-[10.5px] uppercase tracking-wide text-[var(--color-ink-3)]">
+                {d.likelihood}
+                {d.icd10 ? ` · ${d.icd10}` : ''}
+              </span>
+            </div>
+            {d.evidenceFor.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {d.evidenceFor.map((id) => (
+                  <span
+                    key={id}
+                    className="rounded-full border border-[var(--color-line-soft)] bg-white px-2 py-0.5 text-[10.5px] text-[var(--color-ink-2)]"
+                  >
+                    {clean(labelOf(id)) ?? id}
+                  </span>
+                ))}
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 

@@ -18,6 +18,7 @@ import { CaseStateStore } from './case-state';
 import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
+import { ReasoningScheduler } from './reasoning-loop';
 import { bytesToMs, DEFAULT_WINDOW_OPTIONS, nextWindowBoundary, type WindowOptions } from './vad';
 
 /**
@@ -62,6 +63,8 @@ export class LiveSession {
   private readonly meter = new ConsultMeter();
   /** Sprint DS1 — the per-consult reasoning substrate (findings + citation gate). */
   private readonly caseStore: CaseStateStore;
+  /** Sprint DS2 — debounces + coalesces reasoning passes. */
+  private readonly reasoningScheduler = new ReasoningScheduler();
 
   /** Un-flushed audio (bytes not yet transcribed into an utterance). */
   private pending: Buffer = Buffer.alloc(0);
@@ -208,31 +211,40 @@ export class LiveSession {
       this.emit({ type: 'command', command });
     }
 
-    // Sprint DS1 — extract structured findings from this new utterance.
-    await this.runFindings([utterance]);
+    // Sprint DS2 — queue this utterance for the reasoning engine; the
+    // scheduler decides whether to run now or coalesce with the next window.
+    this.reasoningScheduler.enqueue(utterance);
+    const due = this.reasoningScheduler.takeDue();
+    if (due) await this.runReasoning(due);
 
     await this.runNote(false);
     this.emit({ type: 'meter', summary: this.meterSummary() });
   }
 
   /**
-   * Sprint DS1 — the reasoning substrate's findings micro-pass. Extracts
-   * structured clinical findings from the NEW utterances (given the running
-   * CaseState), gates them on their citations (the gateway drops any finding
-   * citing an utterance it never produced), merges the survivors, and emits
-   * the current findings snapshot when it changed. Failures are logged and
-   * swallowed — a findings hiccup must never break the scribe.
+   * Sprint DS2 — THE reasoning pass. ONE combined Flash call turns the new
+   * utterances (given the CaseState + previous differential) into findings-δ
+   * + a ranked differential + ask-next + red flags. The gateway then:
+   *   1. merges findings under the citation gate (drop fabricated utterance
+   *      citations), emitting a `finding` snapshot if it changed;
+   *   2. validates the differential against the freshly-merged findings
+   *      (drop any candidate whose evidence doesn't resolve), caps + emits a
+   *      `reasoning` snapshot if it changed.
+   * Failures are logged + swallowed — a reasoning hiccup must never break the
+   * scribe (the note + transcript keep flowing).
    */
-  private async runFindings(newUtterances: Utterance[]): Promise<void> {
+  private async runReasoning(newUtterances: Utterance[]): Promise<void> {
     if (newUtterances.length === 0) return;
     try {
-      const res = await this.backends.findings.run({
+      const res = await this.backends.reasoning.run({
         sessionId: this.sessionId,
         caseState: this.caseStore.snapshot,
+        previousDifferential: this.caseStore.differential,
         newUtterances,
         ...(this.specialty ? { specialty: this.specialty } : {}),
       });
       this.meter.recordReasoning(res.callLog);
+
       const merged = this.caseStore.applyFindings(
         res.output.findings,
         res.output.answeredQuestionIds,
@@ -244,8 +256,17 @@ export class LiveSession {
           version: this.caseStore.version,
         });
       }
+
+      const reasoned = this.caseStore.applyReasoning(
+        res.output.differential,
+        res.output.askNext,
+        res.output.redFlags,
+      );
+      if (reasoned.changed) {
+        this.emit({ type: 'reasoning', reasoning: this.caseStore.reasoning });
+      }
     } catch (err) {
-      console.error('[live-gateway] findings pass failed:', (err as Error).message);
+      console.error('[live-gateway] reasoning pass failed:', (err as Error).message);
     }
   }
 
@@ -393,7 +414,12 @@ export class LiveSession {
           },
         });
         this.emit({ type: 'utterance', utterance });
-        await this.runFindings([utterance]);
+        this.reasoningScheduler.enqueue(utterance);
+      }
+      // Sprint DS2 — run the reasoning engine over anything the scheduler
+      // was still coalescing so the closing snapshot reflects the whole consult.
+      if (this.reasoningScheduler.hasPending) {
+        await this.runReasoning(this.reasoningScheduler.flush());
       }
       await this.runNote(true);
     } catch (err) {

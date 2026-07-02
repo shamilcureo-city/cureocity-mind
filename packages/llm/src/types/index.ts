@@ -7,6 +7,10 @@ import {
   ClinicalFindingSchema,
   type ClinicalLocale,
   ClinicalReportV1Schema,
+  AskNextItemSchema,
+  LiveDifferentialItemSchema,
+  type LiveDifferentialItem,
+  LiveRedFlagSchema,
   type Utterance,
   type ClientDiagnosis,
   ConceptualMapV1Schema,
@@ -472,6 +476,42 @@ export const PassFindingsOutputSchema = z.object({
 export type PassFindingsOutput = z.infer<typeof PassFindingsOutputSchema>;
 
 // ============================================================================
+// Sprint DS2 — PassReasoning. THE core: ONE combined Flash call per cycle
+// that produces findings-δ + the ranked differential + ask-next questions +
+// red flags. DS1's PassFindings is folded in as this pass's first section
+// (one call is cheaper + more coherent than two). Input is the running
+// CaseState + the previous differential (for stable ids + trend) + the new
+// utterances — incremental, never the whole consult. Flash, structured
+// output, temp 0. Every dx/red-flag must cite finding ids; the gateway
+// post-validates + drops uncited items. See DOCTOR_SCRIBE_V2_SPRINTS.md DS2.
+// ============================================================================
+export interface PassReasoningInput {
+  sessionId: string;
+  /** The running case state (patient context + findings so far). */
+  caseState: CaseState;
+  /** The previous differential — so the model preserves ids + sets trend. */
+  previousDifferential: LiveDifferentialItem[];
+  /** Only the utterances added since the last pass — incremental. */
+  newUtterances: Utterance[];
+  specialty?: string;
+  language?: ClinicalLocale;
+}
+
+export const PassReasoningOutputSchema = z.object({
+  /** Findings-δ (stable ids; same id replaces, new id appends). */
+  findings: z.array(ClinicalFindingSchema).default([]),
+  /** Open ask-next question ids these utterances answered. */
+  answeredQuestionIds: z.array(z.string()).default([]),
+  /** Ranked candidates (gateway caps at 5 + drops uncited). */
+  differential: z.array(LiveDifferentialItemSchema).default([]),
+  /** Differential-driven missing questions (DS3 adds template-driven ones). */
+  askNext: z.array(AskNextItemSchema).default([]),
+  /** Serious conditions to actively exclude. */
+  redFlags: z.array(LiveRedFlagSchema).default([]),
+});
+export type PassReasoningOutput = z.infer<typeof PassReasoningOutputSchema>;
+
+// ============================================================================
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
@@ -486,7 +526,8 @@ export type GeminiPass =
   | 'PASS_7_CONCEPTUAL_MAP'
   | 'PASS_8_CASE_CONSULT'
   | 'PASS_9_DIFFERENTIAL'
-  | 'PASS_10_FINDINGS';
+  | 'PASS_10_FINDINGS'
+  | 'PASS_11_REASONING';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -553,6 +594,12 @@ export interface IPassFindingsBackend {
   ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }>;
 }
 
+export interface IPassReasoningBackend {
+  run(
+    input: PassReasoningInput,
+  ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
@@ -568,6 +615,9 @@ export interface IModelRouter {
   passFindings(
     input: PassFindingsInput,
   ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }>;
+  passReasoning(
+    input: PassReasoningInput,
+  ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

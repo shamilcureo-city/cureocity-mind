@@ -1,32 +1,33 @@
 import {
-  MockGeminiFindingsBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
-  VertexGeminiFindingsBackend,
+  MockGeminiReasoningBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProGlobalBackend,
+  VertexGeminiReasoningBackend,
   type IPass1Backend,
   type IPass2Backend,
-  type IPassFindingsBackend,
+  type IPassReasoningBackend,
 } from '@cureocity/llm';
 
 /**
- * Sprint DV4 — the live gateway's LLM backends. Reuses the SAME proven
- * Pass 1 (transcription) + Pass 2 (medical note) backends the batch
- * pipeline uses, so the live path is real, not scripted:
+ * Sprint DV4 + DS2 — the live gateway's LLM backends.
+ *   Pass 1  (transcription)  — Flash, asia-south1 (DPDP residency).
+ *   Pass 2  (medical note)    — Pro, global.
+ *   Reasoning (DS2)           — Flash, asia-south1, ONE combined call per
+ *     cycle producing findings-δ + differential + ask-next + red flags
+ *     (DS1's findings pass is folded in). This supersedes the standalone
+ *     findings backend as the gateway's reasoning substrate.
+ *
  *   LLM_BACKEND=mock   → deterministic output, runs locally, no creds.
- *   LLM_BACKEND=vertex → real Vertex Gemini (needs VERTEX_PROJECT_ID +
- *                        GOOGLE_APPLICATION_CREDENTIALS, asia-south1 for
- *                        DPDP residency on Pass 1).
- * The true token-streaming ASR is a latency optimisation layered on top
- * (see docs/DOCTOR_VERTICAL.md §4.3); this transcribes rolling windows.
+ *   LLM_BACKEND=vertex → real Vertex Gemini.
  */
 export interface LiveBackends {
   backend: string;
   pass1: IPass1Backend;
   pass2: IPass2Backend;
-  /** Sprint DS1 — live findings extractor (the reasoning substrate). */
-  findings: IPassFindingsBackend;
+  /** Sprint DS2 — combined live reasoning (findings + differential + ask-next). */
+  reasoning: IPassReasoningBackend;
 }
 
 export function buildBackends(): LiveBackends {
@@ -48,13 +49,13 @@ export function buildBackends(): LiveBackends {
         location: proRegion,
         model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
-      // Sprint DS1 — findings extractor. Flash in asia-south1 (DPDP; the
+      // Sprint DS2 — combined reasoning. Flash in asia-south1 (DPDP; the
       // transcript is PII), reuses the Flash model env.
-      findings: new VertexGeminiFindingsBackend({
+      reasoning: new VertexGeminiReasoningBackend({
         projectId: project,
         location: flashRegion,
         model:
-          process.env['VERTEX_FINDINGS_MODEL'] ??
+          process.env['VERTEX_REASONING_MODEL'] ??
           process.env['VERTEX_FLASH_MODEL'] ??
           'gemini-2.5-flash',
       }),
@@ -64,6 +65,6 @@ export function buildBackends(): LiveBackends {
     backend,
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
-    findings: new MockGeminiFindingsBackend(),
+    reasoning: new MockGeminiReasoningBackend(),
   };
 }

@@ -13,6 +13,7 @@ export {
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
+  MockGeminiReasoningBackend,
 } from './backends/mock-gemini.backend';
 export {
   VertexGeminiFlashIndiaBackend,
@@ -63,3 +64,9 @@ export {
   FindingsBackendError,
   type VertexGeminiFindingsOptions,
 } from './backends/vertex-findings.backend';
+export {
+  VertexGeminiReasoningBackend,
+  ReasoningBackendError,
+  type VertexGeminiReasoningOptions,
+} from './backends/vertex-reasoning.backend';
+export { normaliseReasoningOutput } from './backends/reasoning-normalise';

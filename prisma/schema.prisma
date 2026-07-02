@@ -1053,6 +1053,7 @@ enum GeminiPass {
   PASS_8_CASE_CONSULT // Sprint 52 — second-opinion artefact for stuck cases
   PASS_9_DIFFERENTIAL // Sprint DV6 — doctor differential diagnosis
   PASS_10_FINDINGS // Sprint DS1 — live findings extractor (reasoning substrate)
+  PASS_11_REASONING // Sprint DS2 — combined live reasoning (differential + ask-next)
 }
 
 enum GeminiCallStatus {

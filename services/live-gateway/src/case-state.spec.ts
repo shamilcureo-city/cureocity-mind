@@ -1,6 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import type { ClinicalFinding } from '@cureocity/contracts';
+import type { ClinicalFinding, LiveDifferentialItem } from '@cureocity/contracts';
 import { CaseStateStore } from './case-state';
+
+function dx(
+  over: Partial<LiveDifferentialItem> & Pick<LiveDifferentialItem, 'id'>,
+): LiveDifferentialItem {
+  return {
+    label: 'a condition',
+    likelihood: 'moderate',
+    trend: 'new',
+    urgent: false,
+    evidenceFor: ['f1'],
+    evidenceAgainst: [],
+    ...over,
+  };
+}
+
+/** Seed a store with utterance u1 + one cited finding f1 (and optionally f2). */
+function seededStore(findingIds: string[] = ['f1']): CaseStateStore {
+  const store = new CaseStateStore();
+  store.registerUtterance('u1');
+  store.applyFindings(
+    findingIds.map((id) => ({
+      id,
+      kind: 'symptom' as const,
+      label: id,
+      utteranceIds: ['u1'],
+      polarity: 'present' as const,
+    })),
+  );
+  return store;
+}
 
 function finding(over: Partial<ClinicalFinding> & Pick<ClinicalFinding, 'id'>): ClinicalFinding {
   return {
@@ -113,5 +143,121 @@ describe('CaseStateStore', () => {
     const res = store.applyFindings([finding({ id: 'f1', utteranceIds: ['ghost'] })]);
     expect(res.changed).toBe(false);
     expect(store.version).toBe(0);
+  });
+});
+
+describe('CaseStateStore.applyReasoning (DS2 differential citation gate)', () => {
+  it('keeps candidates that cite a real finding + bumps the reasoning version', () => {
+    const store = seededStore(['f1', 'f2']);
+    const res = store.applyReasoning([
+      dx({ id: 'd1', likelihood: 'high', evidenceFor: ['f1'] }),
+      dx({ id: 'd2', likelihood: 'low', evidenceFor: ['f2'] }),
+    ]);
+    expect(res.changed).toBe(true);
+    expect(res.version).toBe(1);
+    expect(store.differential.map((d) => d.id)).toEqual(['d1', 'd2']);
+    expect(store.reasoning.version).toBe(1);
+  });
+
+  it('DROPS a candidate whose evidence cites no real finding', () => {
+    const store = seededStore(['f1']);
+    const res = store.applyReasoning([
+      dx({ id: 'd1', evidenceFor: ['f1'] }),
+      dx({ id: 'd2', evidenceFor: ['f999'] }), // fabricated citation
+      dx({ id: 'd3', evidenceFor: [] }), // uncited
+    ]);
+    expect(res.differential.map((d) => d.id)).toEqual(['d1']);
+    expect(res.dropped.map((d) => d.id)).toEqual(['d2', 'd3']);
+  });
+
+  it('filters fabricated ids out of evidence but keeps the candidate if ≥1 real', () => {
+    const store = seededStore(['f1']);
+    store.applyReasoning([
+      dx({ id: 'd1', evidenceFor: ['f1', 'f999'], evidenceAgainst: ['f999'] }),
+    ]);
+    expect(store.differential[0]!.evidenceFor).toEqual(['f1']);
+    expect(store.differential[0]!.evidenceAgainst).toEqual([]);
+  });
+
+  it('caps the differential at 5', () => {
+    const store = seededStore(['f1']);
+    store.applyReasoning(
+      Array.from({ length: 8 }, (_, i) => dx({ id: `d${i + 1}`, evidenceFor: ['f1'] })),
+    );
+    expect(store.differential).toHaveLength(5);
+  });
+
+  it('keeps at most 3 open ask-next questions + drops closed ones', () => {
+    const store = seededStore(['f1']);
+    store.applyReasoning(
+      [dx({ id: 'd1', evidenceFor: ['f1'] })],
+      [
+        {
+          id: 'q1',
+          question: 'a?',
+          why: 'w',
+          targetDxIds: ['d1'],
+          source: 'DIFFERENTIAL',
+          priority: 'high',
+          status: 'open',
+        },
+        {
+          id: 'q2',
+          question: 'b?',
+          why: 'w',
+          targetDxIds: ['d1'],
+          source: 'DIFFERENTIAL',
+          priority: 'normal',
+          status: 'open',
+        },
+        {
+          id: 'q3',
+          question: 'c?',
+          why: 'w',
+          targetDxIds: ['d1'],
+          source: 'DIFFERENTIAL',
+          priority: 'normal',
+          status: 'open',
+        },
+        {
+          id: 'q4',
+          question: 'd?',
+          why: 'w',
+          targetDxIds: ['d1'],
+          source: 'DIFFERENTIAL',
+          priority: 'normal',
+          status: 'open',
+        },
+        {
+          id: 'q5',
+          question: 'e?',
+          why: 'w',
+          targetDxIds: ['d1'],
+          source: 'DIFFERENTIAL',
+          priority: 'normal',
+          status: 'answered',
+        },
+      ],
+    );
+    expect(store.reasoning.askNext).toHaveLength(3);
+    expect(store.reasoning.askNext.every((a) => a.status === 'open')).toBe(true);
+  });
+
+  it('filters red-flag findingIds to real findings', () => {
+    const store = seededStore(['f1']);
+    store.applyReasoning(
+      [dx({ id: 'd1', evidenceFor: ['f1'] })],
+      [],
+      [{ label: 'ACS', why: 'exclude', findingIds: ['f1', 'ghost'] }],
+    );
+    expect(store.reasoning.redFlags[0]!.findingIds).toEqual(['f1']);
+  });
+
+  it('is idempotent — re-applying the same reasoning does not bump the version', () => {
+    const store = seededStore(['f1']);
+    store.applyReasoning([dx({ id: 'd1', evidenceFor: ['f1'] })]);
+    const res2 = store.applyReasoning([dx({ id: 'd1', evidenceFor: ['f1'] })]);
+    expect(res2.changed).toBe(false);
+    expect(store.reasoning.version).toBe(1);
   });
 });
