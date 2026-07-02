@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import {
   ChronicTrajectorySchema,
   LiveGatewayEventSchema,
@@ -10,6 +10,7 @@ import {
   type MedicalEncounterNoteV1,
   type MeterSummary,
   type PartialStructuredNote,
+  type Utterance,
   type VoiceCommand,
 } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
@@ -33,7 +34,6 @@ import { MedicalNoteView } from './MedicalNoteView';
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
 type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'error';
-type Turn = { speaker: 'doctor' | 'patient' | 'unknown'; text: string };
 
 export function DoctorLiveEncounter({
   sessionId,
@@ -54,10 +54,17 @@ export function DoctorLiveEncounter({
   // Sprint DS3 — suggestion ids we've already audited as SHOWN, so each fires once.
   const shownSuggestionsRef = useRef<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>('idle');
-  const [turns, setTurns] = useState<Turn[]>([]);
+  // Sprint DS4 — the transcript is utterance-anchored (ids from DS0) so an
+  // evidence chip can scroll-highlight its source utterance.
+  const [utterances, setUtterances] = useState<Utterance[]>([]);
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
+  const transcriptRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [note, setNote] = useState<PartialStructuredNote>({});
   const [findings, setFindings] = useState<ClinicalFinding[]>([]);
   const [reasoning, setReasoning] = useState<LiveReasoning | null>(null);
+  // Sprint DS4 — differential candidates the doctor added to the assessment.
+  const [assessmentAdds, setAssessmentAdds] = useState<string[]>([]);
+  const assessmentRef = useRef<string[]>([]);
   const [gaps, setGaps] = useState<EncounterGap[]>([]);
   const [commands, setCommands] = useState<VoiceCommand[]>([]);
   const [shownData, setShownData] = useState<Record<string, string>>({});
@@ -74,6 +81,40 @@ export function DoctorLiveEncounter({
     const t = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [phase]);
+
+  // Sprint DS4 — scroll the first highlighted utterance into view; auto-clear
+  // the highlight after a moment so the pane returns to normal.
+  useEffect(() => {
+    if (highlightIds.size === 0) return;
+    const firstId = [...highlightIds][0];
+    if (firstId)
+      transcriptRefs.current.get(firstId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const t = setTimeout(() => setHighlightIds(new Set()), 2600);
+    return () => clearTimeout(t);
+  }, [highlightIds]);
+
+  // Sprint DS4 — the trust feature: tap an evidence chip → highlight the
+  // finding's source utterance(s) in the transcript pane.
+  function highlightEvidence(findingIds: string[]): void {
+    const uids = new Set<string>();
+    for (const fid of findingIds) {
+      const f = findings.find((x) => x.id === fid);
+      f?.utteranceIds.forEach((u) => uids.add(u));
+    }
+    if (uids.size > 0) setHighlightIds(uids);
+  }
+
+  // Sprint DS4 — add a differential candidate to the note's assessment
+  // (confirm-first in the UI). Persisted when the note lands + audited.
+  function addToAssessment(dxId: string, label: string): void {
+    const text = label.replace(/^\s*\[mock\]\s*/i, '').trim();
+    setAssessmentAdds((prev) => {
+      const next = prev.includes(text) ? prev : [...prev, text];
+      assessmentRef.current = next;
+      return next;
+    });
+    void relaySuggestion('acted', dxId, 'DIFFERENTIAL', label);
+  }
 
   // Sprint DV9 — persist the finalized live note as a draft the doctor can
   // sign from the encounter workspace (parity with the batch path).
@@ -176,10 +217,14 @@ export function DoctorLiveEncounter({
 
   async function start(): Promise<void> {
     setError(null);
-    setTurns([]);
+    setUtterances([]);
+    setHighlightIds(new Set());
+    transcriptRefs.current = new Map();
     setNote({});
     setFindings([]);
     setReasoning(null);
+    setAssessmentAdds([]);
+    assessmentRef.current = [];
     setGaps([]);
     setCommands([]);
     setShownData({});
@@ -263,11 +308,13 @@ export function DoctorLiveEncounter({
           }
           break;
         case 'transcript':
-          setTurns((prev) => appendTurn(prev, event.delta.speaker, event.delta.text));
+          // Sprint DS4 — the utterance-anchored record (below) drives the
+          // transcript display now; the delta is redundant.
           break;
         case 'utterance':
-          // The durable per-window record; the transcript delta above
-          // already drives the running display.
+          setUtterances((prev) =>
+            prev.some((u) => u.id === event.utterance.id) ? prev : [...prev, event.utterance],
+          );
           break;
         case 'meter':
           latestMeterRef.current = event.summary;
@@ -313,10 +360,23 @@ export function DoctorLiveEncounter({
           );
           if (event.command.kind === 'SHOW_DATA') void resolveShowData(event.command.measure);
           break;
-        case 'final':
-          setFinalNote(event.note);
-          void persistLiveNote(event.note, event.medications, event.orders);
+        case 'final': {
+          // Sprint DS4 — fold the doctor's "add to assessment" picks into the
+          // note before it persists (read from a ref — this closure is stale).
+          const adds = assessmentRef.current;
+          const merged =
+            adds.length > 0
+              ? {
+                  ...event.note,
+                  assessment: [event.note.assessment, ...adds.map((a) => `• ${a}`)]
+                    .filter(Boolean)
+                    .join('\n'),
+                }
+              : event.note;
+          setFinalNote(merged);
+          void persistLiveNote(merged, event.medications, event.orders);
           break;
+        }
       }
     };
   }
@@ -412,23 +472,31 @@ export function DoctorLiveEncounter({
       ) : phase === 'idle' || phase === 'connecting' ? (
         <StartPanel connecting={phase === 'connecting'} />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,400px)]">
-          <div className="space-y-4">
-            <TranscriptPanel turns={turns} listening={phase === 'listening'} />
-            {findings.length > 0 && <FindingsPanel findings={findings} />}
-          </div>
-          <NotePanel note={note} specialty={specialty} live={phase === 'listening'} />
-          <div className="space-y-4">
-            {reasoning && (reasoning.differential.length > 0 || reasoning.askNext.length > 0) && (
-              <DifferentialPreview
-                reasoning={reasoning}
-                findings={findings}
-                onDismiss={dismissQuestion}
-                onAsked={(id, label) => void relaySuggestion('acted', id, 'ASK_NEXT', label)}
-              />
-            )}
-            <CopilotRail recs={recs} criticalOpen={criticalOpen} />
-          </div>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,420px)]">
+          <TranscriptPanel
+            utterances={utterances}
+            highlightIds={highlightIds}
+            refs={transcriptRefs}
+            listening={phase === 'listening'}
+          />
+          <NotePanel
+            note={note}
+            specialty={specialty}
+            live={phase === 'listening'}
+            assessmentAdds={assessmentAdds}
+          />
+          <LiveRail
+            reasoning={reasoning}
+            findings={findings}
+            recs={recs}
+            criticalOpen={criticalOpen}
+            live={live}
+            onDismiss={dismissQuestion}
+            onAsked={(id, label) => void relaySuggestion('acted', id, 'ASK_NEXT', label)}
+            onEvidence={highlightEvidence}
+            onAddToAssessment={addToAssessment}
+            addedToAssessment={assessmentAdds}
+          />
         </div>
       )}
     </div>
@@ -463,29 +531,50 @@ function StartPanel({ connecting }: { connecting: boolean }) {
   );
 }
 
-function TranscriptPanel({ turns, listening }: { turns: Turn[]; listening: boolean }) {
+function TranscriptPanel({
+  utterances,
+  highlightIds,
+  refs,
+  listening,
+}: {
+  utterances: Utterance[];
+  highlightIds: Set<string>;
+  refs: MutableRefObject<Map<string, HTMLDivElement | null>>;
+  listening: boolean;
+}) {
   return (
     <PanelShell title="Live transcript">
-      {turns.length === 0 ? (
+      {utterances.length === 0 ? (
         <Empty>Your conversation appears here, speaker by speaker.</Empty>
       ) : (
         <div className="space-y-3.5">
-          {turns.map((t, i) => (
-            <div key={i}>
-              <p
-                className={`mb-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                  t.speaker === 'patient' ? 'text-[#2f5aa8]' : 'text-[var(--color-accent)]'
+          {utterances.map((u) => {
+            const hit = highlightIds.has(u.id);
+            return (
+              <div
+                key={u.id}
+                ref={(el) => {
+                  refs.current.set(u.id, el);
+                }}
+                className={`-mx-2 rounded-lg px-2 py-1 transition-colors duration-500 ${
+                  hit ? 'bg-[var(--color-accent-soft)] ring-1 ring-[var(--color-accent)]' : ''
                 }`}
               >
-                {t.speaker === 'patient'
-                  ? 'Patient'
-                  : t.speaker === 'doctor'
-                    ? 'Doctor'
-                    : 'Speaker'}
-              </p>
-              <p className="text-[13.5px] leading-relaxed text-[var(--color-ink-2)]">{t.text}</p>
-            </div>
-          ))}
+                <p
+                  className={`mb-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                    u.speaker === 'patient' ? 'text-[#2f5aa8]' : 'text-[var(--color-accent)]'
+                  }`}
+                >
+                  {u.speaker === 'patient'
+                    ? 'Patient'
+                    : u.speaker === 'doctor'
+                      ? 'Doctor'
+                      : 'Speaker'}
+                </p>
+                <p className="text-[13.5px] leading-relaxed text-[var(--color-ink-2)]">{u.text}</p>
+              </div>
+            );
+          })}
         </div>
       )}
       {listening && (
@@ -498,56 +587,9 @@ function TranscriptPanel({ turns, listening }: { turns: Turn[]; listening: boole
   );
 }
 
-// Sprint DS1 — the reasoning substrate made visible: the structured
-// findings the copilot has extracted + cited so far. DS2/DS4 build the
-// differential + evidence-chip UI on top of these.
-const FINDING_TONE: Record<ClinicalFinding['kind'], string> = {
-  symptom: '#b86a3c',
-  sign: '#b86a3c',
-  vital: '#2f5aa8',
-  history: '#6b4fa8',
-  negative: '#7a8a99',
-  medication: '#2d5f4d',
-  social: '#6b4fa8',
-};
-
-function FindingsPanel({ findings }: { findings: ClinicalFinding[] }) {
-  return (
-    <PanelShell title={`Clinical findings · ${findings.length}`}>
-      <ul className="space-y-2">
-        {findings.map((f) => (
-          <li key={f.id} className="flex items-start gap-2">
-            <span
-              aria-hidden
-              className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{
-                background: FINDING_TONE[f.kind],
-                opacity: f.polarity === 'denied' ? 0.5 : 1,
-              }}
-            />
-            <span className="text-[13px] leading-snug">
-              <span
-                className={f.polarity === 'denied' ? 'text-[var(--color-ink-3)] line-through' : ''}
-              >
-                {clean(f.label) ?? f.label}
-              </span>
-              {f.detail && (
-                <span className="text-[var(--color-ink-3)]"> · {clean(f.detail) ?? f.detail}</span>
-              )}
-              <span className="ml-1.5 text-[10px] uppercase tracking-wide text-[var(--color-ink-3)]">
-                {f.kind}
-              </span>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </PanelShell>
-  );
-}
-
-// Sprint DS2 — the live differential + ask-next preview. A compact,
-// evidence-cited clinical picture; DS4 turns this into the persistent panel
-// with rank animation + evidence→transcript highlighting.
+// Sprint DS4 — the live copilot rail: a persistent clinical picture in three
+// stacked zones. ASK NEXT (pinned) → DIFFERENTIAL (evidence-cited, tap a chip
+// to highlight its source in the transcript) → SAFETY & MORE (the card feed).
 const LIKELIHOOD_PCT: Record<LiveReasoning['differential'][number]['likelihood'], number> = {
   high: 90,
   moderate: 55,
@@ -560,18 +602,134 @@ const TREND_GLYPH: Record<LiveReasoning['differential'][number]['trend'], string
   steady: '→',
 };
 
-function DifferentialPreview({
+function LiveRail({
   reasoning,
   findings,
+  recs,
+  criticalOpen,
+  live,
   onDismiss,
   onAsked,
+  onEvidence,
+  onAddToAssessment,
+  addedToAssessment,
 }: {
-  reasoning: LiveReasoning;
+  reasoning: LiveReasoning | null;
   findings: ClinicalFinding[];
+  recs: Rec[];
+  criticalOpen: boolean;
+  live: boolean;
   onDismiss: (id: string, label?: string) => void;
   onAsked: (id: string, label?: string) => void;
+  onEvidence: (findingIds: string[]) => void;
+  onAddToAssessment: (dxId: string, label: string) => void;
+  addedToAssessment: string[];
+}) {
+  return (
+    <div className="space-y-4">
+      <AskNextZone askNext={reasoning?.askNext ?? []} onAsked={onAsked} onDismiss={onDismiss} />
+      <DifferentialZone
+        reasoning={reasoning}
+        findings={findings}
+        live={live}
+        onEvidence={onEvidence}
+        onAddToAssessment={onAddToAssessment}
+        addedToAssessment={addedToAssessment}
+      />
+      <CopilotRail recs={recs} criticalOpen={criticalOpen} />
+    </div>
+  );
+}
+
+function AskNextZone({
+  askNext,
+  onAsked,
+  onDismiss,
+}: {
+  askNext: LiveReasoning['askNext'];
+  onAsked: (id: string, label?: string) => void;
+  onDismiss: (id: string, label?: string) => void;
+}) {
+  if (askNext.length === 0) return null;
+  return (
+    <Card className="overflow-hidden p-0">
+      <div className="flex items-center gap-2 border-b border-[var(--color-line-soft)] bg-[var(--color-accent-soft)] px-5 py-3">
+        <QIcon />
+        <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-accent)]">
+          Ask next
+        </h2>
+        <span className="ml-auto text-[11px] text-[var(--color-ink-3)]">
+          {askNext.filter((q) => q.status === 'open').length} open
+        </span>
+      </div>
+      <ul className="divide-y divide-[var(--color-line-soft)]">
+        {askNext.map((q) => {
+          const answered = q.status === 'answered';
+          return (
+            <li key={q.id} className="group flex items-start gap-2 px-4 py-2.5 text-[12.5px]">
+              <span className="flex-1 leading-snug">
+                {answered && <span className="mr-1 font-bold text-[var(--color-accent)]">✓</span>}
+                <span
+                  className={
+                    answered
+                      ? 'text-[var(--color-ink-3)] line-through'
+                      : 'font-medium text-[var(--color-ink)]'
+                  }
+                >
+                  {clean(q.question) ?? q.question}
+                </span>
+                {!answered && q.why && (
+                  <span className="block text-[11px] text-[var(--color-ink-3)]">
+                    {q.why}
+                    {q.source === 'TEMPLATE' ? ' · template' : ''}
+                  </span>
+                )}
+              </span>
+              {!answered && (
+                <span className="flex shrink-0 gap-1 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <button
+                    type="button"
+                    onClick={() => onAsked(q.id, q.question)}
+                    className="rounded px-1 text-[11px] font-semibold text-[var(--color-accent)] hover:underline"
+                    title="Mark as asked"
+                  >
+                    asked
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDismiss(q.id, q.question)}
+                    className="rounded px-1 text-[11px] text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+function DifferentialZone({
+  reasoning,
+  findings,
+  live,
+  onEvidence,
+  onAddToAssessment,
+  addedToAssessment,
+}: {
+  reasoning: LiveReasoning | null;
+  findings: ClinicalFinding[];
+  live: boolean;
+  onEvidence: (findingIds: string[]) => void;
+  onAddToAssessment: (dxId: string, label: string) => void;
+  addedToAssessment: string[];
 }) {
   const labelOf = (id: string) => findings.find((f) => f.id === id)?.label;
+  const differential = reasoning?.differential ?? [];
   return (
     <Card className="overflow-hidden p-0">
       <div className="flex items-center gap-2 border-b border-[var(--color-line-soft)] px-5 py-3.5">
@@ -580,108 +738,83 @@ function DifferentialPreview({
         <span className="ml-auto text-[11px] text-[var(--color-ink-3)]">evidence-cited · live</span>
       </div>
 
-      {reasoning.askNext.length > 0 && (
-        <div className="border-b border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-4 py-3">
-          <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-[var(--color-ink-3)]">
-            Ask next
-          </p>
-          <div className="space-y-2">
-            {reasoning.askNext.map((q) => {
-              const answered = q.status === 'answered';
-              return (
-                <div key={q.id} className="group flex items-start gap-2 text-[12.5px] leading-snug">
-                  <span className={answered ? '' : 'flex-1'}>
-                    {answered && (
-                      <span className="mr-1 font-bold text-[var(--color-accent)]">✓</span>
-                    )}
-                    <span
-                      className={
-                        answered
-                          ? 'text-[var(--color-ink-3)] line-through'
-                          : 'font-medium text-[var(--color-ink)]'
-                      }
-                    >
-                      {clean(q.question) ?? q.question}
-                    </span>
-                    {!answered && q.why && (
-                      <span className="text-[var(--color-ink-3)]"> — {q.why}</span>
-                    )}
-                    {q.source === 'TEMPLATE' && !answered && (
-                      <span className="ml-1 text-[9.5px] uppercase tracking-wide text-[var(--color-ink-3)]">
-                        · template
-                      </span>
-                    )}
+      {differential.length === 0 ? (
+        <div className="px-5 py-6 text-center text-[13px] text-[var(--color-ink-3)]">
+          {live
+            ? 'Building the differential as the history unfolds — deterministic checks (right) are running now.'
+            : 'The ranked differential appears here as the consult begins.'}
+        </div>
+      ) : (
+        <ul className="divide-y divide-[var(--color-line-soft)]">
+          {differential.map((d) => {
+            const added = addedToAssessment.includes(clean(d.label) ?? d.label);
+            return (
+              <li key={d.id} className="px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13.5px] font-semibold text-[var(--color-ink)]">
+                    {clean(d.label) ?? d.label}
                   </span>
-                  {!answered && (
-                    <span className="ml-auto flex shrink-0 gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button
-                        type="button"
-                        onClick={() => onAsked(q.id, q.question)}
-                        className="rounded px-1 text-[11px] font-semibold text-[var(--color-accent)] hover:underline"
-                        title="Mark as asked"
-                      >
-                        asked
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onDismiss(q.id, q.question)}
-                        className="rounded px-1 text-[11px] text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
-                        title="Dismiss"
-                      >
-                        ✕
-                      </button>
+                  {d.urgent && (
+                    <span className="rounded-full bg-[#fbe4e0] px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-[#c0392b]">
+                      Urgent
                     </span>
                   )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      <ul className="divide-y divide-[var(--color-line-soft)]">
-        {reasoning.differential.map((d) => (
-          <li key={d.id} className="px-4 py-3">
-            <div className="flex items-center gap-2">
-              <span className="text-[13.5px] font-semibold text-[var(--color-ink)]">
-                {clean(d.label) ?? d.label}
-              </span>
-              {d.urgent && (
-                <span className="rounded-full bg-[#fbe4e0] px-2 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-[#c0392b]">
-                  Urgent
-                </span>
-              )}
-              <span className="ml-auto text-[12px] text-[var(--color-ink-3)]" title={d.trend}>
-                {TREND_GLYPH[d.trend]}
-              </span>
-            </div>
-            <div className="mt-1.5 flex items-center gap-2">
-              <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
-                <span
-                  className="block h-full rounded-full bg-[#2f5aa8]"
-                  style={{ width: `${LIKELIHOOD_PCT[d.likelihood]}%` }}
-                />
-              </span>
-              <span className="text-[10.5px] uppercase tracking-wide text-[var(--color-ink-3)]">
-                {d.likelihood}
-                {d.icd10 ? ` · ${d.icd10}` : ''}
-              </span>
-            </div>
-            {d.evidenceFor.length > 0 && (
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {d.evidenceFor.map((id) => (
                   <span
-                    key={id}
-                    className="rounded-full border border-[var(--color-line-soft)] bg-white px-2 py-0.5 text-[10.5px] text-[var(--color-ink-2)]"
+                    className="ml-auto text-[13px] font-bold text-[var(--color-ink-3)]"
+                    title={`trend: ${d.trend}`}
                   >
-                    {clean(labelOf(id)) ?? id}
+                    {TREND_GLYPH[d.trend]}
                   </span>
-                ))}
-              </div>
-            )}
-          </li>
-        ))}
-      </ul>
+                </div>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
+                    <span
+                      className="block h-full rounded-full bg-[#2f5aa8] transition-[width] duration-500"
+                      style={{ width: `${LIKELIHOOD_PCT[d.likelihood]}%` }}
+                    />
+                  </span>
+                  <span className="text-[10.5px] uppercase tracking-wide text-[var(--color-ink-3)]">
+                    {d.likelihood}
+                    {d.icd10 ? ` · ${d.icd10}` : ''}
+                  </span>
+                </div>
+                {d.evidenceFor.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {d.evidenceFor.map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        onClick={() => onEvidence([id])}
+                        className="rounded-full border border-[var(--color-line-soft)] bg-white px-2 py-0.5 text-[10.5px] text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                        title="Show the source in the transcript"
+                      >
+                        {clean(labelOf(id)) ?? id}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {d.discriminator && (
+                  <p className="mt-1.5 text-[11.5px] text-[var(--color-ink-3)]">
+                    Discriminate: {d.discriminator}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  disabled={added}
+                  onClick={() => onAddToAssessment(d.id, d.label)}
+                  className={`mt-2 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                    added
+                      ? 'text-[var(--color-ink-3)]'
+                      : 'text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]'
+                  }`}
+                >
+                  {added ? '✓ In assessment' : '+ Add to assessment'}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </Card>
   );
 }
@@ -690,10 +823,12 @@ function NotePanel({
   note,
   specialty,
   live,
+  assessmentAdds,
 }: {
   note: PartialStructuredNote;
   specialty?: string | null;
   live: boolean;
+  assessmentAdds: string[];
 }) {
   const v = note.vitals;
   const vitals = v
@@ -707,7 +842,12 @@ function NotePanel({
       ].filter(Boolean)
     : [];
   const empty =
-    !note.chiefComplaint && !note.hpi && !note.assessment && !note.plan && vitals.length === 0;
+    !note.chiefComplaint &&
+    !note.hpi &&
+    !note.assessment &&
+    !note.plan &&
+    vitals.length === 0 &&
+    assessmentAdds.length === 0;
 
   return (
     <PanelShell
@@ -749,6 +889,18 @@ function NotePanel({
             />
           )}
           <Section label="Assessment" value={clean(note.assessment)} live={live} />
+          {assessmentAdds.length > 0 && (
+            <div>
+              <SectionLabel>Added from differential</SectionLabel>
+              <ul className="mt-1 space-y-0.5">
+                {assessmentAdds.map((a) => (
+                  <li key={a} className="text-[14px] leading-relaxed text-[var(--color-ink)]">
+                    • {a}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <Section label="Plan" value={clean(note.plan)} live={live} />
         </div>
       )}
@@ -1148,20 +1300,6 @@ function clean(s?: string): string | undefined {
   if (!s) return undefined;
   const t = s.replace(MOCK_TAG, '').trim();
   return t.length ? t : undefined;
-}
-
-function appendTurn(prev: Turn[], speaker: Turn['speaker'], text: string): Turn[] {
-  const t = text.trim();
-  if (!t) return prev;
-  const last = prev[prev.length - 1];
-  // Same known speaker → continue the turn; else start a new one.
-  if (last && last.speaker === speaker && speaker !== 'unknown') {
-    return [...prev.slice(0, -1), { speaker, text: `${last.text} ${t}` }];
-  }
-  if (last && speaker === 'unknown') {
-    return [...prev.slice(0, -1), { speaker: last.speaker, text: `${last.text} ${t}` }];
-  }
-  return [...prev, { speaker, text: t }];
 }
 
 function fmtTime(s: number): string {
