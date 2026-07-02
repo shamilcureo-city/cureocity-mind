@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ClinicalFindingSchema, PatientContextSchema } from './case-state';
 import { EvidenceRefSchema, MedicalEncounterNoteV1Schema } from './medical-note';
 import { ClinicalOrderV1Schema, MedicationOrderV1Schema } from './medication-order';
 
@@ -145,6 +146,13 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
      * LIVE_GATEWAY_SECRET is unset); required in prod.
      */
     token: z.string().optional(),
+    /**
+     * Sprint DS1 — patient context seeded into the consult's CaseState
+     * (age / sex / known conditions / active meds / allergies). The browser
+     * fetches it from the encounter page data. Optional — a thin payload
+     * still works; the reasoning engine just has less to anchor on.
+     */
+    context: PatientContextSchema.optional(),
   }),
   z.object({ type: z.literal('stop') }),
 ]);
@@ -176,6 +184,14 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   // each window + once at the end; the browser relays the last one to the
   // live-metric route.
   z.object({ type: z.literal('meter'), summary: MeterSummarySchema }),
+  // Sprint DS1 — the current structured findings snapshot (full list, not a
+  // delta) + the CaseState version. Idempotent client render. DS2's
+  // differential + DS3's ask-next will ride alongside on their own events.
+  z.object({
+    type: z.literal('finding'),
+    findings: z.array(ClinicalFindingSchema),
+    version: z.number().int().nonnegative(),
+  }),
   // Sprint DV9 — the closing note carries the drafted Rx + clinical
   // orders too, so the browser can persist a complete encounter (parity
   // with the batch path) for the doctor to sign.

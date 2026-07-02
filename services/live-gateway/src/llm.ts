@@ -1,10 +1,13 @@
 import {
+  MockGeminiFindingsBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
+  VertexGeminiFindingsBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProGlobalBackend,
   type IPass1Backend,
   type IPass2Backend,
+  type IPassFindingsBackend,
 } from '@cureocity/llm';
 
 /**
@@ -22,6 +25,8 @@ export interface LiveBackends {
   backend: string;
   pass1: IPass1Backend;
   pass2: IPass2Backend;
+  /** Sprint DS1 — live findings extractor (the reasoning substrate). */
+  findings: IPassFindingsBackend;
 }
 
 export function buildBackends(): LiveBackends {
@@ -43,11 +48,22 @@ export function buildBackends(): LiveBackends {
         location: proRegion,
         model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
       }),
+      // Sprint DS1 — findings extractor. Flash in asia-south1 (DPDP; the
+      // transcript is PII), reuses the Flash model env.
+      findings: new VertexGeminiFindingsBackend({
+        projectId: project,
+        location: flashRegion,
+        model:
+          process.env['VERTEX_FINDINGS_MODEL'] ??
+          process.env['VERTEX_FLASH_MODEL'] ??
+          'gemini-2.5-flash',
+      }),
     };
   }
   return {
     backend,
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
+    findings: new MockGeminiFindingsBackend(),
   };
 }

@@ -12,6 +12,7 @@ export {
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
+  MockGeminiFindingsBackend,
 } from './backends/mock-gemini.backend';
 export {
   VertexGeminiFlashIndiaBackend,
@@ -57,3 +58,8 @@ export {
   DifferentialBackendError,
   type VertexGeminiDifferentialOptions,
 } from './backends/vertex-differential.backend';
+export {
+  VertexGeminiFindingsBackend,
+  FindingsBackendError,
+  type VertexGeminiFindingsOptions,
+} from './backends/vertex-findings.backend';

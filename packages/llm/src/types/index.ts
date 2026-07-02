@@ -3,8 +3,11 @@ import {
   AffectFeatureSchema,
   CaseBriefingV1Schema,
   CaseConsultV1Schema,
+  type CaseState,
+  ClinicalFindingSchema,
   type ClinicalLocale,
   ClinicalReportV1Schema,
+  type Utterance,
   type ClientDiagnosis,
   ConceptualMapV1Schema,
   ClinicalOrderV1Schema,
@@ -441,6 +444,34 @@ export const PassDifferentialOutputSchema = z.object({
 export type PassDifferentialOutput = z.infer<typeof PassDifferentialOutputSchema>;
 
 // ============================================================================
+// Sprint DS1 — PassFindings. The live reasoning substrate's first micro-pass:
+// turn new transcript utterances (given the running CaseState) into
+// structured clinical findings that the differential (DS2) + ask-next (DS3)
+// engines cite by id. Flash, structured output, temp 0. The gateway runs it
+// per window; the citation gate lives in the gateway (drops findings citing
+// utterance ids that don't exist). See docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS1.
+// ============================================================================
+export interface PassFindingsInput {
+  sessionId: string;
+  /** The running case state (patient context + findings so far). */
+  caseState: CaseState;
+  /** Only the utterances added since the last pass — incremental by design. */
+  newUtterances: Utterance[];
+  /** Doctor specialty, biases what's clinically salient. */
+  specialty?: string;
+  /** Output language hint. */
+  language?: ClinicalLocale;
+}
+
+export const PassFindingsOutputSchema = z.object({
+  /** New/updated findings (stable ids; same id replaces, new id appends). */
+  findings: z.array(ClinicalFindingSchema),
+  /** Ids of open ask-next questions the extractor saw answered on-mic. */
+  answeredQuestionIds: z.array(z.string()).default([]),
+});
+export type PassFindingsOutput = z.infer<typeof PassFindingsOutputSchema>;
+
+// ============================================================================
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
@@ -454,7 +485,8 @@ export type GeminiPass =
   | 'PASS_6_CASE_BRIEFING'
   | 'PASS_7_CONCEPTUAL_MAP'
   | 'PASS_8_CASE_CONSULT'
-  | 'PASS_9_DIFFERENTIAL';
+  | 'PASS_9_DIFFERENTIAL'
+  | 'PASS_10_FINDINGS';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -515,6 +547,12 @@ export interface IPassDifferentialBackend {
   ): Promise<{ output: PassDifferentialOutput; callLog: GeminiCallLogData }>;
 }
 
+export interface IPassFindingsBackend {
+  run(
+    input: PassFindingsInput,
+  ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
@@ -527,6 +565,9 @@ export interface IModelRouter {
   passDifferential(
     input: PassDifferentialInput,
   ): Promise<{ output: PassDifferentialOutput; callLog: GeminiCallLogData }>;
+  passFindings(
+    input: PassFindingsInput,
+  ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

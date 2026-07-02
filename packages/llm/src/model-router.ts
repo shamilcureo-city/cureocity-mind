@@ -10,6 +10,7 @@ import {
   type IPass7Backend,
   type IPass8Backend,
   type IPassDifferentialBackend,
+  type IPassFindingsBackend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -28,6 +29,8 @@ import {
   type Pass8Output,
   type PassDifferentialInput,
   type PassDifferentialOutput,
+  type PassFindingsInput,
+  type PassFindingsOutput,
 } from './types';
 
 export interface ModelRouterOptions {
@@ -41,6 +44,8 @@ export interface ModelRouterOptions {
   pass8: IPass8Backend;
   /** Sprint DV6 — doctor differential (the medical Pass-3 analogue). */
   passDifferential: IPassDifferentialBackend;
+  /** Sprint DS1 — live findings extractor (the reasoning substrate). */
+  passFindings: IPassFindingsBackend;
   /** Called after every backend call with the resulting call-log row. */
   onCallLog?: (log: GeminiCallLogData) => Promise<void> | void;
 }
@@ -100,6 +105,14 @@ export class ModelRouter implements IModelRouter {
     input: PassDifferentialInput,
   ): Promise<{ output: PassDifferentialOutput; callLog: GeminiCallLogData }> {
     const result = await this.opts.passDifferential.run(input);
+    await this.opts.onCallLog?.(result.callLog);
+    return result;
+  }
+
+  async passFindings(
+    input: PassFindingsInput,
+  ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }> {
+    const result = await this.opts.passFindings.run(input);
     await this.opts.onCallLog?.(result.callLog);
     return result;
   }

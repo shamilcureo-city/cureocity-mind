@@ -4,6 +4,7 @@ import type {
   LiveGatewayEvent,
   MedicalEncounterNoteV1,
   MedicationOrderV1,
+  PatientContext,
   Utterance,
 } from '@cureocity/contracts';
 import type { SpeakerSegment } from '@cureocity/llm';
@@ -13,6 +14,7 @@ import {
   parseVoiceCommands,
   type InteractionSeverity,
 } from '@cureocity/clinical';
+import { CaseStateStore } from './case-state';
 import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
@@ -58,6 +60,8 @@ export class LiveSession {
   private readonly specialty: string | null;
   private readonly windowOpts: WindowOptions;
   private readonly meter = new ConsultMeter();
+  /** Sprint DS1 — the per-consult reasoning substrate (findings + citation gate). */
+  private readonly caseStore: CaseStateStore;
 
   /** Un-flushed audio (bytes not yet transcribed into an utterance). */
   private pending: Buffer = Buffer.alloc(0);
@@ -95,12 +99,14 @@ export class LiveSession {
     backends: LiveBackends,
     emit: Emit,
     windowOpts: WindowOptions = DEFAULT_WINDOW_OPTIONS,
+    patientContext?: PatientContext,
   ) {
     this.sessionId = sessionId;
     this.specialty = specialty;
     this.backends = backends;
     this.emit = emit;
     this.windowOpts = windowOpts;
+    this.caseStore = new CaseStateStore(patientContext);
   }
 
   start(): void {
@@ -202,8 +208,45 @@ export class LiveSession {
       this.emit({ type: 'command', command });
     }
 
+    // Sprint DS1 — extract structured findings from this new utterance.
+    await this.runFindings([utterance]);
+
     await this.runNote(false);
     this.emit({ type: 'meter', summary: this.meterSummary() });
+  }
+
+  /**
+   * Sprint DS1 — the reasoning substrate's findings micro-pass. Extracts
+   * structured clinical findings from the NEW utterances (given the running
+   * CaseState), gates them on their citations (the gateway drops any finding
+   * citing an utterance it never produced), merges the survivors, and emits
+   * the current findings snapshot when it changed. Failures are logged and
+   * swallowed — a findings hiccup must never break the scribe.
+   */
+  private async runFindings(newUtterances: Utterance[]): Promise<void> {
+    if (newUtterances.length === 0) return;
+    try {
+      const res = await this.backends.findings.run({
+        sessionId: this.sessionId,
+        caseState: this.caseStore.snapshot,
+        newUtterances,
+        ...(this.specialty ? { specialty: this.specialty } : {}),
+      });
+      this.meter.recordReasoning(res.callLog);
+      const merged = this.caseStore.applyFindings(
+        res.output.findings,
+        res.output.answeredQuestionIds,
+      );
+      if (merged.changed) {
+        this.emit({
+          type: 'finding',
+          findings: this.caseStore.findings,
+          version: this.caseStore.version,
+        });
+      }
+    } catch (err) {
+      console.error('[live-gateway] findings pass failed:', (err as Error).message);
+    }
   }
 
   /** Append one utterance + its (wall-offset) segments. */
@@ -225,6 +268,8 @@ export class LiveSession {
       tEndMs,
     };
     this.utterances.push(utterance);
+    // DS1 — register so the findings pass can cite it (citation gate).
+    this.caseStore.registerUtterance(utterance.id);
     return utterance;
   }
 
@@ -348,6 +393,7 @@ export class LiveSession {
           },
         });
         this.emit({ type: 'utterance', utterance });
+        await this.runFindings([utterance]);
       }
       await this.runNote(true);
     } catch (err) {

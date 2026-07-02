@@ -10,8 +10,10 @@ import {
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
+  MockGeminiFindingsBackend,
   ModelRouter,
   VertexGeminiDifferentialBackend,
+  VertexGeminiFindingsBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -144,6 +146,16 @@ function build(): IModelRouter {
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
       }),
+      // Sprint DS1 — live findings extractor. Flash in asia-south1 (DPDP;
+      // transcript is PII), reuses the Flash model env.
+      passFindings: new VertexGeminiFindingsBackend({
+        projectId: project,
+        location: flashRegion,
+        model:
+          process.env['VERTEX_FINDINGS_MODEL'] ??
+          process.env['VERTEX_FLASH_MODEL'] ??
+          'gemini-2.5-flash',
+      }),
     });
   }
   console.info(
@@ -159,6 +171,7 @@ function build(): IModelRouter {
     pass7: new MockGeminiPass7Backend(),
     pass8: new MockGeminiPass8Backend(),
     passDifferential: new MockGeminiDifferentialBackend(),
+    passFindings: new MockGeminiFindingsBackend(),
   });
 }
 

@@ -38,6 +38,16 @@ export class ConsultMeter {
     this.noteLatencies.push(nonNegInt(latencyMs));
   }
 
+  /**
+   * Sprint DS1 — a reasoning-pass call (findings, and later the DS2
+   * differential) completed. Its tokens + cost count toward the consult so
+   * the unit economics stay honest; its own latency percentile isn't in the
+   * summary yet (DS2 adds a reasoning latency field).
+   */
+  recordReasoning(callLog: GeminiCallLogData): void {
+    this.accumulate(callLog);
+  }
+
   /** Count one finalized transcription window. */
   markWindow(): void {
     this.windows++;

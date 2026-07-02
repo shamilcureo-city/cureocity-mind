@@ -11,6 +11,7 @@ import {
   type IPass7Backend,
   type IPass8Backend,
   type IPassDifferentialBackend,
+  type IPassFindingsBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
@@ -20,8 +21,10 @@ import {
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
+  MockGeminiFindingsBackend,
   ModelRouter,
   VertexGeminiDifferentialBackend,
+  VertexGeminiFindingsBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -57,6 +60,7 @@ const modelRouterProvider: Provider = {
     let pass7: IPass7Backend;
     let pass8: IPass8Backend;
     let passDifferential: IPassDifferentialBackend;
+    let passFindings: IPassFindingsBackend;
 
     if (!projectId) {
       logger.warn(
@@ -71,6 +75,7 @@ const modelRouterProvider: Provider = {
       pass7 = new MockGeminiPass7Backend();
       pass8 = new MockGeminiPass8Backend();
       passDifferential = new MockGeminiDifferentialBackend();
+      passFindings = new MockGeminiFindingsBackend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -148,6 +153,16 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-pro-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      // Sprint DS1 — findings extractor. Flash in asia-south1 (DPDP).
+      passFindings = new VertexGeminiFindingsBackend({
+        projectId,
+        location: config.get<string>('GEMINI_FLASH_REGION') ?? 'asia-south1',
+        model:
+          config.get<string>('GEMINI_FINDINGS_MODEL') ??
+          config.get<string>('GEMINI_FLASH_MODEL') ??
+          'gemini-1.5-flash-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
@@ -161,6 +176,7 @@ const modelRouterProvider: Provider = {
       pass7,
       pass8,
       passDifferential,
+      passFindings,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

@@ -11,6 +11,7 @@ import {
   type IPass7Backend,
   type IPass8Backend,
   type IPassDifferentialBackend,
+  type IPassFindingsBackend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -29,6 +30,8 @@ import {
   type Pass8Output,
   type PassDifferentialInput,
   type PassDifferentialOutput,
+  type PassFindingsInput,
+  type PassFindingsOutput,
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
@@ -45,6 +48,7 @@ import {
   THERAPY_SCRIPT_PROMPT_VERSION,
   CASE_CONSULT_PROMPT_VERSION,
   DIFFERENTIAL_PROMPT_VERSION,
+  FINDINGS_PROMPT_VERSION,
 } from '../prompts';
 
 /**
@@ -1046,6 +1050,68 @@ export class MockGeminiDifferentialBackend implements IPassDifferentialBackend {
         promptVersion: DIFFERENTIAL_PROMPT_VERSION,
         inputTokens: Math.ceil(input.transcript.length / 4),
         outputTokens: 500,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Sprint DS1 — deterministic findings extractor. Cites the FIRST new
+ * utterance's real id (so the gateway citation gate always passes for the
+ * mock) and returns a stable canned cardio finding set — including one
+ * `negative` — with stable ids (f1/f2/f3) so repeated windows converge
+ * (same ids → the CaseState merge replaces, never duplicates). Emits
+ * nothing when there are no new utterances.
+ */
+export class MockGeminiFindingsBackend implements IPassFindingsBackend {
+  async run(
+    input: PassFindingsInput,
+  ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const anchor = input.newUtterances[0];
+    const output: PassFindingsOutput = anchor
+      ? {
+          findings: [
+            {
+              id: 'f1',
+              kind: 'symptom',
+              label: '[mock] exertional chest pressure',
+              detail: '×2 days, relieved by rest',
+              utteranceIds: [anchor.id],
+              polarity: 'present',
+            },
+            {
+              id: 'f2',
+              kind: 'negative',
+              label: '[mock] no breathlessness at rest',
+              utteranceIds: [anchor.id],
+              polarity: 'denied',
+            },
+            {
+              id: 'f3',
+              kind: 'vital',
+              label: '[mock] BP 148/92',
+              utteranceIds: [anchor.id],
+              polarity: 'present',
+            },
+          ],
+          answeredQuestionIds: [],
+        }
+      : { findings: [], answeredQuestionIds: [] };
+
+    return {
+      output,
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_10_FINDINGS',
+        model: 'mock-flash',
+        region: 'mock-asia-south1',
+        promptVersion: FINDINGS_PROMPT_VERSION,
+        inputTokens: input.newUtterances.reduce((n, u) => n + Math.ceil(u.text.length / 4), 0),
+        outputTokens: 120,
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',

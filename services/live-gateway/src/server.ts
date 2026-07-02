@@ -53,6 +53,8 @@ wss.on('connection', (ws) => {
         cmd.specialty ?? null,
         backends,
         (event) => send(ws, event),
+        undefined, // windowOpts — use the defaults
+        cmd.context, // Sprint DS1 — seed the CaseState's patient context
       );
       session.start();
     } else if (cmd.type === 'stop') {

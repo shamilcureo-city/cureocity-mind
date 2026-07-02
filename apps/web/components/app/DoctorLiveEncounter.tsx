@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   ChronicTrajectorySchema,
   LiveGatewayEventSchema,
+  type ClinicalFinding,
   type EncounterGap,
   type MedicalEncounterNoteV1,
   type MeterSummary,
@@ -52,6 +53,7 @@ export function DoctorLiveEncounter({
   const [phase, setPhase] = useState<Phase>('idle');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [note, setNote] = useState<PartialStructuredNote>({});
+  const [findings, setFindings] = useState<ClinicalFinding[]>([]);
   const [gaps, setGaps] = useState<EncounterGap[]>([]);
   const [commands, setCommands] = useState<VoiceCommand[]>([]);
   const [shownData, setShownData] = useState<Record<string, string>>({});
@@ -146,6 +148,7 @@ export function DoctorLiveEncounter({
     setError(null);
     setTurns([]);
     setNote({});
+    setFindings([]);
     setGaps([]);
     setCommands([]);
     setShownData({});
@@ -184,6 +187,9 @@ export function DoctorLiveEncounter({
           sessionId,
           ...(specialty ? { specialty } : {}),
           ...(token ? { token } : {}),
+          // Sprint DS1 — seed the CaseState with what the page knows about
+          // the patient. Thin for now (age); richer context lands later.
+          ...(patient?.age != null ? { context: { age: patient.age } } : {}),
         }),
       );
       void stream.start().catch((e: Error) => {
@@ -228,11 +234,16 @@ export function DoctorLiveEncounter({
           setTurns((prev) => appendTurn(prev, event.delta.speaker, event.delta.text));
           break;
         case 'utterance':
-          // The durable per-window record (DS1 will consume it); the
-          // transcript delta above already drives the running display.
+          // The durable per-window record; the transcript delta above
+          // already drives the running display.
           break;
         case 'meter':
           latestMeterRef.current = event.summary;
+          break;
+        case 'finding':
+          // Sprint DS1 — the current findings snapshot (idempotent). DS2/DS4
+          // build the differential + evidence UI on top of these.
+          setFindings(event.findings);
           break;
         case 'note':
           setNote(event.partial);
@@ -348,7 +359,10 @@ export function DoctorLiveEncounter({
         <StartPanel connecting={phase === 'connecting'} />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,400px)]">
-          <TranscriptPanel turns={turns} listening={phase === 'listening'} />
+          <div className="space-y-4">
+            <TranscriptPanel turns={turns} listening={phase === 'listening'} />
+            {findings.length > 0 && <FindingsPanel findings={findings} />}
+          </div>
           <NotePanel note={note} specialty={specialty} live={phase === 'listening'} />
           <CopilotRail recs={recs} criticalOpen={criticalOpen} />
         </div>
@@ -416,6 +430,53 @@ function TranscriptPanel({ turns, listening }: { turns: Turn[]; listening: boole
           listening · transcribing in real time
         </div>
       )}
+    </PanelShell>
+  );
+}
+
+// Sprint DS1 — the reasoning substrate made visible: the structured
+// findings the copilot has extracted + cited so far. DS2/DS4 build the
+// differential + evidence-chip UI on top of these.
+const FINDING_TONE: Record<ClinicalFinding['kind'], string> = {
+  symptom: '#b86a3c',
+  sign: '#b86a3c',
+  vital: '#2f5aa8',
+  history: '#6b4fa8',
+  negative: '#7a8a99',
+  medication: '#2d5f4d',
+  social: '#6b4fa8',
+};
+
+function FindingsPanel({ findings }: { findings: ClinicalFinding[] }) {
+  return (
+    <PanelShell title={`Clinical findings · ${findings.length}`}>
+      <ul className="space-y-2">
+        {findings.map((f) => (
+          <li key={f.id} className="flex items-start gap-2">
+            <span
+              aria-hidden
+              className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
+              style={{
+                background: FINDING_TONE[f.kind],
+                opacity: f.polarity === 'denied' ? 0.5 : 1,
+              }}
+            />
+            <span className="text-[13px] leading-snug">
+              <span
+                className={f.polarity === 'denied' ? 'text-[var(--color-ink-3)] line-through' : ''}
+              >
+                {clean(f.label) ?? f.label}
+              </span>
+              {f.detail && (
+                <span className="text-[var(--color-ink-3)]"> · {clean(f.detail) ?? f.detail}</span>
+              )}
+              <span className="ml-1.5 text-[10px] uppercase tracking-wide text-[var(--color-ink-3)]">
+                {f.kind}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
     </PanelShell>
   );
 }

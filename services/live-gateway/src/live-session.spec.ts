@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { LiveGatewayEventSchema, type LiveGatewayEvent } from '@cureocity/contracts';
-import { MockGeminiPass1Backend, MockGeminiPass2Backend } from '@cureocity/llm';
+import {
+  MockGeminiFindingsBackend,
+  MockGeminiPass1Backend,
+  MockGeminiPass2Backend,
+} from '@cureocity/llm';
 import { LiveSession } from './live-session';
 import type { LiveBackends } from './llm';
 import type { WindowOptions } from './vad';
@@ -30,6 +34,7 @@ function mockBackends(): LiveBackends {
     backend: 'mock',
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
+    findings: new MockGeminiFindingsBackend(),
   };
 }
 
@@ -67,6 +72,26 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
 
     // The note rail builds during the consult (not only at the end).
     expect(events.some((e) => e.type === 'note')).toBe(true);
+
+    // Sprint DS1 — findings extracted + emitted, converging (stable ids), and
+    // every rendered finding cites a real utterance id (the citation gate).
+    const findingEvents = events.filter((e) => e.type === 'finding');
+    expect(findingEvents.length).toBeGreaterThan(0);
+    const knownUtteranceIds = new Set(
+      events.flatMap((e) => (e.type === 'utterance' ? [e.utterance.id] : [])),
+    );
+    const lastFinding = findingEvents[findingEvents.length - 1]!;
+    if (lastFinding.type === 'finding') {
+      // Converges to the mock's stable set (f1/f2/f3), not N×windows dupes.
+      expect(lastFinding.findings.length).toBe(3);
+      // Includes at least one explicit negative.
+      expect(lastFinding.findings.some((f) => f.kind === 'negative')).toBe(true);
+      // Every finding cites a real utterance id.
+      for (const f of lastFinding.findings) {
+        expect(f.utteranceIds.length).toBeGreaterThan(0);
+        for (const id of f.utteranceIds) expect(knownUtteranceIds.has(id)).toBe(true);
+      }
+    }
 
     await session.finalize();
 

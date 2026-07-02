@@ -1052,6 +1052,7 @@ enum GeminiPass {
   PASS_7_CONCEPTUAL_MAP // Sprint 24 — Klarify-style per-client thematic graph
   PASS_8_CASE_CONSULT // Sprint 52 — second-opinion artefact for stuck cases
   PASS_9_DIFFERENTIAL // Sprint DV6 — doctor differential diagnosis
+  PASS_10_FINDINGS // Sprint DS1 — live findings extractor (reasoning substrate)
 }
 
 enum GeminiCallStatus {
