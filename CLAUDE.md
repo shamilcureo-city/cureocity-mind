@@ -489,10 +489,14 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   PII field: `contactPhone` + `contactEmail` (Sprint 32) and `fullName`
   (Sprint 54), across create / update / DSR-correction + the
   `/admin/encryption/backfill` route, via `apps/web/lib/tenant-crypto.ts`
-  (LocalDevKmsProvider in dev). STILL PENDING, and prod-data /
-  KMS-decision-dependent: (1) the READ cutover (reads still use the
-  plaintext columns; nothing decrypts yet), (2) the plaintext-column
-  DROP, and (3) wiring `AwsKmsProvider` for `KMS_BACKEND=aws-kms`
+  (LocalDevKmsProvider in dev). READ CUTOVER DONE (Sprint 72): every
+  Client PII read resolves through `apps/web/lib/client-pii.ts`
+  (`resolveClientPii` / `decryptClientField` — prefer the encrypted
+  column, fall back to plaintext when the ciphertext is absent or fails
+  to decrypt, so un-backfilled rows keep working). STILL PENDING, and
+  prod-data / KMS-decision-dependent: (1) the plaintext-column DROP
+  (safe only once every prod row is backfilled + all reads go through
+  the resolver), and (2) wiring `AwsKmsProvider` for `KMS_BACKEND=aws-kms`
   (asia-south1 procurement). `NoteDraft.transcriptEncrypted` now
   dual-writes at the source (note-orchestrator, Sprint 54) + backfill.
   `JournalEntry.contentEncrypted` column exists but has no live
