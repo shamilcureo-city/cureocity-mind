@@ -12,6 +12,7 @@ import {
 } from '@/lib/session-defaults';
 import { parseJson } from '@/lib/validate';
 import { DEFAULT_BUILTIN_TEMPLATE_ID } from '@/lib/builtin-templates';
+import { nextClinicToken } from '@/lib/clinic-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -42,6 +43,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
 
+  // Sprint DV8.4 / DS7 — resolve the vertical once: it drives the billing
+  // noun (encounter vs session) AND whether this session joins the clinic
+  // token queue (doctor encounters get a today-scoped OPD token).
+  const practitioner = await prisma.psychologist.findUnique({
+    where: { id: auth.value.psychologistId },
+    select: { vertical: true },
+  });
+  const isDoctor = practitioner?.vertical === 'DOCTOR';
+
   // Sprint 53 — trial cap gate. Soft enforcement: existing sessions,
   // notes, shares, and copilot all keep working at cap. Only new
   // session creation is blocked, and demo "Example" client sessions
@@ -55,11 +65,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     // Sprint DV8.4 — vertical-aware copy. A doctor records "encounters",
     // a therapist records "sessions". The cap enforcement is identical
     // (shared session-create path); only the wording differs.
-    const practitioner = await prisma.psychologist.findUnique({
-      where: { id: auth.value.psychologistId },
-      select: { vertical: true },
-    });
-    const noun = practitioner?.vertical === 'DOCTOR' ? 'encounter' : 'session';
+    const noun = isDoctor ? 'encounter' : 'session';
     if (!entitlement.isPaidActive && entitlement.trialUsed >= entitlement.trialCap) {
       await writeAudit({
         actorType: 'SYSTEM',
@@ -142,7 +148,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const defaultNoteTemplateId =
     defaults.kind === 'INTAKE' ? null : (defaultTemplate?.id ?? DEFAULT_BUILTIN_TEMPLATE_ID);
 
+  const scheduledAt = new Date(dto.value.scheduledAt);
   const created = await prisma.$transaction(async (tx) => {
+    // Sprint DS7 — doctor encounters join the clinic queue with a
+    // today-scoped OPD token; therapist sessions carry none.
+    const tokenNumber = isDoctor
+      ? await nextClinicToken(tx, auth.value.psychologistId, scheduledAt)
+      : null;
     const row = await tx.session.create({
       data: {
         clientId: dto.value.clientId,
@@ -150,8 +162,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         modality: resolvedModality,
         kind: defaults.kind,
         status: 'SCHEDULED',
-        scheduledAt: new Date(dto.value.scheduledAt),
+        scheduledAt,
         noteTemplateId: defaultNoteTemplateId,
+        ...(tokenNumber !== null && { tokenNumber }),
       },
     });
     await writeAudit(

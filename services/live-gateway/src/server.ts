@@ -1,8 +1,10 @@
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { LiveGatewayCommandSchema, type LiveGatewayEvent } from '@cureocity/contracts';
 import { authRequired, verifyStartToken } from './auth';
 import { buildBackends } from './llm';
 import { LiveSession } from './live-session';
+import { GatewayPool, maxSessionsFromEnv } from './pool';
 
 /**
  * Sprint DV4 (full) — the live copilot's streaming gateway.
@@ -24,11 +26,43 @@ import { LiveSession } from './live-session';
 const PORT = Number(process.env['LIVE_GATEWAY_PORT'] ?? 8787);
 
 const backends = buildBackends();
-const wss = new WebSocketServer({ port: PORT });
+// Sprint DS8 — concurrent-session cap (graceful shed above it).
+const pool = new GatewayPool(maxSessionsFromEnv());
+
+// Sprint DS8 — a plain HTTP server hosts the health endpoint AND upgrades
+// to WebSocket, so a load balancer / systemd can probe liveness + readiness.
+const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  if (req.method === 'GET' && (req.url === '/healthz' || req.url === '/health')) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        status: 'ok',
+        backend: backends.backend,
+        activeSessions: pool.active,
+        maxSessions: pool.max,
+        authRequired: authRequired(),
+      }),
+    );
+    return;
+  }
+  res.writeHead(404, { 'content-type': 'application/json' });
+  res.end(JSON.stringify({ error: 'not found' }));
+});
+
+const wss = new WebSocketServer({ server: httpServer });
 
 wss.on('connection', (ws) => {
   send(ws, { type: 'status', state: 'connected' });
   let session: LiveSession | null = null;
+  // Sprint DS8 — one pool slot per connection, taken on the first start,
+  // returned exactly once on close/error.
+  let acquired = false;
+  const release = (): void => {
+    if (acquired) {
+      pool.release();
+      acquired = false;
+    }
+  };
 
   ws.on('message', (raw: RawData, isBinary: boolean) => {
     // Binary frames are streamed PCM audio for the active session.
@@ -47,26 +81,58 @@ wss.on('connection', (ws) => {
         ws.close();
         return;
       }
+      // Sprint DS8 — shed NEW sessions once the node is at capacity; a
+      // consult already streaming keeps its slot.
+      if (!acquired) {
+        if (!pool.tryAcquire()) {
+          send(ws, { type: 'status', state: 'busy' });
+          ws.close();
+          return;
+        }
+        acquired = true;
+      }
       session?.dispose();
       session = new LiveSession(
         cmd.sessionId ?? `live-${Date.now()}`,
         cmd.specialty ?? null,
         backends,
         (event) => send(ws, event),
+        undefined, // windowOpts — use the defaults
+        cmd.context, // Sprint DS1 — seed the CaseState's patient context
       );
       session.start();
     } else if (cmd.type === 'stop') {
       void session?.finalize();
+    } else if (cmd.type === 'dismiss') {
+      // Sprint DS3 — the doctor dismissed an ask-next question.
+      session?.dismissQuestion(cmd.questionId);
     }
   });
 
-  ws.on('close', () => session?.dispose());
-  ws.on('error', () => session?.dispose());
+  ws.on('close', () => {
+    session?.dispose();
+    release();
+  });
+  ws.on('error', () => {
+    session?.dispose();
+    release();
+  });
 });
 
-console.log(
-  `[live-gateway] streaming gateway listening on ws://localhost:${PORT} (LLM_BACKEND=${backends.backend}, auth=${authRequired() ? 'required' : 'open (dev)'})`,
-);
+httpServer.listen(PORT, () => {
+  console.log(
+    `[live-gateway] listening on :${PORT} (ws + GET /healthz) — LLM_BACKEND=${backends.backend}, auth=${authRequired() ? 'required' : 'open (dev)'}, maxSessions=${pool.max}`,
+  );
+});
+
+// Sprint DS8 — fail-closed posture: a DEPLOYED node with no secret runs
+// open to anyone who can reach the socket. Warn loudly (don't crash — the
+// operator may be mid-rollout), same spirit as the app's auth-bypass banner.
+if (!authRequired() && process.env['NODE_ENV'] === 'production') {
+  console.warn(
+    '[live-gateway] WARNING: running OPEN in production — set LIVE_GATEWAY_SECRET to require a signed start token.',
+  );
+}
 
 function send(ws: WebSocket, event: LiveGatewayEvent): void {
   if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));

@@ -53,6 +53,11 @@ export const PatientShareArtefactTypeSchema = z.enum([
   /// plain-language control trajectory ("BP 150/90 → 130/80 over 8
   /// visits"), built deterministically from the chronic-reading series.
   'CHRONIC_PROGRESS_REPORT',
+  /// Sprint DS5-fu — doctor prescription pad. Patient-facing, shareable
+  /// Indian Rx built deterministically from the session's SIGNED RxPadV1
+  /// (TherapyNote.rxPad — confirmed medications only; pending/AI-suggested
+  /// rows never reach the patient).
+  'RX_PAD',
 ]);
 export type PatientShareArtefactType = z.infer<typeof PatientShareArtefactTypeSchema>;
 
@@ -277,6 +282,37 @@ export const ChronicProgressReportSnapshotSchema = z.object({
 });
 export type ChronicProgressReportSnapshot = z.infer<typeof ChronicProgressReportSnapshotSchema>;
 
+/**
+ * Sprint DS5-fu — prescription-pad snapshot. Patient-facing, deterministic
+ * (no LLM). Built from the session's SIGNED RxPadV1 (confirmed meds only),
+ * with each medication pre-composed into a single plain line the portal
+ * renders verbatim.
+ */
+export const RxPadSnapshotMedSchema = z.object({
+  /** Pre-composed line, e.g. "Paracetamol 500mg · 1-0-1 · after food · for 5 days". */
+  line: z.string().min(1).max(600),
+  /** A continued/existing medicine (the portal badges it). */
+  continued: z.boolean().default(false),
+});
+export type RxPadSnapshotMed = z.infer<typeof RxPadSnapshotMedSchema>;
+
+export const RxPadSnapshotSchema = z.object({
+  kind: z.literal('RX_PAD'),
+  /** Friendly opener (lower-case; the portal prefixes "Hi <name>, "). */
+  greeting: z.string().max(2000),
+  /** Diagnosis / impression line, plain language. */
+  diagnosisLine: z.string().max(600),
+  /** CONFIRMED medications only. */
+  medications: z.array(RxPadSnapshotMedSchema),
+  /** Investigations / tests advised. */
+  investigations: z.array(z.string().min(1).max(400)),
+  /** Plain-language advice lines. */
+  advice: z.array(z.string().min(1).max(800)),
+  /** Follow-up sentence, or empty. */
+  followUp: z.string().max(400),
+});
+export type RxPadSnapshot = z.infer<typeof RxPadSnapshotSchema>;
+
 export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedNoteSnapshotSchema,
   ReflectionQuestionsSnapshotSchema,
@@ -287,6 +323,7 @@ export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedIntakeNoteSnapshotSchema,
   AfterVisitSummarySnapshotSchema,
   ChronicProgressReportSnapshotSchema,
+  RxPadSnapshotSchema,
 ]);
 export type PatientShareSnapshot = z.infer<typeof PatientShareSnapshotSchema>;
 
@@ -407,6 +444,14 @@ export const ShareChronicProgressReportInputSchema = z.object({
   clientId: CuidSchema,
 });
 
+/// Sprint DS5-fu — share a prescription pad. sessionId is the artefact id
+/// (same posture as SIGNED_NOTE / AFTER_VISIT_SUMMARY); the snapshot is
+/// built from the session's signed RxPadV1 (confirmed meds only).
+export const ShareRxPadInputSchema = z.object({
+  artefactType: z.literal('RX_PAD'),
+  sessionId: CuidSchema,
+});
+
 export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareSignedNoteInputSchema,
   ShareReflectionQuestionsInputSchema,
@@ -417,6 +462,7 @@ export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareSignedIntakeNoteInputSchema,
   ShareAfterVisitSummaryInputSchema,
   ShareChronicProgressReportInputSchema,
+  ShareRxPadInputSchema,
 ]);
 export type ShareArtefactRef = z.infer<typeof ShareArtefactRefSchema>;
 

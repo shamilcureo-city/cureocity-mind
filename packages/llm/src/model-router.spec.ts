@@ -10,6 +10,8 @@ import {
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
+  MockGeminiFindingsBackend,
+  MockGeminiReasoningBackend,
 } from './backends/mock-gemini.backend';
 import { computeCostInr, FLASH_PRICING, PRO_PRICING, estimateAudioInputTokens } from './pricing';
 
@@ -26,6 +28,8 @@ describe('ModelRouter', () => {
       pass7: new MockGeminiPass7Backend(),
       pass8: new MockGeminiPass8Backend(),
       passDifferential: new MockGeminiDifferentialBackend(),
+      passFindings: new MockGeminiFindingsBackend(),
+      passReasoning: new MockGeminiReasoningBackend(),
       onCallLog,
     });
 
@@ -92,6 +96,8 @@ describe('ModelRouter', () => {
       pass7: new MockGeminiPass7Backend(),
       pass8: new MockGeminiPass8Backend(),
       passDifferential: new MockGeminiDifferentialBackend(),
+      passFindings: new MockGeminiFindingsBackend(),
+      passReasoning: new MockGeminiReasoningBackend(),
     });
     const r = await router.pass1({
       sessionId: 's_lang_default',
@@ -113,6 +119,8 @@ describe('ModelRouter', () => {
       pass7: new MockGeminiPass7Backend(),
       pass8: new MockGeminiPass8Backend(),
       passDifferential: new MockGeminiDifferentialBackend(),
+      passFindings: new MockGeminiFindingsBackend(),
+      passReasoning: new MockGeminiReasoningBackend(),
     });
     const r = await router.pass1({
       sessionId: 's_lang_manglish',
@@ -136,6 +144,8 @@ describe('ModelRouter', () => {
       pass7: new MockGeminiPass7Backend(),
       pass8: new MockGeminiPass8Backend(),
       passDifferential: new MockGeminiDifferentialBackend(),
+      passFindings: new MockGeminiFindingsBackend(),
+      passReasoning: new MockGeminiReasoningBackend(),
     });
     // The mock backend itself produces a deterministic English script,
     // but the routing layer must accept the new field without errors.
@@ -158,6 +168,8 @@ describe('ModelRouter', () => {
       pass7: new MockGeminiPass7Backend(),
       pass8: new MockGeminiPass8Backend(),
       passDifferential: new MockGeminiDifferentialBackend(),
+      passFindings: new MockGeminiFindingsBackend(),
+      passReasoning: new MockGeminiReasoningBackend(),
     });
     const result = await router.pass1({
       sessionId: 's_2',

@@ -56,6 +56,11 @@ export function DoctorEncounterPanel({
   const [sharing, setSharing] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
+  // Sprint DS5-fu — a live-assembled Rx pad enables the prescription PDF +
+  // patient share; batch encounters (no live Rx) hide them.
+  const [hasRx, setHasRx] = useState(false);
+  const [rxShareUrl, setRxShareUrl] = useState<string | null>(null);
+  const [rxSharing, setRxSharing] = useState(false);
 
   const fetchDraft = useCallback(async () => {
     const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`);
@@ -71,7 +76,9 @@ export function DoctorEncounterPanel({
       status: string;
       content: unknown;
       errorMessage: string | null;
+      hasRxPad?: boolean;
     };
+    setHasRx(draft.hasRxPad === true);
     if (draft.status === 'COMPLETED') {
       const parsed = MedicalEncounterNoteV1Schema.safeParse(draft.content);
       setState(
@@ -187,6 +194,31 @@ export function DoctorEncounterPanel({
     }
   }
 
+  // Sprint DS5-fu — share the SIGNED prescription (confirmed meds only) via
+  // the same PatientShare pipeline as the after-visit summary.
+  async function shareRx(): Promise<void> {
+    setRxSharing(true);
+    setShareError(null);
+    try {
+      const res = await fetch('/api/v1/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          channels: ['PORTAL_LINK'],
+          artefact: { artefactType: 'RX_PAD', sessionId },
+        }),
+      });
+      if (!res.ok) throw new Error(await errorOf(res, 'Could not create the prescription'));
+      const data = (await res.json()) as { results: { portalUrl: string }[] };
+      setRxShareUrl(data.results[0]?.portalUrl ?? null);
+    } catch (e) {
+      setShareError((e as Error).message);
+    } finally {
+      setRxSharing(false);
+    }
+  }
+
   if (state.kind === 'loading' || state.kind === 'starting') {
     return (
       <Card className="p-8 text-center text-sm text-[var(--color-ink-3)]">
@@ -281,6 +313,34 @@ export function DoctorEncounterPanel({
               <Button onClick={shareAvs} disabled={sharing} variant="secondary">
                 {sharing ? 'Creating…' : 'Share after-visit summary'}
               </Button>
+            )}
+            {/* Sprint DS5-fu — the signed prescription: download as a
+                letterhead PDF or share to the patient portal. */}
+            {hasRx && (
+              <>
+                <a
+                  href={`/api/v1/sessions/${sessionId}/rx/pdf`}
+                  target="_blank"
+                  rel="noopener"
+                  className="text-sm text-[var(--color-accent)] underline"
+                >
+                  Prescription PDF ↧
+                </a>
+                {rxShareUrl ? (
+                  <a
+                    href={rxShareUrl}
+                    target="_blank"
+                    rel="noopener"
+                    className="text-sm text-[var(--color-accent)] underline"
+                  >
+                    Open the patient prescription ↗
+                  </a>
+                ) : (
+                  <Button onClick={shareRx} disabled={rxSharing} variant="secondary">
+                    {rxSharing ? 'Creating…' : 'Share prescription'}
+                  </Button>
+                )}
+              </>
             )}
           </>
         ) : (

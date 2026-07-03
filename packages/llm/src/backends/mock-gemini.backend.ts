@@ -11,6 +11,8 @@ import {
   type IPass7Backend,
   type IPass8Backend,
   type IPassDifferentialBackend,
+  type IPassFindingsBackend,
+  type IPassReasoningBackend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -29,6 +31,10 @@ import {
   type Pass8Output,
   type PassDifferentialInput,
   type PassDifferentialOutput,
+  type PassFindingsInput,
+  type PassFindingsOutput,
+  type PassReasoningInput,
+  type PassReasoningOutput,
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
@@ -45,6 +51,8 @@ import {
   THERAPY_SCRIPT_PROMPT_VERSION,
   CASE_CONSULT_PROMPT_VERSION,
   DIFFERENTIAL_PROMPT_VERSION,
+  FINDINGS_PROMPT_VERSION,
+  REASONING_PROMPT_VERSION,
 } from '../prompts';
 
 /**
@@ -1046,6 +1054,375 @@ export class MockGeminiDifferentialBackend implements IPassDifferentialBackend {
         promptVersion: DIFFERENTIAL_PROMPT_VERSION,
         inputTokens: Math.ceil(input.transcript.length / 4),
         outputTokens: 500,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Sprint DS1 — deterministic findings extractor. Cites the FIRST new
+ * utterance's real id (so the gateway citation gate always passes for the
+ * mock) and returns a stable canned cardio finding set — including one
+ * `negative` — with stable ids (f1/f2/f3) so repeated windows converge
+ * (same ids → the CaseState merge replaces, never duplicates). Emits
+ * nothing when there are no new utterances.
+ */
+export class MockGeminiFindingsBackend implements IPassFindingsBackend {
+  async run(
+    input: PassFindingsInput,
+  ): Promise<{ output: PassFindingsOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const anchor = input.newUtterances[0];
+    const output: PassFindingsOutput = anchor
+      ? {
+          findings: [
+            {
+              id: 'f1',
+              kind: 'symptom',
+              label: '[mock] exertional chest pressure',
+              detail: '×2 days, relieved by rest',
+              utteranceIds: [anchor.id],
+              polarity: 'present',
+            },
+            {
+              id: 'f2',
+              kind: 'negative',
+              label: '[mock] no breathlessness at rest',
+              utteranceIds: [anchor.id],
+              polarity: 'denied',
+            },
+            {
+              id: 'f3',
+              kind: 'vital',
+              label: '[mock] BP 148/92',
+              utteranceIds: [anchor.id],
+              polarity: 'present',
+            },
+          ],
+          answeredQuestionIds: [],
+        }
+      : { findings: [], answeredQuestionIds: [] };
+
+    return {
+      output,
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_10_FINDINGS',
+        model: 'mock-flash',
+        region: 'mock-asia-south1',
+        promptVersion: FINDINGS_PROMPT_VERSION,
+        inputTokens: input.newUtterances.reduce((n, u) => n + Math.ceil(u.text.length / 4), 0),
+        outputTokens: 120,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Sprint DS2 — deterministic reasoning engine. Keyword-routes the utterances
+ * to a clinical domain (cardio / endo / GP) and returns a coherent, cited
+ * findings-δ + differential + ask-next + red-flag set for that domain. This
+ * lets the whole DS2 loop + the eval harness run end-to-end with no creds and
+ * gives the unit tests something real to assert. Stable ids (f1/d1/q1 …) so
+ * the gateway merge converges; trend flips new→steady once an id was seen.
+ */
+type MockDomain = 'cardio' | 'endo' | 'gp';
+
+function detectMockDomain(text: string): MockDomain {
+  const t = text.toLowerCase();
+  if (/thirst|polyuria|urinat|sugar|hba1c|diabet|weight loss|excessive urination/.test(t))
+    return 'endo';
+  if (/fever|cough|throat|cold|body ache|sore throat|runny nose|sneez/.test(t)) return 'gp';
+  if (/chest|angina|pressure|exertion|palpitation|breathless|cardiac|heart/.test(t))
+    return 'cardio';
+  return 'cardio';
+}
+
+/** An open question is "answered" if the new speech mentions its key words. */
+function detectMockAnswers(
+  newText: string,
+  openQuestions: { id: string; question: string }[],
+): string[] {
+  const hay = newText.toLowerCase();
+  const answered: string[] = [];
+  for (const q of openQuestions) {
+    const keywords = q.question
+      .toLowerCase()
+      .replace(/[^a-z\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 5 && !STOPWORDS.has(w));
+    if (keywords.some((k) => hay.includes(k))) answered.push(q.id);
+  }
+  return answered;
+}
+
+const STOPWORDS = new Set(['about', 'there', 'their', 'would', 'which', 'these', 'those']);
+
+interface MockReasoningTemplate {
+  findings: Omit<PassReasoningOutput['findings'][number], 'utteranceIds'>[];
+  differential: Omit<PassReasoningOutput['differential'][number], 'trend'>[];
+  askNext: PassReasoningOutput['askNext'];
+  redFlags: PassReasoningOutput['redFlags'];
+}
+
+const MOCK_REASONING: Record<MockDomain, MockReasoningTemplate> = {
+  cardio: {
+    findings: [
+      {
+        id: 'f1',
+        kind: 'symptom',
+        label: '[mock] exertional chest pressure',
+        detail: '×2 days, relieved by rest',
+        polarity: 'present',
+      },
+      { id: 'f2', kind: 'negative', label: '[mock] no breathlessness at rest', polarity: 'denied' },
+      { id: 'f3', kind: 'vital', label: '[mock] BP 148/92', polarity: 'present' },
+    ],
+    differential: [
+      {
+        id: 'd1',
+        label: '[mock] Stable angina',
+        icd10: 'I20.8',
+        likelihood: 'high',
+        urgent: false,
+        evidenceFor: ['f1', 'f3'],
+        evidenceAgainst: [],
+        discriminator: 'exercise ECG / relief with rest',
+      },
+      {
+        id: 'd2',
+        label: '[mock] Acute coronary syndrome',
+        icd10: 'I24.9',
+        likelihood: 'moderate',
+        urgent: true,
+        evidenceFor: ['f1'],
+        evidenceAgainst: ['f2'],
+        discriminator: 'serial troponin + 12-lead ECG',
+      },
+      {
+        id: 'd3',
+        label: '[mock] Gastro-oesophageal reflux',
+        icd10: 'K21.9',
+        likelihood: 'low',
+        urgent: false,
+        evidenceFor: ['f1'],
+        evidenceAgainst: [],
+        discriminator: 'relation to meals / trial of PPI',
+      },
+    ],
+    askNext: [
+      {
+        id: 'q1',
+        question: '[mock] Does the pain radiate to the arm or jaw?',
+        why: 'distinguishes ACS from musculoskeletal/GERD',
+        targetDxIds: ['d1', 'd2'],
+        source: 'DIFFERENTIAL',
+        priority: 'high',
+        status: 'open',
+      },
+      {
+        id: 'q2',
+        question: '[mock] Is the pain related to meals or lying flat?',
+        why: 'supports reflux',
+        targetDxIds: ['d3'],
+        source: 'DIFFERENTIAL',
+        priority: 'normal',
+        status: 'open',
+      },
+    ],
+    redFlags: [
+      {
+        label: '[mock] Acute coronary syndrome',
+        why: 'exclude with ECG + troponin before discharge',
+        findingIds: ['f1'],
+      },
+    ],
+  },
+  endo: {
+    findings: [
+      {
+        id: 'f1',
+        kind: 'symptom',
+        label: '[mock] polyuria + polydipsia',
+        detail: '~2 weeks',
+        polarity: 'present',
+      },
+      { id: 'f2', kind: 'symptom', label: '[mock] unintentional weight loss', polarity: 'present' },
+      { id: 'f3', kind: 'vital', label: '[mock] random glucose 260 mg/dL', polarity: 'present' },
+    ],
+    differential: [
+      {
+        id: 'd1',
+        label: '[mock] Type 2 diabetes mellitus',
+        icd10: 'E11.9',
+        likelihood: 'high',
+        urgent: false,
+        evidenceFor: ['f1', 'f3'],
+        evidenceAgainst: [],
+        discriminator: 'HbA1c + fasting glucose',
+      },
+      {
+        id: 'd2',
+        label: '[mock] Diabetic ketoacidosis',
+        icd10: 'E10.1',
+        likelihood: 'moderate',
+        urgent: true,
+        evidenceFor: ['f3'],
+        evidenceAgainst: [],
+        discriminator: 'urine/serum ketones + venous gas',
+      },
+      {
+        id: 'd3',
+        label: '[mock] Diabetes insipidus',
+        icd10: 'E23.2',
+        likelihood: 'low',
+        urgent: false,
+        evidenceFor: ['f1'],
+        evidenceAgainst: ['f3'],
+        discriminator: 'serum osmolality + water-deprivation test',
+      },
+    ],
+    askNext: [
+      {
+        id: 'q1',
+        question: '[mock] Any nausea, vomiting, or abdominal pain?',
+        why: 'screens for DKA',
+        targetDxIds: ['d2'],
+        source: 'DIFFERENTIAL',
+        priority: 'high',
+        status: 'open',
+      },
+      {
+        id: 'q2',
+        question: '[mock] Any family history of diabetes?',
+        why: 'supports type 2 diabetes',
+        targetDxIds: ['d1'],
+        source: 'DIFFERENTIAL',
+        priority: 'normal',
+        status: 'open',
+      },
+    ],
+    redFlags: [
+      {
+        label: '[mock] Diabetic ketoacidosis',
+        why: 'check ketones + venous gas if unwell',
+        findingIds: ['f3'],
+      },
+    ],
+  },
+  gp: {
+    findings: [
+      { id: 'f1', kind: 'symptom', label: '[mock] fever', detail: '3 days', polarity: 'present' },
+      { id: 'f2', kind: 'symptom', label: '[mock] productive cough', polarity: 'present' },
+      { id: 'f3', kind: 'negative', label: '[mock] no breathlessness', polarity: 'denied' },
+    ],
+    differential: [
+      {
+        id: 'd1',
+        label: '[mock] Acute upper respiratory infection',
+        icd10: 'J06.9',
+        likelihood: 'high',
+        urgent: false,
+        evidenceFor: ['f1', 'f2'],
+        evidenceAgainst: [],
+        discriminator: 'self-limiting course / symptomatic',
+      },
+      {
+        id: 'd2',
+        label: '[mock] Community-acquired pneumonia',
+        icd10: 'J18.9',
+        likelihood: 'moderate',
+        urgent: false,
+        evidenceFor: ['f2'],
+        evidenceAgainst: ['f3'],
+        discriminator: 'chest exam + SpO2 + chest X-ray',
+      },
+      {
+        id: 'd3',
+        label: '[mock] Dengue fever',
+        icd10: 'A90',
+        likelihood: 'low',
+        urgent: false,
+        evidenceFor: ['f1'],
+        evidenceAgainst: [],
+        discriminator: 'NS1/serology + platelet count',
+      },
+    ],
+    askNext: [
+      {
+        id: 'q1',
+        question: '[mock] Any breathlessness or chest pain?',
+        why: 'screens for pneumonia',
+        targetDxIds: ['d2'],
+        source: 'DIFFERENTIAL',
+        priority: 'high',
+        status: 'open',
+      },
+      {
+        id: 'q2',
+        question: '[mock] Any rash, retro-orbital pain, or bleeding?',
+        why: 'screens for dengue',
+        targetDxIds: ['d3'],
+        source: 'DIFFERENTIAL',
+        priority: 'normal',
+        status: 'open',
+      },
+    ],
+    redFlags: [
+      {
+        label: '[mock] Community-acquired pneumonia',
+        why: 'check SpO2 + chest exam',
+        findingIds: ['f2'],
+      },
+    ],
+  },
+};
+
+export class MockGeminiReasoningBackend implements IPassReasoningBackend {
+  async run(
+    input: PassReasoningInput,
+  ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const anchor = input.newUtterances[0];
+    const newText = input.newUtterances.map((u) => u.text).join(' ');
+    const corpus = [newText, ...input.caseState.findings.map((f) => f.label)].join(' ');
+    const seenDx = new Set(input.previousDifferential.map((d) => d.id));
+    // Sprint DS3 — deterministic auto-resolution: if a new utterance mentions a
+    // keyword from an open question, report that question as answered.
+    const answeredQuestionIds = detectMockAnswers(newText, input.openQuestions ?? []);
+
+    const output: PassReasoningOutput = anchor
+      ? (() => {
+          const tpl = MOCK_REASONING[detectMockDomain(corpus)];
+          return {
+            findings: tpl.findings.map((f) => ({ ...f, utteranceIds: [anchor.id] })),
+            answeredQuestionIds,
+            differential: tpl.differential.map((d) => ({
+              ...d,
+              trend: seenDx.has(d.id) ? ('steady' as const) : ('new' as const),
+            })),
+            askNext: tpl.askNext,
+            redFlags: tpl.redFlags,
+          };
+        })()
+      : { findings: [], answeredQuestionIds, differential: [], askNext: [], redFlags: [] };
+
+    return {
+      output,
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_11_REASONING',
+        model: 'mock-flash',
+        region: 'mock-asia-south1',
+        promptVersion: REASONING_PROMPT_VERSION,
+        inputTokens: input.newUtterances.reduce((n, u) => n + Math.ceil(u.text.length / 4), 0) + 64,
+        outputTokens: 300,
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',

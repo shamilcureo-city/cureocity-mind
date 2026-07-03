@@ -50,7 +50,9 @@ export function recordGeminiCall(opts: {
     | 'PASS_6_CASE_BRIEFING'
     | 'PASS_7_CONCEPTUAL_MAP'
     | 'PASS_8_CASE_CONSULT'
-    | 'PASS_9_DIFFERENTIAL';
+    | 'PASS_9_DIFFERENTIAL'
+    | 'PASS_10_FINDINGS'
+    | 'PASS_11_REASONING';
   status: 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
   region: string;
   durationMs: number;

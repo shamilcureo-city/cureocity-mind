@@ -40,6 +40,10 @@ export async function POST(
   const note = parsed.value.note as MedicalEncounterNoteV1;
   const medications = (parsed.value.medications ?? []) as MedicationOrderV1[];
   const orders = (parsed.value.orders ?? []) as ClinicalOrderV1[];
+  // Sprint DS5 — the finalized Rx pad, stored alongside the note.
+  const rxPad = parsed.value.rxPad
+    ? (parsed.value.rxPad as unknown as Prisma.InputJsonValue)
+    : undefined;
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -71,6 +75,7 @@ export async function POST(
       content: note as unknown as Prisma.InputJsonValue,
       riskSeverity: 'NONE',
       errorMessage: null,
+      ...(rxPad !== undefined && { rxPad }),
     },
     create: {
       sessionId,
@@ -78,6 +83,7 @@ export async function POST(
       content: note as unknown as Prisma.InputJsonValue,
       riskSeverity: 'NONE',
       transcript: '(captured via live copilot)',
+      ...(rxPad !== undefined && { rxPad }),
     },
   });
 

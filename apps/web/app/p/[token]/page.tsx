@@ -490,6 +490,38 @@ function SnapshotView({
           )}
         </article>
       );
+    case 'RX_PAD':
+      // Sprint DS5-fu — patient-facing prescription (confirmed meds only).
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, {snapshot.greeting}
+          </p>
+          <NoteSection title="Diagnosis" body={snapshot.diagnosisLine} />
+          {snapshot.medications.length > 0 && (
+            <section className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+              <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Your medicines
+              </h2>
+              <ul className="mt-2 space-y-1.5 text-sm leading-relaxed text-[var(--color-ink)]">
+                {snapshot.medications.map((m, i) => (
+                  <li key={i} className="flex flex-wrap items-baseline gap-2">
+                    <span>{m.line}</span>
+                    {m.continued && (
+                      <span className="rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[11px] text-[var(--color-ink-3)]">
+                        continued
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          <AvsList title="Tests advised" items={snapshot.investigations} />
+          <AvsList title="Advice" items={snapshot.advice} />
+          <NoteSection title="Follow-up" body={snapshot.followUp} />
+        </article>
+      );
   }
 }
 

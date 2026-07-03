@@ -1,6 +1,9 @@
 import { z } from 'zod';
+import { ClinicalFindingSchema, PatientContextSchema } from './case-state';
+import { LiveReasoningSchema } from './live-reasoning';
 import { EvidenceRefSchema, MedicalEncounterNoteV1Schema } from './medical-note';
 import { ClinicalOrderV1Schema, MedicationOrderV1Schema } from './medication-order';
+import { RxPadDraftSchema, RxPadV1Schema } from './rx-pad';
 
 /**
  * Sprint DV1 scaffold — the streaming / live contracts (Rails 1–3 of the
@@ -17,6 +20,27 @@ export const LiveTranscriptDeltaSchema = z.object({
   endMs: z.number().int().nonnegative().optional(),
 });
 export type LiveTranscriptDelta = z.infer<typeof LiveTranscriptDeltaSchema>;
+
+/**
+ * Sprint DS0 — a finalized transcript window. The gateway no longer
+ * re-transcribes the whole rolling buffer every cycle (that was O(n²) in
+ * audio length + tokens). Instead it segments the stream at silence
+ * boundaries (see services/live-gateway/src/vad.ts) and runs Pass 1 on
+ * each NEW ~15–30s window exactly once, appending one Utterance per
+ * window. Utterances are the durable record DS1's CaseState composer
+ * consumes; the cumulative transcript is just their `text` joined.
+ */
+export const UtteranceSchema = z.object({
+  /** Stable per-consult id (monotonic window index, e.g. "u1"). */
+  id: z.string(),
+  speaker: z.enum(['doctor', 'patient', 'unknown']).default('unknown'),
+  text: z.string(),
+  /** Window start offset from consult start, in ms. */
+  tStartMs: z.number().int().nonnegative(),
+  /** Window end offset from consult start, in ms. */
+  tEndMs: z.number().int().nonnegative(),
+});
+export type Utterance = z.infer<typeof UtteranceSchema>;
 
 /// Rail 2 — the incremental structured note, emitted repeatedly during
 /// the consult. A partial of the final encounter note.
@@ -68,8 +92,49 @@ export const VoiceCommandSchema = z.discriminatedUnion('kind', [
     raw: z.string(),
     measure: z.enum(['BP', 'HBA1C', 'FBS', 'LDL', 'WEIGHT']),
   }),
+  // Sprint DS7 — clinic-flow control spoken near the end of a consult.
+  // "next patient" / "call the next one" advances the queue; "wait" /
+  // "hold on" holds the turnover. Surfaced as a command; the doctor still
+  // ends + signs — nothing auto-advances mid-consult.
+  z.object({
+    kind: z.literal('NEXT_PATIENT'),
+    raw: z.string(),
+    /** true = "wait"/"hold on" — stay on this patient, don't advance. */
+    hold: z.boolean().default(false),
+  }),
 ]);
 export type VoiceCommand = z.infer<typeof VoiceCommandSchema>;
+
+// ============================================================================
+// Sprint DS0 — per-consult token / cost / latency meter. The gateway can't
+// touch the DB (no prisma dep — it's a standalone socket service), so it
+// EMITS this summary as a `meter` event and the browser relays it to
+// POST /sessions/:id/live-metric, which persists a LiveConsultMetric row.
+// This is how we hold the unit economics honest: ≤ ₹2 / consult, transcript
+// p95 ≤ 2s. costInr is a plain number (INR, ≤ 4 dp) — the DB column is the
+// Decimal. Latencies are whole ms.
+// ============================================================================
+export const MeterSummarySchema = z.object({
+  sessionId: z.string(),
+  /** 'mock' | 'vertex' — which backend produced these numbers. */
+  backend: z.string(),
+  /** Finalized transcription windows so far. */
+  windows: z.number().int().nonnegative(),
+  pass1Calls: z.number().int().nonnegative(),
+  pass2Calls: z.number().int().nonnegative(),
+  inputTokens: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative(),
+  costInr: z.number().nonnegative(),
+  /** Pass-1 (transcription) latency percentiles across windows. */
+  transcriptP50Ms: z.number().int().nonnegative(),
+  transcriptP95Ms: z.number().int().nonnegative(),
+  /** Pass-2 (note) latency percentiles across windows. */
+  noteP50Ms: z.number().int().nonnegative(),
+  noteP95Ms: z.number().int().nonnegative(),
+  /** Wall-clock since the consult started. */
+  elapsedMs: z.number().int().nonnegative(),
+});
+export type MeterSummary = z.infer<typeof MeterSummarySchema>;
 
 // ============================================================================
 // Sprint DV4 — live gateway wire protocol. The doctor's browser opens a
@@ -93,8 +158,18 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
      * LIVE_GATEWAY_SECRET is unset); required in prod.
      */
     token: z.string().optional(),
+    /**
+     * Sprint DS1 — patient context seeded into the consult's CaseState
+     * (age / sex / known conditions / active meds / allergies). The browser
+     * fetches it from the encounter page data. Optional — a thin payload
+     * still works; the reasoning engine just has less to anchor on.
+     */
+    context: PatientContextSchema.optional(),
   }),
   z.object({ type: z.literal('stop') }),
+  // Sprint DS3 — the doctor dismissed an "ask next" question. The gateway
+  // marks it dismissed for the rest of the consult (never re-suggested).
+  z.object({ type: z.literal('dismiss'), questionId: z.string() }),
 ]);
 export type LiveGatewayCommand = z.infer<typeof LiveGatewayCommandSchema>;
 
@@ -105,6 +180,9 @@ export const LiveGatewayStateSchema = z.enum([
   'done',
   // Sprint DV8 hardening — the start token was missing/invalid/expired.
   'unauthorized',
+  // Sprint DS8 hardening — the node is at its concurrent-session cap; the
+  // client is shed gracefully and asked to retry.
+  'busy',
 ]);
 export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 
@@ -113,8 +191,30 @@ export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
+  // Sprint DS0 — a finalized transcript window, emitted once per window as
+  // the durable record (stable id + precise ms bounds). The `transcript`
+  // delta still drives the running display; `utterance` is what DS1 builds
+  // CaseState from.
+  z.object({ type: z.literal('utterance'), utterance: UtteranceSchema }),
   z.object({ type: z.literal('note'), partial: PartialStructuredNoteSchema }),
   z.object({ type: z.literal('gap'), gap: EncounterGapSchema }),
+  // Sprint DS0 — per-consult token / cost / latency rollup. Emitted after
+  // each window + once at the end; the browser relays the last one to the
+  // live-metric route.
+  z.object({ type: z.literal('meter'), summary: MeterSummarySchema }),
+  // Sprint DS1 — the current structured findings snapshot (full list, not a
+  // delta) + the CaseState version. Idempotent client render. DS2's
+  // differential + DS3's ask-next will ride alongside on their own events.
+  z.object({
+    type: z.literal('finding'),
+    findings: z.array(ClinicalFindingSchema),
+    version: z.number().int().nonnegative(),
+  }),
+  // Sprint DS2 — the live clinical reasoning snapshot (differential +
+  // ask-next + red flags). Full snapshot, idempotent render.
+  z.object({ type: z.literal('reasoning'), reasoning: LiveReasoningSchema }),
+  // Sprint DS5 — the Rx pad assembling live (partial). Idempotent render.
+  z.object({ type: z.literal('rxDraft'), rxPad: RxPadDraftSchema }),
   // Sprint DV9 — the closing note carries the drafted Rx + clinical
   // orders too, so the browser can persist a complete encounter (parity
   // with the batch path) for the doctor to sign.
@@ -123,6 +223,9 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
     note: MedicalEncounterNoteV1Schema,
     medications: z.array(MedicationOrderV1Schema).default([]),
     orders: z.array(ClinicalOrderV1Schema).default([]),
+    // Sprint DS5 — the finalized Rx pad, assembled from the note + drafted
+    // meds/orders + patient context. The browser persists it with the note.
+    rxPad: RxPadV1Schema.optional(),
   }),
   z.object({ type: z.literal('command'), command: VoiceCommandSchema }),
 ]);
@@ -138,5 +241,26 @@ export const LiveNoteInputSchema = z.object({
   note: MedicalEncounterNoteV1Schema,
   medications: z.array(MedicationOrderV1Schema).default([]),
   orders: z.array(ClinicalOrderV1Schema).default([]),
+  // Sprint DS5 — the finalized Rx pad stored alongside the draft note.
+  rxPad: RxPadV1Schema.optional(),
 });
 export type LiveNoteInput = z.infer<typeof LiveNoteInputSchema>;
+
+/**
+ * Sprint DS3 — POST /sessions/:id/live-suggestion body. The browser relays
+ * live copilot suggestion lifecycle events (the gateway can't touch the DB)
+ * so each shown / acted / dismissed / auto-resolved event lands one audit
+ * row — the safety trail + the pilot dataset.
+ */
+export const LiveSuggestionEventSchema = z.object({
+  event: z.enum(['shown', 'acted', 'dismissed', 'autoresolved']),
+  /** Stable id of the suggestion (differential id, ask-next id, …). */
+  suggestionId: z.string(),
+  /** What kind of suggestion, for analytics. */
+  kind: z.enum(['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP']).default('ASK_NEXT'),
+  /** Optional human label, stored in the audit metadata. */
+  label: z.string().optional(),
+  /** Sprint DS9 — why the doctor dismissed (1-tap chip), for the pilot dataset. */
+  dismissReason: z.enum(['wrong', 'known', 'not_now', 'other']).optional(),
+});
+export type LiveSuggestionEvent = z.infer<typeof LiveSuggestionEventSchema>;

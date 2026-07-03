@@ -783,6 +783,13 @@ model Session {
   // Examples: ["en"], ["ml", "en"], ["hi", "en"], ["en", "ml", "hi"].
   spokenLanguages String[] @default([])
 
+  /// Sprint DS7 — OPD token for the clinic queue. Auto-assigned
+  /// server-side at session-create for the DOCTOR vertical (next integer
+  /// among that doctor's sessions scheduled today); null for therapist
+  /// rows + anything created before DS7. Drives the queue ordering on
+  /// /app/clinic. See docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS7.
+  tokenNumber Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -810,6 +817,9 @@ model Session {
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
   @@index([psychologistId, status, scheduledAt])
+  // Sprint DS7 — the clinic-queue read: today's sessions for a doctor,
+  // ordered by token.
+  @@index([psychologistId, scheduledAt, tokenNumber])
   @@map("sessions")
 }
 
@@ -1052,6 +1062,8 @@ enum GeminiPass {
   PASS_7_CONCEPTUAL_MAP // Sprint 24 — Klarify-style per-client thematic graph
   PASS_8_CASE_CONSULT // Sprint 52 — second-opinion artefact for stuck cases
   PASS_9_DIFFERENTIAL // Sprint DV6 — doctor differential diagnosis
+  PASS_10_FINDINGS // Sprint DS1 — live findings extractor (reasoning substrate)
+  PASS_11_REASONING // Sprint DS2 — combined live reasoning (differential + ask-next)
 }
 
 enum GeminiCallStatus {
@@ -1127,6 +1139,10 @@ model NoteDraft {
   content      Json?
   riskSeverity NoteRiskSeverity?
 
+  /// Sprint DS5 — the signable Rx pad (RxPadV1) assembled from the live
+  /// consult, stored alongside the note + signed together.
+  rxPad Json?
+
   // Cost rollup across Pass 1 + Pass 2 (and any retries).
   totalCostInr Decimal @default(0) @db.Decimal(10, 4)
 
@@ -1154,6 +1170,12 @@ model TherapyNote {
 
   version String
   content Json
+
+  // Sprint DS5-fu — the SIGNED prescription pad (RxPadV1, confirmed meds
+  // only), derived from NoteDraft.rxPad at sign time so the signature
+  // attests the Rx. Null for therapy notes + notes signed before DS5-fu.
+  // The clean, patient-safe source for the Rx PDF + RX_PAD share.
+  rxPad Json?
 
   signedAt DateTime
   signedBy String
@@ -1700,6 +1722,7 @@ enum PatientShareArtefactType {
   SIGNED_INTAKE_NOTE // Sprint 49 — intake-note counterpart to SIGNED_NOTE
   AFTER_VISIT_SUMMARY // Sprint DV3 — doctor after-visit summary
   CHRONIC_PROGRESS_REPORT // Sprint DV7 — doctor chronic-disease progress report
+  RX_PAD // Sprint DS5-fu — doctor prescription pad (signed Rx, confirmed meds)
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.
@@ -2334,6 +2357,39 @@ model NoteReview {
   @@map("note_reviews")
 }
 
+/// Sprint DS0 — per-consult token / cost / latency meter for the doctor
+/// live copilot. The streaming gateway can't touch the DB, so the browser
+/// relays the gateway's meter summary to POST /sessions/:id/live-metric,
+/// which writes one row per consult. Telemetry only (scalar keys, no FK) —
+/// it holds the unit economics honest: ≤ ₹2 / consult, transcript p95 ≤ 2s.
+model LiveConsultMetric {
+  id             String @id @default(cuid())
+  sessionId      String
+  psychologistId String
+
+  /// 'mock' | 'vertex' — which backend produced these numbers.
+  backend String
+
+  windows      Int
+  pass1Calls   Int
+  pass2Calls   Int
+  inputTokens  Int
+  outputTokens Int
+  costInr      Decimal @db.Decimal(10, 4)
+
+  transcriptP50Ms Int
+  transcriptP95Ms Int
+  noteP50Ms       Int
+  noteP95Ms       Int
+  elapsedMs       Int
+
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+  @@index([psychologistId, createdAt])
+  @@map("live_consult_metrics")
+}
+
 // ============================================================================
 // AuditLog — append-only. Polymorphic target via (targetType, targetId).
 // Every state-changing endpoint writes one row. Read access surface added in
@@ -2562,6 +2618,8 @@ enum AuditAction {
   // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
   CLINICAL_READING_RECORDED
   PATIENT_CHRONIC_REPORT_SHARED
+  // Doctor vertical — Sprint DS5-fu. Prescription pad shared to the patient.
+  PATIENT_RX_PAD_SHARED
   // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
   ENCOUNTER_FHIR_EXPORTED
   ABHA_LINKED
@@ -2582,6 +2640,13 @@ enum AuditAction {
   WELCOME_DISMISSED
   // A note template was applied to a session (note re-generated to it).
   NOTE_TEMPLATE_APPLIED
+  // Doctor vertical — Sprint DS0. Live consult token/cost/latency meter persisted.
+  LIVE_CONSULT_METERED
+  // Doctor vertical — Sprint DS3. Live copilot suggestion lifecycle.
+  LIVE_SUGGESTION_SHOWN
+  LIVE_SUGGESTION_ACTED
+  LIVE_SUGGESTION_DISMISSED
+  LIVE_SUGGESTION_AUTORESOLVED
 }
 
 enum AuditActorType {

@@ -29,6 +29,15 @@ to the doctor vertical (DV1–DV8): account provisioning, the clinical-loop
 smoke, the safety-rail verification, and the env-gated ABDM / billing
 steps still pending procurement.
 
+## Live-copilot gateway
+
+[live-gateway-deploy.md](./live-gateway-deploy.md) — stand up / restart the
+standalone WebSocket gateway (`services/live-gateway`) that powers the
+doctor live copilot, in-region (asia-south1) with TLS + auth + the
+concurrency cap. The remaining ops step of Sprint DS8: env matrix, the
+container + systemd/Cloud Run run, `wss://` termination, the verify +
+load steps, and the DPDP audio-residency checklist.
+
 ## Go-live walkthrough
 
 [go-live.md](./go-live.md) — sequenced, one-time setup that takes the

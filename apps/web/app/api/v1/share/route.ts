@@ -361,6 +361,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
     }
 
+    // Sprint DS5-fu — dispensing a prescription to a patient is a distinct
+    // clinical event; audit it separately (literal action for the chaos test).
+    if (input.artefact.artefactType === 'RX_PAD') {
+      await writeAudit({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: auth.value.psychologistId,
+        action: 'PATIENT_RX_PAD_SHARED',
+        targetType: 'PatientShare',
+        targetId: updated.id,
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          clientId: client.id,
+          channel,
+          outcome: sendResult.outcome,
+        },
+      });
+    }
+
     channelResults.push({
       channel,
       shareId: updated.id,
@@ -545,6 +563,10 @@ function extractArtefactId(input: ShareInput): string {
       // Sprint DV7 — derived from the per-patient reading series, not a
       // stored row; the clientId IS the artefact discriminator.
       return input.artefact.clientId;
+    case 'RX_PAD':
+      // Sprint DS5-fu — the signed prescription; sessionId is the
+      // discriminator, same posture as SIGNED_NOTE / AFTER_VISIT_SUMMARY.
+      return input.artefact.sessionId;
   }
 }
 

@@ -11,6 +11,8 @@ import {
   type IPass7Backend,
   type IPass8Backend,
   type IPassDifferentialBackend,
+  type IPassFindingsBackend,
+  type IPassReasoningBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
@@ -20,8 +22,12 @@ import {
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
+  MockGeminiFindingsBackend,
+  MockGeminiReasoningBackend,
   ModelRouter,
   VertexGeminiDifferentialBackend,
+  VertexGeminiFindingsBackend,
+  VertexGeminiReasoningBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -57,6 +63,8 @@ const modelRouterProvider: Provider = {
     let pass7: IPass7Backend;
     let pass8: IPass8Backend;
     let passDifferential: IPassDifferentialBackend;
+    let passFindings: IPassFindingsBackend;
+    let passReasoning: IPassReasoningBackend;
 
     if (!projectId) {
       logger.warn(
@@ -71,6 +79,8 @@ const modelRouterProvider: Provider = {
       pass7 = new MockGeminiPass7Backend();
       pass8 = new MockGeminiPass8Backend();
       passDifferential = new MockGeminiDifferentialBackend();
+      passFindings = new MockGeminiFindingsBackend();
+      passReasoning = new MockGeminiReasoningBackend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -148,6 +158,26 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-pro-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      // Sprint DS1 — findings extractor. Flash in asia-south1 (DPDP).
+      passFindings = new VertexGeminiFindingsBackend({
+        projectId,
+        location: config.get<string>('GEMINI_FLASH_REGION') ?? 'asia-south1',
+        model:
+          config.get<string>('GEMINI_FINDINGS_MODEL') ??
+          config.get<string>('GEMINI_FLASH_MODEL') ??
+          'gemini-1.5-flash-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
+      // Sprint DS2 — combined live reasoning. Flash in asia-south1 (DPDP).
+      passReasoning = new VertexGeminiReasoningBackend({
+        projectId,
+        location: config.get<string>('GEMINI_FLASH_REGION') ?? 'asia-south1',
+        model:
+          config.get<string>('GEMINI_REASONING_MODEL') ??
+          config.get<string>('GEMINI_FLASH_MODEL') ??
+          'gemini-1.5-flash-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
@@ -161,6 +191,8 @@ const modelRouterProvider: Provider = {
       pass7,
       pass8,
       passDifferential,
+      passFindings,
+      passReasoning,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

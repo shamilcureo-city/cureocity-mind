@@ -132,6 +132,12 @@ function makeRouter(opts: {
     passDifferential: vi.fn(async () => {
       throw new Error('passDifferential not used by note orchestrator');
     }),
+    passFindings: vi.fn(async () => {
+      throw new Error('passFindings not used by note orchestrator');
+    }),
+    passReasoning: vi.fn(async () => {
+      throw new Error('passReasoning not used by note orchestrator');
+    }),
   };
 }
 

@@ -11,6 +11,8 @@
  * docs/DOCTOR_VERTICAL.md §2, §7; docs/DOCTOR_VERTICAL_SPRINTS.md DV6.3.
  */
 
+import type { AskNextItem } from '@cureocity/contracts';
+
 export type TemplateElementCategory = 'HPI' | 'ROS' | 'EXAM' | 'VITALS';
 
 export interface TemplateElement {
@@ -148,6 +150,8 @@ export interface EncounterCompletenessInput {
 export interface TemplateGap {
   category: TemplateElementCategory;
   elementId: string;
+  /** The element's human label, e.g. "Relation to exertion". */
+  label: string;
   message: string;
 }
 
@@ -175,25 +179,75 @@ export function missingTemplateElements(
 
   for (const el of template.hpi) {
     if (!documented(hpiRosHay, el.cues)) {
-      gaps.push({ category: 'HPI', elementId: el.id, message: `${el.label} not documented yet.` });
+      gaps.push({
+        category: 'HPI',
+        elementId: el.id,
+        label: el.label,
+        message: `${el.label} not documented yet.`,
+      });
     }
   }
   for (const el of template.ros) {
     if (!documented(hpiRosHay, el.cues)) {
-      gaps.push({ category: 'ROS', elementId: el.id, message: `${el.label} not asked yet.` });
+      gaps.push({
+        category: 'ROS',
+        elementId: el.id,
+        label: el.label,
+        message: `${el.label} not asked yet.`,
+      });
     }
   }
   for (const el of template.exam) {
     // Only flag exam elements once an exam has been performed — don't
     // nag for a murmur when no exam was done (that's the PE guard's job).
     if (input.examined && !documented(examHay, el.cues)) {
-      gaps.push({ category: 'EXAM', elementId: el.id, message: `${el.label} not documented.` });
+      gaps.push({
+        category: 'EXAM',
+        elementId: el.id,
+        label: el.label,
+        message: `${el.label} not documented.`,
+      });
     }
   }
   for (const v of template.vitals) {
     if (!vitals.has(v.id)) {
-      gaps.push({ category: 'VITALS', elementId: v.id, message: `${v.label} not recorded.` });
+      gaps.push({
+        category: 'VITALS',
+        elementId: v.id,
+        label: v.label,
+        message: `${v.label} not recorded.`,
+      });
     }
   }
   return gaps;
+}
+
+// ============================================================================
+// Sprint DS3 — template-driven "ask next" questions. The deterministic
+// completeness gaps become AskNextItems (source TEMPLATE, priority normal) so
+// they interleave with the differential-driven questions in the live copilot.
+// Instant + rule-based; the gateway dedups them against differential-driven
+// ones and caps the open set. See docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS3.
+// ============================================================================
+const QUESTION_VERB: Record<TemplateElementCategory, string> = {
+  HPI: 'Ask about',
+  ROS: 'Ask about',
+  EXAM: 'Examine / document',
+  VITALS: 'Record',
+};
+
+export function templateAskNext(
+  input: EncounterCompletenessInput,
+  template: SpecialtyTemplate | null,
+): AskNextItem[] {
+  if (!template) return [];
+  return missingTemplateElements(input, template).map((g) => ({
+    id: `t-${g.category.toLowerCase()}-${g.elementId}`,
+    question: `${QUESTION_VERB[g.category]} ${g.label.toLowerCase()}?`,
+    why: `Completes the ${template.label} template.`,
+    targetDxIds: [],
+    source: 'TEMPLATE' as const,
+    priority: 'normal' as const,
+    status: 'open' as const,
+  }));
 }

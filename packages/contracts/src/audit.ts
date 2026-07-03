@@ -187,6 +187,9 @@ export const AuditActionSchema = z.enum([
   // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
   'CLINICAL_READING_RECORDED',
   'PATIENT_CHRONIC_REPORT_SHARED',
+  // Doctor vertical — Sprint DS5-fu. Prescription pad shared to the patient
+  // (a prescribing/dispensing event, distinct from PATIENT_ARTEFACT_SHARED).
+  'PATIENT_RX_PAD_SHARED',
   // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
   'ENCOUNTER_FHIR_EXPORTED',
   'ABHA_LINKED',
@@ -210,6 +213,15 @@ export const AuditActionSchema = z.enum([
   // Sprint 70 — a note template was applied to a session (the note is
   // re-generated into that template's structure).
   'NOTE_TEMPLATE_APPLIED',
+  // Doctor vertical — Sprint DS0. A live consult's token / cost / latency
+  // meter was persisted (relayed from the streaming gateway on consult end).
+  'LIVE_CONSULT_METERED',
+  // Doctor vertical — Sprint DS3. Live copilot suggestion lifecycle (shown /
+  // acted / dismissed / auto-resolved) — the safety trail + pilot dataset.
+  'LIVE_SUGGESTION_SHOWN',
+  'LIVE_SUGGESTION_ACTED',
+  'LIVE_SUGGESTION_DISMISSED',
+  'LIVE_SUGGESTION_AUTORESOLVED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
