@@ -89,8 +89,12 @@ export async function GET(
       rciNumber: session.psychologist.rciNumber,
       specialty: session.psychologist.specialty,
       clinicName: null,
-      signedBy: session.therapyNote?.signedBy ?? null,
-      signedAt: session.therapyNote?.signedAt?.toISOString() ?? null,
+      // Only stamp "Signed by …" when the rendered pad IS the signed pad.
+      // On the draft fallback (signedRx null — e.g. a note signed before
+      // DS5-fu, so TherapyNote.rxPad was never populated), the signature
+      // block must read "unsigned draft", per this route's contract.
+      signedBy: signedRx ? (session.therapyNote?.signedBy ?? null) : null,
+      signedAt: signedRx ? (session.therapyNote?.signedAt?.toISOString() ?? null) : null,
     }),
   );
 
@@ -106,7 +110,8 @@ export async function GET(
       clientId: session.clientId,
       format: 'pdf',
       doc: 'rx',
-      signed: session.therapyNote != null,
+      // Provenance of the rendered pad: true only when the SIGNED pad was used.
+      signed: signedRx != null,
       bytes: buffer.length,
     },
   });

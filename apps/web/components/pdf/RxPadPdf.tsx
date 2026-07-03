@@ -186,7 +186,7 @@ export function RxPadPdf(props: RxPadPdfProps) {
                     {m.continued ? <Text style={styles.continued}> (continued)</Text> : null}
                   </Text>
                   {m.warnings.length > 0 ? (
-                    <Text style={styles.warn}>⚠ {m.warnings[0]}</Text>
+                    <Text style={styles.warn}>! {m.warnings[0]}</Text>
                   ) : null}
                 </View>
                 <Text style={styles.cDose}>
