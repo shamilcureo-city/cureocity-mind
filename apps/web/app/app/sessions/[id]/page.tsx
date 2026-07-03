@@ -246,9 +246,13 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     select: {
+      psychologistId: true,
       fullName: true,
+      fullNameEncrypted: true,
       contactPhone: true,
+      contactPhoneEncrypted: true,
       contactEmail: true,
+      contactEmailEncrypted: true,
       dateOfBirth: true,
       presentingConcerns: true,
       preferredModality: true,
@@ -257,6 +261,8 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
   if (!client) {
     return <p className="text-sm text-[var(--color-ink-2)]">Client record not found.</p>;
   }
+  // PII read cutover — prefer the encrypted columns (plaintext fallback).
+  const pii = await resolveClientPii(client);
 
   const [pastSessionCount, lastSession] = await Promise.all([
     prisma.session.count({
@@ -281,9 +287,9 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
     <ClientTab
       data={{
         id: clientId,
-        fullName: client.fullName,
-        contactPhone: client.contactPhone,
-        contactEmail: client.contactEmail,
+        fullName: pii.fullName,
+        contactPhone: pii.contactPhone,
+        contactEmail: pii.contactEmail,
         dateOfBirth: client.dateOfBirth,
         presentingConcerns: client.presentingConcerns,
         preferredModality: client.preferredModality,
