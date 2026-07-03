@@ -12,7 +12,7 @@ import { Glyph } from '@/components/app/Sidebar';
 const ITEMS: {
   href: string;
   label: string;
-  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'assistant' | 'cog' | 'clinic';
+  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'assistant' | 'cog' | 'clinic' | 'insights';
 }[] = [
   { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { href: '/app/today', label: 'Today', icon: 'today' },
@@ -26,6 +26,7 @@ const ITEMS: {
 const DOCTOR_ITEMS: typeof ITEMS = [
   { href: '/app/clinic', label: 'Clinic', icon: 'clinic' },
   { href: '/app/patients', label: 'Patients', icon: 'clients' },
+  { href: '/app/insights', label: 'Insights', icon: 'insights' },
   { href: '/app/settings', label: 'Settings', icon: 'cog' },
 ];
 

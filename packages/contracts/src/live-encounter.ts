@@ -260,5 +260,7 @@ export const LiveSuggestionEventSchema = z.object({
   kind: z.enum(['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP']).default('ASK_NEXT'),
   /** Optional human label, stored in the audit metadata. */
   label: z.string().optional(),
+  /** Sprint DS9 — why the doctor dismissed (1-tap chip), for the pilot dataset. */
+  dismissReason: z.enum(['wrong', 'known', 'not_now', 'other']).optional(),
 });
 export type LiveSuggestionEvent = z.infer<typeof LiveSuggestionEventSchema>;

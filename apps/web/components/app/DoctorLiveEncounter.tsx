@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import {
   ChronicTrajectorySchema,
+  DISMISS_REASON_LABELS,
   LiveGatewayEventSchema,
   type ClinicalFinding,
+  type DismissReason,
   type EncounterGap,
   type LiveReasoning,
   type MedicalEncounterNoteV1,
@@ -216,12 +218,19 @@ export function DoctorLiveEncounter({
     suggestionId: string,
     kind: 'DIFFERENTIAL' | 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
     label?: string,
+    dismissReason?: DismissReason,
   ): Promise<void> {
     try {
       await fetch(`/api/v1/sessions/${sessionId}/live-suggestion`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ event, suggestionId, kind, ...(label ? { label } : {}) }),
+        body: JSON.stringify({
+          event,
+          suggestionId,
+          kind,
+          ...(label ? { label } : {}),
+          ...(dismissReason ? { dismissReason } : {}),
+        }),
       });
     } catch {
       /* audit is best-effort */
@@ -229,10 +238,10 @@ export function DoctorLiveEncounter({
   }
 
   // Sprint DS3 — the doctor dismissed an ask-next question: tell the gateway
-  // (so it never re-suggests) + audit it.
-  function dismissQuestion(id: string, label?: string): void {
+  // (so it never re-suggests) + audit it. Sprint DS9 — with a 1-tap reason.
+  function dismissQuestion(id: string, label?: string, reason?: DismissReason): void {
     wsRef.current?.send(JSON.stringify({ type: 'dismiss', questionId: id }));
-    void relaySuggestion('dismissed', id, 'ASK_NEXT', label);
+    void relaySuggestion('dismissed', id, 'ASK_NEXT', label, reason);
   }
 
   // Resolve a SHOW_DATA command against the patient's chronic readings.
@@ -780,7 +789,7 @@ function LiveRail({
   recs: Rec[];
   criticalOpen: boolean;
   live: boolean;
-  onDismiss: (id: string, label?: string) => void;
+  onDismiss: (id: string, label?: string, reason?: DismissReason) => void;
   onAsked: (id: string, label?: string) => void;
   onEvidence: (findingIds: string[]) => void;
   onAddToAssessment: (dxId: string, label: string) => void;
@@ -807,6 +816,8 @@ function LiveRail({
   );
 }
 
+const DISMISS_CHIPS: DismissReason[] = ['wrong', 'known', 'not_now'];
+
 function AskNextZone({
   askNext,
   onAsked,
@@ -814,8 +825,10 @@ function AskNextZone({
 }: {
   askNext: LiveReasoning['askNext'];
   onAsked: (id: string, label?: string) => void;
-  onDismiss: (id: string, label?: string) => void;
+  onDismiss: (id: string, label?: string, reason?: DismissReason) => void;
 }) {
+  // Sprint DS9 — which question's dismiss-reason chips are open.
+  const [reasonFor, setReasonFor] = useState<string | null>(null);
   if (askNext.length === 0) return null;
   return (
     <Card className="overflow-hidden p-0">
@@ -851,26 +864,52 @@ function AskNextZone({
                   </span>
                 )}
               </span>
-              {!answered && (
-                <span className="flex shrink-0 gap-1 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                  <button
-                    type="button"
-                    onClick={() => onAsked(q.id, q.question)}
-                    className="rounded px-1 text-[11px] font-semibold text-[var(--color-accent)] hover:underline"
-                    title="Mark as asked"
-                  >
-                    asked
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDismiss(q.id, q.question)}
-                    className="rounded px-1 text-[11px] text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
-                    title="Dismiss"
-                  >
-                    ✕
-                  </button>
-                </span>
-              )}
+              {!answered &&
+                (reasonFor === q.id ? (
+                  // Sprint DS9 — 1-tap dismiss reason for the pilot dataset.
+                  <span className="flex shrink-0 flex-wrap items-center gap-1 pt-0.5">
+                    {DISMISS_CHIPS.map((r) => (
+                      <button
+                        key={r}
+                        type="button"
+                        onClick={() => {
+                          onDismiss(q.id, q.question, r);
+                          setReasonFor(null);
+                        }}
+                        className="rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[10.5px] font-medium text-[var(--color-ink-2)] hover:bg-[var(--color-warn-soft)] hover:text-[var(--color-warn)]"
+                      >
+                        {DISMISS_REASON_LABELS[r]}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setReasonFor(null)}
+                      className="rounded px-1 text-[11px] text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+                      title="Cancel"
+                    >
+                      ↩
+                    </button>
+                  </span>
+                ) : (
+                  <span className="flex shrink-0 gap-1 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button
+                      type="button"
+                      onClick={() => onAsked(q.id, q.question)}
+                      className="rounded px-1 text-[11px] font-semibold text-[var(--color-accent)] hover:underline"
+                      title="Mark as asked"
+                    >
+                      asked
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReasonFor(q.id)}
+                      className="rounded px-1 text-[11px] text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
+                      title="Dismiss"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
             </li>
           );
         })}

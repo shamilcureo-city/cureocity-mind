@@ -53,6 +53,8 @@ export async function POST(
     suggestionId: ev.suggestionId,
     kind: ev.kind,
     ...(ev.label ? { label: ev.label } : {}),
+    // Sprint DS9 — the 1-tap dismiss reason, for the pilot acceptance dataset.
+    ...(ev.dismissReason ? { dismissReason: ev.dismissReason } : {}),
     ...auditMetadataFromRequest(req),
   };
   const base = {
