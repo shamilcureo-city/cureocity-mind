@@ -12,6 +12,7 @@ import {
   type MedicalEncounterNoteV1,
   MedicalEncounterNoteV1Schema,
   MedicationOrderV1Schema,
+  RxPadV1Schema,
   type ClinicalTreatmentPlan,
   ClinicalTreatmentPlanSchema,
   type SignedIntakeNoteSnapshotSection,
@@ -80,7 +81,88 @@ export async function buildSnapshot(args: BuildArgs): Promise<SnapshotResult | n
       return buildAfterVisitSummary(args, args.ref.sessionId);
     case 'CHRONIC_PROGRESS_REPORT':
       return buildChronicProgressReport(args, args.ref.clientId);
+    case 'RX_PAD':
+      return buildRxPad(args, args.ref.sessionId);
   }
+}
+
+/**
+ * Sprint DS5-fu — prescription-pad builder. Deterministic (no LLM): the
+ * patient's shareable Rx, built from the SIGNED pad (TherapyNote.rxPad).
+ * Gated on the note being signed; only CONFIRMED meds reach the patient
+ * (pending/AI-suggested rows are already excluded from the signed pad, and
+ * we filter again defensively). Every free-text field is stripped of the
+ * [mock] tag before it leaves for a patient.
+ */
+async function buildRxPad(
+  { clientId, psychologistId }: BuildArgs,
+  sessionId: string,
+): Promise<SnapshotResult | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      clientId: true,
+      psychologistId: true,
+      scheduledAt: true,
+      therapyNote: { select: { rxPad: true } },
+    },
+  });
+  if (!session || session.psychologistId !== psychologistId || session.clientId !== clientId) {
+    return null;
+  }
+  if (!session.therapyNote) {
+    throw new SnapshotBuildError('Cannot share a prescription before the note is signed.');
+  }
+  if (session.therapyNote.rxPad == null) {
+    throw new SnapshotBuildError('No prescription was recorded for this consult.');
+  }
+  const parsed = RxPadV1Schema.safeParse(session.therapyNote.rxPad);
+  if (!parsed.success) {
+    throw new SnapshotBuildError('Signed prescription failed schema validation; cannot share.');
+  }
+  const pad = parsed.data;
+
+  const medications = pad.meds
+    .filter((m) => m.status === 'confirmed')
+    .map((m) => ({
+      line: [
+        stripBracketTag(m.drug).trim(),
+        m.strength,
+        m.dose,
+        m.frequency,
+        m.timing,
+        m.durationDays ? `for ${m.durationDays} days` : null,
+      ]
+        .filter((p): p is string => !!p && p.length > 0)
+        .join(' · '),
+      continued: m.continued,
+    }))
+    .filter((m) => m.line.length > 0);
+
+  const investigations = pad.investigations
+    .map((i) => stripBracketTag(i.name).trim())
+    .filter((s) => s.length > 0);
+  const advice = pad.adviceLines.map((a) => stripBracketTag(a).trim()).filter((s) => s.length > 0);
+  const followUp = pad.followUp
+    ? [pad.followUp.when, pad.followUp.withWhat].filter(Boolean).join(' · ')
+    : '';
+
+  const snapshot: PatientShareSnapshot = {
+    kind: 'RX_PAD',
+    greeting: 'here is your prescription from today’s visit.',
+    diagnosisLine: stripBracketTag(pad.dxLine).trim(),
+    medications,
+    investigations,
+    advice,
+    followUp,
+  };
+  const subject = `Your prescription · ${session.scheduledAt.toLocaleDateString('en-IN', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  })}`;
+  return { snapshot, subject, sessionId: session.id };
 }
 
 /**

@@ -1171,6 +1171,12 @@ model TherapyNote {
   version String
   content Json
 
+  // Sprint DS5-fu — the SIGNED prescription pad (RxPadV1, confirmed meds
+  // only), derived from NoteDraft.rxPad at sign time so the signature
+  // attests the Rx. Null for therapy notes + notes signed before DS5-fu.
+  // The clean, patient-safe source for the Rx PDF + RX_PAD share.
+  rxPad Json?
+
   signedAt DateTime
   signedBy String
 
@@ -1716,6 +1722,7 @@ enum PatientShareArtefactType {
   SIGNED_INTAKE_NOTE // Sprint 49 — intake-note counterpart to SIGNED_NOTE
   AFTER_VISIT_SUMMARY // Sprint DV3 — doctor after-visit summary
   CHRONIC_PROGRESS_REPORT // Sprint DV7 — doctor chronic-disease progress report
+  RX_PAD // Sprint DS5-fu — doctor prescription pad (signed Rx, confirmed meds)
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.
@@ -2611,6 +2618,8 @@ enum AuditAction {
   // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
   CLINICAL_READING_RECORDED
   PATIENT_CHRONIC_REPORT_SHARED
+  // Doctor vertical — Sprint DS5-fu. Prescription pad shared to the patient.
+  PATIENT_RX_PAD_SHARED
   // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
   ENCOUNTER_FHIR_EXPORTED
   ABHA_LINKED

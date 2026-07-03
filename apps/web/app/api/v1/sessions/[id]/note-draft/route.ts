@@ -52,7 +52,9 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     targetId: draft.id,
     metadata: auditMetadataFromRequest(req),
   });
-  return NextResponse.json(toNoteDraft(draft));
+  // Sprint DS5-fu — expose whether a live-assembled Rx pad exists so the
+  // encounter workspace can offer the prescription PDF + patient share.
+  return NextResponse.json({ ...toNoteDraft(draft), hasRxPad: draft.rxPad != null });
 }
 
 /**

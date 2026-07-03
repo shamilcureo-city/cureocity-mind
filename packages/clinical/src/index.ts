@@ -16,3 +16,4 @@ export * from './specialty-templates';
 export * from './chronic';
 export * from './voice-commands';
 export * from './fhir';
+export * from './rx-edit';

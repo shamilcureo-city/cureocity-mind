@@ -187,6 +187,9 @@ export const AuditActionSchema = z.enum([
   // Doctor vertical — Sprint DV7. Chronic-disease readings + report.
   'CLINICAL_READING_RECORDED',
   'PATIENT_CHRONIC_REPORT_SHARED',
+  // Doctor vertical — Sprint DS5-fu. Prescription pad shared to the patient
+  // (a prescribing/dispensing event, distinct from PATIENT_ARTEFACT_SHARED).
+  'PATIENT_RX_PAD_SHARED',
   // Doctor vertical — Sprint DV8. ABDM/ABHA/FHIR interoperability.
   'ENCOUNTER_FHIR_EXPORTED',
   'ABHA_LINKED',

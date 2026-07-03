@@ -116,15 +116,22 @@ export function InsightsBoard({ insights, days }: { insights: DoctorInsights; da
               <AcceptanceBar key={c.kind} card={c} />
             ))}
           </div>
-          {/* Rx ≤1-edit — target tracked, value pending the signed-Rx diff */}
+          {/* Rx ≤1-edit — drafted-vs-signed diff over signed prescriptions */}
           <div className="mt-5 border-t border-[var(--color-line-soft)] pt-4">
             <div className="flex items-baseline justify-between text-sm">
               <span className="font-medium">Rx ≤ 1-edit rate</span>
-              <span className="text-[var(--color-ink-3)]">
-                {insights.rxOneEditRate == null
-                  ? 'pending signed-Rx diff'
-                  : pct(insights.rxOneEditRate)}
-                <span className="ml-2 text-xs">target {pct(insights.targets.rxOneEdit)}</span>
+              <span
+                className={
+                  insights.rxOneEditRate != null &&
+                  insights.rxOneEditRate >= insights.targets.rxOneEdit
+                    ? 'font-semibold text-[var(--color-accent)]'
+                    : 'text-[var(--color-ink-3)]'
+                }
+              >
+                {insights.rxOneEditRate == null ? 'no signed Rx yet' : pct(insights.rxOneEditRate)}
+                <span className="ml-2 text-xs font-normal text-[var(--color-ink-3)]">
+                  target {pct(insights.targets.rxOneEdit)}
+                </span>
               </span>
             </div>
           </div>

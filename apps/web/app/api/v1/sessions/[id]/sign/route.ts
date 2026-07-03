@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import {
   IntakeNoteV1Schema,
   MedicalEncounterNoteV1Schema,
+  RxPadV1Schema,
   SignNoteInputSchema,
   TherapyNoteV1Schema,
   type NoteEditEntry,
@@ -10,6 +11,7 @@ import {
   type SignedNoteContent,
   type TherapyNote,
 } from '@cureocity/contracts';
+import type { Prisma } from '@prisma/client';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import {
@@ -250,6 +252,21 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   }
   const editsToWrite = existing ? reSignEdits : edits;
 
+  // Sprint DS5-fu — for a doctor encounter, derive the SIGNED Rx pad from the
+  // draft's live-assembled pad (NoteDraft.rxPad), keeping only CONFIRMED meds
+  // (pending = unconfirmed AI/voice suggestions never become a signed Rx).
+  // Persisting it on the signed record makes the signature attest the Rx, and
+  // gives the Rx PDF + patient share a clean, canonical source. Parsed
+  // defensively — bad stored JSON degrades to "no Rx", never a 500.
+  const signedRxPad =
+    signableKind === 'MEDICAL' && draft.rxPad !== null
+      ? (() => {
+          const parsed = RxPadV1Schema.safeParse(draft.rxPad);
+          if (!parsed.success) return null;
+          return { ...parsed.data, meds: parsed.data.meds.filter((m) => m.status === 'confirmed') };
+        })()
+      : null;
+
   const created = await prisma.$transaction(async (tx) => {
     const noteData = {
       version: finalNote.version,
@@ -262,6 +279,9 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       signAuthenticatorDataB64u: input.value.assertion?.authenticatorData ?? null,
       signSignatureB64u: input.value.assertion?.signature ?? null,
       signChallengeHashHex: input.value.assertion?.challengeHashHex ?? recomputed,
+      // Only set when we derived a signed pad (doctor encounter); therapy
+      // notes leave the column null.
+      ...(signedRxPad !== null && { rxPad: signedRxPad as unknown as Prisma.InputJsonValue }),
     };
     const note = existing
       ? await tx.therapyNote.update({ where: { id: existing.id }, data: noteData })

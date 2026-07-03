@@ -5,8 +5,9 @@ import type {
   DoctorInsights,
   InsightsCatch,
 } from '@cureocity/contracts';
-import { PILOT_TARGETS } from '@cureocity/contracts';
-import type { AuditAction } from '@prisma/client';
+import { PILOT_TARGETS, RxPadV1Schema } from '@cureocity/contracts';
+import { rxWithinOneEdit } from '@cureocity/clinical';
+import { Prisma, type AuditAction } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { istDayRange } from '@/lib/clinic-queue';
 
@@ -53,7 +54,7 @@ export async function loadDoctorInsights(
   from: Date,
   to: Date,
 ): Promise<DoctorInsights> {
-  const [metrics, totalSessions, suggestionRows] = await Promise.all([
+  const [metrics, totalSessions, suggestionRows, signedRx] = await Promise.all([
     prisma.liveConsultMetric.findMany({
       where: { psychologistId, createdAt: { gte: from, lt: to } },
       select: { costInr: true, elapsedMs: true, createdAt: true },
@@ -68,6 +69,16 @@ export async function loadDoctorInsights(
       },
       select: { action: true, metadata: true, createdAt: true },
       orderBy: { createdAt: 'desc' },
+    }),
+    // Sprint DS5-fu — signed prescriptions in the window (with the drafted pad
+    // from the same session), for the Rx ≤1-edit rate.
+    prisma.therapyNote.findMany({
+      where: {
+        signedBy: psychologistId,
+        signedAt: { gte: from, lt: to },
+        rxPad: { not: Prisma.DbNull },
+      },
+      select: { rxPad: true, draft: { select: { rxPad: true } } },
     }),
   ]);
 
@@ -139,6 +150,22 @@ export async function loadDoctorInsights(
 
   const days = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86_400_000));
 
+  // --- Rx ≤1-edit rate (DS5-fu) -------------------------------------------
+  // Over signed prescriptions in the window, the share the doctor signed with
+  // ≤1 edit to the AI-drafted med list (drafted = NoteDraft.rxPad = all meds
+  // incl. declined; signed = TherapyNote.rxPad = confirmed only). Denominator
+  // = signed Rx pads only; sessions with no signed Rx are excluded.
+  let rxWithin = 0;
+  let rxTotal = 0;
+  for (const row of signedRx) {
+    const signed = RxPadV1Schema.safeParse(row.rxPad);
+    if (!signed.success) continue;
+    const drafted = row.draft?.rxPad ? RxPadV1Schema.safeParse(row.draft.rxPad) : null;
+    rxTotal++;
+    if (rxWithinOneEdit(drafted?.success ? drafted.data.meds : [], signed.data.meds)) rxWithin++;
+  }
+  const rxOneEditRate = rxTotal > 0 ? rxWithin / rxTotal : null;
+
   return {
     from: from.toISOString(),
     to: to.toISOString(),
@@ -153,7 +180,7 @@ export async function loadDoctorInsights(
     cards,
     askNextActRate: askNext.actRate,
     dismissReasons,
-    rxOneEditRate: null, // pending the signed-vs-drafted Rx diff (DS5 follow-up)
+    rxOneEditRate,
     catches,
     targets: PILOT_TARGETS,
   };
