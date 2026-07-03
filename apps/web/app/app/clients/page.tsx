@@ -7,6 +7,7 @@ import { ClientsHeader } from '@/components/app/ClientsHeader';
 import { ClientSearchControls } from '@/components/app/ClientSearchControls';
 import { HelpNote } from '@/components/app/EduHeading';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
+import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -52,6 +53,7 @@ export default async function ClientsPage({
       select: {
         id: true,
         fullName: true,
+        fullNameEncrypted: true,
         status: true,
         isDemo: true,
         createdAt: true,
@@ -69,6 +71,11 @@ export default async function ClientsPage({
   const hasMore = rows.length > PAGE_SIZE;
   const pageRows = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
   const nextCursor = hasMore ? (pageRows[pageRows.length - 1]?.id ?? null) : null;
+  // PII read cutover — decrypt each client's name (plaintext fallback). The
+  // search filter above still matches on the dual-written plaintext column.
+  const names = await Promise.all(
+    pageRows.map((c) => decryptClientField(therapist.id, c.fullNameEncrypted, c.fullName)),
+  );
 
   // Preserve the active query + status when paginating.
   const nextHref = nextCursor
@@ -122,14 +129,14 @@ export default async function ClientsPage({
           )
         ) : (
           <ul className="divide-y divide-[var(--color-line-soft)]">
-            {pageRows.map((c) => (
+            {pageRows.map((c, i) => (
               <li key={c.id}>
                 <Link
                   href={`/app/clients/${c.id}`}
                   className="grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
                 >
                   <span className="flex flex-wrap items-center gap-2 font-medium text-[var(--color-ink)]">
-                    {c.fullName}
+                    {names[i]}
                     {c.isDemo && <Badge tone="warn">Example</Badge>}
                   </span>
                   <span>

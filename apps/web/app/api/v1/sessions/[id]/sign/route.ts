@@ -12,7 +12,7 @@ import {
   type TherapyNote,
 } from '@cureocity/contracts';
 import type { Prisma } from '@prisma/client';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { isAuthBypassed, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import {
   SIGNABLE_FIELDS_BY_KIND,
@@ -159,6 +159,25 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     where: { psychologistId: auth.value.psychologistId, revokedAt: null },
     select: { id: true, credentialId: true, publicKey: true, signCount: true },
   });
+  // Sprint 72 — when the deployment opts in (REQUIRE_WEBAUTHN_SIGNING=true),
+  // signing requires a registered passkey: an account with none must enrol
+  // before it can sign a clinical note. Skipped under auth bypass (dev/mock)
+  // so local + CI flows keep working, and default-off so a pilot can turn it
+  // on only once its therapists are enrolled. When off, the historical soft
+  // behaviour stands (assertion required only if a credential already exists).
+  if (
+    activeCredentials.length === 0 &&
+    process.env['REQUIRE_WEBAUTHN_SIGNING'] === 'true' &&
+    !isAuthBypassed()
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'A passkey is required to sign notes. Set one up in Settings → Security, then sign the note.',
+      },
+      { status: 403 },
+    );
+  }
   let credentialBump: { id: string; newSignCount: number } | null = null;
   if (activeCredentials.length > 0) {
     if (!input.value.assertion) {

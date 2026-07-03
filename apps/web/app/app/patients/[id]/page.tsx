@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge';
 import { StartEncounterButton } from '@/components/app/StartEncounterButton';
 import { ChronicCarePanel } from '@/components/app/ChronicCarePanel';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
+import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -25,8 +26,11 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
     select: {
       id: true,
       fullName: true,
+      fullNameEncrypted: true,
       contactPhone: true,
+      contactPhoneEncrypted: true,
       contactEmail: true,
+      contactEmailEncrypted: true,
       dateOfBirth: true,
       status: true,
       isDemo: true,
@@ -44,6 +48,8 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
   if (!patient || patient.deletedAt !== null || patient.psychologistId !== doctor.id) {
     notFound();
   }
+  // PII read cutover — prefer the encrypted columns (plaintext fallback).
+  const pii = await resolveClientPii(patient);
 
   return (
     <Container className="py-10">
@@ -57,15 +63,15 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
       <header className="mt-3 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="flex flex-wrap items-center gap-2 font-serif text-3xl">
-            {patient.fullName}
+            {pii.fullName}
             {patient.isDemo && <Badge tone="warn">Example</Badge>}
             <Badge tone={patient.status === 'ACTIVE' ? 'accent' : 'muted'}>
               {patient.status.toLowerCase()}
             </Badge>
           </h1>
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-            {patient.contactPhone}
-            {patient.contactEmail ? ` · ${patient.contactEmail}` : ''}
+            {pii.contactPhone}
+            {pii.contactEmail ? ` · ${pii.contactEmail}` : ''}
             {patient.dateOfBirth ? ` · DOB ${formatDate(patient.dateOfBirth)}` : ''}
           </p>
         </div>

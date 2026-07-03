@@ -489,19 +489,26 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   PII field: `contactPhone` + `contactEmail` (Sprint 32) and `fullName`
   (Sprint 54), across create / update / DSR-correction + the
   `/admin/encryption/backfill` route, via `apps/web/lib/tenant-crypto.ts`
-  (LocalDevKmsProvider in dev). STILL PENDING, and prod-data /
-  KMS-decision-dependent: (1) the READ cutover (reads still use the
-  plaintext columns; nothing decrypts yet), (2) the plaintext-column
-  DROP, and (3) wiring `AwsKmsProvider` for `KMS_BACKEND=aws-kms`
+  (LocalDevKmsProvider in dev). READ CUTOVER DONE (Sprint 72): every
+  Client PII read resolves through `apps/web/lib/client-pii.ts`
+  (`resolveClientPii` / `decryptClientField` — prefer the encrypted
+  column, fall back to plaintext when the ciphertext is absent or fails
+  to decrypt, so un-backfilled rows keep working). STILL PENDING, and
+  prod-data / KMS-decision-dependent: (1) the plaintext-column DROP
+  (safe only once every prod row is backfilled + all reads go through
+  the resolver), and (2) wiring `AwsKmsProvider` for `KMS_BACKEND=aws-kms`
   (asia-south1 procurement). `NoteDraft.transcriptEncrypted` now
   dual-writes at the source (note-orchestrator, Sprint 54) + backfill.
   `JournalEntry.contentEncrypted` column exists but has no live
   `apps/web` write path (journal creation is a patient-app /
   continuity-service concern) — nothing to wire there yet.
-- **WebAuthn-bound signing** — sign route accepts `assertion` as
-  optional. Sprint 18 introduced per-account WebAuthn registration;
-  next is making the assertion required once any credential is
-  registered (partial — currently enforced only if registrations exist).
+- **WebAuthn-bound signing** — the sign route requires + cryptographically
+  verifies an `assertion` whenever the account has ≥1 registered credential
+  (Sprint 18 → 33). Sprint 72 added `REQUIRE_WEBAUTHN_SIGNING=true` (env,
+  default off, skipped under auth bypass): when set, an account with **no**
+  registered passkey is refused (403) until it enrols — forcing enrollment
+  before signing. Remaining work is OPERATIONAL: flip the flag on in prod
+  once pilot therapists have registered a passkey.
 
 **Big features (need scoping before a blanket build):**
 
