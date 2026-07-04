@@ -87,7 +87,11 @@ export async function GET(
       systemInstruction: buildSystemPrompt(language),
       responseMimeType: 'application/json',
       temperature: 0.5,
-      maxOutputTokens: 1024,
+      // Gemini 2.5 Pro spends part of the output budget on internal
+      // "thinking"; 1024 was too tight and the JSON came back truncated
+      // (→ "Model returned non-JSON"). 4096 matches the sibling backends
+      // (brief / findings) and leaves ample room for 5–7 short questions.
+      maxOutputTokens: 4096,
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
@@ -103,17 +107,20 @@ export async function GET(
     },
   });
 
-  const text = res.text ?? '{}';
-  let parsed: { questions?: string[] };
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return NextResponse.json(
-      { error: 'Model returned non-JSON', preview: text.slice(0, 200) },
-      { status: 502 },
+  const text = res.text ?? '';
+  const parsed = parseQuestions(text);
+  if (parsed === null) {
+    // A truncated / non-JSON body (usually the output budget was spent on
+    // thinking, or the model wrapped prose). Don't surface a raw parser
+    // error — log for diagnosis and return the graceful empty state so the
+    // therapist just hits Regenerate.
+    const finishReason = res.candidates?.[0]?.finishReason;
+    console.warn(
+      `[reflection-questions] sessionId=${sessionId} unparsable model output. finishReason=${finishReason} textLen=${text.length} preview=${JSON.stringify(text.slice(0, 120))}`,
     );
+    return NextResponse.json({ questions: [], language, source: 'vertex', model: proModel });
   }
-  const questions = (parsed.questions ?? [])
+  const questions = parsed
     .filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
     .slice(0, 7);
 
@@ -136,6 +143,37 @@ function buildUserMessage(note: TherapyNoteV1, language: string): string {
     '',
     'Produce reflection questions JSON only.',
   ].join('\n');
+}
+
+/**
+ * Robustly pull the `questions` array out of a model response. Tolerates
+ * markdown fences and surrounding prose (despite responseMimeType JSON, a
+ * thinking model occasionally wraps or truncates its output). Returns null
+ * when nothing parseable is present, so the caller degrades to the empty
+ * state instead of surfacing a raw parser error.
+ */
+function parseQuestions(raw: string): string[] | null {
+  const candidate = extractJsonObject(raw);
+  if (candidate === null) return null;
+  try {
+    const obj = JSON.parse(candidate) as { questions?: unknown };
+    if (!Array.isArray(obj.questions)) return null;
+    return obj.questions.filter((q): q is string => typeof q === 'string');
+  } catch {
+    return null;
+  }
+}
+
+/** The outermost complete `{ … }` span, unwrapping a ```json fence first. */
+function extractJsonObject(raw: string): string | null {
+  let s = raw.trim();
+  if (s === '') return null;
+  const fence = s.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fence?.[1]) s = fence[1].trim();
+  const first = s.indexOf('{');
+  const last = s.lastIndexOf('}');
+  if (first < 0 || last <= first) return null;
+  return s.slice(first, last + 1);
 }
 
 /**
