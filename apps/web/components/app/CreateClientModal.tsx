@@ -58,14 +58,14 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
         scriptVersion: string;
         capturedVia: string;
       }> = [
-        { scope: 'AUDIO_RECORDING', scriptVersion: 'v1', capturedVia: 'IN_PERSON' },
-        { scope: 'AI_NOTE_GENERATION', scriptVersion: 'v1', capturedVia: 'IN_PERSON' },
-        { scope: 'CROSS_BORDER_PROCESSING', scriptVersion: 'v1', capturedVia: 'IN_PERSON' },
+        { scope: 'AUDIO_RECORDING', scriptVersion: 'v1.0', capturedVia: 'IN_PERSON' },
+        { scope: 'AI_NOTE_GENERATION', scriptVersion: 'v1.0', capturedVia: 'IN_PERSON' },
+        { scope: 'CROSS_BORDER_PROCESSING', scriptVersion: 'v1.0', capturedVia: 'IN_PERSON' },
       ];
       if (retentionExtended) {
         consents.push({
           scope: 'DATA_RETENTION_EXTENDED',
-          scriptVersion: 'v1',
+          scriptVersion: 'v1.0',
           capturedVia: 'IN_PERSON',
         });
       }
