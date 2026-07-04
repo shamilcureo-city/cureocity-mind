@@ -101,8 +101,11 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
   return (
     <Container className="py-8">
-      <Link href="/app" className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]">
-        ← All sessions
+      <Link
+        href={`/app/clients/${session.clientId}`}
+        className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+      >
+        ← Back to {pii.fullName}
       </Link>
 
       <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
