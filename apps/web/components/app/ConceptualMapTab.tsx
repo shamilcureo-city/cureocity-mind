@@ -130,6 +130,9 @@ export function ConceptualMapTab({ clientId }: Props) {
             {data.map.nodes.length} concepts · {data.map.edges.length} connections · last refresh{' '}
             {data.generatedAt ? formatRelative(data.generatedAt) : 'unknown'}
           </p>
+          <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
+            Hover a concept to trace its connections · click for the full details.
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <CategoryLegend />
@@ -140,7 +143,7 @@ export function ConceptualMapTab({ clientId }: Props) {
       </header>
       {error && <p className="mb-3 text-xs text-[var(--color-warn)]">{error}</p>}
 
-      <Graph map={data.map} onSelect={setSelectedNodeId} />
+      <Graph map={data.map} onSelect={setSelectedNodeId} selectedId={selectedNodeId} />
 
       {selectedNodeId && (
         <NodeDetailModal
@@ -178,9 +181,61 @@ interface Position {
   y: number;
 }
 
-function Graph({ map, onSelect }: { map: ConceptualMapV1; onSelect: (nodeId: string) => void }) {
-  // Memoise the layout so re-renders (selection) don't re-simulate.
+// Motion + interactivity (Sprint 73). Injected into the SVG once. Entrance
+// pop uses `backwards` fill so it shows the `from` frame during the stagger
+// delay then reverts to base — leaving `transform` free for the hover-scale
+// transition (avoids the animation-locks-transform conflict).
+const CMAP_CSS = `
+.cmap-bubble {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform .28s cubic-bezier(.2,.8,.3,1), filter .28s;
+  animation: cmap-pop .55s cubic-bezier(.2,.9,.3,1.25) backwards;
+}
+.cmap-bubble.is-active { transform: scale(1.12); }
+.cmap-halo {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  pointer-events: none;
+  animation: cmap-pulse 3.6s ease-in-out infinite;
+}
+.cmap-flow { animation: cmap-flow .7s linear infinite; }
+.cmap-edge-label { animation: cmap-fade .25s ease both; }
+@keyframes cmap-pop { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes cmap-pulse { 0%,100% { opacity: 0; transform: scale(.85); } 50% { opacity: .16; transform: scale(1.2); } }
+@keyframes cmap-flow { to { stroke-dashoffset: -20; } }
+@keyframes cmap-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .cmap-bubble, .cmap-halo, .cmap-flow, .cmap-edge-label { animation: none !important; }
+  .cmap-halo { opacity: 0; }
+}
+`;
+
+function Graph({
+  map,
+  onSelect,
+  selectedId,
+}: {
+  map: ConceptualMapV1;
+  onSelect: (nodeId: string) => void;
+  selectedId: string | null;
+}) {
+  // Memoise the layout so re-renders (hover / selection) don't re-simulate.
   const positions = useMemo(() => layoutGraph(map), [map]);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const activeId = hoveredId ?? selectedId;
+
+  // Neighbours of the active node — everything else dims to focus the arc.
+  const connected = useMemo(() => {
+    if (!activeId) return null;
+    const set = new Set<string>();
+    for (const e of map.edges) {
+      if (e.from === activeId) set.add(e.to);
+      if (e.to === activeId) set.add(e.from);
+    }
+    return set;
+  }, [activeId, map.edges]);
 
   return (
     <div className="overflow-x-auto rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)]">
@@ -190,33 +245,92 @@ function Graph({ map, onSelect }: { map: ConceptualMapV1; onSelect: (nodeId: str
         role="img"
         aria-label="Client conceptual map"
         style={{ minHeight: 480 }}
+        onMouseLeave={() => setHoveredId(null)}
       >
-        {map.edges.map((e, i) => {
-          const a = positions[e.from];
-          const b = positions[e.to];
-          if (!a || !b) return null;
-          return (
-            <line
-              key={i}
-              x1={a.x}
-              y1={a.y}
-              x2={b.x}
-              y2={b.y}
-              stroke="var(--color-line)"
-              strokeWidth={1.2}
-            />
-          );
-        })}
-        {map.nodes.map((node) => {
+        <defs>
+          {(Object.keys(CATEGORY_COLOR) as ConceptCategory[]).map((cat) => {
+            const c = CATEGORY_COLOR[cat];
+            return (
+              <radialGradient key={cat} id={`cmap-grad-${cat}`} cx="35%" cy="28%" r="80%">
+                <stop offset="0%" stopColor={lighten(c, 0.34)} />
+                <stop offset="55%" stopColor={c} />
+                <stop offset="100%" stopColor={darken(c, 0.18)} />
+              </radialGradient>
+            );
+          })}
+          <filter id="cmap-shadow" x="-40%" y="-40%" width="180%" height="180%">
+            <feDropShadow dx="0" dy="4" stdDeviation="6" floodColor="#0f1b2a" floodOpacity="0.14" />
+          </filter>
+          <filter id="cmap-glow" x="-60%" y="-60%" width="220%" height="220%">
+            <feDropShadow dx="0" dy="3" stdDeviation="9" floodColor="#0f1b2a" floodOpacity="0.22" />
+          </filter>
+        </defs>
+        <style>{CMAP_CSS}</style>
+
+        <g>
+          {map.edges.map((e, i) => {
+            const a = positions[e.from];
+            const b = positions[e.to];
+            if (!a || !b) return null;
+            const isActive = activeId != null && (e.from === activeId || e.to === activeId);
+            const dim = activeId != null && !isActive;
+            const mx = (a.x + b.x) / 2;
+            const my = (a.y + b.y) / 2;
+            return (
+              <g key={i} style={{ transition: 'opacity .25s', opacity: dim ? 0.12 : 1 }}>
+                <line
+                  x1={a.x}
+                  y1={a.y}
+                  x2={b.x}
+                  y2={b.y}
+                  stroke={isActive ? 'var(--color-accent)' : 'var(--color-line)'}
+                  strokeWidth={isActive ? 2 : 1.2}
+                  strokeDasharray={isActive ? '5 6' : undefined}
+                  className={isActive ? 'cmap-flow' : undefined}
+                />
+                {isActive && e.relationship && (
+                  <text
+                    x={mx}
+                    y={my - 5}
+                    textAnchor="middle"
+                    className="cmap-edge-label"
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      fill: 'var(--color-accent)',
+                      paintOrder: 'stroke',
+                      stroke: 'var(--color-surface-soft)',
+                      strokeWidth: 3.5,
+                      strokeLinejoin: 'round',
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    {e.relationship}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </g>
+
+        {map.nodes.map((node, i) => {
           const p = positions[node.id];
           if (!p) return null;
+          const isActive = node.id === activeId;
+          const isConnected = connected?.has(node.id) ?? false;
+          const dimmed = activeId != null && !isActive && !isConnected;
           return (
             <NodeCircle
               key={node.id}
               node={node}
               x={p.x}
               y={p.y}
+              index={i}
+              active={isActive}
+              dimmed={dimmed}
               onClick={() => onSelect(node.id)}
+              onEnter={() => setHoveredId(node.id)}
+              onLeave={() => setHoveredId((cur) => (cur === node.id ? null : cur))}
             />
           );
         })}
@@ -229,46 +343,104 @@ function NodeCircle({
   node,
   x,
   y,
+  index,
+  active,
+  dimmed,
   onClick,
+  onEnter,
+  onLeave,
 }: {
   node: ConceptNode;
   x: number;
   y: number;
+  index: number;
+  active: boolean;
+  dimmed: boolean;
   onClick: () => void;
+  onEnter: () => void;
+  onLeave: () => void;
 }) {
   const radius = labelRadius(node.label);
   const lines = wrapLabel(node.label, radius);
-  const fill = CATEGORY_COLOR[node.category];
+  const delay = `${Math.min(index * 70, 700)}ms`;
   return (
     <g
-      style={{ cursor: 'pointer' }}
+      style={{ cursor: 'pointer', opacity: dimmed ? 0.32 : 1, transition: 'opacity .25s' }}
       onClick={onClick}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
       role="button"
       aria-label={`${CATEGORY_LABEL[node.category]}: ${node.label}`}
     >
+      {/* Ambient breathing halo — the "alive" idle motion. */}
       <circle
+        className="cmap-halo"
         cx={x}
         cy={y}
-        r={radius}
-        fill={fill}
-        stroke="white"
-        strokeWidth={2.5}
-        style={{ filter: 'drop-shadow(0 4px 14px rgba(15,27,42,0.10))' }}
+        r={radius + 6}
+        fill={CATEGORY_COLOR[node.category]}
+        style={{ animationDelay: `${(index % 5) * 700}ms` }}
       />
-      <text
-        x={x}
-        y={y - ((lines.length - 1) * 12) / 2}
-        textAnchor="middle"
-        style={{ fontSize: 11, fontWeight: 600, fill: '#1d2733', pointerEvents: 'none' }}
-      >
-        {lines.map((ln, i) => (
-          <tspan key={i} x={x} dy={i === 0 ? 4 : 13}>
-            {ln}
-          </tspan>
-        ))}
-      </text>
+      <g className={`cmap-bubble${active ? ' is-active' : ''}`} style={{ animationDelay: delay }}>
+        <circle
+          cx={x}
+          cy={y}
+          r={radius}
+          fill={`url(#cmap-grad-${node.category})`}
+          stroke="white"
+          strokeWidth={2.5}
+          filter={active ? 'url(#cmap-glow)' : 'url(#cmap-shadow)'}
+        />
+        <text
+          x={x}
+          y={y - ((lines.length - 1) * 12) / 2}
+          textAnchor="middle"
+          style={{ fontSize: 11, fontWeight: 600, fill: '#1d2733', pointerEvents: 'none' }}
+        >
+          {lines.map((ln, i) => (
+            <tspan key={i} x={x} dy={i === 0 ? 4 : 13}>
+              {ln}
+            </tspan>
+          ))}
+        </text>
+      </g>
     </g>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Colour helpers — build the per-category radial gradients from the flat
+// category colours (lighter highlight → base → darker rim = depth).
+// ---------------------------------------------------------------------------
+
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const v =
+    h.length === 3
+      ? h
+          .split('')
+          .map((c) => c + c)
+          .join('')
+      : h;
+  return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const to = (n: number) =>
+    Math.max(0, Math.min(255, Math.round(n)))
+      .toString(16)
+      .padStart(2, '0');
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+function lighten(hex: string, amt: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return rgbToHex(r + (255 - r) * amt, g + (255 - g) * amt, b + (255 - b) * amt);
+}
+
+function darken(hex: string, amt: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return rgbToHex(r * (1 - amt), g * (1 - amt), b * (1 - amt));
 }
 
 function NodeDetailModal({
