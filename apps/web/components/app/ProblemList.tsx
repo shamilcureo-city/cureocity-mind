@@ -13,9 +13,12 @@ import type { ProblemListItem } from '@cureocity/contracts';
 export function ProblemList({
   clientId,
   initialItems,
+  sessionCounts = {},
 }: {
   clientId: string;
   initialItems: ProblemListItem[];
+  /** Sprint 73 — sessions that worked on each problem, keyed by problem id. */
+  sessionCounts?: Record<string, number>;
 }) {
   const [items, setItems] = useState<ProblemListItem[]>(initialItems);
   const [title, setTitle] = useState('');
@@ -123,6 +126,12 @@ export function ProblemList({
               <div className="min-w-0">
                 <p className="text-sm font-medium text-[var(--color-ink)]">{p.title}</p>
                 {p.detail && <p className="mt-0.5 text-xs text-[var(--color-ink-2)]">{p.detail}</p>}
+                {(sessionCounts[p.id] ?? 0) > 0 && (
+                  <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
+                    Worked on in {sessionCounts[p.id]} session
+                    {sessionCounts[p.id] === 1 ? '' : 's'}
+                  </p>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-2 text-xs">
                 <button

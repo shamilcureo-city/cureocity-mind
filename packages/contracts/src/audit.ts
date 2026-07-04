@@ -206,6 +206,8 @@ export const AuditActionSchema = z.enum([
   'PROBLEM_LIST_ITEM_ADDED',
   'PROBLEM_LIST_ITEM_UPDATED',
   'PROBLEM_LIST_ITEM_REMOVED',
+  // Sprint 73 — which problems a session worked on (session↔problem tags).
+  'SESSION_PROBLEMS_TAGGED',
   // Supervision review — Sprint 68. A signed note was reviewed in supervision.
   'NOTE_REVIEW_RECORDED',
   // First-run welcome dismissed — durable per-therapist flag.
