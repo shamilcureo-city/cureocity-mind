@@ -17,6 +17,9 @@ import { NotesTab } from '@/components/app/NotesTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs, type TabKey } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
+import { CaseThreadNav } from '@/components/app/CaseThreadNav';
+import { WhereWeLeftOff } from '@/components/app/WhereWeLeftOff';
+import { computeCaseThread, CaseThreadError, type CaseThread } from '@/lib/case-thread';
 import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
@@ -99,14 +102,27 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   const sessionKind: SessionKind = session.kind;
   const isIntake = sessionKind === 'INTAKE';
 
+  // Sprint 73 — case thread: where this document sits in the client's
+  // arc + what carried over. Defensive: a compose failure must never
+  // break the page (the note itself is the point), so we fall back to null.
+  const caseThread: CaseThread | null = await computeCaseThread(id, session.psychologistId).catch(
+    (e) => {
+      if (e instanceof CaseThreadError) return null;
+      throw e;
+    },
+  );
+
   return (
     <Container className="py-8">
-      <Link
-        href={`/app/clients/${session.clientId}`}
-        className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
-      >
-        ← Back to {pii.fullName}
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link
+          href={`/app/clients/${session.clientId}`}
+          className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+        >
+          ← Back to {pii.fullName}
+        </Link>
+        {caseThread && <CaseThreadNav position={caseThread.position} />}
+      </div>
 
       <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -148,6 +164,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             noteLanguage={session.language}
             clientPreferredLanguage={session.client.preferredLanguage}
             noteTemplateId={session.noteTemplateId}
+            caseThread={caseThread}
           />
         )}
         {tab === 'copilot' && (
@@ -182,6 +199,7 @@ async function NotesTabPanel({
   noteLanguage,
   clientPreferredLanguage,
   noteTemplateId,
+  caseThread,
 }: {
   sessionId: string;
   sessionStatus: SessionStatus;
@@ -193,6 +211,7 @@ async function NotesTabPanel({
   noteLanguage: string;
   clientPreferredLanguage: string;
   noteTemplateId: string | null;
+  caseThread: CaseThread | null;
 }) {
   const [draftRow, signedRow] = await Promise.all([
     prisma.noteDraft.findUnique({ where: { sessionId } }),
@@ -226,22 +245,25 @@ async function NotesTabPanel({
     : null;
 
   return (
-    <NotesTab
-      sessionId={sessionId}
-      sessionStatus={sessionStatus}
-      sessionKind={sessionKind}
-      initialDraft={draft}
-      initialNote={signedNote}
-      noteLocked={signedRow?.locked ?? true}
-      clientId={clientId}
-      clientHasContactPhone={clientHasContactPhone}
-      clientHasContactEmail={clientHasContactEmail}
-      llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
-      clientName={clientName}
-      noteLanguage={noteLanguage}
-      clientPreferredLanguage={clientPreferredLanguage}
-      noteTemplateId={noteTemplateId}
-    />
+    <div className="space-y-6">
+      {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
+      <NotesTab
+        sessionId={sessionId}
+        sessionStatus={sessionStatus}
+        sessionKind={sessionKind}
+        initialDraft={draft}
+        initialNote={signedNote}
+        noteLocked={signedRow?.locked ?? true}
+        clientId={clientId}
+        clientHasContactPhone={clientHasContactPhone}
+        clientHasContactEmail={clientHasContactEmail}
+        llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
+        clientName={clientName}
+        noteLanguage={noteLanguage}
+        clientPreferredLanguage={clientPreferredLanguage}
+        noteTemplateId={noteTemplateId}
+      />
+    </div>
   );
 }
 
