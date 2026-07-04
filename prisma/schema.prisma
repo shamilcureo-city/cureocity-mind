@@ -813,6 +813,8 @@ model Session {
   differential        Differential?
   // Doctor vertical — Sprint DV7. Chronic-disease readings captured here.
   clinicalReadings    ClinicalReading[]
+  // Sprint 73 — problems this session worked on (session↔problem tags).
+  problemLinks        SessionProblemLink[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -2322,11 +2324,37 @@ model ProblemListItem {
   updatedAt  DateTime  @updatedAt
   resolvedAt DateTime?
 
+  // Sprint 73 — sessions that worked on this problem (thread across the case).
+  sessionLinks SessionProblemLink[]
+
   @@index([clientId, status])
   // The client page lists problems ordered by createdAt desc; without this
   // the (clientId, status) index can't serve the sort.
   @@index([clientId, createdAt])
   @@map("problem_list_items")
+}
+
+// ============================================================================
+// SessionProblemLink — Sprint 73. Join table tagging which problem-list
+// items a session worked on. Lets the therapist thread a single problem
+// across the whole case (which sessions advanced it) and see, on any note,
+// what was addressed that session. Tenant column carried for query filters.
+// ============================================================================
+
+model SessionProblemLink {
+  id                String   @id @default(cuid())
+  sessionId         String
+  problemListItemId String
+  psychologistId    String
+  createdAt         DateTime @default(now())
+
+  session Session         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  problem ProblemListItem @relation(fields: [problemListItemId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, problemListItemId])
+  @@index([problemListItemId])
+  @@index([sessionId])
+  @@map("session_problem_links")
 }
 
 enum ProblemStatus {
@@ -2634,6 +2662,8 @@ enum AuditAction {
   PROBLEM_LIST_ITEM_ADDED
   PROBLEM_LIST_ITEM_UPDATED
   PROBLEM_LIST_ITEM_REMOVED
+  // Sprint 73 — which problems a session worked on (session↔problem tags).
+  SESSION_PROBLEMS_TAGGED
   // Supervision review — Sprint 68.
   NOTE_REVIEW_RECORDED
   // First-run welcome dismissed (durable per-therapist flag).

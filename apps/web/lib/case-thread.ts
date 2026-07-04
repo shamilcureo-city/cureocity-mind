@@ -96,12 +96,21 @@ export interface MeasureTrend {
   latestSeverityLabel: string;
 }
 
+export interface CaseThreadProblems {
+  /** Active problems on the client — the choosable set for tagging. */
+  active: { id: string; title: string }[];
+  /** Ids of the problems this session is tagged as having worked on. */
+  taggedIds: string[];
+}
+
 export interface CaseThread {
   isFirstSession: boolean;
   position: CaseThreadPosition;
   previous: CaseThreadPrevious | null;
   /** PHQ-9 / GAD-7 trends with ≥2 administrations — the score arc on the note. */
   measures: MeasureTrend[];
+  /** Problem tagging — which of the client's active problems this session worked on. */
+  sessionProblems: CaseThreadProblems;
 }
 
 export async function computeCaseThread(
@@ -118,7 +127,7 @@ export async function computeCaseThread(
   }
   const { clientId } = session;
 
-  const [timeline, lastCompleted, primaryDiagnosis, activeProblems, instrumentRows] =
+  const [timeline, lastCompleted, primaryDiagnosis, activeProblems, instrumentRows, problemLinks] =
     await Promise.all([
       // Whole timeline for position + prev/next. Ordered so array index is rank.
       prisma.session.findMany({
@@ -146,8 +155,8 @@ export async function computeCaseThread(
       prisma.problemListItem.findMany({
         where: { clientId, status: 'ACTIVE' },
         orderBy: { createdAt: 'desc' },
-        take: 4,
-        select: { title: true },
+        take: 50,
+        select: { id: true, title: true },
       }),
       // PHQ-9 / GAD-7 series for the score-trend sparkline on the note.
       prisma.instrumentResponse.findMany({
@@ -155,9 +164,18 @@ export async function computeCaseThread(
         orderBy: { administeredAt: 'asc' },
         select: { instrumentKey: true, score: true, administeredAt: true },
       }),
+      // Problems this session is already tagged as having worked on.
+      prisma.sessionProblemLink.findMany({
+        where: { sessionId },
+        select: { problemListItemId: true },
+      }),
     ]);
 
   const measures = buildMeasures(instrumentRows);
+  const sessionProblems: CaseThreadProblems = {
+    active: activeProblems.map((p) => ({ id: p.id, title: p.title })),
+    taggedIds: problemLinks.map((l) => l.problemListItemId),
+  };
 
   const idx = timeline.findIndex((s) => s.id === sessionId);
   const position: CaseThreadPosition = {
@@ -168,7 +186,7 @@ export async function computeCaseThread(
   };
 
   if (!lastCompleted) {
-    return { isFirstSession: true, position, previous: null, measures };
+    return { isFirstSession: true, position, previous: null, measures, sessionProblems };
   }
 
   // 1-based ordinal of the last completed session in the timeline.
@@ -205,10 +223,11 @@ export async function computeCaseThread(
       diagnosis: primaryDiagnosis
         ? { code: primaryDiagnosis.icd11Code, label: primaryDiagnosis.icd11Label }
         : null,
-      openThreads: activeProblems.map((p) => p.title),
+      openThreads: activeProblems.slice(0, 4).map((p) => p.title),
       carryoverRisk: deriveCarryoverRisk(noteContent),
     },
     measures,
+    sessionProblems,
   };
 }
 

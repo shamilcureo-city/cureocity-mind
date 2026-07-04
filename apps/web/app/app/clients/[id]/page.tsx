@@ -103,6 +103,20 @@ export default async function ClientDetailPage({ params }: PageProps) {
     resolvedAt: p.resolvedAt?.toISOString() ?? null,
   }));
 
+  // Sprint 73 — how many sessions have worked on each problem (thread the
+  // problem across the case).
+  const problemIds = problems.map((p) => p.id);
+  const linkCounts =
+    problemIds.length > 0
+      ? await prisma.sessionProblemLink.groupBy({
+          by: ['problemListItemId'],
+          where: { problemListItemId: { in: problemIds } },
+          _count: { sessionId: true },
+        })
+      : [];
+  const sessionCounts: Record<string, number> = {};
+  for (const g of linkCounts) sessionCounts[g.problemListItemId] = g._count.sessionId;
+
   return (
     <Container className="py-10">
       <p className="mb-4 text-xs text-[var(--color-ink-3)]">
@@ -196,7 +210,11 @@ export default async function ClientDetailPage({ params }: PageProps) {
             The main difficulties you&apos;re working on — your own running list, kept across
             sessions.
           </p>
-          <ProblemList clientId={client.id} initialItems={initialProblems} />
+          <ProblemList
+            clientId={client.id}
+            initialItems={initialProblems}
+            sessionCounts={sessionCounts}
+          />
         </Card>
       </div>
 

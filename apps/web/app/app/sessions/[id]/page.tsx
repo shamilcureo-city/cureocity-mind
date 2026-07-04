@@ -20,6 +20,7 @@ import { TranscriptTab } from '@/components/app/TranscriptTab';
 import { CaseThreadNav } from '@/components/app/CaseThreadNav';
 import { WhereWeLeftOff } from '@/components/app/WhereWeLeftOff';
 import { MeasuresTrend } from '@/components/app/MeasuresTrend';
+import { SessionProblemTags } from '@/components/app/SessionProblemTags';
 import { computeCaseThread, CaseThreadError, type CaseThread } from '@/lib/case-thread';
 import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
@@ -250,6 +251,13 @@ async function NotesTabPanel({
       {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
       {caseThread && caseThread.measures.length > 0 && (
         <MeasuresTrend measures={caseThread.measures} />
+      )}
+      {caseThread && (
+        <SessionProblemTags
+          sessionId={sessionId}
+          active={caseThread.sessionProblems.active}
+          initialTaggedIds={caseThread.sessionProblems.taggedIds}
+        />
       )}
       <NotesTab
         sessionId={sessionId}

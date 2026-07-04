@@ -37,3 +37,13 @@ export const ProblemListItemSchema = z.object({
   resolvedAt: z.string().nullable(),
 });
 export type ProblemListItem = z.infer<typeof ProblemListItemSchema>;
+
+/**
+ * Sprint 73 — session ↔ problem tagging. PUT replaces the full set of
+ * problems a session worked on (idempotent set semantics), so the
+ * therapist can thread a single problem across the whole case.
+ */
+export const SetSessionProblemsInputSchema = z.object({
+  problemIds: z.array(z.string().min(1)).max(50),
+});
+export type SetSessionProblemsInput = z.infer<typeof SetSessionProblemsInputSchema>;
