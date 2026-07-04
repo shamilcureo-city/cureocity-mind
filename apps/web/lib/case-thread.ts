@@ -1,5 +1,17 @@
+import {
+  INSTRUMENTS,
+  REMISSION_CUTOFF,
+  computeInstrumentChange,
+  severityKeyForScore,
+  type ChangeVerdict,
+  type InstrumentKey,
+} from '@cureocity/clinical';
 import type { SessionKind } from '@cureocity/contracts';
 import { prisma } from './prisma';
+
+/** Instruments threaded on the note (mirrors journey.ts). */
+const TRACKED_INSTRUMENTS: InstrumentKey[] = ['PHQ9', 'GAD7'];
+const INSTRUMENT_SHORT_LABEL: Record<InstrumentKey, string> = { PHQ9: 'PHQ-9', GAD7: 'GAD-7' };
 
 /**
  * Sprint 73 — case thread (document continuity).
@@ -64,10 +76,32 @@ export interface CaseThreadPrevious {
   carryoverRisk: CaseThreadRisk | null;
 }
 
+export interface MeasureTrend {
+  key: InstrumentKey;
+  /** Short display label, e.g. "PHQ-9". */
+  shortLabel: string;
+  /** Instrument ceiling (PHQ-9 = 27, GAD-7 = 21) — the sparkline y-scale. */
+  max: number;
+  /** Score at or below which counts as remission — drawn as a guide line. */
+  remissionCutoff: number;
+  /** Full chronological series. */
+  points: { score: number; at: string }[];
+  baseline: number;
+  latest: number;
+  /** latest − baseline (negative = improvement; lower is better). */
+  delta: number;
+  verdict: ChangeVerdict;
+  isRemission: boolean;
+  /** Plain-language severity band of the latest score. */
+  latestSeverityLabel: string;
+}
+
 export interface CaseThread {
   isFirstSession: boolean;
   position: CaseThreadPosition;
   previous: CaseThreadPrevious | null;
+  /** PHQ-9 / GAD-7 trends with ≥2 administrations — the score arc on the note. */
+  measures: MeasureTrend[];
 }
 
 export async function computeCaseThread(
@@ -84,37 +118,46 @@ export async function computeCaseThread(
   }
   const { clientId } = session;
 
-  const [timeline, lastCompleted, primaryDiagnosis, activeProblems] = await Promise.all([
-    // Whole timeline for position + prev/next. Ordered so array index is rank.
-    prisma.session.findMany({
-      where: { clientId },
-      orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
-      select: { id: true },
-    }),
-    // The recap anchors on the most recent COMPLETED session before this one
-    // (a cancelled/no-show session has nothing to carry over).
-    prisma.session.findFirst({
-      where: {
-        clientId,
-        status: 'COMPLETED',
-        id: { not: sessionId },
-        scheduledAt: { lt: session.scheduledAt },
-      },
-      orderBy: { scheduledAt: 'desc' },
-      select: { id: true, scheduledAt: true, modality: true, kind: true },
-    }),
-    prisma.clientDiagnosis.findFirst({
-      where: { clientId, supersededAt: null, isPrimary: true },
-      orderBy: { confirmedAt: 'desc' },
-      select: { icd11Code: true, icd11Label: true },
-    }),
-    prisma.problemListItem.findMany({
-      where: { clientId, status: 'ACTIVE' },
-      orderBy: { createdAt: 'desc' },
-      take: 4,
-      select: { title: true },
-    }),
-  ]);
+  const [timeline, lastCompleted, primaryDiagnosis, activeProblems, instrumentRows] =
+    await Promise.all([
+      // Whole timeline for position + prev/next. Ordered so array index is rank.
+      prisma.session.findMany({
+        where: { clientId },
+        orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+        select: { id: true },
+      }),
+      // The recap anchors on the most recent COMPLETED session before this one
+      // (a cancelled/no-show session has nothing to carry over).
+      prisma.session.findFirst({
+        where: {
+          clientId,
+          status: 'COMPLETED',
+          id: { not: sessionId },
+          scheduledAt: { lt: session.scheduledAt },
+        },
+        orderBy: { scheduledAt: 'desc' },
+        select: { id: true, scheduledAt: true, modality: true, kind: true },
+      }),
+      prisma.clientDiagnosis.findFirst({
+        where: { clientId, supersededAt: null, isPrimary: true },
+        orderBy: { confirmedAt: 'desc' },
+        select: { icd11Code: true, icd11Label: true },
+      }),
+      prisma.problemListItem.findMany({
+        where: { clientId, status: 'ACTIVE' },
+        orderBy: { createdAt: 'desc' },
+        take: 4,
+        select: { title: true },
+      }),
+      // PHQ-9 / GAD-7 series for the score-trend sparkline on the note.
+      prisma.instrumentResponse.findMany({
+        where: { clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
+        orderBy: { administeredAt: 'asc' },
+        select: { instrumentKey: true, score: true, administeredAt: true },
+      }),
+    ]);
+
+  const measures = buildMeasures(instrumentRows);
 
   const idx = timeline.findIndex((s) => s.id === sessionId);
   const position: CaseThreadPosition = {
@@ -125,7 +168,7 @@ export async function computeCaseThread(
   };
 
   if (!lastCompleted) {
-    return { isFirstSession: true, position, previous: null };
+    return { isFirstSession: true, position, previous: null, measures };
   }
 
   // 1-based ordinal of the last completed session in the timeline.
@@ -165,7 +208,45 @@ export async function computeCaseThread(
       openThreads: activeProblems.map((p) => p.title),
       carryoverRisk: deriveCarryoverRisk(noteContent),
     },
+    measures,
   };
+}
+
+/**
+ * PHQ-9 / GAD-7 trends — only instruments with ≥2 administrations (a
+ * sparkline needs at least two points). Reliable-change verdict comes
+ * from the same deterministic engine the journey composer uses.
+ */
+function buildMeasures(
+  rows: { instrumentKey: string; score: number; administeredAt: Date }[],
+): MeasureTrend[] {
+  const out: MeasureTrend[] = [];
+  for (const key of TRACKED_INSTRUMENTS) {
+    const series = rows.filter((r) => r.instrumentKey === key);
+    if (series.length < 2) continue;
+    const baseline = series[0]!.score;
+    const latest = series[series.length - 1]!.score;
+    const change = computeInstrumentChange(key, baseline, latest);
+    const def = INSTRUMENTS[key];
+    const bands = def.severityBands;
+    const max = bands[bands.length - 1]!.max;
+    const latestKey = severityKeyForScore(key, latest);
+    const latestBand = bands.find((b) => b.key === latestKey);
+    out.push({
+      key,
+      shortLabel: INSTRUMENT_SHORT_LABEL[key],
+      max,
+      remissionCutoff: REMISSION_CUTOFF[key],
+      points: series.map((s) => ({ score: s.score, at: s.administeredAt.toISOString() })),
+      baseline,
+      latest,
+      delta: change.delta,
+      verdict: change.verdict,
+      isRemission: change.isRemission,
+      latestSeverityLabel: latestBand?.label.en ?? latestKey,
+    });
+  }
+  return out;
 }
 
 // ============================================================================
