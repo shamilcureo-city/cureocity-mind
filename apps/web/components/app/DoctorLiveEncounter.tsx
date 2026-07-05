@@ -66,6 +66,9 @@ export function DoctorLiveEncounter({
   autoStart?: boolean;
 }) {
   const wsRef = useRef<WebSocket | null>(null);
+  // Safety-net timer so "End" can never trap the doctor on "Finishing…" if
+  // the gateway's `done` never arrives (e.g. a dropped socket).
+  const finalizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Sprint DS0 — the gateway meters the consult and emits `meter` events;
   // we keep the latest and relay it once the consult is done.
   const latestMeterRef = useRef<MeterSummary | null>(null);
@@ -275,6 +278,7 @@ export function DoctorLiveEncounter({
   streamRef.current = stream;
   useEffect(() => {
     return () => {
+      if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
       wsRef.current?.close();
       void streamRef.current.stop();
     };
@@ -382,6 +386,7 @@ export function DoctorLiveEncounter({
           if (event.state === 'listening') setPhase('listening');
           else if (event.state === 'finalizing') setPhase('finalizing');
           else if (event.state === 'done') {
+            if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
             setPhase('done');
             // The final meter arrives just before `done`; relay it now.
             if (latestMeterRef.current) void persistMeter(latestMeterRef.current);
@@ -454,6 +459,7 @@ export function DoctorLiveEncounter({
           if (event.command.kind === 'SHOW_DATA') void resolveShowData(event.command.measure);
           break;
         case 'final': {
+          if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
           // Sprint DS4 — fold the doctor's "add to assessment" picks into the
           // note before it persists (read from a ref — this closure is stale).
           const adds = assessmentRef.current;
@@ -481,6 +487,20 @@ export function DoctorLiveEncounter({
   function stop(): void {
     void stream.stop();
     wsRef.current?.send(JSON.stringify({ type: 'stop' }));
+    // Instant feedback so the doctor isn't left staring at "REC" while the
+    // gateway closes the note.
+    setPhase('finalizing');
+    // Safety net: if the gateway never confirms `done` (e.g. the socket
+    // dropped), surface an escape instead of an endless "Finishing…".
+    if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+    finalizeTimerRef.current = setTimeout(() => {
+      setPhase((p) => (p === 'finalizing' ? 'error' : p));
+      setError(
+        (e) =>
+          e ??
+          'Finishing timed out — the connection may have dropped. Reload the page; if the note didn’t save, re-run the consult.',
+      );
+    }, 45_000);
   }
 
   // Sprint DS6 — the items that gate the close: red flags, contraindicated

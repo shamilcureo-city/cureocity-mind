@@ -85,6 +85,8 @@ export class LiveSession {
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
   private stopped = false;
+  /** One-shot guard so `final` is emitted at most once (real note or fallback). */
+  private finalEmitted = false;
   private startedAtMs = 0;
 
   /** Ordered finalized windows — the source of truth for the transcript. */
@@ -382,6 +384,8 @@ export class LiveSession {
     this.latestOrders = pass2.output.orders;
 
     if (isFinal) {
+      if (this.finalEmitted) return;
+      this.finalEmitted = true;
       this.emit({
         type: 'final',
         note,
@@ -446,48 +450,15 @@ export class LiveSession {
     await this.waitIdle();
     this.emit({ type: 'status', state: 'finalizing' });
     try {
-      // Transcribe whatever remains as the final window (may be short).
-      if (this.pending.length > 0) {
-        const tail = this.pending;
-        const durationMs = bytesToMs(tail.length);
-        const consumed = tail.length;
-        this.pending = Buffer.alloc(0);
-        const tStartMs = bytesToMs(this.flushedBytes);
-        const t0 = Date.now();
-        const pass1 = await this.backends.pass1.run({
-          sessionId: this.sessionId,
-          audioBytes: tail,
-          durationMs,
-        });
-        this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
-        this.meter.markWindow();
-        this.flushedBytes += consumed;
-        const tEndMs = bytesToMs(this.flushedBytes);
-        const utterance = this.commitUtterance(
-          pass1.output.transcript,
-          pass1.output.speakerSegments,
-          tStartMs,
-          tEndMs,
-        );
-        this.emit({
-          type: 'transcript',
-          delta: {
-            text: utterance.text,
-            isFinal: true,
-            speaker: utterance.speaker,
-            startMs: tStartMs,
-            endMs: tEndMs,
-          },
-        });
-        this.emit({ type: 'utterance', utterance });
-        this.reasoningScheduler.enqueue(utterance);
-      }
-      // Sprint DS2 — run the reasoning engine over anything the scheduler
-      // was still coalescing so the closing snapshot reflects the whole consult.
-      if (this.reasoningScheduler.hasPending) {
-        await this.runReasoning(this.reasoningScheduler.flush());
-      }
-      await this.runNote(true);
+      // A slow or hung final note (Pass 2 on Vertex) must never trap the
+      // doctor on "Finishing…". Cap the finalize work; on overrun, fall back
+      // to the last good live note so `final` + `done` ALWAYS fire.
+      await Promise.race([
+        this.finalizeWork(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('finalize budget exceeded')), 25_000),
+        ),
+      ]);
     } catch (err) {
       console.error('[live-gateway] finalize failed:', (err as Error).message);
       this.emitFinalFromLatest();
@@ -497,17 +468,67 @@ export class LiveSession {
     }
   }
 
+  /** The bounded finalize body: last-window transcription → reasoning → note. */
+  private async finalizeWork(): Promise<void> {
+    // Transcribe whatever remains as the final window (may be short).
+    if (this.pending.length > 0) {
+      const tail = this.pending;
+      const durationMs = bytesToMs(tail.length);
+      const consumed = tail.length;
+      this.pending = Buffer.alloc(0);
+      const tStartMs = bytesToMs(this.flushedBytes);
+      const t0 = Date.now();
+      const pass1 = await this.backends.pass1.run({
+        sessionId: this.sessionId,
+        audioBytes: tail,
+        durationMs,
+      });
+      this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
+      this.meter.markWindow();
+      this.flushedBytes += consumed;
+      const tEndMs = bytesToMs(this.flushedBytes);
+      const utterance = this.commitUtterance(
+        pass1.output.transcript,
+        pass1.output.speakerSegments,
+        tStartMs,
+        tEndMs,
+      );
+      this.emit({
+        type: 'transcript',
+        delta: {
+          text: utterance.text,
+          isFinal: true,
+          speaker: utterance.speaker,
+          startMs: tStartMs,
+          endMs: tEndMs,
+        },
+      });
+      this.emit({ type: 'utterance', utterance });
+      this.reasoningScheduler.enqueue(utterance);
+    }
+    // Sprint DS2 — run the reasoning engine over anything the scheduler
+    // was still coalescing so the closing snapshot reflects the whole consult.
+    if (this.reasoningScheduler.hasPending) {
+      await this.runReasoning(this.reasoningScheduler.flush());
+    }
+    await this.runNote(true);
+  }
+
   private meterSummary() {
     return this.meter.summary(this.sessionId, this.backends.backend, Date.now() - this.startedAtMs);
   }
 
   /** Wait for any in-flight `pump()` window to finish before finalizing. */
   private async waitIdle(): Promise<void> {
-    while (this.busy) await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    // Bounded: a stuck in-flight window must never block finalize forever.
+    const deadline = Date.now() + 4_000;
+    while (this.busy && Date.now() < deadline)
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
 
   private emitFinalFromLatest(): void {
-    if (!this.latestNote) return;
+    if (this.finalEmitted || !this.latestNote) return;
+    this.finalEmitted = true;
     this.emit({
       type: 'final',
       note: this.latestNote,
