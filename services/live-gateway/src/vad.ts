@@ -30,14 +30,54 @@ export interface WindowOptions {
   silenceMs: number;
 }
 
+/**
+ * Defaults tuned for perceived latency (Sprint 74): the window is the
+ * dominant term in speech→findings latency — nothing is transcribed or
+ * reasoned about until a window closes, so a 15–30 s window meant findings
+ * trailed speech by ~30 s (breaching the ≤8 s reasoning-update budget in
+ * the DS plan §0.3). 6–12 s windows still cut at natural pauses (silence
+ * gap ≥ 600 ms) so utterances stay whole, and total audio tokens are
+ * unchanged — the same speech just ships in smaller windows. Tune per
+ * deploy via LIVE_MIN_WINDOW_MS / LIVE_MAX_WINDOW_MS / LIVE_SILENCE_MS.
+ */
 export const DEFAULT_WINDOW_OPTIONS: WindowOptions = {
   sampleRate: SAMPLE_RATE,
   frameMs: 20,
   threshold: 0.015,
-  minWindowMs: 15_000,
-  maxWindowMs: 30_000,
+  minWindowMs: 6_000,
+  maxWindowMs: 12_000,
   silenceMs: 600,
 };
+
+/**
+ * Window options with env overrides (LIVE_MIN_WINDOW_MS, LIVE_MAX_WINDOW_MS,
+ * LIVE_SILENCE_MS). Each value is validated independently and falls back to
+ * the default when absent or out of range; max is always kept ≥ min + 1 s so
+ * a partial override can't produce an uncloseable window.
+ */
+export function windowOptionsFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): WindowOptions {
+  const readMs = (key: string, fallback: number, lo: number, hi: number): number => {
+    const raw = env[key];
+    if (!raw) return fallback;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < lo || n > hi) return fallback;
+    return n;
+  };
+  const minWindowMs = readMs(
+    'LIVE_MIN_WINDOW_MS',
+    DEFAULT_WINDOW_OPTIONS.minWindowMs,
+    2_000,
+    60_000,
+  );
+  const maxWindowMs = Math.max(
+    minWindowMs + 1_000,
+    readMs('LIVE_MAX_WINDOW_MS', DEFAULT_WINDOW_OPTIONS.maxWindowMs, 3_000, 120_000),
+  );
+  const silenceMs = readMs('LIVE_SILENCE_MS', DEFAULT_WINDOW_OPTIONS.silenceMs, 200, 3_000);
+  return { ...DEFAULT_WINDOW_OPTIONS, minWindowMs, maxWindowMs, silenceMs };
+}
 
 export type WindowReason = 'silence' | 'max';
 export interface WindowBoundary {

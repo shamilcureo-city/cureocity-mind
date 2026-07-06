@@ -16,6 +16,13 @@ export interface VertexGeminiReasoningOptions {
   location?: string;
   model?: string;
   saKeyPath?: string;
+  /**
+   * Sprint 74 — cap the model's internal "thinking" (billed as output AND
+   * paid in latency; this pass is latency-critical). 0 disables thinking,
+   * -1 restores the model's automatic budget, undefined leaves the request
+   * unchanged (model default).
+   */
+  thinkingBudget?: number;
 }
 
 /**
@@ -30,10 +37,12 @@ export class VertexGeminiReasoningBackend implements IPassReasoningBackend {
   private readonly ai: GoogleGenAI;
   private readonly modelName: string;
   private readonly region: string;
+  private readonly thinkingBudget: number | undefined;
 
   constructor(opts: VertexGeminiReasoningOptions) {
     this.modelName = opts.model ?? 'gemini-2.5-flash';
     this.region = opts.location ?? 'asia-south1';
+    this.thinkingBudget = opts.thinkingBudget;
     if (opts.saKeyPath) {
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] = opts.saKeyPath;
     }
@@ -59,6 +68,9 @@ export class VertexGeminiReasoningBackend implements IPassReasoningBackend {
           responseMimeType: 'application/json',
           temperature: 0,
           maxOutputTokens: 8_192,
+          ...(this.thinkingBudget !== undefined && {
+            thinkingConfig: { thinkingBudget: this.thinkingBudget },
+          }),
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
