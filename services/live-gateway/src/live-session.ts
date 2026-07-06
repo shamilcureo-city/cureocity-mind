@@ -64,6 +64,24 @@ import { bytesToMs, DEFAULT_WINDOW_OPTIONS, nextWindowBoundary, type WindowOptio
  */
 const CYCLE_MS = 1_000;
 
+/**
+ * Sprint 74 — minimum NEW transcript (ms of speech) between interim note
+ * passes. The note pass used to re-run on the full cumulative transcript
+ * after EVERY window — the dominant cost of a consult (O(n²) input, one
+ * full structured note billed as output per 6–12 s window, ~10–25× the
+ * ₹3/consult budget in budgets.ts). The live surfaces the doctor watches
+ * (findings / differential / ask-next) come from the separate reasoning
+ * pass and are untouched by this debounce; the structured note only needs
+ * a periodic refresh plus the authoritative run at finalize. 0 restores
+ * note-per-window.
+ */
+function noteRefreshMsFromEnv(): number {
+  const raw = process.env['LIVE_NOTE_REFRESH_MS'];
+  if (!raw) return 40_000;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 && n <= 600_000 ? n : 40_000;
+}
+
 type Emit = (event: LiveGatewayEvent) => void;
 
 export class LiveSession {
@@ -114,6 +132,10 @@ export class LiveSession {
   /** Last Rx-pad JSON emitted, to suppress identical re-emits. */
   private lastRxJson = '';
 
+  /** Transcript end (ms) when the interim note last ran — the debounce cursor. */
+  private lastNoteTranscriptEndMs = -1;
+  private readonly noteRefreshMs: number;
+
   constructor(
     sessionId: string,
     specialty: string | null,
@@ -121,12 +143,14 @@ export class LiveSession {
     emit: Emit,
     windowOpts: WindowOptions = DEFAULT_WINDOW_OPTIONS,
     patientContext?: PatientContext,
+    noteRefreshMs?: number,
   ) {
     this.sessionId = sessionId;
     this.specialty = specialty;
     this.backends = backends;
     this.emit = emit;
     this.windowOpts = windowOpts;
+    this.noteRefreshMs = noteRefreshMs ?? noteRefreshMsFromEnv();
     this.caseStore = new CaseStateStore(patientContext);
   }
 
@@ -366,8 +390,27 @@ export class LiveSession {
       return;
     }
 
+    // Sprint 74 — debounce the interim note: run the first one immediately
+    // (the doctor sees a note early), then only once ≥ noteRefreshMs of NEW
+    // speech has accumulated. The finalize run is never debounced.
+    const transcriptEndMs = bytesToMs(this.flushedBytes);
+    if (
+      !isFinal &&
+      this.latestNote !== null &&
+      transcriptEndMs - this.lastNoteTranscriptEndMs < this.noteRefreshMs
+    ) {
+      return;
+    }
+
+    // Interim refreshes go to the cheap backend; the authoritative finalize
+    // note (what gets signed) uses the full-quality one. pass2Final is
+    // optional — absent (mock/dev) everything runs on pass2.
+    const backend = isFinal
+      ? (this.backends.pass2Final ?? this.backends.pass2)
+      : this.backends.pass2;
+
     const t0 = Date.now();
-    const pass2 = await this.backends.pass2.run({
+    const pass2 = await backend.run({
       sessionId: this.sessionId,
       transcript,
       speakerSegments: this.segments,
@@ -377,6 +420,7 @@ export class LiveSession {
       clientContext: {},
     });
     this.meter.recordNote(pass2.callLog, Date.now() - t0);
+    this.lastNoteTranscriptEndMs = transcriptEndMs;
 
     if (pass2.output.kind !== 'MEDICAL') {
       // Defensive — DOCTOR always MEDICAL. Fall back to whatever we had.
