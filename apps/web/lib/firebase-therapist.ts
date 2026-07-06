@@ -174,6 +174,12 @@ export function friendlyAuthError(err: unknown): string {
       return 'Enter a password.';
     default: {
       const msg = (err as Error | null)?.message ?? 'Something went wrong. Please try again.';
+      // The reCAPTCHA loader fails with a plain message (no auth/* code)
+      // when the browser or network blocks google.com/recaptcha — almost
+      // always an ad-blocker, Safari content blocker, VPN or DNS filter.
+      if (/recaptcha/i.test(msg)) {
+        return 'Your browser or network blocked Google reCAPTCHA, which phone OTP needs. Turn off ad/content blockers for this site (or try another browser/network) — or use Google / Email sign-in, which don\u2019t need it.';
+      }
       return msg.replace(/^Firebase:\s*/i, '').trim();
     }
   }
