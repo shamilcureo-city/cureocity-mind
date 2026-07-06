@@ -1,4 +1,5 @@
 import {
+  FLASH_PRICING,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
@@ -25,7 +26,13 @@ import {
 export interface LiveBackends {
   backend: string;
   pass1: IPass1Backend;
+  /** Interim note refreshes during the consult (cheap; debounced). */
   pass2: IPass2Backend;
+  /**
+   * Sprint 74 — the authoritative finalize note (what gets signed). Absent
+   * (mock/dev), the session falls back to `pass2` for both.
+   */
+  pass2Final?: IPass2Backend;
   /** Sprint DS2 — combined live reasoning (findings + differential + ask-next). */
   reasoning: IPassReasoningBackend;
 }
@@ -44,7 +51,20 @@ export function buildBackends(): LiveBackends {
         location: flashRegion,
         model: process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash',
       }),
+      // Sprint 74 — interim note refreshes are display drafts, debounced in
+      // the session (LIVE_NOTE_REFRESH_MS) and run on Flash by default; the
+      // note the doctor signs comes from pass2Final (Pro). This was THE
+      // dominant consult cost: an undebounced Pro note per 6–12 s window.
       pass2: new VertexGeminiProGlobalBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['LIVE_INTERIM_NOTE_MODEL'] ??
+          process.env['VERTEX_FLASH_MODEL'] ??
+          'gemini-2.5-flash',
+        pricing: FLASH_PRICING,
+      }),
+      pass2Final: new VertexGeminiProGlobalBackend({
         projectId: project,
         location: proRegion,
         model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',

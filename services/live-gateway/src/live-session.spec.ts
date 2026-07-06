@@ -280,3 +280,89 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
     expect(events.some((e) => e.type === 'final')).toBe(false);
   });
 });
+
+describe('LiveSession — interim-note debounce + final routing (Sprint 74)', () => {
+  class CountingPass2 extends MockGeminiPass2Backend {
+    calls = 0;
+    override run(...args: Parameters<MockGeminiPass2Backend['run']>) {
+      this.calls += 1;
+      return super.run(...args);
+    }
+  }
+
+  function build(noteRefreshMs: number) {
+    const interim = new CountingPass2();
+    const final = new CountingPass2();
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-debounce',
+      null,
+      {
+        backend: 'mock',
+        pass1: new MockGeminiPass1Backend(),
+        pass2: interim,
+        pass2Final: final,
+        reasoning: new MockGeminiReasoningBackend(),
+      },
+      (e) => events.push(e),
+      OPTS,
+      undefined,
+      noteRefreshMs,
+    );
+    return { session, interim, final, events };
+  }
+
+  it('runs the first interim note, debounces the rest, and finalizes on pass2Final', async () => {
+    const { session, interim, final, events } = build(100_000);
+    session.start();
+    // Five utterances ≈ 27.5 s — far below the 100 s refresh threshold.
+    session.pushAudio(Buffer.concat([BLOCK, BLOCK, BLOCK, BLOCK, BLOCK]));
+    await session.pump();
+
+    // First window ran a note (the doctor sees one early); later windows debounced.
+    expect(interim.calls).toBe(1);
+    expect(final.calls).toBe(0);
+    expect(events.some((e) => e.type === 'note')).toBe(true);
+
+    await session.finalize();
+    // Finalize is never debounced and uses the authoritative backend.
+    expect(final.calls).toBe(1);
+    expect(interim.calls).toBe(1);
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
+  });
+
+  it('refreshMs=0 restores note-per-window (the old behaviour)', async () => {
+    const { session, interim } = build(0);
+    session.start();
+    session.pushAudio(Buffer.concat([BLOCK, BLOCK, BLOCK]));
+    await session.pump();
+    // Every closed window re-ran the interim note.
+    expect(interim.calls).toBeGreaterThanOrEqual(3);
+    session.dispose();
+  });
+
+  it('falls back to pass2 for the final when pass2Final is absent', async () => {
+    const interim = new CountingPass2();
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-fallback',
+      null,
+      {
+        backend: 'mock',
+        pass1: new MockGeminiPass1Backend(),
+        pass2: interim,
+        reasoning: new MockGeminiReasoningBackend(),
+      },
+      (e) => events.push(e),
+      OPTS,
+      undefined,
+      100_000,
+    );
+    session.start();
+    session.pushAudio(BLOCK);
+    await session.pump();
+    await session.finalize();
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
+    expect(interim.calls).toBe(2); // first window + finalize
+  });
+});

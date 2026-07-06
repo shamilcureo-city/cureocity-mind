@@ -14,7 +14,7 @@ import {
   THERAPY_NOTE_PROMPT_VERSION,
   THERAPY_NOTE_SYSTEM_PROMPT_V1,
 } from '../prompts';
-import { computeCostInr, PRO_PRICING } from '../pricing';
+import { computeCostInr, PRO_PRICING, type ModelPricing } from '../pricing';
 
 export interface VertexGeminiProGlobalOptions {
   projectId: string;
@@ -22,6 +22,12 @@ export interface VertexGeminiProGlobalOptions {
   location?: string;
   model?: string;
   saKeyPath?: string;
+  /**
+   * Sprint 74 — cost table used for the call log. Defaults to Pro pricing;
+   * pass FLASH_PRICING when this backend is constructed with a Flash model
+   * (e.g. the live gateway's interim-note pass) so the meter stays honest.
+   */
+  pricing?: ModelPricing;
 }
 
 /**
@@ -35,10 +41,12 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
   private readonly ai: GoogleGenAI;
   private readonly modelName: string;
   private readonly region: string;
+  private readonly pricing: ModelPricing;
 
   constructor(opts: VertexGeminiProGlobalOptions) {
     this.modelName = opts.model ?? 'gemini-2.5-pro';
     this.region = opts.location ?? 'global';
+    this.pricing = opts.pricing ?? PRO_PRICING;
     if (opts.saKeyPath) {
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] = opts.saKeyPath;
     }
@@ -125,7 +133,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
           promptVersion,
           inputTokens,
           outputTokens,
-          costInr: computeCostInr(inputTokens, outputTokens, PRO_PRICING),
+          costInr: computeCostInr(inputTokens, outputTokens, this.pricing),
           latencyMs: Date.now() - start,
           status: 'SUCCESS',
         },
@@ -140,7 +148,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
         promptVersion,
         inputTokens: fallbackTokens,
         outputTokens: 0,
-        costInr: computeCostInr(fallbackTokens, 0, PRO_PRICING),
+        costInr: computeCostInr(fallbackTokens, 0, this.pricing),
         latencyMs: Date.now() - start,
         status: 'ERROR',
         errorMessage: (e as Error).message,
