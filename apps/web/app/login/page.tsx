@@ -228,6 +228,9 @@ function LoginPageInner() {
       setConfirmation(conf);
       setStage('otp');
     } catch (err) {
+      // Raw code + message in the console — friendlyAuthError intentionally
+      // rewrites the on-screen text, so this is what remote debugging reads.
+      console.error('[login] OTP send failed', (err as { code?: string })?.code, err);
       resetRecaptcha();
       setError(friendlyAuthError(err));
     } finally {
@@ -247,6 +250,7 @@ function LoginPageInner() {
       if (result === 'invite') setStage('invite');
       else router.push(next);
     } catch (err) {
+      console.error('[login] OTP verify failed', (err as { code?: string })?.code, err);
       setError(friendlyAuthError(err));
     } finally {
       setBusy(false);
