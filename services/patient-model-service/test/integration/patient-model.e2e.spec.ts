@@ -12,6 +12,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -20,11 +21,32 @@ const SKIP = process.env['RUN_INTEGRATION_TESTS'] !== '1';
 
 const DEV_FIREBASE_UID = 'dev-firebase-uid-priya';
 
+/**
+ * CI runs every project's tests in parallel against ONE shared Postgres,
+ * and both this suite and the scribe e2e wipe the same tables in
+ * beforeEach — so one suite's wipe landed mid-pipeline in the other (the
+ * "expected 404 to be 201" flake, failing at a different step each run).
+ * A session-scoped advisory lock serialises the DB-destructive suites:
+ * whichever starts second waits. The lock client pins a single pooled
+ * connection so acquire and auto-release-on-disconnect happen on the same
+ * Postgres session. Keep the key in sync with scribe-e2e.spec.ts.
+ */
+const E2E_DB_LOCK_KEY = 727272;
+
 describe.skipIf(SKIP)('patient-model-service (integration)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
+  let dbLock: PrismaClient | null = null;
 
   beforeAll(async () => {
+    const base = process.env['DATABASE_URL'];
+    if (base) {
+      const url = base.includes('?') ? `${base}&connection_limit=1` : `${base}?connection_limit=1`;
+      dbLock = new PrismaClient({ datasources: { db: { url } } });
+      // ::text cast — pg_advisory_lock() returns void, which Prisma can't deserialize.
+      await dbLock.$queryRaw`SELECT pg_advisory_lock(${E2E_DB_LOCK_KEY})::text`;
+    }
+
     process.env['AUTH_BYPASS'] = 'true';
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -33,10 +55,12 @@ describe.skipIf(SKIP)('patient-model-service (integration)', () => {
     app.setGlobalPrefix('api/v1');
     await app.init();
     prisma = app.get(PrismaService);
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await app?.close();
+    // Session end releases the advisory lock.
+    await dbLock?.$disconnect();
   });
 
   beforeEach(async () => {

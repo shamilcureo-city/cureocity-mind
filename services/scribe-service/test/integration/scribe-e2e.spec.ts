@@ -24,6 +24,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
@@ -33,12 +34,33 @@ const SKIP = process.env['RUN_INTEGRATION_TESTS'] !== '1';
 const DEV_FIREBASE_UID = 'dev-firebase-uid-priya';
 const REAL_GEMINI_AVAILABLE = !!process.env['GCP_PROJECT_ID'] && !!process.env['GCP_SA_KEY_PATH'];
 
+/**
+ * CI runs every project's tests in parallel against ONE shared Postgres,
+ * and both this suite and the patient-model e2e wipe the same tables in
+ * beforeEach — so one suite's wipe landed mid-pipeline in the other (the
+ * "expected 404 to be 201" flake, failing at a different step each run).
+ * A session-scoped advisory lock serialises the DB-destructive suites:
+ * whichever starts second waits. The lock client pins a single pooled
+ * connection so acquire and auto-release-on-disconnect happen on the same
+ * Postgres session. Keep the key in sync with patient-model.e2e.spec.ts.
+ */
+const E2E_DB_LOCK_KEY = 727272;
+
 describe.skipIf(SKIP)('scribe-service E2E (mock Gemini, in-memory storage, inline queue)', () => {
   let app: INestApplication;
   let prisma: PrismaService;
   let clientId: string;
+  let dbLock: PrismaClient | null = null;
 
   beforeAll(async () => {
+    const base = process.env['DATABASE_URL'];
+    if (base) {
+      const url = base.includes('?') ? `${base}&connection_limit=1` : `${base}?connection_limit=1`;
+      dbLock = new PrismaClient({ datasources: { db: { url } } });
+      // ::text cast — pg_advisory_lock() returns void, which Prisma can't deserialize.
+      await dbLock.$queryRaw`SELECT pg_advisory_lock(${E2E_DB_LOCK_KEY})::text`;
+    }
+
     process.env['AUTH_BYPASS'] = 'true';
     process.env['STORAGE_BACKEND'] = 'memory';
     process.env['NOTE_QUEUE_BACKEND'] = 'sync';
@@ -49,10 +71,12 @@ describe.skipIf(SKIP)('scribe-service E2E (mock Gemini, in-memory storage, inlin
     app.setGlobalPrefix('api/v1');
     await app.init();
     prisma = app.get(PrismaService);
-  });
+  }, 120_000);
 
   afterAll(async () => {
     await app?.close();
+    // Session end releases the advisory lock.
+    await dbLock?.$disconnect();
   });
 
   beforeEach(async () => {
