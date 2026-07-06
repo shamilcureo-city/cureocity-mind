@@ -1,9 +1,13 @@
 'use client';
 
-import { Suspense, useEffect, useState, type FormEvent } from 'react';
+import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
+import {
+  signInWithPhoneNumber,
+  type ConfirmationResult,
+  type RecaptchaVerifier,
+} from 'firebase/auth';
 import {
   completeGoogleRedirect,
   createEmailAccount,
@@ -87,6 +91,23 @@ function LoginPageInner() {
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // A RecaptchaVerifier can only be rendered into its element ONCE — creating
+  // a fresh one on every "Send OTP" click threw "reCAPTCHA has already been
+  // rendered in this element" on any second attempt (after a failed send or
+  // "start over"), making one transient failure stick until a full page
+  // reload. Keep a single instance; clear + drop it after a failed send so
+  // the next attempt re-creates it cleanly.
+  const recaptchaRef = useRef<RecaptchaVerifier | null>(null);
+  function resetRecaptcha(): void {
+    try {
+      recaptchaRef.current?.clear();
+    } catch {
+      // Already cleared / never rendered — nothing to do.
+    }
+    recaptchaRef.current = null;
+  }
+  useEffect(() => resetRecaptcha, []);
 
   useEffect(() => {
     setError(null);
@@ -202,11 +223,12 @@ function LoginPageInner() {
     }
     setBusy(true);
     try {
-      const verifier = createRecaptchaVerifier(RECAPTCHA_ELEMENT_ID);
-      const conf = await signInWithPhoneNumber(getFirebaseAuth(), phoneE164, verifier);
+      recaptchaRef.current ??= createRecaptchaVerifier(RECAPTCHA_ELEMENT_ID);
+      const conf = await signInWithPhoneNumber(getFirebaseAuth(), phoneE164, recaptchaRef.current);
       setConfirmation(conf);
       setStage('otp');
     } catch (err) {
+      resetRecaptcha();
       setError(friendlyAuthError(err));
     } finally {
       setBusy(false);
