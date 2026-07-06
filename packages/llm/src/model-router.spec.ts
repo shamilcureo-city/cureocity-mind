@@ -13,7 +13,13 @@ import {
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
 } from './backends/mock-gemini.backend';
-import { computeCostInr, FLASH_PRICING, PRO_PRICING, estimateAudioInputTokens } from './pricing';
+import {
+  computeCostInr,
+  FLASH_AUDIO_PRICING,
+  FLASH_PRICING,
+  PRO_PRICING,
+  estimateAudioInputTokens,
+} from './pricing';
 
 describe('ModelRouter', () => {
   it('runs pass1, pass2, pass3, and pass4, invoking onCallLog for each', async () => {
@@ -181,21 +187,21 @@ describe('ModelRouter', () => {
 });
 
 describe('pricing.computeCostInr', () => {
-  it('matches Flash pricing for a typical 50-minute session', () => {
+  it('matches Flash AUDIO pricing for a typical 50-minute session (Sprint 74 truth-up)', () => {
     // 50 min audio = 50 * 60 * 32 = 96000 input tokens; assume 5000 output tokens
-    const inr = computeCostInr(96_000, 5_000, FLASH_PRICING);
-    // (96000 * 0.075 + 5000 * 0.30) / 1e6 USD = 0.0072 + 0.0015 = 0.0087 USD
-    // ~0.72 INR — should be well under the ₹500/session cap
-    expect(inr).toBeGreaterThan(0.5);
-    expect(inr).toBeLessThan(2);
+    const inr = computeCostInr(96_000, 5_000, FLASH_AUDIO_PRICING);
+    // (96000 * 1.00 + 5000 * 2.50) / 1e6 USD = 0.096 + 0.0125 = 0.1085 USD
+    // ~9 INR — the honest Pass-1 line (audio-rate input, not the text rate)
+    expect(inr).toBeGreaterThan(7);
+    expect(inr).toBeLessThan(12);
   });
 
   it('matches Pro pricing for a typical Pass 2', () => {
-    // 10k input text tokens, 2k output
+    // 10k input text tokens, 2k output (output rate includes thinking tokens)
     const inr = computeCostInr(10_000, 2_000, PRO_PRICING);
-    // (10000 * 1.25 + 2000 * 5) / 1e6 USD = 0.0125 + 0.01 = 0.0225 USD = ~1.87 INR
-    expect(inr).toBeGreaterThan(1);
-    expect(inr).toBeLessThan(3);
+    // (10000 * 1.25 + 2000 * 10) / 1e6 USD = 0.0125 + 0.02 = 0.0325 USD = ~2.7 INR
+    expect(inr).toBeGreaterThan(2);
+    expect(inr).toBeLessThan(4);
   });
 
   it('rounds to 4 fractional digits', () => {

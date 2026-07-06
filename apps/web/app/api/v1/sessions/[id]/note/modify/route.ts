@@ -7,7 +7,7 @@ import {
   type IntakeNoteV1,
   type TherapyNoteV1,
 } from '@cureocity/contracts';
-import { ensureGcpCreds } from '@/lib/llm';
+import { ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
@@ -170,6 +170,11 @@ export async function POST(
       responseMimeType: 'application/json',
       temperature: 0.2,
       maxOutputTokens: 8192,
+      ...(resolveThinkingBudget('LLM_THINKING_BUDGET_MODIFY', 2048) !== undefined && {
+        thinkingConfig: {
+          thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_MODIFY', 2048),
+        },
+      }),
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },

@@ -128,6 +128,29 @@ export default async function MeOverviewPage() {
 
   const medianMs = computeMedianConfirmationLatencyMs(confirmationLatencies);
 
+  // Sprint 74 — the COGS readout: what the AI actually cost in the last 30
+  // days, per pass, from the logged actuals (GeminiCallLog.costInr). This is
+  // the ground truth every cost/pricing decision tunes against — estimates
+  // live in docs/COST_EFFICIENCY_SPRINTS.md, this number is real.
+  const aiUsage = await prisma.geminiCallLog.groupBy({
+    by: ['pass'],
+    where: {
+      createdAt: { gte: since30d },
+      session: { is: { psychologistId: therapist.id } },
+    },
+    _sum: { costInr: true },
+    _count: { _all: true },
+  });
+  const aiTotalInr = aiUsage.reduce((acc, row) => acc + Number(row._sum.costInr ?? 0), 0);
+  const aiPerPass = aiUsage
+    .map((row) => ({
+      pass: row.pass,
+      calls: row._count._all,
+      costInr: Number(row._sum.costInr ?? 0),
+    }))
+    .sort((a, b) => b.costInr - a.costInr);
+  const aiPerSession = sessions30d > 0 ? aiTotalInr / sessions30d : null;
+
   return (
     <Container className="py-10">
       <p className="mb-4 text-xs text-[var(--color-ink-3)]">
@@ -173,6 +196,50 @@ export default async function MeOverviewPage() {
         <StatTile label="Sessions · last 30d" value={String(sessions30d)} />
         <StatTile label="Sessions · lifetime" value={String(sessionsLifetime)} />
         <StatTile label="Clinical briefs" value={String(clinicalReports)} />
+      </section>
+
+      <section className="mt-8">
+        <Card className="p-6">
+          <h2 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+            AI usage · last 30 days
+          </h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+            What the AI passes actually cost, from the call log — not an estimate.
+          </p>
+          {aiPerPass.length === 0 ? (
+            <p className="mt-4 text-sm text-[var(--color-ink-3)]">
+              No AI calls logged in the last 30 days.
+            </p>
+          ) : (
+            <>
+              <div className="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                <p className="text-2xl font-semibold text-[var(--color-ink)]">
+                  ₹{aiTotalInr.toFixed(2)}
+                </p>
+                {aiPerSession !== null && (
+                  <p className="text-sm text-[var(--color-ink-2)]">
+                    ≈ ₹{aiPerSession.toFixed(2)} per completed session
+                  </p>
+                )}
+              </div>
+              <ul className="mt-4 space-y-1.5 text-sm">
+                {aiPerPass.map((row) => (
+                  <li key={row.pass} className="flex items-baseline justify-between gap-3">
+                    <span className="text-[var(--color-ink-2)]">
+                      {row.pass.replace(/_/g, ' ').toLowerCase()}
+                      <span className="ml-1.5 text-xs text-[var(--color-ink-3)]">
+                        × {row.calls}
+                      </span>
+                    </span>
+                    <span className="font-mono text-[var(--color-ink)]">
+                      ₹{row.costInr.toFixed(2)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </Card>
       </section>
 
       <section className="mt-8 grid gap-4 lg:grid-cols-2">

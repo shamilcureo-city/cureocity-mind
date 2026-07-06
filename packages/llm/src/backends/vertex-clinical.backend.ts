@@ -21,6 +21,12 @@ export interface VertexGeminiProClinicalOptions {
   location?: string;
   model?: string;
   saKeyPath?: string;
+  /**
+   * Sprint 74 — cap the model's internal "thinking" (billed as output).
+   * 0 disables, -1 restores the model's automatic budget, undefined leaves
+   * the request unchanged.
+   */
+  thinkingBudget?: number;
 }
 
 /**
@@ -35,7 +41,10 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
   private readonly modelName: string;
   private readonly region: string;
 
+  private readonly thinkingBudget: number | undefined;
+
   constructor(opts: VertexGeminiProClinicalOptions) {
+    this.thinkingBudget = opts.thinkingBudget;
     this.modelName = opts.model ?? 'gemini-2.5-pro';
     this.region = opts.location ?? 'global';
     if (opts.saKeyPath) {
@@ -69,6 +78,9 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
           responseMimeType: 'application/json',
           temperature: 0.15,
           maxOutputTokens: 12_288,
+          ...(this.thinkingBudget !== undefined && {
+            thinkingConfig: { thinkingBudget: this.thinkingBudget },
+          }),
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },

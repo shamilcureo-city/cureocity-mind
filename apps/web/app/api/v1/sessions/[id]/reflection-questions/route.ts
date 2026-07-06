@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import type { TherapyNoteV1 } from '@cureocity/contracts';
-import { ensureGcpCreds } from '@/lib/llm';
+import { ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 
@@ -92,6 +92,11 @@ export async function GET(
       // (→ "Model returned non-JSON"). 4096 matches the sibling backends
       // (brief / findings) and leaves ample room for 5–7 short questions.
       maxOutputTokens: 4096,
+      ...(resolveThinkingBudget('LLM_THINKING_BUDGET_REFLECTIONS', 1024) !== undefined && {
+        thinkingConfig: {
+          thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_REFLECTIONS', 1024),
+        },
+      }),
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
