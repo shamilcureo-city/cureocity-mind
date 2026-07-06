@@ -187,12 +187,19 @@ function buildUserMessage(input: Pass3Input): string {
         `  Version ${input.clientContext.priorTreatmentPlan.version}, confirmed ${input.clientContext.priorTreatmentPlan.confirmedAt}`,
       ].join('\n')
     : '  (no prior treatment plan)';
+  // Sprint 75 — the longitudinal digest sits BEFORE the per-session content
+  // (transcript/note) so the stable prefix maximises implicit prompt caching
+  // and the model reads the arc before the day's material.
+  const digestBlock = input.caseDigest
+    ? ['Cumulative case digest (deterministic, from the chart):', input.caseDigest, '']
+    : [];
   return [
     `Output language: ${input.language}`,
     `Session kind: ${input.kind}`,
     `Modality: ${input.modality ?? '(not yet chosen — intake / investigative)'}`,
     `Presenting concerns: ${input.clientContext.presentingConcerns ?? '(none recorded)'}`,
     '',
+    ...digestBlock,
     'Prior confirmed diagnoses:',
     priorDx,
     '',
