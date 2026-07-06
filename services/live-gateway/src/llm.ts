@@ -51,6 +51,9 @@ export function buildBackends(): LiveBackends {
       }),
       // Sprint DS2 — combined reasoning. Flash in asia-south1 (DPDP; the
       // transcript is PII), reuses the Flash model env.
+      // Sprint 74 — thinking disabled by default: findings extraction is
+      // latency-critical and doesn't need deliberation; uncapped thinking
+      // added seconds per cycle (and cost). -1 restores automatic.
       reasoning: new VertexGeminiReasoningBackend({
         projectId: project,
         location: flashRegion,
@@ -58,6 +61,7 @@ export function buildBackends(): LiveBackends {
           process.env['VERTEX_REASONING_MODEL'] ??
           process.env['VERTEX_FLASH_MODEL'] ??
           'gemini-2.5-flash',
+        thinkingBudget: reasoningThinkingBudget(),
       }),
     };
   }
@@ -67,4 +71,16 @@ export function buildBackends(): LiveBackends {
     pass2: new MockGeminiPass2Backend(),
     reasoning: new MockGeminiReasoningBackend(),
   };
+}
+
+/**
+ * Sprint 74 — LIVE_REASONING_THINKING_BUDGET env: 0 (default) disables
+ * thinking on the live reasoning pass, -1 restores the model's automatic
+ * budget, any positive integer caps it. Garbage falls back to 0.
+ */
+function reasoningThinkingBudget(): number {
+  const raw = process.env['LIVE_REASONING_THINKING_BUDGET'];
+  if (!raw) return 0;
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n >= -1 ? n : 0;
 }

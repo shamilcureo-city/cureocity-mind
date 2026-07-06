@@ -56,8 +56,13 @@ import { bytesToMs, DEFAULT_WINDOW_OPTIONS, nextWindowBoundary, type WindowOptio
  * docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS0.
  */
 
-/** How often we check whether a window is ready to close. */
-const CYCLE_MS = 3_000;
+/**
+ * How often we check whether a window is ready to close. Sprint 74 — 1 s
+ * (was 3 s): the tick adds dead time on top of the window itself, and the
+ * pump is re-entrancy-guarded (`busy`) so a faster tick can't overlap a
+ * slow Pass 1; a no-op tick is just a cheap buffer-length check.
+ */
+const CYCLE_MS = 1_000;
 
 type Emit = (event: LiveGatewayEvent) => void;
 

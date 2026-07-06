@@ -5,6 +5,7 @@ import { authRequired, verifyStartToken } from './auth';
 import { buildBackends } from './llm';
 import { LiveSession } from './live-session';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
+import { windowOptionsFromEnv } from './vad';
 
 /**
  * Sprint DV4 (full) — the live copilot's streaming gateway.
@@ -97,7 +98,7 @@ wss.on('connection', (ws) => {
         cmd.specialty ?? null,
         backends,
         (event) => send(ws, event),
-        undefined, // windowOpts — use the defaults
+        windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
         cmd.context, // Sprint DS1 — seed the CaseState's patient context
       );
       session.start();

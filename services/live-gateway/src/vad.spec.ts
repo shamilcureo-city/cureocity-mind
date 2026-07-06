@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   bytesToMs,
   classifyFrames,
+  DEFAULT_WINDOW_OPTIONS,
   isSilent,
   msToBytes,
   nextWindowBoundary,
   rms,
+  windowOptionsFromEnv,
   type WindowOptions,
 } from './vad';
 
@@ -95,5 +97,40 @@ describe('nextWindowBoundary', () => {
     const first = durations[0]!;
     const last = durations[durations.length - 1]!;
     expect(Math.abs(last - first) / first).toBeLessThanOrEqual(0.2);
+  });
+});
+
+describe('windowOptionsFromEnv', () => {
+  it('returns the latency-tuned defaults with no env set', () => {
+    const o = windowOptionsFromEnv({});
+    expect(o).toEqual(DEFAULT_WINDOW_OPTIONS);
+    expect(o.minWindowMs).toBe(6_000);
+    expect(o.maxWindowMs).toBe(12_000);
+  });
+
+  it('applies valid overrides', () => {
+    const o = windowOptionsFromEnv({
+      LIVE_MIN_WINDOW_MS: '4000',
+      LIVE_MAX_WINDOW_MS: '9000',
+      LIVE_SILENCE_MS: '800',
+    });
+    expect(o.minWindowMs).toBe(4_000);
+    expect(o.maxWindowMs).toBe(9_000);
+    expect(o.silenceMs).toBe(800);
+  });
+
+  it('falls back per-field on garbage or out-of-range values', () => {
+    const o = windowOptionsFromEnv({
+      LIVE_MIN_WINDOW_MS: 'banana',
+      LIVE_MAX_WINDOW_MS: '999999',
+      LIVE_SILENCE_MS: '5',
+    });
+    expect(o).toEqual(DEFAULT_WINDOW_OPTIONS);
+  });
+
+  it('keeps max ≥ min + 1s when a partial override would invert them', () => {
+    const o = windowOptionsFromEnv({ LIVE_MIN_WINDOW_MS: '20000' });
+    expect(o.minWindowMs).toBe(20_000);
+    expect(o.maxWindowMs).toBe(21_000);
   });
 });
