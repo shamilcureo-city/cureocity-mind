@@ -230,6 +230,13 @@ export interface Pass3Input {
     priorDiagnoses?: Pass3PriorDiagnosis[];
     priorTreatmentPlan?: Pass3PriorTreatmentPlan | null;
   };
+  /**
+   * Sprint 75 — the serialised cumulative case digest (same text Passes
+   * 6/7/8 consume): stage, diagnosis evolution, goal statuses, instrument
+   * trajectories, problem threads, open assessment items. Optional +
+   * additive — older callers omit it and the prompt simply skips the block.
+   */
+  caseDigest?: string;
 }
 
 /**

@@ -22,6 +22,7 @@ import {
   recordGeminiCall,
 } from '@cureocity/observability/metrics';
 import { reconcileAssessmentItems } from './assessment-items';
+import { gatherInputs as gatherCaseInputs, serialiseContext } from './case-briefing';
 import { isBuiltinTemplateId, resolveBuiltinTemplate } from './builtin-templates';
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
@@ -794,6 +795,18 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
         }
       : null;
 
+    // Sprint 75 — the cumulative case digest (same serialisation Passes
+    // 6/7/8 consume). Defensive: a digest failure must never block the
+    // clinical analysis itself.
+    let caseDigest: string | undefined;
+    try {
+      caseDigest = serialiseContext(await gatherCaseInputs(args.clientId, args.psychologistId));
+    } catch (e) {
+      console.warn(
+        `[pass3] case digest unavailable for client=${args.clientId}: ${(e as Error).message}`,
+      );
+    }
+
     const router = modelRouter();
     const pass3 = await router.pass3({
       sessionId: args.sessionId,
@@ -813,6 +826,7 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
         ...(priorDiagnoses.length > 0 && { priorDiagnoses }),
         ...(priorTreatmentPlan && { priorTreatmentPlan }),
       },
+      ...(caseDigest && { caseDigest }),
     });
 
     await persistCallLog(pass3.callLog);

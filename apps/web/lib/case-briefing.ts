@@ -36,6 +36,17 @@ export interface CaseBriefingInputs {
   latestReportBody: unknown;
   hasSafetyPlan: boolean;
   clientId: string;
+  /** Sprint 75 — active problem list + how many sessions worked on each. */
+  problems: { title: string; sessionCount: number }[];
+  /** Sprint 75 — full per-instrument score trajectory (compact). */
+  instrumentSeries: { instrumentKey: string; points: { score: number; at: Date }[] }[];
+  /** Sprint 75 — superseded diagnoses, so the formulation's evolution is visible. */
+  diagnosisHistory: {
+    icd11Code: string;
+    icd11Label: string;
+    confirmedAt: Date;
+    supersededAt: Date | null;
+  }[];
 }
 
 export async function buildDeterministicCaseBriefing(
@@ -53,7 +64,16 @@ export async function gatherInputs(
 ): Promise<CaseBriefingInputs> {
   const journey = await computeClientJourney(clientId, psychologistId);
 
-  const [openItemRows, client, latestReport, latestIntakeDraft, safetyPlan] = await Promise.all([
+  const [
+    openItemRows,
+    client,
+    latestReport,
+    latestIntakeDraft,
+    safetyPlan,
+    problemRows,
+    instrumentRows,
+    diagnosisRows,
+  ] = await Promise.all([
     prisma.assessmentItem.findMany({
       where: { clientId, status: { in: ['OPEN', 'ADDRESSED'] } },
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
@@ -78,7 +98,35 @@ export async function gatherInputs(
       where: { clientId, supersededAt: null },
       select: { id: true },
     }),
+    // Sprint 75 — the maintained problem list + session-thread counts.
+    prisma.problemListItem.findMany({
+      where: { clientId, status: 'ACTIVE' },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { title: true, _count: { select: { sessionLinks: true } } },
+    }),
+    // Sprint 75 — full instrument trajectory (not just baseline → latest).
+    prisma.instrumentResponse.findMany({
+      where: { clientId },
+      orderBy: { administeredAt: 'asc' },
+      take: 60,
+      select: { instrumentKey: true, score: true, administeredAt: true },
+    }),
+    // Sprint 75 — diagnosis evolution, superseded entries included.
+    prisma.clientDiagnosis.findMany({
+      where: { clientId },
+      orderBy: { confirmedAt: 'desc' },
+      take: 8,
+      select: { icd11Code: true, icd11Label: true, confirmedAt: true, supersededAt: true },
+    }),
   ]);
+
+  const seriesByKey = new Map<string, { score: number; at: Date }[]>();
+  for (const r of instrumentRows) {
+    const arr = seriesByKey.get(r.instrumentKey) ?? [];
+    arr.push({ score: r.score, at: r.administeredAt });
+    seriesByKey.set(r.instrumentKey, arr);
+  }
 
   return {
     journey,
@@ -88,6 +136,12 @@ export async function gatherInputs(
     latestReportBody: latestReport?.body ?? null,
     hasSafetyPlan: safetyPlan !== null,
     clientId,
+    problems: problemRows.map((p) => ({ title: p.title, sessionCount: p._count.sessionLinks })),
+    instrumentSeries: [...seriesByKey.entries()].map(([instrumentKey, points]) => ({
+      instrumentKey,
+      points,
+    })),
+    diagnosisHistory: diagnosisRows,
   };
 }
 
@@ -98,11 +152,14 @@ function parseIntake(content: unknown) {
 }
 
 /**
- * Compact text dump of the cumulative record. Used as the
- * `contextText` for Pass 6 (case briefing) and Pass 8 (case consult),
- * which both want the same view of the chart. Lifted out of the
- * case-briefing route in Sprint 52 so both consumers share one
- * format and one source of truth.
+ * Compact text dump of the cumulative record — THE case digest.
+ * Used as the `contextText` for Pass 6 (case briefing), Pass 7
+ * (conceptual map) and Pass 8 (case consult), and — Sprint 75 — as
+ * `caseDigest` for Pass 3 (clinical analysis), which previously saw
+ * almost no longitudinal state. Lifted out of the case-briefing route
+ * in Sprint 52 so every consumer shares one format and one source of
+ * truth; enriched in Sprint 75 with the problem threads, the full
+ * instrument trajectory, and the diagnosis evolution.
  */
 export function serialiseContext(inputs: CaseBriefingInputs): string {
   const j = inputs.journey;
@@ -114,6 +171,15 @@ export function serialiseContext(inputs: CaseBriefingInputs): string {
       `Confirmed diagnosis: ${j.workingDiagnosis.icd11Code} ${j.workingDiagnosis.icd11Label} (confidence ${j.workingDiagnosis.confidence})`,
     );
   }
+  const superseded = inputs.diagnosisHistory.filter((d) => d.supersededAt !== null);
+  if (superseded.length > 0) {
+    lines.push('Diagnosis history (superseded — how the formulation evolved):');
+    for (const d of superseded) {
+      lines.push(
+        `  - ${d.icd11Code} ${d.icd11Label} (held ${isoDay(d.confirmedAt)} → ${isoDay(d.supersededAt!)})`,
+      );
+    }
+  }
   if (j.activePlan) {
     lines.push(
       `Active plan v${j.activePlan.version} (${j.activePlan.modality ?? 'modality TBD'}); goals ${j.activePlan.goalsAchieved}/${j.activePlan.goalsTotal} achieved:`,
@@ -121,10 +187,25 @@ export function serialiseContext(inputs: CaseBriefingInputs): string {
     for (const g of j.activePlan.goals) lines.push(`  - [${g.status}] ${g.description}`);
   }
   if (j.instrumentChanges.length > 0) {
-    lines.push('Instruments:');
+    lines.push('Instrument verdicts (deterministic reliable-change engine):');
     for (const c of j.instrumentChanges) {
       lines.push(
         `  - ${c.instrumentKey}: ${c.baselineScore} → ${c.latestScore} (${c.verdict}${c.isRemission ? ', remission' : ''})`,
+      );
+    }
+  }
+  if (inputs.instrumentSeries.length > 0) {
+    lines.push('Instrument trajectories (score@date, oldest first):');
+    for (const s of inputs.instrumentSeries) {
+      const pts = s.points.map((p) => `${p.score}@${isoDay(p.at)}`).join(', ');
+      lines.push(`  - ${s.instrumentKey}: ${pts}`);
+    }
+  }
+  if (inputs.problems.length > 0) {
+    lines.push('Active problem list (therapist-maintained; sessions that worked on each):');
+    for (const p of inputs.problems) {
+      lines.push(
+        `  - ${p.title} (worked on in ${p.sessionCount} session${p.sessionCount === 1 ? '' : 's'})`,
       );
     }
   }
@@ -143,6 +224,10 @@ export function serialiseContext(inputs: CaseBriefingInputs): string {
   }
   lines.push(`Safety plan on file: ${inputs.hasSafetyPlan ? 'yes' : 'no'}`);
   return lines.join('\n');
+}
+
+function isoDay(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 export function composeBriefing(inputs: CaseBriefingInputs): CaseBriefingV1 {
