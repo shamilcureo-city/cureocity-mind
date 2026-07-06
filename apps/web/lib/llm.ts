@@ -70,6 +70,23 @@ export function ensureGcpCreds(): void {
   process.env['GOOGLE_APPLICATION_CREDENTIALS'] = VERCEL_CREDS_PATH;
 }
 
+/**
+ * Sprint 74 — env-tunable thinking budgets. Thinking tokens are billed as
+ * OUTPUT (the Pro rate), and every pass previously ran with the model's
+ * automatic (uncapped) budget. Defaults: tight where the task is
+ * extraction/formatting, generous where clinical reasoning earns its keep.
+ * Semantics per pass env (LLM_THINKING_BUDGET_*): a non-negative integer
+ * caps thinking, 0 disables it, -1 restores the model's automatic budget.
+ */
+export function resolveThinkingBudget(envKey: string, fallback: number): number | undefined {
+  const raw = process.env[envKey];
+  const n = raw ? Number.parseInt(raw, 10) : fallback;
+  if (!Number.isFinite(n) || n < -1) return fallback;
+  // -1 = automatic: omit the config entirely (the SDK treats -1 as auto,
+  // but omitting keeps the request identical to the pre-Sprint-74 shape).
+  return n === -1 ? undefined : n;
+}
+
 function build(): IModelRouter {
   const backend = process.env['LLM_BACKEND'] ?? 'mock';
   if (backend === 'vertex') {
@@ -91,6 +108,7 @@ function build(): IModelRouter {
         projectId: project,
         location: proRegion,
         model: process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS2', 1024),
       }),
       pass3: new VertexGeminiProClinicalBackend({
         projectId: project,
@@ -99,6 +117,7 @@ function build(): IModelRouter {
           process.env['VERTEX_CLINICAL_MODEL'] ??
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS3', 4096),
       }),
       pass4: new VertexGeminiProTherapyScriptBackend({
         projectId: project,
@@ -107,18 +126,21 @@ function build(): IModelRouter {
           process.env['VERTEX_THERAPY_SCRIPT_MODEL'] ??
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS4', 2048),
       }),
       pass5: new VertexGeminiProBriefBackend({
         projectId: project,
         location: proRegion,
         model:
           process.env['VERTEX_BRIEF_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS5', 2048),
       }),
       pass6: new VertexGeminiProCaseBriefingBackend({
         projectId: project,
         location: proRegion,
         model:
           process.env['VERTEX_BRIEF_MODEL'] ?? process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS6', 2048),
       }),
       pass7: new VertexGeminiProConceptualMapBackend({
         projectId: project,
@@ -127,6 +149,7 @@ function build(): IModelRouter {
           process.env['VERTEX_CONCEPTUAL_MAP_MODEL'] ??
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS7', 2048),
       }),
       // Sprint 52 — Pass 8 Case Consult. Reuses the Pro model env so a
       // single override toggles both Pass 6 + 8; both are reasoning-
@@ -138,6 +161,7 @@ function build(): IModelRouter {
           process.env['VERTEX_CASE_CONSULT_MODEL'] ??
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS8', 2048),
       }),
       // Sprint DV6 — doctor differential. Reuses the Pro model env.
       passDifferential: new VertexGeminiDifferentialBackend({
@@ -147,6 +171,7 @@ function build(): IModelRouter {
           process.env['VERTEX_DIFFERENTIAL_MODEL'] ??
           process.env['VERTEX_PRO_MODEL'] ??
           'gemini-2.5-pro',
+        thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_DIFFERENTIAL', 2048),
       }),
       // Sprint DS1 — live findings extractor. Flash in asia-south1 (DPDP;
       // transcript is PII), reuses the Flash model env.

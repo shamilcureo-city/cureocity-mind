@@ -6,7 +6,7 @@ import {
   type Pass1Output,
   computeCostInr,
   estimateAudioInputTokens,
-  FLASH_PRICING,
+  FLASH_AUDIO_PRICING,
   PRO_PRICING,
 } from '@cureocity/llm';
 import type { IStorageClient } from '@cureocity/storage';
@@ -80,7 +80,7 @@ export class NoteOrchestrator {
       const pass1Estimate = computeCostInr(
         estimateAudioInputTokens(durationMs),
         1_000,
-        FLASH_PRICING,
+        FLASH_AUDIO_PRICING,
       );
       await this.costGuard.checkBeforeCall({
         sessionId,

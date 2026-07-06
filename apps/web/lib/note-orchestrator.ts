@@ -2,7 +2,7 @@ import { Prisma, type NoteRiskSeverity as PrismaRiskSeverity } from '@prisma/cli
 import {
   computeCostInr,
   estimateAudioInputTokens,
-  FLASH_PRICING,
+  FLASH_AUDIO_PRICING,
   PRO_PRICING,
   type GeminiCallLogData,
   type Pass1Output,
@@ -597,7 +597,11 @@ async function runLegacyWholeSessionPass1(args: {
     return { kind: 'no-audio' };
   }
 
-  const pass1Estimate = computeCostInr(estimateAudioInputTokens(durationMs), 1_000, FLASH_PRICING);
+  const pass1Estimate = computeCostInr(
+    estimateAudioInputTokens(durationMs),
+    1_000,
+    FLASH_AUDIO_PRICING,
+  );
   await checkCostCircuit({
     sessionId: args.sessionId,
     psychologistId: args.psychologistId,

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
-import { ensureGcpCreds } from '@/lib/llm';
+import { ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
@@ -102,6 +102,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       systemInstruction,
       temperature: 0.4,
       maxOutputTokens: 1024,
+      ...(resolveThinkingBudget('LLM_THINKING_BUDGET_ASSISTANT', 1024) !== undefined && {
+        thinkingConfig: {
+          thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_ASSISTANT', 1024),
+        },
+      }),
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
         { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },

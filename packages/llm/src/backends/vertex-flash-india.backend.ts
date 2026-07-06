@@ -10,7 +10,7 @@ import {
   TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
   TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
 } from '../prompts';
-import { computeCostInr, FLASH_PRICING, estimateAudioInputTokens } from '../pricing';
+import { computeCostInr, FLASH_AUDIO_PRICING, estimateAudioInputTokens } from '../pricing';
 
 export interface VertexGeminiFlashIndiaOptions {
   projectId: string;
@@ -156,7 +156,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           promptVersion: TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
           inputTokens,
           outputTokens,
-          costInr: computeCostInr(inputTokens, outputTokens, FLASH_PRICING),
+          costInr: computeCostInr(inputTokens, outputTokens, FLASH_AUDIO_PRICING),
           latencyMs: Date.now() - start,
           status: 'SUCCESS',
         },
@@ -177,7 +177,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           promptVersion: TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
           inputTokens: inputTokensEstimate,
           outputTokens: 0,
-          costInr: computeCostInr(inputTokensEstimate, 0, FLASH_PRICING),
+          costInr: computeCostInr(inputTokensEstimate, 0, FLASH_AUDIO_PRICING),
           latencyMs: Date.now() - start,
           status: 'ERROR',
           errorMessage: (e as Error).message,

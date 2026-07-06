@@ -28,6 +28,12 @@ export interface VertexGeminiProGlobalOptions {
    * (e.g. the live gateway's interim-note pass) so the meter stays honest.
    */
   pricing?: ModelPricing;
+  /**
+   * Sprint 74 — cap the model's internal "thinking" (billed as output).
+   * 0 disables, -1 restores the model's automatic budget, undefined leaves
+   * the request unchanged.
+   */
+  thinkingBudget?: number;
 }
 
 /**
@@ -43,7 +49,10 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
   private readonly region: string;
   private readonly pricing: ModelPricing;
 
+  private readonly thinkingBudget: number | undefined;
+
   constructor(opts: VertexGeminiProGlobalOptions) {
+    this.thinkingBudget = opts.thinkingBudget;
     this.modelName = opts.model ?? 'gemini-2.5-pro';
     this.region = opts.location ?? 'global';
     this.pricing = opts.pricing ?? PRO_PRICING;
@@ -83,6 +92,9 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
           responseMimeType: 'application/json',
           temperature: 0.2,
           maxOutputTokens: 8192,
+          ...(this.thinkingBudget !== undefined && {
+            thinkingConfig: { thinkingBudget: this.thinkingBudget },
+          }),
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
