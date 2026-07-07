@@ -91,6 +91,8 @@ function LoginPageInner() {
   const [confirmation, setConfirmation] = useState<ConfirmationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Resend-OTP cooldown (seconds) so a lost/slow SMS isn't a dead end.
+  const [resendIn, setResendIn] = useState(0);
 
   // A RecaptchaVerifier can only be rendered into its element ONCE — creating
   // a fresh one on every "Send OTP" click threw "reCAPTCHA has already been
@@ -112,6 +114,13 @@ function LoginPageInner() {
   useEffect(() => {
     setError(null);
   }, [method, emailMode]);
+
+  // Tick the resend cooldown down to zero.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
 
   // Google popup-blocked path uses a full-page redirect (signInWithGoogle
   // → signInWithRedirect). On the way back we MUST complete it here to
@@ -227,10 +236,33 @@ function LoginPageInner() {
       const conf = await signInWithPhoneNumber(getFirebaseAuth(), phoneE164, recaptchaRef.current);
       setConfirmation(conf);
       setStage('otp');
+      setResendIn(30);
     } catch (err) {
       // Raw code + message in the console — friendlyAuthError intentionally
       // rewrites the on-screen text, so this is what remote debugging reads.
       console.error('[login] OTP send failed', (err as { code?: string })?.code, err);
+      resetRecaptcha();
+      setError(friendlyAuthError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Re-request a code for the same number from the OTP screen. The prior
+  // verifier is consumed by the first send, so mint a fresh one.
+  async function resendOtp() {
+    if (busy || resendIn > 0) return;
+    setError(null);
+    setBusy(true);
+    try {
+      resetRecaptcha();
+      recaptchaRef.current = createRecaptchaVerifier(RECAPTCHA_ELEMENT_ID);
+      const conf = await signInWithPhoneNumber(getFirebaseAuth(), phoneE164, recaptchaRef.current);
+      setConfirmation(conf);
+      setOtp('');
+      setResendIn(30);
+    } catch (err) {
+      console.error('[login] OTP resend failed', (err as { code?: string })?.code, err);
       resetRecaptcha();
       setError(friendlyAuthError(err));
     } finally {
@@ -285,6 +317,8 @@ function LoginPageInner() {
     setInviteCode('');
     setConfirmation(null);
     setError(null);
+    setResendIn(0);
+    resetRecaptcha();
   }
 
   return (
@@ -589,6 +623,14 @@ function LoginPageInner() {
                   {busy ? 'Verifying…' : 'Verify and continue'}
                 </Button>
                 <FieldError message={error} />
+                <button
+                  type="button"
+                  onClick={resendOtp}
+                  disabled={busy || resendIn > 0}
+                  className="block w-full text-center text-xs font-medium text-[var(--color-accent)] hover:underline disabled:text-[var(--color-ink-3)] disabled:no-underline"
+                >
+                  {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
+                </button>
                 <button
                   type="button"
                   onClick={startOver}
