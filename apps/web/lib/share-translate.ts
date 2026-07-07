@@ -37,7 +37,9 @@ export async function translateForShare(
   try {
     ensureGcpCreds();
     const region = process.env['VERTEX_PRO_REGION'] ?? 'global';
-    const model = process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro';
+    // Sprint 76 — translation is mechanical; Flash by default (env-reversible).
+    const model =
+      process.env['LLM_TRANSLATE_MODEL'] ?? process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash';
     const ai = new GoogleGenAI({ vertexai: true, project, location: region });
     const languageName = LANGUAGE_NAME[target];
 
