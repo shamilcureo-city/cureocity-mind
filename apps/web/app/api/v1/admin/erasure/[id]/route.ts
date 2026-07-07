@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
@@ -25,11 +26,15 @@ const PatchSchema = z.object({
  *                           clinical obligations (open scripts,
  *                           statutory hold).
  *   PENDING → FULFILLED     direct fulfilment for clean cases —
- *                           soft-deletes the Client (sets
- *                           deletedAt) AND nulls the contact PII
- *                           fields. Hard-delete of session content
- *                           runs via the audio-retention cron and
- *                           a future Sprint 10 PII-purge job.
+ *                           soft-deletes the Client (sets deletedAt),
+ *                           redacts the name + contact PII, AND (SEC-2)
+ *                           redacts every PII/PHI-bearing column across
+ *                           the client's session content in the same
+ *                           transaction: transcripts, notes, diagnoses,
+ *                           plans, instrument answers, raw audio bytes,
+ *                           and patient-share snapshots. Rows are kept
+ *                           (soft-deleted) so the erasure stays auditable
+ *                           and referential integrity holds.
  *   APPROVED → FULFILLED    same fulfilment action after delayed
  *                           approval.
  *
@@ -82,37 +87,111 @@ export async function PATCH(
     });
 
     if (body.value.status === 'FULFILLED') {
+      const clientId = existing.client.id;
       await tx.client.update({
-        where: { id: existing.client.id },
+        where: { id: clientId },
         data: {
           deletedAt: now,
+          // SEC-2 — the fullName is the PRIMARY identifier; redact both the
+          // plaintext and the encrypted twin, else a decrypt-on-read
+          // resurrects the erased name.
+          fullName: 'redacted',
+          fullNameEncrypted: null,
           contactPhone: 'redacted',
           contactEmail: null,
-          // Read cutover — clear the encrypted twins too, else a
-          // decrypt-on-read would resurrect the erased contact details.
           contactPhoneEncrypted: null,
           contactEmailEncrypted: null,
           presentingConcerns: null,
         },
       });
 
-      // DPDP erasure must also clear PII the client's name/detail lives in
-      // outside the Client row. These tables use scalar clientId/sessionId
-      // FKs with no cascade, so they survive a Client soft-delete on their
-      // own: Letter.body bakes in the client's full name (letter-templates),
-      // problem_list_items hold free-text clinical detail, and note_reviews
-      // carry a reviewer's free-text note. Delete them in the same tx.
-      await tx.letter.deleteMany({ where: { clientId: existing.client.id } });
-      await tx.problemListItem.deleteMany({ where: { clientId: existing.client.id } });
+      // SEC-2 — a DPDP erasure must also remove the PII/PHI that lives in the
+      // client's session content, not just the Client row. We keep the (soft-
+      // deleted) rows so the erasure itself stays auditable + referential
+      // integrity holds, but REDACT every PII/PHI-bearing column in place:
+      // transcripts, notes, diagnoses, plans, instrument answers, raw audio,
+      // and patient-share snapshots.
       const clientSessions = await tx.session.findMany({
-        where: { clientId: existing.client.id },
+        where: { clientId },
         select: { id: true },
       });
-      if (clientSessions.length > 0) {
-        await tx.noteReview.deleteMany({
-          where: { sessionId: { in: clientSessions.map((s) => s.id) } },
+      const sessionIds = clientSessions.map((s) => s.id);
+      const therapyNotes = await tx.therapyNote.findMany({
+        where: { sessionId: { in: sessionIds } },
+        select: { id: true },
+      });
+      const therapyNoteIds = therapyNotes.map((n) => n.id);
+
+      // Free-standing PII rows — deleting is cleanest (no dependents).
+      await tx.letter.deleteMany({ where: { clientId } });
+      await tx.problemListItem.deleteMany({ where: { clientId } });
+      if (sessionIds.length > 0) {
+        await tx.noteReview.deleteMany({ where: { sessionId: { in: sessionIds } } });
+      }
+
+      if (sessionIds.length > 0) {
+        // Raw voice recording — biometric-grade PII (was purged only by the
+        // 30-day cron; force it here).
+        await tx.audioChunk.updateMany({
+          where: { sessionId: { in: sessionIds } },
+          data: { bytes: null },
+        });
+        await tx.transcriptSegment.updateMany({
+          where: { sessionId: { in: sessionIds } },
+          data: {
+            transcript: null,
+            speakerSegments: Prisma.DbNull,
+            affectFeatures: Prisma.DbNull,
+            errorMessage: null,
+          },
+        });
+        await tx.noteDraft.updateMany({
+          where: { sessionId: { in: sessionIds } },
+          data: {
+            transcript: null,
+            transcriptEncrypted: null,
+            speakerSegments: Prisma.DbNull,
+            affectFeatures: Prisma.DbNull,
+            content: Prisma.DbNull,
+            rxPad: Prisma.DbNull,
+            errorMessage: null,
+          },
+        });
+        await tx.therapyNote.updateMany({
+          where: { sessionId: { in: sessionIds } },
+          data: { content: {}, rxPad: Prisma.DbNull },
         });
       }
+      if (therapyNoteIds.length > 0) {
+        await tx.noteEdit.updateMany({
+          where: { therapyNoteId: { in: therapyNoteIds } },
+          data: { before: 'redacted', after: 'redacted' },
+        });
+      }
+      // Client-keyed clinical PHI.
+      await tx.clinicalReport.updateMany({
+        where: { clientId },
+        data: { body: Prisma.DbNull, confirmations: {}, errorMessage: null },
+      });
+      await tx.clientDiagnosis.updateMany({
+        where: { clientId },
+        data: { supportingEvidence: [], notes: null },
+      });
+      await tx.treatmentPlan.updateMany({ where: { clientId }, data: { body: {} } });
+      await tx.instrumentResponse.updateMany({
+        where: { clientId },
+        data: { responses: {}, notes: null },
+      });
+      await tx.preSessionBrief.updateMany({
+        where: { clientId },
+        data: { body: Prisma.DbNull, errorMessage: null },
+      });
+      await tx.therapyScript.updateMany({ where: { clientId }, data: { body: {} } });
+      // Patient-share snapshots freeze the client's name + note text + contact.
+      await tx.patientShare.updateMany({
+        where: { clientId },
+        data: { snapshot: {}, toContact: null, subject: 'redacted', errorDetail: null },
+      });
 
       await writeAudit(
         {

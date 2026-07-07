@@ -63,6 +63,20 @@ function instance(): TenantCrypto {
     // never silently fall through to the dev KMS in prod.
     throw new Error('KMS_BACKEND=aws-kms is not yet wired in apps/web — pending S32 Phase 2.');
   } else {
+    // CRYPTO-1 — the local-dev KMS falls back to a PUBLIC hardcoded secret
+    // when CRYPTO_DEV_MASTER_SECRET is unset. On a production deployment that
+    // makes every "encrypted" PII column trivially decryptable from the
+    // source tree. Fail closed: refuse to boot the crypto layer until a real
+    // secret is set (or aws-kms is wired). That secret MUST be backed up +
+    // documented in a secrets manager — losing it is unrecoverable key loss
+    // for every encrypted column.
+    if (process.env['VERCEL_ENV'] === 'production' && !process.env['CRYPTO_DEV_MASTER_SECRET']) {
+      throw new Error(
+        'CRYPTO-1: a production deployment must set CRYPTO_DEV_MASTER_SECRET ' +
+          '(or wire KMS_BACKEND=aws-kms). Refusing to derive tenant keys from ' +
+          'the hardcoded dev master secret.',
+      );
+    }
     kms = new LocalDevKmsProvider();
   }
   const cached: TenantCrypto = {

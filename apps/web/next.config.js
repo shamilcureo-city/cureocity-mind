@@ -22,6 +22,22 @@ const nextConfig = {
     '@opentelemetry/sdk-metrics',
     '@opentelemetry/exporter-metrics-otlp-http',
   ],
+  // SHARE-2 — the public patient portal (and its API) carry clinical PHI
+  // behind an unguessable token. If a link leaks into a crawlable surface it
+  // must never be indexed. Belt-and-braces with the page-level robots
+  // metadata (some crawlers read the header, some the meta tag).
+  async headers() {
+    return [
+      {
+        source: '/p/:path*',
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' }],
+      },
+      {
+        source: '/api/v1/p/:path*',
+        headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' }],
+      },
+    ];
+  },
 };
 
 // Sprint 57 — Sentry. With no SENTRY_AUTH_TOKEN the source-map upload

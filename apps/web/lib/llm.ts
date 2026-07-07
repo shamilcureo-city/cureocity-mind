@@ -194,6 +194,18 @@ function build(): IModelRouter {
       }),
     });
   }
+  // CLIN-4 — fail CLOSED in production. The mock backend fabricates complete
+  // clinical notes; serving those to a real therapist (because LLM_BACKEND was
+  // mistyped or unset on prod) is a patient-safety incident. Mirror the auth
+  // layer's isAuthBypassed() posture: refuse rather than silently fabricate.
+  // Preview deployments (VERCEL_ENV=preview) may still run mock for demos.
+  if (process.env['VERCEL_ENV'] === 'production') {
+    throw new Error(
+      `[llm] REFUSING to serve the mock backend on a production deployment ` +
+        `(LLM_BACKEND='${process.env['LLM_BACKEND'] ?? '<unset>'}'). ` +
+        `Set LLM_BACKEND=vertex + VERTEX_PROJECT_ID for real clinical output.`,
+    );
+  }
   console.info(
     `[llm] backend=mock LLM_BACKEND_value='${process.env['LLM_BACKEND'] ?? '<unset>'}' — Vertex not selected; check env var spelling/case`,
   );

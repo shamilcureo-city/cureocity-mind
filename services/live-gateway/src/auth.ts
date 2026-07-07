@@ -6,10 +6,14 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
  * format + algorithm: token = `base64url(JSON{sessionId,psychologistId,
  * exp}) . HMAC-SHA256(payload)`.
  *
- * Auth is enforced only when `LIVE_GATEWAY_SECRET` is set. When unset
- * (local/mock dev) the gateway runs open — same auth-bypass posture the
- * app uses when Firebase env is missing. Set the secret on BOTH the app
- * and the gateway in prod to require a valid token.
+ * Auth is enforced whenever `LIVE_GATEWAY_SECRET` is set. When unset:
+ *   - in production (NODE_ENV=production) the gateway fails CLOSED —
+ *     every `start` is rejected — because an unauthenticated WS that
+ *     accepts PHI audio and runs real Vertex passes is far worse than a
+ *     down node. This mirrors the app's `isAuthBypassed()` fail-closed
+ *     posture (DOC-4).
+ *   - otherwise (local/mock dev) it runs open for convenience.
+ * Set the secret on BOTH the app and the gateway in prod.
  */
 interface LiveTokenClaims {
   sessionId: string;
@@ -17,22 +21,35 @@ interface LiveTokenClaims {
   exp: number;
 }
 
-/** True if auth is required (the secret is configured). */
+function isProduction(): boolean {
+  return process.env['NODE_ENV'] === 'production';
+}
+
+/**
+ * True if the gateway is misconfigured for production: running in prod
+ * with no secret set. The server refuses every `start` in this state.
+ */
+export function isFailClosedMisconfig(): boolean {
+  return isProduction() && !process.env['LIVE_GATEWAY_SECRET'];
+}
+
+/** True if auth is required (the secret is configured, or we're in prod). */
 export function authRequired(): boolean {
-  return !!process.env['LIVE_GATEWAY_SECRET'];
+  return !!process.env['LIVE_GATEWAY_SECRET'] || isProduction();
 }
 
 /**
  * Verify a token for `sessionId`. Returns true when auth is not required
- * (dev) OR the token is present, well-formed, unexpired, signed with the
- * shared secret, and bound to this session.
+ * (dev with no secret) OR the token is present, well-formed, unexpired,
+ * signed with the shared secret, and bound to this session. In production
+ * with no secret it returns false (fail closed).
  */
 export function verifyStartToken(
   token: string | undefined,
   sessionId: string | undefined,
 ): boolean {
   const secret = process.env['LIVE_GATEWAY_SECRET'];
-  if (!secret) return true; // dev / mock — open
+  if (!secret) return !isProduction(); // dev/mock → open; prod → fail closed
   if (!token || !sessionId) return false;
 
   const dot = token.lastIndexOf('.');

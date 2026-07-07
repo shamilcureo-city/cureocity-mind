@@ -751,7 +751,7 @@ model Session {
   /// SessionModality.INTAKE) so the create route always has a value
   /// to write — but the column is nullable so older rows + future
   /// "decide later" flows aren't blocked at the DB level.
-  modality SessionModality?
+  modality    SessionModality?
   /// Sprint DS11.3 — how the encounter was captured (doctor vertical).
   /// Written at capture start: LIVE by the live-token route; DICTATE /
   /// UPLOAD by the batch capture paths (DS11.7). Null = pre-DS11 rows
@@ -760,8 +760,8 @@ model Session {
   /// Sprint 19 — session classification driving Pass 2/3 prompt
   /// branches. Defaults to TREATMENT for back-compat with rows
   /// inserted before this migration.
-  kind     SessionKind      @default(TREATMENT)
-  status   SessionStatus    @default(SCHEDULED)
+  kind        SessionKind      @default(TREATMENT)
+  status      SessionStatus    @default(SCHEDULED)
 
   /// Sprint 70 — the note template chosen for this session's note. Scalar FK
   /// (no relation, like Letter) to a NoteTemplate; null = the built-in SOAP
