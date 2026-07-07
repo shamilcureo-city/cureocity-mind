@@ -17,8 +17,10 @@ export const dynamic = 'force-dynamic';
  */
 export default async function EncounterWorkspacePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; sessionId: string }>;
+  searchParams: Promise<{ mode?: string }>;
 }) {
   const doctor = await requireOnboardedDoctor();
   const { id: clientId, sessionId } = await params;
@@ -67,6 +69,7 @@ export default async function EncounterWorkspacePage({
         </div>
       </header>
       <DoctorEncounterPanel
+        mode={(await searchParams).mode === 'upload' ? 'upload' : 'dictate'}
         sessionId={session.id}
         clientId={clientId}
         clientName={clientFullName}

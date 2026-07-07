@@ -6,6 +6,7 @@ import { MedicalEncounterNoteV1Schema, type MedicalEncounterNoteV1 } from '@cure
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { LiveRecorder } from './LiveRecorder';
+import { FileUploadPanel } from './FileUploadPanel';
 import { ReviewAndSign } from './ReviewAndSign';
 
 /**
@@ -35,11 +36,14 @@ export function DoctorEncounterPanel({
   clientId,
   clientName,
   sessionStatus,
+  mode = 'dictate',
 }: {
   sessionId: string;
   clientId: string;
   clientName: string;
   sessionStatus: string;
+  /** DS11.7 — the batch capture pipeline: dictate (mic) or upload a file. */
+  mode?: 'dictate' | 'upload';
 }) {
   const router = useRouter();
   const [state, setState] = useState<State>(
@@ -100,7 +104,11 @@ export function DoctorEncounterPanel({
         body: JSON.stringify({ scopes: CONSENT_SCOPES, scriptVersion: 'v1.0' }),
       });
       if (!consent.ok) throw new Error(await errorOf(consent, 'Could not record consent'));
-      const started = await fetch(`/api/v1/sessions/${sessionId}/start`, { method: 'POST' });
+      const started = await fetch(`/api/v1/sessions/${sessionId}/start`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ captureMode: mode === 'upload' ? 'UPLOAD' : 'DICTATE' }),
+      });
       if (!started.ok) throw new Error(await errorOf(started, 'Could not start the encounter'));
       setState({ kind: 'recording' });
     } catch (e) {
@@ -130,11 +138,14 @@ export function DoctorEncounterPanel({
     return (
       <Card className="space-y-4 p-8 text-center">
         <p className="text-sm text-[var(--color-ink-2)]">
-          Ready to record this encounter. The medical note drafts itself from the consultation; you
-          confirm and sign it.
+          {mode === 'upload'
+            ? 'Upload a recording of the visit — the medical note drafts itself from the audio; you confirm and sign it.'
+            : 'Dictate the visit in your own words — symptoms, findings, diagnosis, and your plan. The note drafts itself; you confirm and sign it.'}
         </p>
         <div className="flex justify-center">
-          <Button onClick={beginRecording}>Begin recording</Button>
+          <Button onClick={beginRecording}>
+            {mode === 'upload' ? 'Choose a recording' : '● Begin dictation'}
+          </Button>
         </div>
         <p className="text-xs text-[var(--color-ink-3)]">
           Confirms the patient&rsquo;s recording consent for this encounter, then starts.
@@ -144,12 +155,21 @@ export function DoctorEncounterPanel({
   }
 
   if (state.kind === 'recording') {
-    return (
+    // DS11.7 — mode-aware capture: dictation mic vs file upload, both
+    // landing on the same generate-note pipeline + ReviewAndSign.
+    return mode === 'upload' ? (
+      <FileUploadPanel
+        sessionId={sessionId}
+        clientName={clientName}
+        modality={null}
+        onFinished={() => setState({ kind: 'generating' })}
+      />
+    ) : (
       <LiveRecorder
         sessionId={sessionId}
         clientName={clientName}
         modality={null}
-        source="mic"
+        source="dictation"
         reviewHref={reviewHref}
         onFinished={() => setState({ kind: 'generating' })}
       />

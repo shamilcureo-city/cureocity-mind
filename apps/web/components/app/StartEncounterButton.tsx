@@ -57,6 +57,13 @@ export function StartEncounterButton({ clientId }: { clientId: string }) {
     router.push(`/app/patients/${clientId}/encounters/${id}`);
   }
 
+  async function startUpload(): Promise<void> {
+    setMenuOpen(false);
+    const id = await createSession();
+    if (!id) return;
+    router.push(`/app/patients/${clientId}/encounters/${id}?mode=upload`);
+  }
+
   return (
     <div className="flex flex-col items-end gap-2">
       <div className="relative flex items-stretch">
@@ -90,6 +97,18 @@ export function StartEncounterButton({ clientId }: { clientId: string }) {
               </span>
               <span className="block text-xs text-[var(--color-ink-3)]">
                 You summarise or record; the note drafts from the audio.
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => void startUpload()}
+              className="block w-full border-t border-[var(--color-line-soft)] px-4 py-3 text-left hover:bg-[var(--color-surface-soft)]"
+            >
+              <span className="block text-sm font-medium text-[var(--color-ink)]">
+                📁 Upload a recording
+              </span>
+              <span className="block text-xs text-[var(--color-ink-3)]">
+                Recorded on your phone? Upload the audio file.
               </span>
             </button>
           </div>

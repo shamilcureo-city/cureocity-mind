@@ -35,10 +35,20 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
+  // DS11.7 — the doctor capture surfaces declare their pipeline. Optional
+  // body; therapist callers send none and captureMode stays null.
+  const body = (await req.json().catch(() => null)) as { captureMode?: string } | null;
+  const captureMode =
+    body?.captureMode === 'DICTATE' || body?.captureMode === 'UPLOAD' ? body.captureMode : null;
+
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.session.update({
       where: { id: sessionId },
-      data: { status: 'IN_PROGRESS', startedAt: new Date() },
+      data: {
+        status: 'IN_PROGRESS',
+        startedAt: new Date(),
+        ...(captureMode && { captureMode }),
+      },
     });
     await writeAudit(
       {
