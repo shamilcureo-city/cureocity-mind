@@ -330,6 +330,16 @@ export function DoctorLiveEncounter({
     shownSuggestionsRef.current = new Set();
     setPhase('connecting');
 
+    // DS11.4 — a ws:// gateway can never connect from an https page
+    // (mixed content); fail honestly instead of a dead socket error.
+    if (window.location.protocol === 'https:' && GATEWAY_URL.startsWith('ws://')) {
+      setPhase('error');
+      setError(
+        'The live gateway is not configured for secure connections (wss://). Dictate the consult instead, or contact support.',
+      );
+      return;
+    }
+
     // Sprint DV8 hardening — mint a short-lived token so the gateway can
     // verify we own this session. In dev the gateway runs open, so a failed
     // mint is non-fatal.
@@ -364,8 +374,10 @@ export function DoctorLiveEncounter({
         }),
       );
       void stream.start().catch((e: Error) => {
-        setError(`Microphone unavailable: ${e.message}`);
-        setPhase('error');
+        // DS11.4 — the StartPanel (with its Start button) is the recovery
+        // path: the next tap is the browser gesture that unlocks the mic.
+        setError(`Microphone unavailable: ${e.message}. Tap Start to try again.`);
+        setPhase('idle');
         ws.close();
       });
     };
@@ -680,7 +692,9 @@ export function DoctorLiveEncounter({
               signature lands: sign first, then chain. */}
           {justSigned && <TurnoverBar currentSessionId={sessionId} />}
         </>
-      ) : phase === 'idle' || phase === 'connecting' ? (
+      ) : phase === 'idle' || phase === 'connecting' || phase === 'error' ? (
+        // DS11.4 — 'error' renders the StartPanel too: the error card above
+        // explains what happened, and the capture bar's Start is the retry.
         <StartPanel connecting={phase === 'connecting'} />
       ) : (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,420px)]">

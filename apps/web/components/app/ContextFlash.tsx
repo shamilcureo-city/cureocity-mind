@@ -45,6 +45,24 @@ export function ContextFlash({
   // of this screen); a 4s cap keeps a slow fetch from stalling the consult.
   const [chronicReady, setChronicReady] = useState(false);
   const [modesOpen, setModesOpen] = useState(false);
+  // DS11.4 — gateway preflight: null = checking, true = healthy.
+  const [gatewayOk, setGatewayOk] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch('/api/v1/live/health');
+        const body = (await res.json().catch(() => ({}))) as { ok?: boolean };
+        if (!cancelled) setGatewayOk(body.ok === true);
+      } catch {
+        if (!cancelled) setGatewayOk(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Pull the chronic trajectory so the doctor sees control/trend at a glance.
   useEffect(() => {
@@ -73,14 +91,14 @@ export function ContextFlash({
   // Auto-advance countdown — armed once the chronic chips render (or the
   // 4s cap fires) and paused while the doctor is choosing a capture mode.
   useEffect(() => {
-    if (!chronicReady || modesOpen) return;
+    if (!chronicReady || modesOpen || gatewayOk === false) return;
     if (left <= 0) {
       onDone();
       return;
     }
     const t = setTimeout(() => setLeft((s) => s - 1), 1000);
     return () => clearTimeout(t);
-  }, [left, onDone, chronicReady, modesOpen]);
+  }, [left, onDone, chronicReady, modesOpen, gatewayOk]);
 
   return (
     <Card className="mx-auto max-w-2xl overflow-hidden p-0">
@@ -130,8 +148,29 @@ export function ContextFlash({
           </div>
         </div>
 
+        {gatewayOk === false && (
+          <div className="rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-4 py-3">
+            <p className="text-sm font-medium text-[var(--color-warn)]">
+              The live copilot is unreachable right now.
+            </p>
+            <p className="mt-0.5 text-xs text-[var(--color-warn)]">
+              You can dictate this consult instead — the note still writes itself from the
+              recording.
+            </p>
+            {encounterHref && (
+              <div className="mt-2">
+                <Button size="sm" variant="secondary" onClick={() => router.push(encounterHref)}>
+                  🗣 Dictate instead
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-3 pt-1">
-          <Button onClick={onDone}>● Start recording now</Button>
+          <Button onClick={onDone}>
+            {gatewayOk === false ? '● Try live anyway' : '● Start recording now'}
+          </Button>
           <button
             type="button"
             onClick={onDone}
