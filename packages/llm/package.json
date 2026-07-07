@@ -11,7 +11,8 @@
     "test": "vitest run",
     "lint": "eslint src --max-warnings 0 --no-error-on-unmatched-pattern",
     "eval:reasoning": "tsx src/evals/reasoning/run.ts",
-    "eval:asr": "tsx src/evals/asr/run.ts"
+    "eval:asr": "tsx src/evals/asr/run.ts",
+    "eval:note": "tsx src/evals/note/run.ts"
   },
   "dependencies": {
     "@cureocity/contracts": "workspace:*",

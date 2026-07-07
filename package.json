@@ -28,7 +28,8 @@
     "db:validate": "prisma validate && prisma format --check",
     "db:check-migrations": "node scripts/check-migration-idempotency.mjs",
     "eval:reasoning": "pnpm --filter @cureocity/llm eval:reasoning",
-    "eval:asr": "pnpm --filter @cureocity/llm eval:asr"
+    "eval:asr": "pnpm --filter @cureocity/llm eval:asr",
+    "eval:note": "pnpm --filter @cureocity/llm eval:note"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0"
