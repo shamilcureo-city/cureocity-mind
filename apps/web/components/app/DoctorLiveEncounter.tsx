@@ -1076,7 +1076,7 @@ function AskNextZone({
         </span>
       </div>
       <ul className="divide-y divide-[var(--color-line-soft)]">
-        {askNext.map((q) => {
+        {askNext.slice(0, 3).map((q) => {
           const answered = q.status === 'answered';
           return (
             <li key={q.id} className="group flex items-start gap-2 px-4 py-2.5 text-[12.5px]">
@@ -1147,6 +1147,11 @@ function AskNextZone({
             </li>
           );
         })}
+        {askNext.length > 3 && (
+          <p className="px-1 pt-1 text-[11px] text-[var(--color-ink-3)]">
+            +{askNext.length - 3} more waiting — answered ones clear automatically
+          </p>
+        )}
       </ul>
     </Card>
   );
