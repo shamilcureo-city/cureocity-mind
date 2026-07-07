@@ -508,6 +508,8 @@ function labelForCrisisKind(kind: ClinicalCrisisFlag['kind']): string {
       return 'Possible psychosis';
     case 'substance_emergency':
       return 'Substance emergency';
+    case 'other':
+      return 'Unrecognised risk — review the transcript';
   }
 }
 

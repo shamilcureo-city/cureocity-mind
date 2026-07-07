@@ -532,6 +532,7 @@ const CRISIS_LABEL: Record<string, string> = {
   intimate_partner_violence: 'intimate-partner violence',
   psychosis: 'possible psychosis',
   substance_emergency: 'substance emergency',
+  other: 'unrecognised risk',
 };
 
 function readCrisis(body: unknown): {

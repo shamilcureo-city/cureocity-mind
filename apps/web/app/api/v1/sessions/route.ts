@@ -163,6 +163,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         kind: defaults.kind,
         status: 'SCHEDULED',
         scheduledAt,
+        // FLOW-3 — persist the note language the therapist chose (or the
+        // cascade default). Previously never written, so every note generated
+        // in English despite the code-mix-first positioning.
+        language: dto.value.language ?? defaults.language,
         noteTemplateId: defaultNoteTemplateId,
         ...(tokenNumber !== null && { tokenNumber }),
       },

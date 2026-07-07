@@ -12,9 +12,13 @@
  * the AI Copilot tab in a permanent failed state. Retrying picks the
  * same vocabulary on this seed.
  *
- * The normaliser maps known synonyms to canonical values BEFORE Zod
- * runs. Anything that still doesn't match falls through and lets Zod
- * report it (we don't silently drop unknown crises — clinical safety).
+ * The normaliser maps known synonyms to canonical values BEFORE Zod runs.
+ * For KIND, an unrecognised value is coerced to the 'other' catch-all (CLIN-3)
+ * so a novel crisis is PRESERVED (with its severity + indicators) and rendered
+ * with a "review the transcript" banner, instead of the strict parse sinking
+ * the whole report and hiding the diagnosis, formulation, AND the crisis. For
+ * SEVERITY, an unknown value still falls through to Zod — we never guess how
+ * dangerous a crisis is.
  */
 
 const KIND_CANONICAL = new Set([
@@ -25,6 +29,7 @@ const KIND_CANONICAL = new Set([
   'intimate_partner_violence',
   'psychosis',
   'substance_emergency',
+  'other',
 ]);
 
 const KIND_SYNONYMS: Record<string, string> = {
@@ -88,12 +93,22 @@ function normaliseFlag(flag: unknown): unknown {
   return {
     ...f,
     ...(f['kind'] !== undefined && {
-      kind: normaliseEnum(f['kind'], KIND_CANONICAL, KIND_SYNONYMS),
+      // CLIN-3 — coerce an unrecognised crisis KIND to the 'other' catch-all
+      // (after synonym mapping) so a novel presentation is preserved with its
+      // severity + indicators rather than sinking the whole report. SEVERITY
+      // is deliberately NOT coerced — an unknown severity still fails the Zod
+      // parse, because guessing how dangerous a crisis is would be unsafe.
+      kind: coerceKind(normaliseEnum(f['kind'], KIND_CANONICAL, KIND_SYNONYMS)),
     }),
     ...(f['severity'] !== undefined && {
       severity: normaliseEnum(f['severity'], SEVERITY_CANONICAL, SEVERITY_SYNONYMS),
     }),
   };
+}
+
+function coerceKind(kind: unknown): unknown {
+  if (typeof kind !== 'string') return kind;
+  return KIND_CANONICAL.has(kind.trim().toLowerCase()) ? kind : 'other';
 }
 
 /**
