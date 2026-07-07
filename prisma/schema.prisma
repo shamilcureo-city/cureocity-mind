@@ -2677,6 +2677,8 @@ enum AuditAction {
   LIVE_SUGGESTION_ACTED
   LIVE_SUGGESTION_DISMISSED
   LIVE_SUGGESTION_AUTORESOLVED
+  // Doctor vertical — Sprint DS10-B. Plan composer edited the draft Rx pad.
+  RX_PAD_EDITED
 }
 
 enum AuditActorType {

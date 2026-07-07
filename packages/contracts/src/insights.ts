@@ -24,9 +24,9 @@ export const DISMISS_REASON_LABELS: Record<DismissReason, string> = {
   other: 'Other',
 };
 
-/** Per-card-type acceptance funnel. */
+/** Per-card-type acceptance funnel. DS10-B adds PLAN (AI plan adoptions). */
 export const CardTypeStatsSchema = z.object({
-  kind: z.enum(['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP']),
+  kind: z.enum(['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP', 'PLAN']),
   shown: z.number().int().nonnegative(),
   acted: z.number().int().nonnegative(),
   dismissed: z.number().int().nonnegative(),

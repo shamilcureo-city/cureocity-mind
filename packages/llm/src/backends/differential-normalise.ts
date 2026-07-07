@@ -71,10 +71,35 @@ function normaliseNudge(nudge: unknown): unknown {
   return out;
 }
 
+/** DS10-B — "5", "5 days", 5.0 → 5 (the schema wants a positive int). */
+function normaliseSuggestedMed(med: unknown): unknown {
+  if (!med || typeof med !== 'object') return med;
+  const m = med as Record<string, unknown>;
+  const raw = m['durationDays'];
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    return { ...m, durationDays: Math.max(1, Math.round(raw)) };
+  }
+  if (typeof raw === 'string') {
+    const digits = /\d+/.exec(raw)?.[0];
+    if (digits) return { ...m, durationDays: Math.max(1, Number.parseInt(digits, 10)) };
+    const { durationDays: _dropped, ...rest } = m;
+    return rest;
+  }
+  return med;
+}
+
+function normaliseSuggestedPlan(plan: unknown): unknown {
+  if (!plan || typeof plan !== 'object') return plan;
+  const p = plan as Record<string, unknown>;
+  if (!Array.isArray(p['medications'])) return plan;
+  return { ...p, medications: p['medications'].map(normaliseSuggestedMed) };
+}
+
 /**
  * Walks the raw differential JSON and normalises `redFlagsToExclude[]`
- * to strings and `codingNudges[].{severity,kind}` to canonical enum
- * values. Idempotent; returns a new object — the input is not mutated.
+ * to strings, `codingNudges[].{severity,kind}` to canonical enum values,
+ * and `suggestedPlan.medications[].durationDays` to a positive int.
+ * Idempotent; returns a new object — the input is not mutated.
  */
 export function normaliseDifferentialOutput(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw;
@@ -85,6 +110,9 @@ export function normaliseDifferentialOutput(raw: unknown): unknown {
   }
   if (Array.isArray(r['codingNudges'])) {
     out['codingNudges'] = r['codingNudges'].map(normaliseNudge);
+  }
+  if (r['suggestedPlan'] !== undefined) {
+    out['suggestedPlan'] = normaliseSuggestedPlan(r['suggestedPlan']);
   }
   return out;
 }

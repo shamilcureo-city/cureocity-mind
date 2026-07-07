@@ -20,6 +20,16 @@ import { z } from 'zod';
 export const RxRowStatusSchema = z.enum(['confirmed', 'pending']);
 export type RxRowStatus = z.infer<typeof RxRowStatusSchema>;
 
+/**
+ * Sprint DS10-B — provenance of a pad row. `dictated` = spoken during the
+ * consult (voice/AI-drafted from the transcript); `ai` = adopted from the
+ * differential's suggested plan with an explicit tap; `manual` = typed by
+ * the doctor in the plan composer. Display-only — safety is carried by
+ * `status` (only `confirmed` rows are prescribed), not by source.
+ */
+export const RxRowSourceSchema = z.enum(['dictated', 'ai', 'manual']);
+export type RxRowSource = z.infer<typeof RxRowSourceSchema>;
+
 export const RxMedRowSchema = z.object({
   drug: z.string(),
   strength: z.string().optional(),
@@ -36,12 +46,16 @@ export const RxMedRowSchema = z.object({
   status: RxRowStatusSchema.default('pending'),
   /** Deterministic interaction warnings (server-owned). */
   warnings: z.array(z.string()).default([]),
+  /** Sprint DS10-B — provenance badge (absent on pre-DS10 rows = dictated). */
+  source: RxRowSourceSchema.optional(),
 });
 export type RxMedRow = z.infer<typeof RxMedRowSchema>;
 
 export const RxInvestigationSchema = z.object({
   name: z.string(),
   rationale: z.string().optional(),
+  /** Sprint DS10-B — provenance badge (absent on pre-DS10 rows = dictated). */
+  source: RxRowSourceSchema.optional(),
 });
 export type RxInvestigation = z.infer<typeof RxInvestigationSchema>;
 
@@ -70,3 +84,66 @@ export type RxPadV1 = z.infer<typeof RxPadV1Schema>;
 /// The live, partial pad emitted mid-consult as it assembles.
 export const RxPadDraftSchema = RxPadV1Schema.partial();
 export type RxPadDraft = z.infer<typeof RxPadDraftSchema>;
+
+// ============================================================================
+// Sprint DS10-B — the plan composer. PATCH /sessions/:id/rx-pad applies a
+// typed edit to the DRAFT pad (never a signed one): the doctor adopts an AI
+// suggestion, adds an item manually, confirms a pending med, or removes a
+// row. Every op is audited (RX_PAD_EDITED); interaction warnings are
+// recomputed server-side after every med change.
+
+/** A med being added (adopted from AI or typed manually). */
+export const RxPadAddMedSchema = z.object({
+  op: z.literal('addMed'),
+  source: RxRowSourceSchema,
+  med: z.object({
+    drug: z.string().min(1).max(120),
+    strength: z.string().max(60).optional(),
+    dose: z.string().max(60).optional(),
+    frequency: z.string().max(60).optional(),
+    timing: z.string().max(60).optional(),
+    durationDays: z.number().int().positive().max(365).optional(),
+    route: z.string().max(40).optional(),
+  }),
+});
+
+export const RxPadPatchOpSchema = z.discriminatedUnion('op', [
+  RxPadAddMedSchema,
+  z.object({ op: z.literal('removeMed'), drug: z.string().min(1).max(120) }),
+  /** Flip a pending (voice/AI-drafted) med to confirmed — the prescribe tap. */
+  z.object({ op: z.literal('confirmMed'), drug: z.string().min(1).max(120) }),
+  z.object({
+    op: z.literal('addInvestigation'),
+    source: RxRowSourceSchema,
+    name: z.string().min(1).max(200),
+    rationale: z.string().max(300).optional(),
+  }),
+  z.object({ op: z.literal('removeInvestigation'), name: z.string().min(1).max(200) }),
+  z.object({
+    op: z.literal('addAdvice'),
+    source: RxRowSourceSchema,
+    text: z.string().min(1).max(300),
+  }),
+  z.object({ op: z.literal('removeAdvice'), text: z.string().min(1).max(300) }),
+  z.object({
+    op: z.literal('setFollowUp'),
+    source: RxRowSourceSchema,
+    when: z.string().min(1).max(120),
+    withWhat: z.string().max(200).optional(),
+  }),
+  z.object({ op: z.literal('clearFollowUp') }),
+]);
+export type RxPadPatchOp = z.infer<typeof RxPadPatchOpSchema>;
+
+export const RxPadPatchInputSchema = z.object({
+  ops: z.array(RxPadPatchOpSchema).min(1).max(10),
+});
+export type RxPadPatchInput = z.infer<typeof RxPadPatchInputSchema>;
+
+/** GET/PATCH /sessions/:id/rx-pad response — the current draft pad. */
+export const RxPadResponseSchema = z.object({
+  rxPad: RxPadDraftSchema.nullable(),
+  /** True once the note is signed — the pad is then read-only. */
+  signed: z.boolean(),
+});
+export type RxPadResponse = z.infer<typeof RxPadResponseSchema>;

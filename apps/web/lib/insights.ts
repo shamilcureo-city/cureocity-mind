@@ -36,7 +36,8 @@ const SUGGESTION_ACTIONS = [
   'LIVE_SUGGESTION_AUTORESOLVED',
 ] as const;
 
-const CARD_KINDS = ['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP'] as const;
+// DS10-B adds PLAN — AI plan items adopted/dismissed in the plan composer.
+const CARD_KINDS = ['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP', 'PLAN'] as const;
 type CardKind = (typeof CARD_KINDS)[number];
 
 interface SuggestionMeta {
@@ -106,6 +107,7 @@ export async function loadDoctorInsights(
       ASK_NEXT: { shown: 0, acted: 0, dismissed: 0, auto: 0 },
       RED_FLAG: { shown: 0, acted: 0, dismissed: 0, auto: 0 },
       GAP: { shown: 0, acted: 0, dismissed: 0, auto: 0 },
+      PLAN: { shown: 0, acted: 0, dismissed: 0, auto: 0 },
     };
   const dismissReasonCounts = new Map<DismissReason, number>();
   const catches: InsightsCatch[] = [];

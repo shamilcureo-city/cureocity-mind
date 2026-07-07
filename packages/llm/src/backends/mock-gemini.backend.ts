@@ -1040,6 +1040,39 @@ export class MockGeminiDifferentialBackend implements IPassDifferentialBackend {
             severity: 'info',
           },
         ],
+        // Sprint DS10-B — the AI-proposed plan the composer offers for
+        // adopt/dismiss. Coherent with the chest-pain mock scenario.
+        suggestedPlan: {
+          investigations: [
+            { name: '[mock] 12-lead ECG', rationale: 'exclude ischaemia' },
+            { name: '[mock] Troponin', rationale: 'if pain ongoing or recent' },
+            { name: '[mock] Lipid profile', rationale: 'risk stratification' },
+          ],
+          medications: [
+            {
+              drug: '[mock] Aspirin',
+              strength: '75 mg',
+              frequency: '0-0-1',
+              timing: 'after food',
+              durationDays: 30,
+              rationale: 'antiplatelet pending cardiology review',
+            },
+            {
+              drug: '[mock] Atorvastatin',
+              strength: '40 mg',
+              frequency: '0-0-1',
+              timing: 'at night',
+              durationDays: 30,
+              rationale: 'high-intensity statin for suspected CAD',
+            },
+          ],
+          advice: [
+            '[mock] Avoid exertion until reviewed.',
+            '[mock] Return immediately if pain at rest.',
+          ],
+          followUp: { when: '[mock] In 3 days', withWhat: 'ECG + troponin reports' },
+          examSteps: ['[mock] Cardiovascular examination', '[mock] Blood pressure both arms'],
+        },
         disclaimer:
           '[mock] Decision-support only — not a diagnosis. The treating doctor retains clinical responsibility.',
       },

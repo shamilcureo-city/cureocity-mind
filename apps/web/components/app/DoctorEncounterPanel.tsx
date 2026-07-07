@@ -10,6 +10,7 @@ import { MedicalNoteView } from './MedicalNoteView';
 import { EncounterOrdersPanel } from './EncounterOrdersPanel';
 import { EncounterDifferentialPanel } from './EncounterDifferentialPanel';
 import { EncounterInteropPanel } from './EncounterInteropPanel';
+import { PlanComposer } from './PlanComposer';
 
 /**
  * Sprint DV3 — the doctor encounter workspace body. Drives the record →
@@ -291,6 +292,9 @@ export function DoctorEncounterPanel({
       <Card className="p-7">
         <MedicalNoteView note={state.note} />
       </Card>
+      {/* Sprint DS10-B — two plans, one sign-off: the doctor's pad + the
+          AI-suggested plan, merged item-by-item before the signature. */}
+      <PlanComposer sessionId={sessionId} signed={signed} onPadChange={setHasRx} />
       <EncounterDifferentialPanel sessionId={sessionId} />
       <EncounterOrdersPanel sessionId={sessionId} />
       <EncounterInteropPanel sessionId={sessionId} />

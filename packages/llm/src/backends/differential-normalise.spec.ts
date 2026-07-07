@@ -65,6 +65,25 @@ describe('normaliseDifferentialOutput', () => {
     expect(out.codingNudges[0]?.severity).toBe('catastrophic');
   });
 
+  it('coerces suggestedPlan durationDays strings to positive ints (DS10-B)', () => {
+    const raw = {
+      version: 'V1',
+      suggestedPlan: {
+        medications: [
+          { drug: 'A', durationDays: '5 days' },
+          { drug: 'B', durationDays: 7 },
+          { drug: 'C', durationDays: 'a week' },
+        ],
+      },
+    };
+    const out = normaliseDifferentialOutput(raw) as {
+      suggestedPlan: { medications: Array<{ durationDays?: number }> };
+    };
+    expect(out.suggestedPlan.medications[0]?.durationDays).toBe(5);
+    expect(out.suggestedPlan.medications[1]?.durationDays).toBe(7);
+    expect(out.suggestedPlan.medications[2]?.durationDays).toBeUndefined();
+  });
+
   it('is a no-op on already-canonical payloads and non-objects', () => {
     const canonical = { version: 'V1', redFlagsToExclude: ['x'], codingNudges: [] };
     expect(normaliseDifferentialOutput(canonical)).toEqual(canonical);

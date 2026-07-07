@@ -6,7 +6,7 @@ import {
   PassDifferentialOutputSchema,
   type PassDifferentialOutput,
 } from '../types';
-import { DIFFERENTIAL_PROMPT_VERSION, DIFFERENTIAL_SYSTEM_PROMPT_V1 } from '../prompts';
+import { DIFFERENTIAL_PROMPT_VERSION, DIFFERENTIAL_SYSTEM_PROMPT_V2 } from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
 import { normaliseDifferentialOutput } from './differential-normalise';
 
@@ -63,7 +63,7 @@ export class VertexGeminiDifferentialBackend implements IPassDifferentialBackend
         model: this.modelName,
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         config: {
-          systemInstruction: DIFFERENTIAL_SYSTEM_PROMPT_V1,
+          systemInstruction: DIFFERENTIAL_SYSTEM_PROMPT_V2,
           responseMimeType: 'application/json',
           temperature: 0.2,
           maxOutputTokens: 12_288,

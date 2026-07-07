@@ -256,8 +256,8 @@ export const LiveSuggestionEventSchema = z.object({
   event: z.enum(['shown', 'acted', 'dismissed', 'autoresolved']),
   /** Stable id of the suggestion (differential id, ask-next id, …). */
   suggestionId: z.string(),
-  /** What kind of suggestion, for analytics. */
-  kind: z.enum(['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP']).default('ASK_NEXT'),
+  /** What kind of suggestion, for analytics. DS10-B adds PLAN (AI plan items). */
+  kind: z.enum(['DIFFERENTIAL', 'ASK_NEXT', 'RED_FLAG', 'GAP', 'PLAN']).default('ASK_NEXT'),
   /** Optional human label, stored in the audit metadata. */
   label: z.string().optional(),
   /** Sprint DS9 — why the doctor dismissed (1-tap chip), for the pilot dataset. */

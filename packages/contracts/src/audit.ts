@@ -224,6 +224,10 @@ export const AuditActionSchema = z.enum([
   'LIVE_SUGGESTION_ACTED',
   'LIVE_SUGGESTION_DISMISSED',
   'LIVE_SUGGESTION_AUTORESOLVED',
+  // Doctor vertical — Sprint DS10-B. The plan composer edited the draft Rx
+  // pad (adopt an AI suggestion / manual add / confirm / remove) — one row
+  // per op, with { op, source, item } metadata. The prescribing trail.
+  'RX_PAD_EDITED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);
