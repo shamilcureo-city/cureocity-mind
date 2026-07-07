@@ -76,7 +76,10 @@ export async function GET(
     return NextResponse.json({ error: 'VERTEX_PROJECT_ID not set' }, { status: 500 });
   }
   const proRegion = process.env['VERTEX_PRO_REGION'] ?? 'global';
-  const proModel = process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro';
+  // Sprint 76 — reflection-question generation is a low-stakes pass; runs
+  // on Flash by default (env-reversible to Pro). Kept in the same region.
+  const proModel =
+    process.env['LLM_REFLECTIONS_MODEL'] ?? process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash';
   const ai = new GoogleGenAI({ vertexai: true, project, location: proRegion });
 
   const userMessage = buildUserMessage(note, language);

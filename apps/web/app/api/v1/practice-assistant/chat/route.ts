@@ -82,7 +82,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'VERTEX_PROJECT_ID not set' }, { status: 500 });
   }
   const proRegion = process.env['VERTEX_PRO_REGION'] ?? 'global';
-  const proModel = process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro';
+  // Sprint 76 — the practice assistant is a low-stakes chat; runs on Flash
+  // by default (env-reversible to Pro via LLM_ASSISTANT_MODEL).
+  const proModel =
+    process.env['LLM_ASSISTANT_MODEL'] ?? process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash';
   const ai = new GoogleGenAI({ vertexai: true, project, location: proRegion });
 
   const heading = body.value.clientId ? 'Current client' : 'Current practice snapshot';
