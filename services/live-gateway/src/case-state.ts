@@ -4,6 +4,7 @@ import type {
   ClinicalFinding,
   LiveDifferentialItem,
   LiveReasoning,
+  OrderNextItem,
   LiveRedFlag,
   PatientContext,
 } from '@cureocity/contracts';
@@ -57,6 +58,9 @@ export class CaseStateStore {
   // managed by AskNextManager (DS3).
   private dx: LiveDifferentialItem[] = [];
   private flags: LiveRedFlag[] = [];
+  /** DS11.6 — exam steps + order proposals from the latest reasoning pass. */
+  private examine: string[] = [];
+  private orders: OrderNextItem[] = [];
   private readonly askManager = new AskNextManager();
   private reasoningVersion = 0;
   private lastReasoningJson = '';
@@ -98,6 +102,8 @@ export class CaseStateStore {
       differential: this.dx,
       askNext: this.askManager.feed(),
       redFlags: this.flags,
+      examineNext: this.examine,
+      orderNext: this.orders,
       version: this.reasoningVersion,
     };
   }
@@ -169,6 +175,8 @@ export class CaseStateStore {
     askNext: AskNextItem[] = [],
     redFlags: LiveRedFlag[] = [],
     answeredQuestionIds: string[] = [],
+    examineNext: string[] = [],
+    orderNext: OrderNextItem[] = [],
   ): { differential: LiveDifferentialItem[]; dropped: LiveDifferentialItem[] } {
     const knownFindingIds = new Set(this.state.findings.map((f) => f.id));
 
@@ -202,6 +210,11 @@ export class CaseStateStore {
       findingIds: r.findingIds.filter((id) => knownFindingIds.has(id)),
     }));
 
+    // DS11.6 — exam/order proposals are advisory (no citation gate; they
+    // carry no clinical assertions), capped to keep the rail calm.
+    this.examine = examineNext.slice(0, 3);
+    this.orders = orderNext.slice(0, 3);
+
     return { differential: this.dx, dropped };
   }
 
@@ -226,6 +239,9 @@ export class CaseStateStore {
       d: this.dx,
       a: this.askManager.openFeed(),
       f: this.flags,
+      // DS11.6 — exam/order proposals participate in change detection.
+      e: this.examine,
+      o: this.orders,
     });
     const stableChanged = stableJson !== this.lastReasoningJson;
     const changed = stableChanged || this.askManager.hasJustAnswered();

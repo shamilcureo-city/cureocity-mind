@@ -90,11 +90,18 @@ export function DoctorLiveEncounter({
   // Sprint DS4 — differential candidates the doctor added to the assessment.
   const [assessmentAdds, setAssessmentAdds] = useState<string[]>([]);
   const assessmentRef = useRef<string[]>([]);
+  // DS11.5/6 — AI order proposals the doctor adopted live; they display in
+  // the pad's investigations and merge into the final Rx at End. Dismissed
+  // and done ids keep the rail calm (audited via relaySuggestion, PLAN kind).
+  const [adoptedTests, setAdoptedTests] = useState<{ name: string; rationale?: string }[]>([]);
+  const adoptedTestsRef = useRef<{ name: string; rationale?: string }[]>([]);
+  const [handledSuggestions, setHandledSuggestions] = useState<Set<string>>(new Set());
   // Sprint DS5 — the Rx pad assembling live + the doctor's per-med confirms.
   const [rxPad, setRxPad] = useState<RxPadDraft | null>(null);
   const [confirmedDrugs, setConfirmedDrugs] = useState<Set<string>>(new Set());
   const rxFinalRef = useRef<RxPadV1 | null>(null);
   const confirmedRef = useRef<Set<string>>(new Set());
+  adoptedTestsRef.current = adoptedTests;
   // Sprint DS6 — one-tap actions: which suggestions the doctor has acted on,
   // + the before-you-close gate for unacted critical items.
   const [actedItems, setActedItems] = useState<Set<string>>(new Set());
@@ -225,7 +232,7 @@ export function DoctorLiveEncounter({
   async function relaySuggestion(
     event: 'shown' | 'acted' | 'dismissed' | 'autoresolved',
     suggestionId: string,
-    kind: 'DIFFERENTIAL' | 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
+    kind: 'DIFFERENTIAL' | 'ASK_NEXT' | 'RED_FLAG' | 'GAP' | 'PLAN',
     label?: string,
     dismissReason?: DismissReason,
   ): Promise<void> {
@@ -244,6 +251,28 @@ export function DoctorLiveEncounter({
     } catch {
       /* audit is best-effort */
     }
+  }
+
+  // DS11.6 — adopt an AI-proposed test onto YOUR plan (audited as PLAN).
+  function adoptOrder(name: string, rationale?: string): void {
+    const key = `order:${name}`;
+    if (handledSuggestions.has(key)) return;
+    setHandledSuggestions((prev) => new Set(prev).add(key));
+    setAdoptedTests((prev) =>
+      prev.some((t) => t.name.toLowerCase() === name.toLowerCase())
+        ? prev
+        : [...prev, { name, ...(rationale ? { rationale } : {}) }],
+    );
+    void relaySuggestion('acted', `plan:order:${name}`, 'PLAN', name);
+  }
+  function dismissOrder(name: string): void {
+    setHandledSuggestions((prev) => new Set(prev).add(`order:${name}`));
+    void relaySuggestion('dismissed', `plan:order:${name}`, 'PLAN', name);
+  }
+  // DS11.6 — exam prompts: ✓ done / ✕ dismissed (both audited).
+  function resolveExam(step: string, done: boolean): void {
+    setHandledSuggestions((prev) => new Set(prev).add(`exam:${step}`));
+    void relaySuggestion(done ? 'acted' : 'dismissed', `plan:exam:${step}`, 'PLAN', step);
   }
 
   // Sprint DS3 — the doctor dismissed an ask-next question: tell the gateway
@@ -493,7 +522,11 @@ export function DoctorLiveEncounter({
               : event.note;
           setFinalNote(merged);
           // Sprint DS5 — fold the doctor's confirms into the final Rx pad.
-          const finalRx = event.rxPad ? confirmRxPad(event.rxPad, confirmedRef.current) : null;
+          const finalRxBase = event.rxPad ? confirmRxPad(event.rxPad, confirmedRef.current) : null;
+          // DS11.5/6 — fold live-adopted AI tests into the final pad.
+          const finalRx = finalRxBase
+            ? withAdoptedTests(finalRxBase, adoptedTestsRef.current)
+            : null;
           if (finalRx) setRxPad(finalRx);
           rxFinalRef.current = finalRx;
           void persistLiveNote(merged, event.medications, event.orders, finalRx);
@@ -706,7 +739,7 @@ export function DoctorLiveEncounter({
           />
           <div className="space-y-4">
             <RxPadPanel
-              rxPad={rxPad}
+              rxPad={withAdoptedTestsDraft(rxPad, adoptedTests)}
               confirmedDrugs={confirmedDrugs}
               onConfirm={confirmMed}
               live={live}
@@ -731,6 +764,10 @@ export function DoctorLiveEncounter({
             addedToAssessment={assessmentAdds}
             onAct={markActed}
             actedItems={actedItems}
+            handledSuggestions={handledSuggestions}
+            onAdoptOrder={adoptOrder}
+            onDismissOrder={dismissOrder}
+            onExam={resolveExam}
           />
         </div>
       )}
@@ -863,6 +900,10 @@ function LiveRail({
   addedToAssessment,
   onAct,
   actedItems,
+  handledSuggestions,
+  onAdoptOrder,
+  onDismissOrder,
+  onExam,
 }: {
   reasoning: LiveReasoning | null;
   findings: ClinicalFinding[];
@@ -879,10 +920,23 @@ function LiveRail({
     opts?: { kind?: 'RED_FLAG' | 'GAP' | 'DIFFERENTIAL'; label?: string },
   ) => void;
   actedItems: Set<string>;
+  /** DS11.6 — exam/order proposals + the ids already handled. */
+  handledSuggestions: Set<string>;
+  onAdoptOrder: (name: string, rationale?: string) => void;
+  onDismissOrder: (name: string) => void;
+  onExam: (step: string, done: boolean) => void;
 }) {
   return (
     <div className="space-y-4">
       <AskNextZone askNext={reasoning?.askNext ?? []} onAsked={onAsked} onDismiss={onDismiss} />
+      <ExamineOrderZone
+        examineNext={reasoning?.examineNext ?? []}
+        orderNext={reasoning?.orderNext ?? []}
+        handled={handledSuggestions}
+        onAdoptOrder={onAdoptOrder}
+        onDismissOrder={onDismissOrder}
+        onExam={onExam}
+      />
       <DifferentialZone
         reasoning={reasoning}
         findings={findings}
@@ -897,6 +951,106 @@ function LiveRail({
 }
 
 const DISMISS_CHIPS: DismissReason[] = ['wrong', 'known', 'not_now'];
+
+/**
+ * DS11.6 — "Consider examining" + "Consider ordering", first-class during
+ * the consult. Exam steps: ✓ done / ✕ not now. Order proposals: + Add puts
+ * the test on YOUR plan (never automatic); ✕ dismisses. All audited (PLAN).
+ */
+function ExamineOrderZone({
+  examineNext,
+  orderNext,
+  handled,
+  onAdoptOrder,
+  onDismissOrder,
+  onExam,
+}: {
+  examineNext: string[];
+  orderNext: { name: string; rationale?: string | undefined }[];
+  handled: Set<string>;
+  onAdoptOrder: (name: string, rationale?: string) => void;
+  onDismissOrder: (name: string) => void;
+  onExam: (step: string, done: boolean) => void;
+}) {
+  const exams = examineNext.filter((s) => !handled.has(`exam:${s}`));
+  const orders = orderNext.filter((o) => !handled.has(`order:${o.name}`));
+  if (exams.length === 0 && orders.length === 0) return null;
+  return (
+    <Card className="space-y-3 p-4">
+      {exams.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-3)]">
+            Consider examining
+          </p>
+          <div className="mt-1.5 space-y-1.5">
+            {exams.map((s) => (
+              <div
+                key={s}
+                className="flex items-center gap-2 rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-2.5 py-1.5"
+              >
+                <span className="flex-1 text-[13px] text-[var(--color-ink)]">{s}</span>
+                <button
+                  type="button"
+                  onClick={() => onExam(s, true)}
+                  className="rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-accent)]"
+                >
+                  ✓ Done
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onExam(s, false)}
+                  className="rounded-full px-1.5 text-[13px] text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+                  aria-label={`Dismiss ${s}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {orders.length > 0 && (
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-3)]">
+            Consider ordering
+          </p>
+          <div className="mt-1.5 space-y-1.5">
+            {orders.map((o) => (
+              <div
+                key={o.name}
+                className="rounded-lg border border-dashed border-[var(--color-line)] bg-white px-2.5 py-1.5"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-[13px] font-medium text-[var(--color-ink)]">
+                    {o.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onAdoptOrder(o.name, o.rationale)}
+                    className="rounded-full bg-[var(--color-accent)] px-2.5 py-0.5 text-[11px] font-semibold text-white"
+                  >
+                    + Add
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDismissOrder(o.name)}
+                    className="rounded-full px-1.5 text-[13px] text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+                    aria-label={`Dismiss ${o.name}`}
+                  >
+                    ✕
+                  </button>
+                </div>
+                {o.rationale && (
+                  <p className="mt-0.5 text-[11px] text-[var(--color-ink-3)]">{o.rationale}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function AskNextZone({
   askNext,
@@ -1933,7 +2087,9 @@ function clean(s?: string): string | undefined {
 
 // Sprint DS5 — dedup key for a drug (first significant word, lowercased).
 function medKey(drug: string): string {
-  return drug.replace(MOCK_TAG, '').toLowerCase().split(/\s+/)[0] ?? drug;
+  // DS11.5 — key on the FULL normalised drug string, not the first word:
+  // "Amoxicillin 500" and "Amoxicillin-clavulanate" must not collide.
+  return drug.replace(MOCK_TAG, '').toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 // Sprint DS5 — fold the doctor's confirmations into the final pad so the
@@ -1947,6 +2103,38 @@ function confirmRxPad(pad: RxPadV1, confirmed: Set<string>): RxPadV1 {
         : m,
     ),
   };
+}
+
+// DS11.5/6 — append live-adopted AI tests to the pad's investigations
+// (idempotent by name, tagged source 'ai' for the provenance badge).
+function withAdoptedTests(pad: RxPadV1, adopted: { name: string; rationale?: string }[]): RxPadV1 {
+  if (adopted.length === 0) return pad;
+  const have = new Set((pad.investigations ?? []).map((i) => i.name.toLowerCase()));
+  const extra = adopted
+    .filter((t) => !have.has(t.name.toLowerCase()))
+    .map((t) => ({
+      name: t.name,
+      ...(t.rationale ? { rationale: t.rationale } : {}),
+      source: 'ai' as const,
+    }));
+  return { ...pad, investigations: [...(pad.investigations ?? []), ...extra] };
+}
+
+function withAdoptedTestsDraft(
+  pad: RxPadDraft | null,
+  adopted: { name: string; rationale?: string }[],
+): RxPadDraft | null {
+  if (adopted.length === 0) return pad;
+  const base: RxPadDraft = pad ?? {};
+  const have = new Set((base.investigations ?? []).map((i) => i.name.toLowerCase()));
+  const extra = adopted
+    .filter((t) => !have.has(t.name.toLowerCase()))
+    .map((t) => ({
+      name: t.name,
+      ...(t.rationale ? { rationale: t.rationale } : {}),
+      source: 'ai' as const,
+    }));
+  return { ...base, investigations: [...(base.investigations ?? []), ...extra] };
 }
 
 function fmtTime(s: number): string {

@@ -26,6 +26,7 @@ const CARD_LABEL: Record<CardTypeStats['kind'], string> = {
   ASK_NEXT: 'Ask-next',
   RED_FLAG: 'Red flags',
   GAP: 'Gaps / coding',
+  PLAN: 'Plan adoptions',
 };
 
 export function InsightsBoard({ insights, days }: { insights: DoctorInsights; days: number }) {

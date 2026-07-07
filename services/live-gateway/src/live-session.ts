@@ -308,6 +308,8 @@ export class LiveSession {
         res.output.askNext,
         res.output.redFlags,
         res.output.answeredQuestionIds,
+        res.output.examineNext,
+        res.output.orderNext,
       );
       this.caseStore.applyTemplateGaps(this.templateAskNextFromNote());
 

@@ -11,6 +11,7 @@ import {
   LiveDifferentialItemSchema,
   type LiveDifferentialItem,
   LiveRedFlagSchema,
+  OrderNextItemSchema,
   type Utterance,
   type ClientDiagnosis,
   ConceptualMapV1Schema,
@@ -527,6 +528,10 @@ export const PassReasoningOutputSchema = z.object({
   askNext: z.array(AskNextItemSchema).default([]),
   /** Serious conditions to actively exclude. */
   redFlags: z.array(LiveRedFlagSchema).default([]),
+  /** DS11.6 — physical-exam steps to consider now. */
+  examineNext: z.array(z.string()).default([]),
+  /** DS11.6 — labs/tests to consider ordering (adopt-only proposals). */
+  orderNext: z.array(OrderNextItemSchema).default([]),
 });
 export type PassReasoningOutput = z.infer<typeof PassReasoningOutputSchema>;
 

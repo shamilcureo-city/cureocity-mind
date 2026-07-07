@@ -80,6 +80,18 @@ export const LiveRedFlagSchema = z.object({
 });
 export type LiveRedFlag = z.infer<typeof LiveRedFlagSchema>;
 
+/**
+ * Sprint DS11.6 — a lab/test worth ordering for THIS presentation,
+ * surfaced DURING the consult (adopt-only: it reaches the Rx pad's
+ * investigations only via an explicit doctor tap, audited as PLAN).
+ */
+export const OrderNextItemSchema = z.object({
+  name: z.string(),
+  /** Why — one line, shown beside the adopt button. */
+  rationale: z.string().optional(),
+});
+export type OrderNextItem = z.infer<typeof OrderNextItemSchema>;
+
 /// The full reasoning snapshot emitted to the browser. Idempotent render —
 /// the client replaces its whole reasoning view from this. `version` is
 /// monotonic so superseded snapshots can be dropped.
@@ -87,6 +99,10 @@ export const LiveReasoningSchema = z.object({
   differential: z.array(LiveDifferentialItemSchema).default([]),
   askNext: z.array(AskNextItemSchema).default([]),
   redFlags: z.array(LiveRedFlagSchema).default([]),
+  /** DS11.6 — physical-exam steps to consider ("Throat examination"). */
+  examineNext: z.array(z.string()).default([]),
+  /** DS11.6 — labs/tests to consider ordering, with rationale. */
+  orderNext: z.array(OrderNextItemSchema).default([]),
   version: z.number().int().nonnegative().default(0),
 });
 export type LiveReasoning = z.infer<typeof LiveReasoningSchema>;

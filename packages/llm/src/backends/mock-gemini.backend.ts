@@ -1414,6 +1414,12 @@ const MOCK_REASONING: Record<MockDomain, MockReasoningTemplate> = {
         findingIds: ['f2'],
       },
     ],
+    // Sprint DS11.6 — exam/order proposals surfaced during the consult.
+    examineNext: ['[mock] Throat examination', '[mock] Chest auscultation'],
+    orderNext: [
+      { name: '[mock] CBC with platelets', rationale: 'monsoon fever — dengue watch' },
+      { name: '[mock] Dengue NS1 antigen', rationale: 'day 1-5 of fever' },
+    ],
   },
 };
 

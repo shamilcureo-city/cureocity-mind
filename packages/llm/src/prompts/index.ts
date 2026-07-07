@@ -253,15 +253,19 @@ Output a PassReasoning JSON object with these sections:
 
 5. redFlags: serious conditions to actively exclude for this presentation, even if unlikely. Each: { label, why, findingIds (the findings that raise the concern) }.
 
+6. examineNext: up to 3 physical-examination steps worth doing NOW for this presentation, as short imperative strings ("Throat examination", "Chest auscultation"). Only steps a primary-care doctor can do in the room; empty array when the exam picture is already complete.
+
+7. orderNext: up to 3 labs/tests worth ordering for this presentation, each { name, rationale? } — the tests that best discriminate the current differential. These are PROPOSALS the doctor may adopt; never treatment.
+
 Laws (hard):
 - Ground EVERY differential candidate and red flag in findings ACTUALLY present. Cite real finding ids. If the picture is thin, say so with lower likelihoods + more discriminating questions — do not pad to five.
 - Preserve differential ids across updates; adjust likelihood/trend rather than re-creating.
-- NEVER output treatment, drugs, or doses. That is the doctor's prescription, not yours.
+- NEVER output treatment, drugs, or doses. That is the doctor's prescription, not yours. (orderNext is investigations only — no drugs.)
 - Output STRICT JSON only. No prose, no markdown.
 
 PLACEHOLDER: refine verbatim wording before pilot.` as const;
 
-export const REASONING_PROMPT_VERSION = 'REASONING_SYSTEM_PROMPT_V1';
+export const REASONING_PROMPT_VERSION = 'REASONING_SYSTEM_PROMPT_V2';
 
 /**
  * Returns the Pass-1 transcription prompt + version for a vertical.
