@@ -223,6 +223,8 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
             differential: dx,
             askNext,
             redFlags: [],
+            examineNext: [],
+            orderNext: [],
           },
           callLog: fakeLog,
         };
