@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   ChronicTrajectorySchema,
   type ChronicMeasureTrajectory,
@@ -26,20 +27,29 @@ export function ContextFlash({
   patientName,
   age,
   specialty,
+  encounterHref,
   onDone,
 }: {
   clientId: string;
   patientName: string;
   age: number | null;
   specialty?: string | null;
+  /** DS11.3 — the batch encounter URL, enabling the capture-mode switch. */
+  encounterHref?: string;
   onDone: () => void;
 }) {
+  const router = useRouter();
   const [measures, setMeasures] = useState<ChronicMeasureTrajectory[]>([]);
   const [left, setLeft] = useState(COUNTDOWN_SECONDS);
+  // DS11.3 — the countdown waits for the chronic chips (they are the point
+  // of this screen); a 4s cap keeps a slow fetch from stalling the consult.
+  const [chronicReady, setChronicReady] = useState(false);
+  const [modesOpen, setModesOpen] = useState(false);
 
   // Pull the chronic trajectory so the doctor sees control/trend at a glance.
   useEffect(() => {
     let cancelled = false;
+    const cap = setTimeout(() => setChronicReady(true), 4000);
     void (async () => {
       try {
         const res = await fetch(`/api/v1/clients/${clientId}/chronic`);
@@ -50,22 +60,27 @@ export function ContextFlash({
         }
       } catch {
         /* best-effort — the flash still shows identity + what's watched */
+      } finally {
+        if (!cancelled) setChronicReady(true);
       }
     })();
     return () => {
       cancelled = true;
+      clearTimeout(cap);
     };
   }, [clientId]);
 
-  // Auto-advance countdown.
+  // Auto-advance countdown — armed once the chronic chips render (or the
+  // 4s cap fires) and paused while the doctor is choosing a capture mode.
   useEffect(() => {
+    if (!chronicReady || modesOpen) return;
     if (left <= 0) {
       onDone();
       return;
     }
     const t = setTimeout(() => setLeft((s) => s - 1), 1000);
     return () => clearTimeout(t);
-  }, [left, onDone]);
+  }, [left, onDone, chronicReady, modesOpen]);
 
   return (
     <Card className="mx-auto max-w-2xl overflow-hidden p-0">
@@ -125,6 +140,40 @@ export function ContextFlash({
             Skip
           </button>
         </div>
+
+        {/* DS11.3 — the ONE place the capture-mode choice lives. Live is
+            pre-selected; deviating is progressive-disclosed behind Change. */}
+        {encounterHref && (
+          <div className="border-t border-dashed border-[var(--color-line-soft)] pt-3">
+            {modesOpen ? (
+              <div className="flex flex-wrap gap-2">
+                <ModePill
+                  selected
+                  title="🎙 Live consult"
+                  desc="The note writes itself as you talk."
+                  onPick={() => setModesOpen(false)}
+                />
+                <ModePill
+                  title="🗣 Dictate after visit"
+                  desc="You summarise; we write the note."
+                  onPick={() => router.push(encounterHref)}
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-[var(--color-ink-3)]">
+                Capture mode:{' '}
+                <span className="font-semibold text-[var(--color-accent)]">Live consult</span> ·{' '}
+                <button
+                  type="button"
+                  onClick={() => setModesOpen(true)}
+                  className="underline hover:text-[var(--color-ink)]"
+                >
+                  Change
+                </button>
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -154,6 +203,37 @@ function TrendChip({ m }: { m: ChronicMeasureTrajectory }) {
       </span>
       <span className="font-bold">{glyph}</span>
     </span>
+  );
+}
+
+function ModePill({
+  title,
+  desc,
+  selected = false,
+  onPick,
+}: {
+  title: string;
+  desc: string;
+  selected?: boolean;
+  onPick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      className={`w-56 rounded-xl border px-3.5 py-2.5 text-left transition ${
+        selected
+          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+          : 'border-[var(--color-line)] bg-white hover:border-[var(--color-accent)]'
+      }`}
+    >
+      <span
+        className={`block text-[13px] font-semibold ${selected ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink)]'}`}
+      >
+        {title}
+      </span>
+      <span className="block text-[11px] leading-snug text-[var(--color-ink-3)]">{desc}</span>
+    </button>
   );
 }
 

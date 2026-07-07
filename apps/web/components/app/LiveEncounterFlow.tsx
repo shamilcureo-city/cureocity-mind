@@ -32,6 +32,7 @@ export function LiveEncounterFlow({
         patientName={patient.name}
         age={patient.age}
         specialty={specialty}
+        encounterHref={`/app/patients/${clientId}/encounters/${sessionId}`}
         onDone={() => setPhase('live')}
       />
     );

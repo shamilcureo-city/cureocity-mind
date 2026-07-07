@@ -65,6 +65,8 @@ export async function POST(
         data: {
           status: 'IN_PROGRESS',
           startedAt: new Date(),
+          // DS11.3 — record the capture pipeline on the row.
+          captureMode: 'LIVE',
           ...(needsSnapshot && { consentSnapshot: snapshot }),
         },
       });

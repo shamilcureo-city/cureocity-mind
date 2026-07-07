@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { ClinicQueue, ClinicQueueEntry, ClinicQueueStatus } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { primeMicPermission } from '@/lib/audio/prime-mic';
 
 /**
  * Sprint DS7 — the zero-click clinic landing page (screens 01 / 02 / 10).
@@ -85,9 +86,11 @@ function NextPatientCard({ entry }: { entry: ClinicQueueEntry | null }) {
     );
   }
 
-  function start(): void {
+  async function start(): Promise<void> {
     if (!entry) return;
     setBusy(true);
+    // DS11.3 — prime the mic on THIS gesture so patient #1 auto-starts too.
+    await primeMicPermission();
     router.push(`/app/patients/${entry.clientId}/encounters/${entry.sessionId}/live?flash=1`);
   }
 
@@ -114,7 +117,7 @@ function NextPatientCard({ entry }: { entry: ClinicQueueEntry | null }) {
             Token {entry.tokenNumber ?? '—'} · tap start — the note writes itself
           </p>
         </div>
-        <Button onClick={start} disabled={busy} className="shrink-0 text-base">
+        <Button onClick={() => void start()} disabled={busy} className="shrink-0 text-base">
           {busy ? 'Opening…' : '● Start consult'}
         </Button>
       </div>
@@ -212,6 +215,7 @@ function WalkInAdd({ patients }: { patients: { id: string; name: string }[] }) {
         throw new Error(body.error ?? `Could not add walk-in (${res.status}).`);
       }
       const created = (await res.json()) as { id: string };
+      await primeMicPermission();
       router.push(`/app/patients/${clientId}/encounters/${created.id}/live?flash=1`);
     } catch (e) {
       setError((e as Error).message);

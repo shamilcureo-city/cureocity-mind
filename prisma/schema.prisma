@@ -693,6 +693,13 @@ model Consent {
 // Sprint 3. Transcript field is added by scribe-service migration.
 // ============================================================================
 
+/// Sprint DS11.3 — the doctor consult's capture pipeline.
+enum CaptureMode {
+  LIVE
+  DICTATE
+  UPLOAD
+}
+
 enum SessionStatus {
   SCHEDULED
   IN_PROGRESS
@@ -745,6 +752,11 @@ model Session {
   /// to write — but the column is nullable so older rows + future
   /// "decide later" flows aren't blocked at the DB level.
   modality SessionModality?
+  /// Sprint DS11.3 — how the encounter was captured (doctor vertical).
+  /// Written at capture start: LIVE by the live-token route; DICTATE /
+  /// UPLOAD by the batch capture paths (DS11.7). Null = pre-DS11 rows
+  /// and therapist sessions.
+  captureMode CaptureMode?
   /// Sprint 19 — session classification driving Pass 2/3 prompt
   /// branches. Defaults to TREATMENT for back-compat with rows
   /// inserted before this migration.

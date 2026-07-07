@@ -53,12 +53,14 @@ export default async function EncounterWorkspacePage({
       <header className="mb-6 mt-3 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">Encounter</h1>
         <div className="flex items-center gap-3">
-          <Link
-            href={`/app/patients/${clientId}/encounters/${sessionId}/live`}
-            className="text-sm font-medium text-[var(--color-accent)] hover:underline"
-          >
-            ⚡ Try the live copilot (preview)
-          </Link>
+          {session.status !== 'COMPLETED' && (
+            <Link
+              href={`/app/patients/${clientId}/encounters/${sessionId}/live?flash=1`}
+              className="text-sm font-medium text-[var(--color-accent)] hover:underline"
+            >
+              ● Switch to live consult
+            </Link>
+          )}
           <Badge tone={session.status === 'COMPLETED' ? 'accent' : 'muted'}>
             {session.status.toLowerCase()}
           </Badge>
