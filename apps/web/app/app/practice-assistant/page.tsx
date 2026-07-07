@@ -1,9 +1,11 @@
 import { Container } from '@/components/ui/Container';
 import { PracticeAssistantChat } from '@/components/app/PracticeAssistantChat';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
-export default function PracticeAssistantPage() {
+export default async function PracticeAssistantPage() {
+  await requireOnboardedPsychologist(); // defense-in-depth: the /app layout does not redirect
   return (
     <Container className="py-10">
       <header className="mb-6">

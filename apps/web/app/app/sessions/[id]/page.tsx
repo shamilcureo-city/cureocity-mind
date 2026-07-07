@@ -22,6 +22,7 @@ import { WhereWeLeftOff } from '@/components/app/WhereWeLeftOff';
 import { MeasuresTrend } from '@/components/app/MeasuresTrend';
 import { SessionProblemTags } from '@/components/app/SessionProblemTags';
 import { computeCaseThread, CaseThreadError, type CaseThread } from '@/lib/case-thread';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
@@ -76,13 +77,20 @@ function parseSub(raw: string | undefined): CopilotSubKey {
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
+  // SECURITY (Sprint 78): this page renders the transcript, note, and client
+  // PII — the most sensitive screen in the app. It MUST authenticate and
+  // tenant-scope like every other data-bearing page (the /app layout does not
+  // redirect). `findFirst` with psychologistId makes cross-tenant / unauth URL
+  // probing return 404.
+  const therapist = await requireOnboardedPsychologist();
+
   const { id } = await params;
   const { tab: rawTab, sub: rawSub } = await searchParams;
   const { tab, subOverride } = parseTab(rawTab);
   const sub = subOverride ?? parseSub(rawSub);
 
-  const session = await prisma.session.findUnique({
-    where: { id },
+  const session = await prisma.session.findFirst({
+    where: { id, psychologistId: therapist.id },
     include: {
       client: {
         select: {

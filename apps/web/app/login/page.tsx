@@ -694,8 +694,17 @@ function LoginPageInner() {
               </div>
             )}
 
-            <p className="mt-6 text-center text-[11px] text-[var(--color-ink-3)]">
-              By continuing you agree to our terms and privacy policy. We never share your data.
+            <p className="mt-6 text-center text-[11px] leading-relaxed text-[var(--color-ink-3)]">
+              By continuing you agree to our{' '}
+              <a href="/terms" className="underline hover:text-[var(--color-ink-2)]">
+                Terms
+              </a>{' '}
+              and{' '}
+              <a href="/privacy" className="underline hover:text-[var(--color-ink-2)]">
+                Privacy Policy
+              </a>
+              . We never sell your data; we share it only with the service providers needed to run
+              Cureocity Mind.
             </p>
 
             <div id={RECAPTCHA_ELEMENT_ID} />

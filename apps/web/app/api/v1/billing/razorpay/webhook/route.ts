@@ -22,8 +22,12 @@ export const dynamic = 'force-dynamic';
  * the signature.
  *
  * Idempotent: handlers guard by razorpayOrderId + status so a re-
- * delivered event is a no-op. Razorpay retries on non-2xx, so we
- * always return 200 fast — failures are logged with no rollback.
+ * delivered event is a no-op. Because the handler work is atomic
+ * ($transaction) AND idempotent, a transient DB failure means NO work
+ * was done — so we return 5xx and let Razorpay's retry machinery
+ * redeliver, rather than ACKing 200 and permanently dropping a captured
+ * payment (REL-3). Only genuine no-ops (unknown order, malformed
+ * payload, already-paid) return 200.
  *
  * Handled events:
  *   payment.captured / order.paid  → mark PAID, extend paidThroughAt,
@@ -68,10 +72,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       console.info(`[razorpay-webhook] unhandled event ${event.event} (no-op)`);
     }
   } catch (e) {
-    console.error(`[razorpay-webhook] handler failed: ${(e as Error).message}`);
+    // The handler is atomic + idempotent, so a failure here means the
+    // captured/failed event was NOT persisted. Return 5xx so Razorpay
+    // redelivers — ACKing 200 would strand a paid customer on the trial
+    // cap with money captured and no plan flip (REL-3).
+    console.error(
+      `[razorpay-webhook] handler failed, asking Razorpay to retry: ${(e as Error).message}`,
+    );
+    return NextResponse.json({ error: 'Handler failed; retry' }, { status: 500 });
   }
-  // Always 200 — Razorpay retries on non-2xx and we've already done
-  // best-effort work.
   return NextResponse.json({ ok: true });
 }
 

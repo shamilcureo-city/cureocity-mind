@@ -1,9 +1,11 @@
 import { Container } from '@/components/ui/Container';
 import { TemplatesEditor } from '@/components/app/TemplatesEditor';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
-export default function TemplatesPage() {
+export default async function TemplatesPage() {
+  await requireOnboardedPsychologist(); // defense-in-depth: the /app layout does not redirect
   return (
     <Container className="py-10">
       <header className="mb-6">

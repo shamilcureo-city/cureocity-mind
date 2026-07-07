@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 import {
@@ -15,6 +16,15 @@ import { WATERMARK_TAGLINE, watermarkUrl } from '@/lib/watermark';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+// SHARE-2 — this page contains clinical PHI behind an unguessable token. Never
+// let a search engine index it, and override the marketing <title> the root
+// layout would otherwise leak into the browser tab / link previews with a
+// neutral, non-disclosing one.
+export const metadata: Metadata = {
+  title: 'A private page for you',
+  robots: { index: false, follow: false, nocache: true },
+};
 
 interface PageProps {
   params: Promise<{ token: string }>;
