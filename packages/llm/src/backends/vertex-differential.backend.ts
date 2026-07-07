@@ -8,6 +8,7 @@ import {
 } from '../types';
 import { DIFFERENTIAL_PROMPT_VERSION, DIFFERENTIAL_SYSTEM_PROMPT_V1 } from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
+import { normaliseDifferentialOutput } from './differential-normalise';
 
 export interface VertexGeminiDifferentialOptions {
   projectId: string;
@@ -94,7 +95,7 @@ export class VertexGeminiDifferentialBackend implements IPassDifferentialBackend
       }
       const parsed: unknown = JSON.parse(text);
       const output: PassDifferentialOutput = PassDifferentialOutputSchema.parse({
-        differential: parsed,
+        differential: normaliseDifferentialOutput(parsed),
       });
 
       const usage = res.usageMetadata;

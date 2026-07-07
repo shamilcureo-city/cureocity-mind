@@ -1128,10 +1128,19 @@ export async function runDifferential(args: DifferentialArgs): Promise<void> {
     });
   } catch (e) {
     const message = (e as Error).message;
+    // The raw failure (often a multi-KB ZodError dump) goes to the logs;
+    // the row stores a short doctor-facing line — the panel renders
+    // errorMessage verbatim, and raw validation JSON on a clinician's
+    // screen is unusable.
+    const friendly = message.includes('invalid_')
+      ? 'The AI returned an unexpected format. Try again — this usually resolves on a re-run.'
+      : message.length > 300
+        ? `${message.slice(0, 297)}…`
+        : message;
     await prisma.differential
       .update({
         where: { sessionId: args.sessionId },
-        data: { status: 'FAILED', errorMessage: message },
+        data: { status: 'FAILED', errorMessage: friendly },
       })
       .catch(() => {
         /* primary failure logged below */
