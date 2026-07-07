@@ -108,6 +108,20 @@ only genuinely risky swap (P3→Flash) is optional and gated.
   10-session transcript fidelity spot-check passes.
 - **Exit:** audio tokens −20–30%; transcripts unchanged.
 
+**Status (landed, default-off):** `SilenceTrimmer` (`packages/audio/src/
+silence-trim.ts`) is a pure, streaming, unit-tested transform — never clips
+speech (per-frame classification keeps any frame with energy whole), collapses
+only runs longer than `minSilenceMs`, keeps `paddingMs` on each edge. Wired
+into the **batch upload path** (`apps/web/lib/audio/upload-file.ts`) between
+the decimator and the chunker, behind `NEXT_PUBLIC_AUDIO_SILENCE_TRIM=true`
+(threshold / min-silence / padding overridable via
+`NEXT_PUBLIC_AUDIO_SILENCE_*`). When off it is a byte-for-byte no-op. It logs
+`dropped N% of audio` per upload so the spot-check has a number. **Remaining
+(operational / device-gated):** run the 10-session transcript-fidelity check
+on real uploads, tune the threshold per device, then flip the flag; live-
+capture wiring is deferred (the live gateway already does its own VAD
+windowing).
+
 ### Sprint 78 — Fair-use pricing (bound the tail)
 
 - `PLAN_CATALOG`: Pro/Premium become fair-use (≈120 / 250 sessions per

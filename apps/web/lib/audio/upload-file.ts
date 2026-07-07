@@ -3,10 +3,12 @@
 import {
   PcmChunker,
   PolyphaseDecimator,
+  SilenceTrimmer,
   TARGET_MIME_TYPE,
   TARGET_SAMPLE_RATE_HZ,
   float32ToInt16Le,
   type PcmChunk,
+  type SilenceTrimOptions,
 } from '@cureocity/audio';
 import { ChunkStore, SessionStore } from './idb-chunk-store';
 import { ChunkUploader } from './chunk-uploader';
@@ -75,6 +77,11 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
 
   const decimator = new PolyphaseDecimator(3);
   const chunker = new PcmChunker({ sessionStartedAt, initialChunkIndex: 0 });
+  // Sprint 77 — optional voice-activity silence trim (Pass 1 audio diet).
+  // DEFAULT OFF: the energy threshold is device-dependent, so it stays behind
+  // a build-time flag until a transcript-fidelity spot-check passes. When off,
+  // this is a byte-for-byte no-op (the trimmer is never constructed).
+  const trimmer = resolveSilenceTrimmer();
   const uploader = new ChunkUploader({
     scribeBase: opts.scribeBase ?? '/api/v1',
     ...(opts.getAuthToken && { getAuthToken: opts.getAuthToken }),
@@ -91,8 +98,8 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
     const end = Math.min(cursor + SLICE, monoMid.length);
     const slice = monoMid.subarray(cursor, end);
     const decimated = decimator.process(slice);
-    const completed = chunker.push(decimated);
-    completedChunks.push(...completed);
+    const forChunker = trimmer ? trimmer.process(decimated) : decimated;
+    completedChunks.push(...chunker.push(forChunker));
     cursor = end;
     opts.onProgress?.({
       decoded: cursor,
@@ -101,6 +108,18 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
     });
     // Yield to the event loop occasionally.
     await new Promise((r) => setTimeout(r, 0));
+  }
+  if (trimmer) {
+    // Flush any retained silence held by the trimmer BEFORE flushing the
+    // chunker, so the final partial chunk includes it.
+    const tail = trimmer.flush();
+    if (tail.length) completedChunks.push(...chunker.push(tail));
+    const s = trimmer.getStats();
+    const pct = s.inputSamples > 0 ? Math.round((s.droppedSamples / s.inputSamples) * 100) : 0;
+    console.info(
+      `[upload-file] silence trim: dropped ${pct}% of audio ` +
+        `(${s.droppedSamples}/${s.inputSamples} samples)`,
+    );
   }
   for (const c of chunker.flush()) completedChunks.push(c);
 
@@ -143,4 +162,30 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
     chunksWritten,
     durationMs: Math.round(decoded.duration * 1000),
   };
+}
+
+/**
+ * Sprint 77 — build a SilenceTrimmer only when the build-time flag is set.
+ * Returns null (a no-op) by default. The energy threshold is
+ * microphone/room dependent, so the flag stays off until a transcript-
+ * fidelity spot-check on real uploads passes. Thresholds are overridable
+ * via env for tuning that spot-check.
+ */
+function resolveSilenceTrimmer(): SilenceTrimmer | null {
+  if (process.env['NEXT_PUBLIC_AUDIO_SILENCE_TRIM'] !== 'true') return null;
+  const opts: SilenceTrimOptions = { sampleRate: TARGET_SAMPLE_RATE_HZ };
+  const threshold = numEnv('NEXT_PUBLIC_AUDIO_SILENCE_THRESHOLD_RMS');
+  const minSilence = numEnv('NEXT_PUBLIC_AUDIO_SILENCE_MIN_MS');
+  const padding = numEnv('NEXT_PUBLIC_AUDIO_SILENCE_PADDING_MS');
+  if (threshold !== null) opts.thresholdRms = threshold;
+  if (minSilence !== null) opts.minSilenceMs = minSilence;
+  if (padding !== null) opts.paddingMs = padding;
+  return new SilenceTrimmer(opts);
+}
+
+function numEnv(key: string): number | null {
+  const raw = process.env[key];
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
 }
