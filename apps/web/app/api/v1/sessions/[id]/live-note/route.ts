@@ -52,6 +52,7 @@ export async function POST(
       psychologistId: true,
       clientId: true,
       scheduledAt: true,
+      status: true,
       psychologist: { select: { vertical: true } },
     },
   });
@@ -101,6 +102,29 @@ export async function POST(
       ...auditMetadataFromRequest(req),
     },
   });
+
+  // DS11.1 — the live consult is over: mark the session COMPLETED so the
+  // clinic queue shows DONE and the sign route (requires COMPLETED)
+  // accepts the note. Batch parity with POST /sessions/:id/end.
+  if (session.status !== 'COMPLETED') {
+    await prisma.$transaction(async (tx) => {
+      await tx.session.update({
+        where: { id: sessionId },
+        data: { status: 'COMPLETED', endedAt: new Date() },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'SESSION_ENDED',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+        },
+        tx,
+      );
+    });
+  }
 
   // Reuse the batch helpers: draft the Rx + clinical orders (interaction-
   // checked server-side) and capture vitals into the chronic series.
