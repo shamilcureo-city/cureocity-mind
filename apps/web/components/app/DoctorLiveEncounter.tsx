@@ -17,10 +17,12 @@ import {
   type Utterance,
   type VoiceCommand,
 } from '@cureocity/contracts';
+import { useRouter } from 'next/navigation';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { MedicalNoteView } from './MedicalNoteView';
+import { ReviewAndSign } from './ReviewAndSign';
+// (MedicalNoteView now renders inside ReviewAndSign)
 import { TurnoverBar } from './TurnoverBar';
 
 /**
@@ -65,6 +67,7 @@ export function DoctorLiveEncounter({
   // if the browser needs a gesture, the StartPanel button is the fallback.
   autoStart?: boolean;
 }) {
+  const router = useRouter();
   const wsRef = useRef<WebSocket | null>(null);
   // Safety-net timer so "End" can never trap the doctor on "Finishing…" if
   // the gateway's `done` never arrives (e.g. a dropped socket).
@@ -101,6 +104,9 @@ export function DoctorLiveEncounter({
   const [commands, setCommands] = useState<VoiceCommand[]>([]);
   const [shownData, setShownData] = useState<Record<string, string>>({});
   const [finalNote, setFinalNote] = useState<MedicalEncounterNoteV1 | null>(null);
+  // DS11.2 — the turnover to the next patient arms only AFTER the signature.
+  const [justSigned, setJustSigned] = useState(false);
+  const [startingNew, setStartingNew] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -316,6 +322,7 @@ export function DoctorLiveEncounter({
     setCommands([]);
     setShownData({});
     setFinalNote(null);
+    setJustSigned(false);
     setSaveState('idle');
     setElapsed(0);
     latestMeterRef.current = null;
@@ -484,6 +491,31 @@ export function DoctorLiveEncounter({
     };
   }
 
+  // DS11.2 — "New consult" previously restarted the SAME session, silently
+  // overwriting its note. Mint a fresh session row and chain to it instead.
+  async function newConsult(): Promise<void> {
+    if (!clientId || startingNew) return;
+    setStartingNew(true);
+    try {
+      const res = await fetch('/api/v1/sessions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ clientId, scheduledAt: new Date().toISOString() }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error ?? `Could not start a new consult (${res.status}).`);
+        return;
+      }
+      const created = (await res.json()) as { id: string };
+      router.push(`/app/patients/${clientId}/encounters/${created.id}/live?flash=1`);
+    } catch {
+      setError('Could not start a new consult — check your connection.');
+    } finally {
+      setStartingNew(false);
+    }
+  }
+
   function stop(): void {
     void stream.stop();
     wsRef.current?.send(JSON.stringify({ type: 'stop' }));
@@ -601,9 +633,11 @@ export function DoctorLiveEncounter({
 
         <div className="ml-auto flex items-center gap-2">
           {finalNote || phase === 'done' ? (
-            <Button onClick={() => void start()} variant="secondary">
-              New consult
-            </Button>
+            clientId ? (
+              <Button onClick={() => void newConsult()} variant="secondary" disabled={startingNew}>
+                {startingNew ? 'Starting…' : 'New consult'}
+              </Button>
+            ) : null
           ) : live ? (
             <Button onClick={attemptEnd} className="bg-[var(--color-warn)] hover:bg-[#a25b30]">
               End &amp; review note
@@ -624,15 +658,27 @@ export function DoctorLiveEncounter({
 
       {finalNote ? (
         <>
-          <FinalNote
-            note={finalNote}
-            saveState={saveState}
-            clientId={clientId}
+          {/* DS11.2 — sign on THIS surface; no detour to the encounter page. */}
+          <ReviewAndSign
             sessionId={sessionId}
+            clientId={clientId}
+            note={finalNote}
+            header={
+              <p className="text-sm text-[var(--color-ink-2)]">
+                Consult ended — review the note and plan, then sign.{' '}
+                <span className="text-[var(--color-ink-3)]">
+                  {saveState === 'saving' && 'Saving the draft…'}
+                  {saveState === 'saved' && '✓ Draft saved.'}
+                  {saveState === 'error' &&
+                    'The draft could not be saved automatically — signing will retry.'}
+                </span>
+              </p>
+            }
+            onSigned={() => setJustSigned(true)}
           />
-          {/* Sprint DS7 — arm the next token so consults chain without a
-              detour back to the queue. */}
-          <TurnoverBar currentSessionId={sessionId} />
+          {/* Sprint DS7 + DS11.2 — the next token arms only after the
+              signature lands: sign first, then chain. */}
+          {justSigned && <TurnoverBar currentSessionId={sessionId} />}
         </>
       ) : phase === 'idle' || phase === 'connecting' ? (
         <StartPanel connecting={phase === 'connecting'} />
@@ -1402,47 +1448,6 @@ function CopilotCard({
             {rec.action.verb}
           </button>
         ))}
-    </div>
-  );
-}
-
-function FinalNote({
-  note,
-  saveState,
-  clientId,
-  sessionId,
-}: {
-  note: MedicalEncounterNoteV1;
-  saveState: 'idle' | 'saving' | 'saved' | 'error';
-  clientId?: string;
-  sessionId: string;
-}) {
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-[var(--color-ink-2)]">
-        Consult ended — here is the finished note (≈90% drafted before you touched a key):
-      </p>
-      <Card className="p-7">
-        <MedicalNoteView note={note} />
-      </Card>
-      <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
-        <p className="text-sm text-[var(--color-ink-2)]">
-          {saveState === 'saving' && 'Saving the note to this encounter…'}
-          {saveState === 'saved' &&
-            '✓ Saved as a draft. Open the encounter to confirm the Rx + orders and sign.'}
-          {saveState === 'error' &&
-            'Could not save the note automatically — open the encounter and regenerate.'}
-          {saveState === 'idle' && 'Open the encounter to review, confirm orders, and sign.'}
-        </p>
-        {clientId && (
-          <a
-            href={`/app/patients/${clientId}/encounters/${sessionId}`}
-            className="text-sm font-medium text-[var(--color-accent)] hover:underline"
-          >
-            Open the encounter →
-          </a>
-        )}
-      </Card>
     </div>
   );
 }
