@@ -1202,6 +1202,10 @@ interface MockReasoningTemplate {
   differential: Omit<PassReasoningOutput['differential'][number], 'trend'>[];
   askNext: PassReasoningOutput['askNext'];
   redFlags: PassReasoningOutput['redFlags'];
+  // Sprint DS11.6 — optional exam/order proposals; domains without them
+  // surface an empty rail (the builder defaults to []).
+  examineNext?: PassReasoningOutput['examineNext'];
+  orderNext?: PassReasoningOutput['orderNext'];
 }
 
 const MOCK_REASONING: Record<MockDomain, MockReasoningTemplate> = {
@@ -1448,9 +1452,19 @@ export class MockGeminiReasoningBackend implements IPassReasoningBackend {
             })),
             askNext: tpl.askNext,
             redFlags: tpl.redFlags,
+            examineNext: tpl.examineNext ?? [],
+            orderNext: tpl.orderNext ?? [],
           };
         })()
-      : { findings: [], answeredQuestionIds, differential: [], askNext: [], redFlags: [] };
+      : {
+          findings: [],
+          answeredQuestionIds,
+          differential: [],
+          askNext: [],
+          redFlags: [],
+          examineNext: [],
+          orderNext: [],
+        };
 
     return {
       output,
