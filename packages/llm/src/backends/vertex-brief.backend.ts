@@ -172,12 +172,21 @@ function buildUserMessage(input: Pass5Input): string {
           )
           .join('\n')
       : '  (none on file)';
+  // Sprint 75 — the longitudinal digest sits before the per-session detail so
+  // the model reads the arc (score trajectories, diagnosis evolution, problem
+  // threads) before today's material, and the stable prefix aids implicit
+  // prompt caching. Prefer it over the last-session summary for anything about
+  // the client's trajectory over time.
+  const digestBlock = input.caseDigest
+    ? ['Cumulative case digest (deterministic, from the chart):', input.caseDigest, '']
+    : [];
   return [
     `Output language: ${input.language}`,
     `Session number: ${input.sessionNumber ?? 'unknown'}`,
     `Primary diagnosis: ${dx}`,
     `Presenting concerns: ${input.presentingConcerns ?? '(none recorded)'}`,
     '',
+    ...digestBlock,
     'Active treatment plan:',
     plan,
     '',

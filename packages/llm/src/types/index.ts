@@ -361,6 +361,13 @@ export interface Pass5Input {
   latestInstruments?: Pass5InstrumentSnapshot[];
   /** Free-text presenting concerns. */
   presentingConcerns?: string;
+  /**
+   * Sprint 75 — the deterministic cumulative case digest (same serialisation
+   * Passes 3/6/7/8 consume). Gives the brief the longitudinal arc (score
+   * trajectories, diagnosis evolution, problem threads, goal status) instead
+   * of only last-session highlights. Optional + best-effort.
+   */
+  caseDigest?: string;
 }
 
 export const Pass5OutputSchema = z.object({

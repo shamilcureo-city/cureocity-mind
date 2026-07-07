@@ -9,6 +9,7 @@ import {
 import { recordCostInr, recordGeminiCall } from '@cureocity/observability/metrics';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { gatherInputs as gatherCaseInputs, serialiseContext } from '@/lib/case-briefing';
 import { toPreSessionBrief } from '@/lib/clinical-mappers';
 import { fetchOpenCrises } from '@/lib/crisis-flags';
 import { modelRouter } from '@/lib/llm';
@@ -135,6 +136,18 @@ export async function GET(
 
   const lastSessionSummary = extractLastSummary(lastSession);
 
+  // Sprint 75 — the cumulative case digest (same serialisation Passes 3/6/7/8
+  // consume) gives the brief the longitudinal arc. Defensive: a digest failure
+  // must never block the brief — fall back to the inline grounding above.
+  let caseDigest: string | undefined;
+  try {
+    caseDigest = serialiseContext(await gatherCaseInputs(clientId, auth.value.psychologistId));
+  } catch (e) {
+    console.warn(
+      `[pre-session-brief] case digest unavailable for client=${clientId}: ${(e as Error).message}`,
+    );
+  }
+
   // Insert PENDING row first so the UI can poll if needed.
   const briefRow = await prisma.preSessionBrief.create({
     data: {
@@ -160,6 +173,7 @@ export async function GET(
       }),
       ...(planSummary && { treatmentPlan: planSummary }),
       ...(lastSessionSummary !== null && { lastSessionSummary }),
+      ...(caseDigest && { caseDigest }),
       ...(client.presentingConcerns !== null && {
         presentingConcerns: client.presentingConcerns,
       }),
