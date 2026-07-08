@@ -96,9 +96,13 @@ model Psychologist {
 
   // Sprint 18 — therapist preferences.
   /// ISO 639-1 default output language for new notes / briefs.
-  defaultOutputLanguage String  @default("en")
+  defaultOutputLanguage String       @default("en")
   /// Default modality when creating a session for a client without a preferredModality.
   defaultModality       String?
+  /// Sprint DS11.7-fu — a doctor's preferred capture pipeline for a new
+  /// consult (LIVE is the product default; a doctor who works in a noisy OPD
+  /// or without a reliable mic can pre-select DICTATE/UPLOAD). NULL = LIVE.
+  defaultCaptureMode    CaptureMode?
   /// Secondary email for account recovery if phone-OTP fails. Verified separately.
   backupEmail           String?
 

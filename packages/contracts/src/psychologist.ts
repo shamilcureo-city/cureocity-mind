@@ -12,6 +12,11 @@ export const PsychologistStatusSchema = z.enum([
 export const PsychologistRoleSchema = z.enum(['THERAPIST', 'ADMIN']);
 export type PsychologistRole = z.infer<typeof PsychologistRoleSchema>;
 
+/// Sprint DS11.7-fu — a doctor's preferred capture pipeline for a new consult.
+/// Mirrors the Prisma `CaptureMode` enum. NULL/absent = the product default (LIVE).
+export const CaptureModeSchema = z.enum(['LIVE', 'DICTATE', 'UPLOAD']);
+export type CaptureMode = z.infer<typeof CaptureModeSchema>;
+
 /// Sprint DV1 — product vertical discriminator. One system, two faces:
 /// THERAPIST (psychotherapy) vs DOCTOR (super-specialty OPD scribe).
 /// See docs/DOCTOR_VERTICAL.md.
@@ -60,6 +65,8 @@ export const UpdatePsychologistInputSchema = z
     defaultOutputLanguage: Iso639Schema,
     /** Default modality picked when creating a new session for a client without preferredModality. */
     defaultModality: SessionModalitySchema.nullable(),
+    /** Sprint DS11.7-fu — a doctor's preferred consult capture mode. NULL = LIVE. */
+    defaultCaptureMode: CaptureModeSchema.nullable(),
     /**
      * Backup email for account recovery if the phone-OTP path fails.
      * Verified separately by the recovery flow (Sprint 18 PR 2 — schema
@@ -106,6 +113,8 @@ export const PsychologistSchema = z.object({
   // Sprint 18 — settings additions.
   defaultOutputLanguage: z.string().default('en'),
   defaultModality: SessionModalitySchema.nullable(),
+  // Sprint DS11.7-fu — a doctor's preferred consult capture mode. NULL = LIVE.
+  defaultCaptureMode: CaptureModeSchema.nullable().default(null),
   backupEmail: z.string().nullable(),
 
   // Sprint 31 — null until POST /api/v1/onboarding/complete runs.

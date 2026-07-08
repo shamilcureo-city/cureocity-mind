@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import type { Psychologist, SessionModality } from '@cureocity/contracts';
+import type { CaptureMode, Psychologist, SessionModality } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 
@@ -10,16 +10,23 @@ interface Props {
 }
 
 export function PreferencesSettingsForm({ initial }: Props) {
+  const isDoctor = initial.vertical === 'DOCTOR';
   const [language, setLanguage] = useState(initial.defaultOutputLanguage);
   const [modality, setModality] = useState<SessionModality | ''>(
     (initial.defaultModality as SessionModality | null) ?? '',
+  );
+  // DS11.7-fu — a doctor's preferred consult capture mode; '' = LIVE default.
+  const [captureMode, setCaptureMode] = useState<CaptureMode | ''>(
+    initial.defaultCaptureMode ?? '',
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
   const dirty =
-    language !== initial.defaultOutputLanguage || (modality || null) !== initial.defaultModality;
+    language !== initial.defaultOutputLanguage ||
+    (modality || null) !== initial.defaultModality ||
+    (captureMode || null) !== (initial.defaultCaptureMode ?? null);
 
   const submit = useCallback(async () => {
     setBusy(true);
@@ -32,6 +39,9 @@ export function PreferencesSettingsForm({ initial }: Props) {
       }
       if ((modality || null) !== initial.defaultModality) {
         payload['defaultModality'] = modality || null;
+      }
+      if ((captureMode || null) !== (initial.defaultCaptureMode ?? null)) {
+        payload['defaultCaptureMode'] = captureMode || null;
       }
       if (Object.keys(payload).length === 0) {
         return;
@@ -51,7 +61,14 @@ export function PreferencesSettingsForm({ initial }: Props) {
     } finally {
       setBusy(false);
     }
-  }, [initial.defaultModality, initial.defaultOutputLanguage, language, modality]);
+  }, [
+    captureMode,
+    initial.defaultCaptureMode,
+    initial.defaultModality,
+    initial.defaultOutputLanguage,
+    language,
+    modality,
+  ]);
 
   return (
     <Card className="p-6">
@@ -103,6 +120,32 @@ export function PreferencesSettingsForm({ initial }: Props) {
             <option value="OTHER">Other</option>
           </select>
         </div>
+
+        {/* DS11.7-fu — doctors only: the capture pipeline a new consult opens
+            in. Live is the product default; a doctor in a noisy OPD or without
+            a reliable mic can pre-select dictation or upload. Every mode stays
+            reachable from the Start button's caret regardless. */}
+        {isDoctor && (
+          <div>
+            <label className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Default consult capture
+            </label>
+            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+              Which mode the “Start consult” button opens by default. You can always switch modes
+              from the button&rsquo;s menu.
+            </p>
+            <select
+              value={captureMode}
+              onChange={(e) => setCaptureMode(e.target.value as CaptureMode | '')}
+              className="mt-2 w-full rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3 text-sm"
+            >
+              <option value="">Live consult (default)</option>
+              <option value="LIVE">Live consult</option>
+              <option value="DICTATE">Dictate / record after visit</option>
+              <option value="UPLOAD">Upload a recording</option>
+            </select>
+          </div>
+        )}
       </div>
 
       {error && (

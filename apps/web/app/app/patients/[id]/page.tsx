@@ -75,7 +75,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
             {patient.dateOfBirth ? ` · DOB ${formatDate(patient.dateOfBirth)}` : ''}
           </p>
         </div>
-        <StartEncounterButton clientId={patient.id} />
+        <StartEncounterButton clientId={patient.id} defaultMode={doctor.defaultCaptureMode} />
       </header>
 
       <section className="mt-8">
