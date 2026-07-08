@@ -8,6 +8,7 @@ import {
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { persistDraftedOrders, persistVitalReadings } from '@/lib/note-orchestrator';
+import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
@@ -40,6 +41,10 @@ export async function POST(
   const note = parsed.value.note as MedicalEncounterNoteV1;
   const medications = (parsed.value.medications ?? []) as MedicationOrderV1[];
   const orders = (parsed.value.orders ?? []) as ClinicalOrderV1[];
+  // DOC-7 — the verbatim consult transcript the gateway streamed. Trim and
+  // fall back to the presence marker when empty so a transcript-less consult
+  // still satisfies the NoteDraft presence check.
+  const transcript = parsed.value.transcript?.trim() ?? '';
   // Sprint DS5 — the finalized Rx pad, stored alongside the note.
   const rxPad = parsed.value.rxPad
     ? (parsed.value.rxPad as unknown as Prisma.InputJsonValue)
@@ -66,9 +71,31 @@ export async function POST(
     );
   }
 
-  // Persist the note as a COMPLETED draft. The transcript was streamed
-  // (not stored); a marker keeps presence-checks happy. The doctor signs
-  // it from the encounter workspace — that signature is the attestation.
+  // DOC-7 — the streamed transcript is the medico-legal source record behind
+  // the note; persist it verbatim (with the presence marker as the fallback
+  // when the client sent none). Dual-write the envelope-encrypted copy on the
+  // same per-tenant DEK path as the batch note-orchestrator; a KMS hiccup must
+  // never fail an otherwise-complete note, so we log + store plaintext only.
+  const transcriptText = transcript.length > 0 ? transcript : '(captured via live copilot)';
+  let transcriptEncrypted: string | null = null;
+  if (transcript.length > 0) {
+    try {
+      transcriptEncrypted = await encryptForTenant(auth.value.psychologistId, transcriptText);
+    } catch (e) {
+      console.warn(
+        `[live-note] transcript encryption failed for session=${sessionId}; storing plaintext only: ${(e as Error).message}`,
+      );
+    }
+  }
+
+  // Only overwrite a stored transcript when this request actually carried one,
+  // so a re-POST without a transcript can't clobber a good record with the
+  // marker.
+  const transcriptWrite =
+    transcript.length > 0 ? { transcript: transcriptText, transcriptEncrypted } : {};
+
+  // Persist the note as a COMPLETED draft. The doctor signs it from the
+  // encounter workspace — that signature is the attestation.
   const draft = await prisma.noteDraft.upsert({
     where: { sessionId },
     update: {
@@ -76,6 +103,7 @@ export async function POST(
       content: note as unknown as Prisma.InputJsonValue,
       riskSeverity: 'NONE',
       errorMessage: null,
+      ...transcriptWrite,
       ...(rxPad !== undefined && { rxPad }),
     },
     create: {
@@ -83,7 +111,8 @@ export async function POST(
       status: 'COMPLETED',
       content: note as unknown as Prisma.InputJsonValue,
       riskSeverity: 'NONE',
-      transcript: '(captured via live copilot)',
+      transcript: transcriptText,
+      transcriptEncrypted,
       ...(rxPad !== undefined && { rxPad }),
     },
   });

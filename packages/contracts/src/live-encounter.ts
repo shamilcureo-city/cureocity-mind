@@ -243,6 +243,12 @@ export const LiveNoteInputSchema = z.object({
   orders: z.array(ClinicalOrderV1Schema).default([]),
   // Sprint DS5 — the finalized Rx pad stored alongside the draft note.
   rxPad: RxPadV1Schema.optional(),
+  // DOC-7 — the verbatim consult transcript the gateway streamed (diarized,
+  // utterance-joined). Previously discarded — only a placeholder marker was
+  // stored — leaving the live path with no durable source record behind the
+  // note. Optional so an older client (or a transcript-less consult) still
+  // persists the note. Bounded to keep a runaway stream from bloating the row.
+  transcript: z.string().max(200_000).optional(),
 });
 export type LiveNoteInput = z.infer<typeof LiveNoteInputSchema>;
 
