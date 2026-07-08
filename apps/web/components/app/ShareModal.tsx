@@ -382,53 +382,97 @@ export function ShareModal({
 }
 
 function ResultsView({ results, onClose }: { results: ShareResultEntry[]; onClose: () => void }) {
+  // SHARE-1 — a link can be pulled back right here ("wrong person"). Track the
+  // shares revoked this session so the row reflects it without a refetch.
+  const [revoked, setRevoked] = useState<Set<string>>(new Set());
+  const [revoking, setRevoking] = useState<Set<string>>(new Set());
+
+  const revoke = useCallback(async (shareId: string): Promise<void> => {
+    setRevoking((prev) => new Set(prev).add(shareId));
+    try {
+      const res = await fetch(`/api/v1/shares/${shareId}/revoke`, { method: 'POST' });
+      if (res.ok) setRevoked((prev) => new Set(prev).add(shareId));
+    } catch {
+      /* best-effort; the button stays available to retry */
+    } finally {
+      setRevoking((prev) => {
+        const next = new Set(prev);
+        next.delete(shareId);
+        return next;
+      });
+    }
+  }, []);
+
   return (
     <div>
       <ul className="space-y-2">
-        {results.map((r, i) => (
-          <li
-            key={`${r.channel}-${i}`}
-            className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-4"
-          >
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <strong className="text-sm">{r.channel}</strong>
-              <Badge
-                tone={
-                  r.status === 'SENT' || r.status === 'OPENED'
-                    ? 'accent'
-                    : r.status === 'PENDING'
+        {results.map((r, i) => {
+          const isRevoked = revoked.has(r.shareId);
+          // Only a link that actually went live can be pulled back.
+          const canRevoke =
+            !isRevoked && !!r.portalUrl && (r.status === 'SENT' || r.status === 'OPENED');
+          return (
+            <li
+              key={`${r.channel}-${i}`}
+              className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-4"
+            >
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <strong className="text-sm">{r.channel}</strong>
+                <Badge
+                  tone={
+                    isRevoked
                       ? 'muted'
-                      : 'warn'
-                }
-              >
-                {r.status.toLowerCase().replace(/_/g, ' ')}
-              </Badge>
-            </div>
-            {r.portalUrl && (
-              <p className="mt-2 break-all text-xs">
-                <span className="text-[var(--color-ink-3)]">Portal: </span>
-                <a
-                  href={r.portalUrl}
-                  className="text-[var(--color-accent)] underline"
-                  rel="noopener"
-                  target="_blank"
+                      : r.status === 'SENT' || r.status === 'OPENED'
+                        ? 'accent'
+                        : r.status === 'PENDING'
+                          ? 'muted'
+                          : 'warn'
+                  }
                 >
-                  {r.portalUrl}
-                </a>
+                  {isRevoked ? 'revoked' : r.status.toLowerCase().replace(/_/g, ' ')}
+                </Badge>
+              </div>
+              {r.portalUrl && !isRevoked && (
+                <p className="mt-2 break-all text-xs">
+                  <span className="text-[var(--color-ink-3)]">Portal: </span>
+                  <a
+                    href={r.portalUrl}
+                    className="text-[var(--color-accent)] underline"
+                    rel="noopener"
+                    target="_blank"
+                  >
+                    {r.portalUrl}
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => void navigator.clipboard.writeText(r.portalUrl)}
+                    className="ml-2 rounded-full px-2 py-0.5 text-xs text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+                  >
+                    copy
+                  </button>
+                </p>
+              )}
+              {isRevoked && (
+                <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+                  Link revoked — the client can no longer open it.
+                </p>
+              )}
+              {canRevoke && (
                 <button
                   type="button"
-                  onClick={() => void navigator.clipboard.writeText(r.portalUrl)}
-                  className="ml-2 rounded-full px-2 py-0.5 text-xs text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+                  onClick={() => void revoke(r.shareId)}
+                  disabled={revoking.has(r.shareId)}
+                  className="mt-2 rounded-full px-2 py-0.5 text-xs text-[var(--color-warn)] hover:bg-[var(--color-warn-bg)] disabled:opacity-50"
                 >
-                  copy
+                  {revoking.has(r.shareId) ? 'Revoking…' : 'Revoke link'}
                 </button>
-              </p>
-            )}
-            {r.errorDetail && (
-              <p className="mt-2 text-xs text-[var(--color-warn)]">{r.errorDetail}</p>
-            )}
-          </li>
-        ))}
+              )}
+              {r.errorDetail && (
+                <p className="mt-2 text-xs text-[var(--color-warn)]">{r.errorDetail}</p>
+              )}
+            </li>
+          );
+        })}
       </ul>
       <footer className="mt-5 flex justify-end border-t border-[var(--color-line-soft)] pt-4">
         <Button onClick={onClose}>Done</Button>

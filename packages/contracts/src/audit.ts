@@ -95,6 +95,9 @@ export const AuditActionSchema = z.enum([
   // channel + outcome; portal opens write PORTAL_OPENED.
   'PATIENT_ARTEFACT_SHARED',
   'PATIENT_PORTAL_OPENED',
+  // SHARE-1 — the therapist pulled back a shared link (wrong recipient /
+  // wrong artefact). The portal stops rendering it from that point on.
+  'PATIENT_SHARE_REVOKED',
   // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
   'PRE_SESSION_BRIEF_GENERATED',
   'PRE_SESSION_BRIEF_VIEWED',
