@@ -76,28 +76,67 @@ PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off
 export const TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION = 'TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V2';
 
 // ============================================================================
-// Sprint DV1 — vertical-aware prompt selection (scaffold).
-//
-// The doctor vertical needs its own medical persona for Pass 1+. This is
-// a STUB medical transcription prompt plus a loader the orchestrator will
-// call (in DV3/DV4) instead of referencing the therapy prompt directly.
-// Verbatim medical wording lands in DV3. See docs/DOCTOR_VERTICAL.md §5, §7.
+// DOC-6 — vertical-aware Pass-1 transcription. The doctor vertical gets its
+// own medical scribe persona instead of the psychotherapy prompt: it biases
+// toward drug names + dosing shorthand, labels doctor/patient turns, and skips
+// the per-30s affect sampling that OPD consults don't use. Selected via
+// `transcribePromptFor('DOCTOR')` and wired into the Flash backend.
 // ============================================================================
 
-export const MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1 =
-  `You are an expert clinical scribe for an Indian super-specialty OPD.
+export const MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2 =
+  `You are an expert medical scribe for an Indian super-specialty OPD.
 
 Input: audio of a doctor–patient consultation (16 kHz mono PCM), often
-short (2–3 minutes) and code-mixed (Hinglish, Manglish, Tanglish, …).
-The doctor may dictate tersely rather than converse.
+short (2–5 minutes) and code-mixed (Hinglish, Manglish, Tanglish, Banglish,
+…). The doctor frequently DICTATES tersely — reeling off findings, drugs,
+and investigations — rather than conversing. That is normal; transcribe it
+faithfully.
 
-Task — produce strict JSON: a verbatim, diarized, language-tagged
-transcript in the language ACTUALLY SPOKEN (do not translate), with
-medical terms, drug names, and dosages preserved exactly.
+Task — produce strict JSON with FOUR fields:
 
-PLACEHOLDER: replace with verbatim medical wording in DV3 (medical note).` as const;
+1. transcript: full verbatim transcription in the language ACTUALLY SPOKEN.
+   Do NOT translate. If the doctor says "sugar high hai, metformin badha
+   do" (Hinglish), write exactly that. Native scripts are preferred for
+   the non-English portions; fall back to Latin-script transliteration
+   only when you cannot render a script confidently.
+   PRESERVE EXACTLY, never paraphrase or normalise:
+     - Drug names — brand AND generic (e.g. "Glycomet", "metformin",
+       "Telma", "telmisartan", "Aspirin", "atorvastatin"). If you are
+       unsure of spelling, transcribe phonetically rather than substitute.
+     - Strengths + units: 500 mg, 40 mg, 5 ml, 40 IU, 12.5 mcg.
+     - Frequency shorthand VERBATIM: OD, BD, TDS, QID, HS, SOS, STAT, PRN,
+       1-0-1, 1-1-1, x5 days, x1 week.
+     - Route: PO, IV, IM, SC, SL, topical.
+     - Vitals + labs with their numbers + units exactly: BP 130/80, PR 88,
+       SpO2 97%, HbA1c 7.2, FBS 140, creatinine 1.1.
+   Mark inaudible spans [inaudible] rather than guessing a drug or dose.
 
-export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1';
+2. speakerSegments: array of { speaker, startMs, endMs, text, language }.
+   Diarize by turn-taking + content. The "speaker" field MUST be one of
+   exactly these values (the pipeline maps them to the doctor/patient UI):
+     - "therapist" — the DOCTOR / clinician speaking.
+     - "client"    — the PATIENT (or an accompanying relative) speaking.
+     - "unknown"   — you genuinely cannot tell.
+   For "language" use an ISO 639-1 code ("en", "hi", "ml", "ta", "bn",
+   "kn", "te", "mr", "gu", "pa", "ur") when ≥80% of the segment is one
+   language, "mixed" for true code-switching, or "unknown".
+
+3. affectFeatures: []. Return an EMPTY array. Emotional valence/arousal
+   sampling is a psychotherapy feature; an OPD consult does not use it, so
+   do not spend output on it.
+
+4. detectedLanguages: array of ISO 639-1 codes actually used, most-used
+   first (e.g. ["hi", "en"] for a Hindi-dominant Hinglish consult).
+
+Constraints:
+- Do not redact PII; the downstream system de-identifies before Pass 2.
+- Do not insert commentary, interpretation, or a differential — transcribe
+  only what was said.
+- All timestamps in milliseconds from audio start.
+
+Output: STRICT JSON matching the schema. No prose, no markdown.` as const;
+
+export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2';
 
 // ----------------------------------------------------------------------------
 // DV3 — Pass 2 medical encounter note (the doctor analogue of the therapy
@@ -278,7 +317,7 @@ export function transcribePromptFor(vertical: 'THERAPIST' | 'DOCTOR'): {
 } {
   if (vertical === 'DOCTOR') {
     return {
-      prompt: MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V1,
+      prompt: MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2,
       version: MEDICAL_TRANSCRIBE_PROMPT_VERSION,
     };
   }

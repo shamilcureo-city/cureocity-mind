@@ -620,7 +620,11 @@ async function runLegacyWholeSessionPass1(args: {
 
   const client = await prisma.session.findUnique({
     where: { id: args.sessionId },
-    select: { client: { select: { spokenLanguages: true } } },
+    select: {
+      client: { select: { spokenLanguages: true } },
+      // DOC-6 — a legacy (pre-Sprint-57) doctor session gets the medical prompt too.
+      psychologist: { select: { vertical: true } },
+    },
   });
   const clientSpokenHints =
     client &&
@@ -635,6 +639,7 @@ async function runLegacyWholeSessionPass1(args: {
     audioBytes,
     durationMs,
     ...(clientSpokenHints && { hints: { spokenLanguageHints: clientSpokenHints } }),
+    vertical: client?.psychologist.vertical === 'DOCTOR' ? 'DOCTOR' : 'THERAPIST',
   });
   await persistCallLog(pass1.callLog);
   recordGeminiCall({

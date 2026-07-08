@@ -106,6 +106,14 @@ export interface Pass1Input {
     therapistFullName?: string;
     spokenLanguageHints?: string[];
   };
+  /**
+   * DOC-6 — practitioner vertical. Selects the Pass-1 transcription
+   * persona: DOCTOR biases toward drug names + dosing shorthand and
+   * doctor/patient labels and skips affect features; THERAPIST (default)
+   * keeps the psychotherapy scribe prompt with per-30s affect sampling.
+   * Defaults to THERAPIST so existing callers are unchanged.
+   */
+  vertical?: 'THERAPIST' | 'DOCTOR';
 }
 
 // ============================================================================
