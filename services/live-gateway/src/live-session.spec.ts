@@ -458,3 +458,45 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
     expect(events.some((e) => e.type === 'status' && e.state === 'done')).toBe(true);
   });
 });
+
+describe('LiveSession — cross-visit drug interactions (DOC-3)', () => {
+  it('flags a prior active med interacting with a drug drafted today', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-doc3',
+      'Cardiology',
+      mockBackends(),
+      (e) => events.push(e),
+      OPTS,
+      // The patient is on standing warfarin from a prior encounter — the
+      // context the token route now seeds. The mock note drafts [mock]
+      // Aspirin today, which interacts with warfarin (bleeding risk).
+      { sex: 'unknown', knownConditions: [], allergies: [], activeMeds: ['Warfarin 5mg'] },
+    );
+    session.start();
+    session.pushAudio(Buffer.concat([BLOCK, BLOCK, BLOCK]));
+    await session.pump();
+
+    const drugGaps = events.filter((e) => e.type === 'gap' && e.gap.kind === 'DRUG_INTERACTION');
+    expect(drugGaps.some((e) => e.type === 'gap' && /warfarin/i.test(e.gap.message))).toBe(true);
+  });
+
+  it('does not raise a cross-visit flag when there is no interacting prior med', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-doc3b',
+      'Cardiology',
+      mockBackends(),
+      (e) => events.push(e),
+      OPTS,
+      { sex: 'unknown', knownConditions: [], allergies: [], activeMeds: [] },
+    );
+    session.start();
+    session.pushAudio(Buffer.concat([BLOCK, BLOCK, BLOCK]));
+    await session.pump();
+
+    const drugGaps = events.filter((e) => e.type === 'gap' && e.gap.kind === 'DRUG_INTERACTION');
+    // The mock's own drafted meds don't mention warfarin — no cross-visit flag.
+    expect(drugGaps.some((e) => e.type === 'gap' && /warfarin/i.test(e.gap.message))).toBe(false);
+  });
+});

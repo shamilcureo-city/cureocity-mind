@@ -553,7 +553,17 @@ export class LiveSession {
       this.seenGaps.add(gap.message);
       this.emit({ type: 'gap', gap: gap satisfies EncounterGap });
     }
-    for (const interaction of checkInteractions(this.latestMedications.map((m) => m.drug))) {
+    // DOC-3 — cross-visit interaction check. Include the patient's confirmed
+    // active meds (seeded into the CaseState at consult start) alongside the
+    // meds drafted today, so a standing warfarin + ibuprofen prescribed now
+    // flags. Interactions that already existed among the prior regimen alone
+    // aren't introduced by this consult, so they're excluded to avoid alert
+    // fatigue.
+    const priorMeds = this.caseStore.snapshot.patient.activeMeds;
+    const draftedMeds = this.latestMedications.map((m) => m.drug);
+    const priorOnly = new Set(checkInteractions(priorMeds).map((i) => `${i.drugA}|${i.drugB}`));
+    for (const interaction of checkInteractions([...priorMeds, ...draftedMeds])) {
+      if (priorOnly.has(`${interaction.drugA}|${interaction.drugB}`)) continue;
       const message = formatInteraction(interaction);
       if (this.seenGaps.has(message)) continue;
       this.seenGaps.add(message);
