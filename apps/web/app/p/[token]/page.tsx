@@ -81,6 +81,10 @@ export default async function PortalPage({ params }: PageProps) {
 
   const now = new Date();
   const expired = row.expiresAt.getTime() < now.getTime();
+  // SHARE-1 — a revoked link is dead: don't render the artefact and don't
+  // audit an open. Folded into the same not-available gate as expiry.
+  const revoked = row.status === 'REVOKED';
+  const unavailable = expired || revoked;
 
   const snapshotParse = PatientShareSnapshotSchema.safeParse(row.snapshot);
   const snapshot: PatientShareSnapshot | null = snapshotParse.success ? snapshotParse.data : null;
@@ -92,7 +96,7 @@ export default async function PortalPage({ params }: PageProps) {
     hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? hdrs.get('x-real-ip') ?? undefined;
   const userAgent = hdrs.get('user-agent') ?? undefined;
 
-  if (!expired) {
+  if (!unavailable) {
     // First open sets openedAt + flips status; later opens still audit.
     const isFirstOpen = row.openedAt === null;
     if (isFirstOpen) {
@@ -128,9 +132,11 @@ export default async function PortalPage({ params }: PageProps) {
         <h1 className="mt-1 font-serif text-2xl">{row.subject}</h1>
       </header>
 
-      {expired ? (
+      {unavailable ? (
         <section className="mt-8 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
-          <p className="font-medium text-[var(--color-ink)]">This link has expired.</p>
+          <p className="font-medium text-[var(--color-ink)]">
+            {revoked ? 'This link is no longer available.' : 'This link has expired.'}
+          </p>
           <p className="mt-2">Ask {row.psychologist.fullName} to share a fresh link with you.</p>
         </section>
       ) : snapshot ? (

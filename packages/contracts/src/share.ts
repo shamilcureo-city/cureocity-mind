@@ -70,6 +70,9 @@ export const PatientShareStatusSchema = z.enum([
   'OPENED',
   'TRANSIENT_FAILURE',
   'PERMANENT_FAILURE',
+  // SHARE-1 — the therapist pulled the link back. Terminal: the portal
+  // stops rendering the artefact and no longer audits opens.
+  'REVOKED',
 ]);
 export type PatientShareStatus = z.infer<typeof PatientShareStatusSchema>;
 

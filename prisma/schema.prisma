@@ -1757,6 +1757,7 @@ enum PatientShareStatus {
   OPENED
   TRANSIENT_FAILURE
   PERMANENT_FAILURE
+  REVOKED
 }
 
 model PatientShare {
@@ -1802,6 +1803,10 @@ model PatientShare {
   /// First-opened timestamp on the portal. Repeat views are tracked
   /// in the audit log, not here.
   openedAt DateTime?
+
+  /// SHARE-1 — set when the therapist revokes the link (status → REVOKED).
+  /// From this point the portal refuses to render the artefact.
+  revokedAt DateTime?
 
   /// Token expiry. Defaults to 30 days from creation in the route.
   expiresAt DateTime
@@ -2559,6 +2564,8 @@ enum AuditAction {
   // write PORTAL_OPENED.
   PATIENT_ARTEFACT_SHARED
   PATIENT_PORTAL_OPENED
+  // SHARE-1 — therapist revoked a shared link.
+  PATIENT_SHARE_REVOKED
 
   // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
   PRE_SESSION_BRIEF_GENERATED
