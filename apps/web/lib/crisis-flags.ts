@@ -48,6 +48,38 @@ export async function fetchOpenCrises(clientId: string): Promise<OpenCrisis[]> {
       }
     }
   }
+  // CLIN-1 — a remote self-check-in endorsing suicidality (PHQ-9 item 9)
+  // that the therapist hasn't yet had a session to address is an OPEN
+  // crisis. Surface any SELF-mode riskFlagged instrument response taken
+  // AFTER the client's most recent completed session so it lands in the
+  // same Prepare panel + pre-session brief the therapist reads before the
+  // next visit — not buried in a trend. A row already discussed in a
+  // session ages out naturally (it predates the newest session).
+  const lastSession = await prisma.session.findFirst({
+    where: { clientId, status: 'COMPLETED' },
+    orderBy: { scheduledAt: 'desc' },
+    select: { scheduledAt: true, endedAt: true },
+  });
+  const since = lastSession?.endedAt ?? lastSession?.scheduledAt ?? new Date(0);
+  const riskResponses = await prisma.instrumentResponse.findMany({
+    where: {
+      clientId,
+      riskFlagged: true,
+      administrationMode: 'SELF',
+      administeredAt: { gt: since },
+    },
+    orderBy: { administeredAt: 'desc' },
+    take: 5,
+    select: { administeredAt: true },
+  });
+  for (const r of riskResponses) {
+    result.push({
+      kind: 'self_reported_suicidality',
+      severity: 'critical',
+      lastSeenAt: r.administeredAt.toISOString(),
+    });
+  }
+
   // Dedupe by kind keeping the most recent timestamp.
   const seen = new Map<string, OpenCrisis>();
   for (const c of result) {

@@ -98,6 +98,9 @@ export const AuditActionSchema = z.enum([
   // SHARE-1 — the therapist pulled back a shared link (wrong recipient /
   // wrong artefact). The portal stops rendering it from that point on.
   'PATIENT_SHARE_REVOKED',
+  // CLIN-1 — an immediate alert was dispatched to the owning therapist
+  // because a remote self-check-in raised a safety concern.
+  'THERAPIST_CRISIS_ALERTED',
   // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
   'PRE_SESSION_BRIEF_GENERATED',
   'PRE_SESSION_BRIEF_VIEWED',

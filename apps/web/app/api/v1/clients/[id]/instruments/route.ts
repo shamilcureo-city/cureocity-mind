@@ -79,6 +79,8 @@ export async function POST(
       responses: body.value.responses as unknown as Prisma.InputJsonValue,
       score: scored.score,
       severity: scored.severityKey,
+      // CLIN-1 — persist the safety bit for parity with the self-check-in.
+      riskFlagged: scored.riskFlagged,
       administeredAt: now,
       administeredByPsychologistId: auth.value.psychologistId,
       ...(body.value.notes !== undefined && { notes: body.value.notes }),

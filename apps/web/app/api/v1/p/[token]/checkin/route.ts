@@ -9,6 +9,7 @@ import {
 } from '@cureocity/contracts';
 import { INSTRUMENTS, InstrumentScoringError, scoreInstrument } from '@cureocity/clinical';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { sendCrisisAlert } from '@/lib/crisis-alert';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -54,6 +55,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       language: true,
       status: true,
       expiresAt: true,
+      // CLIN-1 — the owning therapist's contact for the immediate safety alert.
+      psychologist: { select: { email: true, fullName: true } },
     },
   });
   if (!share || share.artefactType !== 'INSTRUMENT_CHECKIN') {
@@ -109,6 +112,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         responses: body.value.responses as unknown as Prisma.InputJsonValue,
         score: scored.score,
         severity: scored.severityKey,
+        // CLIN-1 — persist the safety bit on the record, not just the
+        // audit log, so a remote suicidality endorsement is queryable by
+        // the crisis pathway + the therapist alert below.
+        riskFlagged: scored.riskFlagged,
         administeredAt: now,
         // No clinician administered it; attribute to the owning
         // therapist (who sent it) but mark the mode SELF.
@@ -169,6 +176,41 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       );
     }
   });
+
+  // CLIN-1 — actively reach the owning therapist. The crisis flag is
+  // persisted + surfaced in the Prepare panel / brief above; this closes the
+  // "never actively reaches the therapist" gap so they don't learn of it only
+  // at the next scheduled session. Best-effort + PII-minimal: it must never
+  // fail the client's submission, and the email names nothing sensitive.
+  if (scored.riskFlagged && share.psychologist.email) {
+    try {
+      const clientRecordUrl = `${req.nextUrl.origin}/app/clients/${share.clientId}`;
+      const alert = await sendCrisisAlert({
+        to: share.psychologist.email,
+        therapistName: share.psychologist.fullName || 'there',
+        clientRecordUrl,
+      });
+      await writeAudit({
+        actorType: 'SYSTEM',
+        action: 'THERAPIST_CRISIS_ALERTED',
+        targetType: 'Psychologist',
+        targetId: share.psychologistId,
+        metadata: {
+          clientId: share.clientId,
+          psychologistId: share.psychologistId,
+          source: 'self_checkin',
+          instrumentKey: def.key,
+          channel: 'email',
+          outcome: alert.outcome,
+        },
+      });
+    } catch (e) {
+      // A down alert channel must not break the client's check-in.
+      console.error(
+        `[checkin] crisis alert failed for psychologist=${share.psychologistId}: ${(e as Error).message}`,
+      );
+    }
+  }
 
   // Minimal response — no score / severity echoed back to the client.
   // riskFlagged lets the portal keep crisis resources on the thank-you.

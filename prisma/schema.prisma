@@ -2002,6 +2002,13 @@ model InstrumentResponse {
   /// (e.g. "minimal", "mild", "moderate", "severe").
   severity String
 
+  /// CLIN-1 — the instrument's own safety bit (e.g. PHQ-9 item 9
+  /// endorsed). Persisted on the record, not just the audit log, so a
+  /// self-check-in suicidality endorsement is queryable — it feeds the
+  /// crisis pathway (Prepare panel + pre-session brief) and the
+  /// immediate therapist alert instead of being lost in a trend.
+  riskFlagged Boolean @default(false)
+
   /// When the instrument was administered. May predate createdAt for
   /// backfilled rows.
   administeredAt               DateTime
@@ -2566,6 +2573,8 @@ enum AuditAction {
   PATIENT_PORTAL_OPENED
   // SHARE-1 — therapist revoked a shared link.
   PATIENT_SHARE_REVOKED
+  // CLIN-1 — immediate therapist alert on a remote self-check-in safety flag.
+  THERAPIST_CRISIS_ALERTED
 
   // Pre-session brief + scored instruments + crisis pathway — Sprint 17.
   PRE_SESSION_BRIEF_GENERATED
