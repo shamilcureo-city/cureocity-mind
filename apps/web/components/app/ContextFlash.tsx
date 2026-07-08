@@ -137,7 +137,7 @@ export function ContextFlash({
         <div>
           <SectionLabel>Copilot is watching</SectionLabel>
           <div className="mt-2 flex flex-wrap gap-1.5">
-            {['Red flags', 'Drug interactions', 'Missing questions', 'ICD-10 coding'].map((w) => (
+            {watchChipsFor(specialty).map((w) => (
               <span
                 key={w}
                 className="rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-2.5 py-1 text-xs text-[var(--color-ink-2)]"
@@ -282,4 +282,29 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       {children}
     </span>
   );
+}
+
+/**
+ * DS11.6-fu — specialty-aware "copilot is watching" chips. The three
+ * base guarantees (red flags, interactions, coding) hold for every doctor;
+ * the fourth+ chips make the promise concrete for the specialty in front of
+ * the patient. Matched on keywords so free-text specialty labels ("Paediatric
+ * Cardiology", "OBG") still resolve; unknown specialties get the generic set.
+ */
+function watchChipsFor(specialty?: string | null): string[] {
+  const base = ['Red flags', 'Drug interactions', 'ICD-10 coding'];
+  const s = (specialty ?? '').toLowerCase();
+  if (/cardio|heart/.test(s)) return [...base, 'BP & lipid targets', 'Cardiac red flags'];
+  if (/paed|pedia|child/.test(s)) return [...base, 'Weight-based dosing', 'Growth & milestones'];
+  if (/derm|skin/.test(s)) return [...base, 'Lesion description', 'Photo-worthy findings'];
+  if (/ortho|bone|joint|spine/.test(s)) return [...base, 'Red-flag back pain', 'Range of motion'];
+  if (/gyn|obst|obg|obs/.test(s)) return [...base, 'LMP & pregnancy status', 'Contraception'];
+  if (/endo|diab|thyroid/.test(s)) return [...base, 'HbA1c & sugar trend', 'Foot & renal checks'];
+  if (/psych|mental|behav/.test(s)) return [...base, 'Risk & safety', 'Missing questions'];
+  if (/gastro|hepat|\bgi\b/.test(s)) return [...base, 'Alarm GI symptoms', 'Hydration'];
+  if (/pulmo|chest|resp|lung/.test(s)) return [...base, 'SpO₂ & red flags', 'Smoking history'];
+  if (/neuro|nerve/.test(s)) return [...base, 'Focal deficits', 'Headache red flags'];
+  if (/nephro|renal|kidney/.test(s)) return [...base, 'eGFR & dose adjust', 'Fluid status'];
+  if (/ent|otolar/.test(s)) return [...base, 'Airway red flags', 'Hearing & balance'];
+  return [...base, 'Missing questions'];
 }

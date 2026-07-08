@@ -100,6 +100,13 @@ export function DoctorLiveEncounter({
   const [adoptedTests, setAdoptedTests] = useState<{ name: string; rationale?: string }[]>([]);
   const adoptedTestsRef = useRef<{ name: string; rationale?: string }[]>([]);
   const [handledSuggestions, setHandledSuggestions] = useState<Set<string>>(new Set());
+  // DS11.6-fu — the honest exam ledger for the sign surface. `proposedExams`
+  // accumulates every exam the copilot ever suggested this consult (reasoning
+  // snapshots each carry only the current top-3, so we must accumulate);
+  // `examinedDone` is the subset the doctor marked ✓ done. "Not examined" at
+  // sign is the difference — a suggestion silently dropped is a safety miss.
+  const [proposedExams, setProposedExams] = useState<Set<string>>(new Set());
+  const [examinedDone, setExaminedDone] = useState<Set<string>>(new Set());
   // Sprint DS5 — the Rx pad assembling live + the doctor's per-med confirms.
   const [rxPad, setRxPad] = useState<RxPadDraft | null>(null);
   const [confirmedDrugs, setConfirmedDrugs] = useState<Set<string>>(new Set());
@@ -301,6 +308,9 @@ export function DoctorLiveEncounter({
   // DS11.6 — exam prompts: ✓ done / ✕ dismissed (both audited).
   function resolveExam(step: string, done: boolean): void {
     setHandledSuggestions((prev) => new Set(prev).add(`exam:${step}`));
+    // DS11.6-fu — only ✓ done counts as examined; a ✕ leaves it on the
+    // sign-time "not examined" ledger (declined ≠ examined).
+    if (done) setExaminedDone((prev) => new Set(prev).add(step));
     void relaySuggestion(done ? 'acted' : 'dismissed', `plan:exam:${step}`, 'PLAN', step);
   }
 
@@ -368,6 +378,8 @@ export function DoctorLiveEncounter({
     setNote({});
     setFindings([]);
     setReasoning(null);
+    setProposedExams(new Set());
+    setExaminedDone(new Set());
     setAssessmentAdds([]);
     assessmentRef.current = [];
     setRxPad(null);
@@ -504,6 +516,14 @@ export function DoctorLiveEncounter({
           // Sprint DS2 — the live differential + ask-next snapshot (idempotent).
           // DS4 turns this into the persistent clinical-picture panel.
           setReasoning(event.reasoning);
+          // DS11.6-fu — remember every exam suggestion for the sign-time ledger.
+          if (event.reasoning.examineNext.length > 0) {
+            setProposedExams((prev) => {
+              const next = new Set(prev);
+              for (const step of event.reasoning.examineNext) next.add(step);
+              return next;
+            });
+          }
           // Sprint DS3 — audit each suggestion SHOWN once; audit auto-resolves.
           const seen = shownSuggestionsRef.current;
           for (const d of event.reasoning.differential) {
@@ -745,6 +765,8 @@ export function DoctorLiveEncounter({
             sessionId={sessionId}
             clientId={clientId}
             note={finalNote}
+            examined={[...examinedDone]}
+            notExamined={[...proposedExams].filter((s) => !examinedDone.has(s))}
             header={
               <p className="text-sm text-[var(--color-ink-2)]">
                 Consult ended — review the note and plan, then sign.{' '}

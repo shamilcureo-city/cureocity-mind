@@ -27,6 +27,8 @@ export function ReviewAndSign({
   clientId,
   note,
   header,
+  examined,
+  notExamined,
   onSigned,
 }: {
   sessionId: string;
@@ -35,6 +37,14 @@ export function ReviewAndSign({
   note: MedicalEncounterNoteV1;
   /** Optional slot above the note (the live page's "consult ended" line). */
   header?: ReactNode;
+  /**
+   * DS11.6-fu — the live exam ledger. `examined` = copilot suggestions the
+   * doctor marked ✓ done; `notExamined` = suggested-but-declined-or-untouched.
+   * Only the live path passes these (batch/dictate have no live exam prompts);
+   * absent/empty → the disclosure hides.
+   */
+  examined?: string[] | undefined;
+  notExamined?: string[] | undefined;
   onSigned?: () => void;
 }) {
   const [signed, setSigned] = useState(false);
@@ -141,6 +151,31 @@ export function ReviewAndSign({
       <Card className="p-7">
         <MedicalNoteView note={note} />
       </Card>
+      {/* DS11.6-fu — the honest exam ledger. A copilot exam suggestion the
+          doctor never marked done is disclosed here, not silently dropped.
+          Wording is deliberately factual (no judgement) — pending clinician
+          sign-off before pilot per the DS11 risk note. */}
+      {((examined && examined.length > 0) || (notExamined && notExamined.length > 0)) && (
+        <Card className="space-y-2 p-5">
+          <p className="text-[10.5px] font-bold uppercase tracking-wide text-[var(--color-ink-3)]">
+            Examination
+          </p>
+          {examined && examined.length > 0 && (
+            <p className="text-sm text-[var(--color-ink-2)]">
+              <span className="font-medium text-[var(--color-accent)]">Examined:</span>{' '}
+              {examined.join(', ')}
+            </p>
+          )}
+          {notExamined && notExamined.length > 0 && (
+            <p className="text-sm text-[var(--color-ink-2)]">
+              <span className="font-medium text-[var(--color-warn)]">
+                Suggested but not examined:
+              </span>{' '}
+              {notExamined.join(', ')}
+            </p>
+          )}
+        </Card>
+      )}
       {/* Sprint DS10-B — two plans, one sign-off. */}
       <PlanComposer sessionId={sessionId} signed={signed} onPadChange={setHasRx} />
       <EncounterDifferentialPanel sessionId={sessionId} />
