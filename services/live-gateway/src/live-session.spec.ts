@@ -410,4 +410,51 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
     // And the consult still closed.
     expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
   });
+
+  it('DOC-5: a fully-silent window skips Pass 1 (dead air costs nothing)', async () => {
+    let pass1Calls = 0;
+    class CountingPass1 implements IPass1Backend {
+      private readonly inner = new MockGeminiPass1Backend();
+      async run(input: Pass1Input) {
+        pass1Calls++;
+        return this.inner.run(input);
+      }
+    }
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-silent',
+      'Cardiology',
+      {
+        backend: 'mock',
+        pass1: new CountingPass1(),
+        pass2: new MockGeminiPass2Backend(),
+        reasoning: new MockGeminiReasoningBackend(),
+      },
+      (e) => events.push(e),
+      OPTS,
+    );
+    // 9s of pure silence → force-cut into a silent window at maxWindowMs (8s).
+    session.pushAudio(pcm(9_000, SILENCE));
+    await session.pump();
+    expect(pass1Calls).toBe(0);
+    expect(events.filter((e) => e.type === 'transcript')).toHaveLength(0);
+  });
+
+  it('DOC-5: auto-finalizes when a runaway guard trips (forgotten mic)', async () => {
+    const events: LiveGatewayEvent[] = [];
+    // No start() → startedAtMs stays 0, so the elapsed-time guard trips on the
+    // first processed window — a proxy for a consult that ran past the cap.
+    const session = new LiveSession(
+      'sess-runaway',
+      'Cardiology',
+      mockBackends(),
+      (e) => events.push(e),
+      OPTS,
+    );
+    session.pushAudio(BLOCK);
+    await session.pump(); // processes a window → guard trips → schedules finalize
+    await new Promise((r) => setTimeout(r, 40)); // let the fire-and-forget finalize settle
+    expect(events.some((e) => e.type === 'final')).toBe(true);
+    expect(events.some((e) => e.type === 'status' && e.state === 'done')).toBe(true);
+  });
 });
