@@ -6,10 +6,7 @@ import {
   Pass1OutputSchema,
   type Pass1Output,
 } from '../types';
-import {
-  TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
-  TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
-} from '../prompts';
+import { transcribePromptFor } from '../prompts';
 import { computeCostInr, FLASH_AUDIO_PRICING, estimateAudioInputTokens } from '../pricing';
 
 export interface VertexGeminiFlashIndiaOptions {
@@ -73,6 +70,13 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
   async run(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }> {
     const start = Date.now();
     const inputTokensEstimate = estimateAudioInputTokens(input.durationMs);
+    // DOC-6 — pick the transcription persona by vertical. DOCTOR gets the
+    // medical scribe prompt (drug-name bias, no affect features); THERAPIST
+    // (default) keeps the psychotherapy prompt. Persist the matching version
+    // in the call log so the audit trail resolves which prompt actually ran.
+    const { prompt: systemPrompt, version: promptVersion } = transcribePromptFor(
+      input.vertical ?? 'THERAPIST',
+    );
 
     try {
       const wavBytes = wrapPcmInWav(input.audioBytes, 16000, 1, 16);
@@ -95,7 +99,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           },
         ],
         config: {
-          systemInstruction: TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
+          systemInstruction: systemPrompt,
           responseMimeType: 'application/json',
           temperature: 0.1,
           // A full transcript + per-utterance diarization + affect JSON
@@ -153,7 +157,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           pass: 'PASS_1_TRANSCRIBE_AND_ANALYSE',
           model: this.modelName,
           region: this.region,
-          promptVersion: TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
+          promptVersion,
           inputTokens,
           outputTokens,
           costInr: computeCostInr(inputTokens, outputTokens, FLASH_AUDIO_PRICING),
@@ -174,7 +178,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           pass: 'PASS_1_TRANSCRIBE_AND_ANALYSE',
           model: this.modelName,
           region: this.region,
-          promptVersion: TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION,
+          promptVersion,
           inputTokens: inputTokensEstimate,
           outputTokens: 0,
           costInr: computeCostInr(inputTokensEstimate, 0, FLASH_AUDIO_PRICING),

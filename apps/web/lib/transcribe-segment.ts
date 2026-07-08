@@ -76,6 +76,8 @@ export async function transcribeChunkInline(
           id: true,
           psychologistId: true,
           client: { select: { spokenLanguages: true } },
+          // DOC-6 — pick the Pass-1 transcription persona by vertical.
+          psychologist: { select: { vertical: true } },
         },
       },
     },
@@ -174,6 +176,8 @@ export async function transcribeChunkInline(
       audioBytes: Buffer.from(chunk.bytes),
       durationMs: chunk.durationMs,
       ...(hints && { hints }),
+      // DOC-6 — a DICTATE/UPLOAD doctor consult gets the medical prompt too.
+      vertical: chunk.session.psychologist.vertical === 'DOCTOR' ? 'DOCTOR' : 'THERAPIST',
     });
   } catch (e) {
     // The backend's own try/catch returns an ERROR callLog rather than

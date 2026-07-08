@@ -265,6 +265,7 @@ export class LiveSession {
       sessionId: this.sessionId,
       audioBytes: windowPcm,
       durationMs,
+      vertical: 'DOCTOR', // DOC-6 — the live gateway is always a doctor consult
     });
     this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
     this.meter.markWindow();
@@ -617,6 +618,7 @@ export class LiveSession {
         sessionId: this.sessionId,
         audioBytes: tail,
         durationMs,
+        vertical: 'DOCTOR', // DOC-6 — live gateway is always a doctor consult
       });
       this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
       this.meter.markWindow();
