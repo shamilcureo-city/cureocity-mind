@@ -18,7 +18,7 @@ import {
  */
 const RED_FLAGS: { pattern: RegExp; message: string }[] = [
   {
-    pattern: /chest pain|chest pressure|seene mein|seene me|seene ме/i,
+    pattern: /chest pain|chest pressure|seene mein|seene me/i,
     message: 'Chest pain mentioned — consider ECG + cardiac workup (ACS red flag).',
   },
   {
@@ -26,7 +26,13 @@ const RED_FLAGS: { pattern: RegExp; message: string }[] = [
     message: 'Breathlessness mentioned — assess oxygenation; consider cardiac/respiratory cause.',
   },
   {
-    pattern: /bleeding|blood\b|khoon/i,
+    // DOC-8 — bleeding-SPECIFIC only. The old /blood\b|khoon/ fired on "blood
+    // pressure", "blood test", "blood sugar" and "khoon ki jaanch" (blood
+    // test), raising a critical close-gating alert on nearly every routine
+    // hypertension/diabetes consult — exactly the alert-fatigue the gate is
+    // meant to avoid. Match genuine bleeding phrasing instead.
+    pattern:
+      /bleeding|blood in (the )?(stool|urine|vomit|sputum|phlegm|cough)|(coughing|vomiting|passing|spitting|pass(ed|ing)?) (up |out )?blood|blood loss|h(a)?emorrhage|khoon (aa|beh|nikal|gir)/i,
     message: 'Bleeding mentioned — assess severity + source.',
   },
   {

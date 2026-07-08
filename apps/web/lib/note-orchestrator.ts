@@ -531,6 +531,9 @@ async function runOrAssemblePass1(args: {
         transcribeChunkInline({
           sessionId: args.sessionId,
           chunkIndex: chunk.chunkIndex,
+          // REL-2 — this is the window's last chance before assembly, so
+          // reclaim stale/orphaned rows and ignore the per-window attempts cap.
+          fromBackstop: true,
         }),
       ),
     );
@@ -565,6 +568,12 @@ async function runOrAssemblePass1(args: {
   const assembled = assembleSegments(assemblyInput);
 
   const totalDurationMs = chunks.reduce((sum, c) => sum + c.durationMs, 0);
+  // REL-2 — surface windows that are STILL not transcribed after the backstop
+  // (reaped/failed beyond rescue). Basing this on the post-backstop COMPLETED
+  // count (`refreshed`) rather than the pre-backstop `missing` count means the
+  // therapist is warned only about genuine holes — a silently truncated note
+  // is the worst clinical failure mode.
+  const droppedWindows = chunks.length - refreshed.length;
   return {
     kind: 'ready',
     source: missing.length === 0 ? 'assembled' : 'backstop',
@@ -575,8 +584,8 @@ async function runOrAssemblePass1(args: {
     totalCostInr: assembled.totalCostInr,
     totalDurationMs,
     segmentCount: assembled.segmentCount,
-    ...(missing.length > 0 && {
-      errorMessage: `Backstop transcribed ${missing.length} of ${chunks.length} window(s) at End — pre-arrival path missed them.`,
+    ...(droppedWindows > 0 && {
+      errorMessage: `${droppedWindows} of ${chunks.length} audio window(s) could not be transcribed — this note may be missing part of the session.`,
     }),
   };
 }
