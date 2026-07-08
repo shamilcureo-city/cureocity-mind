@@ -2,4 +2,11 @@
 -- NULL keeps the product default (LIVE). Idempotent: the column add is guarded
 -- so the P3009 self-heal (rollback + replay) never trips "already exists".
 -- The "CaptureMode" enum already exists (20260811000000_ds11_capture_mode).
-ALTER TABLE "Psychologist" ADD COLUMN IF NOT EXISTS "defaultCaptureMode" "CaptureMode";
+--
+-- The Psychologist model is @@map("psychologists"); the original DDL referenced
+-- the unmapped "Psychologist" table which does not exist, so `prisma migrate
+-- deploy` failed with 'relation "Psychologist" does not exist' and wedged every
+-- fresh deploy + CI. Fixed in place because the migration never applied
+-- successfully anywhere (nothing to preserve a checksum for) — same class of
+-- bug + fix as the ds11_capture_mode "Session"→"sessions" repair.
+ALTER TABLE "psychologists" ADD COLUMN IF NOT EXISTS "defaultCaptureMode" "CaptureMode";
