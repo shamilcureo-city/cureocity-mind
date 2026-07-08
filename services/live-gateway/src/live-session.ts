@@ -261,6 +261,9 @@ export class LiveSession {
     if (due) await this.runReasoning(due);
 
     await this.runNote(false);
+    // DOC-2 — deterministic red-flag / interaction checks EVERY window (not
+    // gated by the note-refresh debounce). Pure regex/table lookups, ~0 cost.
+    this.runDeterministicChecks();
     this.emit({ type: 'meter', summary: this.meterSummary() });
   }
 
@@ -453,13 +456,37 @@ export class LiveSession {
       this.emit({ type: 'note', partial: note });
     }
 
-    for (const gap of detectGaps(transcript, note, this.specialty)) {
+    // DOC-2 — the deterministic red-flag + interaction checks used to live
+    // HERE, below the Sprint-74 note debounce, so they only fired every
+    // ~noteRefreshMs and NEVER on the finalize path. They now run per window
+    // (and once more at finalize) via runDeterministicChecks(); see
+    // processWindow + finalizeWork.
+
+    // Sprint DS5 — the Rx pad assembling live. Emit only when it changed.
+    const rxPad = this.assembleRx();
+    const rxJson = JSON.stringify(rxPad);
+    if (rxJson !== this.lastRxJson) {
+      this.lastRxJson = rxJson;
+      this.emit({ type: 'rxDraft', rxPad });
+    }
+  }
+
+  /**
+   * DOC-2 — the deterministic (regex/table, ~0 cost) safety engine: red-flag
+   * detection over the cumulative transcript + latest note, and drug-
+   * interaction checks over the drafted meds. Runs EVERY window and once at
+   * finalize — decoupled from the note-refresh debounce — so a red flag in the
+   * last seconds of a consult still reaches the before-you-close gate. Every
+   * gap is deduped by message, so re-running per window is cheap + idempotent.
+   */
+  private runDeterministicChecks(): void {
+    const transcript = this.cumulativeTranscript();
+    if (transcript.length === 0) return;
+    for (const gap of detectGaps(transcript, this.latestNote, this.specialty)) {
       if (this.seenGaps.has(gap.message)) continue;
       this.seenGaps.add(gap.message);
       this.emit({ type: 'gap', gap: gap satisfies EncounterGap });
     }
-
-    // Rail-3 💊 — deterministic interaction-check over the drafted Rx.
     for (const interaction of checkInteractions(this.latestMedications.map((m) => m.drug))) {
       const message = formatInteraction(interaction);
       if (this.seenGaps.has(message)) continue;
@@ -472,14 +499,6 @@ export class LiveSession {
           message,
         },
       });
-    }
-
-    // Sprint DS5 — the Rx pad assembling live. Emit only when it changed.
-    const rxPad = this.assembleRx();
-    const rxJson = JSON.stringify(rxPad);
-    if (rxJson !== this.lastRxJson) {
-      this.lastRxJson = rxJson;
-      this.emit({ type: 'rxDraft', rxPad });
     }
   }
 
@@ -562,6 +581,10 @@ export class LiveSession {
     if (this.reasoningScheduler.hasPending) {
       await this.runReasoning(this.reasoningScheduler.flush());
     }
+    // DOC-2 — run the deterministic checks over the FULL transcript (incl. the
+    // tail window just committed above) BEFORE the note's `final` event, so a
+    // red flag in the closing seconds reaches the before-you-close gate.
+    this.runDeterministicChecks();
     await this.runNote(true);
   }
 
