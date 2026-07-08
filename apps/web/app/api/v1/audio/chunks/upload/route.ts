@@ -78,16 +78,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { psychologistId: true, status: true },
+    select: {
+      psychologistId: true,
+      status: true,
+      noteDraft: { select: { status: true } },
+    },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
-  if (session.status !== 'IN_PROGRESS') {
-    return NextResponse.json(
-      { error: `Session is in ${session.status} state, not IN_PROGRESS` },
-      { status: 409 },
-    );
+  // REL-1 — accept late tail chunks after "End session". The recorder flushes
+  // its last window(s) asynchronously, so a chunk can land just after the
+  // session flips IN_PROGRESS → COMPLETED. Rejecting it (the old
+  // status !== 'IN_PROGRESS' gate) silently dropped that audio from the note.
+  // A COMPLETED session still accepts chunks UNTIL its note is finalized
+  // (NoteDraft COMPLETED) — after that the note is done and more audio is
+  // pointless. Any other state (CANCELLED / NO_SHOW / …) rejects outright.
+  const noteFinalized = session.noteDraft?.status === 'COMPLETED';
+  const acceptsChunks =
+    session.status === 'IN_PROGRESS' || (session.status === 'COMPLETED' && !noteFinalized);
+  if (!acceptsChunks) {
+    const reason = noteFinalized
+      ? 'note already finalized'
+      : `session is in ${session.status} state`;
+    return NextResponse.json({ error: `Cannot accept audio: ${reason}` }, { status: 409 });
   }
 
   try {
