@@ -39,7 +39,17 @@ export interface TranscribeChunkArgs {
   chunkIndex: number;
   /// Backed off retries on Vertex blips. Optional override mainly for tests.
   maxAttempts?: number;
+  /// REL-2 — the End-session backstop is a window's LAST chance before the
+  /// note is assembled. When true, it ignores the attempts cap (a maxed-out
+  /// row would otherwise be dropped silently). It always reclaims a stale
+  /// TRANSCRIBING row regardless of this flag.
+  fromBackstop?: boolean;
 }
+
+/// REL-2 — a TRANSCRIBING row older than this was almost certainly orphaned by
+/// a reaped Vercel `after()` callback (the claim never reached COMPLETED or
+/// FAILED). Reclaim it rather than skipping it as "already-in-flight" forever.
+const STALE_TRANSCRIBING_MS = 3 * 60_000;
 
 export type TranscribeChunkResult =
   | { status: 'completed'; transcriptChars: number; latencyMs: number }
@@ -82,8 +92,14 @@ export async function transcribeChunkInline(
   //    Gemini. updateMany on a PENDING/FAILED status doubles as the lock.
   const existing = await prisma.transcriptSegment.findUnique({
     where: { audioChunkId: chunk.id },
-    select: { id: true, status: true, attempts: true },
+    select: { id: true, status: true, attempts: true, startedAt: true },
   });
+
+  const staleCutoff = new Date(Date.now() - STALE_TRANSCRIBING_MS);
+  const isStaleInFlight =
+    existing?.status === 'TRANSCRIBING' &&
+    existing.startedAt !== null &&
+    existing.startedAt < staleCutoff;
 
   let segmentId: string;
   if (!existing) {
@@ -110,16 +126,25 @@ export async function transcribeChunkInline(
     }
   } else if (existing.status === 'COMPLETED') {
     return { status: 'skipped', reason: 'already-completed' };
-  } else if (existing.status === 'TRANSCRIBING') {
+  } else if (existing.status === 'TRANSCRIBING' && !isStaleInFlight) {
+    // A genuinely in-flight row — let the other caller finish. Only a STALE
+    // one (reaped after()) falls through to be reclaimed below (REL-2).
     return { status: 'skipped', reason: 'already-in-flight' };
-  } else if (existing.attempts >= maxAttempts) {
+  } else if (existing.attempts >= maxAttempts && !args.fromBackstop) {
+    // The backstop is the last chance before assembly, so it ignores the cap.
     return { status: 'skipped', reason: 'max-attempts-reached' };
   } else {
-    // Claim a PENDING/FAILED row by atomically advancing the status.
+    // Claim a PENDING / FAILED row — OR a STALE TRANSCRIBING row orphaned by a
+    // reaped after() (REL-2) — by atomically advancing the status. The
+    // startedAt guard on the TRANSCRIBING arm keeps a genuinely in-flight row
+    // safe from a concurrent reclaim.
     const claimed = await prisma.transcriptSegment.updateMany({
       where: {
         id: existing.id,
-        status: { in: ['PENDING', 'FAILED'] satisfies TranscriptSegmentStatus[] },
+        OR: [
+          { status: { in: ['PENDING', 'FAILED'] satisfies TranscriptSegmentStatus[] } },
+          { status: 'TRANSCRIBING', startedAt: { lt: staleCutoff } },
+        ],
       },
       data: {
         status: 'TRANSCRIBING',
