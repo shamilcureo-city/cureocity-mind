@@ -225,7 +225,21 @@ export async function GET(
     // therapy script persists an ExerciseAssignment + the portal can
     // flip it COMPLETED, we read the latest assignment for the
     // client and replace whatever the LLM said with the truth.
-    const briefBody = await applyHomeworkTruth(clientId, pass5.output.preSessionBrief);
+    const briefWithHomework = await applyHomeworkTruth(clientId, pass5.output.preSessionBrief);
+
+    // CLIN-2 — deterministically inject carryoverCrisis from the DB, exactly
+    // like homeworkStatus above. Pass 5 is told the open crises but the stored
+    // field is whatever Gemini echoes — and an empty array validates fine, so
+    // the model can silently drop an OPEN crisis (the highest-stakes field on
+    // the brief). Overwrite with the ground truth from fetchOpenCrises.
+    const briefBody = {
+      ...briefWithHomework,
+      carryoverCrisis: openCrises.map((c) => ({
+        kind: c.kind,
+        severity: c.severity,
+        lastSeenAt: c.lastSeenAt,
+      })),
+    };
 
     const completed = await prisma.preSessionBrief.update({
       where: { id: briefRow.id },
@@ -245,7 +259,7 @@ export async function GET(
         clientId,
         lastSessionId,
         language,
-        carryoverCrisisCount: pass5.output.preSessionBrief.carryoverCrisis.length,
+        carryoverCrisisCount: briefBody.carryoverCrisis.length,
         costInr: pass5.callLog.costInr,
       },
     });

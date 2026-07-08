@@ -133,11 +133,14 @@ describe('normalisePass3Output', () => {
     expect(out.crisisFlags[1]?.severity).toBe('low');
   });
 
-  it('leaves truly unknown values for Zod to reject (clinical safety)', () => {
+  it('CLIN-3: coerces an unknown KIND to "other" but leaves an unknown SEVERITY for Zod', () => {
     const out = normalisePass3Output({
       crisisFlags: [{ kind: 'totally_made_up', severity: 'cataclysmic' }],
     }) as { crisisFlags: Array<{ kind: string; severity: string }> };
-    expect(out.crisisFlags[0]?.kind).toBe('totally_made_up');
+    // Unknown kind is salvaged to the catch-all so the report still parses...
+    expect(out.crisisFlags[0]?.kind).toBe('other');
+    // ...but an unknown severity is left untouched so Zod rejects it — we
+    // never fabricate how dangerous a crisis is.
     expect(out.crisisFlags[0]?.severity).toBe('cataclysmic');
   });
 
@@ -199,5 +202,45 @@ describe('normalisePass3Output', () => {
       expect(result.data.crisisFlags[0]?.kind).toBe('substance_emergency');
       expect(result.data.crisisFlags[0]?.severity).toBe('critical');
     }
+  });
+
+  it('CLIN-3: coerces an unknown crisis KIND to "other" (keeps severity + indicators)', () => {
+    const drifty = {
+      ...validReport,
+      crisisFlags: [
+        {
+          kind: 'eating_disorder_emergency', // outside the enum, no synonym
+          severity: 'high',
+          indicators: [
+            { quote: 'I have not eaten in four days', speaker: 'client', startMs: 9000 },
+          ],
+          recommendedAction: 'Assess medical stability urgently.',
+        },
+      ],
+    };
+    const result = ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      // The novel crisis survives instead of sinking the whole report.
+      expect(result.data.crisisFlags[0]?.kind).toBe('other');
+      // Severity is preserved verbatim — never guessed.
+      expect(result.data.crisisFlags[0]?.severity).toBe('high');
+      expect(result.data.crisisFlags[0]?.indicators.length).toBe(1);
+    }
+  });
+
+  it('CLIN-3: still REJECTS an unknown SEVERITY (we never guess how dangerous a crisis is)', () => {
+    const drifty = {
+      ...validReport,
+      crisisFlags: [
+        {
+          kind: 'suicidal_ideation',
+          severity: 'apocalyptic', // unknown severity — must NOT be salvaged
+          indicators: [{ quote: 'x', speaker: 'client', startMs: 1 }],
+          recommendedAction: 'x',
+        },
+      ],
+    };
+    expect(ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty)).success).toBe(false);
   });
 });

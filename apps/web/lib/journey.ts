@@ -87,18 +87,29 @@ export async function computeClientJourney(
     }),
     prisma.instrumentResponse.findMany({
       where: { clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
-      orderBy: { administeredAt: 'asc' },
+      // CLIN-5 — secondary sort so same-timestamp duplicate administrations
+      // pick a deterministic baseline/latest instead of an arbitrary one.
+      orderBy: [{ administeredAt: 'asc' }, { createdAt: 'asc' }],
       select: { instrumentKey: true, score: true, administeredAt: true },
     }),
     prisma.treatmentEpisode.findFirst({
       where: { clientId },
       orderBy: { openedAt: 'desc' },
-      select: { status: true, closedAt: true, closeReason: true },
+      select: { status: true, openedAt: true, closedAt: true, closeReason: true },
     }),
   ]);
 
+  // CLIN-5 — bound the instrument series to the CURRENT episode. The baseline
+  // is series[0]; without this bound a discharged client who relapses and
+  // returns compares their new score against the PREVIOUS episode's baseline
+  // and can show "remission reached — consider discharge" on their first
+  // session back. Fall back to all-time only for pre-episode clients.
+  const episodeScoped = latestEpisode
+    ? instrumentRows.filter((r) => r.administeredAt >= latestEpisode.openedAt)
+    : instrumentRows;
+
   // Per-instrument reliable-change verdicts (only where ≥2 administrations).
-  const instrumentChanges = buildInstrumentChanges(instrumentRows);
+  const instrumentChanges = buildInstrumentChanges(episodeScoped);
 
   // Sprint 20 Phase 3 — a closed episode makes the arc terminal, UNLESS
   // the client has come back (a completed session after the close).

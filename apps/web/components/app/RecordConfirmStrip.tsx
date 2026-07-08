@@ -199,6 +199,9 @@ export function RecordConfirmStrip({
         body: JSON.stringify({
           clientId,
           modality: modality ?? undefined,
+          // FLOW-3 — send the chosen note language so it's persisted on the
+          // session (was dropped, so every note generated in English).
+          language,
           scheduledAt: new Date().toISOString(),
         }),
       });

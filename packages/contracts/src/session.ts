@@ -12,6 +12,11 @@ export const CreateSessionInputSchema = z.object({
   /// → Client.preferredModality → Psychologist.defaultModality →
   /// INTAKE) and writes a SESSION_MODALITY_INFERRED audit row.
   modality: SessionModalitySchema.optional(),
+  /// FLOW-3 — the therapist's chosen note language. Optional; when absent the
+  /// session-defaults cascade language (psychologist.defaultOutputLanguage ??
+  /// client.preferredLanguage) is written. Previously the pre-flight picker
+  /// was dead UI and every note generated in English.
+  language: ClinicalLocaleSchema.optional(),
   scheduledAt: IsoDateTimeSchema,
 });
 

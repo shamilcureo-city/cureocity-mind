@@ -170,6 +170,11 @@ export const ClinicalCrisisKindSchema = z.enum([
   'intimate_partner_violence',
   'psychosis',
   'substance_emergency',
+  // CLIN-3 — catch-all for a crisis Gemini flags with a category outside the
+  // known set. The Pass-3 normaliser coerces unknown kinds to this (preserving
+  // severity + indicators) rather than failing the WHOLE report, which would
+  // hide the diagnosis, formulation, AND the crisis behind a parse error.
+  'other',
 ]);
 export type ClinicalCrisisKind = z.infer<typeof ClinicalCrisisKindSchema>;
 

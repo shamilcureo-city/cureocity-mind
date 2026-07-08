@@ -76,26 +76,40 @@ export async function buildProgressReport(
     client.fullName,
   );
 
-  const [completedCount, firstSession, instrumentRows, activePlanRow] = await Promise.all([
-    prisma.session.count({ where: { clientId: args.clientId, status: 'COMPLETED' } }),
-    prisma.session.findFirst({
-      where: { clientId: args.clientId, status: 'COMPLETED' },
-      orderBy: { scheduledAt: 'asc' },
-      select: { scheduledAt: true },
-    }),
-    prisma.instrumentResponse.findMany({
-      where: { clientId: args.clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
-      orderBy: { administeredAt: 'asc' },
-      select: { instrumentKey: true, score: true, administeredAt: true },
-    }),
-    prisma.treatmentPlan.findFirst({
-      where: { clientId: args.clientId, supersededAt: null },
-      orderBy: { version: 'desc' },
-      select: { body: true },
-    }),
-  ]);
+  const [completedCount, firstSession, instrumentRows, activePlanRow, latestEpisode] =
+    await Promise.all([
+      prisma.session.count({ where: { clientId: args.clientId, status: 'COMPLETED' } }),
+      prisma.session.findFirst({
+        where: { clientId: args.clientId, status: 'COMPLETED' },
+        orderBy: { scheduledAt: 'asc' },
+        select: { scheduledAt: true },
+      }),
+      prisma.instrumentResponse.findMany({
+        where: { clientId: args.clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
+        // CLIN-5 — deterministic tiebreak for same-timestamp administrations.
+        orderBy: [{ administeredAt: 'asc' }, { createdAt: 'asc' }],
+        select: { instrumentKey: true, score: true, administeredAt: true },
+      }),
+      prisma.treatmentPlan.findFirst({
+        where: { clientId: args.clientId, supersededAt: null },
+        orderBy: { version: 'desc' },
+        select: { body: true },
+      }),
+      prisma.treatmentEpisode.findFirst({
+        where: { clientId: args.clientId },
+        orderBy: { openedAt: 'desc' },
+        select: { openedAt: true },
+      }),
+    ]);
 
-  const entries = buildInstrumentEntries(instrumentRows);
+  // CLIN-5 — bound the pre→post comparison to the CURRENT episode so a
+  // returning client's report never celebrates the previous episode's gains
+  // (baseline is series[0]). Fall back to all-time for pre-episode clients.
+  const episodeScoped = latestEpisode
+    ? instrumentRows.filter((r) => r.administeredAt >= latestEpisode.openedAt)
+    : instrumentRows;
+
+  const entries = buildInstrumentEntries(episodeScoped);
   if (entries.length === 0) {
     throw new ProgressReportError(
       'No comparable instrument administrations yet. Administer PHQ-9 or GAD-7 at least twice before sharing a progress report.',
