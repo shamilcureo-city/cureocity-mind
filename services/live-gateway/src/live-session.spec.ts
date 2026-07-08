@@ -5,7 +5,9 @@ import {
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
   type GeminiCallLogData,
+  type IPass1Backend,
   type IPassReasoningBackend,
+  type Pass1Input,
   type PassReasoningInput,
   type PassReasoningOutput,
 } from '@cureocity/llm';
@@ -366,5 +368,46 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
     await session.finalize();
     expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
     expect(interim.calls).toBe(2); // first window + finalize
+  });
+
+  it('DOC-2: deterministic red flags run at finalize (previously skipped on the isFinal path)', async () => {
+    // A red flag spoken in the closing seconds. Before DOC-2, the isFinal path
+    // emitted `final` and returned BEFORE the gap block, so this never fired.
+    class ScriptedPass1 implements IPass1Backend {
+      private readonly inner = new MockGeminiPass1Backend();
+      constructor(private readonly transcript: string) {}
+      async run(input: Pass1Input) {
+        const r = await this.inner.run(input);
+        return { output: { ...r.output, transcript: this.transcript }, callLog: r.callLog };
+      }
+    }
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-doc2',
+      'Cardiology',
+      {
+        backend: 'mock',
+        pass1: new ScriptedPass1('now with sudden chest pain radiating to the arm'),
+        pass2: new MockGeminiPass2Backend(),
+        reasoning: new MockGeminiReasoningBackend(),
+      },
+      (e) => {
+        expect(LiveGatewayEventSchema.safeParse(e).success).toBe(true);
+        events.push(e);
+      },
+      OPTS,
+    );
+    // No start() — drive the tail synchronously through finalize (no pump timer).
+    session.pushAudio(BLOCK);
+    await session.finalize();
+
+    const redFlags = events
+      .filter((e): e is Extract<LiveGatewayEvent, { type: 'gap' }> => e.type === 'gap')
+      .filter((e) => e.gap.kind === 'RED_FLAG');
+    // The chest-pain red flag reaches the doctor even though it was only ever
+    // spoken in the finalize window.
+    expect(redFlags.some((e) => /chest pain/i.test(e.gap.message))).toBe(true);
+    // And the consult still closed.
+    expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
   });
 });
