@@ -415,9 +415,19 @@ export function DoctorLiveEncounter({
     // verify we own this session. In dev the gateway runs open, so a failed
     // mint is non-fatal.
     let token: string | undefined;
+    // DOC-3 — the token route also resolves the patient's confirmed active
+    // meds server-side (the browser can't) for the cross-visit interaction check.
+    let serverContext: { activeMeds?: string[] } | undefined;
     try {
       const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, { method: 'POST' });
-      if (r.ok) token = ((await r.json()) as { token?: string }).token;
+      if (r.ok) {
+        const body = (await r.json()) as {
+          token?: string;
+          patientContext?: { activeMeds?: string[] };
+        };
+        token = body.token;
+        serverContext = body.patientContext;
+      }
     } catch {
       /* dev gateway runs open */
     }
@@ -439,9 +449,13 @@ export function DoctorLiveEncounter({
           sessionId,
           ...(specialty ? { specialty } : {}),
           ...(token ? { token } : {}),
-          // Sprint DS1 — seed the CaseState with what the page knows about
-          // the patient. Thin for now (age); richer context lands later.
-          ...(patient?.age != null ? { context: { age: patient.age } } : {}),
+          // Sprint DS1 + DOC-3 — seed the CaseState with the patient context:
+          // the page's age plus the server-resolved confirmed active meds, so
+          // the gateway's interaction engine catches cross-visit risk.
+          context: {
+            ...(patient?.age != null ? { age: patient.age } : {}),
+            ...(serverContext?.activeMeds?.length ? { activeMeds: serverContext.activeMeds } : {}),
+          },
         }),
       );
       void stream.start().catch((e: Error) => {

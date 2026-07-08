@@ -3,6 +3,7 @@ import type { SessionConsentSnapshot } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { signLiveToken } from '@/lib/live-token';
+import { fetchActiveMedications } from '@/lib/patient-context';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -42,7 +43,7 @@ export async function POST(
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { psychologistId: true, status: true, consentSnapshot: true },
+    select: { psychologistId: true, status: true, consentSnapshot: true, clientId: true },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -106,5 +107,18 @@ export async function POST(
     sessionId,
     psychologistId: auth.value.psychologistId,
   });
-  return NextResponse.json({ token, expiresInSec });
+
+  // DOC-3 — hand the browser the patient's confirmed active meds so it can
+  // seed the live CaseState. The gateway's drug-interaction engine then sees
+  // the standing regimen (a prior warfarin) against anything prescribed today
+  // (ibuprofen) — the cross-visit safety check the "{age}-only" context missed.
+  const activeMeds = await fetchActiveMedications(session.clientId, {
+    excludeSessionId: sessionId,
+  });
+
+  return NextResponse.json({
+    token,
+    expiresInSec,
+    patientContext: { activeMeds },
+  });
 }

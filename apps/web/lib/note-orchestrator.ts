@@ -26,6 +26,7 @@ import { gatherInputs as gatherCaseInputs, serialiseContext } from './case-brief
 import { isBuiltinTemplateId, resolveBuiltinTemplate } from './builtin-templates';
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
+import { clientIdForSession, fetchActiveMedications } from './patient-context';
 import { encryptForTenant } from './tenant-crypto';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
@@ -948,7 +949,22 @@ export async function persistDraftedOrders(
   clinicalOrders: ClinicalOrderV1[],
 ): Promise<void> {
   if (medications.length > 0) {
-    const warningsByDrug = interactionWarningsByDrug(medications.map((m) => m.drug));
+    // DOC-3 — cross-visit interaction check. Include the patient's confirmed
+    // active meds from PRIOR encounters, not just today's draft, so warfarin
+    // from a past visit + ibuprofen drafted today flags. We pass the drafted
+    // drugs FIRST, then the prior meds, and keep only the drafted slice — so
+    // each drafted order carries its interactions with the standing regimen,
+    // while pre-existing prior↔prior pairs (already on the patient, not
+    // introduced today) don't spam every order.
+    const draftedDrugs = medications.map((m) => m.drug);
+    const clientId = await clientIdForSession(sessionId);
+    const priorMeds = clientId
+      ? await fetchActiveMedications(clientId, { excludeSessionId: sessionId })
+      : [];
+    const warningsByDrug = interactionWarningsByDrug([...draftedDrugs, ...priorMeds]).slice(
+      0,
+      draftedDrugs.length,
+    );
     await prisma.medicationOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
     await prisma.medicationOrder.createMany({
       data: medications.map((m, i) => ({
