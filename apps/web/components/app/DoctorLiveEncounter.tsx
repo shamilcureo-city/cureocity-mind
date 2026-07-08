@@ -82,6 +82,10 @@ export function DoctorLiveEncounter({
   // Sprint DS4 — the transcript is utterance-anchored (ids from DS0) so an
   // evidence chip can scroll-highlight its source utterance.
   const [utterances, setUtterances] = useState<Utterance[]>([]);
+  // DOC-7 — the utterances mirrored in a ref so the `final` handler (a stale
+  // effect closure) can read the FULL diarized transcript — including the tail
+  // window committed just before `final` — and relay it for durable storage.
+  const utterancesRef = useRef<Utterance[]>([]);
   const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
   const transcriptRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const [note, setNote] = useState<PartialStructuredNote>({});
@@ -196,18 +200,43 @@ export function DoctorLiveEncounter({
     medications: unknown[],
     orders: unknown[],
     rx: RxPadV1 | null,
+    transcript: string,
   ): Promise<void> {
     setSaveState('saving');
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ note, medications, orders, ...(rx ? { rxPad: rx } : {}) }),
+        body: JSON.stringify({
+          note,
+          medications,
+          orders,
+          ...(rx ? { rxPad: rx } : {}),
+          // DOC-7 — the verbatim diarized transcript is the source record
+          // behind the note; relay it so it's stored, not discarded.
+          ...(transcript ? { transcript } : {}),
+        }),
       });
       setSaveState(res.ok ? 'saved' : 'error');
     } catch {
       setSaveState('error');
     }
+  }
+
+  /** DOC-7 — join the diarized utterances into a durable transcript string.
+   *  Ordered by consult time; each line labelled with its speaker. */
+  function buildTranscript(items: Utterance[]): string {
+    return [...items]
+      .sort((a, b) => a.tStartMs - b.tStartMs)
+      .map((u) => {
+        const text = u.text.trim();
+        if (!text) return '';
+        const who =
+          u.speaker === 'doctor' ? 'Doctor' : u.speaker === 'patient' ? 'Patient' : 'Speaker';
+        return `${who}: ${text}`;
+      })
+      .filter(Boolean)
+      .join('\n');
   }
 
   // Sprint DS0 — relay the gateway's per-consult meter so it lands as a
@@ -333,6 +362,7 @@ export function DoctorLiveEncounter({
   async function start(): Promise<void> {
     setError(null);
     setUtterances([]);
+    utterancesRef.current = []; // DOC-7 — clear the relayed-transcript mirror
     setHighlightIds(new Set());
     transcriptRefs.current = new Map();
     setNote({});
@@ -454,9 +484,13 @@ export function DoctorLiveEncounter({
           // transcript display now; the delta is redundant.
           break;
         case 'utterance':
-          setUtterances((prev) =>
-            prev.some((u) => u.id === event.utterance.id) ? prev : [...prev, event.utterance],
-          );
+          setUtterances((prev) => {
+            const next = prev.some((u) => u.id === event.utterance.id)
+              ? prev
+              : [...prev, event.utterance];
+            utterancesRef.current = next; // DOC-7 — keep the ref in lockstep
+            return next;
+          });
           break;
         case 'meter':
           latestMeterRef.current = event.summary;
@@ -529,7 +563,10 @@ export function DoctorLiveEncounter({
             : null;
           if (finalRx) setRxPad(finalRx);
           rxFinalRef.current = finalRx;
-          void persistLiveNote(merged, event.medications, event.orders, finalRx);
+          // DOC-7 — read the utterances from the ref (this closure is stale)
+          // so the persisted transcript includes the tail window.
+          const transcript = buildTranscript(utterancesRef.current);
+          void persistLiveNote(merged, event.medications, event.orders, finalRx, transcript);
           break;
         }
       }
