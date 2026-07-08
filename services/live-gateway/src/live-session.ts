@@ -26,7 +26,13 @@ import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
 import { ReasoningScheduler } from './reasoning-loop';
 import { assembleRxPad } from './rx-pad';
-import { bytesToMs, DEFAULT_WINDOW_OPTIONS, nextWindowBoundary, type WindowOptions } from './vad';
+import {
+  bytesToMs,
+  DEFAULT_WINDOW_OPTIONS,
+  isSilent,
+  nextWindowBoundary,
+  type WindowOptions,
+} from './vad';
 
 /**
  * Sprint DV4 (full) + DS0 rework — the real live encounter session.
@@ -82,6 +88,29 @@ function noteRefreshMsFromEnv(): number {
   return Number.isFinite(n) && n >= 0 && n <= 600_000 ? n : 40_000;
 }
 
+function numEnv(key: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
+}
+
+/**
+ * DOC-5 — runaway-consult guards. A forgotten/open mic must not transcribe
+ * dead air forever or run Vertex passes without a ceiling.
+ *   - skipSilentWindows: drop a fully-silent window before Pass 1 (default on).
+ *   - maxConsultMs: hard cap on consult length → auto-finalize (default 90 min).
+ *   - costCeilingInr: cap on accumulated LLM spend → auto-finalize (default ₹15,
+ *     well above the ₹2–3 target so a normal consult is never interrupted).
+ */
+function runawayGuardsFromEnv() {
+  return {
+    skipSilentWindows: process.env['LIVE_SKIP_SILENT_WINDOWS'] !== 'false',
+    maxConsultMs: numEnv('LIVE_MAX_CONSULT_MS', 90 * 60_000, 60_000, 6 * 60 * 60_000),
+    costCeilingInr: numEnv('LIVE_COST_CEILING_INR', 15, 1, 1000),
+  };
+}
+
 type Emit = (event: LiveGatewayEvent) => void;
 
 export class LiveSession {
@@ -111,6 +140,10 @@ export class LiveSession {
   /** One-shot guard so `final` is emitted at most once (real note or fallback). */
   private finalEmitted = false;
   private startedAtMs = 0;
+  /** DOC-5 — runaway-consult guards (silence skip + duration/cost ceilings). */
+  private readonly guards = runawayGuardsFromEnv();
+  /** Set once a ceiling trips, so pump auto-finalizes exactly once. */
+  private autoFinalizing = false;
 
   /** Ordered finalized windows — the source of truth for the transcript. */
   private readonly utterances: Utterance[] = [];
@@ -199,6 +232,10 @@ export class LiveSession {
     } finally {
       this.busy = false;
     }
+    // DOC-5 — a runaway guard tripped this window: close the consult now (after
+    // the pump is idle, so finalize()'s waitIdle doesn't deadlock). finalize()
+    // is a no-op if already stopped, so this fires exactly once.
+    if (this.autoFinalizing && !this.stopped) void this.finalize();
   }
 
   /**
@@ -211,6 +248,16 @@ export class LiveSession {
     durationMs: number,
     consumedBytes: number,
   ): Promise<void> {
+    // DOC-5 — a fully-silent window (e.g. a mic left open in an empty room,
+    // force-cut at maxWindowMs) has nothing to transcribe. Drop it before
+    // Pass 1 so dead air never runs up the Vertex bill. Advance the cursor so
+    // the pump doesn't re-scan it.
+    if (this.guards.skipSilentWindows && isSilent(windowPcm, this.windowOpts)) {
+      this.flushedBytes += consumedBytes;
+      this.pending = this.pending.subarray(consumedBytes);
+      return;
+    }
+
     const tStartMs = bytesToMs(this.flushedBytes);
 
     const t0 = Date.now();
@@ -265,6 +312,24 @@ export class LiveSession {
     // gated by the note-refresh debounce). Pure regex/table lookups, ~0 cost.
     this.runDeterministicChecks();
     this.emit({ type: 'meter', summary: this.meterSummary() });
+
+    // DOC-5 — trip the runaway guard; pump auto-finalizes after this window.
+    const overBudget = this.overBudgetReason();
+    if (overBudget && !this.autoFinalizing) {
+      this.autoFinalizing = true;
+      console.warn(`[live-gateway] auto-finalizing sess=${this.sessionId}: ${overBudget}`);
+    }
+  }
+
+  /** DOC-5 — reason the consult should auto-close (null = within budget). */
+  private overBudgetReason(): string | null {
+    if (Date.now() - this.startedAtMs >= this.guards.maxConsultMs) {
+      return `max consult duration ${Math.round(this.guards.maxConsultMs / 60_000)}min reached`;
+    }
+    if (this.meterSummary().costInr >= this.guards.costCeilingInr) {
+      return `cost ceiling ₹${this.guards.costCeilingInr} reached`;
+    }
+    return null;
   }
 
   /**
