@@ -2,11 +2,16 @@ import type {
   AskNextItem,
   ClinicalOrderV1,
   EncounterGap,
+  IntakeNoteV1,
   LiveGatewayEvent,
   MedicalEncounterNoteV1,
   MedicationOrderV1,
   PatientContext,
+  PractitionerVertical,
   RxPadV1,
+  SessionKind,
+  SessionModality,
+  TherapyNoteV1,
   Utterance,
   VoiceCommand,
 } from '@cureocity/contracts';
@@ -163,6 +168,13 @@ export class LiveSession {
   private latestNote: MedicalEncounterNoteV1 | null = null;
   private latestMedications: MedicationOrderV1[] = [];
   private latestOrders: ClinicalOrderV1[] = [];
+  /** Sprint TS1 — practitioner vertical + (therapist) session kind/modality. */
+  private readonly vertical: PractitionerVertical;
+  private readonly sessionKind: SessionKind;
+  private readonly sessionModality: SessionModality | null;
+  /** Sprint TS1 — the therapist's latest note (SOAP or intake), for the final. */
+  private latestTherapyNote: TherapyNoteV1 | IntakeNoteV1 | null = null;
+  private latestTherapyKind: SessionKind = 'TREATMENT';
   /** Sprint DS5 — voice-command meds/orders accumulated for the Rx pad. */
   private readonly voiceCommands: VoiceCommand[] = [];
   /** Last Rx-pad JSON emitted, to suppress identical re-emits. */
@@ -180,13 +192,24 @@ export class LiveSession {
     windowOpts: WindowOptions = DEFAULT_WINDOW_OPTIONS,
     patientContext?: PatientContext,
     noteRefreshMs?: number,
+    // Sprint TS1 — the therapist live scribe rides the same gateway. Defaults
+    // keep the shipped doctor path byte-identical.
+    vertical: PractitionerVertical = 'DOCTOR',
+    sessionKind: SessionKind = 'TREATMENT',
+    sessionModality: SessionModality | null = null,
   ) {
     this.sessionId = sessionId;
     this.specialty = specialty;
     this.backends = backends;
     this.emit = emit;
     this.windowOpts = windowOpts;
-    this.noteRefreshMs = noteRefreshMs ?? noteRefreshMsFromEnv();
+    this.vertical = vertical;
+    this.sessionKind = sessionKind;
+    this.sessionModality = sessionModality;
+    // Therapy runs ~45-60 min vs a ~10-min consult, so slow the interim-note
+    // refresh to keep Pass-2 spend bounded (the finalize note is never debounced).
+    this.noteRefreshMs =
+      noteRefreshMs ?? (vertical === 'THERAPIST' ? 90_000 : noteRefreshMsFromEnv());
     this.caseStore = new CaseStateStore(patientContext);
   }
 
@@ -273,7 +296,7 @@ export class LiveSession {
       sessionId: this.sessionId,
       audioBytes: windowPcm,
       durationMs,
-      vertical: 'DOCTOR', // DOC-6 — the live gateway is always a doctor consult
+      vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
     });
     this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
     this.meter.markWindow();
@@ -363,6 +386,8 @@ export class LiveSession {
    * scribe (the note + transcript keep flowing).
    */
   private async runReasoning(newUtterances: Utterance[]): Promise<void> {
+    // Sprint TS1 — no live differential for therapy (TS5 adds a therapy rail).
+    if (this.vertical === 'THERAPIST') return;
     if (newUtterances.length === 0) return;
     try {
       const res = await this.backends.reasoning.run({
@@ -482,9 +507,11 @@ export class LiveSession {
     // (the doctor sees a note early), then only once ≥ noteRefreshMs of NEW
     // speech has accumulated. The finalize run is never debounced.
     const transcriptEndMs = bytesToMs(this.flushedBytes);
+    const hasLatest =
+      this.vertical === 'THERAPIST' ? this.latestTherapyNote !== null : this.latestNote !== null;
     if (
       !isFinal &&
-      this.latestNote !== null &&
+      hasLatest &&
       transcriptEndMs - this.lastNoteTranscriptEndMs < this.noteRefreshMs
     ) {
       return;
@@ -502,13 +529,53 @@ export class LiveSession {
       sessionId: this.sessionId,
       transcript,
       speakerSegments: this.segments,
-      kind: 'TREATMENT',
-      modality: null,
-      vertical: 'DOCTOR',
+      kind: this.vertical === 'DOCTOR' ? 'TREATMENT' : this.sessionKind,
+      modality: this.vertical === 'DOCTOR' ? null : this.sessionModality,
+      vertical: this.vertical,
       clientContext: {},
     });
     this.meter.recordNote(pass2.callLog, Date.now() - t0);
     this.lastNoteTranscriptEndMs = transcriptEndMs;
+
+    // Sprint TS1 — therapist branch: a SOAP/intake note (no meds/orders/Rx),
+    // emitted on the therapyNote / therapyFinal wire events; the note's own
+    // riskFlags drive a free live safety rail (emitTherapyRisk).
+    if (this.vertical === 'THERAPIST') {
+      const out = pass2.output;
+      let kind: SessionKind;
+      let tnote: TherapyNoteV1 | IntakeNoteV1;
+      if (out.kind === 'INTAKE') {
+        kind = 'INTAKE';
+        tnote = out.intakeNote;
+      } else if (out.kind === 'TREATMENT' || out.kind === 'REVIEW') {
+        kind = out.kind;
+        tnote = out.therapyNote;
+      } else {
+        // MEDICAL — never expected for a therapist; keep the last good note.
+        if (isFinal) this.emitFinalFromLatest();
+        return;
+      }
+      this.latestTherapyNote = tnote;
+      this.latestTherapyKind = kind;
+      this.emitTherapyRisk(tnote);
+      if (isFinal) {
+        if (this.finalEmitted) return;
+        this.finalEmitted = true;
+        this.emit({
+          type: 'therapyFinal',
+          kind,
+          note: tnote,
+          transcript: this.cumulativeTranscript(),
+        });
+        return;
+      }
+      const tjson = JSON.stringify(tnote);
+      if (tjson !== this.lastNoteJson) {
+        this.lastNoteJson = tjson;
+        this.emit({ type: 'therapyNote', kind, note: tnote });
+      }
+      return;
+    }
 
     if (pass2.output.kind !== 'MEDICAL') {
       // Defensive — DOCTOR always MEDICAL. Fall back to whatever we had.
@@ -563,6 +630,9 @@ export class LiveSession {
    * gap is deduped by message, so re-running per window is cheap + idempotent.
    */
   private runDeterministicChecks(): void {
+    // Sprint TS1 — the medical red-flag table + drug-interaction checks don't
+    // apply to therapy; its safety rail is the note's own riskFlags (emitTherapyRisk).
+    if (this.vertical === 'THERAPIST') return;
     const transcript = this.cumulativeTranscript();
     if (transcript.length === 0) return;
     for (const gap of detectGaps(transcript, this.latestNote, this.specialty)) {
@@ -606,6 +676,34 @@ export class LiveSession {
     });
   }
 
+  /**
+   * Sprint TS1 — the free live safety rail for therapy: surface the note's
+   * own riskFlags as a RED_FLAG gap (deduped) when severity is meaningful. No
+   * new LLM pass — Pass 2 already scores riskFlags on every interim note.
+   */
+  private emitTherapyRisk(note: TherapyNoteV1 | IntakeNoteV1): void {
+    const rf = note.riskFlags;
+    if (!rf || rf.severity === 'none') return;
+    const message =
+      rf.details?.trim() ||
+      (rf.indicators.length > 0
+        ? `Risk indicators: ${rf.indicators.join('; ')}`
+        : 'Elevated risk detected — assess safety.');
+    const key = `risk:${rf.severity}:${message}`;
+    if (this.seenGaps.has(key)) return;
+    this.seenGaps.add(key);
+    const severity: 'info' | 'warn' | 'critical' =
+      rf.severity === 'critical' || rf.severity === 'high'
+        ? 'critical'
+        : rf.severity === 'medium'
+          ? 'warn'
+          : 'info';
+    this.emit({
+      type: 'gap',
+      gap: { kind: 'RED_FLAG', severity, message } satisfies EncounterGap,
+    });
+  }
+
   /** Doctor ended the consult: flush the tail, close the note, report. */
   async finalize(): Promise<void> {
     if (this.stopped) return;
@@ -645,7 +743,7 @@ export class LiveSession {
         sessionId: this.sessionId,
         audioBytes: tail,
         durationMs,
-        vertical: 'DOCTOR', // DOC-6 — live gateway is always a doctor consult
+        vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
       });
       this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
       this.meter.markWindow();
@@ -708,7 +806,20 @@ export class LiveSession {
   }
 
   private emitFinalFromLatest(): void {
-    if (this.finalEmitted || !this.latestNote) return;
+    if (this.finalEmitted) return;
+    // Sprint TS1 — therapist fallback final (on a finalize timeout/failure).
+    if (this.vertical === 'THERAPIST') {
+      if (!this.latestTherapyNote) return;
+      this.finalEmitted = true;
+      this.emit({
+        type: 'therapyFinal',
+        kind: this.latestTherapyKind,
+        note: this.latestTherapyNote,
+        transcript: this.cumulativeTranscript(),
+      });
+      return;
+    }
+    if (!this.latestNote) return;
     this.finalEmitted = true;
     this.emit({
       type: 'final',

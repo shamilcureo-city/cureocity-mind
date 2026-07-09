@@ -130,6 +130,10 @@ wss.on('connection', (ws) => {
         (event) => send(ws, event),
         windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
         cmd.context, // Sprint DS1 — seed the CaseState's patient context
+        undefined, // noteRefreshMs — the constructor picks the per-vertical default
+        cmd.vertical ?? 'DOCTOR', // Sprint TS1 — therapist live scribe support
+        cmd.kind ?? 'TREATMENT',
+        cmd.modality ?? null,
       );
       session.start();
       started = true;
