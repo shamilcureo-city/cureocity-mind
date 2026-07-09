@@ -486,9 +486,27 @@ export const ShareInputSchema = z
     /** Optional language override; defaults to client.preferredLanguage. */
     language: ClinicalLocaleSchema.optional(),
     artefact: ShareArtefactRefSchema,
+    /**
+     * SHARE-3 — dry-run. When true, the route builds + translates the
+     * snapshot and returns it for the therapist to review (the exact text
+     * the patient will read), WITHOUT creating any PatientShare or sending
+     * anything. The real send is a second call with preview omitted/false.
+     */
+    preview: z.boolean().optional(),
   })
   .strict();
 export type ShareInput = z.infer<typeof ShareInputSchema>;
+
+/**
+ * SHARE-3 — response to a `preview: true` share request: the translated,
+ * patient-facing snapshot the therapist confirms before the real send.
+ */
+export const SharePreviewResponseSchema = z.object({
+  preview: z.literal(true),
+  language: ClinicalLocaleSchema,
+  snapshot: PatientShareSnapshotSchema,
+});
+export type SharePreviewResponse = z.infer<typeof SharePreviewResponseSchema>;
 
 export const ShareResultEntrySchema = z.object({
   channel: PatientShareChannelSchema,
