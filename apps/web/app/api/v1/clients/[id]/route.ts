@@ -119,3 +119,43 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
   });
   return NextResponse.json(await toClient(updated));
 }
+
+/**
+ * DELETE /api/v1/clients/:id — archive (soft-delete). Sets `deletedAt`
+ * so the client drops out of every roster/list (all queries filter
+ * `deletedAt: null`) while the underlying record — encounters, notes,
+ * audit trail — is retained for statutory / audit obligations. This is
+ * deliberately NOT a hard delete and NOT the DPDP erasure path (that is
+ * the deliberately-gated `dsr/erasure` → admin-fulfilment flow, which
+ * additionally scrubs PHI). The audit row carries `cause:
+ * 'THERAPIST_ARCHIVE'` so it is distinguishable from a regulatory
+ * `CLIENT_SOFT_DELETED` fired by DSR erasure.
+ *
+ * Side-effecting, so it is a DELETE (never GET — prefetchers only fire
+ * GET; see docs/AUTH_SESSION.md). Idempotent in effect: a second call on
+ * an already-archived client 404s via `fetchOwnedClient`.
+ */
+export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  const auth = await requirePsychologistId(req);
+  if (!auth.ok) return auth.response;
+  const { id } = await ctx.params;
+  const existing = await fetchOwnedClient(auth.value.psychologistId, id);
+  if (!existing) return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.client.update({ where: { id }, data: { deletedAt: new Date() } });
+    await writeAudit(
+      {
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: auth.value.psychologistId,
+        action: 'CLIENT_SOFT_DELETED',
+        targetType: 'Client',
+        targetId: id,
+        metadata: { ...auditMetadataFromRequest(req), cause: 'THERAPIST_ARCHIVE' },
+      },
+      tx,
+    );
+  });
+
+  return NextResponse.json({ ok: true });
+}

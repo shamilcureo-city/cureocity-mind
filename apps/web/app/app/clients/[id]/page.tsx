@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClientEditPanel } from '@/components/app/ClientEditPanel';
+import { ArchivePatientButton } from '@/components/app/ArchivePatientButton';
 import { DemoClientButton } from '@/components/app/DemoClientButton';
 import { SendCheckinButton } from '@/components/app/SendCheckinButton';
 import { DataRightsCard } from '@/components/app/DataRightsCard';
@@ -171,6 +172,12 @@ export default async function ClientDetailPage({ params }: PageProps) {
                   preferredLanguage: client.preferredLanguage,
                   spokenLanguages: client.spokenLanguages,
                 }}
+              />
+              <ArchivePatientButton
+                clientId={client.id}
+                redirectTo="/app/clients"
+                noun="client"
+                name={pii.fullName}
               />
             </div>
           </header>

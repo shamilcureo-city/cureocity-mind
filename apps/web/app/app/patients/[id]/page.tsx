@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { StartEncounterButton } from '@/components/app/StartEncounterButton';
+import { ArchivePatientButton } from '@/components/app/ArchivePatientButton';
 import { ChronicCarePanel } from '@/components/app/ChronicCarePanel';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { resolveClientPii } from '@/lib/client-pii';
@@ -72,7 +73,15 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
             {patient.dateOfBirth ? ` · DOB ${formatDate(patient.dateOfBirth)}` : ''}
           </p>
         </div>
-        <StartEncounterButton clientId={patient.id} defaultMode={doctor.defaultCaptureMode} />
+        <div className="flex flex-col items-end gap-2">
+          <StartEncounterButton clientId={patient.id} defaultMode={doctor.defaultCaptureMode} />
+          <ArchivePatientButton
+            clientId={patient.id}
+            redirectTo="/app/patients"
+            noun="patient"
+            name={pii.fullName}
+          />
+        </div>
       </header>
 
       <section className="mt-8">
