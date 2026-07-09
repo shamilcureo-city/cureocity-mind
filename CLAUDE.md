@@ -554,29 +554,30 @@ The five existing passes are the template — pick the closest analogue.
 
 ## 8. Documentation map
 
-| File                               | What it covers                                                                                                                                                              |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `README.md`                        | Quick getting-started + current product summary                                                                                                                             |
-| `CLAUDE.md`                        | This file — operational guide + conventions                                                                                                                                 |
-| `docs/ARCHITECTURE.md`             | **System overview** — both verticals, request paths, deploy topology, the two pipelines (current-state, start here)                                                         |
-| `docs/DATA_MODEL.md`               | **Schema guide** — the core spine, entity groups, Session lifecycle, key enums                                                                                              |
-| `docs/GLOSSARY.md`                 | **Domain vocabulary** — the ~35 load-bearing terms decoded, with where each lives                                                                                           |
-| `docs/ENVIRONMENT.md`              | **Config + deploy** — env-var matrix by subsystem + which var lives on Vercel vs Cloud Run                                                                                  |
-| `docs/CLINICAL_COPILOT.md`         | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                                                                                                  |
-| `docs/MEASUREMENT_BASED_CARE.md`   | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report                                                                                                 |
-| `docs/DOCTOR_VERTICAL.md`          | Doctor vertical — foundational architecture + rationale; **DV0–DV8 SHIPPED** (see § 3b)                                                                                     |
-| `docs/DOCTOR_VERTICAL_SPRINTS.md`  | Doctor vertical DV0–DV8 sprint record — **SHIPPED** (per-sprint "Status: built" blocks)                                                                                     |
-| `docs/DOCTOR_SCRIBE_V2_PLAN.md`    | Rx-first V2 strategy — § 5 architecture **SHIPPED**; § 3/6/7 (benchmark, pricing, pilot) forward-looking                                                                    |
-| `docs/DOCTOR_SCRIBE_V2_SPRINTS.md` | Doctor Scribe V2 DS0–DS9 — live reasoning engine + Rx pad + OPD queue + insights, **SHIPPED**                                                                               |
-| `docs/DS11_CONSULT_UX_SPRINTS.md`  | Consult UX v3 (DS11.1–11.8) — live-first single Review & Sign surface + CaptureMode, **SHIPPED**                                                                            |
-| `docs/SPRINT_21.md`                | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status)                                                                                   |
-| `docs/EXECUTION_PLAN.md`           | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+                                                                                     |
-| `docs/SETUP.md`                    | Account procurement + env var matrix per sprint                                                                                                                             |
-| `docs/dpdp-data-flow.md`           | DPDP compliance data flows + DSR endpoints + cross-border                                                                                                                   |
-| `docs/security-audit.md`           | OWASP top-10 + secrets + IAM matrix                                                                                                                                         |
-| `docs/AUTH_SESSION.md`             | **Auth & session model** — `__session` cookie, page vs API guards, Bearer self-heal, the sign-out-must-be-POST rule, "bounced to /login" troubleshooting (2026-06 incident) |
-| `docs/runbooks/README.md`          | Operational runbooks index                                                                                                                                                  |
-| `docs/load-test-results.md`        | Pre-pilot load test record                                                                                                                                                  |
+| File                               | What it covers                                                                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `README.md`                        | Quick getting-started + current product summary                                                                                                                                |
+| `CLAUDE.md`                        | This file — operational guide + conventions                                                                                                                                    |
+| `docs/ARCHITECTURE.md`             | **System overview** — both verticals, request paths, deploy topology, the two pipelines (current-state, start here)                                                            |
+| `docs/DATA_MODEL.md`               | **Schema guide** — the core spine, entity groups, Session lifecycle, key enums                                                                                                 |
+| `docs/GLOSSARY.md`                 | **Domain vocabulary** — the ~35 load-bearing terms decoded, with where each lives                                                                                              |
+| `docs/ENVIRONMENT.md`              | **Config + deploy** — env-var matrix by subsystem + which var lives on Vercel vs Cloud Run                                                                                     |
+| `docs/CLINICAL_COPILOT.md`         | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                                                                                                     |
+| `docs/MEASUREMENT_BASED_CARE.md`   | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report                                                                                                    |
+| `docs/DOCTOR_VERTICAL.md`          | Doctor vertical — foundational architecture + rationale; **DV0–DV8 SHIPPED** (see § 3b)                                                                                        |
+| `docs/DOCTOR_VERTICAL_SPRINTS.md`  | Doctor vertical DV0–DV8 sprint record — **SHIPPED** (per-sprint "Status: built" blocks)                                                                                        |
+| `docs/DOCTOR_SCRIBE_V2_PLAN.md`    | Rx-first V2 strategy — § 5 architecture **SHIPPED**; § 3/6/7 (benchmark, pricing, pilot) forward-looking                                                                       |
+| `docs/DOCTOR_SCRIBE_V2_SPRINTS.md` | Doctor Scribe V2 DS0–DS9 — live reasoning engine + Rx pad + OPD queue + insights, **SHIPPED**                                                                                  |
+| `docs/DS11_CONSULT_UX_SPRINTS.md`  | Consult UX v3 (DS11.1–11.8) — live-first single Review & Sign surface + CaptureMode, **SHIPPED**                                                                               |
+| `docs/THERAPIST_SCRIBE_SPRINTS.md` | **Therapist Scribe V2 (TS0–TS5) — PLANNED**: audit findings + the plan to bring the therapist vertical to the doctor bar (live scribe, one surface, evidence-anchored reports) |
+| `docs/SPRINT_21.md`                | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status)                                                                                      |
+| `docs/EXECUTION_PLAN.md`           | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+                                                                                        |
+| `docs/SETUP.md`                    | Account procurement + env var matrix per sprint                                                                                                                                |
+| `docs/dpdp-data-flow.md`           | DPDP compliance data flows + DSR endpoints + cross-border                                                                                                                      |
+| `docs/security-audit.md`           | OWASP top-10 + secrets + IAM matrix                                                                                                                                            |
+| `docs/AUTH_SESSION.md`             | **Auth & session model** — `__session` cookie, page vs API guards, Bearer self-heal, the sign-out-must-be-POST rule, "bounced to /login" troubleshooting (2026-06 incident)    |
+| `docs/runbooks/README.md`          | Operational runbooks index                                                                                                                                                     |
+| `docs/load-test-results.md`        | Pre-pilot load test record                                                                                                                                                     |
 
 ## 9. Running the codebase locally
 
