@@ -14,6 +14,7 @@ import {
 } from '../prompts';
 import { computeCostInr, PRO_PRICING } from '../pricing';
 import { normalisePass3Output } from './pass3-normalise';
+import { verifyPass3Evidence } from './pass3-evidence';
 
 export interface VertexGeminiProClinicalOptions {
   projectId: string;
@@ -110,12 +111,22 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
       // "suicidal_ideation", "moderate" vs "medium"). Map known synonyms
       // before the strict Zod parse so the whole brief isn't rejected.
       const normalised: unknown = normalisePass3Output(parsed);
+      // TS0 — evidence gate: drop supporting quotes not found in the
+      // transcript (the therapist analogue of the doctor citation gate,
+      // services/live-gateway/src/case-state.ts). A fabricated quote must
+      // never reach the client's permanent diagnosis record.
+      const { output: verified, stats } = verifyPass3Evidence(normalised, input.transcript);
+      if (stats.quotesDropped > 0 || stats.candidatesDropped > 0) {
+        console.warn(
+          `[vertex-clinical] evidence gate sessionId=${input.sessionId} dropped ${stats.quotesDropped}/${stats.quotesChecked} quotes, ${stats.candidatesDropped}/${stats.candidatesChecked} candidates`,
+        );
+      }
       // Pass 3 prompts ask for the body directly (no wrapper). Wrap
       // with the discriminator so consumers see the discriminated
       // union shape.
       const output: Pass3Output = isIntake
-        ? Pass3OutputSchema.parse({ kind: 'INTAKE', initialAssessmentBrief: normalised })
-        : Pass3OutputSchema.parse({ kind: input.kind, clinicalReport: normalised });
+        ? Pass3OutputSchema.parse({ kind: 'INTAKE', initialAssessmentBrief: verified })
+        : Pass3OutputSchema.parse({ kind: input.kind, clinicalReport: verified });
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);

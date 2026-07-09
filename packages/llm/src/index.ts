@@ -70,3 +70,5 @@ export {
   type VertexGeminiReasoningOptions,
 } from './backends/vertex-reasoning.backend';
 export { normaliseReasoningOutput } from './backends/reasoning-normalise';
+export { verifyPass3Evidence, quoteVerified } from './backends/pass3-evidence';
+export type { EvidenceGateStats } from './backends/pass3-evidence';

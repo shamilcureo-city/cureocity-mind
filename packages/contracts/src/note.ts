@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { SessionModalitySchema } from './client';
-import { MedicalEncounterNoteV1Schema } from './medical-note';
+import { EvidenceRefSchema, MedicalEncounterNoteV1Schema } from './medical-note';
 
 // ============================================================================
 // Pass 1 outputs — diarized transcript + affect features. Shipped by
@@ -110,6 +110,16 @@ export const TherapyNoteV1Schema = z.object({
     details: z.string().optional(),
   }),
   modalitySpecific: z.record(z.unknown()).optional(),
+  /**
+   * Sprint TS0 — per-statement provenance back to the transcript
+   * (anti-hallucination), mirroring `MedicalEncounterNoteV1.linkedEvidence`.
+   * Optional + additive via `.default([])`: notes written before this simply
+   * carry an empty array. Pass 2 populates it by tying key clinical
+   * statements (especially anything in `assessment` / `riskFlags`) to a
+   * VERBATIM transcript span; the Clinical Brief UI links each quote to its
+   * moment in the session.
+   */
+  linkedEvidence: z.array(EvidenceRefSchema).default([]),
   phaseHints: z
     .array(
       z.object({
@@ -216,6 +226,11 @@ export const IntakeNoteV1Schema = z.object({
     indicators: z.array(z.string()).default([]),
     details: z.string().optional(),
   }),
+  /**
+   * Sprint TS0 — per-statement transcript provenance (see
+   * `TherapyNoteV1Schema.linkedEvidence`). Optional + additive.
+   */
+  linkedEvidence: z.array(EvidenceRefSchema).default([]),
 });
 export type IntakeNoteV1 = z.infer<typeof IntakeNoteV1Schema>;
 export type TherapyNoteV1 = z.infer<typeof TherapyNoteV1Schema>;

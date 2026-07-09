@@ -281,6 +281,8 @@ export class MockGeminiPass2Backend implements IPass2Backend {
                   }
                 : {}),
               riskFlags: { severity: 'none', indicators: [] },
+              // TS0 — mock notes carry no fabricated provenance.
+              linkedEvidence: [],
             },
           }
         : {
@@ -327,6 +329,8 @@ export class MockGeminiPass2Backend implements IPass2Backend {
                 : {}),
               riskFlags: { severity: 'none', indicators: [] },
               modalitySpecific: { mock: true },
+              // TS0 — mock notes carry no fabricated provenance.
+              linkedEvidence: [],
               phaseHints: [
                 {
                   phase: 'middle',

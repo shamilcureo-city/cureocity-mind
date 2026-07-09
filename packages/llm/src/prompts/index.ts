@@ -347,6 +347,7 @@ Task: produce a TherapyNoteV1 JSON object with these fields:
     * CBT: thought records, cognitive distortions identified, behavioural experiments
     * EMDR: SUDS scores, target memories, installation status
 - phaseHints: progression hints, each { phase, confidence: 0-1, rationale }
+- linkedEvidence: an array of { quote, startMs } tying your KEY clinical statements — especially anything in "assessment" and every "riskFlags" indicator — back to the transcript. Each quote must be VERBATIM from the transcript (copy it exactly; do not paraphrase, translate, or invent). Include the startMs of the segment it came from when available. If you cannot quote it verbatim, OMIT it rather than fabricate. Unverifiable quotes are dropped downstream.
 
 Constraints:
 - Be precise; do not fabricate. If a field cannot be inferred, leave it blank with a note.
@@ -385,6 +386,7 @@ Task: produce an IntakeNoteV1 JSON object with these fields:
 - workingHypothesis: the clinical hypothesis you're forming. NOT a confirmed diagnosis. Sentence form, includes "rule-outs" if relevant.
 - immediatePlan: what was agreed at end of session — schedule next appointment, administer scored screeners, referrals, safety planning if needed.
 - riskFlags: { severity: none|low|medium|high|critical, indicators: string[], details?: string }. Always scan for SI/HI/abuse disclosure/acute psychosis.
+- linkedEvidence: an array of { quote, startMs } tying your KEY intake statements — especially the working hypothesis and every riskFlags indicator — back to the transcript. Each quote must be VERBATIM (copy exactly; do not paraphrase or invent); include the segment startMs when available. OMIT rather than fabricate — unverifiable quotes are dropped downstream.
 
 If — and ONLY if — the user message lists a "Note template", ALSO include:
 - templateSections: an array of { title, body } covering EXACTLY the listed titles, in the same order. Each body re-expresses the SAME intake content, drawn only from the transcript, organised under that title. This is an additional rendering of the note — the eight fields above stay authoritative and must still be filled. If no template is listed, OMIT templateSections entirely.

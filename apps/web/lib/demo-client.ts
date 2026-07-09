@@ -578,6 +578,7 @@ export async function removeDemoClient(
 function buildIntakeNote(): IntakeNoteV1 {
   return {
     version: 'V1',
+    linkedEvidence: [],
     presentingConcerns:
       'Ananya, a 29-year-old software engineer in Bengaluru, presents with a four-month period of persistent low mood, anhedonia, and concentration difficulty that has begun to affect her work performance. She booked the session after a conversation with a close friend who had been through therapy.',
     historyOfPresentingIllness:
@@ -679,6 +680,7 @@ function buildInitialAssessmentBrief(): InitialAssessmentBriefV1 {
 function buildTreatmentNote(): TherapyNoteV1 {
   return {
     version: 'V1',
+    linkedEvidence: [],
     modality: 'CBT',
     subjective:
       'Client reports mood slightly improved this week. Completed two of the three planned walks. Worked through one thought-record around a difficult work conversation. Mentions the weekend felt "lighter than the last few."',

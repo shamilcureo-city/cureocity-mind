@@ -85,6 +85,7 @@ describe('IntakeNoteV1Schema', () => {
     immediatePlan:
       'Schedule next session; administer PHQ-9 and GAD-7; provide panic-cycle psychoeducation.',
     riskFlags: { severity: 'none', indicators: [] },
+    linkedEvidence: [],
   };
 
   it('accepts a representative intake note', () => {
