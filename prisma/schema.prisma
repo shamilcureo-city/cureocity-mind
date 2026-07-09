@@ -2433,11 +2433,14 @@ model LiveConsultMetric {
   outputTokens Int
   costInr      Decimal @db.Decimal(10, 4)
 
-  transcriptP50Ms Int
-  transcriptP95Ms Int
-  noteP50Ms       Int
-  noteP95Ms       Int
-  elapsedMs       Int
+  transcriptP50Ms         Int
+  transcriptP95Ms         Int
+  /// DOC-9 — honest speech→transcript latency (window-wait included).
+  speechToTranscriptP50Ms Int @default(0)
+  speechToTranscriptP95Ms Int @default(0)
+  noteP50Ms               Int
+  noteP95Ms               Int
+  elapsedMs               Int
 
   createdAt DateTime @default(now())
 
