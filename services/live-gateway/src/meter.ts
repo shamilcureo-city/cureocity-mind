@@ -20,6 +20,7 @@ export class ConsultMeter {
   private outputTokens = 0;
   private costInr = 0;
   private readonly transcriptLatencies: number[] = [];
+  private readonly speechToTranscriptLatencies: number[] = [];
   private readonly noteLatencies: number[] = [];
   private readonly pass1InputTokenSamples: number[] = [];
 
@@ -29,6 +30,18 @@ export class ConsultMeter {
     this.accumulate(callLog);
     this.transcriptLatencies.push(nonNegInt(latencyMs));
     this.pass1InputTokenSamples.push(callLog.inputTokens);
+  }
+
+  /**
+   * DOC-9 — the HONEST speech→transcript latency for one window: the delta
+   * from when that window's speech was actually spoken (wall-clock) to when
+   * its transcript was emitted. Includes the window-wait + pump + Pass-1
+   * call, so `speechToTranscriptP*` reflects what the doctor experiences,
+   * not just the Pass-1 call time. The caller (which owns the clock) computes
+   * the delta; the meter stays pure.
+   */
+  recordSpeechToTranscript(latencyMs: number): void {
+    this.speechToTranscriptLatencies.push(nonNegInt(latencyMs));
   }
 
   /** A Pass-2 note build completed. */
@@ -83,6 +96,9 @@ export class ConsultMeter {
       costInr: round4(this.costInr),
       transcriptP50Ms: percentile(this.transcriptLatencies, 50),
       transcriptP95Ms: percentile(this.transcriptLatencies, 95),
+      // DOC-9 — the lived speech→transcript latency (window-wait included).
+      speechToTranscriptP50Ms: percentile(this.speechToTranscriptLatencies, 50),
+      speechToTranscriptP95Ms: percentile(this.speechToTranscriptLatencies, 95),
       noteP50Ms: percentile(this.noteLatencies, 50),
       noteP95Ms: percentile(this.noteLatencies, 95),
       elapsedMs: nonNegInt(elapsedMs),

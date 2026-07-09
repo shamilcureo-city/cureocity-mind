@@ -129,6 +129,9 @@ export class LiveSession {
   private pending: Buffer = Buffer.alloc(0);
   /** All-time bytes received, for wall offsets. */
   private totalBytes = 0;
+  /** DOC-9 — wall-clock (ms) of the first audio byte; anchors the honest
+   *  speech→transcript latency via the real-time byte↔time mapping. */
+  private captureStartMs = 0;
   /** All-time bytes already transcribed (the window cursor). */
   private flushedBytes = 0;
   /** Monotonic window counter, for stable utterance ids. */
@@ -201,6 +204,11 @@ export class LiveSession {
   /** Append a chunk of PCM audio streamed from the browser. */
   pushAudio(chunk: Buffer): void {
     if (this.stopped || chunk.length === 0) return;
+    // DOC-9 — stamp the wall-clock of the very first audio byte. Because the
+    // browser streams PCM in real time, a byte at offset b was spoken at
+    // ≈ captureStartMs + bytesToMs(b), which lets us measure the honest
+    // speech→transcript latency (window-wait included) without per-byte stamps.
+    if (this.totalBytes === 0) this.captureStartMs = Date.now();
     // `pending` stays bounded — each closed window slices its prefix off, so
     // this concat is over ~one window of audio, not the whole consult.
     this.pending = Buffer.concat([this.pending, chunk]);
@@ -292,6 +300,7 @@ export class LiveSession {
         endMs: tEndMs,
       },
     });
+    this.recordSpeechToTranscript(tStartMs);
     this.emit({ type: 'utterance', utterance });
 
     // Recognised voice commands (transcript-only). The doctor confirms them.
@@ -658,6 +667,7 @@ export class LiveSession {
           endMs: tEndMs,
         },
       });
+      this.recordSpeechToTranscript(tStartMs);
       this.emit({ type: 'utterance', utterance });
       this.reasoningScheduler.enqueue(utterance);
     }
@@ -675,6 +685,18 @@ export class LiveSession {
 
   private meterSummary() {
     return this.meter.summary(this.sessionId, this.backends.backend, Date.now() - this.startedAtMs);
+  }
+
+  /**
+   * DOC-9 — record the lived speech→transcript latency for a window whose
+   * speech began at audio-offset `tStartMs`. The window's first speech was
+   * spoken at wall-clock ≈ captureStartMs + tStartMs; `now − that` includes
+   * the window-wait + pump + Pass-1 call — the honest number the ≤2s target
+   * should be judged against.
+   */
+  private recordSpeechToTranscript(tStartMs: number): void {
+    if (this.captureStartMs === 0) return; // no audio captured — nothing to time
+    this.meter.recordSpeechToTranscript(Date.now() - (this.captureStartMs + tStartMs));
   }
 
   /** Wait for any in-flight `pump()` window to finish before finalizing. */

@@ -136,6 +136,18 @@ export const MeterSummarySchema = z.object({
   /** Pass-1 (transcription) latency percentiles across windows. */
   transcriptP50Ms: z.number().int().nonnegative(),
   transcriptP95Ms: z.number().int().nonnegative(),
+  /**
+   * DOC-9 — the HONEST speech→transcript latency: from when a window's audio
+   * was actually spoken (wall-clock, derived from the real-time byte stream)
+   * to when its transcript was emitted. This includes the dominant
+   * window-wait (a VAD window is 6–12 s) + pump + the Pass-1 call, unlike
+   * transcriptP*Ms which times only the Pass-1 call and so reads
+   * systematically optimistic against the ≤2 s target. Default 0 for older
+   * rows. The real sub-2s fix is streaming ASR — this just stops the meter
+   * from reporting green while the lived latency is 7–15 s.
+   */
+  speechToTranscriptP50Ms: z.number().int().nonnegative().default(0),
+  speechToTranscriptP95Ms: z.number().int().nonnegative().default(0),
   /** Pass-2 (note) latency percentiles across windows. */
   noteP50Ms: z.number().int().nonnegative(),
   noteP95Ms: z.number().int().nonnegative(),

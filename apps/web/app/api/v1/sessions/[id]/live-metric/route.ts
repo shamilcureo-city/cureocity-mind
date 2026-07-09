@@ -62,6 +62,9 @@ export async function POST(
       costInr: summary.costInr,
       transcriptP50Ms: summary.transcriptP50Ms,
       transcriptP95Ms: summary.transcriptP95Ms,
+      // DOC-9 — the honest speech→transcript latency (window-wait included).
+      speechToTranscriptP50Ms: summary.speechToTranscriptP50Ms,
+      speechToTranscriptP95Ms: summary.speechToTranscriptP95Ms,
       noteP50Ms: summary.noteP50Ms,
       noteP95Ms: summary.noteP95Ms,
       elapsedMs: summary.elapsedMs,

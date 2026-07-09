@@ -55,6 +55,8 @@ function baseMeter(over: Partial<MeterSummary>): MeterSummary {
     costInr: 0.5,
     transcriptP50Ms: 500,
     transcriptP95Ms: 900,
+    speechToTranscriptP50Ms: 1_200,
+    speechToTranscriptP95Ms: 1_800,
     noteP50Ms: 1_000,
     noteP95Ms: 2_000,
     elapsedMs: 20_000,
@@ -78,6 +80,18 @@ describe('latency budget check (DS8)', () => {
     expect(res.ok).toBe(false);
     expect(res.breaches.map((b) => b.metric)).toContain('costInr');
     expect(LATENCY_BUDGETS.costInrCeiling).toBe(3);
+  });
+
+  it('DOC-9: flags the HONEST speech→transcript latency, not just the Pass-1 call', () => {
+    // A realistic consult: the Pass-1 CALL is fast (900ms, within budget) but
+    // the lived speech→transcript is ~12s once the window-wait is counted.
+    // The old check read green off transcriptP95Ms; the honest metric breaches.
+    const realistic = baseMeter({ transcriptP95Ms: 900, speechToTranscriptP95Ms: 12_000 });
+    const res = checkLatencyBudget(realistic);
+    expect(res.ok).toBe(false);
+    expect(res.breaches.map((b) => b.metric)).toContain('speechToTranscriptP95Ms');
+    // The Pass-1-call sub-metric alone would NOT have breached — that's the bug.
+    expect(checkLatencyBudget(baseMeter({ transcriptP95Ms: 900 })).ok).toBe(true);
   });
 
   it('a scripted mock consult stays within budget end-to-end', async () => {
