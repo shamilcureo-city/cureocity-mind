@@ -1,5 +1,14 @@
 # Doctor Scribe V2 — strategy + build plan
 
+> **Status note (2026-07):** the §5 V2 _architecture_ (kill O(n²)
+> re-transcription, incremental windows + VAD, `RxPadV1`, one-tap
+> actions, live differential) has since been BUILT — see
+> `docs/DOCTOR_SCRIBE_V2_SPRINTS.md` (DS0–DS9) and
+> `docs/DS11_CONSULT_UX_SPRINTS.md` (DS11). What remains genuinely
+> forward-looking is the GTM strategy: the Hinglish ASR benchmark (§3),
+> pricing (§6), and the pilot plan (§7). Read §5 as _shipped design
+> rationale_, §3/§6/§7 as _open strategy_.
+
 _Research-backed plan for revamping the doctor ambient-scribe vertical.
 Sources: a 107-agent deep-research pass (July 2026) with adversarial
 claim verification — every cited fact below survived 3-vote

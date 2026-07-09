@@ -1,5 +1,19 @@
 # Doctor Scribe V2 — the full sprint plan (DS0–DS9)
 
+> **Current status (2026-07): SHIPPED.** DS0–DS9 are built and live —
+> the incremental live pipeline + metering (`services/live-gateway`
+> `vad.ts`/`meter.ts`), the Live Clinical Reasoning Engine
+> (`case-state.ts` + `reasoning-loop.ts` + `ask-next.ts`, contract
+> `packages/contracts/src/live-reasoning.ts`, `passReasoning` in the
+> ModelRouter), the Rx pad (`packages/contracts/src/rx-pad.ts`,
+> `NoteDraft.rxPad`), the zero-click OPD queue (`/app/clinic` +
+> `lib/clinic-queue` + `Session.tokenNumber`), and the pilot insights
+> dashboard (`/app/insights` + `lib/insights`). The DS10 Plan-Pad and
+> DS11 consult-UX follow-ups (`docs/DS11_CONSULT_UX_SPRINTS.md`) also
+> shipped. Read the sprints below as the _how it was built_ record; the
+> forward-looking parts (Hinglish benchmark, pricing, pilot) live in
+> `DOCTOR_SCRIBE_V2_PLAN.md` §3/§6/§7.
+
 _The execution companion to [`DOCTOR_SCRIBE_V2_PLAN.md`](DOCTOR_SCRIBE_V2_PLAN.md)
 and the approved 11-screen flow. **The centerpiece is the Live Clinical
 Reasoning Engine — a live, evolving differential diagnosis and

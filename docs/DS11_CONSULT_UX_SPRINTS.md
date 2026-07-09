@@ -1,6 +1,10 @@
 # DS11 — Consult UX v3: live-first, two plans, one surface
 
-**Status:** planned (2026-07-07). Successor to the DS0–DS10 arc
+**Status:** SHIPPED (2026-07). DS11.1–11.8 landed — `CaptureMode`
+(LIVE/DICTATE/UPLOAD), `Session.captureMode`, `Psychologist.defaultCaptureMode`,
+the single `ReviewAndSign` surface, `ContextFlash`/`TurnoverBar`, the two-lane
+Plan Pad, and first-class Examine/Order prompts are all in the schema + UI.
+Originally planned 2026-07-07; successor to the DS0–DS10 arc
 (`DOCTOR_SCRIBE_V2_SPRINTS.md`). This plan was synthesized from a codebase
 map (entry points, live surface, batch/upload paths, clinical capabilities),
 competitor research (Heidi, Freed, Suki, Abridge, Nabla — 2025/26 patterns),

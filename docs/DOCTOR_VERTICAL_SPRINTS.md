@@ -1,5 +1,14 @@
 # Doctor Vertical — sprint plan
 
+> **Current status (2026-07): SHIPPED.** DV0–DV8 are all built and live
+> (foundation + `vertical` discriminator, `/for-doctors`, the medical
+> note, the AVS, the live gateway, Rx + orders + interactions, the
+> differential pass, chronic-disease reuse, FHIR/ABDM). DV4–DV8 already
+> carry per-sprint **"Status (built)"** blocks below; DV0–DV3 shipped
+> too. The vertical was then revamped Rx-first — see
+> `docs/DOCTOR_SCRIBE_V2_SPRINTS.md` (DS0–DS9) and
+> `docs/DS11_CONSULT_UX_SPRINTS.md` (DS11) for the current live flow.
+
 The task-level execution plan for the doctor vertical specified in
 `docs/DOCTOR_VERTICAL.md`. Read that build spec first — it explains the
 _why_ and the architecture; this file is the _how_, sprint by sprint.

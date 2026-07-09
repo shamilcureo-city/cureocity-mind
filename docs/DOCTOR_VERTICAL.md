@@ -6,8 +6,18 @@ dictation AI scribe and in-room copilot for doctors**, with a different
 landing page and dashboard but the **same repo, same APIs, same
 infra** as the psychotherapist product.
 
-It is a design document, not a record of shipped work. Nothing here is
-implemented yet. Read order:
+> **Current status (2026-07): SHIPPED.** This started as a pure design
+> document, but the vertical it describes has since been built and is
+> live in production — DV0–DV8 landed (the `vertical` discriminator, the
+> standalone live gateway, the medical note, one-tap Rx + orders, the
+> chronic-disease reuse, FHIR/ABDM). Read this file for the
+> _foundational rationale + architecture_; for per-sprint "what actually
+> landed" see `docs/DOCTOR_VERTICAL_SPRINTS.md` (DV0–DV8), then the
+> later Rx-first revamp in `docs/DOCTOR_SCRIBE_V2_SPRINTS.md` (DS0–DS9)
+> and `docs/DS11_CONSULT_UX_SPRINTS.md` (DS11). What remains forward-
+> looking is operational only (ABDM env, pilot) — see CLAUDE.md §11.
+
+Read order:
 
 1. `CLAUDE.md` — how the code is organised + conventions (read first).
 2. `docs/CLINICAL_COPILOT.md` — what the psychology product does today.
