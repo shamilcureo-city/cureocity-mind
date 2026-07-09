@@ -516,11 +516,17 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   metrics), but billing is still per-therapist; clinic-plan billing
   isn't built.
 - **Billing** — Razorpay DONE (Sprint 53): trial-cap enforcement at
-  session-create + Checkout + webhook + Plan page. Remaining: renewal
-  reminders, self-serve downgrade/cancel, refunds, receipt PDFs,
-  clinic-plan billing. (Stripe explicitly out of scope.)
-- **Observability stack** — Sentry, OTel collector, Grafana — only
-  metric counters exist today.
+  session-create + Checkout + webhook + Plan page. Self-serve lifecycle
+  DONE since: renewal reminders (`app/api/v1/cron/billing-reminders`),
+  pause/resume/**cancel** (`app/api/v1/billing/lifecycle` + `PlanManageButtons`),
+  and receipt/invoice PDFs (`app/api/v1/billing/payments/[id]/invoice` +
+  `apps/web/lib/invoice.ts`). Remaining: refunds + clinic-plan billing.
+  (Stripe explicitly out of scope.)
+- **Observability stack** — Sentry + OTel are WIRED, not just counters:
+  `@sentry/nextjs` (`apps/web/sentry.client.config.ts` + `instrumentation.ts`
+  - `global-error.tsx`) and the OTel SDK (`packages/observability/src/sdk.ts`).
+    Remaining is OPERATIONAL/config only — set `SENTRY_DSN` (+ OTLP endpoint)
+    on the prod deployment; a Grafana/collector backend is optional.
 - **Pilot account provisioning + first-5-therapist onboarding** —
   manual.
 
@@ -537,8 +543,14 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   English-only and needs validated translations (do not machine-translate).
 - **More scored instruments** (WHODAS-2, PCL-5, …) — registry supports
   it; validated item wording required.
-- **Treatment-plan inline edit** — Clinical Brief's plan section is
-  still "Accept or reject" (no Edit-and-Accept).
+- **Treatment-plan inline edit** — DONE (Sprint 35): the Clinical Brief's
+  plan section has an `Edit and accept` path (`PlanEditor` in
+  `apps/web/components/app/ClinicalBriefTab.tsx`) that POSTs `action: 'modify'`
+  with the edited `{ treatmentPlan }` to
+  `app/api/v1/clinical-reports/[id]/sections/[section]` (versions the plan).
 
 When asked to "do the next thing", default to the pilot-blocking
-section unless the user has redirected.
+section unless the user has redirected. **NB:** this backlog drifts stale —
+much of it has been built since it was written (treatment-plan edit,
+billing lifecycle, observability wiring were all listed as open but are
+done). VERIFY a backlog item against the code before building it.
