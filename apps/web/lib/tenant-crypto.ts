@@ -1,5 +1,6 @@
 import {
   AesGcmFieldEncryptor,
+  GcpKmsProvider,
   LocalDevKmsProvider,
   type IFieldEncryptor,
   type IKmsProvider,
@@ -8,6 +9,7 @@ import {
 } from '@cureocity/crypto';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
+import { gcpKmsRestClient } from '@/lib/gcp-kms-rest';
 
 /**
  * Sprint 32 — per-tenant envelope encryption for the live request path.
@@ -41,11 +43,13 @@ interface CachedKey {
   expiresAt: number;
 }
 
+type KmsBackend = 'local-dev' | 'aws-kms' | 'gcp-kms';
+
 interface TenantCrypto {
   kms: IKmsProvider;
   encryptor: IFieldEncryptor;
   cache: Map<string, CachedKey>;
-  backend: 'local-dev' | 'aws-kms';
+  backend: KmsBackend;
 }
 
 declare global {
@@ -54,14 +58,29 @@ declare global {
 
 function instance(): TenantCrypto {
   if (globalThis.__cureocityTenantCrypto) return globalThis.__cureocityTenantCrypto;
-  const backend = (process.env['KMS_BACKEND'] ?? 'local-dev') as 'local-dev' | 'aws-kms';
+  const backend = (process.env['KMS_BACKEND'] ?? 'local-dev') as KmsBackend;
   let kms: IKmsProvider;
-  if (backend === 'aws-kms') {
-    // AwsKmsProvider needs @aws-sdk/client-kms wired in apps/web. Track in
-    // S32 Phase 2 — asia-south1 region procurement decides the deployment
-    // story. Until then any non-local backend hard-fails at startup so we
-    // never silently fall through to the dev KMS in prod.
-    throw new Error('KMS_BACKEND=aws-kms is not yet wired in apps/web — pending S32 Phase 2.');
+  if (backend === 'gcp-kms') {
+    // S32 Phase 2 — production KMS is Google Cloud KMS (asia-south1), reusing
+    // the Vertex service account (GOOGLE_APPLICATION_CREDENTIALS_JSON) over the
+    // REST API (no gRPC SDK — bundles cleanly on Vercel). GCP_KMS_KEY_NAME is
+    // the versionless cryptoKey resource name.
+    const keyName = process.env['GCP_KMS_KEY_NAME'];
+    if (!keyName) {
+      throw new Error(
+        'KMS_BACKEND=gcp-kms requires GCP_KMS_KEY_NAME — the cryptoKey resource name ' +
+          '(projects/P/locations/asia-south1/keyRings/R/cryptoKeys/K).',
+      );
+    }
+    kms = new GcpKmsProvider(gcpKmsRestClient(), keyName);
+  } else if (backend === 'aws-kms') {
+    // Not wired: S32 Phase 2 chose GCP Cloud KMS (one cloud + region as Vertex,
+    // reuses the existing SA). AwsKmsProvider stays in @cureocity/crypto for
+    // portability, but apps/web hard-fails rather than silently falling through
+    // to the dev KMS.
+    throw new Error(
+      'KMS_BACKEND=aws-kms is not wired in apps/web — use gcp-kms (S32 Phase 2 chose GCP Cloud KMS).',
+    );
   } else {
     // CRYPTO-1 — the local-dev KMS falls back to a PUBLIC hardcoded secret
     // when CRYPTO_DEV_MASTER_SECRET is unset. On a production deployment that

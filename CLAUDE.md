@@ -494,10 +494,17 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   (`resolveClientPii` / `decryptClientField` — prefer the encrypted
   column, fall back to plaintext when the ciphertext is absent or fails
   to decrypt, so un-backfilled rows keep working). STILL PENDING, and
-  prod-data / KMS-decision-dependent: (1) the plaintext-column DROP
-  (safe only once every prod row is backfilled + all reads go through
-  the resolver), and (2) wiring `AwsKmsProvider` for `KMS_BACKEND=aws-kms`
-  (asia-south1 procurement). `NoteDraft.transcriptEncrypted` now
+  prod-data-dependent: the plaintext-column DROP (safe only once every
+  prod row is backfilled + all reads go through the resolver). The
+  production KMS is now WIRED (S32 Phase 2): `KMS_BACKEND=gcp-kms` uses
+  Google Cloud KMS (asia-south1) over the REST API via `GcpKmsProvider`
+  (`packages/crypto`) + `apps/web/lib/gcp-kms-rest.ts`, reusing the Vertex
+  service account (`GOOGLE_APPLICATION_CREDENTIALS_JSON`) — no gRPC SDK, no
+  new credential. Remaining is OPERATIONAL: create the keyring/key + grant
+  the SA encrypt/decrypt, set `KMS_BACKEND=gcp-kms` + `GCP_KMS_KEY_NAME`,
+  run the backfill, then drop the plaintext columns. `AwsKmsProvider` stays
+  in `packages/crypto` for portability but is not wired in apps/web.
+  `NoteDraft.transcriptEncrypted` now
   dual-writes at the source (note-orchestrator, Sprint 54) + backfill.
   `JournalEntry.contentEncrypted` column exists but has no live
   `apps/web` write path (journal creation is a patient-app /
