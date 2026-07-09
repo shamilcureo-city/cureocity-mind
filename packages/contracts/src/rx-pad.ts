@@ -48,6 +48,12 @@ export const RxMedRowSchema = z.object({
   warnings: z.array(z.string()).default([]),
   /** Sprint DS10-B — provenance badge (absent on pre-DS10 rows = dictated). */
   source: RxRowSourceSchema.optional(),
+  /**
+   * Sprint DS11.5-fu — for a HEARD (voice-dictated) row, the id of the
+   * utterance it was spoken in. Powers the 🗣 quote-chip that scroll-highlights
+   * the source in the live transcript. Absent on continued/AI-drafted rows.
+   */
+  utteranceId: z.string().optional(),
 });
 export type RxMedRow = z.infer<typeof RxMedRowSchema>;
 
@@ -56,6 +62,8 @@ export const RxInvestigationSchema = z.object({
   rationale: z.string().optional(),
   /** Sprint DS10-B — provenance badge (absent on pre-DS10 rows = dictated). */
   source: RxRowSourceSchema.optional(),
+  /** Sprint DS11.5-fu — source utterance for a heard investigation chip. */
+  utteranceId: z.string().optional(),
 });
 export type RxInvestigation = z.infer<typeof RxInvestigationSchema>;
 

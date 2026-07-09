@@ -160,6 +160,14 @@ export function DoctorLiveEncounter({
     if (uids.size > 0) setHighlightIds(uids);
   }
 
+  // DS11.5-fu — the Rx pad's heard rows carry a source utteranceId directly
+  // (not a finding id), so the 🗣 quote-chip highlights the transcript through
+  // this sibling of highlightEvidence. The existing scroll effect does the rest.
+  function highlightUtterances(utteranceIds: string[]): void {
+    const uids = new Set(utteranceIds.filter(Boolean));
+    if (uids.size > 0) setHighlightIds(uids);
+  }
+
   // Sprint DS4 — add a differential candidate to the note's assessment
   // (confirm-first in the UI). Persisted when the note lands + audited.
   function addToAssessment(dxId: string, label: string): void {
@@ -815,6 +823,7 @@ export function DoctorLiveEncounter({
               rxPad={withAdoptedTestsDraft(rxPad, adoptedTests)}
               confirmedDrugs={confirmedDrugs}
               onConfirm={confirmMed}
+              onQuote={highlightUtterances}
               live={live}
             />
             <NotePanel
@@ -1342,11 +1351,14 @@ function RxPadPanel({
   rxPad,
   confirmedDrugs,
   onConfirm,
+  onQuote,
   live,
 }: {
   rxPad: RxPadDraft | null;
   confirmedDrugs: Set<string>;
   onConfirm: (drug: string) => void;
+  /** DS11.5-fu — scroll-highlight the source utterance for a heard row. */
+  onQuote: (utteranceIds: string[]) => void;
   live: boolean;
 }) {
   const meds = rxPad?.meds ?? [];
@@ -1422,6 +1434,19 @@ function RxPadPanel({
                           </span>
                         )}
                       </span>
+                      {/* DS11.5-fu — heard row: 🗣 jumps to the utterance it was
+                          spoken in (live only; the transcript refs exist then). */}
+                      {live && m.utteranceId && (
+                        <button
+                          type="button"
+                          onClick={() => onQuote([m.utteranceId as string])}
+                          className="shrink-0 rounded-full border border-[var(--color-line-soft)] px-1.5 py-0.5 text-[11px] text-[var(--color-ink-3)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                          title="Heard — show where in the transcript"
+                          aria-label={`Show where ${clean(m.drug) ?? m.drug} was heard`}
+                        >
+                          🗣
+                        </button>
+                      )}
                       {m.continued ? (
                         <span className="shrink-0 rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
                           continued
@@ -1450,15 +1475,30 @@ function RxPadPanel({
             <div>
               <SectionLabel>Investigations</SectionLabel>
               <div className="mt-1.5 flex flex-wrap gap-1.5">
-                {investigations.map((inv) => (
-                  <span
-                    key={inv.name}
-                    className="rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-2.5 py-1 text-xs"
-                    title={inv.rationale}
-                  >
-                    {inv.name}
-                  </span>
-                ))}
+                {investigations.map((inv) =>
+                  // DS11.5-fu — a heard investigation is a 🗣 button to its source.
+                  live && inv.utteranceId ? (
+                    <button
+                      key={inv.name}
+                      type="button"
+                      onClick={() => onQuote([inv.utteranceId as string])}
+                      className="rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-2.5 py-1 text-xs hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                      title={
+                        inv.rationale ? `Heard · ${inv.rationale}` : 'Heard — show in transcript'
+                      }
+                    >
+                      🗣 {inv.name}
+                    </button>
+                  ) : (
+                    <span
+                      key={inv.name}
+                      className="rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-2.5 py-1 text-xs"
+                      title={inv.rationale}
+                    >
+                      {inv.name}
+                    </span>
+                  ),
+                )}
               </div>
             </div>
           )}

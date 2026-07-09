@@ -295,11 +295,19 @@ export class LiveSession {
     this.emit({ type: 'utterance', utterance });
 
     // Recognised voice commands (transcript-only). The doctor confirms them.
+    // DS11.5-fu — a command becomes newly-parseable only once this utterance
+    // completes its clause (seenCommands dedups the re-scan), so the current
+    // utterance is its source; stamp it on the heard pad-feeding kinds so the
+    // browser can render a 🗣 quote-chip back to the transcript.
     for (const command of parseVoiceCommands(this.cumulativeTranscript())) {
       if (this.seenCommands.has(command.raw)) continue;
       this.seenCommands.add(command.raw);
-      this.voiceCommands.push(command); // DS5 — feed the Rx pad
-      this.emit({ type: 'command', command });
+      const anchored =
+        command.kind === 'ADD_MEDICATION' || command.kind === 'ORDER_TEST'
+          ? { ...command, utteranceId: utterance.id }
+          : command;
+      this.voiceCommands.push(anchored); // DS5 — feed the Rx pad
+      this.emit({ type: 'command', command: anchored });
     }
 
     // Sprint DS2 — queue this utterance for the reasoning engine; the

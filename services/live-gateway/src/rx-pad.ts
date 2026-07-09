@@ -65,7 +65,8 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
     });
   }
 
-  // 2. Spoken meds (voice-command fast path) — pending confirm.
+  // 2. Spoken meds (voice-command fast path) — pending confirm. DS11.5-fu:
+  // carry the source utterance so the pad row gets a 🗣 quote-chip.
   for (const cmd of voiceCommands) {
     if (cmd.kind !== 'ADD_MEDICATION') continue;
     pushMed({
@@ -76,6 +77,7 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
       continued: false,
       status: 'pending',
       warnings: [],
+      ...(cmd.utteranceId ? { utteranceId: cmd.utteranceId } : {}),
     });
   }
 
@@ -98,12 +100,16 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
   // Investigations from clinical orders + spoken "order X" commands.
   const investigations: RxInvestigation[] = [];
   const seenInv = new Set<string>();
-  const pushInv = (name: string, rationale?: string) => {
+  const pushInv = (name: string, rationale?: string, utteranceId?: string) => {
     const clip = clean(name);
     const key = clip.toLowerCase();
     if (!clip || seenInv.has(key)) return;
     seenInv.add(key);
-    investigations.push({ name: clip, ...(rationale ? { rationale: clean(rationale) } : {}) });
+    investigations.push({
+      name: clip,
+      ...(rationale ? { rationale: clean(rationale) } : {}),
+      ...(utteranceId ? { utteranceId } : {}),
+    });
   };
   const adviceLines: string[] = [];
   for (const o of orders) {
@@ -111,7 +117,7 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
     else pushInv(o.description, o.rationale);
   }
   for (const cmd of voiceCommands) {
-    if (cmd.kind === 'ORDER_TEST') pushInv(cmd.description);
+    if (cmd.kind === 'ORDER_TEST') pushInv(cmd.description, undefined, cmd.utteranceId);
   }
 
   // Advice + follow-up from the plan; dx line + vitals from the note.

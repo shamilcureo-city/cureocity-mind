@@ -76,6 +76,31 @@ describe('assembleRxPad', () => {
     expect(pad.meds.filter((m) => m.drug.toLowerCase() === 'aspirin')).toHaveLength(1);
   });
 
+  it('carries the source utteranceId from a spoken med + order onto the pad rows', () => {
+    // DS11.5-fu — the gateway stamps the heard utterance on the command; the
+    // pad must pass it through so the browser can render a 🗣 quote-chip.
+    const voiceCommands: VoiceCommand[] = [
+      { kind: 'ADD_MEDICATION', raw: 'add metformin', drug: 'Metformin', utteranceId: 'u7' },
+      { kind: 'ORDER_TEST', raw: 'order hba1c', description: 'HbA1c', utteranceId: 'u9' },
+    ];
+    const pad = assembleRxPad(input({ voiceCommands }));
+    expect(pad.meds.find((m) => m.drug === 'Metformin')?.utteranceId).toBe('u7');
+    expect(pad.investigations.find((i) => i.name === 'HbA1c')?.utteranceId).toBe('u9');
+  });
+
+  it('leaves utteranceId unset on continued + AI-drafted meds', () => {
+    const pad = assembleRxPad(
+      input({
+        patient: patient({ activeMeds: ['Amlodipine 5 mg'] }),
+        medications: [med({ drug: 'Aspirin' })],
+      }),
+    );
+    expect(
+      pad.meds.find((m) => m.drug.toLowerCase().startsWith('amlodipine'))?.utteranceId,
+    ).toBeUndefined();
+    expect(pad.meds.find((m) => m.drug === 'Aspirin')?.utteranceId).toBeUndefined();
+  });
+
   it('maps clinical orders to investigations + referrals to advice', () => {
     const orders: ClinicalOrderV1[] = [
       { version: 'V1', category: 'PROCEDURE', description: '12-lead ECG', rationale: 'ischaemia' },

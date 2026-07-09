@@ -81,11 +81,19 @@ export const VoiceCommandSchema = z.discriminatedUnion('kind', [
     strength: z.string().optional(),
     frequency: z.string().optional(),
     durationDays: z.number().int().positive().optional(),
+    /**
+     * Sprint DS11.5-fu — the id of the utterance this order was heard in, so
+     * the Rx pad's heard rows can carry a 🗣 quote-chip that scroll-highlights
+     * the source in the transcript (the DS4 anchoring). The gateway stamps it.
+     */
+    utteranceId: z.string().optional(),
   }),
   z.object({
     kind: z.literal('ORDER_TEST'),
     raw: z.string(),
     description: z.string(),
+    /** Sprint DS11.5-fu — source utterance for the heard investigation chip. */
+    utteranceId: z.string().optional(),
   }),
   z.object({
     kind: z.literal('SHOW_DATA'),
