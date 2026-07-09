@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { ClinicalFindingSchema, PatientContextSchema } from './case-state';
+import { SessionKindSchema, SessionModalitySchema } from './client';
 import { LiveReasoningSchema } from './live-reasoning';
 import { EvidenceRefSchema, MedicalEncounterNoteV1Schema } from './medical-note';
 import { ClinicalOrderV1Schema, MedicationOrderV1Schema } from './medication-order';
+import { IntakeNoteV1Schema, TherapyNoteV1Schema } from './note';
+import { PractitionerVerticalSchema } from './psychologist';
 import { RxPadDraftSchema, RxPadV1Schema } from './rx-pad';
 
 /**
@@ -185,6 +188,16 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
      * still works; the reasoning engine just has less to anchor on.
      */
     context: PatientContextSchema.optional(),
+    /**
+     * Sprint TS1 — the therapist live scribe rides the same gateway. The
+     * browser passes the session's vertical and, for therapy, its `kind`
+     * (INTAKE/TREATMENT/REVIEW) + `modality`, which Pass 2 needs to produce
+     * the right note shape. Absent ⇒ DOCTOR (back-compat with the shipped
+     * doctor client, which sends neither).
+     */
+    vertical: PractitionerVerticalSchema.optional(),
+    kind: SessionKindSchema.optional(),
+    modality: SessionModalitySchema.nullable().optional(),
   }),
   z.object({ type: z.literal('stop') }),
   // Sprint DS3 — the doctor dismissed an "ask next" question. The gateway
@@ -248,6 +261,24 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
     rxPad: RxPadV1Schema.optional(),
   }),
   z.object({ type: z.literal('command'), command: VoiceCommandSchema }),
+  // Sprint TS1 — therapist live note (interim). Display-only, so the note
+  // body is loosely typed on the wire; the FINAL note is validated strictly
+  // on the live-note route before it persists. `kind` narrows the UI render
+  // (SOAP vs intake). Additive — the doctor path never emits this.
+  z.object({
+    type: z.literal('therapyNote'),
+    kind: SessionKindSchema,
+    note: z.record(z.unknown()),
+  }),
+  // Sprint TS1 — therapist closing note. A full TherapyNoteV1 | IntakeNoteV1
+  // (therapy has no meds / orders / Rx). The browser relays it to the
+  // live-note route to persist as a COMPLETED NoteDraft the therapist signs.
+  z.object({
+    type: z.literal('therapyFinal'),
+    kind: SessionKindSchema,
+    note: z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]),
+    transcript: z.string().optional(),
+  }),
 ]);
 export type LiveGatewayEvent = z.infer<typeof LiveGatewayEventSchema>;
 
@@ -271,6 +302,19 @@ export const LiveNoteInputSchema = z.object({
   transcript: z.string().max(200_000).optional(),
 });
 export type LiveNoteInput = z.infer<typeof LiveNoteInputSchema>;
+
+/**
+ * Sprint TS1 — POST /sessions/:id/live-note body for the THERAPIST vertical.
+ * Mirrors {@link LiveNoteInputSchema} but carries a therapy/intake note and
+ * none of the doctor-only meds / orders / Rx. The route persists it as a
+ * COMPLETED NoteDraft — the same provenance as the batch therapist path.
+ */
+export const TherapyLiveNoteInputSchema = z.object({
+  kind: SessionKindSchema,
+  note: z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]),
+  transcript: z.string().max(200_000).optional(),
+});
+export type TherapyLiveNoteInput = z.infer<typeof TherapyLiveNoteInputSchema>;
 
 /**
  * Sprint DS3 — POST /sessions/:id/live-suggestion body. The browser relays
