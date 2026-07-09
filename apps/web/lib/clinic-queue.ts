@@ -92,7 +92,8 @@ function ageFrom(dob: Date | null): number | null {
 export async function loadClinicQueue(psychologistId: string): Promise<ClinicQueue> {
   const { start, end, dateKey } = istDayRange(new Date());
   const rows = await prisma.session.findMany({
-    where: { psychologistId, scheduledAt: { gte: start, lt: end } },
+    // Archived clients (deletedAt set) drop out of the OPD queue.
+    where: { psychologistId, scheduledAt: { gte: start, lt: end }, client: { deletedAt: null } },
     orderBy: [{ tokenNumber: { sort: 'asc', nulls: 'last' } }, { scheduledAt: 'asc' }],
     select: {
       id: true,

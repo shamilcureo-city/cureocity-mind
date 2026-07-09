@@ -39,6 +39,8 @@ export default async function TodayPage() {
       where: {
         psychologistId: therapist.id,
         scheduledAt: { gte: startOfToday, lt: endOfToday },
+        // Archived clients (deletedAt set) drop off the day board.
+        client: { deletedAt: null },
       },
       orderBy: { scheduledAt: 'asc' },
       select: sessionSelect,
@@ -48,6 +50,8 @@ export default async function TodayPage() {
         psychologistId: therapist.id,
         status: 'SCHEDULED',
         scheduledAt: { gte: startOfTomorrow, lt: lookAheadEnd },
+        // Archived clients (deletedAt set) drop off the day board.
+        client: { deletedAt: null },
       },
       orderBy: { scheduledAt: 'asc' },
       take: 8,

@@ -24,7 +24,8 @@ export default async function RecordPage() {
   const [rawSessions, rawClients] = therapist
     ? await Promise.all([
         prisma.session.findMany({
-          where: { psychologistId: therapist.id },
+          // Archived clients (deletedAt set) drop out of Recent sessions.
+          where: { psychologistId: therapist.id, client: { deletedAt: null } },
           orderBy: { scheduledAt: 'desc' },
           take: 30,
           include: { client: { select: { fullNameEncrypted: true } } },
