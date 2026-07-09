@@ -1,5 +1,13 @@
 # Cureocity Mind
 
+An Indian clinical-documentation platform with **two practitioner
+verticals on one codebase** (`PractitionerVertical = THERAPIST | DOCTOR`):
+a psychotherapy co-pilot and a doctor ambient live-scribe. They share one
+app, one patient/session schema, and the same auth / audit / crypto /
+billing / Vertex-Gemini plumbing.
+
+### Therapist — psychology co-pilot
+
 A clinical co-pilot for Indian psychotherapists that **closes the
 measurement-based-care loop**. The therapist records a session in the
 browser; Gemini produces a transcript, an intake or SOAP note (depending
@@ -23,18 +31,38 @@ Designed for real Indian practice: the audio can be in any language
 (Manglish, Hinglish, Tanglish, …). Pass 1 detects what was actually
 spoken and transcribes faithfully in the spoken language(s).
 
+### Doctor — ambient live-scribe for OPD
+
+A live ambient scribe + passive in-room copilot for Indian OPD doctors.
+The doctor's home is a zero-click patient **queue**; "Start encounter"
+opens a **live** consult that streams audio to a standalone WebSocket
+gateway. As the doctor talks, the copilot returns a live transcript, a
+structured medical note, an editable **prescription pad**, and a passive
+three-rail assistant — an evolving differential diagnosis, the "questions
+you haven't asked yet", red-flag + drug-interaction alerts, and
+examine/order prompts — every suggestion cited to something actually said.
+The doctor reviews and signs one surface, shares an after-visit summary /
+prescription, then moves to the next patient. Capture can also be
+dictation or an uploaded recording. The vertical reuses the therapist
+stack (including the Journey engine, for chronic-disease tracking) and
+adds FHIR export + ABDM / ABHA push for Indian health-record interop.
+See [`docs/DOCTOR_VERTICAL.md`](docs/DOCTOR_VERTICAL.md) + CLAUDE.md § 3b.
+
 ## Start here
 
-| Doc                                                                | Purpose                                                                          |
-| ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| [`CLAUDE.md`](CLAUDE.md)                                           | Agent + developer operational guide — read this first                            |
-| [`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md)             | Product context — Sprints 13-19, clinical co-pilot pivot + intake-aware flow     |
-| [`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md) | Sprint 20 — the journey hub, reliable-change engine, progress report, episodes   |
-| [`docs/SPRINT_21.md`](docs/SPRINT_21.md)                           | Sprint 21 — diagnosis history, intake-note modify, My Practice view, goal status |
-| [`docs/SETUP.md`](docs/SETUP.md)                                   | Account procurement + env var matrix per sprint                                  |
-| [`docs/dpdp-data-flow.md`](docs/dpdp-data-flow.md)                 | DPDP compliance data flows                                                       |
-| [`docs/security-audit.md`](docs/security-audit.md)                 | Pre-pilot security audit                                                         |
-| [`docs/EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md)                 | **Historical** — original 13-sprint scribe plan, superseded for Sprint 13+       |
+| Doc                                                                    | Purpose                                                                          |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [`CLAUDE.md`](CLAUDE.md)                                               | Agent + developer operational guide — read this first                            |
+| [`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md)                 | Product context — Sprints 13-19, clinical co-pilot pivot + intake-aware flow     |
+| [`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md)     | Sprint 20 — the journey hub, reliable-change engine, progress report, episodes   |
+| [`docs/SPRINT_21.md`](docs/SPRINT_21.md)                               | Sprint 21 — diagnosis history, intake-note modify, My Practice view, goal status |
+| [`docs/SETUP.md`](docs/SETUP.md)                                       | Account procurement + env var matrix per sprint                                  |
+| [`docs/dpdp-data-flow.md`](docs/dpdp-data-flow.md)                     | DPDP compliance data flows                                                       |
+| [`docs/security-audit.md`](docs/security-audit.md)                     | Pre-pilot security audit                                                         |
+| [`docs/EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md)                     | **Historical** — original 13-sprint scribe plan, superseded for Sprint 13+       |
+| [`docs/DOCTOR_VERTICAL.md`](docs/DOCTOR_VERTICAL.md)                   | Doctor vertical — architecture + rationale (DV0–DV8 shipped)                     |
+| [`docs/DOCTOR_SCRIBE_V2_SPRINTS.md`](docs/DOCTOR_SCRIBE_V2_SPRINTS.md) | Doctor Scribe V2 (DS0–DS9) — live reasoning engine, Rx pad, OPD queue, insights  |
+| [`docs/DS11_CONSULT_UX_SPRINTS.md`](docs/DS11_CONSULT_UX_SPRINTS.md)   | Consult UX v3 (DS11) — live-first single Review & Sign surface + capture modes   |
 
 ## Status
 
@@ -45,6 +73,7 @@ spoken and transcribes faithfully in the spoken language(s).
 | Sprint 19 — Scribing flow revamp (intake-aware: Pre-Flight panel, IntakeNote, InitialAssessmentBrief) | **Shipped** |
 | Sprint 20 — Measurement-based-care loop (Journey hub, Progress Report, Episodes, goal status)         | **Shipped** |
 | Sprint 21 — Diagnosis history, intake-note AI modify, My Practice view                                | **Shipped** |
+| Doctor vertical — ambient live-scribe (DV0–DV8) + Rx-first revamp (DS0–DS11)                          | **Shipped** |
 | Pre-pilot blockers (real Firebase auth, PII field encryption, WebAuthn-required sign)                 | **Pending** |
 | Other backlog (multi-tenant Clinic, billing, observability stack, multilingual progress copy)         | **Pending** |
 

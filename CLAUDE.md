@@ -3,30 +3,46 @@
 This document is the operational guide for AI agents (Claude Code, Claude
 Agent SDK) and human developers working in the Cureocity Mind codebase.
 For product context, read **[`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md)**
-first — it explains what the product currently does. This file is about
-_how the code is organised_ and the conventions to follow.
+(the therapist vertical) and **[`docs/DOCTOR_VERTICAL.md`](docs/DOCTOR_VERTICAL.md)**
+(the doctor vertical) — they explain what each product does. This file is
+about _how the code is organised_ and the conventions to follow.
 
 ## 1. What this codebase is
 
-A clinical co-pilot for Indian psychotherapists. The therapist records
-a session in the browser; Gemini passes produce a transcript, a SOAP
-note (or intake note), an ICD-11 clinical brief (or initial-assessment
-brief), a step-by-step therapy script (read aloud to the client), and
-a pre-session brief for the next visit. The therapist confirms each
-AI suggestion; confirmed diagnoses + plans persist cumulatively.
-Patient-facing content can be shared via WhatsApp / email / portal link.
+**One platform, two practitioner verticals**, chosen per account by
+`Psychologist.vertical: PractitionerVertical = 'THERAPIST' | 'DOCTOR'`.
+Both share one Next.js app, one `Client` / `Session` schema, and the same
+auth / audit / crypto / billing / Vertex-Gemini plumbing; they diverge in
+the recording flow, the AI passes, and the UI surface. (The codebase was
+therapist-only until the doctor vertical was grafted on at Sprint DV1.)
 
-Sprint 19 reworked the start-of-session flow to be clinically honest
-(intake vs treatment vs review). Sprint 20 closed the
-**measurement-based-care loop**: the therapist now sees a per-client
-arc (Journey hub), a deterministic reliable-change verdict on PHQ-9 /
-GAD-7, a passive next-best-action, an explicit Discharge flow, and
-shares a plain-language Progress Report with the client. Read
-**[`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md)**
-for the conceptual model.
+**Therapist — psychology co-pilot.** The therapist records a session in
+the browser; five Gemini passes (§3) produce a transcript, a SOAP note (or
+intake note), an ICD-11 clinical brief (or initial-assessment brief), a
+step-by-step therapy script (read aloud to the client), and a pre-session
+brief for the next visit. The therapist confirms each AI suggestion;
+confirmed diagnoses + plans persist cumulatively. Patient-facing content
+can be shared via WhatsApp / email / portal link. Sprint 19 made the
+start-of-session flow clinically honest (intake vs treatment vs review);
+Sprint 20 closed the **measurement-based-care loop** (Journey hub,
+deterministic reliable-change verdict on PHQ-9 / GAD-7, passive
+next-best-action, Discharge flow, plain-language Progress Report — see
+**[`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md)**).
 
-Originally a 13-sprint "AI scribe" plan; pivoted at Sprint 13 to
-"clinical co-pilot". Sprint timeline:
+**Doctor — ambient live-scribe for OPD.** The doctor's home is a
+zero-click OPD **queue**; "Start encounter" opens a **live** consult that
+streams audio to a standalone WebSocket **gateway** (`services/live-gateway`,
+§3b). As the doctor talks, the gateway streams back a live transcript, a
+structured medical note, a **prescription pad**, and a passive three-rail
+copilot (evolving differential, "questions you haven't asked yet", red-flags
+/ drug-interactions, examine/order prompts). The doctor reviews + signs on a
+single **Review & Sign** surface, shares an after-visit summary / Rx, then
+taps "next patient". Capture can also be **dictate** or **upload** (both run
+the batch medical-note path). See §3b + **[`docs/DOCTOR_VERTICAL.md`](docs/DOCTOR_VERTICAL.md)**.
+
+Sprint timeline:
+
+_Therapist track_ (pivoted at Sprint 13 from the original "AI scribe" plan):
 
 - **Sprint 13** — Pass 3 (Clinical Analysis) + Clinical Brief tab
 - **Sprint 14** — Pass 4 (Therapy Script) + Therapy Library
@@ -43,6 +59,22 @@ Originally a 13-sprint "AI scribe" plan; pivoted at Sprint 13 to
   Phase 3 TreatmentEpisode + discharge flow + per-goal achievement
 - **Sprint 21** — Diagnosis history card, intake-note AI modify, therapist
   My Practice (`/app/me`) view
+
+_Doctor track_ (parallel; **DV** = foundation, **DS** = the Rx-first live
+revamp — both SHIPPED):
+
+- **DV0–DV3** — streaming spike; the `vertical` discriminator; `/for-doctors`
+  landing; `MedicalEncounterNoteV1` proven on the batch pipeline; after-visit summary
+- **DV4–DV8** — the live gateway; Rx + orders + drug-interactions; live
+  differential (`PASS_9_DIFFERENTIAL`); chronic-disease reuse of the Journey
+  engine; FHIR export + ABDM / ABHA push
+- **DS0–DS9** — the Rx-first revamp: incremental O(n) live pipeline + metering;
+  the Live Clinical Reasoning Engine (CaseState + `PASS_11_REASONING` + ask-next);
+  the Rx pad; one-tap actions + before-you-close gate; the zero-click clinic
+  queue; gateway hardening; pilot insights
+- **DS10–DS11** — two-lane Plan Pad, then Consult UX v3: one Review & Sign
+  surface, `CaptureMode` (LIVE / DICTATE / UPLOAD), gateway preflight + graceful
+  degrade, first-class Examine / Order prompts
 
 ## 2. Repository layout
 
@@ -64,10 +96,11 @@ packages/                       # Shared TypeScript libraries
   observability/                # OpenTelemetry metrics + audit-write counters
   storage/                      # S3 / Vercel Blob adapters
 
-services/                       # NestJS scaffolds (NOT the live request path).
-                                # Kept as the "blueprint + unit-test home"
-                                # for clinical / audio / llm packages. Live
-                                # requests go through apps/web/app/api/v1/*.
+services/                       # Mostly NestJS scaffolds (unit-test home for
+                                # clinical / audio / llm packages; NO prod traffic)
+  live-gateway/                 # …EXCEPT live-gateway: a REAL standalone
+                                # WebSocket runtime — the doctor live consult
+                                # (§3b). Vercel serverless can't hold a socket.
 
 prisma/
   schema.prisma                 # Single source of truth for the DB
@@ -77,11 +110,13 @@ docs/                           # Engineering documentation (see § 8)
 infrastructure/                 # docker-compose for local dev (Postgres, Redis, etc.)
 ```
 
-**Important architectural fact**: the live request path is `apps/web` only.
-The NestJS services in `services/` exist as scaffolds — they hold unit
-tests for shared packages and document how a future microservice split
-would look — but they do not handle production traffic. Every API
-endpoint is a Next.js route under `apps/web/app/api/v1/*`.
+**Important architectural fact**: the HTTP request path is `apps/web` only —
+every REST endpoint is a Next.js route under `apps/web/app/api/v1/*`, and the
+NestJS apps in `services/` are scaffolds (unit-test home for shared packages)
+that serve no production traffic. **The one exception is `services/live-gateway`**:
+a real, deployed standalone WebSocket service that runs the doctor live consult
+(§3b). It has **no DB access** — the browser relays its events back to `apps/web`
+routes to persist them.
 
 ## 3. The five Gemini passes
 
@@ -130,6 +165,117 @@ PASS 5  client context → PreSessionBriefV1
 All five passes wired through `ModelRouter` in
 `packages/llm/src/model-router.ts`. Mock backends in
 `packages/llm/src/backends/mock-gemini.backend.ts` cover dev/CI.
+
+## 3b. The doctor live-scribe pipeline
+
+The doctor vertical replaces the batch five-pass flow with a **live**
+consult. Audio streams from the browser to a standalone WebSocket
+**gateway** (`services/live-gateway`) that runs the pipeline and streams
+results back; the browser **relays** those events to `apps/web` routes to
+persist them (the gateway has no DB access). Capture can instead be
+**dictate** or **upload**, both of which run the batch medical-note path.
+
+**Vertical routing.** `Psychologist.vertical` is set at onboarding
+(`api/v1/onboarding/complete`). Page guards `requireOnboardedDoctor()` /
+`requireOnboardedTherapist()` (`apps/web/lib/auth-page.ts`); API routes
+re-check `vertical === 'DOCTOR'` (409 otherwise). `/app` redirects doctors
+to `/app/clinic`; `Sidebar` / `MobileNav` branch on `vertical`;
+`subjectNounFor(vertical)` (`apps/web/lib/vertical.ts`) maps
+THERAPIST→"client" / DOCTOR→"patient". Doctors and therapists share ONE
+`Client` and ONE `Session` table — the only doctor markers on a session
+are `tokenNumber` (OPD token) and `captureMode`.
+
+**The live gateway** (`services/live-gateway/src/`):
+
+```
+browser mic ──PCM 16kHz──▶  server.ts        WS entry; /healthz; token verify; conn caps
+                            live-session.ts  per-consult pipeline; 1s pump() tick
+   ▲                          │
+   │ events (transcript /     ├─ vad.ts       Rail 1: energy VAD → O(n) windows
+   │ note / finding /         │                (6–12s, cut at ≥600ms silence gap)
+   │ reasoning / gap /        ├─ Pass 1       transcript / window — Flash, asia-south1
+   │ rxDraft / meter /        ├─ Pass 2       medical note — Flash interim, Pro on finalize
+   │ final)                   ├─ reasoning-loop.ts  debounced PASS_11_REASONING scheduler
+   │                          │   └─ case-state.ts  CaseState + CITATION GATE (a finding is
+   │                          │                     kept only if it cites a real seen
+   │                          │                     utterance id) + differential (≤5)
+   │                          │       └─ ask-next.ts  "questions you haven't asked" lifecycle
+   │                          ├─ gaps.ts      Rail 3: deterministic red-flags + completeness
+   │                          ├─ rx-pad.ts    deterministic Rx assembly (CONTINUED / SPOKEN /
+   │                          │                DRAFTED sources; nothing auto-prescribes)
+   │                          └─ meter.ts     per-consult tokens / INR / latency (DOC-9)
+   └───────────────────────── auth.ts (HMAC start-token; FAILS CLOSED in prod w/o secret),
+                              pool.ts (session cap + graceful "busy" shed)
+```
+
+**Passes.** The live copilot runs **`PASS_11_REASONING`** — the combined
+differential + ask-next + red-flags + examine/order pass (folds findings
+in): `packages/llm/src/backends/vertex-reasoning.backend.ts`, prompt
+`REASONING_SYSTEM_PROMPT_V1`, normalised through
+`backends/reasoning-normalise.ts` before Zod. `PASS_10_FINDINGS` is a
+standalone findings substrate (wired through `ModelRouter`, not run live).
+The batch differential is `PASS_9_DIFFERENTIAL`. Transcription is Pass 1
+(Flash), the note is Pass 2 (Flash interim, Pro finalize). `LLM_BACKEND=mock`
+gives a full offline live UX.
+
+**Browser-relays-persistence.** `apps/web/components/app/DoctorLiveEncounter.tsx`
+opens `NEXT_PUBLIC_LIVE_GATEWAY_URL` (default `ws://localhost:8787`) and POSTs to:
+
+- `sessions/[id]/live-token` — mint the HMAC gateway token; also transitions
+  SCHEDULED→IN_PROGRESS, writes the consent snapshot, sets `captureMode='LIVE'`,
+  returns the patient's `activeMeds` (cross-visit interaction seeding).
+- `sessions/[id]/live-note` — upsert the final note as a COMPLETED `NoteDraft`
+  (+ encrypted transcript + `rxPad`), mark the Session COMPLETED, persist
+  drafted orders + vitals.
+- `sessions/[id]/live-metric` — one `LiveConsultMetric` row (`LIVE_CONSULT_METERED`).
+- `sessions/[id]/live-suggestion` — one audit row per copilot event
+  (`LIVE_SUGGESTION_SHOWN|ACTED|DISMISSED|AUTORESOLVED`); the pilot dataset
+  (no dedicated table).
+- `sessions/[id]/rx-pad` (GET / PATCH) — typed patch ops on the draft pad;
+  server recomputes drug-interaction warnings; read-only once signed (`RX_PAD_EDITED`).
+- `live/health` — server-side proxy to the gateway `/healthz` (the preflight).
+
+**OPD queue.** Doctor home `/app/clinic` (`ClinicBoard`) reads
+`loadClinicQueue()` (`apps/web/lib/clinic-queue.ts`); tokens are assigned in
+the session-create tx via `nextClinicToken` (IST-day-scoped `Session.tokenNumber`).
+`GET /api/v1/clinic/queue` is the API twin.
+
+**Review & Sign** is a **component** (`apps/web/components/app/ReviewAndSign.tsx`),
+NOT a route — both the live and dictate/upload paths converge on it. It shows
+the medical note, the exam ledger, the two-lane `PlanComposer` (draft Rx vs
+AI-suggested plan), the differential / orders / interop panels, then signs
+(WebAuthn-gated, `ENCOUNTER_NOTE_SIGNED`) and shares the after-visit summary /
+Rx (+ PDF). **Pilot insights**: `/app/insights` (`InsightsBoard` +
+`apps/web/lib/insights.ts`), a rollup over `LiveConsultMetric` +
+`LIVE_SUGGESTION_*` with anonymised CSV export.
+
+**Doctor contracts** (`packages/contracts/src/`): `live-encounter.ts` (the
+wire protocol — `LiveGatewayEvent` / `Command`, `Utterance`, `VoiceCommand`,
+`MeterSummary`, `LiveNoteInput`, `LiveSuggestionEvent`), `live-reasoning.ts`,
+`case-state.ts`, `rx-pad.ts` (`RxPadV1` + DS10-B patch ops), `clinic-queue.ts`,
+`insights.ts`, `medical-note.ts` (`MedicalEncounterNoteV1`),
+`medication-order.ts`, `chronic.ts`.
+
+**Doctor schema** (`prisma/schema.prisma`): `PractitionerVertical`,
+`CaptureMode {LIVE,DICTATE,UPLOAD}`, `Session.tokenNumber`,
+`Session.captureMode`, `Psychologist.defaultCaptureMode`, `NoteDraft.rxPad`
+(+ `TherapyNote.rxPad` snapshot at sign), `LiveConsultMetric`, `GeminiPass`
++= `PASS_9_DIFFERENTIAL` / `PASS_10_FINDINGS` / `PASS_11_REASONING`, plus the
+chronic-care + orders models. Chronic-disease tracking **reuses** the Sprint-20
+Journey / reliable-change engine.
+
+**Gotchas.**
+
+- The gateway **fails closed in production** without `LIVE_GATEWAY_SECRET`.
+- There is **no committed Cloud Run manifest** — deploy is the `Dockerfile` +
+  env; the browser default `NEXT_PUBLIC_LIVE_GATEWAY_URL` is the localhost dev URL.
+- The gateway has **no Prisma** — never add DB writes there; relay to an
+  `apps/web` route instead.
+- `PASS_11_REASONING`'s prompt **version string is `REASONING_SYSTEM_PROMPT_V2`**
+  even though the const is named `..._V1` — persist the string.
+- Any new live copilot suggestion needs its lifecycle audit written via the
+  `live-suggestion` route (four literal `writeAudit` calls) or the
+  audit-coverage chaos test breaks.
 
 ## 4. Conventions to follow
 
@@ -408,22 +554,25 @@ The five existing passes are the template — pick the closest analogue.
 
 ## 8. Documentation map
 
-| File                              | What it covers                                                                                                                                                              |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `README.md`                       | Quick getting-started + current product summary                                                                                                                             |
-| `CLAUDE.md`                       | This file — operational guide + conventions                                                                                                                                 |
-| `docs/CLINICAL_COPILOT.md`        | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                                                                                                  |
-| `docs/MEASUREMENT_BASED_CARE.md`  | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report                                                                                                 |
-| `docs/DOCTOR_VERTICAL.md`         | **Build spec** — doctor (super-specialty OPD) vertical: live-scribe pivot + reuse plan                                                                                      |
-| `docs/DOCTOR_VERTICAL_SPRINTS.md` | **Sprint plan** — doctor vertical task breakdown, sprints DV0–DV8                                                                                                           |
-| `docs/SPRINT_21.md`               | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status)                                                                                   |
-| `docs/EXECUTION_PLAN.md`          | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+                                                                                     |
-| `docs/SETUP.md`                   | Account procurement + env var matrix per sprint                                                                                                                             |
-| `docs/dpdp-data-flow.md`          | DPDP compliance data flows + DSR endpoints + cross-border                                                                                                                   |
-| `docs/security-audit.md`          | OWASP top-10 + secrets + IAM matrix                                                                                                                                         |
-| `docs/AUTH_SESSION.md`            | **Auth & session model** — `__session` cookie, page vs API guards, Bearer self-heal, the sign-out-must-be-POST rule, "bounced to /login" troubleshooting (2026-06 incident) |
-| `docs/runbooks/README.md`         | Operational runbooks index                                                                                                                                                  |
-| `docs/load-test-results.md`       | Pre-pilot load test record                                                                                                                                                  |
+| File                               | What it covers                                                                                                                                                              |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `README.md`                        | Quick getting-started + current product summary                                                                                                                             |
+| `CLAUDE.md`                        | This file — operational guide + conventions                                                                                                                                 |
+| `docs/CLINICAL_COPILOT.md`         | Sprint 13-19 — clinical co-pilot pivot + intake-aware flow                                                                                                                  |
+| `docs/MEASUREMENT_BASED_CARE.md`   | Sprint 20+ — Journey hub, reliable-change engine, episodes, Progress Report                                                                                                 |
+| `docs/DOCTOR_VERTICAL.md`          | Doctor vertical — foundational architecture + rationale; **DV0–DV8 SHIPPED** (see § 3b)                                                                                     |
+| `docs/DOCTOR_VERTICAL_SPRINTS.md`  | Doctor vertical DV0–DV8 sprint record — **SHIPPED** (per-sprint "Status: built" blocks)                                                                                     |
+| `docs/DOCTOR_SCRIBE_V2_PLAN.md`    | Rx-first V2 strategy — § 5 architecture **SHIPPED**; § 3/6/7 (benchmark, pricing, pilot) forward-looking                                                                    |
+| `docs/DOCTOR_SCRIBE_V2_SPRINTS.md` | Doctor Scribe V2 DS0–DS9 — live reasoning engine + Rx pad + OPD queue + insights, **SHIPPED**                                                                               |
+| `docs/DS11_CONSULT_UX_SPRINTS.md`  | Consult UX v3 (DS11.1–11.8) — live-first single Review & Sign surface + CaptureMode, **SHIPPED**                                                                            |
+| `docs/SPRINT_21.md`                | Sprint 21 incremental polish (diagnosis history, intake modify, My Practice, goal status)                                                                                   |
+| `docs/EXECUTION_PLAN.md`           | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+                                                                                     |
+| `docs/SETUP.md`                    | Account procurement + env var matrix per sprint                                                                                                                             |
+| `docs/dpdp-data-flow.md`           | DPDP compliance data flows + DSR endpoints + cross-border                                                                                                                   |
+| `docs/security-audit.md`           | OWASP top-10 + secrets + IAM matrix                                                                                                                                         |
+| `docs/AUTH_SESSION.md`             | **Auth & session model** — `__session` cookie, page vs API guards, Bearer self-heal, the sign-out-must-be-POST rule, "bounced to /login" troubleshooting (2026-06 incident) |
+| `docs/runbooks/README.md`          | Operational runbooks index                                                                                                                                                  |
+| `docs/load-test-results.md`        | Pre-pilot load test record                                                                                                                                                  |
 
 ## 9. Running the codebase locally
 
@@ -444,29 +593,36 @@ all run with deterministic mocks. No GCP creds needed for dev.
 
 ## 10. Critical files / where to look first
 
-| When you want to…                                | Start here                                                                                                                    |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| Add a new API endpoint                           | `apps/web/app/api/v1/sessions/[id]/note/modify/route.ts` (the canonical pattern)                                              |
-| Add a new Gemini pass                            | `packages/llm/src/backends/vertex-pro-global.backend.ts` + this CLAUDE.md § 5                                                 |
-| Add a new tab on the session detail page         | `apps/web/app/app/sessions/[id]/page.tsx` + `apps/web/components/app/SessionWorkspaceTabs.tsx`                                |
-| Add a new audit action                           | `packages/contracts/src/audit.ts` + this CLAUDE.md § 6                                                                        |
-| Change the SOAP note shape                       | `packages/contracts/src/note.ts` (`TherapyNoteV1Schema`)                                                                      |
-| Change the intake note shape                     | `packages/contracts/src/note.ts` (`IntakeNoteV1Schema`)                                                                       |
-| Change the Clinical Brief shape                  | `packages/contracts/src/clinical.ts` (`ClinicalReportV1Schema`)                                                               |
-| Change the Initial Assessment Brief shape        | `packages/contracts/src/clinical.ts` (`InitialAssessmentBriefV1Schema`)                                                       |
-| Add a UI primitive                               | Don't. Compose existing ones in `apps/web/components/ui/`                                                                     |
-| Add a patient-facing share artefact type         | `packages/contracts/src/share.ts` + `apps/web/lib/share-snapshots.ts` + `apps/web/app/p/[token]/page.tsx`                     |
-| Curate a new scored instrument                   | `packages/clinical/src/instruments/index.ts` + add tests                                                                      |
-| Add a new India crisis hotline                   | `packages/clinical/src/crisis.ts`                                                                                             |
-| Edit the session-start cascade                   | `apps/web/lib/session-defaults.ts` + `apps/web/app/api/v1/clients/[id]/session-defaults/route.ts`                             |
-| Change the Journey hub / reliable-change verdict | `apps/web/lib/journey.ts` + `packages/clinical/src/instruments/change-score.ts`                                               |
-| Change the Progress Report copy                  | `apps/web/lib/progress-report.ts` (deterministic — no LLM) + portal render branch in `apps/web/app/p/[token]/page.tsx`        |
-| Open / close a treatment episode                 | `apps/web/app/api/v1/sessions/route.ts` (opens) + `apps/web/app/api/v1/clients/[id]/discharge/route.ts` (closes)              |
-| Toggle a goal status                             | `apps/web/app/api/v1/treatment-plans/[id]/goals/[index]/route.ts`                                                             |
-| Debug auth / "bounced to /login"                 | `docs/AUTH_SESSION.md` (log-line → cause table) + `apps/web/lib/auth-page.ts` + `apps/web/lib/auth-server.ts`                 |
-| Add a route with a side effect                   | Make it **POST-only** (prefetchers fire `GET`). Pattern: `apps/web/app/api/v1/auth/signout/route.ts`                          |
-| Make a client component call `/api/v1`           | Just `fetch('/api/v1/...')` — `AuthedFetchProvider` adds the Bearer token (`apps/web/components/app/AuthedFetchProvider.tsx`) |
-| Change the Pass-3 crisis-flag normaliser         | `packages/llm/src/backends/pass3-normalise.ts` (+ its spec) — wired into `vertex-clinical.backend.ts`                         |
+| When you want to…                                | Start here                                                                                                                       |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new API endpoint                           | `apps/web/app/api/v1/sessions/[id]/note/modify/route.ts` (the canonical pattern)                                                 |
+| Add a new Gemini pass                            | `packages/llm/src/backends/vertex-pro-global.backend.ts` + this CLAUDE.md § 5                                                    |
+| Add a new tab on the session detail page         | `apps/web/app/app/sessions/[id]/page.tsx` + `apps/web/components/app/SessionWorkspaceTabs.tsx`                                   |
+| Add a new audit action                           | `packages/contracts/src/audit.ts` + this CLAUDE.md § 6                                                                           |
+| Change the SOAP note shape                       | `packages/contracts/src/note.ts` (`TherapyNoteV1Schema`)                                                                         |
+| Change the intake note shape                     | `packages/contracts/src/note.ts` (`IntakeNoteV1Schema`)                                                                          |
+| Change the Clinical Brief shape                  | `packages/contracts/src/clinical.ts` (`ClinicalReportV1Schema`)                                                                  |
+| Change the Initial Assessment Brief shape        | `packages/contracts/src/clinical.ts` (`InitialAssessmentBriefV1Schema`)                                                          |
+| Add a UI primitive                               | Don't. Compose existing ones in `apps/web/components/ui/`                                                                        |
+| Add a patient-facing share artefact type         | `packages/contracts/src/share.ts` + `apps/web/lib/share-snapshots.ts` + `apps/web/app/p/[token]/page.tsx`                        |
+| Curate a new scored instrument                   | `packages/clinical/src/instruments/index.ts` + add tests                                                                         |
+| Add a new India crisis hotline                   | `packages/clinical/src/crisis.ts`                                                                                                |
+| Edit the session-start cascade                   | `apps/web/lib/session-defaults.ts` + `apps/web/app/api/v1/clients/[id]/session-defaults/route.ts`                                |
+| Change the Journey hub / reliable-change verdict | `apps/web/lib/journey.ts` + `packages/clinical/src/instruments/change-score.ts`                                                  |
+| Change the Progress Report copy                  | `apps/web/lib/progress-report.ts` (deterministic — no LLM) + portal render branch in `apps/web/app/p/[token]/page.tsx`           |
+| Open / close a treatment episode                 | `apps/web/app/api/v1/sessions/route.ts` (opens) + `apps/web/app/api/v1/clients/[id]/discharge/route.ts` (closes)                 |
+| Toggle a goal status                             | `apps/web/app/api/v1/treatment-plans/[id]/goals/[index]/route.ts`                                                                |
+| Work on the doctor live consult (gateway)        | `services/live-gateway/src/live-session.ts` (+ `vad`/`case-state`/`reasoning-loop`/`rx-pad`) — see § 3b                          |
+| Change the live reasoning pass                   | `packages/llm/src/backends/vertex-reasoning.backend.ts` + `reasoning-normalise.ts` + prompt `REASONING_SYSTEM_PROMPT_V1`         |
+| Persist a live gateway event                     | Relay from `apps/web/components/app/DoctorLiveEncounter.tsx` → an `apps/web/app/api/v1/sessions/[id]/live-*` route               |
+| Change the OPD queue / token assignment          | `apps/web/lib/clinic-queue.ts` + `apps/web/app/app/clinic/page.tsx` + `apps/web/app/api/v1/clinic/queue/route.ts`                |
+| Change the doctor Review & Sign surface          | `apps/web/components/app/ReviewAndSign.tsx` (a component — both live + batch converge here)                                      |
+| Change the Rx pad                                | `packages/contracts/src/rx-pad.ts` + `services/live-gateway/src/rx-pad.ts` + `apps/web/app/api/v1/sessions/[id]/rx-pad/route.ts` |
+| Change doctor capture modes                      | `apps/web/components/app/StartEncounterButton.tsx` + `CaptureMode` in `prisma/schema.prisma` + `defaultCaptureMode`              |
+| Debug auth / "bounced to /login"                 | `docs/AUTH_SESSION.md` (log-line → cause table) + `apps/web/lib/auth-page.ts` + `apps/web/lib/auth-server.ts`                    |
+| Add a route with a side effect                   | Make it **POST-only** (prefetchers fire `GET`). Pattern: `apps/web/app/api/v1/auth/signout/route.ts`                             |
+| Make a client component call `/api/v1`           | Just `fetch('/api/v1/...')` — `AuthedFetchProvider` adds the Bearer token (`apps/web/components/app/AuthedFetchProvider.tsx`)    |
+| Change the Pass-3 crisis-flag normaliser         | `packages/llm/src/backends/pass3-normalise.ts` (+ its spec) — wired into `vertex-clinical.backend.ts`                            |
 
 ## 11. What's NOT in scope (still on the backlog)
 
@@ -489,20 +645,20 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   PII field: `contactPhone` + `contactEmail` (Sprint 32) and `fullName`
   (Sprint 54), across create / update / DSR-correction + the
   `/admin/encryption/backfill` route, via `apps/web/lib/tenant-crypto.ts`
-  (LocalDevKmsProvider in dev). READ CUTOVER DONE (Sprint 72): every
-  Client PII read resolves through `apps/web/lib/client-pii.ts`
-  (`resolveClientPii` / `decryptClientField` — prefer the encrypted
-  column, fall back to plaintext when the ciphertext is absent or fails
-  to decrypt, so un-backfilled rows keep working). STILL PENDING, and
-  prod-data-dependent: the plaintext-column DROP (safe only once every
-  prod row is backfilled + all reads go through the resolver). The
-  production KMS is now WIRED (S32 Phase 2): `KMS_BACKEND=gcp-kms` uses
-  Google Cloud KMS (asia-south1) over the REST API via `GcpKmsProvider`
-  (`packages/crypto`) + `apps/web/lib/gcp-kms-rest.ts`, reusing the Vertex
-  service account (`GOOGLE_APPLICATION_CREDENTIALS_JSON`) — no gRPC SDK, no
-  new credential. Remaining is OPERATIONAL: create the keyring/key + grant
-  the SA encrypt/decrypt, set `KMS_BACKEND=gcp-kms` + `GCP_KMS_KEY_NAME`,
-  run the backfill, then drop the plaintext columns. `AwsKmsProvider` stays
+  (LocalDevKmsProvider in dev). READ CUTOVER DONE (Sprint 72) + **PLAINTEXT
+  DROP DONE (S32 Phase 2, 2026-07)**: Google Cloud KMS is live in prod
+  (`KMS_BACKEND=gcp-kms`, asia-south1, over the REST API via `GcpKmsProvider`
+  in `packages/crypto` + `apps/web/lib/gcp-kms-rest.ts`, reusing the Vertex
+  service account `GOOGLE_APPLICATION_CREDENTIALS_JSON` — no gRPC SDK, no new
+  credential), and the legacy plaintext columns (`fullName` / `contactPhone` /
+  `contactEmail`) were **DROPPED**. `apps/web/lib/client-pii.ts` is now the
+  single **decrypt-only** read path — no plaintext fallback: `resolveClientPii`
+  / `decryptClientField` decrypt the `*Encrypted` columns and render `''`
+  (logged) on an undecryptable value. Writes (create / update / DSR-correction)
+  set only the `*Encrypted` columns. Remaining is OPERATIONAL: any pre-cutover
+  prod row still holds old local-dev ciphertext that won't decrypt under the GCP
+  key — run `/admin/encryption/backfill` for those (else they render blank; a
+  visibly-broken row can be archived from its roster). `AwsKmsProvider` stays
   in `packages/crypto` for portability but is not wired in apps/web.
   `NoteDraft.transcriptEncrypted` now
   dual-writes at the source (note-orchestrator, Sprint 54) + backfill.
@@ -556,8 +712,15 @@ CLIENT_EMAIL/PRIVATE_KEY` on the prod deployment (then bypass
   with the edited `{ treatmentPlan }` to
   `app/api/v1/clinical-reports/[id]/sections/[section]` (versions the plan).
 
+**Doctor vertical (§ 3b) — SHIPPED, not backlog.** DV0–DV8 + DS0–DS11 are
+built and live; only operational items remain: set the gateway's prod URL
+(`NEXT_PUBLIC_LIVE_GATEWAY_URL`) + `LIVE_GATEWAY_SECRET`, and the forward-
+looking GTM work (Hinglish ASR benchmark, pricing, first-doctor pilot) in
+`docs/DOCTOR_SCRIBE_V2_PLAN.md` § 3/6/7.
+
 When asked to "do the next thing", default to the pilot-blocking
 section unless the user has redirected. **NB:** this backlog drifts stale —
 much of it has been built since it was written (treatment-plan edit,
-billing lifecycle, observability wiring were all listed as open but are
-done). VERIFY a backlog item against the code before building it.
+billing lifecycle, observability wiring, the PII plaintext drop were all
+listed as open but are done). VERIFY a backlog item against the code before
+building it.
