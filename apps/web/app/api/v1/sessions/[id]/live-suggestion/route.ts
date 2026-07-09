@@ -41,12 +41,7 @@ export async function POST(
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
-  if (session.psychologist.vertical !== 'DOCTOR') {
-    return NextResponse.json(
-      { error: 'Live copilot suggestions are for the doctor vertical only.' },
-      { status: 409 },
-    );
-  }
+  // Sprint TS1 — both verticals relay live copilot suggestion lifecycle events.
 
   const metadata = {
     sessionId,
