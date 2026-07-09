@@ -39,6 +39,9 @@ export interface RecorderHandle {
   startedAt: number | null;
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  /** FLOW-2 — drain the IDB queue once more; resolves to the count still
+   *  pending (0 = safe to generate the note). */
+  drainPending: () => Promise<number>;
 }
 
 const SUPPORTS_DISPLAY_MEDIA =
@@ -231,6 +234,25 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   // Stable wrapper for the consumer.
   const stop = useCallback(() => stopInternal(), [stopInternal]);
 
+  // FLOW-2 — drain the IndexedDB queue once more and report how many chunks
+  // still failed to upload. The End flow calls this in a retry loop so it can
+  // hold ("Uploading the last part… n left") until the tail is safely on the
+  // server, instead of generating a note from partial audio.
+  const drainPending = useCallback(async (): Promise<number> => {
+    if (uploaderRef.current) {
+      setDraining(true);
+      try {
+        await uploaderRef.current.drainSession(opts.sessionId);
+      } finally {
+        setDraining(false);
+      }
+    }
+    const remaining = (await ChunkStore.listForSession(opts.sessionId)).length;
+    setPendingCount(remaining);
+    if (remaining === 0) await SessionStore.clear(opts.sessionId);
+    return remaining;
+  }, [opts.sessionId]);
+
   // beforeunload warning while recording — discourage accidental refresh.
   useEffect(() => {
     if (state !== 'recording') return;
@@ -272,6 +294,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     startedAt,
     start,
     stop,
+    drainPending,
   };
 }
 
