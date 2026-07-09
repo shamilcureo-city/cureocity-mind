@@ -4,6 +4,7 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ClientsHeader } from '@/components/app/ClientsHeader';
+import { ArchivePatientButton } from '@/components/app/ArchivePatientButton';
 import { ClientSearchControls } from '@/components/app/ClientSearchControls';
 import { HelpNote } from '@/components/app/EduHeading';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
@@ -163,10 +164,13 @@ export default async function ClientsPage({
         ) : (
           <ul className="divide-y divide-[var(--color-line-soft)]">
             {pageRows.map((c, i) => (
-              <li key={c.id}>
+              <li
+                key={c.id}
+                className="flex items-center transition-colors hover:bg-[var(--color-surface-soft)]"
+              >
                 <Link
                   href={`/app/clients/${c.id}`}
-                  className="grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
+                  className="grid min-w-0 flex-1 grid-cols-[2fr_1fr_1fr_1fr_1.5fr] items-center gap-3 px-5 py-4 text-sm"
                 >
                   <span className="flex flex-wrap items-center gap-2 font-medium text-[var(--color-ink)]">
                     {names[i]}
@@ -185,6 +189,14 @@ export default async function ClientsPage({
                     {c.sessions[0] ? formatDateTime(c.sessions[0].scheduledAt) : '—'}
                   </span>
                 </Link>
+                <div className="shrink-0 pr-4">
+                  <ArchivePatientButton
+                    clientId={c.id}
+                    noun="client"
+                    name={names[i]}
+                    variant="row"
+                  />
+                </div>
               </li>
             ))}
           </ul>
