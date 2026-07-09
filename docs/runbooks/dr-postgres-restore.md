@@ -1,100 +1,127 @@
-# Disaster recovery — Postgres restore
+# Disaster recovery — database restore (Neon)
 
-**Severity:** invoked manually during DR. **Owner:** platform on-call.
+**Severity:** invoked manually during DR. **Owner:** the founder / whoever
+holds the Neon + Vercel credentials (there is no separate platform on-call —
+see the bus-factor note at the end).
 
-## Targets (gap G12)
+> This runbook describes the **real** production stack: **Vercel** (stateless
+> Next.js app + serverless API routes), **Neon** (serverless Postgres, the
+> single source of truth — `prisma/schema.prisma`), and **Vercel Blob / S3**
+> (audio chunks + generated PDFs, via `packages/storage`). There is **no
+> Kubernetes and no self-managed Postgres**; the `services/*` NestJS apps are
+> non-live scaffolds (CLAUDE.md §2). Any earlier version of this file that
+> told you to `kubectl scale` or replay WAL from an S3 bucket was describing
+> infrastructure that never existed — ignore it.
 
-- **RPO** (recovery point objective) ≤ **15 minutes.**
-- **RTO** (recovery time objective) ≤ **1 hour.**
+## Targets
 
-The 15-minute RPO is achieved via continuous WAL archival to S3
-(`cureocity-mind-pg-wal` bucket, ap-south-1) plus daily base backups.
-RTO is bounded by network speed pulling the most recent base backup
+- **RPO** (recovery point objective): bounded by Neon's **history retention
+  window**. Neon streams WAL continuously, so PITR granularity is effectively
+  to-the-second within the retention window — confirm the plan's retention
+  (Console → Project → Settings → _Storage / History retention_; paid plans
+  default to 7 days). **Action item:** set retention ≥ 7 days before pilot.
+- **RTO** (recovery time objective): minutes. A Neon restore is a metadata
+  operation (create a branch at a timestamp) + a Vercel env repoint +
+  redeploy — no data copy over the wire.
 
-- WAL replay; tested by the Sprint 10 PR 3 DR script.
+## What can fail, and the recovery for each
 
-## Pre-flight (every restore)
+| Failure                                                                                 | Recovery                                                                                                                                                                                                                                                                                             |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Bad write / accidental delete / bad migration** (data is corrupt but Neon is healthy) | Neon **PITR** to just before the incident (below). This is the common case.                                                                                                                                                                                                                          |
+| **Neon project/branch lost or unreachable**                                             | Restore from Neon's retained history into a new branch, or (worst case) contact Neon support — Neon replicates storage across AZs, so a total loss is a provider-level event.                                                                                                                        |
+| **Audio chunk / PDF loss**                                                              | Vercel Blob + S3 are independently durable object stores (cross-AZ). Objects are not deleted by a DB incident. A `NoteDraft` re-generation re-reads the same `AudioChunk` rows; if a Blob object is genuinely gone, the transcript on the `NoteDraft` row is still the source of truth for the note. |
+| **Vercel app down**                                                                     | Stateless — redeploy the last good commit, or roll back in the Vercel dashboard. No data lives in the app tier.                                                                                                                                                                                      |
 
-1. **Stop traffic to the failed primary.** In Kubernetes:
+## Restore procedure — Neon Point-in-Time Restore
+
+Do this from the Neon Console (or `neonctl`). **Prefer restoring into a NEW
+branch** and repointing, rather than an in-place reset — it's non-destructive
+and lets you diff the recovered data before cutting over.
+
+1. **Freeze writes (optional but preferred).** In Vercel → Project →
+   Settings → Environment Variables, you can flip the app into maintenance by
+   pointing `DATABASE_URL` at a paused/empty branch, or simply proceed —
+   Neon PITR reads from history, it doesn't need the primary stopped.
+
+2. **Identify the recovery timestamp.** The last-known-good moment, just
+   before the incident. Note it in UTC in the incident ticket.
+
+3. **Create a branch at that timestamp** (time travel):
+   - Console: Project → **Branches** → _Create branch_ → _From a point in
+     time_ → pick the timestamp → name it `restore-<incident-date>`.
+   - CLI:
+     ```bash
+     neonctl branches create \
+       --project-id "$NEON_PROJECT_ID" \
+       --name "restore-<incident-date>" \
+       --parent-timestamp "2026-07-08T16:30:00Z"
+     ```
+
+4. **Get the new branch's connection strings** (pooled + unpooled):
+
+   ```bash
+   neonctl connection-string "restore-<incident-date>" --pooled
+   neonctl connection-string "restore-<incident-date>"          # unpooled
    ```
-   kubectl -n cureocity scale deploy --replicas=0 \
-     patient-model-service scribe-service modality-workflow-service \
-     affect-engine-service continuity-service pdf-generator-service
-   ```
-   In docker-compose dev:
-   ```
-   docker compose -f infrastructure/docker-compose.yml stop \
-     postgres
-   ```
-2. **Snapshot the broken primary's WAL position** (if reachable):
-   ```
-   pg_controldata $PGDATA | grep "Latest checkpoint location"
-   ```
-   File this in the incident ticket.
 
-## Restore from base backup + WAL
+5. **Verify the recovered branch BEFORE cutover** (see next section). Point a
+   scratch `DATABASE_URL` at it locally and spot-check.
 
-Real production runbook (KMS-encrypted backups in S3):
+6. **Cut over.** In Vercel → Environment Variables (Production), set:
+   - `DATABASE_URL` → the new branch's **pooled** string,
+   - `DATABASE_URL_UNPOOLED` → the new branch's **unpooled** string,
+     then **redeploy** (Deployments → … → _Redeploy_, or push a no-op commit).
+     Env changes only take effect on a new deployment.
 
-```bash
-# 1. Identify the latest base backup
-aws s3 ls s3://cureocity-mind-pg-wal/base/ --recursive | sort | tail -1
-
-# 2. Restore to a clean data directory
-mkdir -p /var/lib/postgresql/restore && cd /var/lib/postgresql/restore
-aws s3 cp s3://cureocity-mind-pg-wal/base/<latest>.tar.gz - | tar xzf -
-
-# 3. Drop in a recovery.signal + restore_command in postgresql.conf
-cat > postgresql.conf.append <<EOF
-restore_command = 'aws s3 cp s3://cureocity-mind-pg-wal/wal/%f %p'
-recovery_target_time = '<incident-timestamp - 1 minute>'
-recovery_target_action = 'promote'
-EOF
-cat postgresql.conf.append >> postgresql.conf
-touch recovery.signal
-
-# 4. Start Postgres pointed at the restore directory
-pg_ctl -D /var/lib/postgresql/restore -l restore.log start
-
-# 5. Tail the log until "consistent recovery state reached" then
-#    "selected new timeline ID" — recovery is complete.
-tail -f restore.log
-```
+7. Once traffic is healthy on the restored branch, you can promote it to be
+   the project's default/primary in the Neon console and retire the old one.
 
 ## Verify before re-opening traffic
 
-1. Check the latest audit row:
-   ```
-   SELECT MAX(created_at) FROM audit_logs;
-   ```
-   If the value is more than 15 minutes before the incident time,
-   the RPO has been breached — file a P0.
-2. Spot-check a recent therapy note:
-   ```
-   SELECT id, signed_at FROM therapy_notes ORDER BY signed_at DESC LIMIT 1;
-   ```
-3. Run the chaos audit test against the recovered DB to confirm
-   structural integrity.
+Run against the **recovered branch's** connection string:
 
-## Re-opening traffic
+1. **Freshness** — the newest audit row should be at (or just before) the
+   recovery timestamp, not older:
+   ```sql
+   SELECT MAX("createdAt") FROM audit_logs;
+   ```
+2. **Spot-check a recent signed note** exists and is intact:
+   ```sql
+   SELECT id, "signedAt" FROM therapy_notes ORDER BY "signedAt" DESC NULLS LAST LIMIT 1;
+   ```
+3. **Schema integrity** — migrations are all applied (no drift):
+   ```bash
+   DATABASE_URL=<recovered-branch> pnpm exec prisma migrate status
+   ```
+4. **Audit-coverage** — the contracts chaos test still passes against the
+   recovered shape (`pnpm --filter @cureocity/contracts test`).
 
-1. Update the connection string in service configs (or repoint via
-   DNS / PgBouncer if that abstraction is in place).
-2. Scale services back up gradually — start at 1 replica, watch p95
-   latency for 5 minutes, then scale to target.
-3. Announce in the operations Slack channel with timeline + RPO
-   achieved.
+## Audio + PDFs (Vercel Blob / S3)
 
-## DR drill expectations
+- Audio chunks live as `AudioChunk` **BYTEA rows in Postgres** (the
+  chunk-upload route writes Postgres, not Blob — see
+  `apps/web/app/api/v1/audio/chunks/upload/route.ts`), so they restore with
+  the Neon branch. Generated PDFs + any blob-stored assets go through
+  `packages/storage` (Vercel Blob / S3), which are independently durable and
+  unaffected by a DB incident — no separate restore step.
 
-- **Quarterly drill** (Sprint 10 ships the first one): execute this
-  runbook against the staging cluster, time each step, file the
-  result in `docs/runbooks/dr-log.md`.
-- Drill failure (didn't meet RTO ≤ 1 hour) blocks the pilot
-  go-live.
+## Mandatory before pilot — run one real drill
+
+**None of the above has been rehearsed.** Before go-live, the credential
+holder MUST:
+
+1. Confirm Neon history retention ≥ 7 days is enabled on the prod project.
+2. Do one **real** PITR into a throwaway branch, run the four verify steps
+   against it, and record the wall-clock RTO + observed RPO in
+   `docs/runbooks/dr-log.md`.
+3. Practice the Vercel env repoint + redeploy on a preview deployment.
+
+A restore path that has never been executed is not a recovery plan. This
+drill is a pilot blocker.
 
 ## Related
 
-- Backup strategy: pgBackRest / wal-g — choice TBD with infra lead.
-- Sprint 10 PR 3 — DR script `scripts/dr-test.ts`.
-- DPDP § 8(7) — backups are a Fiduciary duty.
+- Neon PITR docs: <https://neon.tech/docs/introduction/point-in-time-restore>
+- `scripts/vercel-db-setup.sh` — the deploy-time migrate + P3009 self-heal.
+- DPDP § 8(7) — backups / continuity are a Data-Fiduciary duty.
