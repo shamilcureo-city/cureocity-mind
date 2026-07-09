@@ -46,10 +46,30 @@ interface CachedKey {
 type KmsBackend = 'local-dev' | 'aws-kms' | 'gcp-kms';
 
 interface TenantCrypto {
+  /** Primary provider — used for generateDataKey (new DEKs). */
   kms: IKmsProvider;
+  /**
+   * S32 Phase 2 cutover fallback: a LocalDevKmsProvider kept alongside the GCP
+   * primary so DEKs minted BEFORE the gcp-kms switch (keyId 'local-dev-kms-v1')
+   * still unwrap. `getOrCreateDek` then retires such a key and re-provisions
+   * under GCP, so new writes move to GCP while old ciphertext stays readable
+   * via the retired row. null on a local-dev or aws deployment.
+   */
+  localDev: IKmsProvider | null;
   encryptor: IFieldEncryptor;
   cache: Map<string, CachedKey>;
   backend: KmsBackend;
+}
+
+/**
+ * Route an unwrap to the provider that can service the DEK's keyId. GCP DEKs
+ * carry a `projects/…` resource name; anything else is a pre-cutover local-dev
+ * DEK. When there's no fallback (local-dev / aws deployments) the primary
+ * handles everything.
+ */
+function providerFor(tc: TenantCrypto, keyId: string): IKmsProvider {
+  if (tc.localDev && !keyId.startsWith('projects/')) return tc.localDev;
+  return tc.kms;
 }
 
 declare global {
@@ -60,6 +80,7 @@ function instance(): TenantCrypto {
   if (globalThis.__cureocityTenantCrypto) return globalThis.__cureocityTenantCrypto;
   const backend = (process.env['KMS_BACKEND'] ?? 'local-dev') as KmsBackend;
   let kms: IKmsProvider;
+  let localDev: IKmsProvider | null = null;
   if (backend === 'gcp-kms') {
     // S32 Phase 2 — production KMS is Google Cloud KMS (asia-south1), reusing
     // the Vertex service account (GOOGLE_APPLICATION_CREDENTIALS_JSON) over the
@@ -73,6 +94,10 @@ function instance(): TenantCrypto {
       );
     }
     kms = new GcpKmsProvider(gcpKmsRestClient(), keyName);
+    // Cutover fallback: unwrap any DEK minted under local-dev before this
+    // switch. Uses the same CRYPTO_DEV_MASTER_SECRET that wrapped it; absent
+    // that secret there can be no such row, so the fallback stays off.
+    if (process.env['CRYPTO_DEV_MASTER_SECRET']) localDev = new LocalDevKmsProvider();
   } else if (backend === 'aws-kms') {
     // Not wired: S32 Phase 2 chose GCP Cloud KMS (one cloud + region as Vertex,
     // reuses the existing SA). AwsKmsProvider stays in @cureocity/crypto for
@@ -100,6 +125,7 @@ function instance(): TenantCrypto {
   }
   const cached: TenantCrypto = {
     kms,
+    localDev,
     encryptor: new AesGcmFieldEncryptor(),
     cache: new Map(),
     backend,
@@ -162,9 +188,29 @@ async function getOrCreateDek(psychologistId: string): Promise<UnwrappedDataKey>
     orderBy: { createdAt: 'desc' },
   });
 
-  const dek = active
-    ? await tc.kms.unwrapDataKey({ keyId: active.kmsKeyId, wrappedKey: active.wrappedKey })
-    : await provisionNewDek(psychologistId);
+  let dek: UnwrappedDataKey;
+  if (!active) {
+    dek = await provisionNewDek(psychologistId);
+  } else if (tc.backend === 'gcp-kms' && !active.kmsKeyId.startsWith('projects/')) {
+    // S32 Phase 2 cutover — the active DEK predates the gcp-kms switch (it was
+    // wrapped by local-dev). Retire it so new writes use a GCP-wrapped DEK;
+    // ciphertext already written under it stays readable via the retired row
+    // (getDekByEnvelope + the local-dev routing fallback). Lossless — the DEK
+    // keyId is embedded in every envelope, so we rotate rather than re-wrap.
+    await prisma.psychologistTenantKey.update({
+      where: { id: active.id },
+      data: { retiredAt: new Date() },
+    });
+    console.info(
+      `[tenant-crypto] cutover: retired local-dev DEK psy=${psychologistId} keyId=${active.kmsKeyId}; provisioning GCP DEK`,
+    );
+    dek = await provisionNewDek(psychologistId);
+  } else {
+    dek = await providerFor(tc, active.kmsKeyId).unwrapDataKey({
+      keyId: active.kmsKeyId,
+      wrappedKey: active.wrappedKey,
+    });
+  }
 
   tc.cache.set(psychologistId, { dek, expiresAt: Date.now() + CACHE_TTL_MS });
   return dek;
@@ -184,7 +230,10 @@ async function getDekByEnvelope(
     orderBy: { createdAt: 'desc' },
   });
   if (!row) return null;
-  return tc.kms.unwrapDataKey({ keyId: row.kmsKeyId, wrappedKey: row.wrappedKey });
+  return providerFor(tc, row.kmsKeyId).unwrapDataKey({
+    keyId: row.kmsKeyId,
+    wrappedKey: row.wrappedKey,
+  });
 }
 
 async function provisionNewDek(psychologistId: string): Promise<UnwrappedDataKey> {
