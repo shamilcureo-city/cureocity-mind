@@ -9,6 +9,7 @@ import { PlanComposer } from './PlanComposer';
 import { EncounterDifferentialPanel } from './EncounterDifferentialPanel';
 import { EncounterOrdersPanel } from './EncounterOrdersPanel';
 import { EncounterInteropPanel } from './EncounterInteropPanel';
+import { postSignNote } from '../../lib/sign-note';
 
 /**
  * Sprint DS11.2 — the ONE review-and-sign surface.
@@ -68,16 +69,14 @@ export function ReviewAndSign({
     try {
       const payload = JSON.stringify(note);
       const payloadHashHex = await sha256Hex(payload);
-      const res = await fetch(`/api/v1/sessions/${sessionId}/sign`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          payload,
-          payloadHashHex,
-          note,
-          edits: [],
-          signedAt: new Date().toISOString(),
-        }),
+      // TS0 (F6) — steps up to a WebAuthn assertion only when the account has
+      // a registered passkey (the route 401s the assertion-free attempt then).
+      const res = await postSignNote(sessionId, {
+        payload,
+        payloadHashHex,
+        note,
+        edits: [],
+        signedAt: new Date().toISOString(),
       });
       if (res.status === 409) {
         setSigned(true); // already signed in a previous visit

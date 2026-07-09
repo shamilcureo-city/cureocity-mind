@@ -20,6 +20,7 @@ import { IntakeNoteEditor } from './IntakeNoteEditor';
 import { NoteToolbar } from './NoteToolbar';
 import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
+import { postSignNote } from '../../lib/sign-note';
 import { isBuiltinTemplateId, resolveBuiltinTemplate } from '../../lib/builtin-templates';
 import {
   NOTE_VERBOSITIES,
@@ -325,16 +326,14 @@ export function NotesTab({
       // long as the same bytes round-trip.
       const payload = JSON.stringify({ note, signedAt });
       const payloadHashHex = await sha256Hex(payload);
-      const res = await fetch(`/api/v1/sessions/${sessionId}/sign`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          payload,
-          payloadHashHex,
-          note,
-          edits: [],
-          signedAt,
-        }),
+      // TS0 (F6) — steps up to a WebAuthn assertion only when the account has
+      // a registered passkey (the route 401s the assertion-free attempt then).
+      const res = await postSignNote(sessionId, {
+        payload,
+        payloadHashHex,
+        note,
+        edits: [],
+        signedAt,
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
