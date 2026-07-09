@@ -1,36 +1,26 @@
 import { decryptForTenant } from '@/lib/tenant-crypto';
 
 /**
- * Sprint 32 / 54 — Client PII **read cutover**.
+ * Sprint 32 / 54 / S32 Phase 2 — Client PII read path (post plaintext drop).
  *
- * Every Client PII column is dual-written: a legacy plaintext column
- * (`fullName` / `contactPhone` / `contactEmail`) plus an envelope-encrypted
- * twin (`*Encrypted`). The write paths (create / update / DSR-correction /
- * the admin backfill) keep both in sync.
+ * Client PII lives ONLY in the envelope-encrypted columns (`fullNameEncrypted`
+ * / `contactPhoneEncrypted` / `contactEmailEncrypted`) — the legacy plaintext
+ * columns were dropped once GCP Cloud KMS went live and every read moved here.
+ * This module is the single READ path: it decrypts each column with the tenant
+ * DEK. There is no plaintext fallback anymore — an absent/undecryptable
+ * ciphertext is a data-integrity error, surfaced loudly and rendered as an
+ * empty string (a visibly-broken value) rather than crashing the read.
  *
- * This module is the single READ path: it resolves the *effective* value by
- * preferring the encrypted column (decrypt it with the tenant DEK) and
- * falling back to the plaintext column when
- *   - the encrypted twin is absent (a row written before the dual-write
- *     landed and not yet backfilled), or
- *   - decryption fails (malformed envelope / missing key row — `decryptForTenant`
- *     returns null and logs).
- *
- * The fallback is what makes the cutover safe to ship before every prod row is
- * backfilled: un-backfilled rows transparently keep reading plaintext. Once
- * the backfill is complete and every read goes through here, the plaintext
- * columns can be dropped (the remaining pilot-blocking step).
+ * Writes (create / update / DSR-correction / demo / backfill) set the
+ * `*Encrypted` columns via `encryptForTenant`.
  */
 
 /** The subset of a Prisma `Client` row this resolver needs. */
 export interface ClientPiiRow {
   /** Tenant whose DEK unwraps the ciphertext. */
   psychologistId: string;
-  fullName: string;
   fullNameEncrypted: string | null;
-  contactPhone: string;
   contactPhoneEncrypted: string | null;
-  contactEmail: string | null;
   contactEmailEncrypted: string | null;
 }
 
@@ -42,35 +32,38 @@ export interface ResolvedClientPii {
 }
 
 /**
- * Decrypt one encrypted PII column, falling back to the plaintext value when
- * the ciphertext is absent (un-backfilled row) or fails to decrypt. Exported
- * for the direct-read sites that select a single field (e.g. a relation's
- * `fullName`) rather than a whole Client row.
+ * Decrypt one required encrypted PII column. Post plaintext-drop there is no
+ * fallback: a null or undecryptable ciphertext is logged as a data-integrity
+ * error and rendered as '' rather than throwing on a read. Exported for the
+ * direct-read sites that resolve a single field (e.g. a relation's `fullName`).
  */
 export async function decryptClientField(
   psychologistId: string,
   ciphertext: string | null,
-  plaintext: string,
 ): Promise<string> {
   if (ciphertext) {
     const decrypted = await decryptForTenant(psychologistId, ciphertext);
     if (decrypted !== null) return decrypted;
   }
-  return plaintext;
+  console.error(
+    `[client-pii] no decryptable value for psy=${psychologistId} (ciphertext ${
+      ciphertext ? 'undecryptable' : 'absent'
+    })`,
+  );
+  return '';
 }
 
 /**
- * Resolve a single client row's PII. Decrypts the three encrypted columns
- * (re-using the cached tenant DEK across the three calls), each with a
- * plaintext fallback.
+ * Resolve a single client row's PII by decrypting the three encrypted columns
+ * (re-using the cached tenant DEK across the calls).
  */
 export async function resolveClientPii(row: ClientPiiRow): Promise<ResolvedClientPii> {
   const [fullName, contactPhone] = await Promise.all([
-    decryptClientField(row.psychologistId, row.fullNameEncrypted, row.fullName),
-    decryptClientField(row.psychologistId, row.contactPhoneEncrypted, row.contactPhone),
+    decryptClientField(row.psychologistId, row.fullNameEncrypted),
+    decryptClientField(row.psychologistId, row.contactPhoneEncrypted),
   ]);
-  // Email is nullable: a null plaintext + null ciphertext stays null.
-  let contactEmail = row.contactEmail;
+  // Email is nullable: no ciphertext → null.
+  let contactEmail: string | null = null;
   if (row.contactEmailEncrypted) {
     const decrypted = await decryptForTenant(row.psychologistId, row.contactEmailEncrypted);
     if (decrypted !== null) contactEmail = decrypted;

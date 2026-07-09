@@ -14,9 +14,9 @@ export function toClient(row: ClientRow): Client {
   return {
     id: row.id,
     psychologistId: row.psychologistId,
-    fullName: row.fullName,
-    contactPhone: row.contactPhone,
-    contactEmail: row.contactEmail,
+    fullName: row.fullNameEncrypted ?? '',
+    contactPhone: row.contactPhoneEncrypted ?? '',
+    contactEmail: row.contactEmailEncrypted,
     dateOfBirth: toIsoDate(row.dateOfBirth),
     presentingConcerns: row.presentingConcerns,
     preferredModality: row.preferredModality as Client['preferredModality'],

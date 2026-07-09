@@ -61,7 +61,7 @@ export default async function NotesDuePage() {
       id: true,
       scheduledAt: true,
       kind: true,
-      client: { select: { fullName: true, fullNameEncrypted: true } },
+      client: { select: { fullNameEncrypted: true } },
       noteDraft: { select: { status: true } },
     },
   });
@@ -69,11 +69,7 @@ export default async function NotesDuePage() {
   const rows = await Promise.all(
     sessions.map(async (s) => ({
       id: s.id,
-      clientName: await decryptClientField(
-        therapist.id,
-        s.client.fullNameEncrypted,
-        s.client.fullName,
-      ),
+      clientName: await decryptClientField(therapist.id, s.client.fullNameEncrypted),
       scheduledAt: s.scheduledAt,
       kind: s.kind,
       bucket: bucketFor(s.noteDraft?.status),

@@ -201,7 +201,7 @@ describe('ClientsService.update', () => {
 
     expect(deps.clientUpdate).toHaveBeenCalledWith({
       where: { id: CLIENT_ID },
-      data: { fullName: 'Arjun K. Rao' },
+      data: { fullNameEncrypted: 'Arjun K. Rao' },
     });
     expect(deps.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({

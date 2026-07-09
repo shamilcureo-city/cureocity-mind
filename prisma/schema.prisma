@@ -390,25 +390,21 @@ model Client {
   // null, and the patient-app side of continuity endpoints is unreachable.
   clientFirebaseUid String? @unique
 
-  // PII — Sprint 9 PR 3 (gap G10).
-  // Plaintext columns retained for the V1 transition window; encrypted
-  // companions populated whenever the writing service has access to a
-  // TenantDataKey. Sprint 10 hardens the cutover (data copy + plaintext drop).
-  fullName     String
-  contactPhone String
-  contactEmail String?
-  dateOfBirth  DateTime? @db.Date
+  // PII — Sprint 9 PR 3 (gap G10). S32 Phase 2 completed the cutover: the
+  // legacy plaintext columns (fullName / contactPhone / contactEmail) were
+  // DROPPED once every read resolved through client-pii.ts and PII moved to
+  // Google Cloud KMS envelope encryption. Only the encrypted twins remain;
+  // all reads go through resolveClientPii, all writes set the *Encrypted cols.
+  dateOfBirth DateTime? @db.Date
 
-  /// Envelope-encrypted contactPhone — format documented in
-  /// @cureocity/crypto. Nullable until backfilled.
+  /// Envelope-encrypted contactPhone — format documented in @cureocity/crypto.
+  /// Sole store for the value (plaintext column dropped, S32 Phase 2).
   contactPhoneEncrypted String?
   contactEmailEncrypted String?
 
   /// Envelope-encrypted fullName — Sprint 54. The patient's name is the
-  /// highest-sensitivity PII field; brought to dual-write parity with
-  /// phone + email. Nullable until backfilled. Plaintext `fullName` is
-  /// retained for the transition window (read-cutover + plaintext drop
-  /// are a later, prod-data-dependent step).
+  /// highest-sensitivity PII field. Sole store since the S32 Phase 2 plaintext
+  /// drop.
   fullNameEncrypted String?
 
   // Clinical context (free text in V1; structured assessment in Sprint 5)

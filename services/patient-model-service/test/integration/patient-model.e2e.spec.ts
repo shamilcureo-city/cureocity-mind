@@ -165,8 +165,8 @@ describe.skipIf(SKIP)('patient-model-service (integration)', () => {
     const otherClient = await prisma.client.create({
       data: {
         psychologistId: otherPsy.id,
-        fullName: 'Stranger',
-        contactPhone: '+919000000000',
+        fullNameEncrypted: 'Stranger',
+        contactPhoneEncrypted: '+919000000000',
         status: 'ACTIVE',
       },
     });

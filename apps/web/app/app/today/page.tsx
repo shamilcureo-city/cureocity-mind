@@ -55,26 +55,22 @@ export default async function TodayPage() {
     }),
     prisma.client.findMany({
       where: { psychologistId: therapist.id, deletedAt: null, status: 'ACTIVE' },
-      orderBy: { fullName: 'asc' },
-      select: { id: true, fullName: true, fullNameEncrypted: true, preferredModality: true },
+      // The name is envelope-encrypted, so alphabetical ordering can't run in
+      // SQL — fetch by a stable key and sort by the decrypted name below.
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, fullNameEncrypted: true, preferredModality: true },
     }),
   ]);
 
-  // Read cutover — decrypt the client name into each row (plaintext fallback)
-  // before the sync card / dropdown mappers read it.
-  const decSessionName = async <
-    T extends { client: { fullName: string; fullNameEncrypted: string | null } },
-  >(
+  // Read cutover — decrypt the client name into each row before the sync
+  // card / dropdown mappers read it.
+  const decSessionName = async <T extends { client: { fullNameEncrypted: string | null } }>(
     s: T,
-  ): Promise<T> => ({
+  ): Promise<T & { client: T['client'] & { fullName: string } }> => ({
     ...s,
     client: {
       ...s.client,
-      fullName: await decryptClientField(
-        therapist.id,
-        s.client.fullNameEncrypted,
-        s.client.fullName,
-      ),
+      fullName: await decryptClientField(therapist.id, s.client.fullNameEncrypted),
     },
   });
   const [todayRows, upcomingRows, clients] = await Promise.all([
@@ -83,9 +79,9 @@ export default async function TodayPage() {
     Promise.all(
       rawClients.map(async (c) => ({
         ...c,
-        fullName: await decryptClientField(therapist.id, c.fullNameEncrypted, c.fullName),
+        fullName: await decryptClientField(therapist.id, c.fullNameEncrypted),
       })),
-    ),
+    ).then((list) => list.sort((a, b) => a.fullName.localeCompare(b.fullName))),
   ]);
 
   const nowAndUpcoming = todayRows.filter(
@@ -213,7 +209,7 @@ const sessionSelect = {
   modality: true,
   kind: true,
   clientId: true,
-  client: { select: { id: true, fullName: true, fullNameEncrypted: true, isDemo: true } },
+  client: { select: { id: true, fullNameEncrypted: true, isDemo: true } },
   noteDraft: { select: { status: true } },
   therapyNote: { select: { id: true } },
 } as const;

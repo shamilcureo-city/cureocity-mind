@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { decryptClientField } from './client-pii';
 
 /**
  * Sprint 24 — build the Pass 7 input context for a single client.
@@ -18,12 +19,13 @@ export async function buildConceptualMapContext(
   const client = await prisma.client.findFirst({
     where: { id: clientId, psychologistId, deletedAt: null },
     select: {
-      fullName: true,
+      fullNameEncrypted: true,
       presentingConcerns: true,
       preferredModality: true,
     },
   });
   if (!client) throw new Error('Client not found');
+  const clientFullName = await decryptClientField(psychologistId, client.fullNameEncrypted);
 
   // Pull the completed sessions (with transcript + note) chronologically.
   // Cap at 12 sessions; on a very long-running client, prefer the most
@@ -52,7 +54,7 @@ export async function buildConceptualMapContext(
   const sessionIds: string[] = [];
   const lines: string[] = [];
 
-  lines.push(`Client: ${client.fullName}`);
+  lines.push(`Client: ${clientFullName}`);
   if (client.presentingConcerns) lines.push(`Presenting concerns: ${client.presentingConcerns}`);
   if (client.preferredModality) lines.push(`Preferred modality: ${client.preferredModality}`);
   if (diagnosis) {

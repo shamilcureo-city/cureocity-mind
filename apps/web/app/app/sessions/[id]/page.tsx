@@ -94,12 +94,9 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
     include: {
       client: {
         select: {
-          fullName: true,
           fullNameEncrypted: true,
           preferredLanguage: true,
-          contactPhone: true,
           contactPhoneEncrypted: true,
-          contactEmail: true,
           contactEmailEncrypted: true,
           isDemo: true,
         },
@@ -292,11 +289,8 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
     where: { id: clientId },
     select: {
       psychologistId: true,
-      fullName: true,
       fullNameEncrypted: true,
-      contactPhone: true,
       contactPhoneEncrypted: true,
-      contactEmail: true,
       contactEmailEncrypted: true,
       dateOfBirth: true,
       presentingConcerns: true,

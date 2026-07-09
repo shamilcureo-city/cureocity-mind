@@ -31,7 +31,7 @@ export async function GET(
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     include: {
-      client: { select: { fullName: true, fullNameEncrypted: true } },
+      client: { select: { fullNameEncrypted: true } },
       therapyNote: true,
     },
   });
@@ -41,7 +41,6 @@ export async function GET(
   const clientFullName = await decryptClientField(
     session.psychologistId,
     session.client.fullNameEncrypted,
-    session.client.fullName,
   );
   if (!session.therapyNote || !session.therapyNote.content) {
     return NextResponse.json(

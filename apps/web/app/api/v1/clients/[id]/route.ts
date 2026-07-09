@@ -77,11 +77,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
     const row = await tx.client.update({
       where: { id },
       data: {
-        ...(dto.value.fullName !== undefined && { fullName: dto.value.fullName }),
+        // S32 Phase 2 — PII is written ONLY to the encrypted columns; the
+        // plaintext columns were dropped.
         ...(fullNameEncrypted !== undefined && { fullNameEncrypted }),
-        ...(dto.value.contactPhone !== undefined && { contactPhone: dto.value.contactPhone }),
         ...(contactPhoneEncrypted !== undefined && { contactPhoneEncrypted }),
-        ...(dto.value.contactEmail !== undefined && { contactEmail: dto.value.contactEmail }),
         ...(contactEmailEncrypted !== undefined && { contactEmailEncrypted }),
         ...(dto.value.dateOfBirth !== undefined && {
           dateOfBirth: dto.value.dateOfBirth ? new Date(dto.value.dateOfBirth) : null,

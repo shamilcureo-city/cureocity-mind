@@ -302,9 +302,12 @@ async function main(): Promise<void> {
       data: {
         psychologistId: priyaId,
         clientFirebaseUid: DEMO_CLIENT_UID,
-        fullName: 'Arjun Rao',
-        contactPhone: '+919812345678',
-        contactEmail: 'arjun.rao@example.in',
+        // PII plaintext columns were dropped (Sprint 72 cutover). The seed
+        // has no tenant DEK, so we write opaque placeholder ciphertext into
+        // the encrypted twins — dev-only fixtures; not real ciphertext.
+        fullNameEncrypted: 'seed:Arjun Rao',
+        contactPhoneEncrypted: 'seed:+919812345678',
+        contactEmailEncrypted: 'seed:arjun.rao@example.in',
         dateOfBirth: new Date('1992-03-14'),
         presentingConcerns:
           'Generalised anxiety; sleep disruption; work-related rumination. Prefers practical, structured approach.',
@@ -312,7 +315,7 @@ async function main(): Promise<void> {
         status: 'ACTIVE',
       },
     }));
-  console.log(`  Client: ${client.fullName} (${client.id})`);
+  console.log(`  Client: Arjun Rao (${client.id})`);
 
   const existingBookings = await prisma.booking.count({ where: { therapistId: priyaId } });
   if (existingBookings === 0) {

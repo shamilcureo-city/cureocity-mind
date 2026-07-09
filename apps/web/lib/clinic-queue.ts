@@ -101,7 +101,7 @@ export async function loadClinicQueue(psychologistId: string): Promise<ClinicQue
       status: true,
       scheduledAt: true,
       client: {
-        select: { fullName: true, fullNameEncrypted: true, dateOfBirth: true, isDemo: true },
+        select: { fullNameEncrypted: true, dateOfBirth: true, isDemo: true },
       },
     },
   });
@@ -111,11 +111,7 @@ export async function loadClinicQueue(psychologistId: string): Promise<ClinicQue
       sessionId: s.id,
       clientId: s.clientId,
       tokenNumber: s.tokenNumber ?? null,
-      patientName: await decryptClientField(
-        psychologistId,
-        s.client.fullNameEncrypted,
-        s.client.fullName,
-      ),
+      patientName: await decryptClientField(psychologistId, s.client.fullNameEncrypted),
       age: ageFrom(s.client.dateOfBirth),
       status: deriveQueueStatus(s.status),
       scheduledAt: s.scheduledAt.toISOString(),

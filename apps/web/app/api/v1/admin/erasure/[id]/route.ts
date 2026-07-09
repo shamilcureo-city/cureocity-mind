@@ -92,13 +92,9 @@ export async function PATCH(
         where: { id: clientId },
         data: {
           deletedAt: now,
-          // SEC-2 — the fullName is the PRIMARY identifier; redact both the
-          // plaintext and the encrypted twin, else a decrypt-on-read
-          // resurrects the erased name.
-          fullName: 'redacted',
+          // SEC-2 — the fullName is the PRIMARY identifier; null the encrypted
+          // column so a decrypt-on-read can't resurrect the erased name.
           fullNameEncrypted: null,
-          contactPhone: 'redacted',
-          contactEmail: null,
           contactPhoneEncrypted: null,
           contactEmailEncrypted: null,
           presentingConcerns: null,

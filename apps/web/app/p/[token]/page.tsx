@@ -66,18 +66,14 @@ export default async function PortalPage({ params }: PageProps) {
       openedAt: true,
       expiresAt: true,
       status: true,
-      client: { select: { fullName: true, fullNameEncrypted: true } },
+      client: { select: { fullNameEncrypted: true } },
       psychologist: { select: { fullName: true } },
     },
   });
   if (!row) notFound();
   // Read cutover — the share row carries psychologistId, so the portal can
-  // decrypt the client's name (plaintext fallback) for the greeting.
-  const clientFullName = await decryptClientField(
-    row.psychologistId,
-    row.client.fullNameEncrypted,
-    row.client.fullName,
-  );
+  // decrypt the client's name for the greeting.
+  const clientFullName = await decryptClientField(row.psychologistId, row.client.fullNameEncrypted);
 
   const now = new Date();
   const expired = row.expiresAt.getTime() < now.getTime();

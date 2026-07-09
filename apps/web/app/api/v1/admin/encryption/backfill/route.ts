@@ -41,15 +41,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     2000,
   );
 
-  // Two passes — phone first, email second — share the same Client
-  // table scan but exit early when nothing else is left to backfill.
-  let phoneScanned = 0;
-  let phoneEncrypted = 0;
-  let emailScanned = 0;
-  let emailEncrypted = 0;
-  // Sprint 54 — fullName joins the backfill.
-  let fullNameScanned = 0;
-  let fullNameEncrypted = 0;
+  // Client PII (fullName / contactPhone / contactEmail) is now dropped as
+  // plaintext — the columns are gone, so there is no source value left to
+  // encrypt from. Every surviving row is either already backfilled or
+  // unrecoverable; the Client PII backfill loop is retired. These counters
+  // stay at 0 to preserve the audit + response shape.
+  const phoneScanned = 0;
+  const phoneEncrypted = 0;
+  const emailScanned = 0;
+  const emailEncrypted = 0;
+  const fullNameScanned = 0;
+  const fullNameEncrypted = 0;
   const errors: { clientId: string; field: string; message: string }[] = [];
 
   // No cursor — each pass shrinks the un-backfilled set (we only ever
@@ -58,90 +60,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Dry-run is the only branch that doesn't make progress, so we cap
   // iterations defensively.
   const maxIterations = dryRun ? 1 : 10_000;
-  let iter = 0;
-  while (iter++ < maxIterations) {
-    const rows = await prisma.client.findMany({
-      where: {
-        OR: [
-          { contactPhone: { not: '' }, contactPhoneEncrypted: null },
-          { contactEmail: { not: null }, contactEmailEncrypted: null },
-          // fullName is non-empty by schema, so a null encrypted column
-          // is the only condition that marks a row as un-backfilled.
-          { fullNameEncrypted: null },
-        ],
-      },
-      orderBy: { id: 'asc' },
-      take: batchSize,
-      select: {
-        id: true,
-        psychologistId: true,
-        fullName: true,
-        contactPhone: true,
-        contactEmail: true,
-        fullNameEncrypted: true,
-        contactPhoneEncrypted: true,
-        contactEmailEncrypted: true,
-      },
-    });
-    if (rows.length === 0) break;
-
-    for (const row of rows) {
-      // Phone — every Client has a non-empty contactPhone by schema.
-      if (row.contactPhoneEncrypted === null && row.contactPhone) {
-        phoneScanned++;
-        if (!dryRun) {
-          try {
-            const ct = await encryptForTenant(row.psychologistId, row.contactPhone);
-            await prisma.client.update({
-              where: { id: row.id },
-              data: { contactPhoneEncrypted: ct },
-            });
-            phoneEncrypted++;
-          } catch (e) {
-            errors.push({ clientId: row.id, field: 'phone', message: (e as Error).message });
-          }
-        } else {
-          phoneEncrypted++;
-        }
-      }
-      // Email — nullable.
-      if (row.contactEmailEncrypted === null && row.contactEmail) {
-        emailScanned++;
-        if (!dryRun) {
-          try {
-            const ct = await encryptForTenant(row.psychologistId, row.contactEmail);
-            await prisma.client.update({
-              where: { id: row.id },
-              data: { contactEmailEncrypted: ct },
-            });
-            emailEncrypted++;
-          } catch (e) {
-            errors.push({ clientId: row.id, field: 'email', message: (e as Error).message });
-          }
-        } else {
-          emailEncrypted++;
-        }
-      }
-      // Sprint 54 — fullName, always present by schema.
-      if (row.fullNameEncrypted === null && row.fullName) {
-        fullNameScanned++;
-        if (!dryRun) {
-          try {
-            const ct = await encryptForTenant(row.psychologistId, row.fullName);
-            await prisma.client.update({
-              where: { id: row.id },
-              data: { fullNameEncrypted: ct },
-            });
-            fullNameEncrypted++;
-          } catch (e) {
-            errors.push({ clientId: row.id, field: 'fullName', message: (e as Error).message });
-          }
-        } else {
-          fullNameEncrypted++;
-        }
-      }
-    }
-  }
 
   // Sprint 54 — second pass: NoteDraft transcripts. Separate table +
   // loop because NoteDraft reaches its tenant via session.psychologistId

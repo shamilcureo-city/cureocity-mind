@@ -103,9 +103,9 @@ describe.skipIf(SKIP)('scribe-service E2E (mock Gemini, in-memory storage, inlin
     const client = await prisma.client.create({
       data: {
         psychologistId: psy.id,
-        fullName: 'Arjun Rao',
-        contactPhone: '+919812345678',
-        contactEmail: 'arjun@example.in',
+        fullNameEncrypted: 'Arjun Rao',
+        contactPhoneEncrypted: '+919812345678',
+        contactEmailEncrypted: 'arjun@example.in',
         presentingConcerns: 'anxiety',
         preferredModality: 'CBT',
         status: 'ACTIVE',

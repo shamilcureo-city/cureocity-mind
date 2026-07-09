@@ -19,6 +19,7 @@ import {
 import { INSTRUMENTS, scoreInstrument } from '@cureocity/clinical';
 import { prisma } from './prisma';
 import { writeAudit } from './audit';
+import { encryptForTenant } from './tenant-crypto';
 import { buildProgressReport } from './progress-report';
 
 /**
@@ -130,15 +131,19 @@ export async function createDemoClient(
     return { target, responses, result };
   });
 
+  // PII is envelope-encrypted only. Encrypt outside the tx (may auto-provision
+  // the tenant DEK). Empty phone round-trips to '' so ShareModal still greys
+  // out WhatsApp + Email, leaving PORTAL_LINK as the demoable channel.
+  const fullNameEncrypted = await encryptForTenant(psychologistId, DEMO_NAME);
+  const contactPhoneEncrypted = await encryptForTenant(psychologistId, '');
+
   const clientId = await prisma.$transaction(async (tx) => {
     const client = await tx.client.create({
       data: {
         psychologistId,
-        fullName: DEMO_NAME,
-        // Empty contact strings cause ShareModal to grey out WhatsApp +
-        // Email, leaving PORTAL_LINK as the demoable channel.
-        contactPhone: '',
-        contactEmail: null,
+        fullNameEncrypted,
+        contactPhoneEncrypted,
+        contactEmailEncrypted: null,
         dateOfBirth: null,
         presentingConcerns:
           'Persistent low mood, loss of interest, sleep disruption, work performance worries.',

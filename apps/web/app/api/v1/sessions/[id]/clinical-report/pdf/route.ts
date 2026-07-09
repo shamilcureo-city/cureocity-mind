@@ -31,7 +31,7 @@ export async function GET(
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    include: { client: { select: { fullName: true, fullNameEncrypted: true } } },
+    include: { client: { select: { fullNameEncrypted: true } } },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -39,7 +39,6 @@ export async function GET(
   const clientFullName = await decryptClientField(
     session.psychologistId,
     session.client.fullNameEncrypted,
-    session.client.fullName,
   );
 
   const reportRow = await prisma.clinicalReport.findUnique({ where: { sessionId } });

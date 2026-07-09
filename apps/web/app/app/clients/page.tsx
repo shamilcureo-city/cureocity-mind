@@ -41,41 +41,74 @@ export default async function ClientsPage({
     psychologistId: therapist.id,
     deletedAt: null,
     ...(status && { status }),
-    ...(q && { fullName: { contains: q, mode: 'insensitive' } }),
   };
 
-  const [rows, total] = await Promise.all([
-    prisma.client.findMany({
+  const clientSelect = {
+    id: true,
+    fullNameEncrypted: true,
+    status: true,
+    isDemo: true,
+    createdAt: true,
+    _count: { select: { sessions: true } },
+    sessions: {
+      orderBy: { scheduledAt: 'desc' as const },
+      take: 1,
+      select: { scheduledAt: true },
+    },
+  } satisfies Prisma.ClientSelect;
+
+  let pageRows: Prisma.ClientGetPayload<{ select: typeof clientSelect }>[];
+  let names: string[];
+  let nextCursor: string | null;
+  let total: number;
+
+  if (q) {
+    // The client name is now envelope-encrypted, so a substring search can no
+    // longer run in SQL. Load the tenant roster, decrypt every name, then
+    // filter + cursor-paginate in memory (a solo therapist's roster is small).
+    const all = await prisma.client.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: PAGE_SIZE + 1,
-      ...(cursor && { cursor: { id: cursor }, skip: 1 }),
-      select: {
-        id: true,
-        fullName: true,
-        fullNameEncrypted: true,
-        status: true,
-        isDemo: true,
-        createdAt: true,
-        _count: { select: { sessions: true } },
-        sessions: {
-          orderBy: { scheduledAt: 'desc' },
-          take: 1,
-          select: { scheduledAt: true },
-        },
-      },
-    }),
-    prisma.client.count({ where }),
-  ]);
-
-  const hasMore = rows.length > PAGE_SIZE;
-  const pageRows = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
-  const nextCursor = hasMore ? (pageRows[pageRows.length - 1]?.id ?? null) : null;
-  // PII read cutover — decrypt each client's name (plaintext fallback). The
-  // search filter above still matches on the dual-written plaintext column.
-  const names = await Promise.all(
-    pageRows.map((c) => decryptClientField(therapist.id, c.fullNameEncrypted, c.fullName)),
-  );
+      select: clientSelect,
+    });
+    const allNames = await Promise.all(
+      all.map((c) => decryptClientField(therapist.id, c.fullNameEncrypted)),
+    );
+    const needle = q.toLowerCase();
+    const matched = all
+      .map((row, i) => ({ row, name: allNames[i] ?? '' }))
+      .filter((m) => m.name.toLowerCase().includes(needle));
+    total = matched.length;
+    let start = 0;
+    if (cursor) {
+      const at = matched.findIndex((m) => m.row.id === cursor);
+      start = at >= 0 ? at + 1 : 0;
+    }
+    const pageSlice = matched.slice(start, start + PAGE_SIZE);
+    const hasMore = start + PAGE_SIZE < matched.length;
+    pageRows = pageSlice.map((m) => m.row);
+    names = pageSlice.map((m) => m.name);
+    nextCursor = hasMore ? (pageRows[pageRows.length - 1]?.id ?? null) : null;
+  } else {
+    const [rows, count] = await Promise.all([
+      prisma.client.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: PAGE_SIZE + 1,
+        ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+        select: clientSelect,
+      }),
+      prisma.client.count({ where }),
+    ]);
+    const hasMore = rows.length > PAGE_SIZE;
+    pageRows = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+    nextCursor = hasMore ? (pageRows[pageRows.length - 1]?.id ?? null) : null;
+    total = count;
+    // PII read cutover — decrypt each client's name from the encrypted column.
+    names = await Promise.all(
+      pageRows.map((c) => decryptClientField(therapist.id, c.fullNameEncrypted)),
+    );
+  }
 
   // Preserve the active query + status when paginating.
   const nextHref = nextCursor

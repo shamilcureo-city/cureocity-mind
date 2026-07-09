@@ -32,7 +32,7 @@ export default async function EncounterWorkspacePage({
       status: true,
       psychologistId: true,
       clientId: true,
-      client: { select: { fullName: true, fullNameEncrypted: true } },
+      client: { select: { fullNameEncrypted: true } },
     },
   });
   if (!session || session.psychologistId !== doctor.id || session.clientId !== clientId) {
@@ -41,7 +41,6 @@ export default async function EncounterWorkspacePage({
   const clientFullName = await decryptClientField(
     session.psychologistId,
     session.client.fullNameEncrypted,
-    session.client.fullName,
   );
 
   return (

@@ -35,11 +35,8 @@ export async function POST(
     select: {
       psychologistId: true,
       deletedAt: true,
-      fullName: true,
       fullNameEncrypted: true,
-      contactPhone: true,
       contactPhoneEncrypted: true,
-      contactEmail: true,
       contactEmailEncrypted: true,
       presentingConcerns: true,
     },

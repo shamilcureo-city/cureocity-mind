@@ -7,6 +7,7 @@ import {
 } from '@cureocity/contracts';
 import { buildFhirBundle, type FhirBundle } from '@cureocity/clinical';
 import { prisma } from './prisma';
+import { decryptClientField } from './client-pii';
 
 /**
  * Sprint DV8 — assemble the FHIR R4 export for a signed doctor encounter
@@ -42,12 +43,13 @@ export async function buildEncounterFhir(
       psychologistId: true,
       clientId: true,
       scheduledAt: true,
-      client: { select: { fullName: true, abhaAddress: true } },
+      client: { select: { fullNameEncrypted: true, abhaAddress: true } },
       psychologist: { select: { fullName: true, medicalRegNumber: true } },
       therapyNote: { select: { content: true } },
     },
   });
   if (!session || session.psychologistId !== psychologistId) return null;
+  const clientFullName = await decryptClientField(psychologistId, session.client.fullNameEncrypted);
   if (!session.therapyNote) {
     throw new FhirExportError(
       'Sign the encounter note before exporting to FHIR / ABDM.',
@@ -87,7 +89,7 @@ export async function buildEncounterFhir(
     clinicalOrders,
     patient: {
       id: session.clientId,
-      displayName: session.client.fullName,
+      displayName: clientFullName,
       ...(session.client.abhaAddress ? { abhaAddress: session.client.abhaAddress } : {}),
     },
     practitioner: {
@@ -103,7 +105,7 @@ export async function buildEncounterFhir(
   return {
     bundle,
     clientId: session.clientId,
-    patientName: session.client.fullName,
+    patientName: clientFullName,
     abhaAddress: session.client.abhaAddress,
   };
 }

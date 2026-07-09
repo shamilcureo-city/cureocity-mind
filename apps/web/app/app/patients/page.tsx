@@ -45,7 +45,6 @@ export default async function PatientsPage({
       ...(cursor && { cursor: { id: cursor }, skip: 1 }),
       select: {
         id: true,
-        fullName: true,
         fullNameEncrypted: true,
         status: true,
         isDemo: true,
@@ -67,7 +66,7 @@ export default async function PatientsPage({
   const nextHref = nextCursor ? `/app/patients?cursor=${nextCursor}` : null;
   // PII read cutover — decrypt each patient's name (plaintext fallback).
   const names = await Promise.all(
-    pageRows.map((c) => decryptClientField(doctor.id, c.fullNameEncrypted, c.fullName)),
+    pageRows.map((c) => decryptClientField(doctor.id, c.fullNameEncrypted)),
   );
 
   return (

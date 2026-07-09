@@ -27,17 +27,18 @@ export default async function RecordPage() {
           where: { psychologistId: therapist.id },
           orderBy: { scheduledAt: 'desc' },
           take: 30,
-          include: { client: { select: { fullName: true, fullNameEncrypted: true } } },
+          include: { client: { select: { fullNameEncrypted: true } } },
         }),
         // Sprint 23 — Client tiles need the most recent COMPLETED
         // session's `endedAt` to render "last 2d ago" copy. Inline
         // include (take: 1) keeps the query a single round-trip.
         prisma.client.findMany({
           where: { psychologistId: therapist.id, deletedAt: null, status: 'ACTIVE' },
-          orderBy: { fullName: 'asc' },
+          // The name is envelope-encrypted, so alphabetical ordering can't run
+          // in SQL — fetch by a stable key and sort by decrypted name below.
+          orderBy: { createdAt: 'asc' },
           select: {
             id: true,
-            fullName: true,
             fullNameEncrypted: true,
             preferredModality: true,
             isDemo: true,
@@ -59,23 +60,21 @@ export default async function RecordPage() {
       ...s,
       client: {
         ...s.client,
-        fullName: await decryptClientField(
-          therapist.id,
-          s.client.fullNameEncrypted,
-          s.client.fullName,
-        ),
+        fullName: await decryptClientField(therapist.id, s.client.fullNameEncrypted),
       },
     })),
   );
-  const clients: ClientTileEntry[] = await Promise.all(
-    rawClients.map(async (c) => ({
-      id: c.id,
-      fullName: await decryptClientField(therapist.id, c.fullNameEncrypted, c.fullName),
-      preferredModality: c.preferredModality,
-      lastCompletedSessionAt: c.sessions[0]?.endedAt?.toISOString() ?? null,
-      isDemo: c.isDemo,
-    })),
-  );
+  const clients: ClientTileEntry[] = (
+    await Promise.all(
+      rawClients.map(async (c) => ({
+        id: c.id,
+        fullName: await decryptClientField(therapist.id, c.fullNameEncrypted),
+        preferredModality: c.preferredModality,
+        lastCompletedSessionAt: c.sessions[0]?.endedAt?.toISOString() ?? null,
+        isDemo: c.isDemo,
+      })),
+    )
+  ).sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   const grouped = groupByDate(sessions as SessionWithClient[]);
 

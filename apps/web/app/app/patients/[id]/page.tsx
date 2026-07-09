@@ -25,11 +25,8 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
     where: { id },
     select: {
       id: true,
-      fullName: true,
       fullNameEncrypted: true,
-      contactPhone: true,
       contactPhoneEncrypted: true,
-      contactEmail: true,
       contactEmailEncrypted: true,
       dateOfBirth: true,
       status: true,

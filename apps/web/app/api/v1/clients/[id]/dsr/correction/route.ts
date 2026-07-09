@@ -57,11 +57,10 @@ export async function PATCH(
     const next = await tx.client.update({
       where: { id: clientId },
       data: {
-        ...(body.value.fullName !== undefined && { fullName: body.value.fullName }),
+        // S32 Phase 2 — DSR corrections write PII to the encrypted columns
+        // only; the plaintext columns were dropped.
         ...(fullNameEncrypted !== undefined && { fullNameEncrypted }),
-        ...(body.value.contactPhone !== undefined && { contactPhone: body.value.contactPhone }),
         ...(contactPhoneEncrypted !== undefined && { contactPhoneEncrypted }),
-        ...(body.value.contactEmail !== undefined && { contactEmail: body.value.contactEmail }),
         ...(contactEmailEncrypted !== undefined && { contactEmailEncrypted }),
       },
     });

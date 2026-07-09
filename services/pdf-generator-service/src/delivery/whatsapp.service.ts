@@ -36,7 +36,12 @@ export class WhatsAppDeliveryService {
   ): Promise<SendTreatmentPlanResult> {
     const client = await this.prisma.client.findUnique({
       where: { id: clientId },
-      select: { psychologistId: true, fullName: true, contactPhone: true, deletedAt: true },
+      select: {
+        psychologistId: true,
+        fullNameEncrypted: true,
+        contactPhoneEncrypted: true,
+        deletedAt: true,
+      },
     });
     if (!client || client.deletedAt !== null || client.psychologistId !== psychologistId) {
       throw new NotFoundException('Client not found');
@@ -62,9 +67,10 @@ export class WhatsAppDeliveryService {
 
     const templateName =
       this.config.get<string>('WATI_TEMPLATE_TREATMENT_PLAN') ?? 'treatment_plan';
-    const firstName = client.fullName.trim().split(/\s+/)[0] ?? client.fullName;
+    const clientFullName = client.fullNameEncrypted ?? '';
+    const firstName = clientFullName.trim().split(/\s+/)[0] ?? clientFullName;
     const sendResult = await this.messaging.sendWhatsApp({
-      to: client.contactPhone,
+      to: client.contactPhoneEncrypted ?? '',
       templateName,
       templateParams: [firstName],
       mediaUrl: pdfUrl,

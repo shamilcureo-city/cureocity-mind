@@ -60,7 +60,6 @@ export async function buildProgressReport(
     select: {
       psychologistId: true,
       deletedAt: true,
-      fullName: true,
       fullNameEncrypted: true,
     },
   });
@@ -70,11 +69,7 @@ export async function buildProgressReport(
   if (client.psychologistId !== args.psychologistId) {
     throw new ProgressReportError('Client not owned by this psychologist');
   }
-  const clientFullName = await decryptClientField(
-    client.psychologistId,
-    client.fullNameEncrypted,
-    client.fullName,
-  );
+  const clientFullName = await decryptClientField(client.psychologistId, client.fullNameEncrypted);
 
   const [completedCount, firstSession, instrumentRows, activePlanRow, latestEpisode] =
     await Promise.all([

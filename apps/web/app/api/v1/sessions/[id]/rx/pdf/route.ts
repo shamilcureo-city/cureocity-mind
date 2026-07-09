@@ -30,7 +30,7 @@ export async function GET(
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     include: {
-      client: { select: { fullName: true, fullNameEncrypted: true, dateOfBirth: true } },
+      client: { select: { fullNameEncrypted: true, dateOfBirth: true } },
       noteDraft: { select: { id: true, rxPad: true } },
       therapyNote: { select: { id: true, rxPad: true, signedBy: true, signedAt: true } },
       psychologist: {
@@ -74,7 +74,6 @@ export async function GET(
   const clientFullName = await decryptClientField(
     session.psychologistId,
     session.client.fullNameEncrypted,
-    session.client.fullName,
   );
 
   const buffer = await renderToBuffer(

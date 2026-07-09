@@ -34,7 +34,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     },
     orderBy: { createdAt: 'asc' },
     include: {
-      client: { select: { id: true, fullName: true, fullNameEncrypted: true, status: true } },
+      client: { select: { id: true, fullNameEncrypted: true, status: true } },
     },
     take: 100,
   });
@@ -50,11 +50,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         resolutionNotes: r.resolutionNotes,
         client: {
           id: r.client.id,
-          fullName: await decryptClientField(
-            auth.value.psychologistId,
-            r.client.fullNameEncrypted,
-            r.client.fullName,
-          ),
+          fullName: await decryptClientField(auth.value.psychologistId, r.client.fullNameEncrypted),
           status: r.client.status,
         },
       })),

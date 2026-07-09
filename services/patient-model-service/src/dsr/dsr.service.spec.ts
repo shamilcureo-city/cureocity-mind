@@ -107,9 +107,9 @@ function makeDeps(opts?: {
 function sampleClient() {
   return {
     id: CLIENT,
-    fullName: 'Arjun Mehta',
-    contactPhone: '+919900000000',
-    contactEmail: 'arjun@example.in',
+    fullNameEncrypted: 'Arjun Mehta',
+    contactPhoneEncrypted: '+919900000000',
+    contactEmailEncrypted: 'arjun@example.in',
     dateOfBirth: new Date('1990-04-12'),
     presentingConcerns: 'anxiety',
     preferredModality: 'CBT',
@@ -174,14 +174,14 @@ describe('DsrService.requestCorrection', () => {
     );
     expect(deps.clientUpdate).toHaveBeenCalledWith({
       where: { id: CLIENT },
-      data: { contactPhone: '+919800000000' },
+      data: { contactPhoneEncrypted: '+919800000000' },
     });
     expect(deps.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'DSR_CORRECTION_REQUESTED',
         metadata: expect.objectContaining({
-          before: expect.objectContaining({ contactPhone: '+919900000000' }),
-          after: expect.objectContaining({ contactPhone: '+919800000000' }),
+          before: expect.objectContaining({ contactPhoneEncrypted: '+919900000000' }),
+          after: expect.objectContaining({ contactPhoneEncrypted: '+919800000000' }),
           reason: 'phone number changed',
         }),
       }),

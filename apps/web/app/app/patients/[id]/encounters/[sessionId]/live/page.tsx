@@ -36,7 +36,7 @@ export default async function LiveEncounterPage({
       psychologistId: true,
       clientId: true,
       client: {
-        select: { fullName: true, fullNameEncrypted: true, dateOfBirth: true },
+        select: { fullNameEncrypted: true, dateOfBirth: true },
       },
     },
   });
@@ -44,11 +44,7 @@ export default async function LiveEncounterPage({
     notFound();
   }
 
-  const name = await decryptClientField(
-    session.psychologistId,
-    session.client.fullNameEncrypted,
-    session.client.fullName,
-  );
+  const name = await decryptClientField(session.psychologistId, session.client.fullNameEncrypted);
 
   return (
     <div className="mx-auto max-w-[1440px] px-6 py-8">

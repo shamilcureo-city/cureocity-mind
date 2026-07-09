@@ -27,13 +27,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // false` — coalesce defensively.
   const limit = q.value.limit ?? 50;
 
+  const where = {
+    psychologistId: auth.value.psychologistId,
+    deletedAt: null,
+    ...(q.value.status && { status: q.value.status }),
+  };
+
+  // S32 Phase 2 — the name filter can no longer run in SQL: fullName is now
+  // ciphertext (dropped plaintext column). For a name search we resolve PII
+  // in memory and filter on the decrypted value, then page in memory. Rosters
+  // are small (per-therapist), so the full-tenant fetch is bounded + cheap.
+  if (q.value.q) {
+    const all = await prisma.client.findMany({ where, orderBy: { createdAt: 'desc' } });
+    const resolved = await Promise.all(all.map(toClient));
+    const needle = q.value.q.toLowerCase();
+    const matched = resolved.filter((c) => c.fullName.toLowerCase().includes(needle));
+    const start = q.value.cursor ? matched.findIndex((c) => c.id === q.value.cursor) + 1 : 0;
+    const page = matched.slice(start, start + limit);
+    const nextCursor = start + limit < matched.length ? (page[page.length - 1]?.id ?? null) : null;
+    return NextResponse.json({ items: page, nextCursor } satisfies ListClientsResponse);
+  }
+
   const items = await prisma.client.findMany({
-    where: {
-      psychologistId: auth.value.psychologistId,
-      deletedAt: null,
-      ...(q.value.status && { status: q.value.status }),
-      ...(q.value.q && { fullName: { contains: q.value.q, mode: 'insensitive' as const } }),
-    },
+    where,
     orderBy: { createdAt: 'desc' },
     take: limit + 1,
     ...(q.value.cursor && { cursor: { id: q.value.cursor }, skip: 1 }),
@@ -77,11 +93,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const row = await tx.client.create({
       data: {
         psychologistId: auth.value.psychologistId,
-        fullName: body.value.fullName,
         fullNameEncrypted,
-        contactPhone: body.value.contactPhone,
         contactPhoneEncrypted,
-        contactEmail: body.value.contactEmail ?? null,
         contactEmailEncrypted,
         dateOfBirth: body.value.dateOfBirth ? new Date(body.value.dateOfBirth) : null,
         presentingConcerns: body.value.presentingConcerns ?? null,

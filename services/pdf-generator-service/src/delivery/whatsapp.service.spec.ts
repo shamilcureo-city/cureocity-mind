@@ -14,13 +14,13 @@ const CLIENT_ID = 'cclient11111111111111111x';
 
 const baseClient: {
   psychologistId: string;
-  fullName: string;
-  contactPhone: string;
+  fullNameEncrypted: string;
+  contactPhoneEncrypted: string;
   deletedAt: Date | null;
 } = {
   psychologistId: PSY_ID,
-  fullName: 'Riya Sharma',
-  contactPhone: '+919900000000',
+  fullNameEncrypted: 'Riya Sharma',
+  contactPhoneEncrypted: '+919900000000',
   deletedAt: null,
 };
 

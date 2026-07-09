@@ -112,9 +112,9 @@ export class DsrService {
       exportedAt,
       client: {
         id: client.id,
-        fullName: client.fullName,
-        contactPhone: client.contactPhone,
-        contactEmail: client.contactEmail,
+        fullName: client.fullNameEncrypted ?? '',
+        contactPhone: client.contactPhoneEncrypted ?? '',
+        contactEmail: client.contactEmailEncrypted,
         dateOfBirth: client.dateOfBirth ? client.dateOfBirth.toISOString().slice(0, 10) : null,
         presentingConcerns: client.presentingConcerns,
         preferredModality: client.preferredModality,
@@ -167,7 +167,11 @@ export class DsrService {
   ): Promise<void> {
     const existing = await this.prisma.client.findUnique({
       where: { id: clientId },
-      select: { fullName: true, contactPhone: true, contactEmail: true },
+      select: {
+        fullNameEncrypted: true,
+        contactPhoneEncrypted: true,
+        contactEmailEncrypted: true,
+      },
     });
     if (!existing) throw new NotFoundException('Client not found');
 
@@ -175,9 +179,9 @@ export class DsrService {
       await tx.client.update({
         where: { id: clientId },
         data: {
-          ...(dto.fullName !== undefined && { fullName: dto.fullName }),
-          ...(dto.contactPhone !== undefined && { contactPhone: dto.contactPhone }),
-          ...(dto.contactEmail !== undefined && { contactEmail: dto.contactEmail }),
+          ...(dto.fullName !== undefined && { fullNameEncrypted: dto.fullName }),
+          ...(dto.contactPhone !== undefined && { contactPhoneEncrypted: dto.contactPhone }),
+          ...(dto.contactEmail !== undefined && { contactEmailEncrypted: dto.contactEmail }),
         },
       });
       await this.audit.log(
@@ -190,10 +194,10 @@ export class DsrService {
             ...auditMeta,
             before: existing,
             after: {
-              fullName: dto.fullName ?? existing.fullName,
-              contactPhone: dto.contactPhone ?? existing.contactPhone,
-              contactEmail:
-                dto.contactEmail === undefined ? existing.contactEmail : dto.contactEmail,
+              fullNameEncrypted: dto.fullName ?? existing.fullNameEncrypted,
+              contactPhoneEncrypted: dto.contactPhone ?? existing.contactPhoneEncrypted,
+              contactEmailEncrypted:
+                dto.contactEmail === undefined ? existing.contactEmailEncrypted : dto.contactEmail,
             },
             reason: dto.reason,
           },

@@ -32,9 +32,9 @@ export class ClientsService {
       const row = await tx.client.create({
         data: {
           psychologistId,
-          fullName: dto.fullName,
-          contactPhone: dto.contactPhone,
-          contactEmail: dto.contactEmail ?? null,
+          fullNameEncrypted: dto.fullName,
+          contactPhoneEncrypted: dto.contactPhone,
+          contactEmailEncrypted: dto.contactEmail ?? null,
           dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
           presentingConcerns: dto.presentingConcerns ?? null,
           preferredModality: dto.preferredModality ?? null,
@@ -131,9 +131,9 @@ export class ClientsService {
       const row = await tx.client.update({
         where: { id: clientId },
         data: {
-          ...(dto.fullName !== undefined && { fullName: dto.fullName }),
-          ...(dto.contactPhone !== undefined && { contactPhone: dto.contactPhone }),
-          ...(dto.contactEmail !== undefined && { contactEmail: dto.contactEmail }),
+          ...(dto.fullName !== undefined && { fullNameEncrypted: dto.fullName }),
+          ...(dto.contactPhone !== undefined && { contactPhoneEncrypted: dto.contactPhone }),
+          ...(dto.contactEmail !== undefined && { contactEmailEncrypted: dto.contactEmail }),
           ...(dto.dateOfBirth !== undefined && {
             dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
           }),

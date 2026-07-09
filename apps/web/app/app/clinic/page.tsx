@@ -21,14 +21,14 @@ export default async function ClinicPage() {
       where: { psychologistId: doctor.id, deletedAt: null, status: 'ACTIVE' },
       orderBy: { createdAt: 'desc' },
       take: 100,
-      select: { id: true, fullName: true, fullNameEncrypted: true },
+      select: { id: true, fullNameEncrypted: true },
     }),
   ]);
 
   const patients = await Promise.all(
     rawPatients.map(async (c) => ({
       id: c.id,
-      name: await decryptClientField(doctor.id, c.fullNameEncrypted, c.fullName),
+      name: await decryptClientField(doctor.id, c.fullNameEncrypted),
     })),
   );
 

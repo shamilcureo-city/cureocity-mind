@@ -31,11 +31,8 @@ export async function GET(
     where: { id: clientId },
     select: {
       psychologistId: true,
-      fullName: true,
       fullNameEncrypted: true,
-      contactPhone: true,
       contactPhoneEncrypted: true,
-      contactEmail: true,
       contactEmailEncrypted: true,
       status: true,
       createdAt: true,

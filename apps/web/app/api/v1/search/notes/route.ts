@@ -39,7 +39,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       clientId: string;
       scheduledAt: Date;
       kind: string;
-      fullName: string;
       fullNameEncrypted: string | null;
       contentText: string;
     }[]
@@ -48,7 +47,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
            s."clientId" AS "clientId",
            s."scheduledAt" AS "scheduledAt",
            s."kind"::text AS "kind",
-           c."fullName" AS "fullName",
            c."fullNameEncrypted" AS "fullNameEncrypted",
            tn."content"::text AS "contentText"
     FROM "therapy_notes" tn
@@ -65,11 +63,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     rows.map(async (r) => ({
       sessionId: r.sessionId,
       clientId: r.clientId,
-      clientName: await decryptClientField(
-        auth.value.psychologistId,
-        r.fullNameEncrypted,
-        r.fullName,
-      ),
+      clientName: await decryptClientField(auth.value.psychologistId, r.fullNameEncrypted),
       scheduledAt: r.scheduledAt.toISOString(),
       kind: r.kind,
       snippet: snippet(r.contentText, q),

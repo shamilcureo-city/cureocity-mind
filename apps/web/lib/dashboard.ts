@@ -1,6 +1,7 @@
 import { computeInstrumentChange, type InstrumentKey } from '@cureocity/clinical';
 import type { JourneyStage } from '@cureocity/contracts';
 import { fetchOpenCrises } from './crisis-flags';
+import { decryptClientField } from './client-pii';
 import { computeDayBoundaries } from './ist';
 import { prisma } from './prisma';
 
@@ -137,10 +138,10 @@ export async function buildDashboard(
     activeClients,
     sessionsThisWeek,
     unsignedCount,
-    unsignedRows,
-    upNextRows,
-    recentRows,
-    candidates,
+    unsignedRowsRaw,
+    upNextRowsRaw,
+    recentRowsRaw,
+    candidatesRaw,
   ] = await Promise.all([
     prisma.client.count({
       where: { psychologistId, status: 'ACTIVE', deletedAt: null, isDemo: false },
@@ -165,7 +166,12 @@ export async function buildDashboard(
       },
       orderBy: { endedAt: 'desc' },
       take: HERO_FETCH,
-      select: { id: true, clientId: true, endedAt: true, client: { select: { fullName: true } } },
+      select: {
+        id: true,
+        clientId: true,
+        endedAt: true,
+        client: { select: { fullNameEncrypted: true } },
+      },
     }),
     prisma.session.findMany({
       where: {
@@ -182,7 +188,7 @@ export async function buildDashboard(
         scheduledAt: true,
         modality: true,
         status: true,
-        client: { select: { fullName: true } },
+        client: { select: { fullNameEncrypted: true } },
       },
     }),
     prisma.session.findMany({
@@ -194,14 +200,36 @@ export async function buildDashboard(
         clientId: true,
         scheduledAt: true,
         modality: true,
-        client: { select: { fullName: true } },
+        client: { select: { fullNameEncrypted: true } },
       },
     }),
     prisma.treatmentEpisode.findMany({
       where: { psychologistId, status: 'OPEN', client: { isDemo: false, deletedAt: null } },
       orderBy: { openedAt: 'desc' },
-      select: { clientId: true, client: { select: { fullName: true } } },
+      select: { clientId: true, client: { select: { fullNameEncrypted: true } } },
     }),
+  ]);
+
+  // PII read cutover — the client name is envelope-encrypted, so decrypt it
+  // onto each row (all rows belong to `psychologistId`) before the
+  // deterministic mappers below read `.client.fullName`.
+  const attachClientName = async <T extends { client: { fullNameEncrypted: string | null } }>(
+    rows: readonly T[],
+  ): Promise<(T & { client: T['client'] & { fullName: string } })[]> =>
+    Promise.all(
+      rows.map(async (r) => ({
+        ...r,
+        client: {
+          ...r.client,
+          fullName: await decryptClientField(psychologistId, r.client.fullNameEncrypted),
+        },
+      })),
+    );
+  const [unsignedRows, upNextRows, recentRows, candidates] = await Promise.all([
+    attachClientName(unsignedRowsRaw),
+    attachClientName(upNextRowsRaw),
+    attachClientName(recentRowsRaw),
+    attachClientName(candidatesRaw),
   ]);
 
   const candidateIds = candidates.map((c) => c.clientId);

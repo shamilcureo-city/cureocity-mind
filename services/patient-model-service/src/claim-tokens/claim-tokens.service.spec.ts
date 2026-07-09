@@ -17,7 +17,7 @@ const baseClient = {
   psychologistId: PSY_ID,
   clientFirebaseUid: null,
   deletedAt: null,
-  fullName: 'Arjun Mehta',
+  fullNameEncrypted: 'Arjun Mehta',
 };
 
 function inFuture(days: number): Date {
@@ -158,7 +158,7 @@ describe('ClaimTokensService.preview', () => {
         expiresAt: inFuture(7),
         redeemedAt: null,
         client: {
-          fullName: 'Arjun Mehta',
+          fullNameEncrypted: 'Arjun Mehta',
           psychologist: { fullName: 'Dr. Priya Menon' },
         },
       }),
@@ -179,7 +179,7 @@ describe('ClaimTokensService.preview', () => {
         expiresAt: inFuture(7),
         redeemedAt: inPast(0.5),
         client: {
-          fullName: 'Arjun Mehta',
+          fullNameEncrypted: 'Arjun Mehta',
           psychologist: { fullName: 'Dr. Priya Menon' },
         },
       }),
@@ -205,7 +205,7 @@ describe('ClaimTokensService.preview', () => {
         expiresAt: inPast(1),
         redeemedAt: null,
         client: {
-          fullName: 'Arjun Mehta',
+          fullNameEncrypted: 'Arjun Mehta',
           psychologist: { fullName: 'Dr. Priya Menon' },
         },
       }),
@@ -235,7 +235,7 @@ describe('ClaimTokensService.redeem', () => {
       redeemedByFirebaseUid: overrides?.redeemedByFirebaseUid ?? null,
       client: {
         id: CLIENT_ID,
-        fullName: 'Arjun Mehta',
+        fullNameEncrypted: 'Arjun Mehta',
         clientFirebaseUid: overrides?.clientFirebaseUid ?? null,
         psychologist: { fullName: 'Dr. Priya Menon' },
       },

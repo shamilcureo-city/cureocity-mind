@@ -105,7 +105,7 @@ export class ClaimTokensService {
       include: {
         client: {
           select: {
-            fullName: true,
+            fullNameEncrypted: true,
             psychologist: { select: { fullName: true } },
           },
         },
@@ -115,7 +115,7 @@ export class ClaimTokensService {
     if (row.expiresAt <= new Date()) throw new BadRequestException('Claim token has expired');
 
     return {
-      clientFirstName: firstName(row.client.fullName),
+      clientFirstName: firstName(row.client.fullNameEncrypted ?? ''),
       psychologistFullName: row.client.psychologist.fullName,
       expiresAt: row.expiresAt.toISOString(),
       redeemed: row.redeemedAt !== null,
@@ -133,7 +133,7 @@ export class ClaimTokensService {
         client: {
           select: {
             id: true,
-            fullName: true,
+            fullNameEncrypted: true,
             clientFirebaseUid: true,
             psychologist: { select: { fullName: true } },
           },
@@ -147,7 +147,7 @@ export class ClaimTokensService {
     if (row.redeemedAt && row.redeemedByFirebaseUid === firebaseUid) {
       return {
         clientId: row.clientId,
-        clientFirstName: firstName(row.client.fullName),
+        clientFirstName: firstName(row.client.fullNameEncrypted ?? ''),
         psychologistFullName: row.client.psychologist.fullName,
         redeemedAt: row.redeemedAt.toISOString(),
       };
@@ -203,7 +203,7 @@ export class ClaimTokensService {
 
     return {
       clientId: row.clientId,
-      clientFirstName: firstName(row.client.fullName),
+      clientFirstName: firstName(row.client.fullNameEncrypted ?? ''),
       psychologistFullName: row.client.psychologist.fullName,
       redeemedAt: redeemedAt.toISOString(),
     };

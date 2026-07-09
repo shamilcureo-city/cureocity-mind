@@ -160,7 +160,6 @@ async function buildClientContext(psychologistId: string, clientId: string): Pro
   const client = await prisma.client.findUnique({
     where: { id: clientId },
     select: {
-      fullName: true,
       fullNameEncrypted: true,
       psychologistId: true,
       presentingConcerns: true,
@@ -169,11 +168,7 @@ async function buildClientContext(psychologistId: string, clientId: string): Pro
   if (!client || client.psychologistId !== psychologistId) {
     return 'No accessible client record. Tell the therapist you cannot find that client.';
   }
-  const fullName = await decryptClientField(
-    client.psychologistId,
-    client.fullNameEncrypted,
-    client.fullName,
-  );
+  const fullName = await decryptClientField(client.psychologistId, client.fullNameEncrypted);
   try {
     const { buildDeterministicCaseBriefing } = await import('@/lib/case-briefing');
     const briefing = await buildDeterministicCaseBriefing(clientId, psychologistId);
@@ -203,7 +198,7 @@ async function buildClientContext(psychologistId: string, clientId: string): Pro
     ];
     return lines.join('\n');
   } catch {
-    return `Client: ${redactName(client.fullName)}. (Could not assemble the full record — answer from general principles and say so.)`;
+    return `Client: ${redactName(fullName)}. (Could not assemble the full record — answer from general principles and say so.)`;
   }
 }
 
@@ -220,12 +215,12 @@ async function buildContext(psychologistId: string): Promise<string> {
   // answers in the seeded demo client. (Client-scoped chat on the demo
   // client itself stays allowed; that path enters via
   // /practice-assistant/chat with a clientId and never visits this builder.)
-  const [clients, recentSessions, workflows, upcomingSessions] = await Promise.all([
+  const [clientRows, recentSessionRows, workflowRows, upcomingSessionRows] = await Promise.all([
     prisma.client.findMany({
       where: { psychologistId, deletedAt: null, isDemo: false },
       select: {
         id: true,
-        fullName: true,
+        fullNameEncrypted: true,
         preferredModality: true,
         sessions: {
           orderBy: { scheduledAt: 'desc' },
@@ -244,7 +239,7 @@ async function buildContext(psychologistId: string): Promise<string> {
         client: { isDemo: false },
       },
       include: {
-        client: { select: { fullName: true } },
+        client: { select: { fullNameEncrypted: true } },
         therapyNote: { select: { content: true } },
       },
       orderBy: { endedAt: 'desc' },
@@ -252,7 +247,7 @@ async function buildContext(psychologistId: string): Promise<string> {
     }),
     prisma.modalityState.findMany({
       where: { psychologistId, completedAt: null, client: { isDemo: false } },
-      include: { client: { select: { fullName: true } } },
+      include: { client: { select: { fullNameEncrypted: true } } },
       take: 30,
     }),
     prisma.session.findMany({
@@ -262,10 +257,37 @@ async function buildContext(psychologistId: string): Promise<string> {
         scheduledAt: { gte: new Date(), lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
         client: { isDemo: false },
       },
-      include: { client: { select: { fullName: true } } },
+      include: { client: { select: { fullNameEncrypted: true } } },
       orderBy: { scheduledAt: 'asc' },
       take: 10,
     }),
+  ]);
+
+  // Decrypt the client name onto each row so the deterministic context
+  // builder below can read `.fullName` unchanged. All four queries are
+  // tenant-scoped to `psychologistId`, so that DEK decrypts every name.
+  const clients = await Promise.all(
+    clientRows.map(async (c) => ({
+      ...c,
+      fullName: await decryptClientField(psychologistId, c.fullNameEncrypted),
+    })),
+  );
+  const withClientName = async <T extends { client: { fullNameEncrypted: string | null } }>(
+    rows: readonly T[],
+  ): Promise<(T & { client: T['client'] & { fullName: string } })[]> =>
+    Promise.all(
+      rows.map(async (r) => ({
+        ...r,
+        client: {
+          ...r.client,
+          fullName: await decryptClientField(psychologistId, r.client.fullNameEncrypted),
+        },
+      })),
+    );
+  const [recentSessions, workflows, upcomingSessions] = await Promise.all([
+    withClientName(recentSessionRows),
+    withClientName(workflowRows),
+    withClientName(upcomingSessionRows),
   ]);
 
   const lines: string[] = [];

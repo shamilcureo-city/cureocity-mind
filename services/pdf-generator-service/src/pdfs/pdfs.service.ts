@@ -52,7 +52,7 @@ export class PdfsService {
 
     const html = renderSessionNoteHtml({
       note: noteContent,
-      clientFullName: session.client.fullName,
+      clientFullName: session.client.fullNameEncrypted ?? '',
       sessionId: session.id,
       // Sprint 19 — Session.modality is nullable for intake sessions.
       // PDF rendering falls back to the session kind label.
@@ -122,7 +122,7 @@ export class PdfsService {
     }));
 
     const html = renderTreatmentPlanHtml({
-      clientFullName: client.fullName,
+      clientFullName: client.fullNameEncrypted ?? '',
       psychologistFullName: client.psychologist.fullName,
       modality: client.modalityState?.modality ?? client.preferredModality ?? 'CBT',
       currentPhase:

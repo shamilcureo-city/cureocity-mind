@@ -65,11 +65,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     select: {
       id: true,
       psychologistId: true,
-      fullName: true,
       fullNameEncrypted: true,
-      contactPhone: true,
       contactPhoneEncrypted: true,
-      contactEmail: true,
       contactEmailEncrypted: true,
       preferredLanguage: true,
       deletedAt: true,
@@ -78,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!client || client.psychologistId !== auth.value.psychologistId || client.deletedAt !== null) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
-  // Read cutover — decrypt the name + contacts (plaintext fallback) before
+  // Read cutover — decrypt the name + contacts before
   // routing the outbound message / personalising it.
   const pii = await resolveClientPii(client);
 
