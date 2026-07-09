@@ -112,6 +112,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // leaves the original text, it never blocks the share.
   await translateSnapshotForClient(snapshot, language);
 
+  // SHARE-3 — dry-run. Hand the therapist the exact translated, patient-facing
+  // snapshot to review, and create NOTHING: no PatientShare, no homework
+  // assignment, no send. The therapist confirms with a second, non-preview
+  // call. This closes the gap where a Gemini-translated note (risk language,
+  // med instructions, hedged formulations) reached the patient in a language
+  // the therapist never saw.
+  if (input.preview) {
+    return NextResponse.json({ preview: true, language, snapshot });
+  }
+
   // Sprint 51 — homework loop. When sharing a therapy script with
   // assignHomework (default true), persist the script's `homework`
   // field as an ExerciseAssignment so the client can mark it done

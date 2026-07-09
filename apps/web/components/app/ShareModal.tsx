@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   PatientShareChannel,
+  PatientShareSnapshot,
   ShareArtefactRef,
   ShareResponse,
   ShareResultEntry,
+  SharePreviewResponse,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -104,6 +106,9 @@ export function ShareModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<ShareResultEntry[] | null>(null);
+  // SHARE-3 — the translated, patient-facing snapshot the therapist reviews
+  // before the real send (only for notes shared in a non-English language).
+  const [preview, setPreview] = useState<SharePreviewResponse | null>(null);
   // Sprint 43 — which send channels this deployment can actually deliver
   // on. Null until loaded; greying falls back to contact-availability.
   const [config, setConfig] = useState<{
@@ -117,8 +122,15 @@ export function ShareModal({
       setError(null);
       setResults(null);
       setBusy(false);
+      setPreview(null);
     }
   }, [open]);
+
+  // SHARE-3 — a stale translation preview must not survive a language change
+  // (the therapist would confirm text that isn't what will be sent).
+  useEffect(() => {
+    setPreview(null);
+  }, [language]);
 
   // Seed the language from the client's preference each time the modal opens.
   useEffect(() => {
@@ -168,6 +180,15 @@ export function ShareModal({
     [selected],
   );
 
+  // SHARE-3 — a signed note shared in a non-English language is machine-
+  // translated at send time. Gate the send behind a preview the therapist
+  // must confirm, so risk language / med instructions / hedged formulations
+  // aren't sent in a language they never saw. Other artefacts localise
+  // deterministically (pre-translated catalogs) and don't need the gate.
+  const translatableNote =
+    artefact.artefactType === 'SIGNED_NOTE' || artefact.artefactType === 'SIGNED_INTAKE_NOTE';
+  const needsPreviewGate = showLanguage && language !== 'en' && translatableNote;
+
   const submit = useCallback(async () => {
     if (selectedChannels.length === 0) {
       setError('Pick at least one channel.');
@@ -176,6 +197,9 @@ export function ShareModal({
     setBusy(true);
     setError(null);
     try {
+      // First click on a non-English note fetches the preview instead of
+      // sending; the therapist reviews it, then a second click confirms.
+      const wantPreview = needsPreviewGate && preview === null;
       const res = await fetch('/api/v1/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -185,11 +209,17 @@ export function ShareModal({
           ...(therapistMessage.trim().length > 0 && { therapistMessage: therapistMessage.trim() }),
           ...(showLanguage && { language }),
           artefact,
+          ...(wantPreview && { preview: true }),
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as ShareResponse & { error?: string };
+      const data = (await res.json().catch(() => ({}))) as ShareResponse &
+        SharePreviewResponse & { error?: string };
       if (!res.ok) {
         throw new Error(data.error ?? `HTTP ${res.status}`);
+      }
+      if (wantPreview) {
+        setPreview(data as SharePreviewResponse);
+        return; // hold — the therapist confirms with a second click
       }
       setResults(data.results);
     } catch (e) {
@@ -197,7 +227,16 @@ export function ShareModal({
     } finally {
       setBusy(false);
     }
-  }, [artefact, clientId, selectedChannels, therapistMessage, showLanguage, language]);
+  }, [
+    artefact,
+    clientId,
+    selectedChannels,
+    therapistMessage,
+    showLanguage,
+    language,
+    needsPreviewGate,
+    preview,
+  ]);
 
   if (!open) return null;
 
@@ -360,6 +399,23 @@ export function ShareModal({
               </section>
             )}
 
+            {/* SHARE-3 — the translated text the patient will actually read,
+                shown for confirmation before the send is committed. */}
+            {preview && (
+              <section className="mt-4 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+                <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-3)]">
+                  Review — what your client reads in {shareLanguageLabel(preview.language)}
+                </p>
+                <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                  This is a machine translation of your signed note. Check the risk wording,
+                  medication instructions, and any hedged phrasing before it goes out.
+                </p>
+                <div className="mt-3 max-h-64 space-y-2 overflow-y-auto text-sm text-[var(--color-ink)]">
+                  <TranslationPreview snapshot={preview.snapshot} />
+                </div>
+              </section>
+            )}
+
             {error && (
               <div className="mt-4 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-sm text-[var(--color-warn)]">
                 {error}
@@ -371,7 +427,15 @@ export function ShareModal({
                 Cancel
               </Button>
               <Button onClick={() => void submit()} disabled={busy}>
-                {busy ? 'Sending…' : 'Send'}
+                {busy
+                  ? preview
+                    ? 'Sending…'
+                    : 'Translating…'
+                  : needsPreviewGate && !preview
+                    ? 'Preview translation'
+                    : preview
+                      ? 'Looks right — send'
+                      : 'Send'}
               </Button>
             </footer>
           </>
@@ -379,6 +443,45 @@ export function ShareModal({
       </div>
     </div>
   );
+}
+
+/** SHARE-3 — render the translated, patient-facing snapshot for review. Only
+ *  the two free-text note kinds are machine-translated; anything else shows a
+ *  short fallback (the gate only triggers for those kinds anyway). */
+function TranslationPreview({ snapshot }: { snapshot: PatientShareSnapshot }) {
+  if (snapshot.kind === 'SIGNED_NOTE') {
+    const fields: [string, string][] = [
+      ['Subjective', snapshot.subjective],
+      ['Objective', snapshot.objective],
+      ['Assessment', snapshot.assessment],
+      ['Plan', snapshot.plan],
+    ];
+    return (
+      <>
+        {fields.map(([label, body]) =>
+          body?.trim() ? (
+            <div key={label}>
+              <p className="text-xs font-medium text-[var(--color-ink-2)]">{label}</p>
+              <p className="whitespace-pre-wrap">{body}</p>
+            </div>
+          ) : null,
+        )}
+      </>
+    );
+  }
+  if (snapshot.kind === 'SIGNED_INTAKE_NOTE') {
+    return (
+      <>
+        {snapshot.sections.map((s, i) => (
+          <div key={`${s.title}-${i}`}>
+            <p className="text-xs font-medium text-[var(--color-ink-2)]">{s.title}</p>
+            <p className="whitespace-pre-wrap">{s.body}</p>
+          </div>
+        ))}
+      </>
+    );
+  }
+  return <p className="text-[var(--color-ink-3)]">Preview unavailable for this artefact.</p>;
 }
 
 function ResultsView({ results, onClose }: { results: ShareResultEntry[]; onClose: () => void }) {
