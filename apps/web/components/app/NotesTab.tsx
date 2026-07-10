@@ -372,16 +372,25 @@ export function NotesTab({
   // translation is persisted into the draft, so sign + share carry it.
   const translateTo = useCallback(
     async (code: string): Promise<void> => {
-      if (phase.kind !== 'completed' || code === noteLang || translating) return;
+      // TS-fix — no longer early-return when `code === noteLang`. The language
+      // pill reflects Session.language, which can DISAGREE with the note body's
+      // actual language, so clicking the "current" language must still run a
+      // translate (otherwise clicking it does nothing — the reported symptom).
+      if (phase.kind !== 'completed' || translating) return;
       const draft = phase.draft;
       const reopened = phase.reopened;
       const label = noteLanguageLabel(code);
       setTranslating(true);
       setTranslateError(null);
+      // TS-fix — a client-side deadline so a stalled request can't latch
+      // "Translating…" forever (the route caps at 60s; abort a touch under it).
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 58_000);
       try {
         const res = await fetch(`/api/v1/sessions/${sessionId}/note/modify`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({
             instruction: `Translate every text field of this note into ${label}. Output all narrative text in ${label}, keeping the exact JSON structure, all clinical content, risk severity, and meaning identical. Translate only — do not add, remove, summarise, or re-interpret anything. Leave proper names unchanged.`,
           }),
@@ -401,12 +410,17 @@ export function NotesTab({
         });
         setNoteLang(code);
       } catch (e) {
-        setTranslateError((e as Error).message);
+        setTranslateError(
+          (e as Error).name === 'AbortError'
+            ? 'Translation took too long — please try again.'
+            : (e as Error).message,
+        );
       } finally {
+        clearTimeout(timeout);
         setTranslating(false);
       }
     },
-    [phase, sessionId, noteLang, translating],
+    [phase, sessionId, translating],
   );
 
   // Save a manual edit of the draft note (PUT note-draft). Kind-agnostic —
@@ -1196,10 +1210,15 @@ function ModifyPanel({
       setPending(true);
       setError(null);
       setLastChanged(null);
+      // TS-fix — client-side deadline so a stalled modify can't latch the panel
+      // "working" forever (the route caps at 60s; abort a touch under it).
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 58_000);
       try {
         const res = await fetch(`/api/v1/sessions/${sessionId}/note/modify`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
+          signal: controller.signal,
           body: JSON.stringify({ instruction: text }),
         });
         if (!res.ok) {
@@ -1214,8 +1233,13 @@ function ModifyPanel({
         setLastChanged(body.changedFields);
         setInstruction('');
       } catch (e) {
-        setError((e as Error).message);
+        setError(
+          (e as Error).name === 'AbortError'
+            ? 'That took too long — please try again.'
+            : (e as Error).message,
+        );
       } finally {
+        clearTimeout(timeout);
         setPending(false);
       }
     },

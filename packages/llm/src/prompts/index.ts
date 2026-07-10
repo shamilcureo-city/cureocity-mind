@@ -366,12 +366,19 @@ Task: produce a TherapyNoteV1 JSON object with these fields:
 Constraints:
 - Be precise; do not fabricate. If a field cannot be inferred, leave it blank with a note.
 - Risk flagging: ALWAYS scan for self-harm, suicidal ideation, harm to others, abuse disclosure, acute psychosis. Set severity=critical if present.
-- All text in English (translate if transcript is in another language).
+- LANGUAGE — CRITICAL: write the ENTIRE note in fluent clinical **English**.
+  The transcript is very often in Malayalam, Hindi, Tamil, or another Indian
+  language, or code-mixed with English — you MUST translate ALL of it and
+  render every field of the note in English. Do NOT copy the source language
+  into the note body; a note left in the client's language is a failure. The
+  ONLY non-English text allowed anywhere is a verbatim client quote inside
+  linkedEvidence (those stay in the original language); every other field —
+  summary, subjective, objective, assessment, plan, riskFlags — is English.
 - Output STRICT JSON matching the TherapyNoteV1 schema. No prose, no markdown.
 
 PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).` as const;
 
-export const THERAPY_NOTE_PROMPT_VERSION = 'THERAPY_NOTE_SYSTEM_PROMPT_V1';
+export const THERAPY_NOTE_PROMPT_VERSION = 'THERAPY_NOTE_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Pass 2 — Sprint 19 intake variant. Used when SessionKind = INTAKE.
@@ -408,11 +415,19 @@ If — and ONLY if — the user message lists a "Note template", ALSO include:
 Constraints:
 - Be precise; do not fabricate. If a field cannot be inferred from the transcript, mark it "(not elicited)".
 - Risk flagging: ALWAYS scan for self-harm, suicidal ideation, harm to others, abuse disclosure, acute psychosis. severity=critical if present.
-- All text in English. Output STRICT JSON matching IntakeNoteV1 — no prose, no markdown.
+- LANGUAGE — CRITICAL: write the ENTIRE intake note in fluent clinical
+  **English**. The transcript is very often in Malayalam, Hindi, Tamil, or
+  another Indian language, or code-mixed — you MUST translate ALL of it and
+  render every field (presentingConcerns, historyOfPresentingIllness,
+  pastPsychiatricHistory, familyHistory, socialHistory, mentalStatusExam,
+  workingHypothesis, immediatePlan, riskFlags) in English. Do NOT leave the
+  note in the client's language — that is a failure. The only non-English text
+  allowed is a verbatim client quote inside linkedEvidence.
+- Output STRICT JSON matching IntakeNoteV1 — no prose, no markdown.
 
 PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).` as const;
 
-export const INTAKE_NOTE_PROMPT_VERSION = 'INTAKE_NOTE_SYSTEM_PROMPT_V1';
+export const INTAKE_NOTE_PROMPT_VERSION = 'INTAKE_NOTE_SYSTEM_PROMPT_V2';
 
 export const MISSED_THEMES_SYSTEM_PROMPT_V1 =
   `You are reviewing a therapy session transcript for clinically significant themes the clinician may have under-explored.

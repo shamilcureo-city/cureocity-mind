@@ -15,7 +15,10 @@ import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 30;
+// Modify/translate is an EDITING task, not clinical reasoning — it runs on
+// Flash with no thinking budget (see below), which finishes in a few seconds.
+// 60s is the ceiling headroom for a very long note, not the expected latency.
+export const maxDuration = 60;
 
 const ModifyInputSchema = z.object({
   instruction: z.string().min(3).max(1000),
@@ -148,7 +151,11 @@ export async function POST(
     return NextResponse.json({ error: 'VERTEX_PROJECT_ID not set' }, { status: 500 });
   }
   const proRegion = process.env['VERTEX_PRO_REGION'] ?? 'global';
-  const proModel = process.env['VERTEX_PRO_MODEL'] ?? 'gemini-2.5-pro';
+  // TS-fix — modify/translate is a fast rewrite, not deep reasoning. Default to
+  // Flash (≈3–5× faster than Pro); Pro was routinely blowing the 30s budget on
+  // a full note and 504-ing. Override with VERTEX_MODIFY_MODEL if needed.
+  const modifyModel =
+    process.env['VERTEX_MODIFY_MODEL'] ?? process.env['VERTEX_FLASH_MODEL'] ?? 'gemini-2.5-flash';
   const ai = new GoogleGenAI({ vertexai: true, project, location: proRegion });
 
   const currentNote = currentIntake ?? currentTherapy!;
@@ -162,18 +169,20 @@ export async function POST(
     `Output the modified ${isIntake ? 'IntakeNoteV1' : 'TherapyNoteV1'} JSON only.`,
   ].join('\n');
 
+  // TS-fix — no thinking budget by default: editing/translating a note doesn't
+  // need deliberation, and thinking tokens added several seconds per call.
+  // Re-enable with LLM_THINKING_BUDGET_MODIFY if a hard edit needs it.
+  const modifyThinking = resolveThinkingBudget('LLM_THINKING_BUDGET_MODIFY', 0);
   const res = await ai.models.generateContent({
-    model: proModel,
+    model: modifyModel,
     contents: [{ role: 'user', parts: [{ text: userMessage }] }],
     config: {
       systemInstruction: isIntake ? INTAKE_SYSTEM_PROMPT : THERAPY_SYSTEM_PROMPT,
       responseMimeType: 'application/json',
       temperature: 0.2,
       maxOutputTokens: 8192,
-      ...(resolveThinkingBudget('LLM_THINKING_BUDGET_MODIFY', 2048) !== undefined && {
-        thinkingConfig: {
-          thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_MODIFY', 2048),
-        },
+      ...(modifyThinking !== undefined && {
+        thinkingConfig: { thinkingBudget: modifyThinking },
       }),
       safetySettings: [
         { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
@@ -261,7 +270,7 @@ export async function POST(
   return NextResponse.json({
     note: validated,
     changedFields,
-    model: proModel,
+    model: modifyModel,
     kind: isIntake ? 'INTAKE' : 'TREATMENT',
   });
 }
