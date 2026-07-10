@@ -1,18 +1,23 @@
 'use client';
 
 /**
- * Sprint TS2 — the therapist live scribe surface.
+ * Sprint TS2 → TS-B2..B5 — the therapist live scribe surface.
  *
- * The therapist analogue of DoctorLiveEncounter: streams mic audio to the
- * standalone live gateway (which runs Pass 1 + the therapy Pass 2) and renders
- * the transcript + a live-building SOAP/intake note + a safety rail (the note's
- * own riskFlags) as the therapist talks — no more blind, timer-only recording.
+ * The therapist analogue of DoctorLiveEncounter, redesigned to read like the
+ * session itself (see docs/THERAPIST_SCRIBE_SPRINTS.md + the approved mock):
+ *   - a speaker-true CONVERSATION (one bubble per diarized segment — B1 made
+ *     the gateway emit per-segment utterances) with timestamps, auto-scroll
+ *     and a live talk-balance bar;
+ *   - a LIVE NOTE that visibly assembles — every section always on screen,
+ *     unfilled ones as placeholders, "Updated Xs ago" + an Update-now button
+ *     (the `refreshNote` gateway command) instead of a silent 90s wait;
+ *   - a RISK WATCH that is always present (calm state → escalates in place);
+ *   - on INTAKE sessions, a WHAT-TO-EXPLORE coverage checklist derived from
+ *     which intake-note fields are still "(not elicited)" — zero extra AI cost;
+ *   - header chips that tell the truth: "Note: English" vs "Hearing: ML·EN".
  *
  * On end it relays the finalized note to the live-note route (persisted as a
- * COMPLETED NoteDraft) and routes to the session workspace, where the existing
- * therapist review / sign / share surface takes over with the note ALREADY
- * written (no post-hoc generation wait). TS3 will inline that review surface
- * here; this MVP reuses the proven one.
+ * COMPLETED NoteDraft) and routes to the session workspace for review + sign.
  *
  * NOTE: like DoctorLiveEncounter, this is a browser-only WS/audio surface — it
  * cannot be exercised in CI. Drive it once with `pnpm gateway` before trusting.
@@ -41,12 +46,50 @@ interface Props {
   sessionId: string;
   kind: SessionKind;
   modality: SessionModality | null;
+  /** Session.language — the language the NOTE is written in. */
+  language: string;
   clientName?: string;
   /** Auto-start the mic once (arriving via a flash/queue flow). */
   autoStart?: boolean;
 }
 
-/** The note fields we render, in order, per kind — defensive to missing keys. */
+// ---------------------------------------------------------------------------
+// Pure helpers
+// ---------------------------------------------------------------------------
+
+const LANGUAGE_LABEL: Record<string, string> = {
+  en: 'English',
+  hi: 'Hindi',
+  ml: 'Malayalam',
+  ta: 'Tamil',
+  bn: 'Bengali',
+};
+
+/** Indic-script detection for the "Hearing: ML·EN" chip — no model call. */
+const SCRIPT_CODES: [RegExp, string][] = [
+  [/[ഀ-ൿ]/, 'ML'],
+  [/[ऀ-ॿ]/, 'HI'],
+  [/[஀-௿]/, 'TA'],
+  [/[ঀ-৿]/, 'BN'],
+  [/[ఀ-౿]/, 'TE'],
+  [/[ಀ-೿]/, 'KN'],
+  [/[઀-૿]/, 'GU'],
+];
+
+function hearingCodes(utterances: Utterance[]): string[] {
+  const seen = new Set<string>();
+  let latin = false;
+  for (const u of utterances) {
+    for (const [re, code] of SCRIPT_CODES) if (re.test(u.text)) seen.add(code);
+    if (/[A-Za-z]/.test(u.text)) latin = true;
+  }
+  const out = [...seen];
+  if (latin) out.push('EN');
+  return out.slice(0, 3);
+}
+
+/** The note sections we render, in order, per kind — empty values included so
+ *  the panel shows placeholders for what hasn't been written yet. */
 function noteSections(
   kind: SessionKind,
   note: Record<string, unknown>,
@@ -56,9 +99,6 @@ function noteSections(
       ? [
           ['Presenting concerns', 'presentingConcerns'],
           ['History of present illness', 'historyOfPresentingIllness'],
-          ['Past psychiatric history', 'pastPsychiatricHistory'],
-          ['Family history', 'familyHistory'],
-          ['Social history', 'socialHistory'],
           ['Mental status exam', 'mentalStatusExam'],
           ['Working hypothesis', 'workingHypothesis'],
           ['Immediate plan', 'immediatePlan'],
@@ -70,12 +110,10 @@ function noteSections(
           ['Assessment', 'assessment'],
           ['Plan', 'plan'],
         ];
-  return rows
-    .map(([label, key]) => ({
-      label,
-      value: typeof note[key] === 'string' ? (note[key] as string) : '',
-    }))
-    .filter((r) => r.value.trim().length > 0);
+  return rows.map(([label, key]) => ({
+    label,
+    value: typeof note[key] === 'string' ? (note[key] as string) : '',
+  }));
 }
 
 function readRisk(note: Record<string, unknown>): { severity: string; text: string } | null {
@@ -92,11 +130,76 @@ function readRisk(note: Record<string, unknown>): { severity: string; text: stri
   };
 }
 
-export function TherapistLiveSession({ sessionId, kind, modality, clientName, autoStart }: Props) {
+/** TS-B5 — the intake coverage checklist, read straight off the live note. */
+const INTAKE_COVERAGE: [string, string][] = [
+  ['presentingConcerns', 'Presenting concerns'],
+  ['historyOfPresentingIllness', 'History'],
+  ['pastPsychiatricHistory', 'Past psychiatric'],
+  ['familyHistory', 'Family history'],
+  ['socialHistory', 'Social history'],
+  ['mentalStatusExam', 'Mental status'],
+  ['workingHypothesis', 'Hypothesis'],
+  ['immediatePlan', 'Plan'],
+];
+
+function intakeCoverage(note: Record<string, unknown>): { label: string; done: boolean }[] {
+  return INTAKE_COVERAGE.map(([key, label]) => {
+    const v = note[key];
+    const done =
+      typeof v === 'string' && v.trim().length > 0 && !/not elicited|none elicited/i.test(v);
+    return { label, done };
+  });
+}
+
+function noteTopics(note: Record<string, unknown>): string[] {
+  const t = note['topics'];
+  if (!Array.isArray(t)) return [];
+  return t
+    .map((x) =>
+      x && typeof x === 'object' && typeof (x as { title?: unknown }).title === 'string'
+        ? ((x as { title: string }).title as string)
+        : null,
+    )
+    .filter((x): x is string => Boolean(x))
+    .slice(0, 6);
+}
+
+/** Speaking-time split between attributed speakers; null until ≥10s heard. */
+function talkBalance(utterances: Utterance[]): { you: number; client: number } | null {
+  let you = 0;
+  let client = 0;
+  for (const u of utterances) {
+    const d = Math.max(0, u.tEndMs - u.tStartMs);
+    if (u.speaker === 'doctor') you += d;
+    else if (u.speaker === 'patient') client += d;
+  }
+  const total = you + client;
+  if (total < 10_000) return null;
+  const youPct = Math.round((you / total) * 100);
+  return { you: youPct, client: 100 - youPct };
+}
+
+function fmtClock(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// ---------------------------------------------------------------------------
+
+export function TherapistLiveSession({
+  sessionId,
+  kind,
+  modality,
+  language,
+  clientName,
+  autoStart,
+}: Props) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>('idle');
   const [utterances, setUtterances] = useState<Utterance[]>([]);
   const [note, setNote] = useState<Record<string, unknown>>({});
+  const [noteUpdatedAt, setNoteUpdatedAt] = useState<number | null>(null);
+  const [refreshingNote, setRefreshingNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -108,6 +211,8 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
   const meterRef = useRef<MeterSummary | null>(null);
   const meteredRef = useRef(false);
   const finalHandledRef = useRef(false);
+  const convoRef = useRef<HTMLDivElement | null>(null);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const stream = useLiveStream({
     onFrame: (pcm) => {
@@ -122,15 +227,25 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
     return () => {
       wsRef.current?.close();
       void streamRef.current.stop();
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
 
-  // Elapsed timer while listening.
+  // Elapsed timer while listening — also drives the "Updated Xs ago" ticker.
   useEffect(() => {
     if (phase !== 'listening') return;
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(t);
   }, [phase]);
+
+  // Auto-scroll the conversation when new turns arrive, unless the therapist
+  // has scrolled up to re-read (stay out of their way).
+  useEffect(() => {
+    const el = convoRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - (el.scrollTop + el.clientHeight) < 160;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [utterances.length]);
 
   const autoStartedRef = useRef(false);
   useEffect(() => {
@@ -202,6 +317,8 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
     setNoteFailed(false);
     setUtterances([]);
     setNote({});
+    setNoteUpdatedAt(null);
+    setRefreshingNote(false);
     setElapsed(0);
     meteredRef.current = false;
     meterRef.current = null;
@@ -293,12 +410,15 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
           break;
         case 'therapyNote':
           setNote(event.note as Record<string, unknown>);
+          setNoteUpdatedAt(Date.now());
+          setRefreshingNote(false);
           break;
         case 'meter':
           meterRef.current = event.summary;
           break;
         case 'therapyFinal':
           setNote(event.note as unknown as Record<string, unknown>);
+          setNoteUpdatedAt(Date.now());
           void persistAndFinish(
             event.kind,
             event.note,
@@ -318,24 +438,58 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
     wsRef.current?.send(JSON.stringify({ type: 'stop' }));
   }
 
+  /** TS-B3 — "Update now": ask the gateway for an immediate note refresh. */
+  function updateNoteNow(): void {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== ws.OPEN || phase !== 'listening' || refreshingNote) return;
+    ws.send(JSON.stringify({ type: 'refreshNote' }));
+    setRefreshingNote(true);
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    // If nothing changed, no event comes back — quietly re-enable the button.
+    refreshTimerRef.current = setTimeout(() => setRefreshingNote(false), 12_000);
+  }
+
+  const sorted = [...utterances].sort((a, b) => a.tStartMs - b.tStartMs);
   const risk = readRisk(note);
   const sections = noteSections(kind, note);
+  const filledCount = sections.filter((s) => s.value.trim().length > 0).length;
+  const topics = kind === 'INTAKE' ? [] : noteTopics(note);
+  const coverage = kind === 'INTAKE' ? intakeCoverage(note) : [];
+  const balance = talkBalance(utterances);
+  const hearing = hearingCodes(utterances);
+  const clientFirst = clientName?.trim().split(/\s+/)[0] || 'Client';
   const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const ss = String(elapsed % 60).padStart(2, '0');
+  const updatedAgo =
+    noteUpdatedAt !== null ? Math.max(0, Math.round((Date.now() - noteUpdatedAt) / 1000)) : null;
 
   return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-serif text-2xl">{clientName || 'Live session'}</h1>
-          <p className="text-sm text-[var(--color-ink-3)]">
-            {kind === 'INTAKE' ? 'Intake' : kind === 'REVIEW' ? 'Review' : 'Session'}
-            {modality ? ` · ${modality}` : ''} · live scribe
-          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
+              {kind === 'INTAKE' ? 'Intake' : kind === 'REVIEW' ? 'Review' : 'Treatment session'}
+            </span>
+            {modality && (
+              <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
+                {modality}
+              </span>
+            )}
+            <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
+              Note: {LANGUAGE_LABEL[language] ?? language}
+            </span>
+            {hearing.length > 0 && (
+              <span className="rounded-full border border-[var(--color-accent)] bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs text-[var(--color-accent)]">
+                Hearing: {hearing.join(' · ')}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 pt-1">
           {phase === 'listening' && (
-            <span className="flex items-center gap-2 text-sm text-[var(--color-ink-2)]">
+            <span className="flex items-center gap-2 text-sm tabular-nums text-[var(--color-ink-2)]">
               <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
               {mm}:{ss}
             </span>
@@ -366,77 +520,216 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
         </Card>
       )}
 
-      {risk && (
-        <Card
-          className={`p-4 text-sm ${
-            risk.severity === 'critical' || risk.severity === 'high'
-              ? 'border-red-300 bg-red-50 text-red-800'
-              : 'border-amber-300 bg-amber-50 text-amber-800'
-          }`}
-        >
-          <strong className="uppercase tracking-wide">Safety · {risk.severity}</strong>
-          <p className="mt-1">{risk.text}</p>
-        </Card>
-      )}
-
       {phase === 'idle' && (
         <Card className="p-8 text-center">
           <p className="mb-4 text-sm text-[var(--color-ink-2)]">
-            The transcript and note build in real time as you talk.
+            The conversation and note build in real time as you talk.
           </p>
           <Button onClick={() => void start()}>Start session</Button>
         </Card>
       )}
 
       {phase !== 'idle' && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="p-4">
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-              Transcript
-            </h2>
-            <div className="max-h-[60vh] space-y-2 overflow-y-auto text-sm">
-              {utterances.length === 0 ? (
-                <p className="text-[var(--color-ink-3)]">Listening…</p>
+        <div className="grid items-start gap-4 lg:grid-cols-12">
+          {/* ============ Conversation ============ */}
+          <Card className="p-4 lg:col-span-7">
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                Conversation
+              </h2>
+              <span className="text-xs text-[var(--color-ink-3)]">auto-scrolls</span>
+            </div>
+
+            {balance && (
+              <div className="mt-3 flex items-center gap-2.5 text-xs text-[var(--color-ink-3)]">
+                <span className="whitespace-nowrap">
+                  {clientFirst} {balance.client}%
+                </span>
+                <div className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
+                  <div
+                    className="bg-[var(--color-accent)] opacity-80"
+                    style={{ width: `${balance.client}%` }}
+                  />
+                  <div className="bg-[#c9b98f]" style={{ width: `${balance.you}%` }} />
+                </div>
+                <span className="whitespace-nowrap">You {balance.you}%</span>
+              </div>
+            )}
+
+            <div ref={convoRef} className="mt-3 flex max-h-[62vh] flex-col gap-3 overflow-y-auto">
+              {sorted.length === 0 ? (
+                <p className="text-sm text-[var(--color-ink-3)]">Listening…</p>
               ) : (
-                [...utterances]
-                  .sort((a, b) => a.tStartMs - b.tStartMs)
-                  .map((u) => (
-                    <p key={u.id}>
-                      <span className="font-medium text-[var(--color-ink-3)]">
-                        {u.speaker === 'doctor' ? 'You' : u.speaker === 'patient' ? 'Client' : '—'}
-                        :{' '}
+                sorted.map((u) => {
+                  const who =
+                    u.speaker === 'doctor' ? 'You' : u.speaker === 'patient' ? clientFirst : null;
+                  const align =
+                    u.speaker === 'doctor' ? 'items-end self-end' : 'items-start self-start';
+                  const bubble =
+                    u.speaker === 'doctor'
+                      ? 'bg-[var(--color-accent-soft)] border border-[#d8e6de] rounded-tr-sm'
+                      : u.speaker === 'patient'
+                        ? 'bg-[var(--color-surface-soft)] border border-[var(--color-line-soft)] rounded-tl-sm'
+                        : 'border border-dashed border-[var(--color-line)] italic text-[var(--color-ink-3)] rounded-tl-sm';
+                  return (
+                    <div key={u.id} className={`flex max-w-[82%] flex-col gap-0.5 ${align}`}>
+                      <span className="text-[10.5px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+                        {who ?? 'Unclear'}{' '}
+                        <span className="font-normal normal-case tabular-nums">
+                          · {fmtClock(u.tStartMs)}
+                        </span>
                       </span>
-                      {u.text}
-                    </p>
-                  ))
+                      <div className={`rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${bubble}`}>
+                        {u.text}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              {phase === 'listening' && sorted.length > 0 && (
+                <div className="flex items-center gap-2 pt-1 text-xs text-[var(--color-ink-3)]">
+                  <span className="flex gap-1">
+                    <span className="h-1 w-1 animate-pulse rounded-full bg-[var(--color-ink-3)]" />
+                    <span
+                      className="h-1 w-1 animate-pulse rounded-full bg-[var(--color-ink-3)]"
+                      style={{ animationDelay: '0.2s' }}
+                    />
+                    <span
+                      className="h-1 w-1 animate-pulse rounded-full bg-[var(--color-ink-3)]"
+                      style={{ animationDelay: '0.4s' }}
+                    />
+                  </span>
+                  Listening…
+                </div>
               )}
             </div>
           </Card>
 
-          <Card className="p-4">
-            <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-              Note{' '}
-              {phase === 'listening' && (
-                <span className="text-[var(--color-ink-3)]">· writing…</span>
-              )}
-            </h2>
-            <div className="max-h-[60vh] space-y-3 overflow-y-auto text-sm">
-              {sections.length === 0 ? (
-                <p className="text-[var(--color-ink-3)]">
-                  The note appears here as the session unfolds.
+          {/* ============ Right rail ============ */}
+          <div className="space-y-4 lg:col-span-5">
+            {/* Risk watch — always present */}
+            {risk ? (
+              <Card
+                className={`p-4 text-sm ${
+                  risk.severity === 'critical' || risk.severity === 'high'
+                    ? 'border-red-300 bg-red-50 text-red-800'
+                    : 'border-amber-300 bg-amber-50 text-amber-800'
+                }`}
+              >
+                <strong className="uppercase tracking-wide">Safety · {risk.severity}</strong>
+                <p className="mt-1">{risk.text}</p>
+              </Card>
+            ) : (
+              <Card className="flex items-start gap-2.5 p-4">
+                <span className="mt-1.5 h-2 w-2 flex-none rounded-full bg-[var(--color-accent)]" />
+                <div>
+                  <p className="text-sm font-medium text-[var(--color-ink)]">
+                    Risk watch — no signals so far
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
+                    Escalates here the moment something needs your attention.
+                  </p>
+                </div>
+              </Card>
+            )}
+
+            {/* What to explore — intake coverage (B5) */}
+            {kind === 'INTAKE' && (
+              <Card className="p-4">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                  What to explore
+                </h2>
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {coverage.map((c) => (
+                    <span
+                      key={c.label}
+                      className={`rounded-full border px-2.5 py-0.5 text-xs ${
+                        c.done
+                          ? 'border-[#d8e6de] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                          : 'border-[var(--color-line)] text-[var(--color-ink-3)]'
+                      }`}
+                    >
+                      {c.done ? '✓' : '○'} {c.label}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+                  Read from the note as it builds — cover the open circles before you wrap up.
                 </p>
-              ) : (
-                sections.map((s) => (
+              </Card>
+            )}
+
+            {/* Live note */}
+            <Card className="p-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                  Live note
+                </h2>
+                <span className="flex-1" />
+                <span className="text-xs text-[var(--color-ink-3)]">
+                  {refreshingNote
+                    ? 'Updating…'
+                    : updatedAgo !== null
+                      ? `Updated ${updatedAgo}s ago`
+                      : 'Writing…'}
+                </span>
+                {phase === 'listening' && (
+                  <button
+                    type="button"
+                    onClick={updateNoteNow}
+                    disabled={refreshingNote}
+                    className="rounded-full border border-[var(--color-line)] px-2.5 py-0.5 text-xs font-semibold text-[var(--color-accent)] disabled:opacity-50"
+                  >
+                    Update now
+                  </button>
+                )}
+              </div>
+
+              <div className="mt-3 flex max-h-[52vh] flex-col gap-3.5 overflow-y-auto">
+                {sections.map((s) => (
                   <div key={s.label}>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">
+                    <div className="text-[10.5px] font-bold uppercase tracking-wide text-[var(--color-accent)]">
                       {s.label}
                     </div>
-                    <p className="mt-0.5 whitespace-pre-line text-[var(--color-ink)]">{s.value}</p>
+                    {s.value.trim() ? (
+                      <p className="mt-0.5 whitespace-pre-line text-sm text-[var(--color-ink)]">
+                        {s.value}
+                      </p>
+                    ) : (
+                      <div className="mt-1.5 space-y-1.5">
+                        <div className="h-2.5 animate-pulse rounded bg-[var(--color-line-soft)]" />
+                        <div className="h-2.5 w-3/5 animate-pulse rounded bg-[var(--color-line-soft)]" />
+                      </div>
+                    )}
                   </div>
-                ))
+                ))}
+                {filledCount === 0 && (
+                  <p className="text-xs italic text-[var(--color-ink-3)]">
+                    Fills in as the session gives it material…
+                  </p>
+                )}
+              </div>
+
+              {topics.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--color-line-soft)] pt-3">
+                  {topics.map((t) => (
+                    <span
+                      key={t}
+                      className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
               )}
-            </div>
-          </Card>
+            </Card>
+
+            {meterRef.current && (
+              <p className="pr-1 text-right text-xs tabular-nums text-[var(--color-ink-3)]">
+                ₹{meterRef.current.costInr.toFixed(2)} this session
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>

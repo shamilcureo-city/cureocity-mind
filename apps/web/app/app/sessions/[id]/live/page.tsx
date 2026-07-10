@@ -33,6 +33,7 @@ export default async function TherapistLivePage({
       clientId: true,
       kind: true,
       modality: true,
+      language: true,
       status: true,
       client: { select: { fullNameEncrypted: true } },
     },
@@ -49,6 +50,7 @@ export default async function TherapistLivePage({
         sessionId={session.id}
         kind={session.kind}
         modality={session.modality}
+        language={session.language}
         clientName={clientName}
         autoStart={sp.flash === '1'}
       />
