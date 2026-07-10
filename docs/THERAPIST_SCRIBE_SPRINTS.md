@@ -271,6 +271,34 @@ session workspace has ≤4 top-level tabs; existing E2E flows green.
 report; a clinician-readable diff of before/after outputs attached to the
 PR; prompt versions bumped + logged.
 
+**Status (TS4):**
+
+- **Task 2 (letters) — DONE.** `composeLetter` moved into
+  `@cureocity/clinical` and given a case-specific clinical-reasoning
+  paragraph: therapeutic focus + a PHQ-9/GAD-7 measurement trajectory
+  (baseline→latest with a response/remission verdict from the reliable-change
+  engine); the referral rationale flips to "limited response to therapy alone"
+  when symptoms persist. Scores stay clinician-to-clinician (REFERRAL only);
+  ATTENDANCE discloses nothing clinical. 11 golden tests.
+- **Task 3 (case-file summaries) — DONE.** `sessionSummaryLine` (in clinical)
+  prefers the note's own `summary` over the truncated SOAP `plan`. 9 tests.
+- **Task 4 (progress report) — PARTIAL.** The deterministic "what we worked
+  on" paragraph (`composeFocusSummary`, from episode session topics + plan
+  modality + goals) is DONE + rendered on the portal (9 tests; optional
+  `focusSummary` on the snapshot). The **baseline-only** rendering (≥1
+  administration) and generalising beyond PHQ-9/GAD-7 are DEFERRED — both need
+  a `ProgressReportInstrumentEntry` schema change to represent a single reading
+  (and the registry only holds the two instruments today, so generalisation is
+  moot until a third is curated).
+- **Task 1 (prompt uplift) — PARTIAL / DEFERRED.** linkedEvidence is done
+  (TS0) and the Pass-2 `summary` ask already demands a 2–4 sentence jargon-free
+  synthesis (Sprint 70). The remaining piece — typed `modalitySpecific`
+  schemas (CBT thought-record / EMDR SUDS) replacing `z.record(z.unknown())`
+  plus confidence self-flagging — is DEFERRED: it is a Pass-2 discriminated-
+  union migration that needs clinician-validated item wording, and prompt-text
+  changes can't be validated in CI (mock backends are deterministic; there is
+  no clinician-diff harness). Do it with a clinician in the loop.
+
 ## TS5 — Live therapy copilot rail (the ambitious one — separate, optional)
 
 **Goal:** the therapy analogue of the doctor's reasoning engine — but
