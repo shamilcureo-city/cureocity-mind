@@ -307,6 +307,16 @@ export class LiveSession {
     this.pending = this.pending.subarray(consumedBytes);
     const tEndMs = bytesToMs(this.flushedBytes);
 
+    // Anti-hallucination (TS-fix): Pass 1 now returns an EMPTY transcript for a
+    // window that carried no discernible speech (silence/room-noise that cleared
+    // the energy VAD but wasn't actually speech). Drop it — don't emit a blank
+    // utterance or re-run the note/reasoning on nothing. The cursor is already
+    // advanced so the window is never re-scanned.
+    if (pass1.output.transcript.trim().length === 0) {
+      this.emit({ type: 'meter', summary: this.meterSummary() });
+      return;
+    }
+
     const utterance = this.commitUtterance(
       pass1.output.transcript,
       pass1.output.speakerSegments,
@@ -552,6 +562,10 @@ export class LiveSession {
         tnote = out.therapyNote;
       } else {
         // MEDICAL — never expected for a therapist; keep the last good note.
+        console.warn(
+          `[live-gateway] therapist Pass 2 returned a non-therapy note (kind=${out.kind}) ` +
+            `for sess=${this.sessionId}; ignoring. Check the Pass-2 backend vertical branch.`,
+        );
         if (isFinal) this.emitFinalFromLatest();
         return;
       }
@@ -749,25 +763,29 @@ export class LiveSession {
       this.meter.markWindow();
       this.flushedBytes += consumed;
       const tEndMs = bytesToMs(this.flushedBytes);
-      const utterance = this.commitUtterance(
-        pass1.output.transcript,
-        pass1.output.speakerSegments,
-        tStartMs,
-        tEndMs,
-      );
-      this.emit({
-        type: 'transcript',
-        delta: {
-          text: utterance.text,
-          isFinal: true,
-          speaker: utterance.speaker,
-          startMs: tStartMs,
-          endMs: tEndMs,
-        },
-      });
-      this.recordSpeechToTranscript(tStartMs);
-      this.emit({ type: 'utterance', utterance });
-      this.reasoningScheduler.enqueue(utterance);
+      // Anti-hallucination (TS-fix): skip a silent tail window — no blank
+      // utterance, no hallucinated closing line.
+      if (pass1.output.transcript.trim().length > 0) {
+        const utterance = this.commitUtterance(
+          pass1.output.transcript,
+          pass1.output.speakerSegments,
+          tStartMs,
+          tEndMs,
+        );
+        this.emit({
+          type: 'transcript',
+          delta: {
+            text: utterance.text,
+            isFinal: true,
+            speaker: utterance.speaker,
+            startMs: tStartMs,
+            endMs: tEndMs,
+          },
+        });
+        this.recordSpeechToTranscript(tStartMs);
+        this.emit({ type: 'utterance', utterance });
+        this.reasoningScheduler.enqueue(utterance);
+      }
     }
     // Sprint DS2 — run the reasoning engine over anything the scheduler
     // was still coalescing so the closing snapshot reflects the whole consult.
@@ -809,7 +827,17 @@ export class LiveSession {
     if (this.finalEmitted) return;
     // Sprint TS1 — therapist fallback final (on a finalize timeout/failure).
     if (this.vertical === 'THERAPIST') {
-      if (!this.latestTherapyNote) return;
+      if (!this.latestTherapyNote) {
+        // No note ever built (Pass 2 empty/blocked/errored every window). We
+        // cannot fabricate a clinical note, but the client MUST NOT hang: it
+        // treats the `done` status that always follows as a "no note" terminal
+        // and offers recovery. Log so the cause is diagnosable.
+        console.warn(
+          `[live-gateway] therapist finalize: no note was built for sess=${this.sessionId} ` +
+            `(utterances=${this.utterances.length}); emitting no therapyFinal — client shows recovery.`,
+        );
+        return;
+      }
       this.finalEmitted = true;
       this.emit({
         type: 'therapyFinal',

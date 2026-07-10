@@ -100,6 +100,9 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
+  // Set when the consult ended but no note ever arrived (Pass 2 empty/blocked
+  // upstream). Terminal, recoverable — never leave the user on "Finishing…".
+  const [noteFailed, setNoteFailed] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const meterRef = useRef<MeterSummary | null>(null);
@@ -196,6 +199,7 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
 
   async function start(): Promise<void> {
     setError(null);
+    setNoteFailed(false);
     setUtterances([]);
     setNote({});
     setElapsed(0);
@@ -269,8 +273,13 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
         case 'status':
           if (event.state === 'listening') setPhase('listening');
           else if (event.state === 'finalizing') setPhase('finalizing');
-          else if (event.state === 'done') setPhase('done');
-          else if (event.state === 'unauthorized' || event.state === 'busy') {
+          else if (event.state === 'done') {
+            setPhase('done');
+            // The gateway always sends `done` after a therapyFinal. If we get
+            // here without one, no note was generated (Pass 2 empty/blocked) —
+            // surface a recovery panel instead of hanging on "Finishing…".
+            if (!finalHandledRef.current) setNoteFailed(true);
+          } else if (event.state === 'unauthorized' || event.state === 'busy') {
             setPhase('error');
             setError(
               event.state === 'busy'
@@ -339,6 +348,23 @@ export function TherapistLiveSession({ sessionId, kind, modality, clientName, au
       </header>
 
       {error && <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</Card>}
+
+      {noteFailed && (
+        <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+          <strong className="block">The note couldn’t be generated automatically.</strong>
+          <p className="mt-1">
+            The session ended but the AI note didn’t come back (the transcriber may have returned
+            nothing for this audio). Your session isn’t lost — you can try the live scribe again, or
+            open the session to record or write the note there.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => void start()}>Try again</Button>
+            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
+              Open session
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {risk && (
         <Card

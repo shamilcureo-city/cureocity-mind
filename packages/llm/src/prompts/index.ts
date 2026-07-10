@@ -61,6 +61,13 @@ Task — produce strict JSON with FOUR fields:
      - ["en", "ml", "hi"] — three languages mixed
 
 Constraints:
+- NO SPEECH → EMPTY OUTPUT. If this audio contains no discernible speech —
+  silence, room noise, breathing, typing, or other non-speech sound only —
+  return transcript: "" and speakerSegments: []. NEVER invent, infer,
+  guess, or "fill in" plausible dialogue that was not actually spoken.
+  Fabricating clinical content the client never said is a patient-safety
+  failure. When you are unsure whether a faint sound is speech, prefer
+  [inaudible] or an empty result over a guess.
 - Do not redact PII. The downstream system de-identifies before Pass 2.
 - Preserve hesitations ("um", "umm", "uhh", pauses) only when
   clinically meaningful (signs of avoidance, distress, or thought
@@ -73,7 +80,7 @@ Output: STRICT JSON matching the schema. No prose, no markdown.
 
 PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).` as const;
 
-export const TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION = 'TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V2';
+export const TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION = 'TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V3';
 
 // ============================================================================
 // DOC-6 — vertical-aware Pass-1 transcription. The doctor vertical gets its
@@ -129,6 +136,13 @@ Task — produce strict JSON with FOUR fields:
    first (e.g. ["hi", "en"] for a Hindi-dominant Hinglish consult).
 
 Constraints:
+- NO SPEECH → EMPTY OUTPUT. If this audio contains no discernible speech —
+  silence, room noise, breathing, typing, or other non-speech sound only —
+  return transcript: "" and speakerSegments: []. NEVER invent, infer, or
+  "fill in" a plausible consult (findings, drugs, doses) that was not
+  actually spoken; a fabricated drug or dose is a patient-safety failure.
+  When unsure whether a faint sound is speech, prefer [inaudible] or an
+  empty result over a guess.
 - Do not redact PII; the downstream system de-identifies before Pass 2.
 - Do not insert commentary, interpretation, or a differential — transcribe
   only what was said.
@@ -136,7 +150,7 @@ Constraints:
 
 Output: STRICT JSON matching the schema. No prose, no markdown.` as const;
 
-export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2';
+export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V3';
 
 // ----------------------------------------------------------------------------
 // DV3 — Pass 2 medical encounter note (the doctor analogue of the therapy

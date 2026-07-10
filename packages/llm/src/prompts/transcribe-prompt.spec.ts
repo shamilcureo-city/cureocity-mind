@@ -16,7 +16,21 @@ describe('transcribePromptFor (DOC-6)', () => {
     const picked = transcribePromptFor('DOCTOR');
     expect(picked.prompt).toBe(MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2);
     expect(picked.version).toBe(MEDICAL_TRANSCRIBE_PROMPT_VERSION);
-    expect(picked.version).toBe('MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2');
+    expect(picked.version).toBe('MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V3');
+  });
+
+  // TS-fix — both prompts must instruct the model to return an EMPTY result on
+  // silence rather than hallucinating dialogue (the "it invents things when I
+  // don't talk" bug). Lock it so a future edit can't silently drop it.
+  it('both transcribe prompts forbid hallucinating on silence', () => {
+    for (const p of [
+      MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2,
+      TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V1,
+    ]) {
+      expect(p).toMatch(/NO SPEECH/);
+      expect(p).toMatch(/NEVER invent/i);
+      expect(p).toMatch(/transcript:\s*""/);
+    }
   });
 
   it('selects the psychotherapy prompt + version for THERAPIST', () => {
