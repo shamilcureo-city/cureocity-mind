@@ -1,6 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { Prisma } from '@prisma/client';
+import { z } from 'zod';
 import {
+  CarriedQuestionSchema,
+  type CarriedQuestion,
   type ClinicalLocale,
   ClinicalLocaleSchema,
   type ClinicalTreatmentPlan,
@@ -48,6 +51,7 @@ export async function GET(
       psychologistId: true,
       preferredLanguage: true,
       presentingConcerns: true,
+      carriedQuestions: true,
       deletedAt: true,
     },
   });
@@ -146,6 +150,22 @@ export async function GET(
     console.warn(
       `[pre-session-brief] case digest unavailable for client=${clientId}: ${(e as Error).message}`,
     );
+  }
+
+  // Sprint TSC — the decision board's "ask next session" questions. They
+  // persist on Client.carriedQuestions and get appended to the case digest so
+  // Pass 5 opens the next session with them. The cache key already handles
+  // staleness: questions are ticked during/after session N, and the brief for
+  // the NEXT visit is keyed on lastSessionId = N, so it generates fresh.
+  const carriedQuestions = parseCarriedQuestions(client.carriedQuestions);
+  if (carriedQuestions.length > 0) {
+    const block = [
+      'QUESTIONS THE THERAPIST MARKED TO ASK AT THIS SESSION (weave these into todaysFocus and openingLine):',
+      ...carriedQuestions.map(
+        (q, i) => `${i + 1}. ${q.question}${q.rationale ? ` — why: ${q.rationale}` : ''}`,
+      ),
+    ].join('\n');
+    caseDigest = caseDigest ? `${caseDigest}\n\n${block}` : block;
   }
 
   // Insert PENDING row first so the UI can poll if needed.
@@ -310,6 +330,12 @@ function extractLastSummary(
 
 function truncate(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max)}…`;
+}
+
+/** Defensive parse of Client.carriedQuestions — a malformed blob is skipped. */
+function parseCarriedQuestions(raw: unknown): CarriedQuestion[] {
+  const parsed = z.array(CarriedQuestionSchema).safeParse(raw);
+  return parsed.success ? parsed.data : [];
 }
 
 /**

@@ -622,8 +622,11 @@ const PLAN_MODALITIES: ClinicalTreatmentPlan['modality'][] = [
  * reason — the same path the route already supported for diagnosis.
  * Accepting the edited plan bumps TreatmentPlan.version exactly like an
  * unedited accept.
+ *
+ * Exported (Sprint TSC) — the CopilotDecisionBoard reuses this editor for
+ * its "Edit & accept" plan action.
  */
-function PlanEditor({
+export function PlanEditor({
   initialPlan,
   busy,
   error,

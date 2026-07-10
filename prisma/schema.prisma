@@ -411,6 +411,12 @@ model Client {
   presentingConcerns String?
   preferredModality  String?
 
+  /// Sprint TSC — questions the therapist ticked on the copilot decision
+  /// board to carry into the NEXT session. JSON array of
+  /// { question, rationale, sourceSessionId, carriedAt }. Replaced wholesale
+  /// on each save; woven into the pre-session brief's case digest.
+  carriedQuestions Json?
+
   /// Doctor vertical — Sprint DV8. The patient's linked ABHA address /
   /// number (Ayushman Bharat Health Account), set when the doctor pushes
   /// to the patient's ABDM PHR. Null until linked.
@@ -2562,6 +2568,8 @@ enum AuditAction {
   DIAGNOSIS_CONFIRMED
   PLAN_CONFIRMED
   CRISIS_ACKNOWLEDGED
+  // Sprint TSC — copilot decision board carried-questions save.
+  CARRIED_QUESTIONS_UPDATED
 
   // Therapy script — Sprint 14.
   // Pass 4 generates a per-therapy script keyed by (client, therapy,

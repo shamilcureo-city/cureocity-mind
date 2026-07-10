@@ -1,6 +1,9 @@
+import { z } from 'zod';
 import {
+  CarriedQuestionSchema,
   ClinicalLocaleSchema,
   ClinicalReportV1Schema,
+  ClinicalTreatmentPlanSchema,
   type ClinicalLocale,
   type SessionKind,
   type TherapyNoteV1,
@@ -9,11 +12,13 @@ import { Card } from '@/components/ui/Card';
 import { AffectCard } from '@/components/app/AffectCard';
 import { CaseBriefingPanel } from '@/components/app/CaseBriefingPanel';
 import { CaseConsultPanel } from '@/components/app/CaseConsultPanel';
-import { ClinicalBriefTab } from '@/components/app/ClinicalBriefTab';
 import { ConceptualMapTab } from '@/components/app/ConceptualMapTab';
+import {
+  CopilotDecisionBoard,
+  type CaseRecordSnapshot,
+} from '@/components/app/CopilotDecisionBoard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
 import { EpisodeStepper } from '@/components/app/EpisodeStepper';
-import { InitialAssessmentTab } from '@/components/app/InitialAssessmentTab';
 import { InstrumentRunner } from '@/components/app/InstrumentRunner';
 import { JourneyHeader } from '@/components/app/JourneyHeader';
 import { MindmapTab } from '@/components/app/MindmapTab';
@@ -143,33 +148,82 @@ async function SessionSub({
   clientHasContactEmail: boolean;
 }) {
   const isIntake = sessionKind === 'INTAKE';
-  const [reportRow, draft, signed] = await Promise.all([
-    prisma.clinicalReport.findUnique({ where: { sessionId } }),
-    prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
-    prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
-  ]);
+  // The board's right lane is the client's confirmed record — loaded here
+  // (server truth) and refreshed via router.refresh() after each accept.
+  const [reportRow, draft, signed, client, diagnoses, activePlan, instruments, safetyPlan] =
+    await Promise.all([
+      prisma.clinicalReport.findUnique({ where: { sessionId } }),
+      prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
+      prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
+      prisma.client.findUnique({ where: { id: clientId }, select: { carriedQuestions: true } }),
+      prisma.clientDiagnosis.findMany({
+        where: { clientId, supersededAt: null },
+        orderBy: [{ isPrimary: 'desc' }, { confirmedAt: 'desc' }],
+        select: {
+          icd11Code: true,
+          icd11Label: true,
+          isPrimary: true,
+          confirmedAt: true,
+          sessionId: true,
+        },
+      }),
+      prisma.treatmentPlan.findFirst({
+        where: { clientId, supersededAt: null },
+        orderBy: { version: 'desc' },
+        select: { version: true, body: true, confirmedAt: true },
+      }),
+      prisma.instrumentResponse.findMany({
+        where: { clientId },
+        orderBy: { administeredAt: 'desc' },
+        take: 6,
+        select: { instrumentKey: true, score: true, severity: true, administeredAt: true },
+      }),
+      prisma.safetyPlan.findFirst({
+        where: { clientId, supersededAt: null },
+        select: { confirmedAt: true },
+      }),
+    ]);
   const noteJson = (signed?.content ?? draft?.content) as TherapyNoteV1 | null;
 
-  if (isIntake) {
-    return (
-      <InitialAssessmentTab
-        sessionId={sessionId}
-        clientId={clientId}
-        reportEnvelope={
-          reportRow ? { status: reportRow.status, errorMessage: reportRow.errorMessage } : null
+  const planBody = activePlan ? ClinicalTreatmentPlanSchema.safeParse(activePlan.body) : null;
+  const carriedParse = z.array(CarriedQuestionSchema).safeParse(client?.carriedQuestions);
+  const record: CaseRecordSnapshot = {
+    diagnoses: diagnoses.map((d) => ({
+      icd11Code: d.icd11Code,
+      icd11Label: d.icd11Label,
+      isPrimary: d.isPrimary,
+      confirmedAt: d.confirmedAt.toISOString(),
+      sessionId: d.sessionId,
+    })),
+    plan: activePlan
+      ? {
+          version: activePlan.version,
+          modality: planBody?.success ? planBody.data.modality : 'other',
+          goalCount: planBody?.success ? planBody.data.goals.length : 0,
+          confirmedAt: activePlan.confirmedAt.toISOString(),
         }
-        initialBrief={reportRow ? readInitialAssessmentBrief(reportRow) : null}
-      />
-    );
-  }
+      : null,
+    instruments: instruments.map((i) => ({
+      instrumentKey: i.instrumentKey,
+      score: i.score,
+      severity: i.severity,
+      administeredAt: i.administeredAt.toISOString(),
+    })),
+    safetyPlanConfirmedAt: safetyPlan?.confirmedAt.toISOString() ?? null,
+    carriedQuestions: carriedParse.success ? carriedParse.data : [],
+  };
 
   return (
     <div className="space-y-8">
-      <ClinicalBriefTab
+      <CopilotDecisionBoard
         sessionId={sessionId}
+        clientId={clientId}
+        sessionKind={sessionKind}
         initialReport={reportRow ? toClinicalReport(reportRow) : null}
+        initialBrief={isIntake && reportRow ? readInitialAssessmentBrief(reportRow) : null}
+        record={record}
       />
-      {noteJson && (
+      {!isIntake && noteJson && (
         <section>
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
             Mindmap
@@ -177,7 +231,7 @@ async function SessionSub({
           <MindmapTab note={noteJson} />
         </section>
       )}
-      {noteJson && (
+      {!isIntake && noteJson && (
         <section>
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
             Reflection questions

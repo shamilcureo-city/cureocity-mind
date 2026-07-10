@@ -393,6 +393,39 @@ export const ConfirmClinicalSectionInputSchema = z
 export type ConfirmClinicalSectionInput = z.infer<typeof ConfirmClinicalSectionInputSchema>;
 
 // ============================================================================
+// Sprint TSC — copilot decision board.
+// ============================================================================
+
+/// Accept selected differential candidates from an INTAKE initial-assessment
+/// brief as the client's working diagnosis. The treatment-report path goes
+/// through the sections route above; intakes have no plan/section
+/// confirmations, so this is the intake-shaped equivalent.
+/// POST /api/v1/clinical-reports/[id]/intake-diagnosis
+export const AcceptIntakeDiagnosisInputSchema = z.object({
+  /** Indexes into the brief's `differential` array. */
+  candidateIndexes: z.array(z.number().int().nonnegative()).min(1).max(5),
+  /** Which of the SELECTED candidates is primary (index into candidateIndexes). */
+  primarySelectionIndex: z.number().int().nonnegative().nullable(),
+});
+export type AcceptIntakeDiagnosisInput = z.infer<typeof AcceptIntakeDiagnosisInputSchema>;
+
+/// One question the therapist ticked on the decision board to carry into the
+/// client's NEXT session (woven into the pre-session brief's case digest).
+export const CarriedQuestionSchema = z.object({
+  question: z.string().min(1).max(500),
+  rationale: z.string().max(1000).nullable(),
+  sourceSessionId: z.string().nullable(),
+  carriedAt: IsoDateTimeSchema,
+});
+export type CarriedQuestion = z.infer<typeof CarriedQuestionSchema>;
+
+/// POST /api/v1/clients/[id]/carried-questions — replaces the list wholesale.
+export const SaveCarriedQuestionsInputSchema = z.object({
+  questions: z.array(CarriedQuestionSchema).max(8),
+});
+export type SaveCarriedQuestionsInput = z.infer<typeof SaveCarriedQuestionsInputSchema>;
+
+// ============================================================================
 // ClientDiagnosis — cumulative per-client diagnosis record. One row per
 // confirmed diagnosis decision; older entries are kept (supersededAt set)
 // when the therapist updates the diagnosis on a later session.

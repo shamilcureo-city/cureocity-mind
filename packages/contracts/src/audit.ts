@@ -84,6 +84,9 @@ export const AuditActionSchema = z.enum([
   'DIAGNOSIS_CONFIRMED',
   'PLAN_CONFIRMED',
   'CRISIS_ACKNOWLEDGED',
+  // Sprint TSC — the copilot decision board: questions the therapist ticked
+  // to carry into the next session (stored on Client.carriedQuestions).
+  'CARRIED_QUESTIONS_UPDATED',
   // Therapy script — Sprint 14. Pass 4 generates a per-therapy
   // script keyed by (client, therapy, language, inputs-hash);
   // cached + audited so re-views don't re-bill and the regulator

@@ -1,0 +1,1545 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import type {
+  CarriedQuestion,
+  ClinicalAssessmentGap,
+  ClinicalCrisisFlag,
+  ClinicalCrisisSeverity,
+  ClinicalDiagnosisCandidate,
+  ClinicalRecommendedTherapy,
+  ClinicalReport,
+  ClinicalSectionConfirmation,
+  ClinicalTreatmentPlan,
+  InitialAssessmentBriefV1,
+  SessionKind,
+} from '@cureocity/contracts';
+import { Badge } from '../ui/Badge';
+import { Button } from '../ui/Button';
+import { Card } from '../ui/Card';
+import { PlanEditor } from './ClinicalBriefTab';
+
+// ============================================================================
+// Sprint TSC — the copilot decision board.
+//
+// Replaces the "wall of look-alike cards" (ClinicalBriefTab /
+// InitialAssessmentTab) on the AI Copilot "This session" sub-tab with a
+// two-lane decision board, doctor-style:
+//
+//   - LEFT — "AI suggests", five steps in working order: safety →
+//     working impression → ask next session → suggested plan → baseline.
+//     Every suggestion is an action; sand-topped cards + an AI tag mark
+//     everything unconfirmed.
+//   - RIGHT — "Your case record", green-topped and sticky: what the
+//     therapist has actually accepted (diagnoses, plan version, safety
+//     record, baselines, carried questions). Server truth, refreshed via
+//     router.refresh() after every accept.
+//
+// One trust banner replaces the per-card disclaimers; the lane design
+// enforces the same rule visually — nothing crosses lanes until accepted.
+//
+// The same shell serves both session kinds: INTAKE reads the
+// InitialAssessmentBriefV1 (accepts via the intake-diagnosis route),
+// TREATMENT/REVIEW read the ClinicalReportV1 (accepts via the existing
+// sections route).
+// ============================================================================
+
+export interface RecordDiagnosis {
+  icd11Code: string;
+  icd11Label: string;
+  isPrimary: boolean;
+  confirmedAt: string;
+  sessionId: string;
+}
+
+export interface RecordPlan {
+  version: number;
+  modality: string;
+  goalCount: number;
+  confirmedAt: string;
+}
+
+export interface RecordInstrument {
+  instrumentKey: string;
+  score: number;
+  severity: string;
+  administeredAt: string;
+}
+
+export interface CaseRecordSnapshot {
+  diagnoses: RecordDiagnosis[];
+  plan: RecordPlan | null;
+  instruments: RecordInstrument[];
+  safetyPlanConfirmedAt: string | null;
+  carriedQuestions: CarriedQuestion[];
+}
+
+interface Props {
+  sessionId: string;
+  clientId: string;
+  sessionKind: SessionKind;
+  /// Full report DTO for BOTH kinds (body parses only for treatment;
+  /// intake needs it for id + status + errorMessage).
+  initialReport: ClinicalReport | null;
+  /// Parsed intake brief (INTAKE kind only).
+  initialBrief: InitialAssessmentBriefV1 | null;
+  record: CaseRecordSnapshot;
+}
+
+/** The kind-normalised AI reading the five steps render from. */
+interface BoardData {
+  crisisFlags: ClinicalCrisisFlag[];
+  impression: string;
+  fullFormulation: string | null;
+  candidates: ClinicalDiagnosisCandidate[];
+  primaryIndex: number | null;
+  gaps: ClinicalAssessmentGap[];
+  therapies: ClinicalRecommendedTherapy[];
+  plan: ClinicalTreatmentPlan | null;
+  recommendedInstruments: string[];
+}
+
+interface AnalysisResponse {
+  report?: ClinicalReport | null;
+  initialAssessmentBrief?: InitialAssessmentBriefV1 | null;
+  error?: string;
+  code?: string;
+}
+
+export function CopilotDecisionBoard({
+  sessionId,
+  clientId,
+  sessionKind,
+  initialReport,
+  initialBrief,
+  record,
+}: Props) {
+  const router = useRouter();
+  const isIntake = sessionKind === 'INTAKE';
+  const [report, setReport] = useState<ClinicalReport | null>(initialReport);
+  const [brief, setBrief] = useState<InitialAssessmentBriefV1 | null>(initialBrief);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  // Set after a NOTE_NOT_USABLE kick re-ran generate-note: the report row may
+  // not even exist yet, but Pass 3 is on its way — poll until it lands.
+  const [kickedPending, setKickedPending] = useState(false);
+
+  const applyResponse = useCallback((payload: AnalysisResponse) => {
+    if (payload.report !== undefined) setReport(payload.report ?? null);
+    if (payload.initialAssessmentBrief !== undefined) {
+      setBrief(payload.initialAssessmentBrief ?? null);
+    }
+    if (payload.report && payload.report.status !== 'PENDING') setKickedPending(false);
+  }, []);
+
+  const generate = useCallback(async () => {
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/clinical-analysis`, {
+        method: 'POST',
+      });
+      const body = (await res.json().catch(() => ({}))) as AnalysisResponse;
+      if (!res.ok) {
+        // Pass 3 can't run when Pass 1 produced an unusable transcript —
+        // kick generate-note (which retries Pass 1) so one Retry click
+        // moves the therapist forward instead of looping on the same 409.
+        if (res.status === 409 && body.code === 'NOTE_NOT_USABLE') {
+          const regen = await fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
+            method: 'POST',
+          });
+          if (!regen.ok) {
+            const rb = (await regen.json().catch(() => ({}))) as { error?: string };
+            throw new Error(
+              rb.error ??
+                'Could not re-run note generation. Open the Note tab and hit Retry there.',
+            );
+          }
+          setKickedPending(true);
+          return;
+        }
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      applyResponse(body);
+      router.refresh();
+    } catch (e) {
+      setGenError((e as Error).message);
+    } finally {
+      setGenerating(false);
+    }
+  }, [sessionId, applyResponse, router]);
+
+  const status: ClinicalReport['status'] | null = kickedPending
+    ? 'PENDING'
+    : (report?.status ?? null);
+
+  // Poll while Pass 3 runs in the background (generate-note schedules it via
+  // after(), so the therapist can land here in PENDING).
+  useEffect(() => {
+    if (status !== 'PENDING') return;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/clinical-analysis`, {
+          cache: 'no-store',
+        });
+        if (!res.ok) return;
+        const body = (await res.json().catch(() => ({}))) as AnalysisResponse;
+        if (cancelled) return;
+        applyResponse(body);
+      } catch {
+        // Swallow — next tick retries.
+      }
+    };
+    const id = setInterval(() => void poll(), 3_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [status, sessionId, applyResponse]);
+
+  const data: BoardData | null = useMemo(() => {
+    if (isIntake) {
+      if (!brief) return null;
+      return {
+        crisisFlags: brief.crisisFlags,
+        impression: brief.workingHypothesis,
+        fullFormulation: brief.formulation,
+        candidates: brief.differential,
+        primaryIndex: null,
+        gaps: brief.assessmentGaps,
+        therapies: brief.recommendedTherapies,
+        plan: null,
+        recommendedInstruments: brief.recommendedInstruments,
+      };
+    }
+    const body = report?.body;
+    if (!body) return null;
+    return {
+      crisisFlags: body.crisisFlags,
+      impression: body.formulation,
+      fullFormulation: null,
+      candidates: body.diagnosisCandidates,
+      primaryIndex: body.primaryDiagnosisIndex,
+      gaps: body.assessmentGaps,
+      therapies: body.recommendedTherapies,
+      plan: body.treatmentPlan,
+      recommendedInstruments: [],
+    };
+  }, [isIntake, brief, report?.body]);
+
+  // ----- accept plumbing -----
+
+  const patchSection = useCallback(
+    async (section: string, body: Record<string, unknown>): Promise<void> => {
+      if (!report) throw new Error('No report to confirm against.');
+      const res = await fetch(`/api/v1/clinical-reports/${report.id}/sections/${section}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = (await res.json().catch(() => ({}))) as {
+        report?: ClinicalReport;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      if (payload.report) setReport(payload.report);
+      router.refresh();
+    },
+    [report, router],
+  );
+
+  const acceptIntakeDiagnosis = useCallback(
+    async (candidateIndexes: number[], primarySelectionIndex: number | null): Promise<void> => {
+      if (!report) throw new Error('No report to confirm against.');
+      const res = await fetch(`/api/v1/clinical-reports/${report.id}/intake-diagnosis`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ candidateIndexes, primarySelectionIndex }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      router.refresh();
+    },
+    [report, router],
+  );
+
+  // ----- pre-reading states -----
+
+  const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=measures`;
+  const readingNoun = isIntake ? 'initial assessment' : 'clinical brief';
+
+  if (status === null || (status === 'COMPLETED' && !data)) {
+    return (
+      <Card className="p-10 text-center">
+        <p className="font-serif text-2xl">No AI reading yet</p>
+        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
+          The {readingNoun} is generated automatically after the note finishes. If you don't see
+          one, the note may not have completed — generate the note first, then come back here.
+        </p>
+        <div className="mt-6">
+          <Button onClick={() => void generate()} disabled={generating}>
+            {generating ? 'Generating…' : `Generate ${readingNoun}`}
+          </Button>
+        </div>
+        {genError && <p className="mt-4 text-sm text-[var(--color-warn)]">{genError}</p>}
+      </Card>
+    );
+  }
+
+  if (status === 'PENDING' || !data) {
+    return (
+      <Card className="p-10 text-center">
+        <p className="font-serif text-2xl">
+          {status === 'PENDING'
+            ? "This session's reading is being prepared…"
+            : `${capitalise(readingNoun)} generation failed`}
+        </p>
+        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
+          {status === 'PENDING'
+            ? 'Usually about a minute after the note is ready. If it takes longer, it may have stopped early — just re-run it.'
+            : (report?.errorMessage ?? `Couldn't generate the ${readingNoun} — try again.`)}
+        </p>
+        <div className="mt-6">
+          <Button onClick={() => void generate()} disabled={generating}>
+            {generating ? 'Re-running…' : status === 'PENDING' ? 'Re-run now' : 'Retry'}
+          </Button>
+        </div>
+        {genError && <p className="mt-4 text-sm text-[var(--color-warn)]">{genError}</p>}
+      </Card>
+    );
+  }
+
+  // ----- the board -----
+
+  const confirmations = report?.confirmations ?? null;
+  const highest = highestCrisisSeverity(data.crisisFlags);
+  const crisisAcknowledged = isIntake || confirmations?.crisis.status !== 'PENDING';
+  const crisisBlocking =
+    !crisisAcknowledged &&
+    data.crisisFlags.length > 0 &&
+    (highest === 'high' || highest === 'critical');
+
+  return (
+    <div className="space-y-5">
+      <header className="flex flex-wrap items-center gap-3">
+        <h2 className="font-serif text-2xl">This session's reading</h2>
+        <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] px-3.5 py-1.5 text-xs text-[var(--color-ink-2)]">
+          <AiChip inline />
+          Suggestions only — nothing joins the record until you accept it.
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {!isIntake && (
+            <a
+              href={`/api/v1/sessions/${sessionId}/clinical-report/pdf`}
+              className="inline-flex h-9 items-center justify-center rounded-full border border-[var(--color-line)] bg-white px-4 text-[13px] font-medium text-[var(--color-ink)] transition-colors hover:border-[var(--color-ink)]"
+            >
+              Download PDF
+            </a>
+          )}
+          <Button variant="secondary" onClick={() => void generate()} disabled={generating}>
+            {generating ? 'Regenerating…' : 'Regenerate'}
+          </Button>
+        </div>
+      </header>
+      {genError && <p className="text-sm text-[var(--color-warn)]">{genError}</p>}
+
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+        {/* ================= AI lane ================= */}
+        <div className="space-y-4">
+          <LaneLabel>AI suggests — in the order you'd work</LaneLabel>
+
+          <SafetyStep
+            flags={data.crisisFlags}
+            isIntake={isIntake}
+            confirmation={confirmations?.crisis ?? null}
+            safetyPlanConfirmedAt={record.safetyPlanConfirmedAt}
+            onAcknowledge={() => patchSection('crisis', { action: 'accept' })}
+          />
+
+          <div className={crisisBlocking ? 'space-y-4 opacity-40' : 'space-y-4'}>
+            <div
+              className={crisisBlocking ? 'pointer-events-none select-none space-y-4' : 'space-y-4'}
+            >
+              <ImpressionStep
+                sessionId={sessionId}
+                isIntake={isIntake}
+                impression={data.impression}
+                fullFormulation={data.fullFormulation}
+                candidates={data.candidates}
+                primaryIndex={data.primaryIndex}
+                confirmation={confirmations?.diagnosis ?? null}
+                recordDiagnoses={record.diagnoses}
+                onAcceptTreatment={(selected, primaryInSelected, reason) =>
+                  patchSection('diagnosis', {
+                    action: 'modify',
+                    reason,
+                    edits: {
+                      diagnosisCandidates: selected,
+                      primaryDiagnosisIndex: primaryInSelected,
+                    },
+                  })
+                }
+                onAcceptIntake={acceptIntakeDiagnosis}
+              />
+
+              <AskNextStep
+                sessionId={sessionId}
+                clientId={clientId}
+                gaps={data.gaps}
+                carried={record.carriedQuestions}
+                onSaved={() => router.refresh()}
+              />
+
+              <PlanStep
+                isIntake={isIntake}
+                plan={data.plan}
+                therapies={data.therapies}
+                confirmation={confirmations?.plan ?? null}
+                onAccept={() => patchSection('plan', { action: 'accept' })}
+                onModify={(edits, reason) =>
+                  patchSection('plan', { action: 'modify', reason, edits })
+                }
+              />
+
+              <BaselineStep
+                recommendedInstruments={data.recommendedInstruments}
+                instruments={record.instruments}
+                measuresHref={measuresHref}
+              />
+            </div>
+            {crisisBlocking && (
+              <p className="text-center text-xs font-medium text-[var(--color-warn)]">
+                Acknowledge the safety review above to continue with the rest of the reading.
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* ================= Your record lane ================= */}
+        <div className="space-y-2 lg:sticky lg:top-4">
+          <LaneLabel>Your case record — what you've decided</LaneLabel>
+          <RecordLane record={record} crisisFlags={data.crisisFlags} measuresHref={measuresHref} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// Step shell + shared chrome.
+// ============================================================================
+
+function LaneLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="px-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+      {children}
+    </p>
+  );
+}
+
+function AiChip({ inline = false }: { inline?: boolean }) {
+  return (
+    <span
+      className={`${inline ? '' : 'absolute right-3.5 top-3 '}rounded-full border border-[#e7d9b0] bg-[#f6efdc] px-2 py-px text-[10px] font-bold tracking-[0.08em] text-[#8a7434]`}
+    >
+      AI
+    </span>
+  );
+}
+
+function Step({
+  no,
+  title,
+  titleExtra,
+  sub,
+  tone = 'ai',
+  children,
+}: {
+  no: number;
+  title: string;
+  titleExtra?: React.ReactNode;
+  sub: string;
+  tone?: 'ai' | 'risk';
+  children: React.ReactNode;
+}) {
+  return (
+    <Card
+      className={`relative border-t-[3px] ${
+        tone === 'risk' ? 'border-t-[var(--color-warn-border)]' : 'border-t-[#d9c9a3]'
+      }`}
+    >
+      <AiChip />
+      <div className="flex gap-3 p-5">
+        <span
+          className={`mt-0.5 grid h-7 w-7 flex-none place-items-center rounded-full text-[13px] font-bold ${
+            tone === 'risk'
+              ? 'bg-[var(--color-warn-soft)] text-[var(--color-warn)]'
+              : 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+          }`}
+        >
+          {no}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="flex flex-wrap items-center gap-2 text-[15.5px] font-semibold">
+            {title}
+            {titleExtra}
+          </p>
+          <p className="mb-3 mt-0.5 text-xs text-[var(--color-ink-3)]">{sub}</p>
+          {children}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function DoneChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-[#d8e6de] bg-[var(--color-accent-soft)] px-3 py-1 text-xs font-medium text-[var(--color-accent)]">
+      ✓ {children}
+    </span>
+  );
+}
+
+/** Small pill-shaped action button (the mock's `.act`). */
+function Act({
+  children,
+  onClick,
+  primary = false,
+  quiet = false,
+  disabled = false,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  primary?: boolean;
+  quiet?: boolean;
+  disabled?: boolean;
+}) {
+  const cls = primary
+    ? 'border border-[var(--color-accent)] bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)]'
+    : quiet
+      ? 'border border-transparent text-[var(--color-ink-3)] hover:text-[var(--color-ink)]'
+      : 'border border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-accent)] hover:border-[var(--color-accent)]';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 ${cls}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ============================================================================
+// Step 1 — Safety.
+// ============================================================================
+
+const CRISIS_HOTLINES: { name: string; number: string }[] = [
+  { name: 'iCall', number: '9152987821' },
+  { name: 'Vandrevala', number: '1860-2662-345' },
+  { name: 'NIMHANS', number: '080-46110007' },
+];
+
+function SafetyStep({
+  flags,
+  isIntake,
+  confirmation,
+  safetyPlanConfirmedAt,
+  onAcknowledge,
+}: {
+  flags: ClinicalCrisisFlag[];
+  isIntake: boolean;
+  confirmation: ClinicalSectionConfirmation | null;
+  safetyPlanConfirmedAt: string | null;
+  onAcknowledge: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const highest = highestCrisisSeverity(flags);
+  const acknowledged = confirmation !== null && confirmation.status !== 'PENDING';
+
+  const acknowledge = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onAcknowledge();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (flags.length === 0) {
+    return (
+      <Step no={1} title="Safety first" sub="Checked on every reading." tone="ai">
+        <p className="text-sm text-[var(--color-ink-2)]">
+          No safety flags detected in this session.
+          {safetyPlanConfirmedAt && (
+            <span className="ml-2">
+              <DoneChip>Safety plan on file</DoneChip>
+            </span>
+          )}
+        </p>
+      </Step>
+    );
+  }
+
+  return (
+    <Step
+      no={1}
+      title="Safety first"
+      titleExtra={
+        <span className="rounded-full bg-[var(--color-warn)] px-2.5 py-px text-[10.5px] font-bold tracking-[0.06em] text-white">
+          {highest.toUpperCase()}
+        </span>
+      }
+      sub="Deal with this before anything else on the page."
+      tone="risk"
+    >
+      <div className="space-y-2" role="alert">
+        {flags.map((f, i) => (
+          <div
+            key={i}
+            className="rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3.5 text-sm"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <b>{labelForCrisisKind(f.kind)}</b>
+              <Badge tone="warn">{f.severity}</Badge>
+            </div>
+            {f.indicators.length > 0 && (
+              <p className="mt-1 text-xs italic text-[var(--color-ink-2)]">
+                “{f.indicators[0]!.quote}”{' '}
+                <span className="not-italic text-[var(--color-ink-3)]">
+                  — {f.indicators[0]!.speaker} @ {formatTimestamp(f.indicators[0]!.startMs)}
+                </span>
+              </p>
+            )}
+            <p className="mt-1.5 text-[13px] text-[var(--color-ink-2)]">{f.recommendedAction}</p>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {CRISIS_HOTLINES.map((h) => (
+          <a
+            key={h.name}
+            href={`tel:${h.number.replace(/[^+\d]/g, '')}`}
+            className="rounded-full border border-[var(--color-warn-border)] bg-[var(--color-surface)] px-2.5 py-0.5 text-xs text-[var(--color-ink-2)] tabular-nums hover:border-[var(--color-warn)]"
+          >
+            {h.name} — {h.number}
+          </a>
+        ))}
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {isIntake ? (
+          safetyPlanConfirmedAt ? (
+            <DoneChip>Safety plan on file · {formatDate(safetyPlanConfirmedAt)}</DoneChip>
+          ) : (
+            <p className="text-xs text-[var(--color-ink-3)]">
+              No safety plan on file yet — build one with the client before they leave.
+            </p>
+          )
+        ) : acknowledged ? (
+          <DoneChip>Reviewed {formatDate(confirmation.confirmedAt)}</DoneChip>
+        ) : (
+          <Act primary onClick={() => void acknowledge()} disabled={busy}>
+            {busy ? 'Saving…' : 'Acknowledge safety review'}
+          </Act>
+        )}
+        {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
+      </div>
+    </Step>
+  );
+}
+
+// ============================================================================
+// Step 2 — Working impression (the differential you can act on).
+// ============================================================================
+
+function ImpressionStep({
+  sessionId,
+  isIntake,
+  impression,
+  fullFormulation,
+  candidates,
+  primaryIndex,
+  confirmation,
+  recordDiagnoses,
+  onAcceptTreatment,
+  onAcceptIntake,
+}: {
+  sessionId: string;
+  isIntake: boolean;
+  impression: string;
+  fullFormulation: string | null;
+  candidates: ClinicalDiagnosisCandidate[];
+  primaryIndex: number | null;
+  confirmation: ClinicalSectionConfirmation | null;
+  recordDiagnoses: RecordDiagnosis[];
+  onAcceptTreatment: (
+    selected: ClinicalDiagnosisCandidate[],
+    primaryInSelected: number | null,
+    reason: string,
+  ) => Promise<void>;
+  onAcceptIntake: (
+    candidateIndexes: number[],
+    primarySelectionIndex: number | null,
+  ) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Treatment defaults to the AI's full slate (matching the old accept-all);
+  // intake starts empty — the therapist owns what enters the record.
+  const [selected, setSelected] = useState<Set<number>>(
+    () => new Set(isIntake ? [] : candidates.map((_, i) => i)),
+  );
+  const [primary, setPrimary] = useState<number | null>(primaryIndex);
+  const [dismissed, setDismissed] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const confirmed = confirmation !== null && confirmation.status !== 'PENDING';
+  const intakeAccepted = isIntake && recordDiagnoses.some((d) => d.sessionId === sessionId);
+  const done = confirmed || intakeAccepted;
+
+  const toggleExpand = (i: number) =>
+    setExpanded((s) => {
+      const next = new Set(s);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
+  const toggleSelect = (i: number) => {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(i)) {
+        next.delete(i);
+        setPrimary((p) => (p === i ? null : p));
+      } else {
+        next.add(i);
+      }
+      return next;
+    });
+  };
+
+  const dismiss = (i: number) => {
+    setDismissed((s) => new Set(s).add(i));
+    setSelected((s) => {
+      const next = new Set(s);
+      next.delete(i);
+      return next;
+    });
+    setPrimary((p) => (p === i ? null : p));
+    setExpanded((s) => {
+      const next = new Set(s);
+      next.delete(i);
+      return next;
+    });
+  };
+
+  const accept = async () => {
+    const selectedIdxs = candidates.map((_, i) => i).filter((i) => selected.has(i));
+    if (selectedIdxs.length === 0) return;
+    const primaryPos = primary !== null ? selectedIdxs.indexOf(primary) : -1;
+    setBusy(true);
+    setError(null);
+    try {
+      if (isIntake) {
+        await onAcceptIntake(selectedIdxs, primaryPos >= 0 ? primaryPos : null);
+      } else {
+        await onAcceptTreatment(
+          selectedIdxs.map((i) => candidates[i]!),
+          primaryPos >= 0 ? primaryPos : null,
+          `Decision board: accepted ${selectedIdxs.length} of ${candidates.length} candidate(s) as the working diagnosis.`,
+        );
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const visible = candidates.map((_, i) => i).filter((i) => !dismissed.has(i));
+
+  return (
+    <Step
+      no={2}
+      title="Working impression"
+      sub={
+        isIntake
+          ? 'Confidence stays low at intake by design — accept only what you’re ready to own.'
+          : 'The AI’s read of this session. Accept only what you’re ready to own.'
+      }
+    >
+      <p className="mb-3 whitespace-pre-line text-[13.5px] leading-relaxed text-[var(--color-ink-2)]">
+        {impression}
+      </p>
+      {fullFormulation && fullFormulation !== impression && (
+        <details className="mb-3">
+          <summary className="cursor-pointer text-xs font-medium text-[var(--color-accent)]">
+            Full case formulation
+          </summary>
+          <p className="mt-2 whitespace-pre-line text-[13px] leading-relaxed text-[var(--color-ink-2)]">
+            {fullFormulation}
+          </p>
+        </details>
+      )}
+
+      {candidates.length === 0 ? (
+        <p className="text-sm text-[var(--color-ink-2)]">
+          The AI did not propose any diagnosis candidates — evidence too thin.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {visible.map((i) => {
+            const c = candidates[i]!;
+            const isOpen = expanded.has(i);
+            const isSelected = selected.has(i);
+            return (
+              <div key={i}>
+                <div
+                  className={`flex items-center gap-3 rounded-xl border p-3 ${
+                    isSelected
+                      ? 'border-[#d8e6de] bg-[var(--color-accent-soft)]'
+                      : 'border-[var(--color-line-soft)] bg-white/30'
+                  }`}
+                >
+                  {!done && (
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(i)}
+                      aria-label={`Select ${c.icd11Code} ${c.icd11Label}`}
+                      className="accent-[var(--color-accent)]"
+                    />
+                  )}
+                  <span className="flex-none rounded-md bg-[var(--color-surface-soft)] px-1.5 py-0.5 font-mono text-xs font-bold text-[var(--color-ink-2)]">
+                    {c.icd11Code}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(i)}
+                    className="min-w-0 flex-1 text-left text-sm font-semibold"
+                  >
+                    {c.icd11Label}
+                    {primary === i && (
+                      <span className="ml-2 align-middle">
+                        <Badge tone="accent">primary</Badge>
+                      </span>
+                    )}
+                  </button>
+                  <span className="w-24 flex-none">
+                    <span className="block h-[5px] overflow-hidden rounded-full bg-[var(--color-line-soft)]">
+                      <span
+                        className="block h-full bg-[var(--color-accent)] opacity-75"
+                        style={{ width: `${Math.round(c.confidence * 100)}%` }}
+                      />
+                    </span>
+                    <span className="mt-0.5 block text-right text-[11px] text-[var(--color-ink-3)] tabular-nums">
+                      AI {Math.round(c.confidence * 100)}%
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(i)}
+                    aria-label={isOpen ? 'Collapse' : 'Expand'}
+                    className="flex-none text-xs text-[var(--color-ink-3)]"
+                  >
+                    {isOpen ? '▴' : '▾'}
+                  </button>
+                </div>
+                {isOpen && (
+                  <div className="mt-1.5 rounded-xl bg-[var(--color-surface-soft)] p-3.5 text-[12.5px]">
+                    {c.supportingEvidence.map((q, j) => (
+                      <p key={j} className="mb-1 italic text-[var(--color-ink-2)]">
+                        “{q.quote}”{' '}
+                        <span className="not-italic text-[var(--color-ink-3)] tabular-nums">
+                          — {q.speaker} @ {formatTimestamp(q.startMs)}
+                        </span>
+                      </p>
+                    ))}
+                    {c.gapsToFill.length > 0 && (
+                      <>
+                        <b className="text-[11px] tracking-[0.08em] text-[var(--color-ink-3)]">
+                          TO CONFIRM, ESTABLISH
+                        </b>
+                        <ul className="mt-1 list-disc pl-4 text-[var(--color-ink-2)]">
+                          {c.gapsToFill.map((g, j) => (
+                            <li key={j}>{g}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {!done && (
+                      <div className="mt-2.5 flex flex-wrap gap-2">
+                        <Act
+                          onClick={() => {
+                            if (!isSelected) toggleSelect(i);
+                            setPrimary(i);
+                          }}
+                          disabled={primary === i}
+                        >
+                          {primary === i ? 'Marked primary' : 'Mark as primary'}
+                        </Act>
+                        <Act quiet onClick={() => dismiss(i)}>
+                          Dismiss
+                        </Act>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {dismissed.size > 0 && !done && (
+        <button
+          type="button"
+          onClick={() => setDismissed(new Set())}
+          className="mt-2 text-xs font-medium text-[var(--color-ink-3)] underline"
+        >
+          {dismissed.size} set aside · restore
+        </button>
+      )}
+
+      <div className="mt-3.5 flex flex-wrap items-center gap-2">
+        {done ? (
+          <DoneChip>
+            {intakeAccepted
+              ? `${recordDiagnoses.filter((d) => d.sessionId === sessionId).length} in your record`
+              : `In your record — ${confirmation!.status.toLowerCase()} ${formatDate(confirmation!.confirmedAt)}`}
+          </DoneChip>
+        ) : (
+          candidates.length > 0 && (
+            <>
+              <Act primary onClick={() => void accept()} disabled={busy || selected.size === 0}>
+                {busy
+                  ? 'Saving…'
+                  : `Accept ${selected.size || ''}${selected.size ? ' ' : ''}as working diagnosis`}
+              </Act>
+              <span className="text-[11px] text-[var(--color-ink-3)]">
+                Accepted diagnoses persist to the client&rsquo;s record; prior active ones are
+                superseded.
+              </span>
+            </>
+          )
+        )}
+        {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
+      </div>
+    </Step>
+  );
+}
+
+// ============================================================================
+// Step 3 — Ask next session (assessment gaps as a carry-able checklist).
+// ============================================================================
+
+const RISK_FIRST_RE = /suicid|self-harm|risk|safety|harm to/i;
+const MAX_CARRIED = 8;
+
+function AskNextStep({
+  sessionId,
+  clientId,
+  gaps,
+  carried,
+  onSaved,
+}: {
+  sessionId: string;
+  clientId: string;
+  gaps: ClinicalAssessmentGap[];
+  carried: CarriedQuestion[];
+  onSaved: () => void;
+}) {
+  const initialSelected = useMemo(
+    () =>
+      new Set(
+        gaps.filter((g) => carried.some((c) => c.question === g.question)).map((g) => g.question),
+      ),
+    [gaps, carried],
+  );
+  const [selected, setSelected] = useState<Set<string>>(initialSelected);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  // Carried questions this board doesn't manage (from other sessions, or
+  // wording that no longer matches a current gap) are preserved on save.
+  const untouched = useMemo(
+    () => carried.filter((c) => !gaps.some((g) => g.question === c.question)),
+    [carried, gaps],
+  );
+  const atCap = untouched.length + selected.size >= MAX_CARRIED;
+
+  const dirty =
+    selected.size !== initialSelected.size || [...selected].some((q) => !initialSelected.has(q));
+
+  const toggle = (q: string) => {
+    setSaved(false);
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(q)) next.delete(q);
+      else if (untouched.length + next.size < MAX_CARRIED) next.add(q);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const now = new Date().toISOString();
+      const questions: CarriedQuestion[] = [
+        ...untouched,
+        ...gaps
+          .filter((g) => selected.has(g.question))
+          .map((g) => ({
+            question: g.question.slice(0, 500),
+            rationale: g.rationale ? g.rationale.slice(0, 1000) : null,
+            sourceSessionId: sessionId,
+            carriedAt: now,
+          })),
+      ].slice(0, MAX_CARRIED);
+      const res = await fetch(`/api/v1/clients/${clientId}/carried-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questions }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      setSaved(true);
+      onSaved();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Risk questions first, preserving relative order otherwise.
+  const ordered = useMemo(
+    () =>
+      [...gaps].sort(
+        (a, b) => Number(RISK_FIRST_RE.test(b.question)) - Number(RISK_FIRST_RE.test(a.question)),
+      ),
+    [gaps],
+  );
+
+  return (
+    <Step
+      no={3}
+      title="Ask next session"
+      sub="Tick what you plan to cover — ticked questions open this client's next pre-session brief."
+    >
+      {gaps.length === 0 ? (
+        <p className="text-sm text-[var(--color-ink-2)]">
+          No open questions — the AI thinks the picture is clear enough.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {ordered.map((g) => {
+            const checked = selected.has(g.question);
+            return (
+              <label
+                key={g.question}
+                className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[var(--color-line-soft)] p-3"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggle(g.question)}
+                  disabled={!checked && atCap}
+                  className="mt-1 accent-[var(--color-accent)]"
+                />
+                <span className="min-w-0">
+                  <b className="block text-[13.5px] font-semibold">
+                    {g.question}
+                    {RISK_FIRST_RE.test(g.question) && (
+                      <span className="ml-2 rounded-full bg-[var(--color-warn-soft)] px-2 py-px align-middle text-[10px] font-bold tracking-[0.06em] text-[var(--color-warn)]">
+                        FIRST
+                      </span>
+                    )}
+                  </b>
+                  <span className="mt-0.5 block text-xs text-[var(--color-ink-3)]">
+                    {g.rationale}
+                  </span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-3.5 flex flex-wrap items-center gap-2">
+        {gaps.length > 0 && (
+          <Act primary onClick={() => void save()} disabled={busy || !dirty}>
+            {busy
+              ? 'Saving…'
+              : selected.size > 0
+                ? `Carry ${selected.size} to next session`
+                : 'Clear carried questions'}
+          </Act>
+        )}
+        {saved && <DoneChip>Will open the next pre-session brief</DoneChip>}
+        {atCap && (
+          <span className="text-[11px] text-[var(--color-ink-3)]">
+            Carry limit reached ({MAX_CARRIED}).
+          </span>
+        )}
+        {untouched.length > 0 && (
+          <span className="text-[11px] text-[var(--color-ink-3)]">
+            +{untouched.length} carried earlier (kept).
+          </span>
+        )}
+        {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
+      </div>
+    </Step>
+  );
+}
+
+// ============================================================================
+// Step 4 — Suggested plan (treatment) / suggested approaches (intake).
+// ============================================================================
+
+function PlanStep({
+  isIntake,
+  plan,
+  therapies,
+  confirmation,
+  onAccept,
+  onModify,
+}: {
+  isIntake: boolean;
+  plan: ClinicalTreatmentPlan | null;
+  therapies: ClinicalRecommendedTherapy[];
+  confirmation: ClinicalSectionConfirmation | null;
+  onAccept: () => Promise<void>;
+  onModify: (edits: unknown, reason: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<null | 'accept' | 'modify'>(null);
+  const [editing, setEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirmed = confirmation !== null && confirmation.status !== 'PENDING';
+
+  const accept = async () => {
+    setBusy('accept');
+    setError(null);
+    try {
+      await onAccept();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const modify = async (edits: unknown, reason: string) => {
+    setBusy('modify');
+    setError(null);
+    try {
+      await onModify(edits, reason);
+      setEditing(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (isIntake || !plan) {
+    return (
+      <Step
+        no={4}
+        title="Suggested approaches"
+        sub="First-line directions to consider. A versioned treatment plan is proposed from your first treatment-session brief."
+      >
+        {therapies.length === 0 ? (
+          <p className="text-sm text-[var(--color-ink-2)]">
+            No first-line therapies recommended — the differential is too uncertain.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {therapies.map((t, i) => (
+              <TherapyCard key={i} therapy={t} />
+            ))}
+          </div>
+        )}
+      </Step>
+    );
+  }
+
+  return (
+    <Step
+      no={4}
+      title="Suggested plan"
+      sub="Accepting versions this client's treatment plan — yours to edit, and every future session builds on it."
+    >
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <div>
+          <dt className="text-[11px] uppercase tracking-wide text-[var(--color-ink-3)]">
+            Modality
+          </dt>
+          <dd className="capitalize">{plan.modality}</dd>
+        </div>
+        <div>
+          <dt className="text-[11px] uppercase tracking-wide text-[var(--color-ink-3)]">
+            Expected duration
+          </dt>
+          <dd>
+            {plan.expectedDurationSessions !== null
+              ? `${plan.expectedDurationSessions} sessions`
+              : 'too uncertain'}
+          </dd>
+        </div>
+      </dl>
+      <ol className="mt-2.5 flex flex-wrap gap-1.5 text-xs">
+        {plan.phaseSequence.map((p, i) => (
+          <li
+            key={i}
+            className="rounded-full bg-[var(--color-surface-soft)] px-2.5 py-1 text-[var(--color-ink-2)]"
+          >
+            {i + 1}. {p}
+          </li>
+        ))}
+      </ol>
+      <ul className="mt-2.5 space-y-1.5">
+        {plan.goals.map((g, i) => (
+          <li key={i} className="rounded-xl border border-[var(--color-line-soft)] bg-white/30 p-3">
+            <p className="text-sm font-medium">{g.description}</p>
+            <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">measure: {g.measure}</p>
+          </li>
+        ))}
+      </ul>
+      {therapies.length > 0 && (
+        <details className="mt-2.5">
+          <summary className="cursor-pointer text-xs font-medium text-[var(--color-accent)]">
+            Recommended approaches ({therapies.length})
+          </summary>
+          <div className="mt-2 space-y-2">
+            {therapies.map((t, i) => (
+              <TherapyCard key={i} therapy={t} />
+            ))}
+          </div>
+        </details>
+      )}
+
+      {editing && !confirmed ? (
+        <div className="mt-3.5">
+          <PlanEditor
+            initialPlan={plan}
+            busy={busy === 'modify'}
+            error={error}
+            onCancel={() => {
+              setEditing(false);
+              setError(null);
+            }}
+            onSubmit={(edits, reason) => void modify(edits, reason)}
+          />
+        </div>
+      ) : (
+        <div className="mt-3.5 flex flex-wrap items-center gap-2">
+          {confirmed ? (
+            <DoneChip>
+              In your record — {confirmation!.status.toLowerCase()}{' '}
+              {formatDate(confirmation!.confirmedAt)}
+            </DoneChip>
+          ) : (
+            <>
+              <Act primary onClick={() => void accept()} disabled={busy !== null}>
+                {busy === 'accept' ? 'Saving…' : 'Accept into plan'}
+              </Act>
+              <Act onClick={() => setEditing(true)} disabled={busy !== null}>
+                Edit &amp; accept
+              </Act>
+            </>
+          )}
+          {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
+        </div>
+      )}
+    </Step>
+  );
+}
+
+function TherapyCard({ therapy }: { therapy: ClinicalRecommendedTherapy }) {
+  return (
+    <div className="rounded-xl border border-[var(--color-line-soft)] p-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <b className="text-sm">{therapy.name}</b>
+        <span className="rounded-full border border-[var(--color-line)] px-2 py-px text-[11px] text-[var(--color-ink-3)]">
+          {therapy.whenInPlan}
+        </span>
+      </div>
+      <p className="mt-1 text-[13px] text-[var(--color-ink-2)]">{therapy.rationale}</p>
+    </div>
+  );
+}
+
+// ============================================================================
+// Step 5 — Lock in a baseline.
+// ============================================================================
+
+const ADMINISTERABLE: { key: string; label: string }[] = [
+  { key: 'PHQ9', label: 'PHQ-9' },
+  { key: 'GAD7', label: 'GAD-7' },
+];
+
+function BaselineStep({
+  recommendedInstruments,
+  instruments,
+  measuresHref,
+}: {
+  recommendedInstruments: string[];
+  instruments: RecordInstrument[];
+  measuresHref: string;
+}) {
+  const latestByKey = useMemo(() => {
+    const m = new Map<string, RecordInstrument>();
+    for (const r of instruments) if (!m.has(r.instrumentKey)) m.set(r.instrumentKey, r);
+    return m;
+  }, [instruments]);
+
+  const otherRecommendations = recommendedInstruments.filter(
+    (k) => !ADMINISTERABLE.some((a) => a.key === normaliseInstrumentKey(k)),
+  );
+
+  return (
+    <Step
+      no={5}
+      title="Lock in a baseline"
+      sub="Two minutes now — every later session measures change against it."
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        {ADMINISTERABLE.map((a) => {
+          const latest = latestByKey.get(a.key);
+          return latest ? (
+            <span key={a.key} className="inline-flex items-center gap-2">
+              <DoneChip>
+                {a.label} — {latest.score} ({latest.severity.toLowerCase()}) ·{' '}
+                {formatDate(latest.administeredAt)}
+              </DoneChip>
+              <Link
+                href={measuresHref}
+                className="text-xs font-medium text-[var(--color-accent)] underline"
+              >
+                re-administer
+              </Link>
+            </span>
+          ) : (
+            <Link
+              key={a.key}
+              href={measuresHref}
+              className="rounded-full border border-[var(--color-accent)] bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)]"
+            >
+              Administer {a.label}
+            </Link>
+          );
+        })}
+      </div>
+      {otherRecommendations.length > 0 && (
+        <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+          Also suggested: {otherRecommendations.join(', ')} (not yet administerable in-app).
+        </p>
+      )}
+    </Step>
+  );
+}
+
+// ============================================================================
+// The record lane — server truth, sticky.
+// ============================================================================
+
+function RecordLane({
+  record,
+  crisisFlags,
+  measuresHref,
+}: {
+  record: CaseRecordSnapshot;
+  crisisFlags: ClinicalCrisisFlag[];
+  measuresHref: string;
+}) {
+  const highest = highestCrisisSeverity(crisisFlags);
+  return (
+    <Card className="border-t-[3px] border-t-[var(--color-accent)]">
+      <RecBlock label="Working diagnosis">
+        {record.diagnoses.length === 0 ? (
+          <RecEmpty>Nothing confirmed yet — accept from the left when you&rsquo;re ready.</RecEmpty>
+        ) : (
+          <ul className="space-y-1.5">
+            {record.diagnoses.map((d, i) => (
+              <li key={i} className="text-[13.5px]">
+                <b className="font-semibold">
+                  {d.icd11Code} {d.icd11Label}
+                </b>
+                {d.isPrimary && (
+                  <span className="ml-1.5 align-middle">
+                    <Badge tone="accent">primary</Badge>
+                  </span>
+                )}
+                <span className="block text-[11.5px] text-[var(--color-ink-3)]">
+                  confirmed {formatDate(d.confirmedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </RecBlock>
+      <RecBlock label="Treatment plan">
+        {record.plan === null ? (
+          <RecEmpty>No plan yet. Accepting the suggestion creates v1.</RecEmpty>
+        ) : (
+          <p className="text-[13.5px]">
+            <b className="font-semibold">
+              v{record.plan.version} · <span className="capitalize">{record.plan.modality}</span>
+            </b>{' '}
+            · {record.plan.goalCount} goal{record.plan.goalCount === 1 ? '' : 's'}
+            <span className="block text-[11.5px] text-[var(--color-ink-3)]">
+              confirmed {formatDate(record.plan.confirmedAt)}
+            </span>
+          </p>
+        )}
+      </RecBlock>
+      <RecBlock label="Safety record">
+        {record.safetyPlanConfirmedAt ? (
+          <p className="text-[13.5px]">
+            <DoneChip>Safety plan on file</DoneChip>
+            <span className="mt-1 block text-[11.5px] text-[var(--color-ink-3)]">
+              confirmed {formatDate(record.safetyPlanConfirmedAt)}
+            </span>
+          </p>
+        ) : crisisFlags.length > 0 ? (
+          <p className="text-[13.5px]">
+            <span className="inline-block rounded-full border border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] px-2.5 py-0.5 text-xs text-[var(--color-warn)]">
+              Risk flagged — {highest}
+            </span>
+            <span className="mt-1 block text-[11.5px] text-[var(--color-ink-3)]">
+              no safety plan on file yet
+            </span>
+          </p>
+        ) : (
+          <RecEmpty>No safety concerns on file.</RecEmpty>
+        )}
+      </RecBlock>
+      <RecBlock label="Baseline measures">
+        <div className="flex flex-wrap gap-1.5">
+          {ADMINISTERABLE.map((a) => {
+            const latest = record.instruments.find((r) => r.instrumentKey === a.key);
+            return (
+              <Link
+                key={a.key}
+                href={measuresHref}
+                className="rounded-full border border-[var(--color-line)] px-2.5 py-0.5 text-xs text-[var(--color-ink-3)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+              >
+                {latest
+                  ? `${a.label} — ${latest.score} · ${formatDate(latest.administeredAt)}`
+                  : `○ ${a.label} — not yet`}
+              </Link>
+            );
+          })}
+        </div>
+      </RecBlock>
+      <RecBlock label="Next session will open with">
+        {record.carriedQuestions.length === 0 ? (
+          <RecEmpty>Nothing carried yet — tick questions in step 3.</RecEmpty>
+        ) : (
+          <div className="text-[12.5px] text-[var(--color-ink-2)]">
+            <ul className="list-disc space-y-0.5 pl-4">
+              {record.carriedQuestions.slice(0, 3).map((q, i) => (
+                <li key={i}>{q.question}</li>
+              ))}
+            </ul>
+            {record.carriedQuestions.length > 3 && (
+              <p className="mt-1 text-[11.5px] text-[var(--color-ink-3)]">
+                +{record.carriedQuestions.length - 3} more
+              </p>
+            )}
+            <p className="mt-1 text-[11.5px] text-[var(--color-ink-3)]">
+              Feeds the pre-session brief automatically.
+            </p>
+          </div>
+        )}
+      </RecBlock>
+    </Card>
+  );
+}
+
+function RecBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="border-b border-[var(--color-line-soft)] p-4 last:border-b-0">
+      <p className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+function RecEmpty({ children }: { children: React.ReactNode }) {
+  return <p className="text-[13px] italic text-[var(--color-ink-3)]">{children}</p>;
+}
+
+// ============================================================================
+// Helpers.
+// ============================================================================
+
+function highestCrisisSeverity(flags: ClinicalCrisisFlag[]): ClinicalCrisisSeverity | 'none' {
+  const rank: Record<ClinicalCrisisSeverity | 'none', number> = {
+    none: 0,
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4,
+  };
+  let max: ClinicalCrisisSeverity | 'none' = 'none';
+  for (const f of flags) {
+    if (rank[f.severity] > rank[max]) max = f.severity;
+  }
+  return max;
+}
+
+function labelForCrisisKind(kind: ClinicalCrisisFlag['kind']): string {
+  switch (kind) {
+    case 'suicidal_ideation':
+      return 'Suicidal ideation';
+    case 'suicidal_plan':
+      return 'Suicidal plan / means';
+    case 'harm_to_others':
+      return 'Risk of harm to others';
+    case 'child_safety':
+      return 'Child safety concern';
+    case 'intimate_partner_violence':
+      return 'Intimate partner violence';
+    case 'psychosis':
+      return 'Possible psychosis';
+    case 'substance_emergency':
+      return 'Substance emergency';
+    case 'other':
+      return 'Unrecognised risk — review the transcript';
+  }
+}
+
+function formatTimestamp(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString('en-IN', { month: 'short', day: 'numeric' });
+}
+
+function capitalise(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** "PHQ-9" / "phq9" → "PHQ9" so recommended keys match the registry. */
+function normaliseInstrumentKey(key: string): string {
+  return key.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
