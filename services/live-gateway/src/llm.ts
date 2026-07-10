@@ -3,9 +3,11 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
+  resolveLlmBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProGlobalBackend,
   VertexGeminiReasoningBackend,
+  type BackendPolicyInput,
   type IPass1Backend,
   type IPass2Backend,
   type IPassReasoningBackend,
@@ -37,15 +39,35 @@ export interface LiveBackends {
   reasoning: IPassReasoningBackend;
 }
 
+/**
+ * TS-safety — how the gateway maps its (Cloud Run) environment onto the shared
+ * backend policy. The Dockerfile sets NODE_ENV=production and Cloud Run injects
+ * K_SERVICE, so any container deploy is "production" here → mock is refused.
+ * A local gateway (NODE_ENV !== 'production') is not deployed → mock allowed.
+ */
+function gatewayBackendPolicyInput(): BackendPolicyInput {
+  const prod = process.env['NODE_ENV'] === 'production' || Boolean(process.env['K_SERVICE']);
+  return {
+    requested: process.env['LLM_BACKEND'],
+    production: prod,
+    deployed: prod,
+    allowMockOptIn: process.env['ALLOW_MOCK_LLM'] === 'true',
+  };
+}
+
 export function buildBackends(): LiveBackends {
-  const backend = process.env['LLM_BACKEND'] ?? 'mock';
-  if (backend === 'vertex') {
+  // TS-safety — refuse the mock backend on a deployed gateway. Throws
+  // MockBackendRefusedError at boot (server.ts calls this at module load), so a
+  // misconfigured Cloud Run revision crash-loops loudly instead of serving live
+  // consults on fabricated transcripts/notes. Mock is reachable only locally.
+  const choice = resolveLlmBackend(gatewayBackendPolicyInput());
+  if (choice === 'vertex') {
     const project = process.env['VERTEX_PROJECT_ID'];
     if (!project) throw new Error('LLM_BACKEND=vertex requires VERTEX_PROJECT_ID');
     const flashRegion = process.env['VERTEX_FLASH_REGION'] ?? 'asia-south1';
     const proRegion = process.env['VERTEX_PRO_REGION'] ?? 'global';
     return {
-      backend,
+      backend: 'vertex',
       pass1: new VertexGeminiFlashIndiaBackend({
         projectId: project,
         location: flashRegion,
@@ -86,7 +108,7 @@ export function buildBackends(): LiveBackends {
     };
   }
   return {
-    backend,
+    backend: 'mock',
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
     reasoning: new MockGeminiReasoningBackend(),

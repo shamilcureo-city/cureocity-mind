@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import type { TherapyNoteV1 } from '@cureocity/contracts';
-import { ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
+import { appMockRefusalReason, ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 
@@ -63,6 +63,17 @@ export async function GET(
 
   const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
   if (llmBackend !== 'vertex') {
+    // TS-safety — never serve mock content on a deployed environment. Fail
+    // loud (503) instead of fabricating reflection questions; mock is only
+    // returned on a local dev machine.
+    const refusal = appMockRefusalReason();
+    if (refusal) {
+      console.error(`[reflection-questions] ${refusal}`);
+      return NextResponse.json(
+        { error: 'Reflection questions are unavailable in this environment.' },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({
       questions: mockQuestionsForLanguage(language),
       language,

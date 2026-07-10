@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
-import { ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
+import { appMockRefusalReason, ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
@@ -63,6 +63,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
   if (llmBackend !== 'vertex') {
+    // TS-safety — never serve the mock stub on a deployed environment; fail
+    // loud (503) instead. The mock reply only appears on a local dev machine.
+    const refusal = appMockRefusalReason();
+    if (refusal) {
+      console.error(`[practice-assistant] ${refusal}`);
+      return NextResponse.json(
+        { error: 'The practice assistant is unavailable in this environment.' },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({
       reply:
         "I'm running in mock mode — set LLM_BACKEND=vertex in your Vercel env to enable real chat responses.",

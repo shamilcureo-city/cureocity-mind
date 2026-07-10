@@ -13,6 +13,9 @@ import {
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
   ModelRouter,
+  resolveLlmBackend,
+  mockRefusalReason,
+  type BackendPolicyInput,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
   VertexGeminiReasoningBackend,
@@ -87,9 +90,41 @@ export function resolveThinkingBudget(envKey: string, fallback: number): number 
   return n === -1 ? undefined : n;
 }
 
+/**
+ * TS-safety — how apps/web maps its (Vercel) environment onto the shared
+ * backend policy. `VERCEL_ENV` is the only signal that separates a preview
+ * deploy from production (NODE_ENV is 'production' on both), so both
+ * 'production' and 'preview' count as DEPLOYED → mock is refused there.
+ * Local (`next dev`: VERCEL_ENV unset; `vercel dev`: 'development') is not
+ * deployed → mock is allowed for offline dev.
+ */
+export function appBackendPolicyInput(): BackendPolicyInput {
+  const vercelEnv = process.env['VERCEL_ENV'];
+  return {
+    requested: process.env['LLM_BACKEND'],
+    production: vercelEnv === 'production',
+    deployed: vercelEnv === 'production' || vercelEnv === 'preview',
+    allowMockOptIn: process.env['ALLOW_MOCK_LLM'] === 'true',
+  };
+}
+
+/**
+ * For request handlers that serve mock output directly (not via the
+ * ModelRouter): the refusal message when mock is not allowed in this
+ * environment, or null when it's fine to proceed. Lets a route return a clean
+ * 503 instead of fabricating clinical content on a misconfigured deploy.
+ */
+export function appMockRefusalReason(): string | null {
+  return mockRefusalReason(appBackendPolicyInput());
+}
+
 function build(): IModelRouter {
-  const backend = process.env['LLM_BACKEND'] ?? 'mock';
-  if (backend === 'vertex') {
+  // TS-safety — single rule for mock-vs-vertex. Throws MockBackendRefusedError
+  // on ANY deployed environment (Vercel preview + production) when Vertex
+  // isn't selected, so a misconfigured deploy fails loud instead of silently
+  // fabricating clinical notes. Mock is reachable only on a local dev machine.
+  const choice = resolveLlmBackend(appBackendPolicyInput());
+  if (choice === 'vertex') {
     ensureGcpCreds();
     const project = process.env['VERTEX_PROJECT_ID'];
     if (!project) throw new Error('LLM_BACKEND=vertex requires VERTEX_PROJECT_ID');
@@ -194,20 +229,11 @@ function build(): IModelRouter {
       }),
     });
   }
-  // CLIN-4 — fail CLOSED in production. The mock backend fabricates complete
-  // clinical notes; serving those to a real therapist (because LLM_BACKEND was
-  // mistyped or unset on prod) is a patient-safety incident. Mirror the auth
-  // layer's isAuthBypassed() posture: refuse rather than silently fabricate.
-  // Preview deployments (VERCEL_ENV=preview) may still run mock for demos.
-  if (process.env['VERCEL_ENV'] === 'production') {
-    throw new Error(
-      `[llm] REFUSING to serve the mock backend on a production deployment ` +
-        `(LLM_BACKEND='${process.env['LLM_BACKEND'] ?? '<unset>'}'). ` +
-        `Set LLM_BACKEND=vertex + VERTEX_PROJECT_ID for real clinical output.`,
-    );
-  }
+  // Reachable only on a local/dev machine — resolveLlmBackend() above throws on
+  // any deployed environment (preview OR production) when Vertex isn't
+  // selected, so mock can never silently serve a real practitioner.
   console.info(
-    `[llm] backend=mock LLM_BACKEND_value='${process.env['LLM_BACKEND'] ?? '<unset>'}' — Vertex not selected; check env var spelling/case`,
+    `[llm] backend=mock (local dev) LLM_BACKEND_value='${process.env['LLM_BACKEND'] ?? '<unset>'}' — Vertex not selected`,
   );
   return new ModelRouter({
     pass1: new MockGeminiPass1Backend(),
