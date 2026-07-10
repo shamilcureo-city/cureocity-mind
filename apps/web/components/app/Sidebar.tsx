@@ -26,21 +26,31 @@ interface NavItem {
     | 'insights';
 }
 
+// Sprint TS3 — the primary nav is the daily work spine, trimmed to 6 (was 9).
+// Today is the agenda + post-login landing; Record is the walk-in / dictation
+// / upload capture entry; Clients, Search, Templates, Learn round it out. The
+// power / occasional surfaces (Dashboard triage, Assistant, My practice) move
+// to the muted SECONDARY group below so they stay reachable without crowding
+// the spine. Grouping is intentionally easy to re-tune with screenshots.
 const PRIMARY: NavItem[] = [
-  // Sprint 57 — Dashboard is the practice-wide triage hub ("what needs me
-  // across my whole caseload"). Today (below) stays the time-ordered agenda
-  // and remains the post-login landing.
-  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
-  // Sprint 45 — Today: the screen a therapist opens each morning. Record
-  // stays for walk-ins / dictation; Today is the calendar-driven entry point.
+  // Sprint 45 — Today: the screen a therapist opens each morning, and the
+  // calendar-driven entry point into the live scribe (TS3-F1).
   { href: '/app/today', label: 'Today', icon: 'today' },
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
   { href: '/app/search', label: 'Search', icon: 'search' },
   { href: '/app/templates', label: 'Templates', icon: 'templates' },
+  { href: '/app/learn', label: 'Learn', icon: 'learn' },
+];
+
+// Sprint TS3 — the "More" group: reachable, de-emphasised. Dashboard is the
+// practice-wide triage hub ("what needs me across my whole caseload"); the
+// Practice Assistant and My-practice stats are occasional lookups, not part
+// of the record-a-session spine.
+const SECONDARY: NavItem[] = [
+  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
   { href: '/app/me', label: 'My practice', icon: 'me' },
-  { href: '/app/learn', label: 'Learn', icon: 'learn' },
 ];
 
 // Sprint DV2 — doctor nav. The doctor's home is the patient roster
@@ -79,6 +89,9 @@ interface SidebarProps {
 export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) {
   const path = usePathname() ?? '/app';
   const items = vertical === 'DOCTOR' ? DOCTOR_PRIMARY : PRIMARY;
+  // Sprint TS3 — the therapist "More" group. Doctors already have a 4-item
+  // spine, so no secondary section for them.
+  const secondary = vertical === 'DOCTOR' ? [] : SECONDARY;
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] md:flex">
       <div className="px-6 py-6">
@@ -115,6 +128,35 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
             );
           })}
         </ul>
+
+        {secondary.length > 0 && (
+          <>
+            <p className="mt-6 px-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-3)]">
+              More
+            </p>
+            <ul className="mt-1 space-y-1">
+              {secondary.map((item) => {
+                const active = path.startsWith(item.href);
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
+                        active
+                          ? 'bg-white font-medium text-[var(--color-ink)] shadow-sm'
+                          : 'text-[var(--color-ink-3)] hover:bg-white/60 hover:text-[var(--color-ink)]'
+                      }`}
+                      aria-current={active ? 'page' : undefined}
+                    >
+                      <Glyph kind={item.icon} />
+                      {item.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
       </nav>
 
       <div className="mt-auto px-4 pb-6">

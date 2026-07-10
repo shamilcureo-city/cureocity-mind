@@ -221,6 +221,26 @@ screenshot recorded.
 (regression test on session-create reuse); nav has ≤6 primary items; the
 session workspace has ≤4 top-level tabs; existing E2E flows green.
 
+**Status (TS3):**
+
+- **Task 1 (F1) — DONE.** Today's "Start session" / "Resume" open the live
+  scribe for the booked row (`/app/sessions/[id]/live`); the Record home's
+  in-person live capture routes there too (virtual / dictation / upload stay
+  on the batch recorder — the live stream is mic-only for now). Session-create
+  takes `startNow` and reuses today's open session for the client via the pure,
+  unit-tested `selectReusableSession` helper (8 regression tests) — no duplicate
+  row, no trial credit consumed on reuse.
+- **Task 2 (nav) — PARTIAL.** Sidebar primary trimmed 9 → 6 (Today · Record ·
+  Clients · Search · Templates · Learn) with a muted **More** group (Dashboard ·
+  Assistant · My practice) so nothing is orphaned; mobile bar mirrors the top 5.
+  The deeper **page** merge (Today absorbs the Record walk-in picker + Dashboard
+  triage; `/app` renders Today) is DEFERRED to a screenshot-driven pass — it
+  reshapes shared landing pages that need the therapist's eye to validate.
+- **Task 3 (workspace diet) — DEFERRED.** Collapsing the 5 copilot sub-tabs to
+  one scrollable tab + merging note-editing surfaces is a visual refactor best
+  done with screenshots; not attempted blind.
+- **Task 4 (share last-mile) — DEFERRED** to the same screenshot pass.
+
 ## TS4 — Report content quality
 
 **Goal:** the outputs read like a good clinician wrote them.

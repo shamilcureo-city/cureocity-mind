@@ -6,19 +6,21 @@ import { type PractitionerVertical } from '@cureocity/contracts';
 import { Glyph } from '@/components/app/Sidebar';
 
 // Sprint 45 — Today is the morning landing screen on phones too. Mobile
-// is capped at 5 grid cols. Sprint 57 — Dashboard takes a slot; Settings
-// drops off the bottom bar (still on the desktop footer) since it isn't an
-// in-session tool, same rationale as "My practice" dropping off earlier.
+// is capped at 5 grid cols. Sprint TS3 — the bottom bar now mirrors the
+// desktop primary spine's top five (Today · Record · Clients · Search ·
+// Templates); Dashboard / Assistant moved to the desktop "More" group and
+// aren't in-session phone tools, same rationale as Settings / My practice
+// dropping off earlier.
 const ITEMS: {
   href: string;
   label: string;
-  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'assistant' | 'cog' | 'clinic' | 'insights';
+  icon: 'today' | 'record' | 'clients' | 'search' | 'templates' | 'clinic' | 'insights' | 'cog';
 }[] = [
-  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { href: '/app/today', label: 'Today', icon: 'today' },
   { href: '/app', label: 'Record', icon: 'record' },
   { href: '/app/clients', label: 'Clients', icon: 'clients' },
-  { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
+  { href: '/app/search', label: 'Search', icon: 'search' },
+  { href: '/app/templates', label: 'Templates', icon: 'templates' },
 ];
 
 // Sprint DV2 — doctor bottom bar: the patient roster + settings. See
