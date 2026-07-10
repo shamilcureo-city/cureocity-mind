@@ -235,31 +235,42 @@ export function RecordConfirmStrip({
         id: string;
         kind: SessionKind;
         modality: SessionModality | null;
+        status?: string;
       };
 
-      // Per-session consent: re-ack everything already granted (at signup or
-      // on the client's record) plus anything the therapist ticked here. The
-      // data-residency / retention consents are NOT a per-session decision —
-      // they're the client's standing consent (captured with a proper
-      // explanation when the client is added), so we simply honour whatever
-      // is on file rather than re-prompting a therapist who can't be expected
-      // to weigh data-residency per session.
-      const acked = new Set<ConsentScope>(defaults.consentsAlreadyGranted);
-      for (const [scope, ticked] of Object.entries(missingRequired)) {
-        if (ticked) acked.add(scope as ConsentScope);
-      }
+      // TS3 (F1) fix — the create call may have REUSED an already-started
+      // session (e.g. a live consult begun earlier today). Consent + /start
+      // only apply to a not-yet-started SCHEDULED session — the consent route
+      // rejects IN_PROGRESS ("Cannot record consent on a session in
+      // IN_PROGRESS state"), and a reused IN_PROGRESS session already has its
+      // consent snapshot. Skip both when it's already running.
+      const alreadyStarted = sessionRow.status === 'IN_PROGRESS';
 
-      const consentRes = await fetch(`/api/v1/sessions/${sessionRow.id}/consent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scopes: Array.from(acked),
-          scriptVersion: SCRIPT_VERSION,
-        }),
-      });
-      if (!consentRes.ok) {
-        const body = (await consentRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Record consent failed (${consentRes.status})`);
+      if (!alreadyStarted) {
+        // Per-session consent: re-ack everything already granted (at signup or
+        // on the client's record) plus anything the therapist ticked here. The
+        // data-residency / retention consents are NOT a per-session decision —
+        // they're the client's standing consent (captured with a proper
+        // explanation when the client is added), so we simply honour whatever
+        // is on file rather than re-prompting a therapist who can't be expected
+        // to weigh data-residency per session.
+        const acked = new Set<ConsentScope>(defaults.consentsAlreadyGranted);
+        for (const [scope, ticked] of Object.entries(missingRequired)) {
+          if (ticked) acked.add(scope as ConsentScope);
+        }
+
+        const consentRes = await fetch(`/api/v1/sessions/${sessionRow.id}/consent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            scopes: Array.from(acked),
+            scriptVersion: SCRIPT_VERSION,
+          }),
+        });
+        if (!consentRes.ok) {
+          const body = (await consentRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `Record consent failed (${consentRes.status})`);
+        }
       }
 
       // TS3 (F1) — in-person live capture goes to the live scribe (transcript
@@ -273,10 +284,12 @@ export function RecordConfirmStrip({
         return;
       }
 
-      const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
-      if (!startRes.ok) {
-        const body = (await startRes.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Start session failed (${startRes.status})`);
+      if (!alreadyStarted) {
+        const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
+        if (!startRes.ok) {
+          const body = (await startRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `Start session failed (${startRes.status})`);
+        }
       }
 
       onReady({
