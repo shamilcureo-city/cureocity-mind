@@ -203,6 +203,9 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
   // Sprint DS3 — the doctor dismissed an "ask next" question. The gateway
   // marks it dismissed for the rest of the consult (never re-suggested).
   z.object({ type: z.literal('dismiss'), questionId: z.string() }),
+  // Sprint TS-B3 — "Update now": the practitioner asks for an interim note
+  // refresh immediately instead of waiting out the note-refresh debounce.
+  z.object({ type: z.literal('refreshNote') }),
 ]);
 export type LiveGatewayCommand = z.infer<typeof LiveGatewayCommandSchema>;
 

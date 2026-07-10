@@ -47,6 +47,57 @@ function mockBackends(): LiveBackends {
 /** One "utterance" of audio: 5s of speech + a 0.5s pause. */
 const BLOCK = Buffer.concat([pcm(5_000, SPEECH), pcm(500, SILENCE)]);
 
+describe('LiveSession — per-segment diarized utterances (TS-B1)', () => {
+  it('splits a multi-speaker window into speaker-correct utterances', async () => {
+    const events: LiveGatewayEvent[] = [];
+    // The mock Pass 1 returns TWO diarized segments per window
+    // (therapist greeting + client reply) — previously collapsed into one
+    // utterance labeled with the LAST segment's speaker.
+    const session = new LiveSession('sess-diar', null, mockBackends(), (e) => events.push(e), OPTS);
+    session.pushAudio(BLOCK);
+    await session.pump();
+
+    const utterances = events.flatMap((e) => (e.type === 'utterance' ? [e.utterance] : []));
+    expect(utterances).toHaveLength(2);
+    expect(utterances[0]!.speaker).toBe('doctor'); // therapist slot
+    expect(utterances[0]!.text).toContain('How have things been');
+    expect(utterances[1]!.speaker).toBe('patient'); // client slot
+    expect(utterances[1]!.text).toContain('breathing exercises');
+    // Sequential ids, ordered non-inverted times inside the window.
+    expect(utterances.map((u) => u.id)).toEqual(['u1', 'u2']);
+    for (const u of utterances) expect(u.tEndMs).toBeGreaterThanOrEqual(u.tStartMs);
+    session.dispose();
+  });
+
+  it('falls back to ONE unknown-speaker utterance when diarization is empty', async () => {
+    class NoSegmentsPass1 implements IPass1Backend {
+      private readonly inner = new MockGeminiPass1Backend();
+      async run(input: Pass1Input) {
+        const r = await this.inner.run(input);
+        return {
+          output: { ...r.output, transcript: 'undiarized speech', speakerSegments: [] },
+          callLog: r.callLog,
+        };
+      }
+    }
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-noseg',
+      null,
+      { ...mockBackends(), pass1: new NoSegmentsPass1() },
+      (e) => events.push(e),
+      OPTS,
+    );
+    session.pushAudio(BLOCK);
+    await session.pump();
+    const utterances = events.flatMap((e) => (e.type === 'utterance' ? [e.utterance] : []));
+    expect(utterances).toHaveLength(1);
+    expect(utterances[0]!.speaker).toBe('unknown');
+    expect(utterances[0]!.text).toBe('undiarized speech');
+    session.dispose();
+  });
+});
+
 describe('LiveSession — incremental windowing + metering (DS0)', () => {
   it('emits schema-valid events, one utterance per window, and a final note + meter', async () => {
     const events: LiveGatewayEvent[] = [];
@@ -378,7 +429,25 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
       constructor(private readonly transcript: string) {}
       async run(input: Pass1Input) {
         const r = await this.inner.run(input);
-        return { output: { ...r.output, transcript: this.transcript }, callLog: r.callLog };
+        // TS-B1 — utterance text now comes from the diarized segments, so a
+        // scripted transcript must script its segment too (as real Pass 1
+        // keeps them consistent).
+        return {
+          output: {
+            ...r.output,
+            transcript: this.transcript,
+            speakerSegments: [
+              {
+                speaker: 'client' as const,
+                startMs: 0,
+                endMs: input.durationMs,
+                text: this.transcript,
+                language: 'en',
+              },
+            ],
+          },
+          callLog: r.callLog,
+        };
       }
     }
     const events: LiveGatewayEvent[] = [];

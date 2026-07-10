@@ -317,44 +317,48 @@ export class LiveSession {
       return;
     }
 
-    const utterance = this.commitUtterance(
+    // Sprint TS-B1 — one utterance per diarized segment (see commitUtterances).
+    const utterances = this.commitUtterances(
       pass1.output.transcript,
       pass1.output.speakerSegments,
       tStartMs,
       tEndMs,
     );
-    this.emit({
-      type: 'transcript',
-      delta: {
-        text: utterance.text,
-        isFinal: true,
-        speaker: utterance.speaker,
-        startMs: tStartMs,
-        endMs: tEndMs,
-      },
-    });
     this.recordSpeechToTranscript(tStartMs);
-    this.emit({ type: 'utterance', utterance });
+    for (const utterance of utterances) {
+      this.emit({
+        type: 'transcript',
+        delta: {
+          text: utterance.text,
+          isFinal: true,
+          speaker: utterance.speaker,
+          startMs: utterance.tStartMs,
+          endMs: utterance.tEndMs,
+        },
+      });
+      this.emit({ type: 'utterance', utterance });
+    }
+    const lastUtterance = utterances[utterances.length - 1]!;
 
     // Recognised voice commands (transcript-only). The doctor confirms them.
-    // DS11.5-fu — a command becomes newly-parseable only once this utterance
-    // completes its clause (seenCommands dedups the re-scan), so the current
-    // utterance is its source; stamp it on the heard pad-feeding kinds so the
-    // browser can render a 🗣 quote-chip back to the transcript.
+    // DS11.5-fu — a command becomes newly-parseable only once this window
+    // completes its clause (seenCommands dedups the re-scan), so the window's
+    // last utterance is its source; stamp it on the heard pad-feeding kinds so
+    // the browser can render a 🗣 quote-chip back to the transcript.
     for (const command of parseVoiceCommands(this.cumulativeTranscript())) {
       if (this.seenCommands.has(command.raw)) continue;
       this.seenCommands.add(command.raw);
       const anchored =
         command.kind === 'ADD_MEDICATION' || command.kind === 'ORDER_TEST'
-          ? { ...command, utteranceId: utterance.id }
+          ? { ...command, utteranceId: lastUtterance.id }
           : command;
       this.voiceCommands.push(anchored); // DS5 — feed the Rx pad
       this.emit({ type: 'command', command: anchored });
     }
 
-    // Sprint DS2 — queue this utterance for the reasoning engine; the
+    // Sprint DS2 — queue the new utterances for the reasoning engine; the
     // scheduler decides whether to run now or coalesce with the next window.
-    this.reasoningScheduler.enqueue(utterance);
+    for (const utterance of utterances) this.reasoningScheduler.enqueue(utterance);
     const due = this.reasoningScheduler.takeDue();
     if (due) await this.runReasoning(due);
 
@@ -462,6 +466,33 @@ export class LiveSession {
    * Sprint DS3 — the doctor dismissed an "ask next" question. Persist it for
    * the consult (never re-suggest) and re-emit the reasoning snapshot.
    */
+  /**
+   * Sprint TS-B3 — "Update now": re-run the interim note immediately, bypassing
+   * the refresh debounce. Serialized behind the pump's `busy` guard so it can
+   * never overlap an in-flight window; a no-op if the consult has stopped. If
+   * the regenerated note is unchanged, no event is emitted (the client shows
+   * its own "no changes" state).
+   */
+  requestNoteRefresh(): void {
+    if (this.stopped) return;
+    void (async () => {
+      const deadline = Date.now() + 4_000;
+      while (this.busy && Date.now() < deadline)
+        await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      if (this.busy || this.stopped) return;
+      this.busy = true;
+      try {
+        this.lastNoteTranscriptEndMs = Number.NEGATIVE_INFINITY;
+        await this.runNote(false);
+        this.emit({ type: 'meter', summary: this.meterSummary() });
+      } catch (err) {
+        console.error('[live-gateway] note refresh failed:', (err as Error).message);
+      } finally {
+        this.busy = false;
+      }
+    })();
+  }
+
   dismissQuestion(questionId: string): void {
     this.caseStore.dismissAsk(questionId);
     if (this.caseStore.commitReasoning().changed) {
@@ -470,28 +501,59 @@ export class LiveSession {
     }
   }
 
-  /** Append one utterance + its (wall-offset) segments. */
-  private commitUtterance(
+  /**
+   * Append this window's speech as utterances + its (wall-offset) segments.
+   *
+   * Sprint TS-B1 — one utterance PER DIARIZED SEGMENT, not per window. The
+   * old code collapsed the whole 6–12s window into a single utterance labeled
+   * with the LAST segment's speaker, so multi-turn windows rendered as one
+   * mislabeled wall of text ("You:" for everything). Pass 1 already diarizes
+   * each segment as therapist/client; keep that. A window whose segments are
+   * all empty (diarization failed but speech transcribed) falls back to ONE
+   * `unknown`-speaker utterance carrying the whole transcript — unattributed
+   * is honest, mislabeled is not.
+   */
+  private commitUtterances(
     transcript: string,
     segments: SpeakerSegment[],
     tStartMs: number,
     tEndMs: number,
-  ): Utterance {
+  ): Utterance[] {
     for (const seg of segments) {
       this.segments.push({ ...seg, startMs: seg.startMs + tStartMs, endMs: seg.endMs + tStartMs });
     }
-    const last = segments[segments.length - 1];
-    const utterance: Utterance = {
-      id: `u${++this.windowIndex}`,
-      speaker: mapSpeaker(last?.speaker),
-      text: transcript.trim(),
-      tStartMs,
-      tEndMs,
-    };
-    this.utterances.push(utterance);
-    // DS1 — register so the findings pass can cite it (citation gate).
-    this.caseStore.registerUtterance(utterance.id);
-    return utterance;
+    const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
+    const speech = segments.filter((s) => s.text.trim().length > 0);
+    const out: Utterance[] = [];
+    if (speech.length === 0) {
+      out.push({
+        id: `u${++this.windowIndex}`,
+        speaker: 'unknown',
+        text: transcript.trim(),
+        tStartMs,
+        tEndMs,
+      });
+    } else {
+      for (const seg of speech) {
+        // Segment times are window-relative; clamp defensively so a garbled
+        // model timestamp can never produce an inverted or out-of-window turn.
+        const absStart = clamp(tStartMs + seg.startMs, tStartMs, tEndMs);
+        const absEnd = clamp(tStartMs + seg.endMs, absStart, tEndMs);
+        out.push({
+          id: `u${++this.windowIndex}`,
+          speaker: mapSpeaker(seg.speaker),
+          text: seg.text.trim(),
+          tStartMs: absStart,
+          tEndMs: absEnd,
+        });
+      }
+    }
+    for (const u of out) {
+      this.utterances.push(u);
+      // DS1 — register so the findings pass can cite it (citation gate).
+      this.caseStore.registerUtterance(u.id);
+    }
+    return out;
   }
 
   private cumulativeTranscript(): string {
@@ -766,25 +828,28 @@ export class LiveSession {
       // Anti-hallucination (TS-fix): skip a silent tail window — no blank
       // utterance, no hallucinated closing line.
       if (pass1.output.transcript.trim().length > 0) {
-        const utterance = this.commitUtterance(
+        // Sprint TS-B1 — per-segment utterances at the tail too.
+        const utterances = this.commitUtterances(
           pass1.output.transcript,
           pass1.output.speakerSegments,
           tStartMs,
           tEndMs,
         );
-        this.emit({
-          type: 'transcript',
-          delta: {
-            text: utterance.text,
-            isFinal: true,
-            speaker: utterance.speaker,
-            startMs: tStartMs,
-            endMs: tEndMs,
-          },
-        });
         this.recordSpeechToTranscript(tStartMs);
-        this.emit({ type: 'utterance', utterance });
-        this.reasoningScheduler.enqueue(utterance);
+        for (const utterance of utterances) {
+          this.emit({
+            type: 'transcript',
+            delta: {
+              text: utterance.text,
+              isFinal: true,
+              speaker: utterance.speaker,
+              startMs: utterance.tStartMs,
+              endMs: utterance.tEndMs,
+            },
+          });
+          this.emit({ type: 'utterance', utterance });
+          this.reasoningScheduler.enqueue(utterance);
+        }
       }
     }
     // Sprint DS2 — run the reasoning engine over anything the scheduler

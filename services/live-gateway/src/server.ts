@@ -143,6 +143,9 @@ wss.on('connection', (ws) => {
     } else if (cmd.type === 'dismiss') {
       // Sprint DS3 — the doctor dismissed an ask-next question.
       session?.dismissQuestion(cmd.questionId);
+    } else if (cmd.type === 'refreshNote') {
+      // Sprint TS-B3 — "Update now" on the live note panel.
+      session?.requestNoteRefresh();
     }
   });
 
