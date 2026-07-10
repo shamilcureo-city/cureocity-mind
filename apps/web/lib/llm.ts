@@ -15,6 +15,7 @@ import {
   ModelRouter,
   resolveLlmBackend,
   mockRefusalReason,
+  vercelPolicyInput,
   type BackendPolicyInput,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
@@ -99,13 +100,7 @@ export function resolveThinkingBudget(envKey: string, fallback: number): number 
  * deployed → mock is allowed for offline dev.
  */
 export function appBackendPolicyInput(): BackendPolicyInput {
-  const vercelEnv = process.env['VERCEL_ENV'];
-  return {
-    requested: process.env['LLM_BACKEND'],
-    production: vercelEnv === 'production',
-    deployed: vercelEnv === 'production' || vercelEnv === 'preview',
-    allowMockOptIn: process.env['ALLOW_MOCK_LLM'] === 'true',
-  };
+  return vercelPolicyInput(process.env);
 }
 
 /**

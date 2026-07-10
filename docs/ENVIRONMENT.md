@@ -24,12 +24,23 @@ gateway: `pnpm gateway` (defaults to `ws://localhost:8787`, `LLM_BACKEND=mock`).
 
 ## 2. Core (required in prod)
 
-| Var                                                                     | Purpose                                                                                   |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `DATABASE_URL` (+ `DATABASE_URL_UNPOOLED`, or the `POSTGRES_*` aliases) | Neon Postgres. `apps/web/lib/prisma.ts` reads whichever is set first.                     |
-| `LLM_BACKEND`                                                           | `mock` (default) or `vertex`. `NEXT_PUBLIC_LLM_BACKEND` mirrors it to the browser banner. |
-| `BLOB_READ_WRITE_TOKEN`                                                 | Vercel Blob — audio-chunk + PDF persistence.                                              |
-| `NODE_ENV` / `VERCEL_ENV`                                               | Runtime mode; `VERCEL_ENV=production` toggles fail-closed behaviors.                      |
+| Var                                                                     | Purpose                                                                                                                                                                            |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL` (+ `DATABASE_URL_UNPOOLED`, or the `POSTGRES_*` aliases) | Neon Postgres. `apps/web/lib/prisma.ts` reads whichever is set first.                                                                                                              |
+| `LLM_BACKEND`                                                           | `mock` (default, **local dev only**) or `vertex`. `NEXT_PUBLIC_LLM_BACKEND` mirrors it to the browser banner. **Mock is REFUSED on any deployed env** — see the policy note below. |
+| `ALLOW_MOCK_LLM`                                                        | `true` deliberately re-permits the mock backend on a NON-production **preview** deploy (demo only). Ignored locally (mock already allowed) and in production (never).              |
+| `BLOB_READ_WRITE_TOKEN`                                                 | Vercel Blob — audio-chunk + PDF persistence.                                                                                                                                       |
+| `NODE_ENV` / `VERCEL_ENV`                                               | Runtime mode; `VERCEL_ENV=production` toggles fail-closed behaviors.                                                                                                               |
+
+### No mock in any deployed environment (patient safety)
+
+The mock backends fabricate complete, plausible clinical output. `packages/llm/src/backend-policy.ts` (`resolveLlmBackend`) is the single rule both the batch pipeline (`apps/web/lib/llm.ts`) and the live gateway (`services/live-gateway/src/llm.ts`) funnel through:
+
+- **Local dev** (no `VERCEL_ENV`; gateway `NODE_ENV` ≠ `production` and no `K_SERVICE`) → mock allowed, so offline dev without GCP creds works.
+- **Any deployed env** — Vercel **preview or production**, or a Cloud Run / `NODE_ENV=production` container → mock is **refused**: `apps/web` `build()` and the gateway `buildBackends()` throw at boot (a misconfigured deploy fails loud instead of fabricating), and the two direct-mock routes (`reflection-questions`, `practice-assistant/chat`) return `503`.
+- **Production never permits mock**, even with `ALLOW_MOCK_LLM=true`. The opt-in only re-enables mock on a non-production preview for a deliberate demo.
+
+So a human only ever sees real Vertex output or a loud failure — never a silent fake. Unit tests construct the mock backends directly (bypassing these builders), so the guard never fires under test.
 
 ## 3. Vertex AI / Gemini (required when `LLM_BACKEND=vertex`)
 

@@ -23,15 +23,15 @@ operator turns them into a running prod endpoint.
 
 Set on the **gateway** service:
 
-| Var                         | Value                    | Notes                           |
-| --------------------------- | ------------------------ | ------------------------------- |
-| `LLM_BACKEND`               | `vertex`                 | `mock` only for smoke           |
-| `VERTEX_PROJECT_ID`         | your GCP project         |                                 |
-| `VERTEX_FLASH_REGION`       | `asia-south1`            | Pass 1 residency (audio)        |
-| `LIVE_GATEWAY_SECRET`       | a 32+ byte random secret | **required in prod** (auth)     |
-| `LIVE_GATEWAY_MAX_SESSIONS` | `50` (tune to the node)  | concurrency cap                 |
-| `LIVE_GATEWAY_PORT`         | `8787`                   | behind the TLS proxy            |
-| `NODE_ENV`                  | `production`             | enables the fail-closed warning |
+| Var                         | Value                    | Notes                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM_BACKEND`               | `vertex`                 | **Required.** The deployed image bakes `NODE_ENV=production`, and the gateway **refuses to boot on mock in production** (crash-loops loudly) — a fail-closed patient-safety guard, not a bug. There is no mock smoke-test of the built image; smoke-test with real Vertex creds, or run mock only via the local `pnpm gateway` dev path (no `NODE_ENV=production`). |
+| `VERTEX_PROJECT_ID`         | your GCP project         |                                                                                                                                                                                                                                                                                                                                                                     |
+| `VERTEX_FLASH_REGION`       | `asia-south1`            | Pass 1 residency (audio)                                                                                                                                                                                                                                                                                                                                            |
+| `LIVE_GATEWAY_SECRET`       | a 32+ byte random secret | **required in prod** (auth)                                                                                                                                                                                                                                                                                                                                         |
+| `LIVE_GATEWAY_MAX_SESSIONS` | `50` (tune to the node)  | concurrency cap                                                                                                                                                                                                                                                                                                                                                     |
+| `LIVE_GATEWAY_PORT`         | `8787`                   | behind the TLS proxy                                                                                                                                                                                                                                                                                                                                                |
+| `NODE_ENV`                  | `production`             | enables the fail-closed warning                                                                                                                                                                                                                                                                                                                                     |
 
 Set on the **app** (Vercel prod):
 

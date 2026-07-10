@@ -3,6 +3,7 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
+  containerPolicyInput,
   resolveLlmBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProGlobalBackend,
@@ -46,13 +47,7 @@ export interface LiveBackends {
  * A local gateway (NODE_ENV !== 'production') is not deployed → mock allowed.
  */
 function gatewayBackendPolicyInput(): BackendPolicyInput {
-  const prod = process.env['NODE_ENV'] === 'production' || Boolean(process.env['K_SERVICE']);
-  return {
-    requested: process.env['LLM_BACKEND'],
-    production: prod,
-    deployed: prod,
-    allowMockOptIn: process.env['ALLOW_MOCK_LLM'] === 'true',
-  };
+  return containerPolicyInput(process.env);
 }
 
 export function buildBackends(): LiveBackends {

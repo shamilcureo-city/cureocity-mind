@@ -25,6 +25,8 @@ import {
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
   ModelRouter,
+  containerPolicyInput,
+  resolveLlmBackend,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
   VertexGeminiReasoningBackend,
@@ -67,6 +69,13 @@ const modelRouterProvider: Provider = {
     let passReasoning: IPassReasoningBackend;
 
     if (!projectId) {
+      // TS-safety — defence in depth. This service is a scaffold with no
+      // production deploy today, but keep the same invariant as apps/web +
+      // the live gateway: never run mock on a deployed (NODE_ENV=production or
+      // Cloud Run) environment. Under NODE_ENV=test / local dev this is a
+      // no-op and mock proceeds. `requested: 'mock'` forces the mock-path
+      // check regardless of any LLM_BACKEND value.
+      resolveLlmBackend({ ...containerPolicyInput(process.env), requested: 'mock' });
       logger.warn(
         'GCP_PROJECT_ID is unset — using Mock backends for Pass 1-8. Do NOT ship to production like this.',
       );

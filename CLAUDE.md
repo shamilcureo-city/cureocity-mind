@@ -477,6 +477,20 @@ The five existing passes are the template — pick the closest analogue.
   (`dev-firebase-uid-priya`). Real Firebase env disables bypass.
 - **Mock backends in dev** prefix outputs with `[mock]`. Share snapshots
   strip the tag automatically (`share-snapshots.ts` `stripBracketTag`).
+- **The mock LLM backend is REFUSED on any deployed environment** (Vercel
+  preview + production, Cloud Run / `NODE_ENV=production` container) — it
+  fabricates clinical content, so it must never reach a practitioner.
+  `packages/llm/src/backend-policy.ts` (`resolveLlmBackend`) is the single
+  rule; `apps/web/lib/llm.ts` (via `vercelPolicyInput`) and
+  `services/live-gateway/src/llm.ts` (via `containerPolicyInput`) both funnel
+  through it and **throw at boot** when mock would run on a deploy. The two
+  routes that serve mock without the ModelRouter (`reflection-questions`,
+  `practice-assistant/chat`) call `appMockRefusalReason()` → `503`. Mock is
+  allowed only on a local machine; `ALLOW_MOCK_LLM=true` re-permits it on a
+  non-production **preview** only (never production). Unit tests build the
+  mock backends directly, so the guard never fires under test. When you add a
+  new LLM-serving path, gate its mock branch through this policy (keep
+  `services/scribe-service/src/llm/llm.module.ts` in sync).
 - **Reflection questions** are not persisted; they're regenerated on the
   fly. The Share flow snapshots them inline into `PatientShare.snapshot`.
 - **Pass 4 cacheKey** is bumped to v2 in Sprint 16 because it now

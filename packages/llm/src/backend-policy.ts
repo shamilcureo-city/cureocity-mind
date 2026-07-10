@@ -94,3 +94,48 @@ export function mockRefusalReason(input: BackendPolicyInput): string | null {
     return e instanceof MockBackendRefusedError ? e.message : null;
   }
 }
+
+/** The subset of process.env the environment→policy mappers read. */
+export interface RawBackendEnv {
+  LLM_BACKEND?: string | undefined;
+  VERCEL_ENV?: string | undefined;
+  NODE_ENV?: string | undefined;
+  K_SERVICE?: string | undefined;
+  ALLOW_MOCK_LLM?: string | undefined;
+}
+
+/**
+ * Map a Vercel-hosted surface's env (apps/web) onto the policy.
+ * `VERCEL_ENV` ('production' | 'preview') is the primary deploy signal — it is
+ * the ONLY thing that separates a preview from production. `NODE_ENV ===
+ * 'production'` is a FALLBACK deploy signal so a self-hosted / containerised
+ * apps/web (where `VERCEL_ENV` is absent) still counts as deployed and refuses
+ * mock, rather than silently fabricating on a bare `next start`.
+ */
+export function vercelPolicyInput(env: RawBackendEnv): BackendPolicyInput {
+  return {
+    requested: env.LLM_BACKEND,
+    production: env.VERCEL_ENV === 'production',
+    deployed:
+      env.VERCEL_ENV === 'production' ||
+      env.VERCEL_ENV === 'preview' ||
+      env.NODE_ENV === 'production',
+    allowMockOptIn: env.ALLOW_MOCK_LLM === 'true',
+  };
+}
+
+/**
+ * Map a container/Cloud-Run service's env (the live gateway) onto the policy.
+ * The gateway Dockerfile bakes `NODE_ENV=production` into the runtime image and
+ * Cloud Run injects `K_SERVICE`; either marks a real deployment, where mock is
+ * never served. Local dev (neither signal) allows mock.
+ */
+export function containerPolicyInput(env: RawBackendEnv): BackendPolicyInput {
+  const prod = env.NODE_ENV === 'production' || Boolean(env.K_SERVICE);
+  return {
+    requested: env.LLM_BACKEND,
+    production: prod,
+    deployed: prod,
+    allowMockOptIn: env.ALLOW_MOCK_LLM === 'true',
+  };
+}
