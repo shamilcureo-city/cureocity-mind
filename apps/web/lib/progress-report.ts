@@ -1,4 +1,10 @@
-import { INSTRUMENTS, computeInstrumentChange, type InstrumentKey } from '@cureocity/clinical';
+import {
+  INSTRUMENTS,
+  composeFocusSummary,
+  computeInstrumentChange,
+  modalityFocusPhrase,
+  type InstrumentKey,
+} from '@cureocity/clinical';
 import {
   type ChangeVerdict,
   type InstrumentChange,
@@ -71,7 +77,7 @@ export async function buildProgressReport(
   }
   const clientFullName = await decryptClientField(client.psychologistId, client.fullNameEncrypted);
 
-  const [completedCount, firstSession, instrumentRows, activePlanRow, latestEpisode] =
+  const [completedCount, firstSession, instrumentRows, activePlanRow, latestEpisode, sessionNotes] =
     await Promise.all([
       prisma.session.count({ where: { clientId: args.clientId, status: 'COMPLETED' } }),
       prisma.session.findFirst({
@@ -95,6 +101,12 @@ export async function buildProgressReport(
         orderBy: { openedAt: 'desc' },
         select: { openedAt: true },
       }),
+      // TS4 — session notes for the "what we worked on" topics narrative.
+      prisma.session.findMany({
+        where: { clientId: args.clientId, status: 'COMPLETED' },
+        orderBy: { scheduledAt: 'asc' },
+        select: { scheduledAt: true, therapyNote: { select: { content: true } } },
+      }),
     ]);
 
   // CLIN-5 — bound the pre→post comparison to the CURRENT episode so a
@@ -116,6 +128,16 @@ export async function buildProgressReport(
   const encouragements = encouragementsFor(overall);
   const goals = readPlanGoals(activePlanRow?.body);
 
+  // TS4 — a deterministic "what we worked on" paragraph from the episode's
+  // session topics + the plan's modality + goals, so the report reads like a
+  // sentence the therapist wrote, not only a chart of scores.
+  const focusSummary = composeFocusSummary({
+    modalityLabel: modalityFocusPhrase(readModality(activePlanRow?.body)),
+    sessionsCompleted: completedCount,
+    topics: collectSessionTopics(sessionNotes, latestEpisode?.openedAt ?? null),
+    goals: goals.map((g) => g.description),
+  });
+
   const snapshot: ProgressReportSnapshot = {
     kind: 'PROGRESS_REPORT',
     headline,
@@ -124,6 +146,7 @@ export async function buildProgressReport(
     startedAt: firstSession?.scheduledAt.toISOString() ?? null,
     instruments: entries,
     goals,
+    focusSummary,
     encouragements,
   };
   const subject = `Your progress · ${formatClientFirstName(clientFullName)}`.slice(0, 120);
@@ -303,6 +326,38 @@ function readPlanGoals(body: unknown): { description: string; measure: string }[
         typeof (g as { measure?: unknown }).measure === 'string',
     )
     .map((g) => ({ description: g.description, measure: g.measure }));
+}
+
+/** TS4 — the plan's stored modality enum (for the "what we worked on" phrase). */
+function readModality(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const modality = (body as { modality?: unknown }).modality;
+  return typeof modality === 'string' ? modality : null;
+}
+
+/**
+ * TS4 — gather Session Topics (TherapyNoteV1.topics) across the current
+ * episode's completed sessions for the "what we worked on" narrative.
+ * Episode-scoped like the instrument series; defensive against bad JSON.
+ */
+function collectSessionTopics(
+  sessions: { scheduledAt: Date; therapyNote: { content: unknown } | null }[],
+  episodeOpenedAt: Date | null,
+): string[] {
+  const scoped = episodeOpenedAt
+    ? sessions.filter((s) => s.scheduledAt >= episodeOpenedAt)
+    : sessions;
+  const topics: string[] = [];
+  for (const s of scoped) {
+    const content = s.therapyNote?.content;
+    if (!content || typeof content !== 'object') continue;
+    const raw = (content as { topics?: unknown }).topics;
+    if (!Array.isArray(raw)) continue;
+    for (const t of raw) {
+      if (typeof t === 'string' && t.trim().length > 0) topics.push(t.trim());
+    }
+  }
+  return topics;
 }
 
 function formatClientFirstName(fullName: string): string {

@@ -19,3 +19,4 @@ export * from './fhir';
 export * from './rx-edit';
 export * from './reports/session-summary';
 export * from './reports/letter';
+export * from './reports/progress-narrative';

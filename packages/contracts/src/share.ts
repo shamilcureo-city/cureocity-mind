@@ -180,6 +180,13 @@ export const ProgressReportSnapshotSchema = z.object({
   instruments: z.array(ProgressReportInstrumentEntrySchema),
   /** Active treatment plan goals if one exists. */
   goals: z.array(z.object({ description: z.string(), measure: z.string() })),
+  /**
+   * Sprint TS4 — a plain-language "what we worked on" paragraph, composed
+   * deterministically from the episode's session topics + plan goals. Optional
+   * so already-shared snapshots (created before TS4) still parse; null when
+   * there were no topics/goals to summarise.
+   */
+  focusSummary: z.string().max(1200).nullable().optional(),
   /** Three short encouraging lines tailored to the verdict. */
   encouragements: z.array(z.string().min(1).max(400)).min(1).max(5),
 });

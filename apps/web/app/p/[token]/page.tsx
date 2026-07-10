@@ -352,6 +352,11 @@ function SnapshotView({
               {snapshot.intro}
             </p>
           )}
+          {snapshot.focusSummary && (
+            <p className="text-sm leading-relaxed text-[var(--color-ink)]">
+              {snapshot.focusSummary}
+            </p>
+          )}
           <section className="space-y-4">
             {snapshot.instruments.map((entry) => (
               <ProgressInstrumentBar key={entry.label} entry={entry} />
