@@ -28,6 +28,7 @@ import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { clientIdForSession, fetchActiveMedications } from './patient-context';
 import { encryptForTenant } from './tenant-crypto';
+import { ensureEnglishNote } from './ensure-english-note';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
 import { assembleSegments, transcribeChunkInline, type AssemblyInput } from './transcribe-segment';
@@ -285,8 +286,13 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
 
     // Sprint 19 — Pass 2 output is a discriminated union. Read the
     // body shape via the kind discriminator.
-    const pass2Body =
+    const pass2BodyRaw =
       pass2.output.kind === 'INTAKE' ? pass2.output.intakeNote : pass2.output.therapyNote;
+    // TS-fix — the clinician's note must be in English. If Pass 2 echoed a
+    // Malayalam/Hindi-dominant transcript's language, translate it back with one
+    // fast Flash call before persisting. Best-effort: returns the original on
+    // any failure or on a non-Vertex backend.
+    const pass2Body = await ensureEnglishNote(pass2BodyRaw, session.kind);
     const pass2RiskFlags = pass2Body.riskFlags;
     await persistCallLog(pass2.callLog);
     recordGeminiCall({

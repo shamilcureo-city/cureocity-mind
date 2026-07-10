@@ -3,6 +3,7 @@ export * from './prompts';
 export * from './pricing';
 export * from './model-router';
 export * from './backend-policy';
+export * from './language-detect';
 export {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,

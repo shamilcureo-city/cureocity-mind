@@ -3,11 +3,14 @@ import {
   LiveNoteInputSchema,
   TherapyLiveNoteInputSchema,
   type ClinicalOrderV1,
+  type IntakeNoteV1,
   type MedicalEncounterNoteV1,
   type MedicationOrderV1,
+  type TherapyNoteV1,
 } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { ensureEnglishNote } from '@/lib/ensure-english-note';
 import { persistDraftedOrders, persistVitalReadings } from '@/lib/note-orchestrator';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
@@ -58,7 +61,14 @@ export async function POST(
   if (session.psychologist.vertical === 'THERAPIST') {
     const parsedT = await parseJson(req, TherapyLiveNoteInputSchema);
     if (!parsedT.ok) return parsedT.response;
-    const tnote = parsedT.value.note;
+    // TS-fix — guarantee the clinician's note is in English (best-effort; the
+    // live gateway's Pass 2 can echo a Malayalam-dominant transcript's language).
+    // The cast bridges Zod's input/output typing of the union — the parsed
+    // value is already a valid TherapyNoteV1 / IntakeNoteV1 at runtime.
+    const tnote = await ensureEnglishNote(
+      parsedT.value.note as TherapyNoteV1 | IntakeNoteV1,
+      parsedT.value.kind,
+    );
     const tTranscript = parsedT.value.transcript?.trim() ?? '';
     const tTranscriptText = tTranscript.length > 0 ? tTranscript : '(captured via live scribe)';
     let tTranscriptEncrypted: string | null = null;
