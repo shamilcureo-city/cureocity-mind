@@ -18,6 +18,13 @@ export const CreateSessionInputSchema = z.object({
   /// was dead UI and every note generated in English.
   language: ClinicalLocaleSchema.optional(),
   scheduledAt: IsoDateTimeSchema,
+  /// Sprint TS3 (F1) — the therapist is starting a session NOW (from the
+  /// Record home / Today "Start session"), not booking a future slot. When
+  /// true the create route reuses an existing SCHEDULED/IN_PROGRESS session
+  /// for this client today instead of minting a duplicate that orphans the
+  /// booked row (mirrors the doctor queue's reuse of the pre-minted
+  /// encounter). Absent/false → always mint (the schedule-a-future-slot path).
+  startNow: z.boolean().optional(),
 });
 
 /// Sprint 45 — Today screen no-show transition. The client never

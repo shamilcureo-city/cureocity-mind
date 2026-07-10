@@ -5,6 +5,7 @@ export * from './client';
 export * from './briefing';
 export * from './audit';
 export * from './session';
+export * from './session-reuse';
 export * from './note';
 export * from './workflow';
 export * from './prescription';

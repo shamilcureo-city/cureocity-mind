@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type {
   BillingEntitlement,
   ConsentScope,
@@ -125,6 +126,7 @@ export function RecordConfirmStrip({
   onCancel,
   onReady,
 }: Props) {
+  const router = useRouter();
   const [defaults, setDefaults] = useState<SessionDefaults | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -203,6 +205,9 @@ export function RecordConfirmStrip({
           // session (was dropped, so every note generated in English).
           language,
           scheduledAt: new Date().toISOString(),
+          // TS3 (F1) — starting now: reuse today's booked session for this
+          // client instead of minting a duplicate that orphans the slot.
+          startNow: true,
         }),
       });
       if (!createRes.ok) {
@@ -255,6 +260,17 @@ export function RecordConfirmStrip({
       if (!consentRes.ok) {
         const body = (await consentRes.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `Record consent failed (${consentRes.status})`);
+      }
+
+      // TS3 (F1) — in-person live capture goes to the live scribe (transcript
+      // + note build as you talk, like the doctor consult). The live page's
+      // live-token call performs the SCHEDULED→IN_PROGRESS start, so we skip
+      // the batch /start here. Virtual (tab-audio), dictation and upload stay
+      // on the batch recorder — the live stream is mic-only for now.
+      const useLiveScribe = mode === 'live-capture' && method === 'mic';
+      if (useLiveScribe) {
+        router.push(`/app/sessions/${sessionRow.id}/live?flash=1`);
+        return;
       }
 
       const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });

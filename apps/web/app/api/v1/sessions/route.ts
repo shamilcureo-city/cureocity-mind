@@ -1,5 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { CreateSessionInputSchema, planTierLabel } from '@cureocity/contracts';
+import {
+  CreateSessionInputSchema,
+  planTierLabel,
+  selectReusableSession,
+} from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { getEntitlement, isBillingEnforced } from '@/lib/billing';
@@ -12,7 +16,7 @@ import {
 } from '@/lib/session-defaults';
 import { parseJson } from '@/lib/validate';
 import { DEFAULT_BUILTIN_TEMPLATE_ID } from '@/lib/builtin-templates';
-import { nextClinicToken } from '@/lib/clinic-queue';
+import { istDayRange, nextClinicToken } from '@/lib/clinic-queue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -41,6 +45,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (client.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+  }
+
+  // Sprint TS3 (F1) — "start now" reuse. When the therapist is starting a
+  // session for a client who already has an open (SCHEDULED / IN_PROGRESS)
+  // session booked for today, reuse that row instead of minting a duplicate
+  // at `now` that orphans the booked slot (the F1 dead-end). Mirrors the
+  // doctor clinic queue, which reuses the pre-minted encounter on start.
+  // Reuse consumes no trial credit (nothing new is created), so it sits
+  // ahead of the billing gate; the schedule-a-future-slot path (no startNow)
+  // always falls through to mint below.
+  if (dto.value.startNow) {
+    const range = istDayRange(new Date());
+    const candidates = await prisma.session.findMany({
+      where: {
+        clientId: dto.value.clientId,
+        psychologistId: auth.value.psychologistId,
+        status: { in: ['SCHEDULED', 'IN_PROGRESS'] },
+        scheduledAt: { gte: range.start, lt: range.end },
+      },
+      orderBy: { scheduledAt: 'asc' },
+    });
+    const reuse = selectReusableSession(candidates, range);
+    if (reuse) {
+      return NextResponse.json(toSession(reuse), { status: 200 });
+    }
   }
 
   // Sprint DV8.4 / DS7 — resolve the vertical once: it drives the billing

@@ -107,8 +107,11 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
           <div className="flex flex-wrap items-center gap-2">
             {session.status === 'SCHEDULED' && (
               <>
+                {/* TS3 (F1) — "Start session" opens the live scribe for THIS
+                    booked row (transcript + note build as you talk), not the
+                    empty workspace dead-end. flash=1 arms the mic on arrival. */}
                 <Link
-                  href={`/app/sessions/${session.id}`}
+                  href={`/app/sessions/${session.id}/live?flash=1`}
                   className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
                 >
                   Start session
@@ -130,8 +133,10 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
               </>
             )}
             {session.status === 'IN_PROGRESS' && (
+              // TS3 (F1) — reconnect to the live scribe (no flash: the
+              // therapist re-arms the mic explicitly on a resume).
               <Link
-                href={`/app/sessions/${session.id}`}
+                href={`/app/sessions/${session.id}/live`}
                 className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
               >
                 Resume
