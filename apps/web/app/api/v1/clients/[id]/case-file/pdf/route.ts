@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
+import { sessionSummaryLine } from '@cureocity/clinical';
 import { CaseFilePdf, type CaseFilePdfProps } from '@/components/pdf/CaseFilePdf';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
@@ -137,7 +138,7 @@ export async function GET(
       kind: s.kind,
       status: s.status,
       signed: Boolean(s.therapyNote?.signedAt),
-      summary: noteSummary(s.kind, s.therapyNote?.content ?? null),
+      summary: sessionSummaryLine(s.kind, s.therapyNote?.content ?? null),
     })),
   };
 
@@ -202,14 +203,4 @@ function shapePlan(
       typeof b.expectedDurationSessions === 'number' ? b.expectedDurationSessions : null,
     confirmedAt: confirmedAt.toISOString(),
   };
-}
-
-/** One-line summary of a signed note for the session list (defensive). */
-function noteSummary(kind: string, content: unknown): string | null {
-  if (!content || typeof content !== 'object') return null;
-  const c = content as Record<string, unknown>;
-  const pick = kind === 'INTAKE' ? c['presentingConcerns'] : (c['plan'] ?? c['assessment']);
-  if (typeof pick !== 'string' || pick.trim().length === 0) return null;
-  const flat = pick.trim().replace(/\s+/g, ' ');
-  return flat.length > 160 ? `${flat.slice(0, 157)}…` : flat;
 }

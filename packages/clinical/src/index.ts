@@ -17,3 +17,5 @@ export * from './chronic';
 export * from './voice-commands';
 export * from './fhir';
 export * from './rx-edit';
+export * from './reports/session-summary';
+export * from './reports/letter';
