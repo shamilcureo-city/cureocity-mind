@@ -1,10 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { CaseBriefingV1 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Card } from '../ui/Card';
 import { InfoTip } from '../ui/InfoTip';
+import { CaseConsultPanel } from './CaseConsultPanel';
 import { ClientCaseChat } from './ClientCaseChat';
 
 interface Props {
@@ -14,21 +15,27 @@ interface Props {
 }
 
 /**
- * Sprint JE3 — The story so far, zone [4] of the Care Engine page.
+ * Sprint JE3 → JE6 — "The story so far": the narrative card.
  *
- * A deliberately slimmed CaseBriefingPanel. It keeps only the *narrative*:
- * the one-line headline, the working diagnosis, the 5 Ps formulation, and
- * the "ask about this client" chat. Everything actionable that the old
- * briefing carried — the safety alert, the "still to find out" list, the
- * "do next" actions and the cadence line — now lives in the Care Engine's
- * arc gate, ranked queue, carried-questions panel and cadence. This panel
- * is the synthesis you read; the queue is the thing you do. No duplication.
+ * Keeps only what nothing else on the page owns: the one-line headline,
+ * the 5 Ps formulation, and the two on-demand AI tools — the "ask about
+ * this client" chat and the case consult (folded; it fetches only when
+ * opened). Everything actionable the old briefing carried — safety, the
+ * do-next list, still-to-find-out, cadence — lives on the Care Board /
+ * Next-session card; the working diagnosis lives in the board header.
+ * This card is the synthesis you read; the board is the thing you do.
  */
 export function CareStoryPanel({ clientId, clientName, initialBriefing }: Props) {
   const [briefing, setBriefing] = useState<CaseBriefingV1>(initialBriefing);
   const [refreshing, setRefreshing] = useState(false);
   const [showFormulation, setShowFormulation] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [consultOpen, setConsultOpen] = useState(false);
+
+  // The board's "Get a case consult" CTA lands on #care-consult — unfold it.
+  useEffect(() => {
+    if (window.location.hash === '#care-consult') setConsultOpen(true);
+  }, []);
 
   async function refresh(): Promise<void> {
     setRefreshing(true);
@@ -53,18 +60,6 @@ export function CareStoryPanel({ clientId, clientName, initialBriefing }: Props)
           <p className="mt-2 max-w-3xl text-[15px] leading-relaxed text-[var(--color-ink)]">
             {briefing.headline}
           </p>
-          {briefing.workingDiagnosis && (
-            <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-              <span className="font-mono">{briefing.workingDiagnosis.icd11Code}</span>{' '}
-              {briefing.workingDiagnosis.icd11Label}{' '}
-              <span className="text-[var(--color-ink-3)]">
-                ·{' '}
-                {briefing.workingDiagnosis.confirmed
-                  ? 'confirmed'
-                  : `working (${Math.round(briefing.workingDiagnosis.confidence * 100)}%)`}
-              </span>
-            </p>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <Badge tone={briefing.source === 'llm' ? 'accent' : 'muted'}>
@@ -137,6 +132,25 @@ export function CareStoryPanel({ clientId, clientName, initialBriefing }: Props)
           {chatOpen ? '▾' : '▸'} Ask about {firstName}
         </button>
         {chatOpen && <ClientCaseChat clientId={clientId} clientName={firstName} />}
+      </div>
+
+      {/* The case consult — folded; it only fetches once opened. */}
+      <div
+        id="care-consult"
+        className="mt-4 scroll-mt-24 border-t border-[var(--color-line-soft)] pt-4"
+      >
+        <button
+          type="button"
+          onClick={() => setConsultOpen((s) => !s)}
+          className="flex items-center gap-2 text-sm font-medium text-[var(--color-accent)]"
+        >
+          {consultOpen ? '▾' : '▸'} Second opinion — case consult
+        </button>
+        {consultOpen && (
+          <div className="mt-3">
+            <CaseConsultPanel clientId={clientId} />
+          </div>
+        )}
       </div>
     </Card>
   );

@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CaseConsultV1 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
-import { Card } from '../ui/Card';
 
 /**
  * Sprint 52 — Case Consult panel.
@@ -71,12 +70,13 @@ export function CaseConsultPanel({ clientId }: Props) {
     }
   }
 
+  // Renders as a SUBSECTION (no Card chrome) — since JE6 it lives folded
+  // inside the story card rather than as a standalone panel.
   return (
-    <Card className="p-6">
+    <div>
       <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h2 className="font-serif text-2xl">Case consult</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+          <p className="max-w-2xl text-sm text-[var(--color-ink-2)]">
             A structured second opinion when you&rsquo;re stuck — what&rsquo;s been tried, what the
             data shows, options to consider, and questions to bring to supervision. Therapist-facing
             only.
@@ -106,7 +106,7 @@ export function CaseConsultPanel({ clientId }: Props) {
         </p>
       )}
       {data?.consult && <ConsultBody consult={data.consult} />}
-    </Card>
+    </div>
   );
 }
 

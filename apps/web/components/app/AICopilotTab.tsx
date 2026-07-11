@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { z } from 'zod';
 import {
   CarriedQuestionSchema,
@@ -10,8 +9,7 @@ import {
   type TherapyNoteV1,
 } from '@cureocity/contracts';
 import { Card } from '@/components/ui/Card';
-import { CareArc } from '@/components/app/CareArc';
-import { CareDoNextQueue } from '@/components/app/CareDoNextQueue';
+import { CareBoard } from '@/components/app/CareBoard';
 import { CareMeasurePanel } from '@/components/app/CareMeasurePanel';
 import { CareNextSessionPanel } from '@/components/app/CareNextSessionPanel';
 import { CareStoryPanel } from '@/components/app/CareStoryPanel';
@@ -243,22 +241,24 @@ async function SessionSub({
 }
 
 /**
- * Sprint JE3 — the Care Engine page.
+ * Sprint JE3 → JE6 — the Care Engine page: FOUR cards, one home per fact.
  *
- * One longitudinal view driven by ONE deterministic state machine
- * (`computeCareEngineForClient` → CareEngineV1) instead of the two competing
- * action engines it replaces (that duplication is why "set a baseline" once
- * appeared four times). Five calm zones in the order a psychologist reasons:
+ * Driven by ONE deterministic state machine (`computeCareEngineForClient` →
+ * CareEngineV1). JE6 collapsed the previous five zones / eleven cards after
+ * a UX audit found the page still said things twice (gate vs queue, scores
+ * in three places, diagnosis + cadence + crisis repeated):
  *
- *   1. Care arc + the current stage's exit gate — the stage is *earned*.
- *   2. Do next — ONE ranked queue (SAFETY > MEASURE > DIAGNOSE > PLAN > OUTCOME).
- *   3. Is it working? — verdict-first measures + goals + affect.
- *   4. The story so far — slimmed narrative briefing + case consult.
- *   5. Next session — cadence + carried questions + pre-session brief.
- *
- * The briefing is still loaded (its narrative feeds zone 4) but its
- * actionable parts — safety, do-next, still-to-find-out, cadence — are now
- * owned by the engine, so nothing is said twice.
+ *   1. Care journey (CareBoard) — stage strip + the exit gate rendered AS
+ *      the do-next checklist (met = ✓ with evidence, open = the action
+ *      itself, inline). Diagnosis lives here and nowhere else.
+ *   2. Is it working? (CareMeasurePanel) — per-instrument verdict rows with
+ *      the administration form inline (scoring refreshes the board),
+ *      history folded, plan goals, affect. Scores live here and nowhere else.
+ *   3. The story so far (CareStoryPanel) — headline + 5 Ps + the chat and
+ *      the case consult folded inside.
+ *   4. Next session (CareNextSessionPanel) — cadence + the ranked carried
+ *      questions + the AI brief's unique fields (its crisis banner and
+ *      score list are deliberately not rendered — they have homes above).
  */
 async function JourneySub({
   sessionId,
@@ -300,10 +300,10 @@ async function JourneySub({
   const isDischarged = care.arc.discharged !== null;
 
   return (
-    <div className="space-y-8">
-      {/* 1 — Where they are: the arc + the current stage's exit gate. */}
-      <CareArc
+    <div className="space-y-6">
+      <CareBoard
         arc={care.arc}
+        queue={care.queue}
         workingDiagnosis={care.workingDiagnosis}
         canShareReport={canShareReport}
         clientId={clientId}
@@ -312,54 +312,26 @@ async function JourneySub({
         clientHasContactEmail={clientHasContactEmail}
       />
 
-      {/* 2 — Do next: the single ranked action queue. */}
-      <CareDoNextQueue queue={care.queue} />
+      <CareMeasurePanel
+        measures={care.measures}
+        activePlan={care.activePlan}
+        clientId={clientId}
+        disabled={isDischarged}
+      />
 
-      {/* 3 — Is it working? Verdict-first measures + goals + affect. */}
-      <JourneySection title="Is it working?">
-        <CareMeasurePanel
-          measures={care.measures}
-          activePlan={care.activePlan}
-          clientId={clientId}
-          disabled={isDischarged}
-        />
-      </JourneySection>
-
-      {/* 4 — The story so far: the narrative synthesis + consult. */}
-      <JourneySection title="The story so far">
-        {briefing ? (
-          <CareStoryPanel clientId={clientId} clientName={clientName} initialBriefing={briefing} />
-        ) : (
-          <EmptyState
-            title="No case briefing yet"
-            body="The briefing is composed from the cumulative client record. As sessions and assessments accumulate, it appears here."
-          />
-        )}
-        <div id="care-consult" className="scroll-mt-24">
+      {briefing ? (
+        <CareStoryPanel clientId={clientId} clientName={clientName} initialBriefing={briefing} />
+      ) : (
+        // No briefing yet — keep the consult reachable (it's folded into the
+        // story card whenever the briefing exists).
+        <Card id="care-consult" className="scroll-mt-24 p-6">
+          <h2 className="mb-3 font-serif text-2xl">Case consult</h2>
           <CaseConsultPanel clientId={clientId} />
-        </div>
-      </JourneySection>
+        </Card>
+      )}
 
-      {/* 5 — Next session: cadence + carried questions + pre-session brief. */}
-      <JourneySection title="Next session opens with">
-        <CareNextSessionPanel
-          questions={care.questions}
-          cadence={care.cadence}
-          clientId={clientId}
-        />
-      </JourneySection>
+      <CareNextSessionPanel questions={care.questions} cadence={care.cadence} clientId={clientId} />
     </div>
-  );
-}
-
-function JourneySection({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="space-y-4">
-      <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
-        {title}
-      </h3>
-      {children}
-    </section>
   );
 }
 
