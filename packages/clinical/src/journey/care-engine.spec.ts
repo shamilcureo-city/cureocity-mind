@@ -47,6 +47,7 @@ function makeInput(over: Partial<CareEngineInput> = {}): CareEngineInput {
     instruments: [inst({ key: 'PHQ9' }), inst({ key: 'GAD7' })],
     crisis: { highestSeverity: 'none', labels: [] },
     hasSafetyPlan: false,
+    safetyPlanConfirmedAt: null,
     discharged: null,
     openQuestions: [],
     hrefs: { journeySub: '/j', sessionSub: '/s' },
@@ -233,6 +234,67 @@ describe('computeCareEngine — the action queue', () => {
     expect(e.queue.some((a) => a.id === 'plan-review')).toBe(true);
   });
 
+  it('a safety plan that PREDATES a new crisis does not mark it addressed', () => {
+    const e = computeCareEngine(
+      makeInput({
+        workingDiagnosis: DX,
+        crisis: {
+          highestSeverity: 'critical',
+          labels: ['harm to others'],
+          latestAt: '2026-07-14T00:00:00.000Z',
+        },
+        hasSafetyPlan: true,
+        // Plan confirmed weeks BEFORE the new flag — must not count.
+        safetyPlanConfirmedAt: '2026-06-01T00:00:00.000Z',
+      }),
+    );
+    const safety = e.queue.find((a) => a.id === 'safety-plan');
+    expect(safety).toBeDefined();
+    expect(safety!.title).toContain('Update the safety plan');
+    const gate = e.arc.stages.find((s) => s.status === 'current')!.gate!;
+    expect(Object.fromEntries(gate.criteria.map((c) => [c.key, c]))['safety']!.met).toBe(false);
+  });
+
+  it('a safety plan confirmed AFTER the crisis covers it (no safety action)', () => {
+    const e = computeCareEngine(
+      makeInput({
+        workingDiagnosis: DX,
+        crisis: {
+          highestSeverity: 'high',
+          labels: ['suicidal ideation'],
+          latestAt: '2026-07-10T00:00:00.000Z',
+        },
+        hasSafetyPlan: true,
+        safetyPlanConfirmedAt: '2026-07-12T00:00:00.000Z',
+        instruments: [inst({ key: 'PHQ9', count: 1, lastAt: NOW })],
+      }),
+    );
+    expect(e.queue.some((a) => a.id === 'safety-plan')).toBe(false);
+  });
+
+  it('a critical flag AFTER discharge still surfaces a safety action', () => {
+    const e = computeCareEngine(
+      makeInput({
+        discharged: {
+          status: 'DISCHARGED',
+          closedAt: '2026-07-01T00:00:00.000Z',
+          closeReason: null,
+        },
+        crisis: {
+          highestSeverity: 'critical',
+          labels: ['self-reported suicidality'],
+          latestAt: '2026-07-14T00:00:00.000Z',
+        },
+        hasSafetyPlan: false,
+        instruments: [inst({ key: 'PHQ9', count: 2, change: change('PHQ9') })],
+      }),
+    );
+    expect(e.queue[0]!.id).toBe('safety-plan');
+    expect(e.queue[0]!.priority).toBe('SAFETY');
+    // The outcome-report action still follows.
+    expect(e.queue.some((a) => a.id === 'share-outcome')).toBe(true);
+  });
+
   it('remission + response → discharge action', () => {
     const e = computeCareEngine(
       makeInput({
@@ -298,6 +360,51 @@ describe('computeCareEngine — measures + cadence', () => {
     const phq = e.measures.find((m) => m.instrumentKey === 'PHQ9')!;
     expect(phq.dueState).toBe('DUE_NOW');
     expect(e.queue.some((a) => a.id === 'remeasure')).toBe(true);
+  });
+
+  it('a single stale reading in active treatment is DUE_NOW (2nd reading) with a queue action', () => {
+    const e = computeCareEngine(
+      makeInput({
+        workingDiagnosis: DX,
+        instruments: [inst({ key: 'PHQ9', count: 1, lastAt: '2026-06-20T10:00:00.000Z' })], // 25d
+        activePlan: PLAN,
+        sessionsSincePlan: 2,
+      }),
+    );
+    const phq = e.measures.find((m) => m.instrumentKey === 'PHQ9')!;
+    expect(phq.dueState).toBe('DUE_NOW');
+    expect(phq.dueLabel).toContain('2nd reading');
+    expect(e.queue.some((a) => a.id === 'remeasure')).toBe(true);
+  });
+
+  it('the remeasure action never fires while the card reads on-track (queue ⇔ card)', () => {
+    // Active plan, but a fresh crisis pulls the stage back to ASSESSMENT, so a
+    // stale 2-reading instrument shows ON_TRACK — and NO re-measure is chased.
+    const e = computeCareEngine(
+      makeInput({
+        workingDiagnosis: DX,
+        crisis: {
+          highestSeverity: 'high',
+          labels: ['x'],
+          latestAt: '2026-07-14T00:00:00.000Z',
+        },
+        hasSafetyPlan: false,
+        instruments: [
+          inst({
+            key: 'PHQ9',
+            count: 2,
+            lastAt: '2026-06-20T10:00:00.000Z',
+            change: change('PHQ9'),
+          }),
+        ],
+        activePlan: PLAN,
+        sessionsSincePlan: 2,
+      }),
+    );
+    expect(e.arc.stage).toBe('ASSESSMENT');
+    const phq = e.measures.find((m) => m.instrumentKey === 'PHQ9')!;
+    expect(phq.dueState).toBe('ON_TRACK');
+    expect(e.queue.some((a) => a.id === 'remeasure')).toBe(false);
   });
 
   it('cadence is weekly during assessment', () => {

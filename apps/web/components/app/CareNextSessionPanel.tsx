@@ -61,7 +61,8 @@ export function CareNextSessionPanel({ questions, cadence, clientId }: Props) {
           </p>
           <p className="text-xs text-[var(--color-ink-3)]">
             {questions.openCount} open
-            {questions.gateCount > 0 && ` · ${questions.gateCount} gate the diagnosis`}
+            {questions.gateCount > 0 &&
+              ` · ${questions.gateCount} ${questions.gateCount === 1 ? 'gates' : 'gate'} the diagnosis`}
             {questions.staleCount > 0 && ` · ${questions.staleCount} stale`}
           </p>
         </header>
@@ -106,10 +107,12 @@ function QuestionRow({
   const router = useRouter();
   const [closing, setClosing] = useState(false);
   const [done, setDone] = useState(false);
+  const [failed, setFailed] = useState(false);
   const meta = RANK_META[question.rank];
 
   async function close(): Promise<void> {
     setClosing(true);
+    setFailed(false);
     try {
       const res = await fetch(`/api/v1/clients/${clientId}/assessment-items/${question.id}`, {
         method: 'PATCH',
@@ -119,7 +122,11 @@ function QuestionRow({
       if (res.ok) {
         setDone(true);
         router.refresh();
+      } else {
+        setFailed(true);
       }
+    } catch {
+      setFailed(true);
     } finally {
       setClosing(false);
     }
@@ -150,6 +157,11 @@ function QuestionRow({
           </div>
           <p className="mt-1 text-sm font-medium text-[var(--color-ink)]">{question.question}</p>
           <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">{question.rationale}</p>
+          {failed && (
+            <p className="mt-1 text-xs text-[var(--color-warn)]">
+              Couldn&rsquo;t close — it may already be resolved. Try again.
+            </p>
+          )}
         </div>
         <button
           type="button"
@@ -157,7 +169,7 @@ function QuestionRow({
           disabled={closing}
           className="shrink-0 rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-medium text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-50"
         >
-          {closing ? 'Closing…' : 'Close'}
+          {closing ? 'Closing…' : failed ? 'Retry' : 'Close'}
         </button>
       </div>
     </li>

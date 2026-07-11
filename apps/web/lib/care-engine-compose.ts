@@ -65,10 +65,14 @@ export async function computeCareEngineForClient(
       fetchOpenCrises(clientId),
       prisma.safetyPlan.findFirst({
         where: { clientId, supersededAt: null },
-        select: { id: true },
+        orderBy: { confirmedAt: 'desc' },
+        select: { id: true, confirmedAt: true },
       }),
+      // Only genuinely OPEN items are questions to ASK next. ADDRESSED items
+      // have already been asked (awaiting a closing note), so surfacing them
+      // as "ask next" — and counting them — would be wrong.
       prisma.assessmentItem.findMany({
-        where: { clientId, status: { in: ['OPEN', 'ADDRESSED'] } },
+        where: { clientId, status: 'OPEN' },
         orderBy: { createdAt: 'asc' },
         take: 40,
         select: {
@@ -127,6 +131,10 @@ export async function computeCareEngineForClient(
   }
 
   // fetchOpenCrises only returns high/critical flags, deduped by kind.
+  const latestCrisisAt =
+    openCrises.length > 0
+      ? openCrises.reduce((max, c) => (c.lastSeenAt > max ? c.lastSeenAt : max), '')
+      : null;
   const crisis = {
     highestSeverity: (openCrises.some((c) => c.severity === 'critical')
       ? 'critical'
@@ -134,6 +142,7 @@ export async function computeCareEngineForClient(
         ? 'high'
         : 'none') as 'none' | 'low' | 'medium' | 'high' | 'critical',
     labels: openCrises.map((c) => CRISIS_LABEL[c.kind] ?? c.kind),
+    latestAt: latestCrisisAt,
   };
 
   const journeySub = sessionId ? `/app/sessions/${sessionId}?tab=copilot&sub=journey` : null;
@@ -153,6 +162,7 @@ export async function computeCareEngineForClient(
     instruments,
     crisis,
     hasSafetyPlan: safetyPlan !== null,
+    safetyPlanConfirmedAt: safetyPlan?.confirmedAt.toISOString() ?? null,
     discharged: journey.closedEpisode,
     openQuestions: openItems.map((i) => ({
       id: i.id,

@@ -335,7 +335,9 @@ async function JourneySub({
             body="The briefing is composed from the cumulative client record. As sessions and assessments accumulate, it appears here."
           />
         )}
-        <CaseConsultPanel clientId={clientId} />
+        <div id="care-consult" className="scroll-mt-24">
+          <CaseConsultPanel clientId={clientId} />
+        </div>
       </JourneySection>
 
       {/* 5 — Next session: cadence + carried questions + pre-session brief. */}

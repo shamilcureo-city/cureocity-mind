@@ -52,7 +52,9 @@ export function CareMeasurePanel({ measures, activePlan, clientId, disabled }: P
         ))}
       </div>
 
-      <InstrumentRunner clientId={clientId} />
+      <div id="care-measures" className="scroll-mt-24">
+        <InstrumentRunner clientId={clientId} />
+      </div>
 
       {activePlan && activePlan.goals.length > 0 && (
         <Card className="p-6">
@@ -217,7 +219,11 @@ function GoalRow({
         type="button"
         onClick={() => void cycle()}
         disabled={disabled || busy}
-        aria-label={`Goal status: ${GOAL_STATUS_LABEL[optimistic]} (click to change)`}
+        aria-label={
+          disabled
+            ? `Goal status: ${GOAL_STATUS_LABEL[optimistic]}`
+            : `Goal status: ${GOAL_STATUS_LABEL[optimistic]} (click to change)`
+        }
         className="mt-1 grid h-4 w-4 shrink-0 place-items-center rounded-full disabled:cursor-default"
       >
         <span aria-hidden className={`h-3 w-3 rounded-full ${dot}`}>

@@ -65,10 +65,12 @@ export function CareArc({
         {workingDiagnosis && (
           <div className="text-right">
             <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Current best fit
-              <span className="ml-2 normal-case tracking-normal text-[10px] text-[var(--color-ink-3)]">
-                (provisional — may change as you learn more)
-              </span>
+              {isDischarged ? 'Diagnosis at discharge' : 'Current best fit'}
+              {!isDischarged && (
+                <span className="ml-2 normal-case tracking-normal text-[10px] text-[var(--color-ink-3)]">
+                  (provisional — may change as you learn more)
+                </span>
+              )}
             </p>
             <p className="mt-1 text-sm">
               <span className="font-mono">{workingDiagnosis.icd11Code}</span>{' '}
@@ -126,9 +128,11 @@ export function CareArc({
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
                   {gate.label}
                 </p>
-                <p className="text-xs font-medium text-[var(--color-ink-2)] tabular-nums">
-                  {gate.metCount} of {gate.totalCount} done
-                </p>
+                {gate.totalCount > 1 && (
+                  <p className="text-xs font-medium text-[var(--color-ink-2)] tabular-nums">
+                    {gate.metCount} of {gate.totalCount} done
+                  </p>
+                )}
               </div>
               <ul className="mt-3 space-y-2">
                 {gate.criteria.map((c) => (
@@ -207,7 +211,7 @@ export function CareArc({
           hasContactPhone={clientHasContactPhone}
           hasContactEmail={clientHasContactEmail}
           artefact={{ artefactType: 'PROGRESS_REPORT', clientId }}
-          artefactLabel="Progress report"
+          artefactLabel={isDischarged ? 'Final outcome report' : 'Progress report'}
         />
       )}
 

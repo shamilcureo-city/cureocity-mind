@@ -112,8 +112,13 @@ export interface CareEngineInput {
   crisis: {
     highestSeverity: 'none' | 'low' | 'medium' | 'high' | 'critical';
     labels: string[];
+    /** ISO of the most recent open crisis flag — a safety plan only counts as
+     *  "addressed" if it was confirmed on/after this (else it predates the risk). */
+    latestAt?: string | null;
   };
   hasSafetyPlan: boolean;
+  /** ISO the active safety plan was confirmed (null when none) — see crisis.latestAt. */
+  safetyPlanConfirmedAt: string | null;
   discharged: JourneyEpisode | null;
   openQuestions: CareEngineQuestionInput[];
   /** Deep-link base for in-app CTAs (e.g. the session workspace). */
@@ -174,7 +179,15 @@ function deriveFacts(input: CareEngineInput): CareFacts {
   const hasPrimaryDiagnosis = input.workingDiagnosis !== null;
   const crisisActive =
     input.crisis.highestSeverity === 'high' || input.crisis.highestSeverity === 'critical';
-  const safetyAddressed = !crisisActive || input.hasSafetyPlan;
+  // A safety plan only counts as addressing the CURRENT crisis if it was
+  // confirmed on/after the most recent open flag — an old plan for a past
+  // concern must not silently mark a fresh, unaddressed risk as handled.
+  const crisisAt = input.crisis.latestAt ?? null;
+  const safetyPlanCovers =
+    input.hasSafetyPlan &&
+    input.safetyPlanConfirmedAt !== null &&
+    (crisisAt === null || input.safetyPlanConfirmedAt >= crisisAt);
+  const safetyAddressed = !crisisActive || safetyPlanCovers;
   const baselineMeasured = input.instruments.some((i) => i.count >= 1);
   const hasActivePlan = input.activePlan !== null;
 
@@ -198,13 +211,6 @@ function deriveFacts(input: CareEngineInput): CareFacts {
     hasActivePlan &&
     (input.sessionsSincePlan >= CARE_ENGINE_CONSTANTS.REVIEW_AT_SESSIONS || dischargeReady);
 
-  const remeasureDue =
-    hasActivePlan &&
-    input.instruments.some(
-      (i) =>
-        i.count >= 1 && daysSince(i.lastAt, input.now) >= CARE_ENGINE_CONSTANTS.REMEASURE_DUE_DAYS,
-    );
-
   const isDischarged = input.discharged !== null;
 
   const currentStage = deriveStage({
@@ -213,6 +219,16 @@ function deriveFacts(input: CareEngineInput): CareFacts {
     hasActivePlan,
     reviewReached,
   });
+
+  // The "re-measure" queue action must agree with the per-card due state, so
+  // both derive from the SAME function — an already-baselined instrument whose
+  // card reads DUE_NOW is exactly what makes a re-measure due (never one while
+  // every card says "on track").
+  const remeasureDue =
+    hasActivePlan &&
+    input.instruments.some(
+      (i) => i.count >= 1 && deriveMeasureDue(i, input.now, currentStage).dueState === 'DUE_NOW',
+    );
 
   return {
     firstSessionDone,
@@ -256,23 +272,36 @@ const PRIORITY_RANK: Record<CareAction['priority'], number> = {
 };
 
 function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
-  // Discharged: the only action is optionally sharing an outcome report.
+  // Discharged: the episode is closed, so the only routine action is optionally
+  // sharing an outcome report — BUT a critical flag can still surface after
+  // discharge (e.g. a remote self-report), and safety always outranks silence.
   if (f.isDischarged) {
-    const canShareReport = input.instruments.some((i) => i.change !== null);
-    return canShareReport
-      ? [
-          {
-            id: 'share-outcome',
-            priority: 'OUTCOME',
-            title: 'Share a final outcome report',
-            why: 'This episode of care is complete — send the client a record of their progress.',
-            unlocks: null,
-            when: 'this_session',
-            ctaLabel: null,
-            ctaHref: null,
-          },
-        ]
-      : [];
+    const out: CareAction[] = [];
+    if (f.crisisActive && !f.safetyAddressed) {
+      out.push({
+        id: 'safety-plan',
+        priority: 'SAFETY',
+        title: 'A new risk flag surfaced after discharge — check on the client',
+        why: `A ${input.crisis.highestSeverity}-severity flag${labelSuffix(input)} appeared after this episode closed; reach out and consider re-engaging.`,
+        unlocks: null,
+        when: 'this_session',
+        ctaLabel: null,
+        ctaHref: null,
+      });
+    }
+    if (input.instruments.some((i) => i.change !== null)) {
+      out.push({
+        id: 'share-outcome',
+        priority: 'OUTCOME',
+        title: 'Share a final outcome report',
+        why: 'This episode of care is complete — send the client a record of their progress.',
+        unlocks: null,
+        when: 'this_session',
+        ctaLabel: null,
+        ctaHref: null,
+      });
+    }
+    return out;
   }
 
   // Pre-first-session: the whole picture is "record the intake".
@@ -291,16 +320,25 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
     ];
   }
 
-  const measuresHref = input.hrefs.journeySub;
+  // The queue renders ON the journey page, so a bare journeySub link just
+  // reloads the same URL and jumps to the top. Anchor the measure + consult
+  // CTAs to the on-page zone they mean (the instrument runner / the consult).
+  const measuresHref = input.hrefs.journeySub ? `${input.hrefs.journeySub}#care-measures` : null;
+  const consultHref = input.hrefs.journeySub ? `${input.hrefs.journeySub}#care-consult` : null;
   const out: CareAction[] = [];
 
-  // SAFETY — always able to reach #1.
-  if (f.crisisActive && !input.hasSafetyPlan) {
+  // SAFETY — always able to reach #1. Fires whenever the crisis is not
+  // *covered* by a safety plan confirmed on/after the flag (a stale plan for a
+  // past concern does not count), so a fresh risk is never silently "handled".
+  if (f.crisisActive && !f.safetyAddressed) {
+    const stalePlan = input.hasSafetyPlan; // exists but predates this flag
     out.push({
       id: 'safety-plan',
       priority: 'SAFETY',
-      title: 'Complete a safety plan with the client',
-      why: `A ${input.crisis.highestSeverity}-severity crisis flag${input.crisis.labels.length ? ` (${input.crisis.labels.join(', ')})` : ''} is open; risk outranks all other clinical work.`,
+      title: stalePlan
+        ? 'Update the safety plan for the new risk'
+        : 'Complete a safety plan with the client',
+      why: `A ${input.crisis.highestSeverity}-severity crisis flag${labelSuffix(input)} is open${stalePlan ? ' and the safety plan on file predates it' : ''}; risk outranks all other clinical work.`,
       unlocks: 'Assessment gate · Safety addressed',
       when: 'this_session',
       ctaLabel: null,
@@ -346,7 +384,8 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
         id: `diagnose:${topGating.id}`,
         priority: 'DIAGNOSE',
         title: `Ask: “${clip(topGating.question, 90)}”`,
-        why: `${topGating.rationale} Highest-value of the ${input.openQuestions.length} open question${input.openQuestions.length === 1 ? '' : 's'}.`,
+        // Clip the rationale so the composed `why` stays within the DTO's cap.
+        why: `${clip(topGating.rationale, 500)} Highest-value of the ${input.openQuestions.length} open question${input.openQuestions.length === 1 ? '' : 's'}.`,
         unlocks: 'carried to next session · in the pre-session brief',
         when: 'next_session',
         ctaLabel: null,
@@ -388,8 +427,8 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
       why: 'The screener has shown no reliable improvement across several administrations; an early change of course helps most.',
       unlocks: null,
       when: 'next_session',
-      ctaLabel: measuresHref ? 'Get a case consult' : null,
-      ctaHref: measuresHref,
+      ctaLabel: consultHref ? 'Get a case consult' : null,
+      ctaHref: consultHref,
     });
   }
 
@@ -498,7 +537,7 @@ function buildGate(
         : null,
       why: f.safetyAddressed
         ? null
-        : `${input.crisis.highestSeverity}-severity flag open, no safety plan on file`,
+        : `${input.crisis.highestSeverity}-severity flag open, ${input.hasSafetyPlan ? 'safety plan predates it' : 'no safety plan on file'}`,
       unlocksActionId: actionId('safety-plan'),
     });
     criteria.push({
@@ -554,6 +593,42 @@ function buildGate(
 // Measures — verdict-first with a due state.
 // ============================================================================
 
+/**
+ * The single source of truth for an instrument's due state — used both for
+ * the per-card display AND (via deriveFacts) for the "re-measure" queue
+ * action, so the two can never contradict. Stage-aware: a re-measure is only
+ * chased once treatment is active.
+ */
+function deriveMeasureDue(
+  inst: CareEngineInstrument,
+  now: string,
+  stage: CareStage,
+): { dueState: CareMeasureDueState; dueLabel: string } {
+  const activePhase = stage === 'ACTIVE_TREATMENT' || stage === 'REVIEW';
+  if (inst.count === 0) {
+    return { dueState: 'DUE_NOW', dueLabel: 'due now · baseline' };
+  }
+  const days = daysSince(inst.lastAt, now);
+  if (inst.count === 1) {
+    // A single reading can't yield a verdict; once treatment is under way and
+    // it has gone stale, the second reading is genuinely due now.
+    if (activePhase && days >= CARE_ENGINE_CONSTANTS.REMEASURE_DUE_DAYS) {
+      return { dueState: 'DUE_NOW', dueLabel: `2nd reading due · last ${days}d ago` };
+    }
+    return { dueState: 'DUE_SOON', dueLabel: 'one more for a verdict' };
+  }
+  if (activePhase && days >= CARE_ENGINE_CONSTANTS.REMEASURE_DUE_DAYS) {
+    return { dueState: 'DUE_NOW', dueLabel: `re-measure now · last ${days}d ago` };
+  }
+  if (activePhase) {
+    return {
+      dueState: 'ON_TRACK',
+      dueLabel: `next in ${Math.max(0, CARE_ENGINE_CONSTANTS.REMEASURE_DUE_DAYS - days)}d`,
+    };
+  }
+  return { dueState: 'ON_TRACK', dueLabel: 're-measure once treatment starts' };
+}
+
 function buildMeasures(input: CareEngineInput, f: CareFacts): CareMeasure[] {
   return CARE_ENGINE_CONSTANTS.TRACKED_INSTRUMENTS.map((key) => {
     const inst = input.instruments.find((i) => i.key === key) ?? {
@@ -564,29 +639,7 @@ function buildMeasures(input: CareEngineInput, f: CareFacts): CareMeasure[] {
     };
     const change = inst.change;
     const hasBaseline = inst.count >= 1;
-
-    let dueState: CareMeasureDueState;
-    let dueLabel: string;
-    if (inst.count === 0) {
-      dueState = 'DUE_NOW';
-      dueLabel = 'due now · baseline';
-    } else if (inst.count === 1) {
-      dueState = 'DUE_SOON';
-      dueLabel = 'one more for a verdict';
-    } else {
-      const days = daysSince(inst.lastAt, input.now);
-      const activePhase = f.currentStage === 'ACTIVE_TREATMENT' || f.currentStage === 'REVIEW';
-      if (activePhase && days >= CARE_ENGINE_CONSTANTS.REMEASURE_DUE_DAYS) {
-        dueState = 'DUE_NOW';
-        dueLabel = `re-measure now · last ${days}d ago`;
-      } else if (activePhase) {
-        dueState = 'ON_TRACK';
-        dueLabel = `next in ${Math.max(0, CARE_ENGINE_CONSTANTS.REMEASURE_DUE_DAYS - days)}d`;
-      } else {
-        dueState = 'ON_TRACK';
-        dueLabel = 're-measure once treatment starts';
-      }
-    }
+    const { dueState, dueLabel } = deriveMeasureDue(inst, input.now, f.currentStage);
 
     return {
       instrumentKey: key,
@@ -713,10 +766,17 @@ function daysSince(isoThen: string | null, isoNow: string): number {
   return Math.max(0, Math.floor((now - then) / MS_PER_DAY));
 }
 
+// India Standard Time offset (UTC+5:30) — the app's canonical clinic timezone.
+// These labels are baked into the DTO as finished strings, so an evening-UTC
+// booking must read as the correct IST calendar day (not the previous one).
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
 function fmtDay(iso: string): string {
-  // Deterministic UTC day (e.g. "11 Jul"); the UI can re-localise if it wants.
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
+  // Deterministic IST calendar day (e.g. "11 Jul") — shift into IST, then read
+  // the UTC parts of the shifted instant.
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const d = new Date(t + IST_OFFSET_MS);
   const MONTHS = [
     'Jan',
     'Feb',
@@ -736,4 +796,10 @@ function fmtDay(iso: string): string {
 
 function clip(s: string, max: number): string {
   return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
+
+// " (suicidal ideation, harm to others)" — the crisis flag labels in parens,
+// or an empty string when none. Shared by the two SAFETY action builders.
+function labelSuffix(input: CareEngineInput): string {
+  return input.crisis.labels.length ? ` (${input.crisis.labels.join(', ')})` : '';
 }
