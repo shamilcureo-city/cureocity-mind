@@ -17,7 +17,10 @@
     "typecheck": {
       "executor": "nx:run-commands",
       "cache": true,
-      "options": { "command": "tsc --noEmit", "cwd": "apps/web" }
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "apps/web"
+      }
     },
     "lint": {
       "executor": "nx:run-commands",
@@ -31,13 +34,16 @@
       "executor": "nx:run-commands",
       "cache": true,
       "options": {
-        "command": "echo 'No web tests yet (component + e2e in Sprint 7/9)'",
+        "command": "vitest run",
         "cwd": "apps/web"
       }
     },
     "serve": {
       "executor": "nx:run-commands",
-      "options": { "command": "next dev --port 3000", "cwd": "apps/web" }
+      "options": {
+        "command": "next dev --port 3000",
+        "cwd": "apps/web"
+      }
     }
   }
 }

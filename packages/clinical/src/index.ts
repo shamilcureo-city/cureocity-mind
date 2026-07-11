@@ -12,6 +12,8 @@ export * from './instruments';
 export * from './instruments/change-score';
 export * from './journey/care-engine';
 export * from './crisis';
+// Cureocity Care — deterministic live crisis screen (docs/AI_COUNSELING.md §2).
+export * from './crisis-screen';
 export * from './interactions';
 export * from './specialty-templates';
 export * from './chronic';

@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start --port 3000",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint app lib --max-warnings 0 --no-error-on-unmatched-pattern"
+    "lint": "eslint app lib --max-warnings 0 --no-error-on-unmatched-pattern",
+    "test": "vitest run"
   },
   "dependencies": {
     "@cureocity/audio": "workspace:*",
@@ -49,6 +50,7 @@
     "postcss": "^8.5.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.3",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "vitest": "^2.1.8"
   }
 }

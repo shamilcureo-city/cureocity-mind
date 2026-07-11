@@ -582,6 +582,9 @@ The five existing passes are the template — pick the closest analogue.
 | `docs/DOCTOR_VERTICAL_SPRINTS.md`  | Doctor vertical DV0–DV8 sprint record — **SHIPPED** (per-sprint "Status: built" blocks)                                                                                                                         |
 | `docs/DOCTOR_SCRIBE_V2_PLAN.md`    | Rx-first V2 strategy — § 5 architecture **SHIPPED**; § 3/6/7 (benchmark, pricing, pilot) forward-looking                                                                                                        |
 | `docs/DOCTOR_SCRIBE_V2_SPRINTS.md` | Doctor Scribe V2 DS0–DS9 — live reasoning engine + Rx pad + OPD queue + insights, **SHIPPED**                                                                                                                   |
+| `docs/AI_COUNSELING.md`            | **Build spec** — Cureocity Care: standalone D2C AI voice-therapist product at `/care` (sprints AC0–AC7)                                                                                                         |
+| `docs/AI_COUNSELING_SPRINTS.md`    | **Sprint plan** — Cureocity Care task breakdown, sprints AC0–AC7                                                                                                                                                |
+| `docs/runbooks/care.md`            | Cureocity Care ops — live backends, model-pin rotation, crisis on-call, mock stack                                                                                                                              |
 | `docs/DS11_CONSULT_UX_SPRINTS.md`  | Consult UX v3 (DS11.1–11.8) — live-first single Review & Sign surface + CaptureMode, **SHIPPED**                                                                                                                |
 | `docs/THERAPIST_SCRIBE_SPRINTS.md` | **Therapist Scribe V2 (TS0–TS5) — PLANNED**: audit findings + the plan to bring the therapist vertical to the doctor bar (live scribe, one surface, evidence-anchored reports)                                  |
 | `docs/THERAPIST_COPILOT_V2.md`     | **Therapist copilot v2 + live copilot — SHIPPED (TSC / TS5)**: the two-lane decision board, the assessment engine, revisable decisions + wrap-up, the 3 sub-tabs, and the live `PASS_12_THERAPY_REASONING` rail |
@@ -615,36 +618,41 @@ all run with deterministic mocks. No GCP creds needed for dev.
 
 ## 10. Critical files / where to look first
 
-| When you want to…                                | Start here                                                                                                                       |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| Add a new API endpoint                           | `apps/web/app/api/v1/sessions/[id]/note/modify/route.ts` (the canonical pattern)                                                 |
-| Add a new Gemini pass                            | `packages/llm/src/backends/vertex-pro-global.backend.ts` + this CLAUDE.md § 5                                                    |
-| Add a new tab on the session detail page         | `apps/web/app/app/sessions/[id]/page.tsx` + `apps/web/components/app/SessionWorkspaceTabs.tsx`                                   |
-| Add a new audit action                           | `packages/contracts/src/audit.ts` + this CLAUDE.md § 6                                                                           |
-| Change the SOAP note shape                       | `packages/contracts/src/note.ts` (`TherapyNoteV1Schema`)                                                                         |
-| Change the intake note shape                     | `packages/contracts/src/note.ts` (`IntakeNoteV1Schema`)                                                                          |
-| Change the Clinical Brief shape                  | `packages/contracts/src/clinical.ts` (`ClinicalReportV1Schema`)                                                                  |
-| Change the Initial Assessment Brief shape        | `packages/contracts/src/clinical.ts` (`InitialAssessmentBriefV1Schema`)                                                          |
-| Add a UI primitive                               | Don't. Compose existing ones in `apps/web/components/ui/`                                                                        |
-| Add a patient-facing share artefact type         | `packages/contracts/src/share.ts` + `apps/web/lib/share-snapshots.ts` + `apps/web/app/p/[token]/page.tsx`                        |
-| Curate a new scored instrument                   | `packages/clinical/src/instruments/index.ts` + add tests                                                                         |
-| Add a new India crisis hotline                   | `packages/clinical/src/crisis.ts`                                                                                                |
-| Edit the session-start cascade                   | `apps/web/lib/session-defaults.ts` + `apps/web/app/api/v1/clients/[id]/session-defaults/route.ts`                                |
-| Change the Journey hub / reliable-change verdict | `apps/web/lib/journey.ts` + `packages/clinical/src/instruments/change-score.ts`                                                  |
-| Change the Progress Report copy                  | `apps/web/lib/progress-report.ts` (deterministic — no LLM) + portal render branch in `apps/web/app/p/[token]/page.tsx`           |
-| Open / close a treatment episode                 | `apps/web/app/api/v1/sessions/route.ts` (opens) + `apps/web/app/api/v1/clients/[id]/discharge/route.ts` (closes)                 |
-| Toggle a goal status                             | `apps/web/app/api/v1/treatment-plans/[id]/goals/[index]/route.ts`                                                                |
-| Work on the doctor live consult (gateway)        | `services/live-gateway/src/live-session.ts` (+ `vad`/`case-state`/`reasoning-loop`/`rx-pad`) — see § 3b                          |
-| Change the live reasoning pass                   | `packages/llm/src/backends/vertex-reasoning.backend.ts` + `reasoning-normalise.ts` + prompt `REASONING_SYSTEM_PROMPT_V1`         |
-| Persist a live gateway event                     | Relay from `apps/web/components/app/DoctorLiveEncounter.tsx` → an `apps/web/app/api/v1/sessions/[id]/live-*` route               |
-| Change the OPD queue / token assignment          | `apps/web/lib/clinic-queue.ts` + `apps/web/app/app/clinic/page.tsx` + `apps/web/app/api/v1/clinic/queue/route.ts`                |
-| Change the doctor Review & Sign surface          | `apps/web/components/app/ReviewAndSign.tsx` (a component — both live + batch converge here)                                      |
-| Change the Rx pad                                | `packages/contracts/src/rx-pad.ts` + `services/live-gateway/src/rx-pad.ts` + `apps/web/app/api/v1/sessions/[id]/rx-pad/route.ts` |
-| Change doctor capture modes                      | `apps/web/components/app/StartEncounterButton.tsx` + `CaptureMode` in `prisma/schema.prisma` + `defaultCaptureMode`              |
-| Debug auth / "bounced to /login"                 | `docs/AUTH_SESSION.md` (log-line → cause table) + `apps/web/lib/auth-page.ts` + `apps/web/lib/auth-server.ts`                    |
-| Add a route with a side effect                   | Make it **POST-only** (prefetchers fire `GET`). Pattern: `apps/web/app/api/v1/auth/signout/route.ts`                             |
-| Make a client component call `/api/v1`           | Just `fetch('/api/v1/...')` — `AuthedFetchProvider` adds the Bearer token (`apps/web/components/app/AuthedFetchProvider.tsx`)    |
-| Change the Pass-3 crisis-flag normaliser         | `packages/llm/src/backends/pass3-normalise.ts` (+ its spec) — wired into `vertex-clinical.backend.ts`                            |
+| When you want to…                                | Start here                                                                                                                         |
+| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Add a new API endpoint                           | `apps/web/app/api/v1/sessions/[id]/note/modify/route.ts` (the canonical pattern)                                                   |
+| Add a new Gemini pass                            | `packages/llm/src/backends/vertex-pro-global.backend.ts` + this CLAUDE.md § 5                                                      |
+| Add a new tab on the session detail page         | `apps/web/app/app/sessions/[id]/page.tsx` + `apps/web/components/app/SessionWorkspaceTabs.tsx`                                     |
+| Add a new audit action                           | `packages/contracts/src/audit.ts` + this CLAUDE.md § 6                                                                             |
+| Change the SOAP note shape                       | `packages/contracts/src/note.ts` (`TherapyNoteV1Schema`)                                                                           |
+| Change the intake note shape                     | `packages/contracts/src/note.ts` (`IntakeNoteV1Schema`)                                                                            |
+| Change the Clinical Brief shape                  | `packages/contracts/src/clinical.ts` (`ClinicalReportV1Schema`)                                                                    |
+| Change the Initial Assessment Brief shape        | `packages/contracts/src/clinical.ts` (`InitialAssessmentBriefV1Schema`)                                                            |
+| Add a UI primitive                               | Don't. Compose existing ones in `apps/web/components/ui/`                                                                          |
+| Add a patient-facing share artefact type         | `packages/contracts/src/share.ts` + `apps/web/lib/share-snapshots.ts` + `apps/web/app/p/[token]/page.tsx`                          |
+| Curate a new scored instrument                   | `packages/clinical/src/instruments/index.ts` + add tests                                                                           |
+| Add a new India crisis hotline                   | `packages/clinical/src/crisis.ts`                                                                                                  |
+| Edit the session-start cascade                   | `apps/web/lib/session-defaults.ts` + `apps/web/app/api/v1/clients/[id]/session-defaults/route.ts`                                  |
+| Change the Journey hub / reliable-change verdict | `apps/web/lib/journey.ts` + `packages/clinical/src/instruments/change-score.ts`                                                    |
+| Change the Progress Report copy                  | `apps/web/lib/progress-report.ts` (deterministic — no LLM) + portal render branch in `apps/web/app/p/[token]/page.tsx`             |
+| Open / close a treatment episode                 | `apps/web/app/api/v1/sessions/route.ts` (opens) + `apps/web/app/api/v1/clients/[id]/discharge/route.ts` (closes)                   |
+| Toggle a goal status                             | `apps/web/app/api/v1/treatment-plans/[id]/goals/[index]/route.ts`                                                                  |
+| Work on the doctor live consult (gateway)        | `services/live-gateway/src/live-session.ts` (+ `vad`/`case-state`/`reasoning-loop`/`rx-pad`) — see § 3b                            |
+| Change the live reasoning pass                   | `packages/llm/src/backends/vertex-reasoning.backend.ts` + `reasoning-normalise.ts` + prompt `REASONING_SYSTEM_PROMPT_V1`           |
+| Work on Cureocity Care (D2C AI therapist)        | `docs/AI_COUNSELING.md` + `apps/web/app/api/v1/care/**` + `apps/web/components/care/CareLiveSession.tsx` + `docs/runbooks/care.md` |
+| Change the Care live wire constants (model/VAD)  | `packages/llm/src/live/config.ts` — the ONLY home for the recipe's numbers                                                         |
+| Change the Care report (Pass 13) shape           | `packages/contracts/src/care.ts` (`CareReportV1Schema` — discriminated on `kind`; ALWAYS narrow first)                             |
+| Change the Care gate / kind inference / caps     | `apps/web/lib/care-gate.ts` + `apps/web/lib/care-session-kind.ts` (pure, unit-tested)                                              |
+| Add / adjust Care crisis phrases                 | `packages/clinical/src/crisis-screen.ts` (adding is safe; removing needs clinician sign-off)                                       |
+| Persist a live gateway event                     | Relay from `apps/web/components/app/DoctorLiveEncounter.tsx` → an `apps/web/app/api/v1/sessions/[id]/live-*` route                 |
+| Change the OPD queue / token assignment          | `apps/web/lib/clinic-queue.ts` + `apps/web/app/app/clinic/page.tsx` + `apps/web/app/api/v1/clinic/queue/route.ts`                  |
+| Change the doctor Review & Sign surface          | `apps/web/components/app/ReviewAndSign.tsx` (a component — both live + batch converge here)                                        |
+| Change the Rx pad                                | `packages/contracts/src/rx-pad.ts` + `services/live-gateway/src/rx-pad.ts` + `apps/web/app/api/v1/sessions/[id]/rx-pad/route.ts`   |
+| Change doctor capture modes                      | `apps/web/components/app/StartEncounterButton.tsx` + `CaptureMode` in `prisma/schema.prisma` + `defaultCaptureMode`                |
+| Debug auth / "bounced to /login"                 | `docs/AUTH_SESSION.md` (log-line → cause table) + `apps/web/lib/auth-page.ts` + `apps/web/lib/auth-server.ts`                      |
+| Add a route with a side effect                   | Make it **POST-only** (prefetchers fire `GET`). Pattern: `apps/web/app/api/v1/auth/signout/route.ts`                               |
+| Make a client component call `/api/v1`           | Just `fetch('/api/v1/...')` — `AuthedFetchProvider` adds the Bearer token (`apps/web/components/app/AuthedFetchProvider.tsx`)      |
+| Change the Pass-3 crisis-flag normaliser         | `packages/llm/src/backends/pass3-normalise.ts` (+ its spec) — wired into `vertex-clinical.backend.ts`                              |
 
 ## 11. What's NOT in scope (still on the backlog)
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CareReportV1Schema, type CareSessionKind } from '@cureocity/contracts';
 import {
   AffectFeatureSchema,
   CaseBriefingV1Schema,
@@ -579,6 +580,26 @@ export type PassTherapyReasoningOutput = TherapyReasoningModelOutput;
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
+// ============================================================================
+// Pass 13 — Cureocity Care session report (sprints AC4-AC5). Post-session
+// REST pass for the standalone D2C AI-therapist product. Output is
+// CareReportV1 — a DISCRIMINATED UNION on `kind`. See docs/AI_COUNSELING.md.
+// ============================================================================
+
+export interface PassCareReportInput {
+  careSessionId: string;
+  kind: CareSessionKind;
+  transcriptText: string;
+  caseFileJson: string;
+  verdictsJson?: string;
+  language: string;
+}
+
+export const PassCareReportOutputSchema = z.object({
+  report: CareReportV1Schema,
+});
+export type PassCareReportOutput = z.infer<typeof PassCareReportOutputSchema>;
+
 export type GeminiPass =
   | 'PASS_1_TRANSCRIBE_AND_ANALYSE'
   | 'PASS_2_NOTE_GENERATION'
@@ -592,7 +613,9 @@ export type GeminiPass =
   | 'PASS_9_DIFFERENTIAL'
   | 'PASS_10_FINDINGS'
   | 'PASS_11_REASONING'
-  | 'PASS_12_THERAPY_REASONING';
+  | 'PASS_12_THERAPY_REASONING'
+  | 'PASS_13_CARE_REPORT'
+  | 'LIVE_CARE_SESSION';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -671,6 +694,12 @@ export interface IPassTherapyReasoningBackend {
   ): Promise<{ output: PassTherapyReasoningOutput; callLog: GeminiCallLogData }>;
 }
 
+export interface IPassCareReportBackend {
+  run(
+    input: PassCareReportInput,
+  ): Promise<{ output: PassCareReportOutput; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
@@ -692,6 +721,9 @@ export interface IModelRouter {
   passTherapyReasoning(
     input: PassTherapyReasoningInput,
   ): Promise<{ output: PassTherapyReasoningOutput; callLog: GeminiCallLogData }>;
+  passCareReport(
+    input: PassCareReportInput,
+  ): Promise<{ output: PassCareReportOutput; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

@@ -55,6 +55,8 @@ export * from './medication-order';
 export * from './aftervisit';
 export * from './chronic';
 export * from './abdm';
+// Sprint AC1+ — Cureocity Care, the standalone D2C AI-therapist product.
+export * from './care';
 export * from './letter';
 export * from './problem';
 export * from './note-review';

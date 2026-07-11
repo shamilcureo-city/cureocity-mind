@@ -138,6 +138,9 @@ function makeRouter(opts: {
     passReasoning: vi.fn(async () => {
       throw new Error('passReasoning not used by note orchestrator');
     }),
+    passCareReport: vi.fn(async () => {
+      throw new Error('passCareReport not used by note orchestrator');
+    }),
   };
 }
 
