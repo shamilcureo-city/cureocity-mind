@@ -13,6 +13,7 @@ import {
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
   type IPassReasoningBackend,
+  type IPassTherapyReasoningBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
@@ -24,12 +25,14 @@ import {
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
+  MockGeminiTherapyReasoningBackend,
   ModelRouter,
   containerPolicyInput,
   resolveLlmBackend,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
   VertexGeminiReasoningBackend,
+  VertexGeminiTherapyReasoningBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -67,6 +70,7 @@ const modelRouterProvider: Provider = {
     let passDifferential: IPassDifferentialBackend;
     let passFindings: IPassFindingsBackend;
     let passReasoning: IPassReasoningBackend;
+    let passTherapyReasoning: IPassTherapyReasoningBackend;
 
     if (!projectId) {
       // TS-safety — defence in depth. This service is a scaffold with no
@@ -90,6 +94,7 @@ const modelRouterProvider: Provider = {
       passDifferential = new MockGeminiDifferentialBackend();
       passFindings = new MockGeminiFindingsBackend();
       passReasoning = new MockGeminiReasoningBackend();
+      passTherapyReasoning = new MockGeminiTherapyReasoningBackend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -187,6 +192,16 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-flash-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      // Sprint TS5 — live therapy reasoning. Flash in asia-south1 (DPDP).
+      passTherapyReasoning = new VertexGeminiTherapyReasoningBackend({
+        projectId,
+        location: config.get<string>('GEMINI_FLASH_REGION') ?? 'asia-south1',
+        model:
+          config.get<string>('GEMINI_REASONING_MODEL') ??
+          config.get<string>('GEMINI_FLASH_MODEL') ??
+          'gemini-1.5-flash-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
@@ -202,6 +217,7 @@ const modelRouterProvider: Provider = {
       passDifferential,
       passFindings,
       passReasoning,
+      passTherapyReasoning,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

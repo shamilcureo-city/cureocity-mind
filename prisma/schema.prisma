@@ -1084,6 +1084,7 @@ enum GeminiPass {
   PASS_9_DIFFERENTIAL // Sprint DV6 — doctor differential diagnosis
   PASS_10_FINDINGS // Sprint DS1 — live findings extractor (reasoning substrate)
   PASS_11_REASONING // Sprint DS2 — combined live reasoning (differential + ask-next)
+  PASS_12_THERAPY_REASONING // Sprint TS5 — live therapy copilot (risk + ask-next + threads)
 }
 
 enum GeminiCallStatus {

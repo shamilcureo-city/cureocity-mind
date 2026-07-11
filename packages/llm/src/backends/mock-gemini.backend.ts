@@ -13,6 +13,9 @@ import {
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
   type IPassReasoningBackend,
+  type IPassTherapyReasoningBackend,
+  type PassTherapyReasoningInput,
+  type PassTherapyReasoningOutput,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -53,6 +56,7 @@ import {
   DIFFERENTIAL_PROMPT_VERSION,
   FINDINGS_PROMPT_VERSION,
   REASONING_PROMPT_VERSION,
+  THERAPY_REASONING_PROMPT_VERSION,
 } from '../prompts';
 
 /**
@@ -1502,6 +1506,88 @@ export class MockGeminiReasoningBackend implements IPassReasoningBackend {
         promptVersion: REASONING_PROMPT_VERSION,
         inputTokens: input.newUtterances.reduce((n, u) => n + Math.ceil(u.text.length / 4), 0) + 64,
         outputTokens: 300,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+/**
+ * Sprint TS5 — mock therapy reasoning. Keyword-routed over the new client
+ * utterances so `LLM_BACKEND=mock` gives a believable live copilot offline:
+ * a risk cue when the client says something hopeless/self-harming, a couple of
+ * unexplored threads (brother / work / sleep), and one live ask-next. Every
+ * item cites the anchor utterance id so the gateway's citation gate keeps it.
+ */
+export class MockGeminiTherapyReasoningBackend implements IPassTherapyReasoningBackend {
+  async run(
+    input: PassTherapyReasoningInput,
+  ): Promise<{ output: PassTherapyReasoningOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    // In a therapist session the client is stored with speaker 'patient'
+    // (the wire Utterance enum is doctor|patient|unknown across verticals).
+    const clientUtterances = input.newUtterances.filter((u) => u.speaker === 'patient');
+    const anchor = clientUtterances[0] ?? input.newUtterances[0];
+    const text = clientUtterances
+      .map((u) => u.text)
+      .join(' ')
+      .toLowerCase();
+
+    const output: PassTherapyReasoningOutput = { riskWatch: [], askNext: [], threads: [] };
+    if (anchor) {
+      if (/suicid|kill myself|end it|hopeless|worthless|better off dead|ജീവിതം|मरना/.test(text)) {
+        output.riskWatch.push({
+          id: 'r1',
+          label: 'Hopeless / self-harm cue',
+          why: 'The client voiced hopelessness — assess ideation, intent and means.',
+          severity: 'high',
+          source: 'LIVE',
+          sourceUtteranceIds: [anchor.id],
+        });
+      }
+      const threads: PassTherapyReasoningOutput['threads'] = [];
+      if (/brother|sister|family|father|mother|amma|achan/.test(text)) {
+        threads.push({
+          id: 't1',
+          topic: 'Family conflict',
+          note: 'Client named a family relationship in passing without exploring it.',
+          mentions: 1,
+          sourceUtteranceIds: [anchor.id],
+        });
+      }
+      if (/work|job|office|boss|ജോലി|naukri/.test(text)) {
+        threads.push({
+          id: 't2',
+          topic: 'Work pressure',
+          note: 'Work stress mentioned as a trigger; not yet unpacked.',
+          mentions: 1,
+          sourceUtteranceIds: [anchor.id],
+        });
+      }
+      output.threads = threads.slice(0, 4);
+      output.askNext.push({
+        id: 'q1',
+        question: 'When that feeling shows up, what goes through your mind first?',
+        why: 'Opens the thought behind the affect the client just described.',
+        source: 'LIVE',
+        priority: output.riskWatch.length ? 'high' : 'normal',
+        status: 'open',
+        sourceUtteranceIds: [anchor.id],
+      });
+    }
+
+    return {
+      output,
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_12_THERAPY_REASONING',
+        model: 'mock-flash',
+        region: 'mock-asia-south1',
+        promptVersion: THERAPY_REASONING_PROMPT_VERSION,
+        inputTokens: input.newUtterances.reduce((n, u) => n + Math.ceil(u.text.length / 4), 0) + 48,
+        outputTokens: 180,
         costInr: 0,
         latencyMs: Date.now() - start,
         status: 'SUCCESS',

@@ -12,6 +12,7 @@ import {
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
   type IPassReasoningBackend,
+  type IPassTherapyReasoningBackend,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -34,6 +35,8 @@ import {
   type PassFindingsOutput,
   type PassReasoningInput,
   type PassReasoningOutput,
+  type PassTherapyReasoningInput,
+  type PassTherapyReasoningOutput,
 } from './types';
 
 export interface ModelRouterOptions {
@@ -51,6 +54,8 @@ export interface ModelRouterOptions {
   passFindings: IPassFindingsBackend;
   /** Sprint DS2 — combined live reasoning (findings + differential + ask-next). */
   passReasoning: IPassReasoningBackend;
+  /** Sprint TS5 — live THERAPY reasoning (risk-watch + ask-next + threads). */
+  passTherapyReasoning: IPassTherapyReasoningBackend;
   /** Called after every backend call with the resulting call-log row. */
   onCallLog?: (log: GeminiCallLogData) => Promise<void> | void;
 }
@@ -126,6 +131,14 @@ export class ModelRouter implements IModelRouter {
     input: PassReasoningInput,
   ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }> {
     const result = await this.opts.passReasoning.run(input);
+    await this.opts.onCallLog?.(result.callLog);
+    return result;
+  }
+
+  async passTherapyReasoning(
+    input: PassTherapyReasoningInput,
+  ): Promise<{ output: PassTherapyReasoningOutput; callLog: GeminiCallLogData }> {
+    const result = await this.opts.passTherapyReasoning.run(input);
     await this.opts.onCallLog?.(result.callLog);
     return result;
   }

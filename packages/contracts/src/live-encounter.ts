@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ClinicalFindingSchema, PatientContextSchema } from './case-state';
 import { SessionKindSchema, SessionModalitySchema } from './client';
 import { LiveReasoningSchema } from './live-reasoning';
+import { TherapyLiveContextSchema, TherapyReasoningV1Schema } from './live-therapy-reasoning';
 import { EvidenceRefSchema, MedicalEncounterNoteV1Schema } from './medical-note';
 import { ClinicalOrderV1Schema, MedicationOrderV1Schema } from './medication-order';
 import { IntakeNoteV1Schema, TherapyNoteV1Schema } from './note';
@@ -198,6 +199,14 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
     vertical: PractitionerVerticalSchema.optional(),
     kind: SessionKindSchema.optional(),
     modality: SessionModalitySchema.nullable().optional(),
+    /**
+     * Sprint TS5 — therapist live copilot context. The browser passes the
+     * client's carried questions + whether prior suicidal ideation is on file
+     * + the planned session length, so PASS_12_THERAPY_REASONING can seed the
+     * ask-next rail from the plan and the risk rail with a re-check. The
+     * gateway has no DB, so this must come over the wire. Absent ⇒ no seeding.
+     */
+    therapyContext: TherapyLiveContextSchema.optional(),
   }),
   z.object({ type: z.literal('stop') }),
   // Sprint DS3 — the doctor dismissed an "ask next" question. The gateway
@@ -249,6 +258,9 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   // Sprint DS2 — the live clinical reasoning snapshot (differential +
   // ask-next + red flags). Full snapshot, idempotent render.
   z.object({ type: z.literal('reasoning'), reasoning: LiveReasoningSchema }),
+  // Sprint TS5 — the live THERAPY copilot snapshot (risk-watch + ask-next +
+  // threads + arc). Full snapshot, idempotent render. Therapist path only.
+  z.object({ type: z.literal('therapyReasoning'), reasoning: TherapyReasoningV1Schema }),
   // Sprint DS5 — the Rx pad assembling live (partial). Idempotent render.
   z.object({ type: z.literal('rxDraft'), rxPad: RxPadDraftSchema }),
   // Sprint DV9 — the closing note carries the drafted Rx + clinical

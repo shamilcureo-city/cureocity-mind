@@ -32,6 +32,9 @@ import {
   type TherapyNoteV1,
   TherapyScriptV1Schema,
   type TreatmentPlan,
+  TherapyReasoningModelOutputSchema,
+  type TherapyReasoningModelOutput,
+  type TherapyCarriedQuestion,
 } from '@cureocity/contracts';
 
 // Re-export the cross-service schemas so existing imports from
@@ -544,6 +547,35 @@ export const PassReasoningOutputSchema = z.object({
 export type PassReasoningOutput = z.infer<typeof PassReasoningOutputSchema>;
 
 // ============================================================================
+// Sprint TS5 — PassTherapyReasoning (PASS_12_THERAPY_REASONING). The
+// therapist analogue of PassReasoning: ONE Flash call per cycle over the new
+// utterances that produces the risk-watch cues, live ask-next questions, and
+// unexplored threads. The gateway seeds the CARRIED ask-next + the
+// deterministic prior-SI re-check + the session arc around this — the model
+// never fabricates the plan or the clock. Every item that claims something
+// about the session cites utterance ids; the gateway drops uncited items.
+// ============================================================================
+export interface PassTherapyReasoningInput {
+  sessionId: string;
+  /** Only the utterances added since the last pass — incremental. */
+  newUtterances: Utterance[];
+  /** A capped tail of earlier utterances for thread/context detection. */
+  recentUtterances: Utterance[];
+  /** The questions the therapist planned (so the model doesn't repeat them). */
+  carriedQuestions: TherapyCarriedQuestion[];
+  /** Topics already surfaced as threads (id · topic) — bump, don't duplicate. */
+  previousThreads?: { id: string; topic: string }[];
+  /** Currently-open LIVE ask-next questions — don't repeat. */
+  openQuestions?: { id: string; question: string }[];
+  /** Whether prior suicidal ideation is on file (raises risk sensitivity). */
+  priorRisk: boolean;
+  language?: ClinicalLocale;
+}
+
+export const PassTherapyReasoningOutputSchema = TherapyReasoningModelOutputSchema;
+export type PassTherapyReasoningOutput = TherapyReasoningModelOutput;
+
+// ============================================================================
 // Call log — what each backend reports back, persisted by the router.
 // ============================================================================
 
@@ -559,7 +591,8 @@ export type GeminiPass =
   | 'PASS_8_CASE_CONSULT'
   | 'PASS_9_DIFFERENTIAL'
   | 'PASS_10_FINDINGS'
-  | 'PASS_11_REASONING';
+  | 'PASS_11_REASONING'
+  | 'PASS_12_THERAPY_REASONING';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
 
@@ -632,6 +665,12 @@ export interface IPassReasoningBackend {
   ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }>;
 }
 
+export interface IPassTherapyReasoningBackend {
+  run(
+    input: PassTherapyReasoningInput,
+  ): Promise<{ output: PassTherapyReasoningOutput; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
@@ -650,6 +689,9 @@ export interface IModelRouter {
   passReasoning(
     input: PassReasoningInput,
   ): Promise<{ output: PassReasoningOutput; callLog: GeminiCallLogData }>;
+  passTherapyReasoning(
+    input: PassTherapyReasoningInput,
+  ): Promise<{ output: PassTherapyReasoningOutput; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

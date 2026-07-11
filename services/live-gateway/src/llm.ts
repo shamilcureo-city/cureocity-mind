@@ -3,15 +3,18 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
+  MockGeminiTherapyReasoningBackend,
   containerPolicyInput,
   resolveLlmBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProGlobalBackend,
   VertexGeminiReasoningBackend,
+  VertexGeminiTherapyReasoningBackend,
   type BackendPolicyInput,
   type IPass1Backend,
   type IPass2Backend,
   type IPassReasoningBackend,
+  type IPassTherapyReasoningBackend,
 } from '@cureocity/llm';
 
 /**
@@ -38,6 +41,8 @@ export interface LiveBackends {
   pass2Final?: IPass2Backend;
   /** Sprint DS2 — combined live reasoning (findings + differential + ask-next). */
   reasoning: IPassReasoningBackend;
+  /** Sprint TS5 — live THERAPY reasoning (risk-watch + ask-next + threads). */
+  therapyReasoning: IPassTherapyReasoningBackend;
 }
 
 /**
@@ -100,6 +105,17 @@ export function buildBackends(): LiveBackends {
           'gemini-2.5-flash',
         thinkingBudget: reasoningThinkingBudget(),
       }),
+      // Sprint TS5 — live therapy reasoning. Flash in asia-south1 (DPDP),
+      // same thinking budget as the doctor reasoning pass (latency-critical).
+      therapyReasoning: new VertexGeminiTherapyReasoningBackend({
+        projectId: project,
+        location: flashRegion,
+        model:
+          process.env['VERTEX_REASONING_MODEL'] ??
+          process.env['VERTEX_FLASH_MODEL'] ??
+          'gemini-2.5-flash',
+        thinkingBudget: reasoningThinkingBudget(),
+      }),
     };
   }
   return {
@@ -107,6 +123,7 @@ export function buildBackends(): LiveBackends {
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
     reasoning: new MockGeminiReasoningBackend(),
+    therapyReasoning: new MockGeminiTherapyReasoningBackend(),
   };
 }
 

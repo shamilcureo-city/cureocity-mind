@@ -16,6 +16,7 @@ export {
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
+  MockGeminiTherapyReasoningBackend,
 } from './backends/mock-gemini.backend';
 export {
   VertexGeminiFlashIndiaBackend,
@@ -72,5 +73,11 @@ export {
   type VertexGeminiReasoningOptions,
 } from './backends/vertex-reasoning.backend';
 export { normaliseReasoningOutput } from './backends/reasoning-normalise';
+export {
+  VertexGeminiTherapyReasoningBackend,
+  TherapyReasoningBackendError,
+  type VertexGeminiTherapyReasoningOptions,
+} from './backends/vertex-therapy-reasoning.backend';
+export { normaliseTherapyReasoningOutput } from './backends/therapy-reasoning-normalise';
 export { verifyPass3Evidence, quoteVerified } from './backends/pass3-evidence';
 export type { EvidenceGateStats } from './backends/pass3-evidence';

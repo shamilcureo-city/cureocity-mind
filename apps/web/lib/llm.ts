@@ -12,6 +12,7 @@ import {
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
+  MockGeminiTherapyReasoningBackend,
   ModelRouter,
   resolveLlmBackend,
   mockRefusalReason,
@@ -20,6 +21,7 @@ import {
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
   VertexGeminiReasoningBackend,
+  VertexGeminiTherapyReasoningBackend,
   VertexGeminiFlashIndiaBackend,
   VertexGeminiProBriefBackend,
   VertexGeminiProCaseBriefingBackend,
@@ -222,6 +224,15 @@ function build(): IModelRouter {
           process.env['VERTEX_FLASH_MODEL'] ??
           'gemini-2.5-flash',
       }),
+      // Sprint TS5 — live THERAPY reasoning. Flash in asia-south1 (DPDP).
+      passTherapyReasoning: new VertexGeminiTherapyReasoningBackend({
+        projectId: project,
+        location: flashRegion,
+        model:
+          process.env['VERTEX_REASONING_MODEL'] ??
+          process.env['VERTEX_FLASH_MODEL'] ??
+          'gemini-2.5-flash',
+      }),
     });
   }
   // Reachable only on a local/dev machine — resolveLlmBackend() above throws on
@@ -242,6 +253,7 @@ function build(): IModelRouter {
     passDifferential: new MockGeminiDifferentialBackend(),
     passFindings: new MockGeminiFindingsBackend(),
     passReasoning: new MockGeminiReasoningBackend(),
+    passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),
   });
 }
 

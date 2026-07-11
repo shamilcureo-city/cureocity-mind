@@ -43,6 +43,9 @@ export * from './medical-note';
 // eval order clean.
 export * from './case-state';
 export * from './live-reasoning';
+// Sprint TS5 — the live therapy copilot snapshot; exported before
+// live-encounter (which imports from it) to keep the CJS eval order clean.
+export * from './live-therapy-reasoning';
 export * from './rx-pad';
 export * from './live-encounter';
 export * from './differential';
