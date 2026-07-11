@@ -23,7 +23,7 @@
  * cannot be exercised in CI. Drive it once with `pnpm gateway` before trusting.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   LiveGatewayEventSchema,
@@ -215,9 +215,64 @@ export function TherapistLiveSession({
   const [saving, setSaving] = useState(false);
   // Sprint TS5 — the live copilot snapshot (risk / ask-next / threads / arc).
   const [copilot, setCopilot] = useState<TherapyReasoningV1 | null>(null);
+  // TS5.4 — ids the therapist resolved (asked/assessed/dismissed). Applied
+  // optimistically to whatever snapshot renders, so a card leaves the rail on
+  // tap instead of waiting for the gateway's next emission.
+  const [resolvedIds, setResolvedIds] = useState<Set<string>>(() => new Set());
+  // Ref mirror so ws.onopen (a closure) can replay pre-connection resolutions.
+  const resolvedRef = useRef<Set<string>>(new Set());
   // Set when the consult ended but no note ever arrived (Pass 2 empty/blocked
   // upstream). Terminal, recoverable — never leave the user on "Finishing…".
   const [noteFailed, setNoteFailed] = useState(false);
+
+  // TS5.4 — the SESSION PLAN, rendered before the gateway says a word. Seeds
+  // the rail with the carried/copilot questions and the deterministic prior-SI
+  // re-check, using the SAME ids the gateway's store assigns (`carried-<i>`,
+  // 'risk-recheck'), so a dismissal here also lands on the gateway item once
+  // connected. The first real gateway snapshot simply replaces this.
+  const seedReasoning = useMemo<TherapyReasoningV1 | null>(() => {
+    if (carriedQuestions.length === 0 && !priorRisk) return null;
+    return {
+      riskWatch: priorRisk
+        ? [
+            {
+              id: 'risk-recheck',
+              label: 'Re-check ideation',
+              why: 'Prior suicidal ideation is on file — re-assess ideation, intent and means today.',
+              severity: 'high' as const,
+              source: 'CARRIED_RISK' as const,
+              sourceUtteranceIds: [],
+            },
+          ]
+        : [],
+      askNext: carriedQuestions.map((q, i) => ({
+        id: `carried-${i}`,
+        question: q.question,
+        why: q.why ?? 'You planned to ask this at the start of the session.',
+        source: 'CARRIED' as const,
+        priority: 'normal' as const,
+        status: 'open' as const,
+        sourceUtteranceIds: [],
+      })),
+      threads: [],
+      arc: null,
+      version: 0,
+    };
+  }, [carriedQuestions, priorRisk]);
+
+  // What the rail renders: the latest gateway snapshot, or the local seed
+  // until one arrives — minus everything the therapist already resolved.
+  const effectiveCopilot = useMemo<TherapyReasoningV1 | null>(() => {
+    const base = copilot ?? seedReasoning;
+    if (!base) return null;
+    if (resolvedIds.size === 0) return base;
+    return {
+      ...base,
+      riskWatch: base.riskWatch.filter((r) => !resolvedIds.has(r.id)),
+      askNext: base.askNext.filter((a) => !resolvedIds.has(a.id)),
+      threads: base.threads.filter((t) => !resolvedIds.has(t.id)),
+    };
+  }, [copilot, seedReasoning, resolvedIds]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const meterRef = useRef<MeterSummary | null>(null);
@@ -401,6 +456,11 @@ export function TherapistLiveSession({
           },
         }),
       );
+      // Replay plan items the therapist resolved before the connection existed,
+      // so the gateway's store doesn't re-suggest them.
+      for (const id of resolvedRef.current) {
+        ws.send(JSON.stringify({ type: 'dismiss', questionId: id }));
+      }
       void stream.start().catch((e: Error) => {
         setError(`Microphone unavailable: ${e.message}. Tap Start to try again.`);
         setPhase('idle');
@@ -522,6 +582,10 @@ export function TherapistLiveSession({
     event: 'acted' | 'dismissed',
     label?: string,
   ): void {
+    // Optimistic: the card leaves the rail immediately (also covers resolving
+    // a seeded plan item before the gateway is connected).
+    resolvedRef.current.add(id);
+    setResolvedIds((prev) => new Set(prev).add(id));
     const ws = wsRef.current;
     if (ws && ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({ type: 'dismiss', questionId: id }));
@@ -601,12 +665,24 @@ export function TherapistLiveSession({
       )}
 
       {phase === 'idle' && (
-        <Card className="p-8 text-center">
-          <p className="mb-4 text-sm text-[var(--color-ink-2)]">
-            The conversation and note build in real time as you talk.
-          </p>
-          <Button onClick={() => void start()}>Start session</Button>
-        </Card>
+        <div className="space-y-4">
+          <Card className="p-8 text-center">
+            <p className="mb-4 text-sm text-[var(--color-ink-2)]">
+              The conversation and note build in real time as you talk.
+            </p>
+            <Button onClick={() => void start()}>Start session</Button>
+          </Card>
+
+          {/* TS5.4 — the session plan is visible BEFORE recording starts:
+              the carried questions + the copilot's ranked open questions,
+              plus the prior-risk re-check. Same cards as the live rail. */}
+          {effectiveCopilot &&
+            (effectiveCopilot.askNext.length > 0 || effectiveCopilot.riskWatch.length > 0) && (
+              <div className="mx-auto max-w-xl">
+                <TherapyCopilotRail reasoning={effectiveCopilot} onResolve={resolveCopilot} />
+              </div>
+            )}
+        </div>
       )}
 
       {phase !== 'idle' && (
@@ -687,12 +763,13 @@ export function TherapistLiveSession({
 
           {/* ============ Right rail ============ */}
           <div className="space-y-4 lg:col-span-5">
-            {/* Sprint TS5 — the live copilot (risk / ask-next / threads / arc)
-                once the first reasoning snapshot arrives; before that (and if a
-                Pass-2 note-level risk appears first) a calm/escalated safety
-                card holds the space. */}
-            {copilot ? (
-              <TherapyCopilotRail reasoning={copilot} onResolve={resolveCopilot} />
+            {/* Sprint TS5 → TS5.4 — the live copilot. Renders from the FIRST
+                moment: the seeded session plan (carried + copilot questions,
+                prior-risk re-check) until the gateway's first reasoning
+                snapshot replaces it. A Pass-2 note-level risk still escalates
+                the fallback card when there is no plan at all. */}
+            {effectiveCopilot ? (
+              <TherapyCopilotRail reasoning={effectiveCopilot} onResolve={resolveCopilot} />
             ) : risk ? (
               <Card
                 className={`p-4 text-sm ${

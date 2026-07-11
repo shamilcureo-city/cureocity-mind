@@ -9,15 +9,17 @@ import type {
 import { Card } from '../ui/Card';
 
 /**
- * Sprint TS5 — the live therapy copilot rail.
+ * Sprint TS5 → TS5.4 — the live therapy copilot rail.
  *
- * Renders the PASS_12 snapshot the gateway streams during a session: a risk
- * watch, "ask next" (planned questions the therapist carried in + live cues),
- * threads the client raised but didn't explore, and a session-pacing clock.
- * Every card is passive — one tap to mark it asked/explored or to dismiss it,
- * both of which stop the gateway re-suggesting it and write an audit row. An
- * "AI" tag on the header keeps it visually distinct from what the therapist
- * has decided, doctor-style.
+ * Renders the copilot snapshot (seeded session plan first, then the gateway's
+ * PASS_12 stream): a risk watch, the SESSION PLAN (the questions the
+ * therapist carried in + the copilot's ranked open assessment questions —
+ * visible from second zero, before any AI pass runs), live "ask next" cues
+ * heard in the room, threads the client raised but didn't explore, and a
+ * session-pacing clock. Every card is passive — one tap to mark it
+ * asked/explored or to dismiss it, both of which stop the gateway
+ * re-suggesting it and write an audit row. An "AI" tag on the header keeps it
+ * visually distinct from what the therapist has decided, doctor-style.
  */
 export function TherapyCopilotRail({
   reasoning,
@@ -32,6 +34,10 @@ export function TherapyCopilotRail({
   ) => void;
 }) {
   const { riskWatch, askNext, threads, arc } = reasoning;
+  // The plan (carried in) and the live cues (heard in the room) are different
+  // altitudes — separate sections, not chips on a mixed list.
+  const planned = askNext.filter((a) => a.source === 'CARRIED');
+  const live = askNext.filter((a) => a.source !== 'CARRIED');
   const nothing = riskWatch.length === 0 && askNext.length === 0 && threads.length === 0;
 
   return (
@@ -56,9 +62,17 @@ export function TherapyCopilotRail({
         </RailSection>
       )}
 
-      {askNext.length > 0 && (
-        <RailSection title="Ask next">
-          {askNext.map((a) => (
+      {planned.length > 0 && (
+        <RailSection title={`Session plan · ${planned.length} to ask`}>
+          {planned.map((a) => (
+            <AskCard key={a.id} item={a} onResolve={onResolve} />
+          ))}
+        </RailSection>
+      )}
+
+      {live.length > 0 && (
+        <RailSection title="Heard live — ask next">
+          {live.map((a) => (
             <AskCard key={a.id} item={a} onResolve={onResolve} />
           ))}
         </RailSection>
@@ -181,15 +195,6 @@ function AskCard({
   return (
     <div className="rounded-xl border border-[var(--color-line-soft)] p-2.5 text-[12.5px]">
       <b className="text-[var(--color-ink)]">{item.question}</b>
-      <span
-        className={`ml-1.5 rounded-full px-1.5 py-px text-[9.5px] font-bold tracking-wide ${
-          item.source === 'CARRIED'
-            ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-            : 'bg-[#f6efdc] text-[#8a7434]'
-        }`}
-      >
-        {item.source === 'CARRIED' ? 'PLANNED' : 'LIVE'}
-      </span>
       <p className="mt-0.5 text-[var(--color-ink-3)]">{item.why}</p>
       <div className="mt-1.5 flex gap-1.5">
         <MiniAct onClick={() => onResolve(item.id, 'ASK_NEXT', 'acted', item.question)}>
