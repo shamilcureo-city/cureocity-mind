@@ -1,7 +1,9 @@
 'use client';
 
+import { useRef } from 'react';
 import Link from 'next/link';
 import { PlanCheckoutButton } from './PlanCheckoutButton';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import {
   PLAN_CATALOG,
   TIER_COPY,
@@ -43,6 +45,8 @@ const RECOMMENDED: Record<Variant, PurchasablePlan> = {
 };
 
 export function UpgradeModal({ open, onClose, variant, entitlement }: Props) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(open, dialogRef, onClose);
   if (!open) return null;
   const recommendedTier = PLAN_CATALOG[RECOMMENDED[variant]].tier;
   // For PLAN_CAP we suppress the user's own (capped) tier so they don't
@@ -55,6 +59,7 @@ export function UpgradeModal({ open, onClose, variant, entitlement }: Props) {
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       role="dialog"
       aria-modal="true"

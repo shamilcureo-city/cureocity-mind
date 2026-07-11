@@ -1,9 +1,10 @@
 import { Prisma } from '@prisma/client';
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, after, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { PractitionerVerticalSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { createDemoClient } from '@/lib/demo-client';
 import { toPsychologist } from '@/lib/mappers';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -11,6 +12,9 @@ import { sendWelcomeEmail } from '@/lib/welcome-email';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// NEXT1 — the demo-client seed in after() fabricates a 6-session arc; give
+// it the same budget as the manual /onboarding/demo-client route.
+export const maxDuration = 60;
 
 /**
  * Sprint 31 — onboarding completion.
@@ -189,6 +193,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
     throw e;
+  }
+
+  // NEXT1 — a brand-new therapist lands with the showcase client already
+  // seeded, so the first thing they see is a working caseload instead of an
+  // empty roster (the DemoClientButton stays as the manual remove/re-create
+  // path). Runs after the response; failure must never affect onboarding.
+  // The demo fixture is therapy-shaped, so doctors are skipped.
+  if (!isDoctor) {
+    after(async () => {
+      try {
+        const seeded = await createDemoClient(updated.id, updated.id);
+        if (seeded.created) {
+          console.log(`[onboarding] demo client auto-seeded for psy=${updated.id}`);
+        }
+      } catch (e) {
+        console.error(
+          `[onboarding] demo client auto-seed failed for psy=${updated.id}: ${(e as Error).message}`,
+        );
+      }
+    });
   }
 
   // Best-effort welcome email. A transient failure (or noop in dev)

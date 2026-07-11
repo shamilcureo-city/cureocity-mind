@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   PatientShareChannel,
   PatientShareSnapshot,
@@ -11,6 +11,7 @@ import type {
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 interface ShareModalProps {
   open: boolean;
@@ -115,6 +116,8 @@ export function ShareModal({
     whatsappConfigured: boolean;
     emailConfigured: boolean;
   } | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(open, dialogRef, onClose);
 
   // Reset state when modal closes.
   useEffect(() => {
@@ -242,6 +245,7 @@ export function ShareModal({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
       role="dialog"

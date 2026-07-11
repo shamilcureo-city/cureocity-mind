@@ -15,7 +15,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
  *   - otherwise (local/mock dev) it runs open for convenience.
  * Set the secret on BOTH the app and the gateway in prod.
  */
-interface LiveTokenClaims {
+export interface LiveTokenClaims {
   sessionId: string;
   psychologistId: string;
   exp: number;
@@ -50,24 +50,40 @@ export function verifyStartToken(
 ): boolean {
   const secret = process.env['LIVE_GATEWAY_SECRET'];
   if (!secret) return !isProduction(); // dev/mock → open; prod → fail closed
-  if (!token || !sessionId) return false;
+  return extractVerifiedClaims(token, sessionId) !== null;
+}
+
+/**
+ * NEXT4 — the verified token claims, or null when the token is absent,
+ * malformed, forged, expired, bound to another session, or when no secret
+ * is configured (dev/mock — an unverified psychologistId must never feed
+ * the tenant spend ledger). The single HMAC verification path shared with
+ * {@link verifyStartToken}.
+ */
+export function extractVerifiedClaims(
+  token: string | undefined,
+  sessionId: string | undefined,
+): LiveTokenClaims | null {
+  const secret = process.env['LIVE_GATEWAY_SECRET'];
+  if (!secret || !token || !sessionId) return null;
 
   const dot = token.lastIndexOf('.');
-  if (dot <= 0) return false;
+  if (dot <= 0) return null;
   const payload = token.slice(0, dot);
   const sig = token.slice(dot + 1);
   const expected = createHmac('sha256', secret).update(payload).digest('hex');
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
     const claims = JSON.parse(
       Buffer.from(payload, 'base64url').toString('utf8'),
     ) as LiveTokenClaims;
-    if (claims.sessionId !== sessionId) return false;
-    if (typeof claims.exp !== 'number' || claims.exp < Math.floor(Date.now() / 1000)) return false;
-    return true;
+    if (claims.sessionId !== sessionId) return null;
+    if (typeof claims.exp !== 'number' || claims.exp < Math.floor(Date.now() / 1000)) return null;
+    if (typeof claims.psychologistId !== 'string' || !claims.psychologistId) return null;
+    return claims;
   } catch {
-    return false;
+    return null;
   }
 }

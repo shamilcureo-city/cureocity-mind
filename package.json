@@ -59,6 +59,11 @@
       "@nestjs/core",
       "protobufjs",
       "@swc/core"
-    ]
+    ],
+    "//overrides": "NEXT6 — patch-level floors for vulnerable transitives on the apps/web production path (form-data 2.x boundary-randomness CVE via @types/request; protobufjs via the firebase-admin gRPC chain). Keep selectors narrow so unrelated major lines are untouched.",
+    "overrides": {
+      "form-data": ">=4.0.6",
+      "protobufjs@7": ">=7.6.3"
+    }
   }
 }

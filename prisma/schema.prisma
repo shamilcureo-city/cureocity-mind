@@ -2733,6 +2733,10 @@ enum AuditAction {
   LIVE_SUGGESTION_AUTORESOLVED
   // Doctor vertical — Sprint DS10-B. Plan composer edited the draft Rx pad.
   RX_PAD_EDITED
+  // NEXT2 — reclaim cron flipped a stranded generation to FAILED.
+  STUCK_GENERATION_RECLAIMED
+  // NEXT3 — daily unsigned-note digest email sent to a therapist.
+  UNSIGNED_NOTE_DIGEST_SENT
 }
 
 enum AuditActorType {

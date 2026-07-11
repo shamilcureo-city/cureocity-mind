@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Textarea, FieldError } from '../ui/Field';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 interface Props {
   open: boolean;
@@ -37,6 +38,8 @@ export function RescheduleModal({
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(open, dialogRef, onClose);
 
   if (!open) return null;
 
@@ -70,6 +73,7 @@ export function RescheduleModal({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"

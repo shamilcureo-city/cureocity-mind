@@ -4,52 +4,74 @@
 
 ## What this means
 
-Gemini call timeouts (`status=TIMEOUT`) have exceeded 0.05 calls/second
-over a 10-minute window. Each timeout blocks a NoteDraft from
-progressing; the BullMQ worker retries up to 3× with exponential
-backoff, so a sustained timeout rate means therapy notes are stalling
-across multiple sessions.
+Gemini call timeouts (`status=TIMEOUT` / transient `ERROR` rows in
+`gemini_call_logs`) are elevated. Each failure blocks a NoteDraft from
+progressing. Both batch backends retry once on transient errors with
+their own per-attempt timeout (Pass 1 Flash: 50 s; Pass 2 Pro: 120 s —
+`packages/llm/src/backends/vertex-flash-india.backend.ts` /
+`vertex-pro-global.backend.ts`), so a sustained rate means Vertex
+itself is degraded, and drafts are stalling across sessions.
+
+Anything the retries didn't save is picked up by the reclaim cron
+(`/api/v1/cron/reclaim-stuck`): drafts stranded IN_PROGRESS flip to
+FAILED so the therapist sees a re-run button instead of a spinner.
 
 ## Diagnosis
 
-1. Identify the failing pass:
-   - `metric{pass="PASS_1_TRANSCRIBE_AND_ANALYSE"}` → Pass 1 = Flash
-     in asia-south1.
-   - `metric{pass="PASS_2_NOTE_GENERATION"}` → Pass 2 = Pro (global).
-2. Check Vertex regional health:
-   - GCP status dashboard
-   - the chosen region's outage history
-3. If Pass 2 only, the global Pro endpoint is most likely the cause —
-   the Sprint 2 architecture isolates Pass 2 specifically because
-   Pro is the less-resilient of the two.
+1. Identify the failing pass in `gemini_call_logs`:
+   ```
+   SELECT pass, status, COUNT(*), AVG("latencyMs")
+   FROM gemini_call_logs
+   WHERE "createdAt" > NOW() - interval '1 hour'
+   GROUP BY pass, status ORDER BY pass;
+   ```
+
+   - `PASS_1_TRANSCRIBE_AND_ANALYSE` → Flash in asia-south1.
+   - `PASS_2_NOTE_GENERATION` → Pro (global endpoint).
+2. Check Vertex regional health: the GCP status dashboard, and the
+   chosen region's outage history.
+3. If Pass 2 only, the global Pro endpoint is the likely cause — it is
+   deliberately isolated from Pass 1 for exactly this reason.
 
 ## Mitigation
 
+There is no long-lived process to restart — every batch pass runs
+inside a Vercel serverless invocation, and env-var changes take effect
+on the next **redeploy**.
+
 ### Pass 1 (Flash, asia-south1)
 
-1. Edit `packages/llm/src/backends/vertex-flash.ts` to swap to
-   `asia-southeast1` temporarily (set `VERTEX_FLASH_REGION` env var).
-2. Restart `scribe-service` so the new region takes effect:
-   `pnpm -F scribe-service start:dev` or `kubectl rollout restart`.
+1. If asia-south1 is degraded, DPDP residency blocks a casual region
+   swap for AUDIO — prefer waiting out the incident. Notes already
+   transcribed keep flowing (Pass 2 doesn't need Pass 1's region).
 
 ### Pass 2 (Pro, global)
 
-1. Pass 2 has no built-in regional failover in V1; the only knob is
-   to lengthen the timeout from 30s to 60s. Restarts not required —
-   the router reads env at call time.
-2. If timeouts persist > 1 hour with the longer timeout, file a
-   Vertex AI support ticket and pause new note generation by
-   setting `NOTE_QUEUE_BACKEND=sync` on `scribe-service` (this makes
-   the queue refuse new jobs gracefully rather than piling them up).
+1. The per-attempt timeout and retry count are constructor options on
+   the backend (`timeoutMs`, `maxAttempts` — AUD2); raising them is a
+   one-line change in `apps/web/lib/llm.ts` + redeploy.
+2. If timeouts persist > 1 hour, file a Vertex AI support ticket. New
+   generations fail fast with a visible retry affordance — there is no
+   queue to pile up.
+
+### Live consults (gateway)
+
+The live gateway (Cloud Run) runs the same backends; check
+`https://gateway.cureo.city/healthz` and the Cloud Run logs. Consults
+degrade gracefully — the browser falls back to record-only capture.
 
 ## Verification
 
-- Timeout rate drops below the alert threshold.
-- BullMQ depth drains; `redis-cli LLEN bull:note-generation:wait`
-  returns to 0.
+- Timeout rate in `gemini_call_logs` drops back to baseline.
+- No NoteDraft rows stuck IN_PROGRESS older than the reclaim window:
+  ```
+  SELECT COUNT(*) FROM note_drafts
+  WHERE status = 'IN_PROGRESS' AND "updatedAt" < NOW() - interval '30 min';
+  ```
 
 ## Related
 
 - `packages/llm/src/model-router.ts`
-- `packages/llm/src/backends/vertex-flash.ts`
-- `packages/llm/src/backends/vertex-pro.ts`
+- `packages/llm/src/backends/vertex-flash-india.backend.ts`
+- `packages/llm/src/backends/vertex-pro-global.backend.ts`
+- `apps/web/app/api/v1/cron/reclaim-stuck/route.ts`

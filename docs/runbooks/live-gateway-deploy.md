@@ -5,9 +5,13 @@ powers the doctor live copilot, in-region, with TLS + auth. Vercel
 serverless cannot hold a socket, so the live path (`services/live-gateway`)
 runs as its own always-on service. The app talks to it over `wss://`.
 
-This is the remaining **ops** step of Sprint DS8. The code, container,
-health check, concurrency cap, and auth are shipped; this runbook is how an
-operator turns them into a running prod endpoint.
+**Deployed reality (July 2026):** the gateway runs on **Cloud Run**
+(project `cureocity-mind`, region asia-south1, service `live-gateway`,
+min-instances 1) behind the custom domain **`gateway.cureo.city`**, built
+by **`cloudbuild.gateway.yaml`** from the repo root. The VM + systemd
+section below is the fallback alternative, not the deployed path. Note
+the bare `*.run.app` URL 404s (traffic is fronted by the load balancer) —
+always verify against `https://gateway.cureo.city/healthz`.
 
 ## What it does
 
@@ -23,22 +27,25 @@ operator turns them into a running prod endpoint.
 
 Set on the **gateway** service:
 
-| Var                         | Value                    | Notes                                                                                                                                                                                                                                                                                                                                                               |
-| --------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LLM_BACKEND`               | `vertex`                 | **Required.** The deployed image bakes `NODE_ENV=production`, and the gateway **refuses to boot on mock in production** (crash-loops loudly) — a fail-closed patient-safety guard, not a bug. There is no mock smoke-test of the built image; smoke-test with real Vertex creds, or run mock only via the local `pnpm gateway` dev path (no `NODE_ENV=production`). |
-| `VERTEX_PROJECT_ID`         | your GCP project         |                                                                                                                                                                                                                                                                                                                                                                     |
-| `VERTEX_FLASH_REGION`       | `asia-south1`            | Pass 1 residency (audio)                                                                                                                                                                                                                                                                                                                                            |
-| `LIVE_GATEWAY_SECRET`       | a 32+ byte random secret | **required in prod** (auth)                                                                                                                                                                                                                                                                                                                                         |
-| `LIVE_GATEWAY_MAX_SESSIONS` | `50` (tune to the node)  | concurrency cap                                                                                                                                                                                                                                                                                                                                                     |
-| `LIVE_GATEWAY_PORT`         | `8787`                   | behind the TLS proxy                                                                                                                                                                                                                                                                                                                                                |
-| `NODE_ENV`                  | `production`             | enables the fail-closed warning                                                                                                                                                                                                                                                                                                                                     |
+| Var                                   | Value                    | Notes                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM_BACKEND`                         | `vertex`                 | **Required.** The deployed image bakes `NODE_ENV=production`, and the gateway **refuses to boot on mock in production** (crash-loops loudly) — a fail-closed patient-safety guard, not a bug. There is no mock smoke-test of the built image; smoke-test with real Vertex creds, or run mock only via the local `pnpm gateway` dev path (no `NODE_ENV=production`). |
+| `VERTEX_PROJECT_ID`                   | your GCP project         |                                                                                                                                                                                                                                                                                                                                                                     |
+| `VERTEX_FLASH_REGION`                 | `asia-south1`            | Pass 1 residency (audio)                                                                                                                                                                                                                                                                                                                                            |
+| `LIVE_GATEWAY_SECRET`                 | a 32+ byte random secret | **required in prod** (auth)                                                                                                                                                                                                                                                                                                                                         |
+| `LIVE_GATEWAY_MAX_SESSIONS`           | `50` (tune to the node)  | concurrency cap                                                                                                                                                                                                                                                                                                                                                     |
+| `LIVE_GATEWAY_PORT`                   | `8787`                   | behind the TLS proxy                                                                                                                                                                                                                                                                                                                                                |
+| `NODE_ENV`                            | `production`             | enables the fail-closed warning                                                                                                                                                                                                                                                                                                                                     |
+| `LIVE_GATEWAY_MAX_FRAME_BYTES`        | `262144` (default)       | AUD2 — WS frame cap (PCM frames are ~64 KB)                                                                                                                                                                                                                                                                                                                         |
+| `LIVE_GATEWAY_MAX_CONNECTIONS_PER_IP` | `10` (default)           | AUD2 — per-IP socket cap                                                                                                                                                                                                                                                                                                                                            |
+| `LIVE_GATEWAY_TENANT_DAILY_INR_CAP`   | `2000` (default)         | NEXT4 — per-practitioner daily spend breaker; `0` disables                                                                                                                                                                                                                                                                                                          |
 
 Set on the **app** (Vercel prod):
 
-| Var                            | Value                             | Notes                                |
-| ------------------------------ | --------------------------------- | ------------------------------------ |
-| `NEXT_PUBLIC_LIVE_GATEWAY_URL` | `wss://gateway.mind.cureocity.in` | the public wss endpoint              |
-| `LIVE_GATEWAY_SECRET`          | **same secret as the gateway**    | the app mints the signed start token |
+| Var                            | Value                          | Notes                                |
+| ------------------------------ | ------------------------------ | ------------------------------------ |
+| `NEXT_PUBLIC_LIVE_GATEWAY_URL` | `wss://gateway.cureo.city`     | the public wss endpoint              |
+| `LIVE_GATEWAY_SECRET`          | **same secret as the gateway** | the app mints the signed start token |
 
 The secret MUST match on both sides — the app signs the start token
 (`apps/web/lib/live-token.ts`), the gateway verifies it (`src/auth.ts`).

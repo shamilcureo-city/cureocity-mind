@@ -239,6 +239,14 @@ export const AuditActionSchema = z.enum([
   // pad (adopt an AI suggestion / manual add / confirm / remove) — one row
   // per op, with { op, source, item } metadata. The prescribing trail.
   'RX_PAD_EDITED',
+  // NEXT2 — the reclaim cron marks generations stranded IN_PROGRESS/PENDING
+  // (function killed mid-run) as FAILED so the UI offers a re-run instead of
+  // an infinite spinner. One row per reclaimed draft/report.
+  'STUCK_GENERATION_RECLAIMED',
+  // NEXT3 — the daily digest email nudging a therapist about completed
+  // sessions whose notes are still unsigned. One row per digest sent (the
+  // metadata istDay is the dedupe key).
+  'UNSIGNED_NOTE_DIGEST_SENT',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

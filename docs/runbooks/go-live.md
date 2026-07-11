@@ -302,20 +302,20 @@ fire hose off until you know the product holds up under real load.
 
 ---
 
-## 13 · KMS read-cutover (defer for now, blocks at ~500 paid users)
+## 13 · KMS read-cutover — DONE (S32 Phase 2, 2026-07)
 
-The encryption dual-write is already on (`tenant-crypto.ts`). What
-remains:
+This section is kept for the record; the work shipped:
 
-1. Set `KMS_BACKEND=aws-kms` + procure an AWS KMS CMK in asia-south1.
-2. Flip the read path on the PII fields (`Client.contactPhone`,
-   `contactEmail`, `fullName`) to read the encrypted column. This is
-   a code change — small, but I deferred it.
-3. Drop the plaintext columns after a verification window.
+1. `KMS_BACKEND=gcp-kms` is live in prod (Google Cloud KMS,
+   asia-south1, via `GcpKmsProvider` — reuses the Vertex service
+   account, no new credential).
+2. The read path is decrypt-only (`apps/web/lib/client-pii.ts`) on
+   `fullNameEncrypted` / `contactPhoneEncrypted` /
+   `contactEmailEncrypted`.
+3. The plaintext columns were **dropped**.
 
-Until ~500 paid users this isn't a regulator-visible problem (DPDP
-allows encryption-in-flight + at-rest disk; field-level is the
-gold-standard). Don't block GTM on it.
+Only residue: any pre-cutover row holding old local-dev ciphertext
+renders blank until `/admin/encryption/backfill` is run for it.
 
 ---
 

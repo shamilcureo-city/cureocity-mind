@@ -1,10 +1,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import { LiveGatewayCommandSchema, type LiveGatewayEvent } from '@cureocity/contracts';
-import { authRequired, isFailClosedMisconfig, verifyStartToken } from './auth';
+import {
+  authRequired,
+  extractVerifiedClaims,
+  isFailClosedMisconfig,
+  verifyStartToken,
+} from './auth';
 import { buildBackends } from './llm';
 import { LiveSession } from './live-session';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
+import { ledgerFromEnv } from './tenant-spend';
 import { windowOptionsFromEnv } from './vad';
 
 /**
@@ -35,6 +41,11 @@ const IDLE_TIMEOUT_MS = Number(process.env['LIVE_GATEWAY_IDLE_TIMEOUT_MS'] ?? 30
 const backends = buildBackends();
 // Sprint DS8 — concurrent-session cap (graceful shed above it).
 const pool = new GatewayPool(maxSessionsFromEnv());
+// NEXT4 — per-tenant daily INR circuit breaker. The per-consult ceiling
+// bounds one runaway consult; this bounds a runaway day (looped consults,
+// replayed tokens). New starts over the cap are shed as `busy`; a consult
+// already streaming always finishes. In-memory, per-instance, IST day.
+const tenantSpend = ledgerFromEnv();
 
 // Sprint DS8 — a plain HTTP server hosts the health endpoint AND upgrades
 // to WebSocket, so a load balancer / systemd can probe liveness + readiness.
@@ -148,6 +159,17 @@ wss.on('connection', (ws, req) => {
         ws.close();
         return;
       }
+      // NEXT4 — refuse a tenant already over its daily spend cap. Claims
+      // are only trusted when HMAC-verified (dev/no-secret → null → open,
+      // matching mock's zero cost).
+      const claims = extractVerifiedClaims(cmd.token, cmd.sessionId);
+      const tenantId = claims?.psychologistId ?? null;
+      if (tenantId && tenantSpend.isOverCap(tenantId)) {
+        console.warn(`[gateway] tenant ${tenantId} over daily cost cap — shedding start`);
+        send(ws, { type: 'status', state: 'busy' });
+        ws.close();
+        return;
+      }
       // Sprint DS8 — shed NEW sessions once the node is at capacity; a
       // consult already streaming keeps its slot.
       if (!acquired) {
@@ -159,11 +181,22 @@ wss.on('connection', (ws, req) => {
         acquired = true;
       }
       session?.dispose();
+      // NEXT4 — feed the ledger from meter events. `summary.costInr` is
+      // cumulative per consult, so only the delta since the last event is
+      // added.
+      let lastMeterInr = 0;
+      const forward = (event: LiveGatewayEvent): void => {
+        if (tenantId && event.type === 'meter') {
+          tenantSpend.add(tenantId, event.summary.costInr - lastMeterInr);
+          lastMeterInr = Math.max(lastMeterInr, event.summary.costInr);
+        }
+        send(ws, event);
+      };
       session = new LiveSession(
         cmd.sessionId ?? `live-${Date.now()}`,
         cmd.specialty ?? null,
         backends,
-        (event) => send(ws, event),
+        forward,
         windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
         cmd.context, // Sprint DS1 — seed the CaseState's patient context
         undefined, // noteRefreshMs — the constructor picks the per-vertical default

@@ -126,3 +126,42 @@ jobs:
 
       - name: Run all tests (unit + integration)
         run: pnpm test
+
+  # NEXT5 — the gateway ships as a container to Cloud Run, but nothing in CI
+  # built that image, so a broken Dockerfile (or a workspace change the image
+  # can't install) surfaced only at deploy time in Cloud Build. Build it here
+  # (no push) whenever the gateway or its workspace inputs change.
+  gateway-image:
+    name: Gateway docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect gateway-relevant changes
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -z "$BASE" ] || ! git cat-file -e "$BASE" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE" 2>/dev/null || true
+          # If the diff can't be computed, build anyway (fail open, not skip).
+          FILES=$(git diff --name-only "$BASE" "${{ github.sha }}" 2>/dev/null) || {
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          }
+          if echo "$FILES" | grep -qE '^(services/live-gateway/|packages/(contracts|llm|clinical)/|pnpm-lock\.yaml|package\.json|cloudbuild\.gateway\.yaml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build image
+        if: steps.changed.outputs.run == 'true'
+        run: docker build -f services/live-gateway/Dockerfile -t cureocity-live-gateway:ci .

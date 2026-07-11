@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, Textarea } from '../ui/Field';
 import { SpokenLanguageChips } from './SpokenLanguageChips';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 import { subjectNounFor } from '@/lib/vertical';
 
 interface Props {
@@ -45,6 +46,8 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
   const [retentionExtended, setRetentionExtended] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(open, dialogRef, onClose);
 
   if (!open) return null;
 
@@ -104,6 +107,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"

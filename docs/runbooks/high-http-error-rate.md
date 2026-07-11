@@ -4,41 +4,42 @@
 
 ## What this means
 
-5xx response rate on at least one service exceeded 5% of total
-requests over a sustained 5-minute window. Either the service is
-crashing on a hot path or an upstream dependency (Postgres, Redis,
-Vertex, S3) is failing the requests it depends on.
+5xx response rate exceeded 5% of total requests over a sustained
+5-minute window. Either a hot path is crashing or an upstream
+dependency (Neon Postgres, Vertex, Firebase, WATI/SendGrid) is failing
+the requests that depend on it.
 
 ## Immediate triage
 
-1. Identify the service:
-   - The alert's `service_name` label names which one.
-   - In Grafana: `Cureocity Mind — overview` dashboard → "HTTP request
-     rate by service" panel.
-2. Tail the service logs (production: `kubectl logs -n cureocity ...`;
-   dev: `pnpm -F <service> start:dev` output).
+1. Identify the surface:
+   - Vercel → Project → Observability → errors by route (or Sentry
+     issues, once `SENTRY_DSN` is set).
+   - Live consult errors are the gateway's — check
+     `https://gateway.cureo.city/healthz` + Cloud Run logs instead.
+2. Tail the logs: Vercel → Deployments → Runtime Logs (filter 5xx).
 3. Identify the error class:
-   - `PrismaClientKnownRequestError` → DB problem.
+   - `PrismaClientKnownRequestError` / pool timeouts → DB problem.
    - `5xx` from Vertex / WATI / Twilio → upstream provider.
-   - `ECONNREFUSED` to Redis → BullMQ worker / cache outage.
+   - `[auth-page]` / `[auth-server]` log lines → see
+     `docs/AUTH_SESSION.md` (bounced-to-login table).
 
 ## Recovery decision tree
 
-| Symptom                               | Action                                                |
-| ------------------------------------- | ----------------------------------------------------- |
-| Single hot path 100% failure          | Roll back the most recent service deploy.             |
-| DB-bound errors (timeouts, deadlocks) | Check Postgres health; see `dr-postgres-restore.md`.  |
-| Redis-bound errors                    | Failover Redis primary; BullMQ retries cover gap.     |
-| Vertex 5xx                            | Failover to Pass 2 router's secondary region.         |
-| Errors only from one client / tenant  | Suspect bad input; capture a request body + escalate. |
+| Symptom                               | Action                                                            |
+| ------------------------------------- | ----------------------------------------------------------------- |
+| Single hot path 100% failure          | Instant Rollback in the Vercel dashboard to the last good deploy. |
+| DB-bound errors (timeouts, deadlocks) | Check Neon status/health; see `dr-postgres-restore.md`.           |
+| Vertex 5xx                            | Bounded retries already absorb blips; see `gemini-timeouts.md`.   |
+| Gateway 5xx / WS failures             | Cloud Run revision rollback; browser degrades to record-only.     |
+| Errors only from one client / tenant  | Suspect bad input; capture a request body + escalate.             |
 
 ## Verification after fix
 
-1. 5xx rate drops below 1% in Grafana within 5 min.
+1. 5xx rate drops below 1% within 5 min (Vercel Observability).
 2. Run the chaos-audit test locally to confirm no audit-write
    regression: `pnpm -F @cureocity/contracts test -- audit-coverage`.
 
 ## Related
 
-- `infrastructure/prometheus/alerts/cureocity-alerts.yml`
+- `docs/AUTH_SESSION.md` — the auth-specific 5xx/redirect table
 - `dr-postgres-restore.md` for the DB-failure branch

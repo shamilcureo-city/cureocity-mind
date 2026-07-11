@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { type PractitionerVertical } from '@cureocity/contracts';
 import { Glyph } from '@/components/app/Sidebar';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 // Sprint 45 — Today is the morning landing screen on phones too. Mobile
 // is capped at 5 grid cols. Sprint TS3 kept the bar to the primary spine;
@@ -63,16 +64,11 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
   const items = isDoctor ? DOCTOR_ITEMS : ITEMS;
   const cols = isDoctor ? items.length : items.length + 1;
 
-  // Close the sheet on navigation and on Escape.
+  // Close the sheet on navigation; NEXT7 — the shared hook adds Escape,
+  // focus trapping and focus restore.
   useEffect(() => setMoreOpen(false), [path]);
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setMoreOpen(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [moreOpen]);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useModalA11y(moreOpen, sheetRef, () => setMoreOpen(false));
 
   return (
     <>
@@ -85,6 +81,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
             className="absolute inset-0 bg-[rgba(15,27,42,0.35)]"
           />
           <div
+            ref={sheetRef}
             role="dialog"
             aria-modal="true"
             aria-label="More"
