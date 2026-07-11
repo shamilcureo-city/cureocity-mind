@@ -871,6 +871,16 @@ export function NotesTab({
             }
           />
         </div>
+        {!editing && (
+          <SignAndSendBar
+            signing={signing}
+            reopened={reopened}
+            riskSeverity={intakeNote.riskFlags?.severity ?? null}
+            signError={signError}
+            onSignAndSend={reopened ? () => void triggerSignOff() : signAndShare}
+            onSignOnly={() => void triggerSignOff()}
+          />
+        )}
       </>
     );
   }
@@ -963,6 +973,16 @@ export function NotesTab({
           }
         />
       </div>
+      {!editing && (
+        <SignAndSendBar
+          signing={signing}
+          reopened={reopened}
+          riskSeverity={note.riskFlags?.severity ?? null}
+          signError={signError}
+          onSignAndSend={reopened ? () => void triggerSignOff() : signAndShare}
+          onSignOnly={() => void triggerSignOff()}
+        />
+      )}
     </>
   );
 }
@@ -1046,6 +1066,63 @@ function GeneratingState({
  * re-opened (unlocked) signed note hides Re-generate and re-labels Sign as
  * "re-lock", and swaps the first-timer explainer for a re-lock hint.
  */
+/**
+ * TS7.1 — the sticky Sign & send bar. The single most important act in the
+ * product (signing the clinical record) used to live in a small toolbar icon
+ * and a button below the fold; this pins ONE primary verb to the bottom of
+ * the viewport whenever a completed draft is unsigned. Tapping runs the
+ * existing passkey → sign → share-sheet chain; "Sign only" skips the send.
+ * Sits above the phone tab bar (bottom-16) and clear of it on desktop.
+ */
+function SignAndSendBar({
+  signing,
+  reopened,
+  riskSeverity,
+  signError,
+  onSignAndSend,
+  onSignOnly,
+}: {
+  signing: boolean;
+  reopened: boolean;
+  riskSeverity: string | null;
+  signError: string | null;
+  onSignAndSend: () => void;
+  onSignOnly: () => void;
+}) {
+  const risky = riskSeverity !== null && riskSeverity !== 'none';
+  return (
+    <div className="sticky bottom-16 z-30 mt-6 md:bottom-4">
+      <div className="mx-auto max-w-xl rounded-2xl border border-[var(--color-line)] bg-white/95 p-3 shadow-[0_10px_30px_rgba(15,27,42,0.16)] backdrop-blur">
+        <div className="mb-2 flex items-center justify-between gap-3 px-1">
+          <span
+            className={`text-xs ${risky ? 'font-medium text-[var(--color-warn)]' : 'text-[var(--color-ink-3)]'}`}
+          >
+            {risky
+              ? `⚠ Risk flagged (${riskSeverity}) — review before signing`
+              : 'Risk: none flagged'}
+          </span>
+          <button
+            type="button"
+            onClick={onSignOnly}
+            disabled={signing}
+            className="text-xs text-[var(--color-ink-2)] underline-offset-2 hover:underline"
+          >
+            {reopened ? 'Sign & re-lock' : 'Sign without sending'}
+          </button>
+        </div>
+        <Button onClick={onSignAndSend} disabled={signing} className="w-full text-base">
+          {signing ? 'Signing…' : reopened ? 'Sign & re-lock ▸' : 'Sign & send ▸'}
+        </Button>
+        {signError && (
+          <p className="mt-2 px-1 text-xs text-[var(--color-warn)]" role="alert">
+            {signError}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function NoteActions({
   signing,
   generating,

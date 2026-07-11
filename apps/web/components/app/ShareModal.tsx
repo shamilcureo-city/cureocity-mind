@@ -136,9 +136,30 @@ export function ShareModal({
   }, [language]);
 
   // Seed the language from the client's preference each time the modal opens.
+  // TS7.1 — but the therapist's LAST choice for THIS client wins over the
+  // profile default: pick a channel + language once, and the sheet opens
+  // pre-set forever after (per-device memory, no schema).
   useEffect(() => {
-    if (open) setLanguage(coerceShareLanguage(defaultLanguage));
-  }, [open, defaultLanguage]);
+    if (!open) return;
+    setLanguage(coerceShareLanguage(defaultLanguage));
+    try {
+      const raw = window.localStorage.getItem(`cm.sharePrefs.${clientId}`);
+      if (!raw) return;
+      const prefs = JSON.parse(raw) as { channels?: string[]; language?: string };
+      if (Array.isArray(prefs.channels) && prefs.channels.length > 0) {
+        setSelected({
+          WHATSAPP: prefs.channels.includes('WHATSAPP') && hasContactPhone,
+          EMAIL: prefs.channels.includes('EMAIL') && hasContactEmail,
+          PORTAL_LINK: prefs.channels.includes('PORTAL_LINK'),
+        });
+      }
+      if (typeof prefs.language === 'string' && prefs.language) {
+        setLanguage(coerceShareLanguage(prefs.language));
+      }
+    } catch {
+      // localStorage unavailable / corrupt prefs — profile defaults stand.
+    }
+  }, [open, defaultLanguage, clientId, hasContactPhone, hasContactEmail]);
 
   // Load channel config when the modal opens; drop selections for
   // channels the server can't deliver on so the therapist never sends
@@ -225,6 +246,16 @@ export function ShareModal({
         return; // hold — the therapist confirms with a second click
       }
       setResults(data.results);
+      // TS7.1 — remember what worked for this client so the next share
+      // opens pre-set (see the open-seed effect above).
+      try {
+        window.localStorage.setItem(
+          `cm.sharePrefs.${clientId}`,
+          JSON.stringify({ channels: selectedChannels, ...(showLanguage && { language }) }),
+        );
+      } catch {
+        // best-effort memory only
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -246,14 +277,16 @@ export function ShareModal({
   return (
     <div
       ref={dialogRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 md:items-center md:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-labelledby="share-modal-title"
     >
+      {/* TS7.1 — bottom sheet on phones (one-thumb reach), centered dialog
+          on desktop. Same content either way. */}
       <div
-        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+        className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 pb-8 shadow-2xl md:rounded-2xl md:pb-6"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="mb-4 flex items-baseline justify-between gap-3">
@@ -426,11 +459,8 @@ export function ShareModal({
               </div>
             )}
 
-            <footer className="mt-5 flex items-center justify-end gap-2 border-t border-[var(--color-line-soft)] pt-4">
-              <Button variant="secondary" onClick={onClose} disabled={busy}>
-                Cancel
-              </Button>
-              <Button onClick={() => void submit()} disabled={busy}>
+            <footer className="mt-5 border-t border-[var(--color-line-soft)] pt-4">
+              <Button onClick={() => void submit()} disabled={busy} className="w-full">
                 {busy
                   ? preview
                     ? 'Sending…'
@@ -441,6 +471,16 @@ export function ShareModal({
                       ? 'Looks right — send'
                       : 'Send'}
               </Button>
+              {/* TS7.1 — an equal, guilt-free exit: the record is complete
+                  whether or not anything is sent. */}
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={busy}
+                className="mt-2 w-full rounded-full px-4 py-2 text-sm text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
+              >
+                Done — don’t send anything
+              </button>
             </footer>
           </>
         )}

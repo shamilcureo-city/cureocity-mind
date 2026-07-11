@@ -1,8 +1,10 @@
 import Link from 'next/link';
+import { CARE_ENGINE_CONSTANTS } from '@cureocity/clinical';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { TodaySessionCard } from '@/components/app/TodaySessionCard';
 import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
+import { WalkInSheet } from '@/components/app/WalkInSheet';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import {
   computeDayBoundaries,
@@ -100,66 +102,94 @@ export default async function TodayPage() {
     (s) => s.status === 'NO_SHOW' || s.status === 'CANCELLED' || s.status === 'RESCHEDULED',
   );
 
+  // TS7.2 — at any moment exactly one session matters: the in-progress one,
+  // else the next scheduled. It gets the hero treatment; everything else on
+  // the day becomes one quiet, time-ordered timeline.
+  const hero = nowAndUpcoming[0] ?? null;
+  const restOfDay = [...nowAndUpcoming.slice(1), ...doneToday, ...otherToday].sort(
+    (a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime(),
+  );
+
+  // Recents for the walk-in sheet: whoever is on today's board or in the
+  // look-ahead is likely the person standing in the room.
+  const recentClientIds = [...new Set([...todayRows, ...upcomingRows].map((s) => s.clientId))];
+
+  // TS7.4 — due-measure nudges on the day board. A light approximation of
+  // the care engine's verdict (tracked instrument, ≥1 score, older than the
+  // re-measure cadence); the chip links to the Journey card, which holds the
+  // authoritative state and the one-tap send. One grouped query, no N+1.
+  const todayClientIds = [...new Set(todayRows.map((s) => s.clientId))];
+  const dueByClient = new Map<string, string>();
+  if (todayClientIds.length > 0) {
+    const latestScores = await prisma.instrumentResponse.groupBy({
+      by: ['clientId', 'instrumentKey'],
+      where: { clientId: { in: todayClientIds } },
+      _max: { administeredAt: true },
+    });
+    const dueCutoff = Date.now() - CARE_ENGINE_CONSTANTS.REMEASURE_DUE_DAYS * 24 * 60 * 60 * 1000;
+    for (const row of latestScores) {
+      const last = row._max.administeredAt;
+      if (!last || last.getTime() > dueCutoff) continue;
+      if (!dueByClient.has(row.clientId)) {
+        dueByClient.set(row.clientId, row.instrumentKey === 'GAD7' ? 'GAD-7' : 'PHQ-9');
+      }
+    }
+  }
+
   return (
     <Container className="py-10">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
-            Today
+            Today · {formatDayHeader(startOfToday)}
           </p>
-          <h1 className="mt-1 font-serif text-3xl">{formatDayHeader(startOfToday)}</h1>
+          <h1 className="mt-1 font-serif text-3xl">
+            {hero ? 'Up next' : doneToday.length > 0 ? 'All done for today' : 'Your day'}
+          </h1>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
             {summary(nowAndUpcoming.length, doneToday.length)}
           </p>
         </div>
-        <ScheduleSessionPanel clients={clients} />
+        <div className="flex flex-wrap items-center gap-2">
+          <WalkInSheet
+            clients={clients.map((c) => ({ id: c.id, fullName: c.fullName }))}
+            recentClientIds={recentClientIds}
+            defaultCapture={defaultCapture}
+          />
+          <ScheduleSessionPanel clients={clients} />
+        </div>
       </header>
 
-      <section className="mt-6">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-          Now &amp; upcoming
-        </h2>
-        {nowAndUpcoming.length === 0 ? (
-          <Card className="p-8 text-center text-sm text-[var(--color-ink-2)]">
-            {todayRows.length === 0
-              ? 'Nothing scheduled today. Use Schedule session to book one in, or jump straight to Record for a walk-in.'
-              : 'No more sessions scheduled today. See below for what you’ve already done.'}
-          </Card>
-        ) : (
-          <ul className="space-y-3">
-            {nowAndUpcoming.map((s) => (
-              <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} defaultCapture={defaultCapture} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {doneToday.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-            Done today
-          </h2>
-          <ul className="space-y-3">
-            {doneToday.map((s) => (
-              <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} defaultCapture={defaultCapture} />
-              </li>
-            ))}
-          </ul>
+      {hero ? (
+        <section className="mt-6">
+          <TodaySessionCard
+            session={toCardProps(hero)}
+            defaultCapture={defaultCapture}
+            variant="hero"
+          />
         </section>
+      ) : (
+        <Card className="mt-6 p-8 text-center text-sm text-[var(--color-ink-2)]">
+          {todayRows.length === 0
+            ? 'Nothing scheduled today. Book a slot with Schedule session, or start a Walk-in.'
+            : 'No more sessions scheduled today — the timeline below shows how the day went.'}
+        </Card>
       )}
 
-      {otherToday.length > 0 && (
+      {restOfDay.length > 0 && (
         <section className="mt-8">
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-            No-shows &amp; cancellations
+            Rest of today
           </h2>
-          <ul className="space-y-3">
-            {otherToday.map((s) => (
+          <ul className="space-y-2">
+            {restOfDay.map((s) => (
               <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} defaultCapture={defaultCapture} />
+                <TodaySessionCard
+                  session={toCardProps(s)}
+                  defaultCapture={defaultCapture}
+                  variant="row"
+                  dueMeasure={dueByClient.get(s.clientId) ?? null}
+                />
               </li>
             ))}
           </ul>

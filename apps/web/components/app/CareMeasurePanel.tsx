@@ -13,6 +13,7 @@ import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { AffectCard } from './AffectCard';
+import { ShareModal } from './ShareModal';
 import { severityLabel, phq9Plain, gad7Plain } from '../../lib/instrument-plain-language';
 
 interface CatalogItem {
@@ -41,6 +42,9 @@ interface Props {
   clientId: string;
   /** Discharged — goals are read-only. */
   disabled: boolean;
+  /** TS7.4 — contact availability for the one-tap "Send now" check-in. */
+  hasContactPhone?: boolean;
+  hasContactEmail?: boolean;
 }
 
 const VERDICT_LABEL: Record<ChangeVerdict, string> = {
@@ -67,9 +71,86 @@ const VERDICT_TONE: Record<ChangeVerdict, 'accent' | 'warn' | 'muted'> = {
  * (the old runner left them stale). History folds behind one toggle; the
  * plan's goals and the affect baseline follow as subsections.
  */
-export function CareMeasurePanel({ measures, activePlan, clientId, disabled }: Props) {
+export function CareMeasurePanel({
+  measures,
+  activePlan,
+  clientId,
+  disabled,
+  hasContactPhone = false,
+  hasContactEmail = false,
+}: Props) {
   const router = useRouter();
   const [catalog, setCatalog] = useState<Instrument[]>([]);
+  // TS7.4 — one-tap "Send now": per-instrument busy / sent / failed state,
+  // plus the ShareModal fallback for when no channel can be resolved.
+  const [sendingKey, setSendingKey] = useState<string | null>(null);
+  const [sentMsg, setSentMsg] = useState<Record<string, string>>({});
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [fallbackShare, setFallbackShare] = useState<{
+    instrumentKey: 'PHQ9' | 'GAD7';
+    label: string;
+  } | null>(null);
+
+  // TS7.4 — one tap sends the check-in link over the channel the therapist
+  // last used for this client (share-sheet memory), else the preferred
+  // contact. No usable channel → the full share sheet opens instead (it
+  // owns the portal-link copy UX).
+  async function sendNow(instrumentKey: 'PHQ9' | 'GAD7', label: string): Promise<void> {
+    if (sendingKey) return;
+    setSendError(null);
+    let channels: string[] = [];
+    try {
+      const raw = window.localStorage.getItem(`cm.sharePrefs.${clientId}`);
+      const prefs = raw ? (JSON.parse(raw) as { channels?: string[] }) : null;
+      if (Array.isArray(prefs?.channels)) {
+        channels = prefs.channels.filter(
+          (c) => (c === 'WHATSAPP' && hasContactPhone) || (c === 'EMAIL' && hasContactEmail),
+        );
+      }
+    } catch {
+      // prefs unavailable — fall through to contact order
+    }
+    if (channels.length === 0) {
+      if (hasContactPhone) channels = ['WHATSAPP'];
+      else if (hasContactEmail) channels = ['EMAIL'];
+    }
+    if (channels.length === 0) {
+      setFallbackShare({ instrumentKey, label });
+      return;
+    }
+    setSendingKey(instrumentKey);
+    try {
+      const res = await fetch('/api/v1/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          channels,
+          artefact: { artefactType: 'INSTRUMENT_CHECKIN', clientId, instrumentKey },
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        results?: { channel: string; status: string }[];
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? `Send failed (${res.status})`);
+      const delivered = (data.results ?? []).filter((r) => r.status !== 'FAILED');
+      if (delivered.length === 0) {
+        throw new Error('Nothing was delivered — pick a channel instead.');
+      }
+      setSentMsg((m) => ({
+        ...m,
+        [instrumentKey]: `✓ Check-in sent via ${delivered
+          .map((r) => channelLabel(r.channel))
+          .join(' + ')}`,
+      }));
+    } catch (e) {
+      setSendError((e as Error).message);
+      setFallbackShare({ instrumentKey, label });
+    } finally {
+      setSendingKey(null);
+    }
+  }
   const [history, setHistory] = useState<InstrumentResponse[]>([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [responses, setResponses] = useState<Record<string, number>>({});
@@ -203,19 +284,43 @@ export function CareMeasurePanel({ measures, activePlan, clientId, disabled }: P
                       {m.dueLabel}
                     </Badge>
                   </div>
-                  {cat && !disabled && (
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        setActiveKey(isActive ? null : m.instrumentKey);
-                        setResponses({});
-                        setError(null);
-                      }}
-                    >
-                      {isActive ? 'Cancel' : 'Administer'}
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {/* TS7.4 — due today means send today: one tap fires the
+                        check-in link over the remembered / preferred channel. */}
+                    {!disabled && m.dueState !== 'ON_TRACK' && !sentMsg[m.instrumentKey] && (
+                      <Button
+                        onClick={() => void sendNow(m.instrumentKey, m.label)}
+                        disabled={sendingKey !== null}
+                      >
+                        {sendingKey === m.instrumentKey ? 'Sending…' : 'Send now ▸'}
+                      </Button>
+                    )}
+                    {cat && !disabled && (
+                      <Button
+                        variant="secondary"
+                        onClick={() => {
+                          setActiveKey(isActive ? null : m.instrumentKey);
+                          setResponses({});
+                          setError(null);
+                        }}
+                      >
+                        {isActive ? 'Cancel' : 'Do it in-session'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
+                {sentMsg[m.instrumentKey] && (
+                  <p className="mt-2 text-xs font-medium text-[var(--color-accent)]">
+                    {sentMsg[m.instrumentKey]} — the score lands here when they finish.
+                  </p>
+                )}
+                {sendError &&
+                  sendingKey === null &&
+                  fallbackShare?.instrumentKey === m.instrumentKey && (
+                    <p className="mt-2 text-xs text-[var(--color-warn)]" role="alert">
+                      {sendError}
+                    </p>
+                  )}
 
                 {m.verdict !== null && m.baselineScore !== null ? (
                   <>
@@ -395,8 +500,32 @@ export function CareMeasurePanel({ measures, activePlan, clientId, disabled }: P
           <AffectCard clientId={clientId} />
         </div>
       </Card>
+
+      {/* TS7.4 — fallback when one-tap can't resolve a channel (or a send
+          failed): the full share sheet, which also handles portal-link copy. */}
+      {fallbackShare && (
+        <ShareModal
+          open
+          onClose={() => setFallbackShare(null)}
+          clientId={clientId}
+          hasContactPhone={hasContactPhone}
+          hasContactEmail={hasContactEmail}
+          artefact={{
+            artefactType: 'INSTRUMENT_CHECKIN',
+            clientId,
+            instrumentKey: fallbackShare.instrumentKey,
+          }}
+          artefactLabel={`Check-in · ${fallbackShare.label}`}
+        />
+      )}
     </div>
   );
+}
+
+function channelLabel(channel: string): string {
+  if (channel === 'WHATSAPP') return 'WhatsApp';
+  if (channel === 'EMAIL') return 'email';
+  return 'portal link';
 }
 
 function riskItemLabel(instrumentKey: string, itemNumber: number | null): string {

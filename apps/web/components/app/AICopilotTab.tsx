@@ -317,6 +317,8 @@ async function JourneySub({
         activePlan={care.activePlan}
         clientId={clientId}
         disabled={isDischarged}
+        hasContactPhone={clientHasContactPhone}
+        hasContactEmail={clientHasContactEmail}
       />
 
       {briefing ? (

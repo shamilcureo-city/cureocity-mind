@@ -251,10 +251,13 @@ function MiniAct({
   quiet?: boolean;
 }) {
   return (
+    // TS7.5 — tapped mid-conversation, half-looking: the label stays small
+    // but py-2/px-3 grows the hit area toward the 44px minimum without
+    // reshaping the rail.
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-colors ${
+      className={`rounded-full px-3 py-2 text-[11px] font-semibold transition-colors ${
         quiet
           ? 'text-[var(--color-ink-3)] hover:text-[var(--color-ink)]'
           : 'border border-[var(--color-line)] bg-white text-[var(--color-accent)] hover:border-[var(--color-accent)]'
