@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type {
+  AssessmentGapPurpose,
   CarriedQuestion,
   ClinicalAssessmentGap,
   ClinicalCrisisFlag,
@@ -390,6 +391,12 @@ export function CopilotDecisionBoard({
                 clientId={clientId}
                 gaps={data.gaps}
                 carried={record.carriedQuestions}
+                resolvedLabel={
+                  record.diagnoses.find((d) => d.isPrimary)?.icd11Label ??
+                  (data.primaryIndex !== null
+                    ? (data.candidates[data.primaryIndex]?.icd11Label ?? null)
+                    : null)
+                }
                 onSaved={() => router.refresh()}
               />
 
@@ -938,23 +945,52 @@ function ImpressionStep({
 }
 
 // ============================================================================
-// Step 3 — Ask next session (assessment gaps as a carry-able checklist).
+// Step 3 — Ask next session (the assessment ENGINE, as a carry-able checklist).
+//
+// Questions arrive grouped by the job they do (safety / differentiate /
+// confirm / context — the gap.purpose field). Differentiate + confirm
+// questions show the ICD codes they bear on as chips, so the therapist can
+// see WHY each question is on the list. Pre-V2 gaps (no purpose) fall into
+// an "open questions" group; a safety-shaped question is inferred from
+// wording as a fallback. Ticked questions carry into the pre-session brief;
+// the carry-cap of 8 keeps that brief scannable and is the ONLY cap — the
+// engine itself is uncapped, and shrinks to zero as assessment resolves.
 // ============================================================================
 
 const RISK_FIRST_RE = /suicid|self-harm|risk|safety|harm to/i;
 const MAX_CARRIED = 8;
+
+type GapGroupKey = AssessmentGapPurpose | 'other';
+
+const GAP_GROUPS: { key: GapGroupKey; label: string; risk?: boolean }[] = [
+  { key: 'safety', label: 'Safety — ask first', risk: true },
+  { key: 'differentiate', label: 'To tell apart' },
+  { key: 'confirm', label: 'To confirm' },
+  { key: 'context', label: 'Context' },
+  { key: 'other', label: 'Open questions' },
+];
+
+function gapGroupKey(g: ClinicalAssessmentGap): GapGroupKey {
+  if (g.purpose) return g.purpose;
+  // Back-compat for pre-V2 rows: infer safety from wording, else "other".
+  return RISK_FIRST_RE.test(g.question) ? 'safety' : 'other';
+}
 
 function AskNextStep({
   sessionId,
   clientId,
   gaps,
   carried,
+  resolvedLabel,
   onSaved,
 }: {
   sessionId: string;
   clientId: string;
   gaps: ClinicalAssessmentGap[];
   carried: CarriedQuestion[];
+  /// Primary confirmed/candidate label, shown in the "assessment complete"
+  /// state so it reads "resolved to X".
+  resolvedLabel: string | null;
   onSaved: () => void;
 }) {
   const initialSelected = useMemo(
@@ -1022,12 +1058,13 @@ function AskNextStep({
     }
   };
 
-  // Risk questions first, preserving relative order otherwise.
-  const ordered = useMemo(
+  // Group gaps by the job they do, in engine order. Empty groups are skipped.
+  const grouped = useMemo(
     () =>
-      [...gaps].sort(
-        (a, b) => Number(RISK_FIRST_RE.test(b.question)) - Number(RISK_FIRST_RE.test(a.question)),
-      ),
+      GAP_GROUPS.map((grp) => ({
+        ...grp,
+        items: gaps.filter((g) => gapGroupKey(g) === grp.key),
+      })).filter((grp) => grp.items.length > 0),
     [gaps],
   );
 
@@ -1035,44 +1072,77 @@ function AskNextStep({
     <Step
       no={3}
       title="Ask next session"
-      sub="Tick what you plan to cover — ticked questions open this client's next pre-session brief."
+      sub={
+        gaps.length === 0
+          ? 'The AI found nothing material still open.'
+          : `${gaps.length} still open · regenerated each session against what's already been answered — this list shrinks as your assessment completes.`
+      }
     >
       {gaps.length === 0 ? (
-        <p className="text-sm text-[var(--color-ink-2)]">
-          No open questions — the AI thinks the picture is clear enough.
-        </p>
+        <div className="rounded-xl border border-dashed border-[var(--color-line)] bg-white/30 p-4 text-[13px]">
+          <b className="text-[var(--color-accent)]">✓ Assessment complete</b>
+          <span className="text-[var(--color-ink-2)]">
+            {' '}
+            — the differential has resolved
+            {resolvedLabel ? ` to ${resolvedLabel}` : ''}. Nothing material is open; carry a
+            question only if you want to revisit it.
+          </span>
+        </div>
       ) : (
-        <div className="space-y-2">
-          {ordered.map((g) => {
-            const checked = selected.has(g.question);
-            return (
-              <label
-                key={g.question}
-                className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[var(--color-line-soft)] p-3"
+        <div className="space-y-3.5">
+          {grouped.map((grp) => (
+            <div key={grp.key}>
+              <p
+                className={`mb-1.5 flex flex-wrap items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] ${
+                  grp.risk ? 'text-[var(--color-warn)]' : 'text-[var(--color-ink-3)]'
+                }`}
               >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggle(g.question)}
-                  disabled={!checked && atCap}
-                  className="mt-1 accent-[var(--color-accent)]"
-                />
-                <span className="min-w-0">
-                  <b className="block text-[13.5px] font-semibold">
-                    {g.question}
-                    {RISK_FIRST_RE.test(g.question) && (
-                      <span className="ml-2 rounded-full bg-[var(--color-warn-soft)] px-2 py-px align-middle text-[10px] font-bold tracking-[0.06em] text-[var(--color-warn)]">
-                        FIRST
+                {grp.label}
+                {grp.items.map((g, k) =>
+                  g.targets.length > 0 ? (
+                    <span
+                      key={k}
+                      className="rounded-full bg-[var(--color-accent-soft)] px-2 py-px text-[10px] font-semibold normal-case tracking-normal text-[var(--color-accent)]"
+                    >
+                      {g.targets.join(' ↔ ')}
+                    </span>
+                  ) : null,
+                )}
+              </p>
+              <div className="space-y-1.5">
+                {grp.items.map((g) => {
+                  const checked = selected.has(g.question);
+                  return (
+                    <label
+                      key={g.question}
+                      className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[var(--color-line-soft)] p-3"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(g.question)}
+                        disabled={!checked && atCap}
+                        className="mt-1 accent-[var(--color-accent)]"
+                      />
+                      <span className="min-w-0">
+                        <b className="block text-[13.5px] font-semibold">
+                          {g.question}
+                          {grp.key === 'safety' && (
+                            <span className="ml-2 rounded-full bg-[var(--color-warn-soft)] px-2 py-px align-middle text-[10px] font-bold tracking-[0.06em] text-[var(--color-warn)]">
+                              FIRST
+                            </span>
+                          )}
+                        </b>
+                        <span className="mt-0.5 block text-xs text-[var(--color-ink-3)]">
+                          {g.rationale}
+                        </span>
                       </span>
-                    )}
-                  </b>
-                  <span className="mt-0.5 block text-xs text-[var(--color-ink-3)]">
-                    {g.rationale}
-                  </span>
-                </span>
-              </label>
-            );
-          })}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

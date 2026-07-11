@@ -424,16 +424,30 @@ export class MockGeminiPass3Backend implements IPass3Backend {
         ],
         assessmentGaps: [
           {
-            question: 'How many discrete panic attacks in the last month?',
-            rationale: 'Required to confirm ICD-11 6B01 frequency criterion.',
+            question:
+              'How many discrete panic attacks in the last month, and were they unexpected?',
+            rationale: 'Frequency of unexpected attacks separates panic disorder from GAD.',
+            purpose: 'differentiate',
+            targets: ['6B01', '6B00'],
+          },
+          {
+            question: 'Did the symptoms start after an identifiable stressor in the last month?',
+            rationale:
+              'A recent stressor points to adjustment disorder over a primary anxiety disorder.',
+            purpose: 'differentiate',
+            targets: ['6B01', '6B43'],
           },
           {
             question: 'Has the worry been present most days for ≥ 6 months?',
-            rationale: 'Required to confirm ICD-11 6B00 duration criterion.',
+            rationale: 'Establishes the duration criterion for the leading candidate.',
+            purpose: 'confirm',
+            targets: ['6B01'],
           },
           {
-            question: 'What specific situations are being avoided?',
-            rationale: 'Maps avoidance pattern to differentiate panic vs. social anxiety.',
+            question: 'Who is in your life for support day to day?',
+            rationale: 'Protective factors shape the safety plan and the treatment plan.',
+            purpose: 'context',
+            targets: [],
           },
         ],
         formulation:
@@ -486,8 +500,16 @@ export class MockGeminiPass3Backend implements IPass3Backend {
         primaryDiagnosisIndex: 0,
         assessmentGaps: [
           {
+            question: 'Have the panic-like surges been unexpected, or only in feared situations?',
+            rationale: 'Unexpected surges favour panic disorder; situational ones favour GAD.',
+            purpose: 'differentiate',
+            targets: ['6B00', '6B01'],
+          },
+          {
             question: 'Has the worry been present most days for the last 6 months?',
-            rationale: 'Required to meet ICD-11 6B00 duration criterion.',
+            rationale: 'Establishes the duration criterion for the leading candidate.',
+            purpose: 'confirm',
+            targets: ['6B00'],
           },
         ],
         formulation:

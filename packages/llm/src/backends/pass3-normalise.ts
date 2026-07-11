@@ -111,16 +111,78 @@ function coerceKind(kind: unknown): unknown {
   return KIND_CANONICAL.has(kind.trim().toLowerCase()) ? kind : 'other';
 }
 
+// ============================================================================
+// Sprint TSC-V2 — assessment-gap purpose normalisation.
+//
+// V2 gaps carry an optional `purpose` (safety | differentiate | confirm |
+// context). It's optional, so an omitted value parses fine — but a DRIFTED
+// value ("differential", "diagnostic", "risk") would fail the enum and sink
+// the whole report. We map known synonyms to canonical values and DROP an
+// unrecognised purpose (rather than fail): a gap with no purpose still
+// renders in the UI's "other" group. `targets` is already a permissive
+// string array in the schema, so it needs no coercion here beyond ensuring
+// it's an array of strings.
+// ============================================================================
+
+const PURPOSE_CANONICAL = new Set(['safety', 'differentiate', 'confirm', 'context']);
+
+const PURPOSE_SYNONYMS: Record<string, string> = {
+  risk: 'safety',
+  'safety-check': 'safety',
+  differential: 'differentiate',
+  differentiating: 'differentiate',
+  discriminate: 'differentiate',
+  'tell-apart': 'differentiate',
+  diagnostic: 'differentiate',
+  confirmation: 'confirm',
+  confirming: 'confirm',
+  criterion: 'confirm',
+  criteria: 'confirm',
+  establish: 'confirm',
+  contextual: 'context',
+  background: 'context',
+  history: 'context',
+};
+
+function normaliseGap(gap: unknown): unknown {
+  if (!gap || typeof gap !== 'object') return gap;
+  const g = gap as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...g };
+
+  if (g['purpose'] !== undefined) {
+    const canonical = normalisePurpose(g['purpose']);
+    if (canonical === undefined) delete out['purpose'];
+    else out['purpose'] = canonical;
+  }
+  // Keep only string targets; drop anything malformed so the array-of-string
+  // parse can't fail on a stray object/number the model slipped in.
+  if (Array.isArray(g['targets'])) {
+    out['targets'] = g['targets'].filter((t): t is string => typeof t === 'string');
+  }
+  return out;
+}
+
+function normalisePurpose(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const key = raw.trim().toLowerCase();
+  if (PURPOSE_CANONICAL.has(key)) return key;
+  return PURPOSE_SYNONYMS[key];
+}
+
 /**
  * Walks the raw Pass 3 JSON (intake brief or clinical report) and
  * normalises every `crisisFlags[].kind` and `crisisFlags[].severity`
- * to a canonical enum value. Idempotent. Returns a new object —
- * the input is not mutated.
+ * to a canonical enum value, plus every `assessmentGaps[].purpose` to a
+ * canonical assessment-engine purpose (dropping unknowns). Idempotent.
+ * Returns a new object — the input is not mutated.
  */
 export function normalisePass3Output(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw;
   const r = raw as Record<string, unknown>;
-  const flags = r['crisisFlags'];
-  if (!Array.isArray(flags)) return raw;
-  return { ...r, crisisFlags: flags.map(normaliseFlag) };
+  const out: Record<string, unknown> = { ...r };
+  if (Array.isArray(r['crisisFlags'])) out['crisisFlags'] = r['crisisFlags'].map(normaliseFlag);
+  if (Array.isArray(r['assessmentGaps'])) {
+    out['assessmentGaps'] = r['assessmentGaps'].map(normaliseGap);
+  }
+  return out;
 }

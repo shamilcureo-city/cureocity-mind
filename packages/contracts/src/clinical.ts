@@ -79,11 +79,41 @@ export type ClinicalDiagnosisCandidate = z.infer<typeof ClinicalDiagnosisCandida
 // Assessment gap — an open question the therapist should ask next
 // session. Distinct from gapsToFill on a single candidate because
 // some gaps apply across candidates.
+//
+// Sprint TSC-V2 — the assessment ENGINE. A gap is no longer a flat
+// question; it carries the JOB it does in narrowing the case:
+//
+//   - safety        — a risk question that must be asked first
+//   - differentiate — tells two-or-more candidates apart (targets = the
+//                     ICD codes it decides between)
+//   - confirm       — establishes an unconfirmed criterion of the leading
+//                     candidate (targets = that one code)
+//   - context       — background that shapes formulation / plan (no target)
+//
+// Pass 3 is required to cover the differential systematically: a
+// differentiate question for each pair of leading candidates and confirm
+// questions for the leader's open criteria. Because the pass reads the
+// cumulative record and is told not to re-ask what's already answered,
+// the list SHRINKS session over session — an empty list means the
+// differential has resolved (the board shows "assessment complete").
+//
+// Both fields are OPTIONAL so every pre-V2 stored gap still parses; the UI
+// falls back to an "other" group when purpose is absent.
 // ============================================================================
+
+export const AssessmentGapPurposeSchema = z.enum(['safety', 'differentiate', 'confirm', 'context']);
+export type AssessmentGapPurpose = z.infer<typeof AssessmentGapPurposeSchema>;
 
 export const ClinicalAssessmentGapSchema = z.object({
   question: z.string().min(1).max(600),
   rationale: z.string().min(1).max(600),
+  /// What job this question does. Optional — pre-V2 rows omit it.
+  purpose: AssessmentGapPurposeSchema.optional(),
+  /// The ICD-11 codes this question decides between (differentiate) or
+  /// confirms (a single code). Permissive string (not the strict code
+  /// regex) so display never breaks on a stem variant; empty for
+  /// safety/context questions.
+  targets: z.array(z.string().min(1).max(16)).max(6).default([]),
 });
 export type ClinicalAssessmentGap = z.infer<typeof ClinicalAssessmentGapSchema>;
 

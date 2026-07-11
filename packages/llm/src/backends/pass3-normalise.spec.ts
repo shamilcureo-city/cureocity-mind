@@ -243,4 +243,67 @@ describe('normalisePass3Output', () => {
     };
     expect(ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty)).success).toBe(false);
   });
+
+  // ==========================================================================
+  // Sprint TSC-V2 — assessment-gap purpose normalisation.
+  // ==========================================================================
+
+  it('maps a drifted gap purpose synonym to canonical ("differential" → "differentiate")', () => {
+    const drifty = {
+      ...validReport,
+      assessmentGaps: [
+        {
+          question: 'Any recent stressor?',
+          rationale: 'Separates adjustment disorder from a depressive episode.',
+          purpose: 'differential', // drift — must map to "differentiate"
+          targets: ['6B00', '6B43'],
+        },
+      ],
+    };
+    const result = ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.assessmentGaps[0]?.purpose).toBe('differentiate');
+      expect(result.data.assessmentGaps[0]?.targets).toEqual(['6B00', '6B43']);
+    }
+  });
+
+  it('DROPS an unrecognised gap purpose rather than sinking the report', () => {
+    const drifty = {
+      ...validReport,
+      assessmentGaps: [
+        {
+          question: 'What is the overthinking about?',
+          rationale: 'Shapes the formulation.',
+          purpose: 'vibes', // unknown — must be dropped, gap kept
+          targets: [],
+        },
+      ],
+    };
+    const result = ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.assessmentGaps[0]?.purpose).toBeUndefined();
+      expect(result.data.assessmentGaps[0]?.question).toBe('What is the overthinking about?');
+    }
+  });
+
+  it('filters malformed (non-string) targets so the array-of-string parse survives', () => {
+    const drifty = {
+      ...validReport,
+      assessmentGaps: [
+        {
+          question: 'When did this start?',
+          rationale: 'Timeline separates episode from dysthymia.',
+          purpose: 'differentiate',
+          targets: ['6A70', { code: '6A72' }, 42], // junk mixed in
+        },
+      ],
+    };
+    const result = ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.assessmentGaps[0]?.targets).toEqual(['6A70']);
+    }
+  });
 });

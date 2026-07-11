@@ -481,7 +481,11 @@ Task: produce a ClinicalReportV1 JSON object with these fields:
     - supportingEvidence: 1-6 objects { quote, speaker, startMs } drawn VERBATIM from the transcript.
     - gapsToFill: 0-8 short strings describing assessment data still needed to confirm THIS candidate.
 - primaryDiagnosisIndex: integer index into diagnosisCandidates of the best fit, OR null if evidence is too thin.
-- assessmentGaps: 0-8 objects { question, rationale } — open questions to ask next session.
+- assessmentGaps: 0-8 objects { question, rationale, purpose, targets } — the questions that would RESOLVE the differential, each with the job it does:
+    - question: the exact thing to ask, phrased to say to the client.
+    - rationale: 1 sentence — what the answer decides.
+    - purpose: one of "safety" | "differentiate" | "confirm" | "context".
+    - targets: array of ICD-11 codes (from diagnosisCandidates) this question bears on — the codes it decides between (differentiate) or the single code it confirms (confirm). Empty [] for safety/context.
 - formulation: 3-6 sentences of case formulation in the requested language. Cover predisposing / precipitating / perpetuating / protective factors where evidence exists.
 - treatmentPlan:
     - modality: "CBT" | "EMDR" | "supportive" | "mixed" | "other"
@@ -499,6 +503,15 @@ Task: produce a ClinicalReportV1 JSON object with these fields:
     - indicators: 1-8 supporting transcript quotes { quote, speaker, startMs }
     - recommendedAction: 1 sentence describing the concrete next step (e.g. "Begin safety planning this session; share iCall 9152987821 with the client.")
 
+ASSESSMENT ENGINE — how to build assessmentGaps (this is the therapist's plan for next session):
+- Cover the differential SYSTEMATICALLY, do not free-associate:
+    1. SAFETY first: if any crisisFlags exist, the first gap must be the risk question to fully assess it (purpose "safety", targets []).
+    2. DIFFERENTIATE: for each pair of the leading candidates, produce ONE question whose answer favours one over the other (purpose "differentiate", targets = both codes). Anchor to the real distinguisher (timeline, stressor, duration, pervasiveness).
+    3. CONFIRM: for the leading candidate, one question per still-unmet core criterion (purpose "confirm", targets = that one code). Draw these from that candidate's gapsToFill.
+    4. CONTEXT: at most 1-2 questions for protective factors / functioning that shape the plan (purpose "context", targets []).
+- CONVERGENCE: do NOT include a question whose answer is already established in the transcript or the client's confirmed history. As assessment completes across sessions this list must SHRINK. If the differential has resolved to a single confident candidate and nothing material is open, return an EMPTY assessmentGaps array — that is the correct answer, not a filler question.
+- Never exceed 8 gaps; if more exist, keep the highest-yield ones in the order above.
+
 Hard rules:
 - ICD-11 codes: chapter 06 ONLY in this version. No F-codes, no DSM codes.
 - supportingEvidence + crisisFlags.indicators quotes must be VERBATIM from the transcript. Do not paraphrase. Do not invent.
@@ -510,6 +523,7 @@ Hard rules:
     - 0.9-1.0: full criteria met with multiple quotes; reserved for unambiguous presentations
 - Any indication of suicidal ideation, harm to others, child safety, IPV, psychosis, or acute substance issue must surface as a crisisFlags entry. Severity follows the cues; even low severity must be surfaced.
 - Be CONSERVATIVE. If two candidates fit equally, list both. If unsure, set primaryDiagnosisIndex to null and explain in formulation.
+- assessmentGaps.targets must reference codes that appear in diagnosisCandidates. A "differentiate" gap needs ≥2 targets; a "confirm" gap needs exactly 1.
 - Narrative text (formulation, gap.rationale, plan.goals.description, plan.goals.measure, therapy.rationale) follows the language hint. Code stems + WHO labels + speaker tags + section names stay English.
 - Output STRICT JSON matching ClinicalReportV1. No prose. No markdown. No commentary outside the JSON.
 
@@ -517,7 +531,7 @@ You are not the clinician. The therapist will confirm or reject each section.
 
 PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
 
-export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V1';
+export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Pass 3 — Sprint 19 intake variant. Used when SessionKind = INTAKE.
@@ -551,7 +565,12 @@ Task: produce an InitialAssessmentBriefV1 JSON object with these fields:
     - confidence: 0..1. Cap at 0.5 for any candidate (intake confidence ceiling).
     - supportingEvidence: 1-4 verbatim transcript quotes with { quote, speaker, startMs }.
     - gapsToFill: 1-5 short strings describing data still needed to confirm THIS candidate.
-- assessmentGaps: 3-12 open questions to ask in the next session. Each { question, rationale } — be specific.
+- assessmentGaps: 3-12 objects { question, rationale, purpose, targets } — the questions that would resolve this wide intake differential:
+    - question: the exact thing to ask, phrased to say to the client.
+    - rationale: 1 sentence — what the answer decides.
+    - purpose: "safety" | "differentiate" | "confirm" | "context".
+    - targets: ICD-11 codes (from differential) the question bears on — the codes it decides between (differentiate) or the one it confirms (confirm); [] for safety/context.
+    Order them: SAFETY first (if any crisisFlags), then DIFFERENTIATE (one per pair of leading differential entries, targets = both codes), then CONFIRM (the leader's open criteria, targets = that one code), then CONTEXT. Be specific — no textbook filler.
 - formulation: 3-6 sentence case formulation in INTAKE language ("Working hypothesis is...", "More data is needed about...").
 - recommendedTherapies: 1-6 first-line therapies for the most-likely differential entry. Each:
     - name: short therapy name.
@@ -572,7 +591,7 @@ You are not the clinician. The therapist will confirm a diagnosis and plan in a 
 
 PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
 
-export const INITIAL_ASSESSMENT_PROMPT_VERSION = 'INITIAL_ASSESSMENT_SYSTEM_PROMPT_V1';
+export const INITIAL_ASSESSMENT_PROMPT_VERSION = 'INITIAL_ASSESSMENT_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Pass 4 — Therapy Script. Sprint 14 (Clinical Co-Pilot Pivot).

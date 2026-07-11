@@ -653,11 +653,15 @@ function buildInitialAssessmentBrief(): InitialAssessmentBriefV1 {
     assessmentGaps: [
       {
         question: 'Confirm no episodes of elevated mood lasting >= 4 days.',
-        rationale: 'Rule out bipolar spectrum before committing to a treatment direction.',
+        rationale: 'Rules out bipolar spectrum before committing to a treatment direction.',
+        purpose: 'differentiate',
+        targets: ['6A70.1', '6A60'],
       },
       {
         question: 'Establish baseline PHQ-9 and GAD-7 next session.',
         rationale: 'Anchors the measurement-based-care arc and reliable-change tracking.',
+        purpose: 'context',
+        targets: [],
       },
     ],
     formulation:
@@ -733,6 +737,8 @@ function buildClinicalReport(): ClinicalReportV1 {
       {
         question: 'Continue tracking PHQ-9 every two sessions until remission is consolidated.',
         rationale: 'Sustained remission requires durability evidence over a 2-3 week window.',
+        purpose: 'confirm',
+        targets: ['6A70.1'],
       },
     ],
     formulation:
