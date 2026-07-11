@@ -134,6 +134,7 @@ wss.on('connection', (ws) => {
         cmd.vertical ?? 'DOCTOR', // Sprint TS1 — therapist live scribe support
         cmd.kind ?? 'TREATMENT',
         cmd.modality ?? null,
+        cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
       );
       session.start();
       started = true;

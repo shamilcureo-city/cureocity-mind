@@ -11,6 +11,7 @@ import type {
   RxPadV1,
   SessionKind,
   SessionModality,
+  TherapyLiveContext,
   TherapyNoteV1,
   Utterance,
   VoiceCommand,
@@ -30,6 +31,7 @@ import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
 import { ReasoningScheduler } from './reasoning-loop';
+import { TherapyReasoningStore } from './therapy-reasoning';
 import { assembleRxPad } from './rx-pad';
 import {
   bytesToMs,
@@ -130,6 +132,9 @@ export class LiveSession {
   /** Sprint DS2 — debounces + coalesces reasoning passes. */
   private readonly reasoningScheduler = new ReasoningScheduler();
 
+  /** Sprint TS5 — therapist live copilot state (null for doctors). */
+  private readonly therapyStore: TherapyReasoningStore | null;
+
   /** Un-flushed audio (bytes not yet transcribed into an utterance). */
   private pending: Buffer = Buffer.alloc(0);
   /** All-time bytes received, for wall offsets. */
@@ -197,6 +202,9 @@ export class LiveSession {
     vertical: PractitionerVertical = 'DOCTOR',
     sessionKind: SessionKind = 'TREATMENT',
     sessionModality: SessionModality | null = null,
+    // Sprint TS5 — therapist live copilot context (carried questions + prior
+    // risk + planned length). Null for doctors and for a thin therapist start.
+    therapyContext: TherapyLiveContext | null = null,
   ) {
     this.sessionId = sessionId;
     this.specialty = specialty;
@@ -211,6 +219,7 @@ export class LiveSession {
     this.noteRefreshMs =
       noteRefreshMs ?? (vertical === 'THERAPIST' ? 90_000 : noteRefreshMsFromEnv());
     this.caseStore = new CaseStateStore(patientContext);
+    this.therapyStore = vertical === 'THERAPIST' ? new TherapyReasoningStore(therapyContext) : null;
   }
 
   start(): void {
@@ -263,10 +272,23 @@ export class LiveSession {
     } finally {
       this.busy = false;
     }
+    // Sprint TS5 — advance the session arc even during silence, so the
+    // pacing rail moves through opening → working → closing on its own. Only
+    // emits when the arc PHASE changes (the change-key ignores the minute tick).
+    if (this.therapyStore && !this.stopped) {
+      const { changed, snapshot } = this.therapyStore.recompute(this.elapsedMs());
+      if (changed) this.emit({ type: 'therapyReasoning', reasoning: snapshot });
+    }
+
     // DOC-5 — a runaway guard tripped this window: close the consult now (after
     // the pump is idle, so finalize()'s waitIdle doesn't deadlock). finalize()
     // is a no-op if already stopped, so this fires exactly once.
     if (this.autoFinalizing && !this.stopped) void this.finalize();
+  }
+
+  /** Milliseconds since start() — drives the therapy session arc. */
+  private elapsedMs(): number {
+    return this.startedAtMs ? Date.now() - this.startedAtMs : 0;
   }
 
   /**
@@ -360,7 +382,10 @@ export class LiveSession {
     // scheduler decides whether to run now or coalesce with the next window.
     for (const utterance of utterances) this.reasoningScheduler.enqueue(utterance);
     const due = this.reasoningScheduler.takeDue();
-    if (due) await this.runReasoning(due);
+    if (due) {
+      if (this.vertical === 'THERAPIST') await this.runTherapyReasoning(due);
+      else await this.runReasoning(due);
+    }
 
     await this.runNote(false);
     // DOC-2 — deterministic red-flag / interaction checks EVERY window (not
@@ -447,6 +472,41 @@ export class LiveSession {
     }
   }
 
+  /**
+   * Sprint TS5 — the live THERAPY reasoning pass. PASS_12 over the new
+   * utterances (given the recent tail + the planned questions + prior-risk
+   * flag) produces risk cues + live ask-next + unexplored threads. The store
+   * then citation-gates + merges them, seeds the CARRIED questions + the
+   * deterministic SI re-check, computes the session arc, and we emit a
+   * `therapyReasoning` snapshot if anything changed. Failures are logged +
+   * swallowed — a copilot hiccup must never break the scribe.
+   */
+  private async runTherapyReasoning(newUtterances: Utterance[]): Promise<void> {
+    const store = this.therapyStore;
+    if (!store || newUtterances.length === 0) return;
+    try {
+      const newIds = new Set(newUtterances.map((u) => u.id));
+      const recentUtterances = store.recentTail(newIds);
+      store.registerUtterances(newUtterances);
+
+      const res = await this.backends.therapyReasoning.run({
+        sessionId: this.sessionId,
+        newUtterances,
+        recentUtterances,
+        carriedQuestions: store.carriedQuestions,
+        previousThreads: store.previousThreads(),
+        openQuestions: store.openLiveQuestions(),
+        priorRisk: store.priorRisk,
+      });
+      this.meter.recordReasoning(res.callLog);
+
+      const { changed, snapshot } = store.apply(res.output, this.elapsedMs());
+      if (changed) this.emit({ type: 'therapyReasoning', reasoning: snapshot });
+    } catch (err) {
+      console.error('[live-gateway] therapy reasoning pass failed:', (err as Error).message);
+    }
+  }
+
   /** Sprint DS3 — deterministic template-completeness questions from the note. */
   private templateAskNextFromNote(): AskNextItem[] {
     const template = resolveSpecialtyTemplate(this.specialty);
@@ -494,6 +554,15 @@ export class LiveSession {
   }
 
   dismissQuestion(questionId: string): void {
+    // Sprint TS5 — the therapist path dismisses risk/ask/thread cards through
+    // the same command; route to the therapy store and re-emit its snapshot.
+    if (this.therapyStore) {
+      if (this.therapyStore.dismiss(questionId)) {
+        const { snapshot } = this.therapyStore.recompute(this.elapsedMs());
+        this.emit({ type: 'therapyReasoning', reasoning: snapshot });
+      }
+      return;
+    }
     this.caseStore.dismissAsk(questionId);
     if (this.caseStore.commitReasoning().changed) {
       this.emit({ type: 'reasoning', reasoning: this.caseStore.reasoning });
@@ -852,10 +921,12 @@ export class LiveSession {
         }
       }
     }
-    // Sprint DS2 — run the reasoning engine over anything the scheduler
+    // Sprint DS2 / TS5 — run the reasoning engine over anything the scheduler
     // was still coalescing so the closing snapshot reflects the whole consult.
     if (this.reasoningScheduler.hasPending) {
-      await this.runReasoning(this.reasoningScheduler.flush());
+      const pending = this.reasoningScheduler.flush();
+      if (this.vertical === 'THERAPIST') await this.runTherapyReasoning(pending);
+      else await this.runReasoning(pending);
     }
     // DOC-2 — run the deterministic checks over the FULL transcript (incl. the
     // tail window just committed above) BEFORE the note's `final` event, so a
