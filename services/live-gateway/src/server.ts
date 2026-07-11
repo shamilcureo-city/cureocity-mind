@@ -56,9 +56,26 @@ const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
   res.end(JSON.stringify({ error: 'not found' }));
 });
 
-const wss = new WebSocketServer({ server: httpServer });
+// AUD2 — bound a single frame to a small multiple of the expected PCM window
+// (the browser sends ~64 KB frames; 256 KB is generous). The ws default is
+// 100 MB, which is a memory-DoS invitation on a public socket.
+const MAX_WS_FRAME_BYTES = Number(process.env['LIVE_GATEWAY_MAX_FRAME_BYTES'] ?? 256 * 1024);
+// AUD2 — per-IP connection ceiling so one client can't consume the whole
+// global MAX_CONNECTIONS pool before auth ever runs.
+const MAX_CONNECTIONS_PER_IP = Number(process.env['LIVE_GATEWAY_MAX_CONNECTIONS_PER_IP'] ?? 10);
+const connectionsByIp = new Map<string, number>();
 
-wss.on('connection', (ws) => {
+function clientIp(req: import('node:http').IncomingMessage): string {
+  // Cloud Run fronts us with a proxy — first hop of x-forwarded-for is the
+  // caller. Fall back to the socket address for direct/local connections.
+  const xff = req.headers['x-forwarded-for'];
+  const first = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
+  return first || req.socket.remoteAddress || 'unknown';
+}
+
+const wss = new WebSocketServer({ server: httpServer, maxPayload: MAX_WS_FRAME_BYTES });
+
+wss.on('connection', (ws, req) => {
   // DOC-4 — reject new sockets past the hard connection cap so pre-start
   // connections can't exhaust the node (independent of the session pool).
   if (wss.clients.size > MAX_CONNECTIONS) {
@@ -66,6 +83,25 @@ wss.on('connection', (ws) => {
     ws.close();
     return;
   }
+  // AUD2 — per-IP ceiling (see above). Counted before any protocol work.
+  const ip = clientIp(req);
+  const ipCount = (connectionsByIp.get(ip) ?? 0) + 1;
+  if (ipCount > MAX_CONNECTIONS_PER_IP) {
+    send(ws, { type: 'status', state: 'busy' });
+    ws.close();
+    return;
+  }
+  connectionsByIp.set(ip, ipCount);
+  let ipReleased = false;
+  const releaseIp = (): void => {
+    if (ipReleased) return;
+    ipReleased = true;
+    const n = (connectionsByIp.get(ip) ?? 1) - 1;
+    if (n <= 0) connectionsByIp.delete(ip);
+    else connectionsByIp.set(ip, n);
+  };
+  ws.on('close', releaseIp);
+  ws.on('error', releaseIp);
   send(ws, { type: 'status', state: 'connected' });
   let session: LiveSession | null = null;
   let started = false;

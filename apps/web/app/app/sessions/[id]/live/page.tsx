@@ -104,6 +104,7 @@ export default async function TherapistLivePage({
     <Container className="py-8">
       <TherapistLiveSession
         sessionId={session.id}
+        clientId={session.clientId}
         kind={session.kind}
         modality={session.modality}
         language={session.language}

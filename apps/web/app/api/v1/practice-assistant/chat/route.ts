@@ -1,11 +1,25 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
+import { FLASH_PRICING, computeCostInr } from '@cureocity/llm';
 import { appMockRefusalReason, ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { decryptClientField } from '@/lib/client-pii';
+import { CostCircuitOpenError, checkMonthlyCostCircuit } from '@/lib/cost-guard';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
+
+// AUD1 — this was the one LLM surface outside the cost circuit: no session,
+// no GeminiCallLog, no throttle. Now every turn is (1) rate-limited per
+// therapist via a DB-backed fixed window (serverless-safe — in-memory
+// counters don't survive across lambdas), (2) pre-checked against the
+// monthly cost circuit, and (3) logged to GeminiCallLog with psychologistId
+// so it accrues toward the cap. Failure rows log too, so a failing storm
+// still counts against the rate window.
+const CHAT_RATE_LIMIT_PER_MINUTE = Number(process.env['ASSISTANT_CHAT_PER_MINUTE'] ?? 8);
+// Generous per-turn estimate for the circuit pre-check (~1k in / 1k out Flash).
+const CHAT_ESTIMATED_COST_INR = 0.35;
+const CHAT_PROMPT_VERSION = 'ASSISTANT_CHAT_V1';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -61,6 +75,42 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await parseJson(req, ChatInputSchema);
   if (!body.ok) return body.response;
 
+  // AUD1 — per-therapist fixed-window rate limit (counts every logged
+  // attempt, success or failure, in the last 60s).
+  const recentTurns = await prisma.geminiCallLog.count({
+    where: {
+      pass: 'ASSISTANT_CHAT',
+      psychologistId: auth.value.psychologistId,
+      createdAt: { gte: new Date(Date.now() - 60_000) },
+    },
+  });
+  if (recentTurns >= CHAT_RATE_LIMIT_PER_MINUTE) {
+    return NextResponse.json(
+      { error: 'You are sending messages too quickly — wait a moment and try again.' },
+      { status: 429 },
+    );
+  }
+
+  // AUD1 — the monthly cost circuit now governs this surface too.
+  try {
+    await checkMonthlyCostCircuit({
+      psychologistId: auth.value.psychologistId,
+      estimatedCostInr: CHAT_ESTIMATED_COST_INR,
+    });
+  } catch (e) {
+    if (e instanceof CostCircuitOpenError) {
+      console.error(`[practice-assistant] cost circuit open: ${e.message}`);
+      return NextResponse.json(
+        {
+          error:
+            'The monthly AI budget for this account is exhausted — the assistant is paused until next month.',
+        },
+        { status: 429 },
+      );
+    }
+    throw e;
+  }
+
   const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
   if (llmBackend !== 'vertex') {
     // TS-safety — never serve the mock stub on a deployed environment; fail
@@ -108,32 +158,81 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     parts: [{ text: m.content }],
   }));
 
-  const res = await ai.models.generateContent({
-    model: proModel,
-    contents,
-    config: {
-      systemInstruction,
-      temperature: 0.4,
-      maxOutputTokens: 1024,
-      ...(resolveThinkingBudget('LLM_THINKING_BUDGET_ASSISTANT', 1024) !== undefined && {
-        thinkingConfig: {
-          thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_ASSISTANT', 1024),
+  const startedAt = Date.now();
+  let res;
+  try {
+    res = await ai.models.generateContent({
+      model: proModel,
+      contents,
+      config: {
+        systemInstruction,
+        temperature: 0.4,
+        maxOutputTokens: 1024,
+        ...(resolveThinkingBudget('LLM_THINKING_BUDGET_ASSISTANT', 1024) !== undefined && {
+          thinkingConfig: {
+            thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_ASSISTANT', 1024),
+          },
+        }),
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
+          {
+            category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+            threshold: HarmBlockThreshold.OFF,
+          },
+          {
+            category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+            threshold: HarmBlockThreshold.OFF,
+          },
+        ],
+      },
+    });
+  } catch (e) {
+    // Log the failed attempt (counts toward the rate window), then surface.
+    void prisma.geminiCallLog
+      .create({
+        data: {
+          pass: 'ASSISTANT_CHAT',
+          psychologistId: auth.value.psychologistId,
+          model: proModel,
+          region: proRegion,
+          promptVersion: CHAT_PROMPT_VERSION,
+          inputTokens: 0,
+          outputTokens: 0,
+          costInr: 0,
+          latencyMs: Date.now() - startedAt,
+          status: 'ERROR',
+          errorMessage: (e as Error).message.slice(0, 500),
         },
-      }),
-      safetySettings: [
-        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.OFF },
-        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.OFF },
-        {
-          category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-          threshold: HarmBlockThreshold.OFF,
-        },
-        {
-          category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-          threshold: HarmBlockThreshold.OFF,
-        },
-      ],
-    },
-  });
+      })
+      .catch(() => {});
+    console.error(`[practice-assistant] Gemini call failed: ${(e as Error).message}`);
+    return NextResponse.json(
+      { error: 'The assistant could not answer just now — try again in a moment.' },
+      { status: 502 },
+    );
+  }
+
+  // AUD1 — meter the turn so it accrues toward the monthly cost circuit.
+  const usage = res.usageMetadata;
+  const inputTokens = usage?.promptTokenCount ?? 0;
+  const outputTokens = (usage?.candidatesTokenCount ?? 0) + (usage?.thoughtsTokenCount ?? 0);
+  void prisma.geminiCallLog
+    .create({
+      data: {
+        pass: 'ASSISTANT_CHAT',
+        psychologistId: auth.value.psychologistId,
+        model: proModel,
+        region: proRegion,
+        promptVersion: CHAT_PROMPT_VERSION,
+        inputTokens,
+        outputTokens,
+        costInr: computeCostInr(inputTokens, outputTokens, FLASH_PRICING),
+        latencyMs: Date.now() - startedAt,
+        status: 'SUCCESS',
+      },
+    })
+    .catch(() => {});
 
   const reply = res.text?.trim() ?? '';
   if (!reply) {

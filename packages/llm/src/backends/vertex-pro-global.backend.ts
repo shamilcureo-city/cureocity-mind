@@ -34,6 +34,10 @@ export interface VertexGeminiProGlobalOptions {
    * the request unchanged.
    */
   thinkingBudget?: number;
+  /** AUD2 — HTTP timeout per attempt (ms). Pass 2 was previously unbounded. */
+  timeoutMs?: number;
+  /** AUD2 — total attempts incl. the first (transient errors only). */
+  maxAttempts?: number;
 }
 
 /**
@@ -50,12 +54,19 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
   private readonly pricing: ModelPricing;
 
   private readonly thinkingBudget: number | undefined;
+  private readonly timeoutMs: number;
+  private readonly maxAttempts: number;
 
   constructor(opts: VertexGeminiProGlobalOptions) {
     this.thinkingBudget = opts.thinkingBudget;
     this.modelName = opts.model ?? 'gemini-2.5-pro';
     this.region = opts.location ?? 'global';
     this.pricing = opts.pricing ?? PRO_PRICING;
+    // AUD2 — a hung Pass 2 used to be bounded only by the platform's function
+    // cap, stranding drafts IN_PROGRESS. Mirror the Flash backend: explicit
+    // per-attempt timeout + one bounded transient retry.
+    this.timeoutMs = opts.timeoutMs ?? 120_000;
+    this.maxAttempts = Math.max(1, opts.maxAttempts ?? 2);
     if (opts.saKeyPath) {
       process.env['GOOGLE_APPLICATION_CREDENTIALS'] = opts.saKeyPath;
     }
@@ -63,6 +74,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
       vertexai: true,
       project: opts.projectId,
       location: this.region,
+      httpOptions: { timeout: this.timeoutMs },
     });
   }
 
@@ -84,7 +96,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
         : THERAPY_NOTE_PROMPT_VERSION;
 
     try {
-      const res = await this.ai.models.generateContent({
+      const res = await this.callWithRetry({
         model: this.modelName,
         contents: [{ role: 'user', parts: [{ text: userMessage }] }],
         config: {
@@ -167,6 +179,30 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
       });
     }
   }
+
+  /**
+   * AUD2 — bounded retry on transient Vertex blips (5xx, DEADLINE_EXCEEDED,
+   * UNAVAILABLE, network). Hard rejects surface immediately. Mirrors the
+   * Flash backend's pattern.
+   */
+  private async callWithRetry(
+    req: Parameters<GoogleGenAI['models']['generateContent']>[0],
+  ): Promise<Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>> {
+    let lastError: unknown = null;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt++) {
+      try {
+        return await this.ai.models.generateContent(req);
+      } catch (e) {
+        lastError = e;
+        if (attempt >= this.maxAttempts || !isTransientVertexError(e)) {
+          throw e;
+        }
+        const backoffMs = 500 * attempt + Math.floor(Math.random() * 250);
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('Vertex retry exhausted');
+  }
 }
 
 export class Pass2BackendError extends Error {
@@ -177,6 +213,15 @@ export class Pass2BackendError extends Error {
     super(message);
     this.name = 'Pass2BackendError';
   }
+}
+
+function isTransientVertexError(e: unknown): boolean {
+  const message = (e as { message?: string } | null)?.message ?? '';
+  const status = (e as { status?: number } | null)?.status;
+  if (typeof status === 'number' && status >= 500 && status < 600) return true;
+  return /DEADLINE_EXCEEDED|UNAVAILABLE|INTERNAL|timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|fetch failed/i.test(
+    message,
+  );
 }
 
 function buildUserMessage(input: Pass2Input): string {

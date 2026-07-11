@@ -54,11 +54,39 @@ export async function getTherapistMonthlyTotalInr(
     where: {
       createdAt: { gte: startOfMonth, lt: startOfNextMonth },
       status: 'SUCCESS',
-      session: { psychologistId },
+      // AUD1 — session-attributed calls AND session-less tenant calls (the
+      // practice-assistant chat logs psychologistId directly).
+      OR: [{ session: { psychologistId } }, { psychologistId }],
     },
     _sum: { costInr: true },
   });
   return agg._sum.costInr ?? new Prisma.Decimal(0);
+}
+
+/**
+ * AUD1 — monthly-only circuit for session-less LLM surfaces (the practice
+ * assistant chat). Same monthly cap as {@link checkCostCircuit}, no session leg.
+ */
+export async function checkMonthlyCostCircuit(opts: {
+  psychologistId: string;
+  estimatedCostInr: number;
+}): Promise<void> {
+  const estimated = new Prisma.Decimal(opts.estimatedCostInr);
+  const mCap = monthlyCap();
+  const monthlyTotal = await getTherapistMonthlyTotalInr(opts.psychologistId);
+  const projectedMonthly = monthlyTotal.plus(estimated);
+  if (projectedMonthly.gt(mCap)) {
+    throw new CostCircuitOpenError(
+      `Therapist monthly cost cap ₹${mCap} would be exceeded (current ₹${monthlyTotal.toFixed(4)}, projected ₹${projectedMonthly.toFixed(4)})`,
+      {
+        scope: 'monthly',
+        psychologistId: opts.psychologistId,
+        currentInr: monthlyTotal.toNumber(),
+        projectedInr: projectedMonthly.toNumber(),
+        capInr: mCap,
+      },
+    );
+  }
 }
 
 export async function checkCostCircuit(opts: {

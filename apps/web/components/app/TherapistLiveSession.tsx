@@ -37,6 +37,7 @@ import {
   type Utterance,
 } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
+import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { TherapyCopilotRail } from './TherapyCopilotRail';
@@ -47,6 +48,8 @@ type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'erro
 
 interface Props {
   sessionId: string;
+  /** AUD2 — for the batch-fallback deep link when the gateway drops. */
+  clientId?: string | null;
   kind: SessionKind;
   modality: SessionModality | null;
   /** Session.language — the language the NOTE is written in. */
@@ -195,6 +198,7 @@ function fmtClock(ms: number): string {
 
 export function TherapistLiveSession({
   sessionId,
+  clientId = null,
   kind,
   modality,
   language,
@@ -224,6 +228,14 @@ export function TherapistLiveSession({
   // Set when the consult ended but no note ever arrived (Pass 2 empty/blocked
   // upstream). Terminal, recoverable — never leave the user on "Finishing…".
   const [noteFailed, setNoteFailed] = useState(false);
+  // AUD2 — the gateway socket closed mid-session without a final note:
+  // surface a recovery card instead of hanging on "listening" forever.
+  const [connectionLost, setConnectionLost] = useState(false);
+
+  // AUD2 — keep the phone screen awake while listening. The batch recorder
+  // always did this; the live scribe losing the screen ~30s in put the mic
+  // and the socket at the OS's mercy on the exact device the pilot targets.
+  useWakeLock(phase === 'listening' || phase === 'finalizing');
 
   // TS5.4 — the SESSION PLAN, rendered before the gateway says a word. Seeds
   // the rail with the carried/copilot questions and the deterministic prior-SI
@@ -289,6 +301,10 @@ export function TherapistLiveSession({
   });
   const streamRef = useRef(stream);
   streamRef.current = stream;
+  // AUD2 — ws.onclose is a long-lived closure; it reads the CURRENT phase
+  // through this ref rather than a stale capture.
+  const phaseRef = useRef<Phase>(phase);
+  phaseRef.current = phase;
 
   useEffect(() => {
     return () => {
@@ -404,6 +420,7 @@ export function TherapistLiveSession({
   async function start(): Promise<void> {
     setError(null);
     setNoteFailed(false);
+    setConnectionLost(false);
     setUtterances([]);
     setNote({});
     setNoteUpdatedAt(null);
@@ -473,6 +490,20 @@ export function TherapistLiveSession({
       setError(
         `Couldn't reach the live gateway at ${GATEWAY_URL}. Start it with: pnpm --filter @cureocity/live-gateway dev`,
       );
+    };
+
+    // AUD2 — a clean close (gateway restart/crash/deploy) previously left the
+    // screen on "listening" forever while frames were silently dropped. If we
+    // were mid-session and no final note arrived, stop the mic and surface a
+    // recovery card (reconnect, or continue the classic recorded way).
+    ws.onclose = () => {
+      if (finalHandledRef.current) return;
+      const p = phaseRef.current;
+      if (p === 'listening' || p === 'finalizing') {
+        void streamRef.current.stop();
+        setConnectionLost(true);
+        setPhase('error');
+      }
     };
 
     ws.onmessage = (ev) => {
@@ -646,6 +677,28 @@ export function TherapistLiveSession({
       </header>
 
       {error && <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</Card>}
+
+      {connectionLost && (
+        <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+          <strong className="block">The live connection dropped.</strong>
+          <p className="mt-1">
+            The scribe lost its link to the gateway mid-session. The session itself is safe — what
+            was already transcribed is on this screen, but nothing new is being heard. Reconnect to
+            continue live, or switch to the classic recorder (it reuses this same session).
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => void start()}>Reconnect</Button>
+            {clientId && (
+              <Button variant="secondary" onClick={() => router.push(`/app?record=${clientId}`)}>
+                Continue as recording
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
+              Open session
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {noteFailed && (
         <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">

@@ -103,10 +103,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 }
 
 function isAuthorized(req: NextRequest): boolean {
-  // Vercel sets x-vercel-cron when invoked via vercel.json schedule.
-  if (req.headers.get('x-vercel-cron')) return true;
+  // AUD1 — fail closed: CRON_SECRET must be set, and every invocation must
+  // carry it. Vercel automatically sends `Authorization: Bearer $CRON_SECRET`
+  // on scheduled invocations when the env var exists, so the x-vercel-cron
+  // header alone is no longer sufficient (defense in depth if the app is
+  // ever fronted differently).
   const secret = process.env['CRON_SECRET'];
-  if (!secret) return false;
-  const authHeader = req.headers.get('authorization');
-  return authHeader === `Bearer ${secret}`;
+  if (!secret) {
+    console.error('[cron] CRON_SECRET is not set — refusing all cron invocations (fail closed).');
+    return false;
+  }
+  return req.headers.get('authorization') === `Bearer ${secret}`;
 }

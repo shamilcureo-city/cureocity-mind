@@ -10,6 +10,8 @@ export const dynamic = 'force-dynamic';
 
 const VALID_MIME = 'audio/pcm';
 const MAX_CHUNK_BYTES = 2 * 1024 * 1024;
+// AUD1 — hard ceiling on chunks per session (cost-amplification guard).
+const MAX_CHUNKS_PER_SESSION = Number(process.env['MAX_CHUNKS_PER_SESSION'] ?? 500);
 
 /**
  * POST /api/v1/audio/chunks/upload — direct chunk upload into Postgres
@@ -47,6 +49,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json(
       { error: 'X-Chunk-Index must be a non-negative integer' },
       { status: 400 },
+    );
+  }
+  // AUD1 — bound the per-session chunk count. Each accepted chunk can fire an
+  // inline Pass-1 transcription, so an unbounded index is a cost amplifier.
+  // 500 × ~65s of 16-kHz PCM ≈ 9 hours — far beyond any real session.
+  if (chunkIndex >= MAX_CHUNKS_PER_SESSION) {
+    return NextResponse.json(
+      { error: `X-Chunk-Index exceeds the per-session cap (${MAX_CHUNKS_PER_SESSION})` },
+      { status: 413 },
     );
   }
   if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > 60_000) {

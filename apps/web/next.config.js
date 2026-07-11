@@ -28,6 +28,22 @@ const nextConfig = {
   // metadata (some crawlers read the header, some the meta tag).
   async headers() {
     return [
+      // AUD1 — baseline security headers on every route. The app serves PHI:
+      // it must never be framable (clickjacking), must pin HTTPS (HSTS), and
+      // must not leak paths via referrer. A strict script-src CSP is deferred
+      // (Next inline hydration needs nonces); frame-ancestors is the part
+      // with real risk and zero breakage.
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), geolocation=(), payment=(), usb=()' },
+        ],
+      },
       {
         source: '/p/:path*',
         headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' }],

@@ -1085,6 +1085,7 @@ enum GeminiPass {
   PASS_10_FINDINGS // Sprint DS1 — live findings extractor (reasoning substrate)
   PASS_11_REASONING // Sprint DS2 — combined live reasoning (differential + ask-next)
   PASS_12_THERAPY_REASONING // Sprint TS5 — live therapy copilot (risk + ask-next + threads)
+  ASSISTANT_CHAT // AUD1 — practice-assistant chat turns (metered + rate-limited)
 }
 
 enum GeminiCallStatus {
@@ -1095,8 +1096,12 @@ enum GeminiCallStatus {
 }
 
 model GeminiCallLog {
-  id        String  @id @default(cuid())
-  sessionId String?
+  id             String  @id @default(cuid())
+  sessionId      String?
+  /// AUD1 — tenant attribution for calls with no session (e.g. the practice
+  /// assistant chat), so they count toward the monthly cost circuit and can
+  /// be rate-limited per therapist. No FK — a plain indexed column.
+  psychologistId String?
 
   pass          GeminiPass
   model         String
@@ -1116,6 +1121,7 @@ model GeminiCallLog {
   session Session? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
 
   @@index([sessionId, createdAt])
+  @@index([psychologistId, createdAt])
   @@index([createdAt])
   @@index([status, createdAt])
   @@map("gemini_call_logs")

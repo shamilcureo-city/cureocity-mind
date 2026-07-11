@@ -33,6 +33,8 @@ export const maxDuration = 30;
 
 /** Token expiry — patients can re-open the portal for this long. */
 const SHARE_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+// AUD1 — max shares a therapist can create per rolling hour (fan-out guard).
+const SHARES_PER_HOUR_CAP = Number(process.env['SHARES_PER_HOUR_CAP'] ?? 30);
 
 /**
  * POST /api/v1/share
@@ -59,6 +61,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await parseJson(req, ShareInputSchema);
   if (!body.ok) return body.response;
   const input: ShareInput = body.value;
+
+  // AUD1 — outbound fan-out guard: sharing fires WhatsApp/email sends, so a
+  // runaway client (or stolen token) must not be able to blast unbounded
+  // messages. DB-backed fixed window per therapist.
+  const sharesLastHour = await prisma.patientShare.count({
+    where: {
+      psychologistId: auth.value.psychologistId,
+      createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+    },
+  });
+  if (sharesLastHour >= SHARES_PER_HOUR_CAP) {
+    return NextResponse.json(
+      { error: 'Sharing limit reached for this hour — try again a little later.' },
+      { status: 429 },
+    );
+  }
 
   const client = await prisma.client.findUnique({
     where: { id: input.clientId },
