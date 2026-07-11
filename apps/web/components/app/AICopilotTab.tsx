@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { z } from 'zod';
 import {
   CarriedQuestionSchema,
@@ -111,16 +112,7 @@ export async function AICopilotTab({
           clientHasContactEmail={clientHasContactEmail}
         />
       )}
-      {sub === 'briefing' && (
-        <BriefingSub clientId={clientId} clientName={clientName} psychologistId={psychologistId} />
-      )}
-      {sub === 'measures' && (
-        <div className="space-y-6">
-          <InstrumentRunner clientId={clientId} />
-          <AffectCard clientId={clientId} />
-        </div>
-      )}
-      {sub === 'formulation' && (
+      {sub === 'plan' && (
         <FormulationSub
           clientId={clientId}
           preferredLanguage={preferredLanguage}
@@ -250,6 +242,16 @@ async function SessionSub({
   );
 }
 
+/**
+ * Sprint TSC-V2 — the merged Journey page.
+ *
+ * One longitudinal view in the order a psychologist reasons: WHERE THEY
+ * ARE (stage + next-best-action) → IS IT WORKING (measures + affect trend,
+ * administer inline) → THE STORY SO FAR (case briefing + consult) → WHAT
+ * NEXT SESSION OPENS WITH (pre-session brief). No new engines — the Journey,
+ * Measures and Briefing sub-tabs re-homed into one narrative so a score
+ * lands next to the timeline it belongs to.
+ */
 async function JourneySub({
   clientId,
   psychologistId,
@@ -275,56 +277,62 @@ async function JourneySub({
     prisma.session.count({ where: { clientId, status: 'COMPLETED' } }),
   ]);
   return (
-    <div>
-      <EpisodeStepper journey={journey} sessionsCompleted={sessionsCompleted} />
-      <TodayStrip journey={journey} briefing={briefing} />
-      {journey && (
-        <div className="mt-6">
-          <JourneyHeader
-            journey={journey}
-            clientName={clientName}
-            clientHasContactPhone={clientHasContactPhone}
-            clientHasContactEmail={clientHasContactEmail}
-          />
-        </div>
-      )}
-      <div className="mt-6">
-        <PreSessionBriefCard clientId={clientId} />
+    <div className="space-y-8">
+      {/* 1 — Where they are. */}
+      <div>
+        <EpisodeStepper journey={journey} sessionsCompleted={sessionsCompleted} />
+        <TodayStrip journey={journey} briefing={briefing} />
+        {journey && (
+          <div className="mt-6">
+            <JourneyHeader
+              journey={journey}
+              clientName={clientName}
+              clientHasContactPhone={clientHasContactPhone}
+              clientHasContactEmail={clientHasContactEmail}
+            />
+          </div>
+        )}
       </div>
+
+      {/* 2 — Is it working? Measures live here, next to the timeline. */}
+      <JourneySection title="Is it working?">
+        <InstrumentRunner clientId={clientId} />
+        <AffectCard clientId={clientId} />
+      </JourneySection>
+
+      {/* 3 — The story so far: the cross-session synthesis + consult. */}
+      <JourneySection title="The story so far">
+        {briefing ? (
+          <CaseBriefingPanel
+            clientId={clientId}
+            clientName={clientName}
+            initialBriefing={briefing}
+          />
+        ) : (
+          <EmptyState
+            title="No case briefing yet"
+            body="The briefing is composed from the cumulative client record. As sessions and assessments accumulate, it appears here."
+          />
+        )}
+        <CaseConsultPanel clientId={clientId} />
+      </JourneySection>
+
+      {/* 4 — What next session opens with. */}
+      <JourneySection title="Next session opens with">
+        <PreSessionBriefCard clientId={clientId} />
+      </JourneySection>
     </div>
   );
 }
 
-async function BriefingSub({
-  clientId,
-  clientName,
-  psychologistId,
-}: {
-  clientId: string;
-  clientName: string;
-  psychologistId: string;
-}) {
-  const briefing = await buildDeterministicCaseBriefing(clientId, psychologistId).catch((e) => {
-    if (e instanceof JourneyError) return null;
-    throw e;
-  });
-  if (!briefing) {
-    return (
-      <EmptyState
-        title="No case briefing yet"
-        body="The briefing is composed from the cumulative client record. As sessions and assessments accumulate, it appears here."
-      />
-    );
-  }
+function JourneySection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="space-y-6">
-      <CaseBriefingPanel clientId={clientId} clientName={clientName} initialBriefing={briefing} />
-      {/* Sprint 52 — Case Consult sits alongside the briefing inside
-          the Briefing sub-tab. The briefing answers "what is going
-          on?", the consult answers "given everything I've tried,
-          what should I consider next?". */}
-      <CaseConsultPanel clientId={clientId} />
-    </div>
+    <section className="space-y-4">
+      <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
+        {title}
+      </h3>
+      {children}
+    </section>
   );
 }
 

@@ -290,11 +290,11 @@ function deriveNextBestAction(input: {
       c.verdict !== 'reliable_improvement',
   );
   if (input.hasActivePlan && stalled) {
-    // Sprint 52 — link the "not improving" action to the Case Consult
-    // inside the Briefing sub-tab of the last session's AI Copilot.
-    // That's the exact "I'm stuck" moment the consult was built for.
+    // Sprint 52 → TSC-V2 — link the "not improving" action to the Case
+    // Consult, now in the Journey page's "story so far" section. That's
+    // the exact "I'm stuck" moment the consult was built for.
     const consultHref = input.lastCompletedSessionId
-      ? `/app/sessions/${input.lastCompletedSessionId}?tab=copilot&sub=briefing`
+      ? `/app/sessions/${input.lastCompletedSessionId}?tab=copilot&sub=journey`
       : null;
     return {
       kind: 'REVIEW_PLAN_NOT_IMPROVING',

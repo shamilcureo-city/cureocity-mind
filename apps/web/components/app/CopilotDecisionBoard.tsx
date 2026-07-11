@@ -298,7 +298,7 @@ export function CopilotDecisionBoard({
 
   // ----- pre-reading states -----
 
-  const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=measures`;
+  const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=journey`;
   const readingNoun = isIntake ? 'initial assessment' : 'clinical brief';
 
   if (status === null || (status === 'COMPLETED' && !data)) {

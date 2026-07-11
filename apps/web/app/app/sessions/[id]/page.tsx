@@ -42,13 +42,16 @@ const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'client',
 ]);
 
-const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set([
-  'session',
-  'journey',
-  'briefing',
-  'measures',
-  'formulation',
-]);
+const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['session', 'journey', 'plan']);
+
+// Sprint TSC-V2 — the five sub-tabs collapsed to three. Old links
+// (measures/briefing fold into Journey; formulation into Plan & toolkit)
+// keep working via this map.
+const LEGACY_SUB_MAP: Record<string, CopilotSubKey> = {
+  measures: 'journey',
+  briefing: 'journey',
+  formulation: 'plan',
+};
 
 /**
  * Sprint 28 — top-level tab parser.
@@ -73,6 +76,7 @@ function parseSub(raw: string | undefined): CopilotSubKey {
   if (raw && (VALID_SUBS as ReadonlySet<string>).has(raw)) {
     return raw as CopilotSubKey;
   }
+  if (raw && raw in LEGACY_SUB_MAP) return LEGACY_SUB_MAP[raw]!;
   return 'session';
 }
 

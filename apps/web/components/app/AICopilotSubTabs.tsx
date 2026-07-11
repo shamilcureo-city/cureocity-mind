@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-export type CopilotSubKey = 'session' | 'journey' | 'briefing' | 'measures' | 'formulation';
+export type CopilotSubKey = 'session' | 'journey' | 'plan';
 
 interface Props {
   sessionId: string;
@@ -8,22 +8,22 @@ interface Props {
 }
 
 const TABS: { key: CopilotSubKey; label: string; hint: string }[] = [
-  { key: 'session', label: 'This session', hint: "This recording's AI analysis" },
-  { key: 'journey', label: 'Journey', hint: 'Where they are, what to do next' },
-  { key: 'briefing', label: 'Case Briefing', hint: 'The cross-session synthesis' },
-  { key: 'measures', label: 'Measures', hint: 'Instruments + affect trend' },
-  { key: 'formulation', label: 'Formulation & Plan', hint: 'Map, diagnosis, therapies' },
+  { key: 'session', label: 'This session', hint: "This recording's decision board" },
+  { key: 'journey', label: 'Journey', hint: 'Where they are · is it working · what next' },
+  { key: 'plan', label: 'Plan & toolkit', hint: 'Plan, diagnosis history, map, library' },
 ];
 
 /**
- * Sprint 28 — secondary tab bar inside the session AI Copilot tab.
+ * Sprint 28 → Sprint TSC-V2 — secondary tab bar inside the AI Copilot tab.
  *
- * The session AI Copilot is now the *full* copilot: "This session"
- * (this recording's analysis) sits alongside the cross-session
- * decision-support (Journey, Case Briefing, Measures, Formulation &
- * Plan). Smaller/lighter than the top-level `SessionWorkspaceTabs`
- * so the two levels don't compete. URL: `?tab=copilot&sub=…`,
- * defaulting to `session`.
+ * The five altitude tabs collapsed to three that match how a psychologist
+ * actually thinks: "This session" (the decision board), "Journey" (the one
+ * longitudinal page — stage, measures, the story, what next session opens
+ * with), and "Plan & toolkit" (the working tools). Measures moved inside
+ * Journey (a score only means something against the timeline); Case
+ * Briefing + Consult became the story section of Journey. Smaller/lighter
+ * than the top-level `SessionWorkspaceTabs`. URL: `?tab=copilot&sub=…`,
+ * defaulting to `session`; old sub keys redirect in the page parser.
  */
 export function AICopilotSubTabs({ sessionId, active = 'session' }: Props) {
   return (
