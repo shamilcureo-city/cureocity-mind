@@ -10,8 +10,11 @@ import {
   type TherapyNoteV1,
 } from '@cureocity/contracts';
 import { Card } from '@/components/ui/Card';
-import { AffectCard } from '@/components/app/AffectCard';
-import { CaseBriefingPanel } from '@/components/app/CaseBriefingPanel';
+import { CareArc } from '@/components/app/CareArc';
+import { CareDoNextQueue } from '@/components/app/CareDoNextQueue';
+import { CareMeasurePanel } from '@/components/app/CareMeasurePanel';
+import { CareNextSessionPanel } from '@/components/app/CareNextSessionPanel';
+import { CareStoryPanel } from '@/components/app/CareStoryPanel';
 import { CaseConsultPanel } from '@/components/app/CaseConsultPanel';
 import { ConceptualMapTab } from '@/components/app/ConceptualMapTab';
 import {
@@ -19,19 +22,15 @@ import {
   type CaseRecordSnapshot,
 } from '@/components/app/CopilotDecisionBoard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
-import { EpisodeStepper } from '@/components/app/EpisodeStepper';
-import { InstrumentRunner } from '@/components/app/InstrumentRunner';
-import { JourneyHeader } from '@/components/app/JourneyHeader';
 import { MindmapTab } from '@/components/app/MindmapTab';
-import { PreSessionBriefCard } from '@/components/app/PreSessionBriefCard';
 import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
-import { TodayStrip } from '@/components/app/TodayStrip';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
 import { AICopilotSubTabs, type CopilotSubKey } from '@/components/app/AICopilotSubTabs';
+import { computeCareEngineForClient } from '@/lib/care-engine-compose';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
-import { JourneyError, computeClientJourney } from '@/lib/journey';
+import { JourneyError } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
 
 interface Props {
@@ -105,6 +104,7 @@ export async function AICopilotTab({
       )}
       {sub === 'journey' && (
         <JourneySub
+          sessionId={sessionId}
           clientId={clientId}
           psychologistId={psychologistId}
           clientName={clientName}
@@ -243,30 +243,40 @@ async function SessionSub({
 }
 
 /**
- * Sprint TSC-V2 — the merged Journey page.
+ * Sprint JE3 — the Care Engine page.
  *
- * One longitudinal view in the order a psychologist reasons: WHERE THEY
- * ARE (stage + next-best-action) → IS IT WORKING (measures + affect trend,
- * administer inline) → THE STORY SO FAR (case briefing + consult) → WHAT
- * NEXT SESSION OPENS WITH (pre-session brief). No new engines — the Journey,
- * Measures and Briefing sub-tabs re-homed into one narrative so a score
- * lands next to the timeline it belongs to.
+ * One longitudinal view driven by ONE deterministic state machine
+ * (`computeCareEngineForClient` → CareEngineV1) instead of the two competing
+ * action engines it replaces (that duplication is why "set a baseline" once
+ * appeared four times). Five calm zones in the order a psychologist reasons:
+ *
+ *   1. Care arc + the current stage's exit gate — the stage is *earned*.
+ *   2. Do next — ONE ranked queue (SAFETY > MEASURE > DIAGNOSE > PLAN > OUTCOME).
+ *   3. Is it working? — verdict-first measures + goals + affect.
+ *   4. The story so far — slimmed narrative briefing + case consult.
+ *   5. Next session — cadence + carried questions + pre-session brief.
+ *
+ * The briefing is still loaded (its narrative feeds zone 4) but its
+ * actionable parts — safety, do-next, still-to-find-out, cadence — are now
+ * owned by the engine, so nothing is said twice.
  */
 async function JourneySub({
+  sessionId,
   clientId,
   psychologistId,
   clientName,
   clientHasContactPhone,
   clientHasContactEmail,
 }: {
+  sessionId: string;
   clientId: string;
   psychologistId: string;
   clientName: string;
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
 }) {
-  const [journey, briefing, sessionsCompleted] = await Promise.all([
-    computeClientJourney(clientId, psychologistId).catch((e) => {
+  const [care, briefing] = await Promise.all([
+    computeCareEngineForClient(clientId, psychologistId, sessionId).catch((e) => {
       if (e instanceof JourneyError) return null;
       throw e;
     }),
@@ -274,40 +284,51 @@ async function JourneySub({
       if (e instanceof JourneyError) return null;
       throw e;
     }),
-    prisma.session.count({ where: { clientId, status: 'COMPLETED' } }),
   ]);
+
+  if (!care) {
+    return (
+      <EmptyState
+        title="No care journey yet"
+        body="The care engine composes from the cumulative client record. Record the first session to begin the arc."
+      />
+    );
+  }
+
+  // A shareable report needs ≥1 instrument with a reliable-change verdict.
+  const canShareReport = care.measures.some((m) => m.verdict !== null);
+  const isDischarged = care.arc.discharged !== null;
+
   return (
     <div className="space-y-8">
-      {/* 1 — Where they are. */}
-      <div>
-        <EpisodeStepper journey={journey} sessionsCompleted={sessionsCompleted} />
-        <TodayStrip journey={journey} briefing={briefing} />
-        {journey && (
-          <div className="mt-6">
-            <JourneyHeader
-              journey={journey}
-              clientName={clientName}
-              clientHasContactPhone={clientHasContactPhone}
-              clientHasContactEmail={clientHasContactEmail}
-            />
-          </div>
-        )}
-      </div>
+      {/* 1 — Where they are: the arc + the current stage's exit gate. */}
+      <CareArc
+        arc={care.arc}
+        workingDiagnosis={care.workingDiagnosis}
+        canShareReport={canShareReport}
+        clientId={clientId}
+        clientName={clientName}
+        clientHasContactPhone={clientHasContactPhone}
+        clientHasContactEmail={clientHasContactEmail}
+      />
 
-      {/* 2 — Is it working? Measures live here, next to the timeline. */}
+      {/* 2 — Do next: the single ranked action queue. */}
+      <CareDoNextQueue queue={care.queue} />
+
+      {/* 3 — Is it working? Verdict-first measures + goals + affect. */}
       <JourneySection title="Is it working?">
-        <InstrumentRunner clientId={clientId} />
-        <AffectCard clientId={clientId} />
+        <CareMeasurePanel
+          measures={care.measures}
+          activePlan={care.activePlan}
+          clientId={clientId}
+          disabled={isDischarged}
+        />
       </JourneySection>
 
-      {/* 3 — The story so far: the cross-session synthesis + consult. */}
+      {/* 4 — The story so far: the narrative synthesis + consult. */}
       <JourneySection title="The story so far">
         {briefing ? (
-          <CaseBriefingPanel
-            clientId={clientId}
-            clientName={clientName}
-            initialBriefing={briefing}
-          />
+          <CareStoryPanel clientId={clientId} clientName={clientName} initialBriefing={briefing} />
         ) : (
           <EmptyState
             title="No case briefing yet"
@@ -317,9 +338,13 @@ async function JourneySub({
         <CaseConsultPanel clientId={clientId} />
       </JourneySection>
 
-      {/* 4 — What next session opens with. */}
+      {/* 5 — Next session: cadence + carried questions + pre-session brief. */}
       <JourneySection title="Next session opens with">
-        <PreSessionBriefCard clientId={clientId} />
+        <CareNextSessionPanel
+          questions={care.questions}
+          cadence={care.cadence}
+          clientId={clientId}
+        />
       </JourneySection>
     </div>
   );
