@@ -22,7 +22,13 @@ export interface TodaySessionCardProps {
     clientIsDemo?: boolean;
     hasSignedNote: boolean;
     draftStatus: string | null;
+    /** TS6 — how an IN_PROGRESS session was started (LIVE ⇒ resume the live
+     *  scribe; anything else ⇒ resume via the batch record flow). */
+    captureMode?: string | null;
   };
+  /** TS6 — the therapist's preferred capture; picks the PRIMARY Start action
+   *  (the other stays one tap away in the caret). Absent/LIVE ⇒ live. */
+  defaultCapture?: 'LIVE' | 'BATCH';
 }
 
 /**
@@ -38,11 +44,33 @@ export interface TodaySessionCardProps {
  * re-runs the server query so the page reflects the new state without
  * a manual reload.
  */
-export function TodaySessionCard({ session }: TodaySessionCardProps) {
+export function TodaySessionCard({ session, defaultCapture = 'LIVE' }: TodaySessionCardProps) {
   const router = useRouter();
   const [busy, setBusy] = useState<'no-show' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [startMenuOpen, setStartMenuOpen] = useState(false);
+
+  // TS6 — the two ways to start, doctor-style: the preferred one is the
+  // primary button; the other lives one tap away in the caret. Live opens the
+  // scribe (transcript + note + copilot as you talk); record-only goes to the
+  // batch flow (which reuses THIS booked session via startNow).
+  const startOptions = {
+    LIVE: {
+      href: `/app/sessions/${session.id}/live?flash=1`,
+      primaryLabel: '● Start live session',
+      menuLabel: '🎙 Live scribe',
+      menuDesc: 'Transcript, note and copilot build as you talk.',
+    },
+    BATCH: {
+      href: `/app?record=${session.clientId}`,
+      primaryLabel: '⏺ Start recording',
+      menuLabel: '⏺ Record only',
+      menuDesc: 'Just records — the note generates when you finish.',
+    },
+  } as const;
+  const primaryStart = startOptions[defaultCapture];
+  const secondaryStart = startOptions[defaultCapture === 'LIVE' ? 'BATCH' : 'LIVE'];
 
   async function markNoShow() {
     if (busy) return;
@@ -107,15 +135,43 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
           <div className="flex flex-wrap items-center gap-2">
             {session.status === 'SCHEDULED' && (
               <>
-                {/* TS3 (F1) — "Start session" opens the live scribe for THIS
-                    booked row (transcript + note build as you talk), not the
-                    empty workspace dead-end. flash=1 arms the mic on arrival. */}
-                <Link
-                  href={`/app/sessions/${session.id}/live?flash=1`}
-                  className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
-                >
-                  Start session
-                </Link>
+                {/* TS3 (F1) → TS6 — a split Start button, doctor-style: the
+                    preferred capture is primary, the other is in the caret.
+                    Both attach to THIS booked row (the batch flow reuses it
+                    via startNow). flash=1 arms the mic on the live path. */}
+                <div className="relative flex items-stretch">
+                  <Link
+                    href={primaryStart.href}
+                    className="rounded-l-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+                  >
+                    {primaryStart.primaryLabel}
+                  </Link>
+                  <button
+                    type="button"
+                    aria-label="More ways to start"
+                    aria-expanded={startMenuOpen}
+                    onClick={() => setStartMenuOpen((o) => !o)}
+                    className="rounded-r-full border-l border-white/25 bg-[var(--color-accent)] px-2.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
+                  >
+                    ▾
+                  </button>
+                  {startMenuOpen && (
+                    <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-xl border border-[var(--color-line)] bg-white shadow-lg">
+                      <Link
+                        href={secondaryStart.href}
+                        className="block w-full px-4 py-3 text-left hover:bg-[var(--color-surface-soft)]"
+                        onClick={() => setStartMenuOpen(false)}
+                      >
+                        <span className="block text-sm font-medium text-[var(--color-ink)]">
+                          {secondaryStart.menuLabel}
+                        </span>
+                        <span className="block text-xs text-[var(--color-ink-3)]">
+                          {secondaryStart.menuDesc}
+                        </span>
+                      </Link>
+                    </div>
+                  )}
+                </div>
                 <Button
                   variant="secondary"
                   onClick={() => setRescheduleOpen(true)}
@@ -133,10 +189,16 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
               </>
             )}
             {session.status === 'IN_PROGRESS' && (
-              // TS3 (F1) — reconnect to the live scribe (no flash: the
-              // therapist re-arms the mic explicitly on a resume).
+              // TS3 (F1) → TS6 — resume where the session actually lives: the
+              // live scribe when it was started live (captureMode LIVE; no
+              // flash — the therapist re-arms the mic explicitly), else the
+              // batch record flow (which reuses this in-progress session).
               <Link
-                href={`/app/sessions/${session.id}/live`}
+                href={
+                  session.captureMode === 'LIVE'
+                    ? `/app/sessions/${session.id}/live`
+                    : `/app?record=${session.clientId}`
+                }
                 className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
               >
                 Resume

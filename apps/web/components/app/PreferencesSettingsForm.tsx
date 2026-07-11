@@ -121,7 +121,7 @@ export function PreferencesSettingsForm({ initial }: Props) {
           </select>
         </div>
 
-        {/* DS11.7-fu — doctors only: the capture pipeline a new consult opens
+        {/* DS11.7-fu — doctors: the capture pipeline a new consult opens
             in. Live is the product default; a doctor in a noisy OPD or without
             a reliable mic can pre-select dictation or upload. Every mode stays
             reachable from the Start button's caret regardless. */}
@@ -143,6 +143,30 @@ export function PreferencesSettingsForm({ initial }: Props) {
               <option value="LIVE">Live consult</option>
               <option value="DICTATE">Dictate / record after visit</option>
               <option value="UPLOAD">Upload a recording</option>
+            </select>
+          </div>
+        )}
+
+        {/* TS6 — therapists: live scribe vs record-only, mirroring the
+            doctor's preference. Picks the PRIMARY on the Today card's Start
+            button and preselects the toggle in the record flow; the other
+            path always stays one tap away. */}
+        {!isDoctor && (
+          <div>
+            <label className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Default session capture
+            </label>
+            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+              How “Start session” records by default. You can switch on any individual session.
+            </p>
+            <select
+              value={captureMode}
+              onChange={(e) => setCaptureMode(e.target.value as CaptureMode | '')}
+              className="mt-2 w-full rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3 text-sm"
+            >
+              <option value="">Live scribe (default)</option>
+              <option value="LIVE">Live scribe — note builds as you talk</option>
+              <option value="DICTATE">Record only — note after the session</option>
             </select>
           </div>
         )}

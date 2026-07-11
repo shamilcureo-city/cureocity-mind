@@ -30,6 +30,12 @@ interface Props {
    * `upload`       → no radio; downstream renders FileUploadPanel.
    */
   mode?: ConfirmMode;
+  /**
+   * TS6 — the therapist's preferred capture for in-person sessions: live
+   * scribe vs record-only (batch). Preselects the toggle; never removes a
+   * path. From Psychologist.defaultCaptureMode (non-LIVE ⇒ BATCH).
+   */
+  defaultCapture?: 'LIVE' | 'BATCH';
   onCancel: () => void;
   onReady: (result: RecordReady) => void;
 }
@@ -123,6 +129,7 @@ export function RecordConfirmStrip({
   clientId,
   clientName,
   mode = 'live-capture',
+  defaultCapture = 'LIVE',
   onCancel,
   onReady,
 }: Props) {
@@ -134,6 +141,11 @@ export function RecordConfirmStrip({
   const [modality, setModality] = useState<SessionModality | null>(null);
   const [language, setLanguage] = useState<string>('en');
   const [method, setMethod] = useState<CaptureSource>(mode === 'dictation' ? 'dictation' : 'mic');
+  // TS6 — for in-person (mic) capture the therapist chooses: live scribe
+  // (transcript + note build as you talk) or record-only (batch note after).
+  const [capture, setCapture] = useState<'live' | 'batch'>(
+    defaultCapture === 'BATCH' ? 'batch' : 'live',
+  );
   const [displaySupported, setDisplaySupported] = useState(true);
   const [showDetails, setShowDetails] = useState(false);
 
@@ -273,12 +285,14 @@ export function RecordConfirmStrip({
         }
       }
 
-      // TS3 (F1) — in-person live capture goes to the live scribe (transcript
-      // + note build as you talk, like the doctor consult). The live page's
+      // TS3 (F1) → TS6 — in-person live capture goes to the live scribe
+      // (transcript + note build as you talk, like the doctor consult) ONLY
+      // when the therapist chose it — record-only stays on the batch recorder
+      // (full-session audio, note generated on finish). The live page's
       // live-token call performs the SCHEDULED→IN_PROGRESS start, so we skip
-      // the batch /start here. Virtual (tab-audio), dictation and upload stay
+      // the batch /start there. Virtual (tab-audio), dictation and upload stay
       // on the batch recorder — the live stream is mic-only for now.
-      const useLiveScribe = mode === 'live-capture' && method === 'mic';
+      const useLiveScribe = mode === 'live-capture' && method === 'mic' && capture === 'live';
       if (useLiveScribe) {
         router.push(`/app/sessions/${sessionRow.id}/live?flash=1`);
         return;
@@ -357,6 +371,28 @@ export function RecordConfirmStrip({
                   title="Virtual"
                   description="Capture tab audio for an online session."
                   disabled={!displaySupported}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* TS6 — the capture choice, doctor-style: live scribe or record-
+              only. Mic-only (the live stream doesn't take tab audio yet). */}
+          {mode === 'live-capture' && method === 'mic' && (
+            <div className="mt-5">
+              <Label>During the session</Label>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <MethodOption
+                  checked={capture === 'live'}
+                  onSelect={() => setCapture('live')}
+                  title="Live scribe"
+                  description="Transcript, note and copilot build on screen as you talk."
+                />
+                <MethodOption
+                  checked={capture === 'batch'}
+                  onSelect={() => setCapture('batch')}
+                  title="Record only"
+                  description="Just records — the note generates when you finish."
                 />
               </div>
             </div>

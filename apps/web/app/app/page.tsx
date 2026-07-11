@@ -13,8 +13,13 @@ import type { Session as SessionPrismaRow } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
 
-export default async function RecordPage() {
+export default async function RecordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ record?: string }>;
+}) {
   const therapist = await requireOnboardedPsychologist();
+  const sp = await searchParams;
 
   // Sprint DV2 — doctors don't use the therapy record surface; their home
   // is the clinic queue (Sprint DS7 made the OPD queue the landing page,
@@ -82,7 +87,15 @@ export default async function RecordPage() {
   return (
     <main>
       <Container className="py-10">
-        <RecordingShell clients={clients} />
+        <RecordingShell
+          clients={clients}
+          initialClientId={sp.record ?? null}
+          defaultCapture={
+            therapist.defaultCaptureMode && therapist.defaultCaptureMode !== 'LIVE'
+              ? 'BATCH'
+              : 'LIVE'
+          }
+        />
 
         <FirstRunChecklist psychologistId={therapist.id} />
 

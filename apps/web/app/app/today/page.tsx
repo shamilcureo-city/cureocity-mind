@@ -31,6 +31,10 @@ export const dynamic = 'force-dynamic';
  */
 export default async function TodayPage() {
   const therapist = await requireOnboardedPsychologist();
+  // TS6 — the therapist's preferred capture picks the Start button's primary
+  // action (LIVE unless they chose a batch-first preference).
+  const defaultCapture: 'LIVE' | 'BATCH' =
+    therapist.defaultCaptureMode && therapist.defaultCaptureMode !== 'LIVE' ? 'BATCH' : 'LIVE';
 
   const { startOfToday, endOfToday, startOfTomorrow, lookAheadEnd } = computeDayBoundaries();
 
@@ -125,7 +129,7 @@ export default async function TodayPage() {
           <ul className="space-y-3">
             {nowAndUpcoming.map((s) => (
               <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} />
+                <TodaySessionCard session={toCardProps(s)} defaultCapture={defaultCapture} />
               </li>
             ))}
           </ul>
@@ -140,7 +144,7 @@ export default async function TodayPage() {
           <ul className="space-y-3">
             {doneToday.map((s) => (
               <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} />
+                <TodaySessionCard session={toCardProps(s)} defaultCapture={defaultCapture} />
               </li>
             ))}
           </ul>
@@ -155,7 +159,7 @@ export default async function TodayPage() {
           <ul className="space-y-3">
             {otherToday.map((s) => (
               <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} />
+                <TodaySessionCard session={toCardProps(s)} defaultCapture={defaultCapture} />
               </li>
             ))}
           </ul>
@@ -212,6 +216,7 @@ const sessionSelect = {
   scheduledAt: true,
   modality: true,
   kind: true,
+  captureMode: true,
   clientId: true,
   client: { select: { id: true, fullNameEncrypted: true, isDemo: true } },
   noteDraft: { select: { status: true } },
@@ -224,6 +229,7 @@ function toCardProps(row: {
   scheduledAt: Date;
   modality: string | null;
   kind: string;
+  captureMode: string | null;
   clientId: string;
   client: { fullName: string; isDemo: boolean };
   noteDraft: { status: string } | null;
@@ -246,6 +252,7 @@ function toCardProps(row: {
     clientIsDemo: row.client.isDemo,
     hasSignedNote: row.therapyNote !== null,
     draftStatus: row.noteDraft?.status ?? null,
+    captureMode: row.captureMode,
   };
 }
 

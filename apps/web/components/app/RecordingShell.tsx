@@ -13,6 +13,11 @@ type ConfirmMode = 'live-capture' | 'dictation' | 'upload';
 
 interface Props {
   clients: ClientTileEntry[];
+  /** TS6 — deep link (`/app?record=<clientId>`): open the confirm strip for
+   *  this client directly (the Today card's record / resume-batch path). */
+  initialClientId?: string | null;
+  /** TS6 — the therapist's preferred in-person capture (live vs batch). */
+  defaultCapture?: 'LIVE' | 'BATCH';
 }
 
 type ShellState =
@@ -44,9 +49,20 @@ type ShellState =
  * you decide modality — pre-filling a default would be clinically
  * wrong).
  */
-export function RecordingShell({ clients }: Props) {
+export function RecordingShell({ clients, initialClientId = null, defaultCapture }: Props) {
   const router = useRouter();
-  const [shell, setShell] = useState<ShellState>({ kind: 'pick', intent: 'live' });
+  const [shell, setShell] = useState<ShellState>(() => {
+    // TS6 — arriving via /app?record=<clientId> lands straight on the confirm
+    // strip for that client (an unknown id just falls back to the picker).
+    const preselected = initialClientId ? clients.find((c) => c.id === initialClientId) : undefined;
+    return preselected
+      ? {
+          kind: 'confirm',
+          client: { id: preselected.id, fullName: preselected.fullName },
+          mode: 'live-capture',
+        }
+      : { kind: 'pick', intent: 'live' };
+  });
 
   function handleReady(result: RecordReady, mode: ConfirmMode): void {
     if (mode === 'upload') {
@@ -118,6 +134,7 @@ export function RecordingShell({ clients }: Props) {
         clientId={shell.client.id}
         clientName={shell.client.fullName}
         mode={mode}
+        defaultCapture={defaultCapture ?? 'LIVE'}
         onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
         onReady={(ready) => handleReady(ready, mode)}
       />
