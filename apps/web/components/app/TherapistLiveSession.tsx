@@ -31,12 +31,15 @@ import {
   type MeterSummary,
   type SessionKind,
   type SessionModality,
+  type TherapyCarriedQuestion,
+  type TherapyReasoningV1,
   type TherapyNoteV1,
   type Utterance,
 } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { TherapyCopilotRail } from './TherapyCopilotRail';
 
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
@@ -51,6 +54,10 @@ interface Props {
   clientName?: string;
   /** Auto-start the mic once (arriving via a flash/queue flow). */
   autoStart?: boolean;
+  /** Sprint TS5 — the copilot's live context (fed to the gateway at connect). */
+  carriedQuestions?: TherapyCarriedQuestion[];
+  priorRisk?: boolean;
+  plannedMinutes?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +200,9 @@ export function TherapistLiveSession({
   language,
   clientName,
   autoStart,
+  carriedQuestions = [],
+  priorRisk = false,
+  plannedMinutes = null,
 }: Props) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>('idle');
@@ -203,6 +213,8 @@ export function TherapistLiveSession({
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
+  // Sprint TS5 — the live copilot snapshot (risk / ask-next / threads / arc).
+  const [copilot, setCopilot] = useState<TherapyReasoningV1 | null>(null);
   // Set when the consult ended but no note ever arrived (Pass 2 empty/blocked
   // upstream). Terminal, recoverable — never leave the user on "Finishing…".
   const [noteFailed, setNoteFailed] = useState(false);
@@ -254,6 +266,28 @@ export function TherapistLiveSession({
       void start();
     }
   }, [autoStart, phase]);
+
+  // Sprint TS5 — record a "shown" audit the first time each copilot card
+  // appears, so the pilot dataset captures shown → acted/dismissed. The
+  // deterministic SI re-check is excluded (it's not a model suggestion).
+  const shownIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!copilot) return;
+    const items: { id: string; kind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP'; label: string }[] = [
+      ...copilot.riskWatch
+        .filter((r) => r.source !== 'CARRIED_RISK')
+        .map((r) => ({ id: r.id, kind: 'RED_FLAG' as const, label: r.label })),
+      ...copilot.askNext
+        .filter((a) => a.source === 'LIVE')
+        .map((a) => ({ id: a.id, kind: 'ASK_NEXT' as const, label: a.question })),
+      ...copilot.threads.map((t) => ({ id: t.id, kind: 'GAP' as const, label: t.topic })),
+    ];
+    for (const it of items) {
+      if (shownIdsRef.current.has(it.id)) continue;
+      shownIdsRef.current.add(it.id);
+      relaySuggestion('shown', it.id, it.kind, it.label);
+    }
+  }, [copilot]);
 
   function buildTranscript(items: Utterance[]): string {
     return [...items]
@@ -360,6 +394,11 @@ export function TherapistLiveSession({
           vertical: 'THERAPIST',
           kind,
           modality,
+          therapyContext: {
+            carriedQuestions,
+            priorRisk,
+            plannedMinutes: plannedMinutes ?? null,
+          },
         }),
       );
       void stream.start().catch((e: Error) => {
@@ -413,6 +452,9 @@ export function TherapistLiveSession({
           setNoteUpdatedAt(Date.now());
           setRefreshingNote(false);
           break;
+        case 'therapyReasoning':
+          setCopilot(event.reasoning);
+          break;
         case 'meter':
           meterRef.current = event.summary;
           break;
@@ -447,6 +489,44 @@ export function TherapistLiveSession({
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     // If nothing changed, no event comes back — quietly re-enable the button.
     refreshTimerRef.current = setTimeout(() => setRefreshingNote(false), 12_000);
+  }
+
+  /** Sprint TS5 — relay one copilot-suggestion lifecycle event to the audit
+   *  trail (best-effort; the gateway can't touch the DB, the browser relays). */
+  function relaySuggestion(
+    event: 'shown' | 'acted' | 'dismissed',
+    suggestionId: string,
+    suggestionKind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
+    label?: string,
+  ): void {
+    void fetch(`/api/v1/sessions/${sessionId}/live-suggestion`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        event,
+        suggestionId,
+        kind: suggestionKind,
+        ...(label ? { label } : {}),
+      }),
+    }).catch(() => {
+      /* audit is best-effort */
+    });
+  }
+
+  /** Acted / dismissed a copilot card: stop the gateway re-suggesting it +
+   *  record the outcome. "acted" (Asked ✓ / Explore) and "dismissed" both
+   *  resolve the card so it leaves the rail. */
+  function resolveCopilot(
+    id: string,
+    suggestionKind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
+    event: 'acted' | 'dismissed',
+    label?: string,
+  ): void {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify({ type: 'dismiss', questionId: id }));
+    }
+    relaySuggestion(event, id, suggestionKind, label);
   }
 
   const sorted = [...utterances].sort((a, b) => a.tStartMs - b.tStartMs);
@@ -607,8 +687,13 @@ export function TherapistLiveSession({
 
           {/* ============ Right rail ============ */}
           <div className="space-y-4 lg:col-span-5">
-            {/* Risk watch — always present */}
-            {risk ? (
+            {/* Sprint TS5 — the live copilot (risk / ask-next / threads / arc)
+                once the first reasoning snapshot arrives; before that (and if a
+                Pass-2 note-level risk appears first) a calm/escalated safety
+                card holds the space. */}
+            {copilot ? (
+              <TherapyCopilotRail reasoning={copilot} onResolve={resolveCopilot} />
+            ) : risk ? (
               <Card
                 className={`p-4 text-sm ${
                   risk.severity === 'critical' || risk.severity === 'high'
@@ -624,10 +709,10 @@ export function TherapistLiveSession({
                 <span className="mt-1.5 h-2 w-2 flex-none rounded-full bg-[var(--color-accent)]" />
                 <div>
                   <p className="text-sm font-medium text-[var(--color-ink)]">
-                    Risk watch — no signals so far
+                    Copilot — warming up
                   </p>
                   <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
-                    Escalates here the moment something needs your attention.
+                    Risk cues, questions to ask, and unexplored threads appear here as you talk.
                   </p>
                 </div>
               </Card>
