@@ -1,0 +1,27 @@
+# Builds the live-gateway container on Cloud Build and pushes it to
+# Artifact Registry (asia-south1). The Dockerfile needs the REPO ROOT as its
+# build context (the pnpm workspace lockfile lives there), which is why this
+# config exists instead of `gcloud run deploy --source`.
+#
+# One-time setup (Cloud Shell):
+#   gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com
+#   gcloud artifacts repositories create cureocity --repository-format=docker --location=asia-south1
+#
+# Build:
+#   gcloud builds submit --config cloudbuild.gateway.yaml .
+#
+# Deploy: see docs/runbooks/live-gateway-deploy.md (Cloud Run section).
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-f'
+      - 'services/live-gateway/Dockerfile'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cureocity/live-gateway:latest'
+      - '.'
+images:
+  - 'asia-south1-docker.pkg.dev/$PROJECT_ID/cureocity/live-gateway:latest'
+options:
+  machineType: 'E2_HIGHCPU_8'
+timeout: 1800s
