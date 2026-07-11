@@ -35,6 +35,10 @@ const RANK_META: Record<CareQuestionRank, { label: string; chip: string }> = {
  * with. The questions are the top few by rank; JE4 adds the full drawer.
  */
 export function CareNextSessionPanel({ questions, cadence, clientId }: Props) {
+  const [showAll, setShowAll] = useState(false);
+  const shown = showAll ? questions.all : questions.top;
+  const hasMore = questions.all.length > questions.top.length;
+
   return (
     <div className="space-y-4">
       <Card className="p-6">
@@ -62,16 +66,28 @@ export function CareNextSessionPanel({ questions, cadence, clientId }: Props) {
           </p>
         </header>
 
-        {questions.top.length === 0 ? (
+        {shown.length === 0 ? (
           <p className="mt-3 text-sm text-[var(--color-ink-3)]">
             Nothing outstanding — the picture is clear enough to proceed.
           </p>
         ) : (
           <ul className="mt-3 space-y-2">
-            {questions.top.map((q) => (
+            {shown.map((q) => (
               <QuestionRow key={q.id} clientId={clientId} question={q} />
             ))}
           </ul>
+        )}
+
+        {hasMore && (
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="mt-3 text-xs font-medium text-[var(--color-accent)] hover:underline"
+          >
+            {showAll
+              ? 'Show top few'
+              : `Show all ${questions.all.length} open question${questions.all.length === 1 ? '' : 's'}`}
+          </button>
         )}
       </Card>
 

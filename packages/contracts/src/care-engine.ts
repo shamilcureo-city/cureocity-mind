@@ -169,6 +169,9 @@ export type CareRankedQuestion = z.infer<typeof CareRankedQuestionSchema>;
 export const CareQuestionsSchema = z.object({
   /** Top few by information value (differentiators before confirmers). */
   top: z.array(CareRankedQuestionSchema),
+  /** The COMPLETE ranked list (same order as `top`, which is its head) —
+   *  backs the "show all N" drawer without a second query or a client re-rank. */
+  all: z.array(CareRankedQuestionSchema),
   openCount: z.number().int().nonnegative(),
   staleCount: z.number().int().nonnegative(),
   /** How many open questions currently gate the diagnosis. */

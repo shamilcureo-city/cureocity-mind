@@ -367,6 +367,9 @@ describe('computeCareEngine — questions', () => {
     );
     expect(e.questions.top.length).toBe(CARE_ENGINE_CONSTANTS.TOP_QUESTIONS);
     expect(e.questions.openCount).toBe(9);
+    // `all` carries every ranked question (the drawer source); `top` is its head.
+    expect(e.questions.all.length).toBe(9);
+    expect(e.questions.all.slice(0, CARE_ENGINE_CONSTANTS.TOP_QUESTIONS)).toEqual(e.questions.top);
   });
 });
 

@@ -658,6 +658,7 @@ function buildQuestions(input: CareEngineInput, f: CareFacts) {
   const gateCount = ranked.filter((q) => q.rank === 'differentiate' || q.rank === 'confirm').length;
   return {
     top: ranked.slice(0, CARE_ENGINE_CONSTANTS.TOP_QUESTIONS),
+    all: ranked,
     openCount: ranked.length,
     staleCount,
     gateCount,
