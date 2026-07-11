@@ -1471,6 +1471,12 @@ model ClinicalReport {
   totalCostInr Decimal @default(0) @db.Decimal(10, 4)
   errorMessage String? @db.Text
 
+  /// Sprint TSC-V2 — set when the therapist taps "Finish review" on the
+  /// copilot decision board's wrap-up step. Marks the session's copilot
+  /// review as complete; decisions stay revisable after (this is a
+  /// checkpoint, not a lock).
+  reviewedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2570,6 +2576,8 @@ enum AuditAction {
   CRISIS_ACKNOWLEDGED
   // Sprint TSC — copilot decision board carried-questions save.
   CARRIED_QUESTIONS_UPDATED
+  // Sprint TSC-V2 — decision-board wrap-up: therapist finished the review.
+  COPILOT_REVIEW_FINISHED
 
   // Therapy script — Sprint 14.
   // Pass 4 generates a per-therapy script keyed by (client, therapy,

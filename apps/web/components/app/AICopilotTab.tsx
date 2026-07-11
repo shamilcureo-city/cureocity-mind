@@ -221,6 +221,7 @@ async function SessionSub({
         sessionKind={sessionKind}
         initialReport={reportRow ? toClinicalReport(reportRow) : null}
         initialBrief={isIntake && reportRow ? readInitialAssessmentBrief(reportRow) : null}
+        reviewedAt={reportRow?.reviewedAt?.toISOString() ?? null}
         record={record}
       />
       {!isIntake && noteJson && (

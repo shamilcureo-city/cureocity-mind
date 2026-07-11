@@ -439,6 +439,16 @@ export const AcceptIntakeDiagnosisInputSchema = z.object({
 });
 export type AcceptIntakeDiagnosisInput = z.infer<typeof AcceptIntakeDiagnosisInputSchema>;
 
+/// Create treatment-plan v1 from an INTAKE brief's suggested approaches. The
+/// therapist drafts a plan in the board's editor (seeded from the differential
+/// + selected approaches) and saves it; this creates the first versioned
+/// TreatmentPlan, mirroring the treatment-report plan-confirm write.
+/// POST /api/v1/clinical-reports/[id]/intake-plan
+export const AcceptIntakePlanInputSchema = z.object({
+  treatmentPlan: ClinicalTreatmentPlanSchema,
+});
+export type AcceptIntakePlanInput = z.infer<typeof AcceptIntakePlanInputSchema>;
+
 /// One question the therapist ticked on the decision board to carry into the
 /// client's NEXT session (woven into the pre-session brief's case digest).
 export const CarriedQuestionSchema = z.object({

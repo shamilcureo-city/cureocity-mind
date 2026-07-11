@@ -86,6 +86,9 @@ interface Props {
   initialReport: ClinicalReport | null;
   /// Parsed intake brief (INTAKE kind only).
   initialBrief: InitialAssessmentBriefV1 | null;
+  /// ISO timestamp of the last "Finish review" tap, or null. Passed
+  /// separately from the report DTO (which doesn't carry it).
+  reviewedAt: string | null;
   record: CaseRecordSnapshot;
 }
 
@@ -115,6 +118,7 @@ export function CopilotDecisionBoard({
   sessionKind,
   initialReport,
   initialBrief,
+  reviewedAt,
   record,
 }: Props) {
   const router = useRouter();
@@ -267,6 +271,31 @@ export function CopilotDecisionBoard({
     [report, router],
   );
 
+  const acceptIntakePlan = useCallback(
+    async (plan: ClinicalTreatmentPlan): Promise<void> => {
+      if (!report) throw new Error('No report to confirm against.');
+      const res = await fetch(`/api/v1/clinical-reports/${report.id}/intake-plan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ treatmentPlan: plan }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      router.refresh();
+    },
+    [report, router],
+  );
+
+  const finishReview = useCallback(async (): Promise<void> => {
+    if (!report) throw new Error('No report to finish.');
+    const res = await fetch(`/api/v1/clinical-reports/${report.id}/finish-review`, {
+      method: 'POST',
+    });
+    const payload = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+    router.refresh();
+  }, [report, router]);
+
   // ----- pre-reading states -----
 
   const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=measures`;
@@ -405,16 +434,28 @@ export function CopilotDecisionBoard({
                 plan={data.plan}
                 therapies={data.therapies}
                 confirmation={confirmations?.plan ?? null}
+                recordPlan={record.plan}
                 onAccept={() => patchSection('plan', { action: 'accept' })}
                 onModify={(edits, reason) =>
                   patchSection('plan', { action: 'modify', reason, edits })
                 }
+                onDraftPlan={acceptIntakePlan}
               />
 
               <BaselineStep
                 recommendedInstruments={data.recommendedInstruments}
                 instruments={record.instruments}
                 measuresHref={measuresHref}
+              />
+
+              <WrapUpStep
+                isIntake={isIntake}
+                hasCrisis={data.crisisFlags.length > 0}
+                crisisAcknowledged={crisisAcknowledged}
+                record={record}
+                reviewedAt={reviewedAt}
+                measuresHref={measuresHref}
+                onFinish={finishReview}
               />
             </div>
             {crisisBlocking && (
@@ -707,10 +748,36 @@ function ImpressionStep({
   const [dismissed, setDismissed] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // "Change decision" reopens the accepted view for a fresh accept.
+  const [reopened, setReopened] = useState(false);
 
   const confirmed = confirmation !== null && confirmation.status !== 'PENDING';
   const intakeAccepted = isIntake && recordDiagnoses.some((d) => d.sessionId === sessionId);
-  const done = confirmed || intakeAccepted;
+  const decided = confirmed || intakeAccepted;
+  // When reopened, the step is editable again even though a decision exists.
+  const done = decided && !reopened;
+
+  // Reopen the selection pre-loaded from the CURRENT record, so re-accepting
+  // starts from what's true today (not the AI's original slate). Re-accepting
+  // supersedes the prior diagnosis rows; the record keeps full history.
+  const reopen = () => {
+    const activeCodes = new Map(recordDiagnoses.map((d) => [d.icd11Code, d]));
+    const sel = new Set<number>();
+    let prim: number | null = null;
+    candidates.forEach((c, i) => {
+      const rec = activeCodes.get(c.icd11Code);
+      if (rec) {
+        sel.add(i);
+        if (rec.isPrimary) prim = i;
+      }
+    });
+    // Fall back to the AI slate if nothing in the record matches a candidate.
+    setSelected(sel.size > 0 ? sel : new Set(isIntake ? [] : candidates.map((_, i) => i)));
+    setPrimary(sel.size > 0 ? prim : primaryIndex);
+    setDismissed(new Set());
+    setError(null);
+    setReopened(true);
+  };
 
   const toggleExpand = (i: number) =>
     setExpanded((s) => {
@@ -764,6 +831,7 @@ function ImpressionStep({
           `Decision board: accepted ${selectedIdxs.length} of ${candidates.length} candidate(s) as the working diagnosis.`,
         );
       }
+      setReopened(false);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -918,11 +986,14 @@ function ImpressionStep({
 
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         {done ? (
-          <DoneChip>
-            {intakeAccepted
-              ? `${recordDiagnoses.filter((d) => d.sessionId === sessionId).length} in your record`
-              : `In your record — ${confirmation!.status.toLowerCase()} ${formatDate(confirmation!.confirmedAt)}`}
-          </DoneChip>
+          <>
+            <DoneChip>
+              {intakeAccepted
+                ? `${recordDiagnoses.filter((d) => d.sessionId === sessionId).length} in your record`
+                : `In your record — ${confirmation!.status.toLowerCase()} ${formatDate(confirmation!.confirmedAt)}`}
+            </DoneChip>
+            <Act onClick={reopen}>Change decision</Act>
+          </>
         ) : (
           candidates.length > 0 && (
             <>
@@ -931,9 +1002,15 @@ function ImpressionStep({
                   ? 'Saving…'
                   : `Accept ${selected.size || ''}${selected.size ? ' ' : ''}as working diagnosis`}
               </Act>
+              {reopened && (
+                <Act quiet onClick={() => setReopened(false)} disabled={busy}>
+                  Cancel
+                </Act>
+              )}
               <span className="text-[11px] text-[var(--color-ink-3)]">
-                Accepted diagnoses persist to the client&rsquo;s record; prior active ones are
-                superseded.
+                {reopened
+                  ? 'Re-accepting supersedes the prior diagnosis; history is kept.'
+                  : 'Accepted diagnoses persist to the client’s record; prior active ones are superseded.'}
               </span>
             </>
           )
@@ -1182,15 +1259,22 @@ function PlanStep({
   plan,
   therapies,
   confirmation,
+  recordPlan,
   onAccept,
   onModify,
+  onDraftPlan,
 }: {
   isIntake: boolean;
   plan: ClinicalTreatmentPlan | null;
   therapies: ClinicalRecommendedTherapy[];
   confirmation: ClinicalSectionConfirmation | null;
+  /// The client's active plan (right-lane truth). On intakes, its presence
+  /// means "plan v1 already drafted".
+  recordPlan: RecordPlan | null;
   onAccept: () => Promise<void>;
   onModify: (edits: unknown, reason: string) => Promise<void>;
+  /// Intake only — create/replace treatment-plan v1 from the drafted plan.
+  onDraftPlan: (plan: ClinicalTreatmentPlan) => Promise<void>;
 }) {
   const [busy, setBusy] = useState<null | 'accept' | 'modify'>(null);
   const [editing, setEditing] = useState(false);
@@ -1222,25 +1306,10 @@ function PlanStep({
     }
   };
 
+  // --- Intake: tick approaches → draft a versioned plan v1. ---
   if (isIntake || !plan) {
     return (
-      <Step
-        no={4}
-        title="Suggested approaches"
-        sub="First-line directions to consider. A versioned treatment plan is proposed from your first treatment-session brief."
-      >
-        {therapies.length === 0 ? (
-          <p className="text-sm text-[var(--color-ink-2)]">
-            No first-line therapies recommended — the differential is too uncertain.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {therapies.map((t, i) => (
-              <TherapyCard key={i} therapy={t} />
-            ))}
-          </div>
-        )}
-      </Step>
+      <IntakePlanStep therapies={therapies} recordPlan={recordPlan} onDraftPlan={onDraftPlan} />
     );
   }
 
@@ -1336,9 +1405,19 @@ function PlanStep({
   );
 }
 
-function TherapyCard({ therapy }: { therapy: ClinicalRecommendedTherapy }) {
-  return (
-    <div className="rounded-xl border border-[var(--color-line-soft)] p-3">
+function TherapyCard({
+  therapy,
+  selectable = false,
+  selected = false,
+  onToggle,
+}: {
+  therapy: ClinicalRecommendedTherapy;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggle?: () => void;
+}) {
+  const inner = (
+    <>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <b className="text-sm">{therapy.name}</b>
         <span className="rounded-full border border-[var(--color-line)] px-2 py-px text-[11px] text-[var(--color-ink-3)]">
@@ -1346,8 +1425,192 @@ function TherapyCard({ therapy }: { therapy: ClinicalRecommendedTherapy }) {
         </span>
       </div>
       <p className="mt-1 text-[13px] text-[var(--color-ink-2)]">{therapy.rationale}</p>
-    </div>
+    </>
   );
+  if (!selectable) {
+    return <div className="rounded-xl border border-[var(--color-line-soft)] p-3">{inner}</div>;
+  }
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-2.5 rounded-xl border p-3 ${
+        selected
+          ? 'border-[#d8e6de] bg-[var(--color-accent-soft)]'
+          : 'border-[var(--color-line-soft)]'
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={selected}
+        onChange={onToggle}
+        className="mt-1 accent-[var(--color-accent)]"
+      />
+      <span className="min-w-0 flex-1">{inner}</span>
+    </label>
+  );
+}
+
+// ============================================================================
+// Step 4 (intake) — approaches become treatment-plan v1.
+//
+// The therapist ticks the approaches they'd start with; "Draft plan v1" opens
+// the SAME PlanEditor the treatment brief uses, pre-seeded from those
+// approaches (modality inferred, a sensible phase sequence, one goal per
+// approach + a measurement goal). Saving creates the first versioned
+// TreatmentPlan through the intake-plan route — so a plan exists from day one.
+// ============================================================================
+
+function IntakePlanStep({
+  therapies,
+  recordPlan,
+  onDraftPlan,
+}: {
+  therapies: ClinicalRecommendedTherapy[];
+  recordPlan: RecordPlan | null;
+  onDraftPlan: (plan: ClinicalTreatmentPlan) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<Set<number>>(() => new Set(therapies.map((_, i) => i)));
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const toggle = (i: number) =>
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+
+  const seed = useMemo(
+    () => seedIntakePlan(therapies.filter((_, i) => selected.has(i))),
+    [therapies, selected],
+  );
+
+  const draft = async (edits: unknown, _reason: string) => {
+    const plan = (edits as { treatmentPlan?: ClinicalTreatmentPlan }).treatmentPlan;
+    if (!plan) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onDraftPlan(plan);
+      setEditing(false);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Step
+      no={4}
+      title="Suggested approaches"
+      sub="Tick what you'd start with — drafting opens the plan editor pre-filled, and saving creates treatment plan v1."
+    >
+      {therapies.length === 0 ? (
+        <p className="text-sm text-[var(--color-ink-2)]">
+          No first-line therapies recommended — the differential is too uncertain to seed a plan.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {therapies.map((t, i) => (
+            <TherapyCard
+              key={i}
+              therapy={t}
+              selectable={!editing}
+              selected={selected.has(i)}
+              onToggle={() => toggle(i)}
+            />
+          ))}
+        </div>
+      )}
+
+      {editing ? (
+        <div className="mt-3.5">
+          <PlanEditor
+            initialPlan={seed}
+            busy={busy}
+            error={error}
+            onCancel={() => {
+              setEditing(false);
+              setError(null);
+            }}
+            onSubmit={(edits, reason) => void draft(edits, reason)}
+          />
+        </div>
+      ) : (
+        <div className="mt-3.5 flex flex-wrap items-center gap-2">
+          {recordPlan ? (
+            <>
+              <DoneChip>
+                Plan v{recordPlan.version} in your record · {formatDate(recordPlan.confirmedAt)}
+              </DoneChip>
+              {therapies.length > 0 && <Act onClick={() => setEditing(true)}>Revise plan</Act>}
+            </>
+          ) : (
+            therapies.length > 0 && (
+              <>
+                <Act primary onClick={() => setEditing(true)} disabled={selected.size === 0}>
+                  Draft plan v1 from {selected.size} selected
+                </Act>
+                <span className="text-[11px] text-[var(--color-ink-3)]">
+                  You edit modality, phases, and goals before it saves.
+                </span>
+              </>
+            )
+          )}
+          {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
+        </div>
+      )}
+    </Step>
+  );
+}
+
+/**
+ * Seed a plan-v1 draft from the intake approaches the therapist ticked.
+ * Deterministic + conservative — the therapist edits everything in the
+ * PlanEditor before it persists, so this only needs to be a sensible
+ * starting point that satisfies ClinicalTreatmentPlanSchema.
+ */
+function seedIntakePlan(approaches: ClinicalRecommendedTherapy[]): ClinicalTreatmentPlan {
+  const names = approaches.map((a) => a.name);
+  const joined = names.join(' ').toLowerCase();
+  const modality: ClinicalTreatmentPlan['modality'] = /emdr/.test(joined)
+    ? 'EMDR'
+    : /cbt|cognitive|behavioural|behavioral|activation|exposure/.test(joined)
+      ? 'CBT'
+      : names.length === 0
+        ? 'supportive'
+        : 'mixed';
+
+  const core =
+    names.length > 0
+      ? `Core work: ${names.slice(0, 2).join(' + ')}`.slice(0, 120)
+      : 'Core treatment work';
+  const phaseSequence = [
+    'Safety & stabilisation',
+    'Complete assessment',
+    core,
+    'Relapse prevention',
+  ];
+
+  const goals: ClinicalTreatmentPlan['goals'] = [
+    {
+      description: 'Reduce symptom severity',
+      measure: 'PHQ-9 / GAD-7 trend toward reliable change',
+    },
+    ...names.slice(0, 4).map((n) => ({
+      description: `Engage in ${n}`.slice(0, 400),
+      measure: 'Therapist-rated engagement + between-session practice',
+    })),
+  ];
+
+  return {
+    modality,
+    phaseSequence,
+    goals: goals.slice(0, 8),
+    expectedDurationSessions: null,
+  };
 }
 
 // ============================================================================
@@ -1417,6 +1680,140 @@ function BaselineStep({
         </p>
       )}
     </Step>
+  );
+}
+
+// ============================================================================
+// Step 6 — Wrap up. A deterministic checklist of the five decisions with
+// anything outstanding linked, plus "Finish review" — the board's "save"
+// moment. It's a CHECKPOINT (persists reviewedAt + audits), not a lock:
+// every decision above stays revisable afterwards.
+// ============================================================================
+
+function WrapUpStep({
+  isIntake,
+  hasCrisis,
+  crisisAcknowledged,
+  record,
+  reviewedAt,
+  measuresHref,
+  onFinish,
+}: {
+  isIntake: boolean;
+  hasCrisis: boolean;
+  crisisAcknowledged: boolean;
+  record: CaseRecordSnapshot;
+  reviewedAt: string | null;
+  measuresHref: string;
+  onFinish: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasBaseline = record.instruments.some((i) =>
+    ADMINISTERABLE.some((a) => a.key === i.instrumentKey),
+  );
+
+  const rows: { label: string; done: boolean; detail: string; href?: string }[] = [
+    {
+      label: 'Safety review',
+      done: !hasCrisis || crisisAcknowledged,
+      detail: !hasCrisis ? 'no flags' : crisisAcknowledged ? 'reviewed' : 'acknowledge in step 1',
+    },
+    {
+      label: 'Working diagnosis',
+      done: record.diagnoses.length > 0,
+      detail:
+        record.diagnoses.length > 0
+          ? `${record.diagnoses.find((d) => d.isPrimary)?.icd11Code ?? record.diagnoses[0]!.icd11Code} accepted`
+          : 'none accepted yet',
+    },
+    {
+      label: 'Questions for next session',
+      done: record.carriedQuestions.length > 0,
+      detail:
+        record.carriedQuestions.length > 0
+          ? `${record.carriedQuestions.length} carried`
+          : 'none carried',
+    },
+    {
+      label: 'Treatment plan',
+      done: record.plan !== null,
+      detail: record.plan
+        ? `v${record.plan.version} created`
+        : isIntake
+          ? 'draft v1 in step 4'
+          : 'not accepted',
+    },
+    {
+      label: 'Baseline measures',
+      done: hasBaseline,
+      detail: hasBaseline ? 'on file' : 'administer now',
+      href: hasBaseline ? undefined : measuresHref,
+    },
+  ];
+
+  const finish = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onFinish();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="relative border-t-[3px] border-t-[var(--color-accent)]">
+      <div className="flex gap-3 p-5">
+        <span className="mt-0.5 grid h-7 w-7 flex-none place-items-center rounded-full bg-[var(--color-accent-soft)] text-[13px] font-bold text-[var(--color-accent)]">
+          6
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-[15.5px] font-semibold">Wrap up</p>
+          <p className="mb-3 mt-0.5 text-xs text-[var(--color-ink-3)]">
+            Everything this review decided — finish when it reflects your judgement. You can still
+            change any decision after.
+          </p>
+          <div className="space-y-1.5">
+            {rows.map((r) => (
+              <div
+                key={r.label}
+                className="flex items-center gap-2 rounded-xl border border-[var(--color-line-soft)] px-3 py-2 text-[13.5px]"
+              >
+                <span
+                  className={r.done ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-3)]'}
+                >
+                  {r.done ? '✓' : '○'}
+                </span>
+                <span className="font-medium">{r.label}</span>
+                <span className="ml-auto text-xs text-[var(--color-ink-3)]">{r.detail}</span>
+                {r.href && (
+                  <Link
+                    href={r.href}
+                    className="text-xs font-semibold text-[var(--color-accent)] underline"
+                  >
+                    do it →
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3.5 flex flex-wrap items-center gap-2">
+            <Act primary onClick={() => void finish()} disabled={busy}>
+              {busy ? 'Saving…' : reviewedAt ? 'Re-finish review' : 'Finish review'}
+            </Act>
+            {reviewedAt && <DoneChip>Reviewed {formatDate(reviewedAt)}</DoneChip>}
+            <span className="text-[11px] text-[var(--color-ink-3)]">
+              Marks this session&rsquo;s review done — decisions stay editable.
+            </span>
+            {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 
