@@ -20,6 +20,8 @@ export * from './brief';
 export * from './prepare';
 export * from './instrument';
 export * from './journey';
+// Sprint JE1 — the Care Engine (imports from journey + instrument above).
+export * from './care-engine';
 export * from './episode';
 export * from './assessment-item';
 export * from './case-briefing';

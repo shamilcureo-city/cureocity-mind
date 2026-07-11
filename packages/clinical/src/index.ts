@@ -10,6 +10,7 @@ export * from './exercises/emdr-catalog';
 export * from './prescription/engine';
 export * from './instruments';
 export * from './instruments/change-score';
+export * from './journey/care-engine';
 export * from './crisis';
 export * from './interactions';
 export * from './specialty-templates';
