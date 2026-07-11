@@ -14,6 +14,12 @@ const RETENTION_DAYS = Number(process.env['AUDIO_RETENTION_DAYS'] ?? 30);
  * more than RETENTION_DAYS ago, UNLESS the session's client has a
  * GRANTED Consent of scope DATA_RETENTION_EXTENDED in effect.
  *
+ * AUD3 — the purge also covers sessions that never COMPLETED
+ * (abandoned recordings: browser closed mid-session, cancelled,
+ * no-show with uploaded audio). Anchored on createdAt since those
+ * rows have no endedAt — audio must not outlive the retention
+ * window just because the session was never finished.
+ *
  * Auth: requires X-Vercel-Cron header (auto-set by Vercel when
  * invoked via vercel.json cron schedule) OR CRON_SECRET env var
  * matching the Authorization Bearer header for manual / external
@@ -38,18 +44,25 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     ).map((c) => c.clientId),
   );
 
-  // Find sessions whose audio is eligible for purge: ended before the
-  // cutoff, has at least one chunk with bytes present, and whose
-  // client is not on the extended-retention allowlist.
+  // Find sessions whose audio is eligible for purge: past the cutoff
+  // (ended before it, or never completed and created before it), holding
+  // at least one chunk, and whose client is not on the extended-retention
+  // allowlist.
   const sessions = await prisma.session.findMany({
     where: {
-      status: 'COMPLETED',
-      endedAt: { not: null, lt: cutoff },
+      OR: [
+        { status: 'COMPLETED', endedAt: { not: null, lt: cutoff } },
+        // AUD3 — abandoned / never-completed sessions age out on createdAt.
+        { status: { not: 'COMPLETED' }, createdAt: { lt: cutoff } },
+      ],
+      audioChunks: { some: {} },
     },
     select: {
       id: true,
       clientId: true,
+      status: true,
       endedAt: true,
+      createdAt: true,
       audioChunks: { select: { id: true, sizeBytes: true } },
     },
   });
@@ -78,7 +91,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             clientId: s.clientId,
             chunksDeleted: chunkIds.length,
             bytesDeleted: bytes,
+            sessionStatus: s.status,
             sessionEndedAt: s.endedAt?.toISOString() ?? null,
+            sessionCreatedAt: s.createdAt.toISOString(),
             retentionDays: RETENTION_DAYS,
           },
         },
