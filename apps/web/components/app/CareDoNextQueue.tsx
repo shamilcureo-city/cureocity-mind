@@ -1,6 +1,3 @@
-'use client';
-
-import { useState } from 'react';
 import type { CareAction, CareActionPriority } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 
@@ -24,21 +21,18 @@ const WHEN_LABEL: Record<CareAction['when'], string> = {
   next_session: 'Next session',
 };
 
-const TOP_N = 3;
-
 /**
  * Sprint JE3 — Do next, zone [2] of the Care Engine page.
  *
  * The single ranked action list — the one that killed the "set a baseline"
  * ×4 duplication (there were two competing action engines before). Strict
  * priority order (SAFETY > MEASURE > DIAGNOSE > PLAN > OUTCOME); every card
- * names the gate it unlocks. The top few show up front; the rest fold into a
- * "more" expander so the surface stays calm. Each card carries the anchor id
- * the Care Arc's gate criteria link to.
+ * names the gate it unlocks, and carries the anchor id the Care Arc's gate
+ * criteria jump to. The engine emits at most one action per priority band
+ * (≤5 total), so the whole queue renders inline — nothing is hidden behind
+ * an expander, which also guarantees every gate jump-link has a live target.
  */
 export function CareDoNextQueue({ queue }: Props) {
-  const [expanded, setExpanded] = useState(false);
-
   if (queue.length === 0) {
     return (
       <Card className="p-6">
@@ -52,10 +46,6 @@ export function CareDoNextQueue({ queue }: Props) {
     );
   }
 
-  const top = queue.slice(0, TOP_N);
-  const rest = queue.slice(TOP_N);
-  const shown = expanded ? queue : top;
-
   return (
     <Card className="p-6">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -66,20 +56,10 @@ export function CareDoNextQueue({ queue }: Props) {
       </header>
 
       <ol className="mt-4 space-y-3">
-        {shown.map((a, i) => (
-          <ActionRow key={a.id} action={a} lead={i === 0 && !expanded} />
+        {queue.map((a, i) => (
+          <ActionRow key={a.id} action={a} lead={i === 0} />
         ))}
       </ol>
-
-      {rest.length > 0 && (
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          className="mt-3 text-xs font-medium text-[var(--color-accent)] hover:underline"
-        >
-          {expanded ? 'Show less' : `Show ${rest.length} more`}
-        </button>
-      )}
     </Card>
   );
 }
