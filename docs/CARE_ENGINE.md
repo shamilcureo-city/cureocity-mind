@@ -78,9 +78,9 @@ no clock (`now` is an input), same record → same screen.
 
 **Stages + exit gates.** INTAKE (gate: first session recorded) →
 ASSESSMENT (gate: diagnosis accepted + safety addressed + baseline
-measured) → FORMULATION (gate: plan accepted) → ACTIVE_TREATMENT →
+measured) → FORMULATION (gate: plan accepted) → ACTIVE*TREATMENT →
 REVIEW (reached at 8 sessions since the plan, or earlier on remission).
-A stage is _earned_ — the gate says exactly what's missing and why.
+A stage is \_earned* — the gate says exactly what's missing and why.
 
 **The queue.** At most one action per priority band, strict order
 `SAFETY > MEASURE > DIAGNOSE > PLAN > OUTCOME`. Each action carries the
