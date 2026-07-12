@@ -9,6 +9,7 @@ import {
   type IPass6Backend,
   type IPass7Backend,
   type IPass8Backend,
+  type IPassCareReportBackend,
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
   type IPassReasoningBackend,
@@ -37,6 +38,8 @@ import {
   type PassReasoningOutput,
   type PassTherapyReasoningInput,
   type PassTherapyReasoningOutput,
+  type PassCareReportInput,
+  type PassCareReportOutput,
 } from './types';
 
 export interface ModelRouterOptions {
@@ -56,6 +59,8 @@ export interface ModelRouterOptions {
   passReasoning: IPassReasoningBackend;
   /** Sprint TS5 — live THERAPY reasoning (risk-watch + ask-next + threads). */
   passTherapyReasoning: IPassTherapyReasoningBackend;
+  /** Sprint AC4 — Cureocity Care kind-branched session report. */
+  passCareReport: IPassCareReportBackend;
   /** Called after every backend call with the resulting call-log row. */
   onCallLog?: (log: GeminiCallLogData) => Promise<void> | void;
 }
@@ -139,6 +144,14 @@ export class ModelRouter implements IModelRouter {
     input: PassTherapyReasoningInput,
   ): Promise<{ output: PassTherapyReasoningOutput; callLog: GeminiCallLogData }> {
     const result = await this.opts.passTherapyReasoning.run(input);
+    await this.opts.onCallLog?.(result.callLog);
+    return result;
+  }
+
+  async passCareReport(
+    input: PassCareReportInput,
+  ): Promise<{ output: PassCareReportOutput; callLog: GeminiCallLogData }> {
+    const result = await this.opts.passCareReport.run(input);
     await this.opts.onCallLog?.(result.callLog);
     return result;
   }

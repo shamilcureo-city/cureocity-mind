@@ -10,6 +10,7 @@ import {
   type IPass6Backend,
   type IPass7Backend,
   type IPass8Backend,
+  type IPassCareReportBackend,
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
   type IPassReasoningBackend,
@@ -22,6 +23,7 @@ import {
   MockGeminiPass6Backend,
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
+  MockGeminiCareReportBackend,
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
@@ -29,6 +31,7 @@ import {
   ModelRouter,
   containerPolicyInput,
   resolveLlmBackend,
+  VertexGeminiCareReportBackend,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
   VertexGeminiReasoningBackend,
@@ -68,6 +71,7 @@ const modelRouterProvider: Provider = {
     let pass7: IPass7Backend;
     let pass8: IPass8Backend;
     let passDifferential: IPassDifferentialBackend;
+    let passCareReport: IPassCareReportBackend;
     let passFindings: IPassFindingsBackend;
     let passReasoning: IPassReasoningBackend;
     let passTherapyReasoning: IPassTherapyReasoningBackend;
@@ -92,6 +96,7 @@ const modelRouterProvider: Provider = {
       pass7 = new MockGeminiPass7Backend();
       pass8 = new MockGeminiPass8Backend();
       passDifferential = new MockGeminiDifferentialBackend();
+      passCareReport = new MockGeminiCareReportBackend();
       passFindings = new MockGeminiFindingsBackend();
       passReasoning = new MockGeminiReasoningBackend();
       passTherapyReasoning = new MockGeminiTherapyReasoningBackend();
@@ -163,6 +168,15 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-pro-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      passCareReport = new VertexGeminiCareReportBackend({
+        projectId,
+        location: config.get<string>('GEMINI_PRO_REGION') ?? 'us-central1',
+        model:
+          config.get<string>('GEMINI_CARE_REPORT_MODEL') ??
+          config.get<string>('GEMINI_PRO_MODEL') ??
+          'gemini-1.5-pro-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       passDifferential = new VertexGeminiDifferentialBackend({
         projectId,
         location: config.get<string>('GEMINI_PRO_REGION') ?? 'us-central1',
@@ -215,6 +229,7 @@ const modelRouterProvider: Provider = {
       pass7,
       pass8,
       passDifferential,
+      passCareReport,
       passFindings,
       passReasoning,
       passTherapyReasoning,

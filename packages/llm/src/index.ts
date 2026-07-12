@@ -14,6 +14,7 @@ export {
   MockGeminiPass7Backend,
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
+  MockGeminiCareReportBackend,
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
   MockGeminiTherapyReasoningBackend,
@@ -81,3 +82,9 @@ export {
 export { normaliseTherapyReasoningOutput } from './backends/therapy-reasoning-normalise';
 export { verifyPass3Evidence, quoteVerified } from './backends/pass3-evidence';
 export type { EvidenceGateStats } from './backends/pass3-evidence';
+export {
+  VertexGeminiCareReportBackend,
+  PassCareReportBackendError,
+  type VertexGeminiCareReportOptions,
+} from './backends/vertex-care-report.backend';
+export * from './live/config';

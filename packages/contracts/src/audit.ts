@@ -247,6 +247,24 @@ export const AuditActionSchema = z.enum([
   // sessions whose notes are still unsigned. One row per digest sent (the
   // metadata istDay is the dedupe key).
   'UNSIGNED_NOTE_DIGEST_SENT',
+  // Cureocity Care — sprints AC1+ (docs/AI_COUNSELING.md §11). The
+  // standalone D2C AI-therapist surface at /care.
+  'CARE_USER_REGISTERED',
+  'CARE_ONBOARDING_COMPLETED',
+  'CARE_CONSENT_CAPTURED',
+  'CARE_SESSION_STARTED',
+  'CARE_SESSION_COMPLETED',
+  'CARE_SESSION_ABORTED',
+  'CARE_PLAN_PROPOSED',
+  'CARE_PLAN_ACCEPTED',
+  'CARE_PLAN_REVISED',
+  'CARE_INSTRUMENT_SUBMITTED',
+  'CARE_CRISIS_ESCALATED',
+  'CARE_SAFETY_HOLD_SET',
+  'CARE_SAFETY_HOLD_LIFTED',
+  'CARE_REPORT_GENERATED',
+  'CARE_CHECKIN_SUBMITTED',
+  'CARE_ACCOUNT_DELETED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

@@ -1,0 +1,22 @@
+{
+  "name": "@cureocity/care-mock-live",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cureocity Care — scripted local twin of the Gemini Live WS endpoint (CARE_LIVE_BACKEND=mock). Speaks the exact wire protocol from docs/AI_COUNSELING.md §4 (setupComplete, snake_case transcription events, PCM24 inlineData audio, flag_crisis/end_session tool calls) so the full therapy arc runs offline in dev/CI. A dev tool, NOT a live path.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src --max-warnings 0 --no-error-on-unmatched-pattern"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "@types/ws": "^8.18.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

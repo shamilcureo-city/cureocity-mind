@@ -10,12 +10,15 @@ import {
   type IPass6Backend,
   type IPass7Backend,
   type IPass8Backend,
+  type IPassCareReportBackend,
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
   type IPassReasoningBackend,
   type IPassTherapyReasoningBackend,
   type PassTherapyReasoningInput,
   type PassTherapyReasoningOutput,
+  type PassCareReportInput,
+  type PassCareReportOutput,
   type Pass1Input,
   type Pass1Output,
   type Pass2Input,
@@ -41,9 +44,10 @@ import {
   type PreSessionBriefV1,
   type TherapyScriptV1,
 } from '../types';
-import type { CaseConsultV1 } from '@cureocity/contracts';
+import type { CareReportV1, CaseConsultV1 } from '@cureocity/contracts';
 import type { ConceptualMapV1 } from '@cureocity/contracts';
 import {
+  CARE_REPORT_PROMPT_VERSION,
   CASE_BRIEFING_PROMPT_VERSION,
   CLINICAL_ANALYSIS_PROMPT_VERSION,
   CONCEPTUAL_MAP_PROMPT_VERSION,
@@ -1595,3 +1599,137 @@ export class MockGeminiTherapyReasoningBackend implements IPassTherapyReasoningB
     };
   }
 }
+
+export class MockGeminiCareReportBackend implements IPassCareReportBackend {
+  async run(
+    input: PassCareReportInput,
+  ): Promise<{ output: PassCareReportOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const risky = input.transcriptText.includes('[mock-risk]');
+    const riskScreen = risky
+      ? { level: 'HIGH' as const, evidence: ['[mock] transcript contained the [mock-risk] marker'] }
+      : { level: 'NONE' as const, evidence: [] };
+
+    let report: CareReportV1;
+    if (input.kind === 'INTAKE') {
+      report = {
+        kind: 'INTAKE',
+        assessmentAndPlan: {
+          formulation:
+            '[mock] Work pressure and broken sleep are feeding each other. The "I will mess it up" thoughts spike on Sunday nights, and avoiding people keeps the loop going. This makes sense, and it is workable.',
+          concernAreas: [
+            { name: '[mock] Sleep', evidenceQuote: 'I lie awake till 3 most nights' },
+            { name: '[mock] Work worry', evidenceQuote: 'every Sunday I start dreading the week' },
+          ],
+          proposedGoals: [
+            {
+              goal: '[mock] Sleep before 1am, 5 nights a week',
+              why: 'broken sleep is feeding the worry loop',
+              measure: 'nights per week',
+            },
+            {
+              goal: '[mock] One social thing every week',
+              why: 'avoiding people keeps the loop going',
+              measure: 'one activity per week',
+            },
+            {
+              goal: '[mock] A toolkit for the Sunday dread',
+              why: 'the spike is predictable, so it can be prepared for',
+              measure: 'used on 2 Sundays',
+            },
+          ],
+          modalityTrack: 'CBT',
+          cadence: 'weekly-25min',
+          riskScreen,
+        },
+      };
+    } else if (input.kind === 'REVIEW') {
+      let verdicts: CareReportV1extractVerdicts = [];
+      try {
+        const parsed = input.verdictsJson ? (JSON.parse(input.verdictsJson) as unknown[]) : [];
+        verdicts = (parsed as Array<Record<string, unknown>>).map((v) => ({
+          instrumentKey: String(v['instrumentKey'] ?? 'PHQ9'),
+          baselineScore: Number(v['baselineScore'] ?? 0),
+          latestScore: Number(v['latestScore'] ?? 0),
+          verdict: String(v['verdict'] ?? 'no_reliable_change'),
+          plainWords: '[mock] computed by change-score.ts; explained here in plain words.',
+        }));
+      } catch {
+        verdicts = [];
+      }
+      report = {
+        kind: 'REVIEW',
+        progressReview: {
+          verdicts,
+          goalOutcomes: [
+            { goalIndex: 0, status: 'KEEP', note: '[mock] 3 of 5 nights most weeks — keep going' },
+            { goalIndex: 1, status: 'ACHIEVED', note: '[mock] cricket on Saturdays stuck' },
+          ],
+          revisedGoals: [],
+          recommendation: 'CONTINUE',
+          narrative:
+            '[mock] A solid stretch of work. The thought records are landing, sleep is moving, and you showed up every week — that consistency is the treatment.',
+          riskScreen,
+        },
+      };
+    } else {
+      report = {
+        kind: 'TREATMENT',
+        sessionReport: {
+          headline: '[mock] You caught the thought before it caught you.',
+          summary:
+            '[mock] You challenged the "I will mess up the review" thought with the actual evidence from Tuesday, and rated it down from 90% to 40% believable. You noticed the word "should" doing a lot of work in your week.',
+          insights: [
+            {
+              observation: '[mock] When work comes up, "should" does too.',
+              evidenceQuote:
+                'okay when I say it out loud it does sound like a prediction, not a fact',
+            },
+          ],
+          goalProgress: [
+            {
+              goalIndex: 0,
+              movement: 'FORWARD',
+              evidence: '[mock] slept before 1am on 3 of 5 nights',
+            },
+          ],
+          homework: {
+            title: '[mock] Thought record when the Sunday dread starts',
+            steps: [
+              'Notice the dread starting',
+              'Write the hot thought down',
+              'Rate it, answer it, re-rate it',
+            ],
+            whyItHelps: 'catching the thought early shrinks it before it snowballs',
+          },
+          reflectionPrompt: '[mock] What would you tell a friend who "made it a thing"?',
+          riskScreen,
+        },
+      };
+    }
+
+    return {
+      output: { report },
+      callLog: {
+        sessionId: null,
+        pass: 'PASS_13_CARE_REPORT',
+        model: 'mock-pro',
+        region: 'mock-global',
+        promptVersion: CARE_REPORT_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.transcriptText.length / 4),
+        outputTokens: 450,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+type CareReportV1extractVerdicts = Array<{
+  instrumentKey: string;
+  baselineScore: number;
+  latestScore: number;
+  verdict: string;
+  plainWords: string;
+}>;

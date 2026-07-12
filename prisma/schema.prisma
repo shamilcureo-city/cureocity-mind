@@ -1086,6 +1086,8 @@ enum GeminiPass {
   PASS_11_REASONING // Sprint DS2 — combined live reasoning (differential + ask-next)
   PASS_12_THERAPY_REASONING // Sprint TS5 — live therapy copilot (risk + ask-next + threads)
   ASSISTANT_CHAT // AUD1 — practice-assistant chat turns (metered + rate-limited)
+  PASS_13_CARE_REPORT // Sprint AC4 — Cureocity Care kind-branched session report
+  LIVE_CARE_SESSION // Sprint AC3 — Cureocity Care live voice session (Gemini Live)
 }
 
 enum GeminiCallStatus {
@@ -2737,6 +2739,23 @@ enum AuditAction {
   STUCK_GENERATION_RECLAIMED
   // NEXT3 — daily unsigned-note digest email sent to a therapist.
   UNSIGNED_NOTE_DIGEST_SENT
+  // Cureocity Care — sprints AC1+ (docs/AI_COUNSELING.md §11).
+  CARE_USER_REGISTERED
+  CARE_ONBOARDING_COMPLETED
+  CARE_CONSENT_CAPTURED
+  CARE_SESSION_STARTED
+  CARE_SESSION_COMPLETED
+  CARE_SESSION_ABORTED
+  CARE_PLAN_PROPOSED
+  CARE_PLAN_ACCEPTED
+  CARE_PLAN_REVISED
+  CARE_INSTRUMENT_SUBMITTED
+  CARE_CRISIS_ESCALATED
+  CARE_SAFETY_HOLD_SET
+  CARE_SAFETY_HOLD_LIFTED
+  CARE_REPORT_GENERATED
+  CARE_CHECKIN_SUBMITTED
+  CARE_ACCOUNT_DELETED
 }
 
 enum AuditActorType {
@@ -2771,4 +2790,213 @@ model AuditLog {
   @@index([action, createdAt])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ============================================================================
+// Cureocity Care — the standalone D2C AI-therapist product (sprints AC1+).
+// Self-owned identity: CareUser is a data principal with us as the DPDP
+// fiduciary directly. NO coupling to the practitioner tenancy (Client rows
+// belong to a Psychologist; CareUser rows belong to nobody but themselves).
+// See docs/AI_COUNSELING.md §6-7.
+// ============================================================================
+
+enum CareUserStatus {
+  ACTIVE
+  SAFETY_HOLD
+  DELETED
+}
+
+model CareUser {
+  id             String  @id @default(cuid())
+  firebaseUid    String  @unique
+  displayName    String
+  // PII — encrypted companion column exists from day one; the care-user
+  // keyed KMS wiring lands with the encryption cutover (AC6 hardening).
+  phone          String?
+  phoneEncrypted String?
+  email          String?
+
+  preferredLanguage String   @default("en")
+  spokenLanguages   String[] @default([])
+
+  // The therapist persona the user chose at onboarding. Stable across
+  // sessions — continuity of relationship is the product.
+  personaName  String @default("Meera")
+  voiceName    String @default("Kore")
+  personaStyle String @default("gentle")
+
+  // §4.4 — "give me more time to think". 400 is the floor, never lower.
+  vadSilenceMs Int @default(700)
+
+  trustedContactName  String?
+  trustedContactPhone String?
+
+  status       CareUserStatus @default(ACTIVE)
+  // §2 layer 5 — set on any crisis event (or baseline-gate "yes"); AI
+  // sessions lock until the next-day check-in lifts it.
+  safetyHoldAt DateTime?
+  // Count of crisis events in the trailing window drives the second-event
+  // lockout rule; derived from audit rows, not stored.
+
+  planTier String @default("free")
+
+  onboardedAt    DateTime?
+  consentVersion String?
+  consentAt      DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  sessions    CareSession[]
+  carePlans   CarePlan[]
+  checkins    CareCheckin[]
+  instruments CareInstrumentResponse[]
+
+  @@index([status])
+  @@map("care_users")
+}
+
+// The accepted Assessment & Plan — versioned like TreatmentPlan. A REVIEW
+// session that changes goals creates a new version; history never mutates.
+// Accepting is a USER action (POST /care/plan/accept), never a model action.
+model CarePlan {
+  id         String @id @default(cuid())
+  careUserId String
+  version    Int
+
+  /// Plain-language formulation from the INTAKE report (CareAssessmentAndPlan).
+  formulation   Json
+  /// CarePlanGoal[] — proposal fields + live status per goal.
+  goals         Json
+  /// CareModalityTrack — CBT | BEHAVIOURAL_ACTIVATION | GROUNDING | SLEEP.
+  modalityTrack String
+  cadence       String @default("weekly-25min")
+
+  /// The INTAKE / REVIEW session whose report proposed this version.
+  sourceSessionId String?
+
+  acceptedAt DateTime
+  createdAt  DateTime @default(now())
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@unique([careUserId, version])
+  @@map("care_plans")
+}
+
+enum CareSessionKind {
+  INTAKE
+  TREATMENT
+  REVIEW
+}
+
+enum CareSessionStatus {
+  CREATED
+  IN_PROGRESS
+  COMPLETED
+  ABORTED
+  CRISIS_ESCALATED
+}
+
+enum CareRiskLevel {
+  NONE
+  LOW
+  MODERATE
+  HIGH
+}
+
+model CareSession {
+  id         String @id @default(cuid())
+  careUserId String
+
+  /// Inferred server-side from cumulative state at create time — users
+  /// never pick "intake" (the Sprint-19 convention).
+  kind       CareSessionKind
+  /// The plan version in force when the session ran. Null for INTAKE.
+  carePlanId String?
+
+  status CareSessionStatus @default(CREATED)
+
+  topic      String?
+  moodBefore Int?
+  moodAfter  Int?
+
+  startedAt   DateTime?
+  endedAt     DateTime?
+  durationSec Int?
+
+  /// Mirrored turns {seq, role, text, atMs} — the server-side transcript
+  /// (input to Pass 10). Encrypted companion pending the AC6 cutover.
+  liveTranscript          Json    @default("[]")
+  liveTranscriptEncrypted String?
+
+  model         String
+  promptVersion String
+
+  crisisAt     DateTime?
+  /// 'keyword_screen' | 'model_tool' | 'user_button'
+  crisisSource String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  careUser CareUser    @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+  report   CareReport?
+
+  @@index([careUserId, createdAt])
+  @@index([status, createdAt])
+  @@map("care_sessions")
+}
+
+model CareReport {
+  id            String @id @default(cuid())
+  careSessionId String @unique
+
+  /// Denormalized from the session for queries; body is CareReportV1
+  /// (discriminated union on kind — always narrow before reading).
+  kind CareSessionKind
+  body Json
+
+  /// Extracted from body.riskScreen — internal, drives safety UX only.
+  riskLevel CareRiskLevel @default(NONE)
+
+  createdAt DateTime @default(now())
+
+  careSession CareSession @relation(fields: [careSessionId], references: [id], onDelete: Cascade)
+
+  @@index([riskLevel, createdAt])
+  @@map("care_reports")
+}
+
+model CareCheckin {
+  id         String   @id @default(cuid())
+  careUserId String
+  mood       Int
+  note       String?
+  createdAt  DateTime @default(now())
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@index([careUserId, createdAt])
+  @@map("care_checkins")
+}
+
+/// Self-administered PHQ-9 / GAD-7 — items + scoring come from the
+/// @cureocity/clinical instruments registry; NOT the tenant-coupled
+/// InstrumentResponse table.
+model CareInstrumentResponse {
+  id            String   @id @default(cuid())
+  careUserId    String
+  instrumentKey String
+  answers       Json
+  totalScore    Int
+  /// PHQ-9 item 9 raw value — the §2-layer-6 safety tripwire. Null for GAD-7.
+  item9         Int?
+  createdAt     DateTime @default(now())
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@index([careUserId, instrumentKey, createdAt])
+  @@map("care_instrument_responses")
 }

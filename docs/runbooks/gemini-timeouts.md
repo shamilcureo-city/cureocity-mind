@@ -19,6 +19,7 @@ FAILED so the therapist sees a re-run button instead of a spinner.
 ## Diagnosis
 
 1. Identify the failing pass in `gemini_call_logs`:
+
    ```
    SELECT pass, status, COUNT(*), AVG("latencyMs")
    FROM gemini_call_logs
@@ -28,6 +29,7 @@ FAILED so the therapist sees a re-run button instead of a spinner.
 
    - `PASS_1_TRANSCRIBE_AND_ANALYSE` → Flash in asia-south1.
    - `PASS_2_NOTE_GENERATION` → Pro (global endpoint).
+
 2. Check Vertex regional health: the GCP status dashboard, and the
    chosen region's outage history.
 3. If Pass 2 only, the global Pro endpoint is the likely cause — it is

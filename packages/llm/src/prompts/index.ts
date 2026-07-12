@@ -894,3 +894,5 @@ Constraints:
 PLACEHOLDER: Replace verbatim per PRD 24.1 (pending clinical sign-off).` as const;
 
 export const CONCEPTUAL_MAP_PROMPT_VERSION = 'CONCEPTUAL_MAP_SYSTEM_PROMPT_V1';
+// Cureocity Care — sprints AC3-AC5 (docs/AI_COUNSELING.md §4.8 + §5).
+export * from './care';

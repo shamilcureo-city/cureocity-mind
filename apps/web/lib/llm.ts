@@ -1,6 +1,7 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { GoogleGenAI } from '@google/genai';
 import {
+  MockGeminiCareReportBackend,
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiPass3Backend,
@@ -18,6 +19,7 @@ import {
   mockRefusalReason,
   vercelPolicyInput,
   type BackendPolicyInput,
+  VertexGeminiCareReportBackend,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
   VertexGeminiReasoningBackend,
@@ -196,6 +198,14 @@ function build(): IModelRouter {
         thinkingBudget: resolveThinkingBudget('LLM_THINKING_BUDGET_PASS8', 2048),
       }),
       // Sprint DV6 — doctor differential. Reuses the Pro model env.
+      passCareReport: new VertexGeminiCareReportBackend({
+        projectId: project,
+        location: proRegion,
+        model:
+          process.env['VERTEX_CARE_REPORT_MODEL'] ??
+          process.env['VERTEX_PRO_MODEL'] ??
+          'gemini-2.5-pro',
+      }),
       passDifferential: new VertexGeminiDifferentialBackend({
         projectId: project,
         location: proRegion,
@@ -251,6 +261,7 @@ function build(): IModelRouter {
     pass7: new MockGeminiPass7Backend(),
     pass8: new MockGeminiPass8Backend(),
     passDifferential: new MockGeminiDifferentialBackend(),
+    passCareReport: new MockGeminiCareReportBackend(),
     passFindings: new MockGeminiFindingsBackend(),
     passReasoning: new MockGeminiReasoningBackend(),
     passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),

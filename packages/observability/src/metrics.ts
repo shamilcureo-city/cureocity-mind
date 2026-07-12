@@ -53,7 +53,9 @@ export function recordGeminiCall(opts: {
     | 'PASS_9_DIFFERENTIAL'
     | 'PASS_10_FINDINGS'
     | 'PASS_11_REASONING'
-    | 'PASS_12_THERAPY_REASONING';
+    | 'PASS_12_THERAPY_REASONING'
+    | 'PASS_13_CARE_REPORT'
+    | 'LIVE_CARE_SESSION';
   status: 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
   region: string;
   durationMs: number;

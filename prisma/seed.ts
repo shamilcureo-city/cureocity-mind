@@ -353,6 +353,24 @@ async function main(): Promise<void> {
     }
     console.log(`  Seeded ${SAMPLE_INTAKES.length} intake submissions.`);
   }
+
+  // Cureocity Care — the demo consumer for the /care surface (AC1).
+  // The API/page guards also auto-create this row in bypass mode; the
+  // seed keeps fresh databases deterministic either way.
+  await prisma.careUser.upsert({
+    where: { firebaseUid: 'dev-care-firebase-uid-kavya' },
+    update: {},
+    create: {
+      firebaseUid: 'dev-care-firebase-uid-kavya',
+      displayName: 'Kavya',
+      preferredLanguage: 'en',
+      spokenLanguages: ['ml', 'en'],
+      personaName: 'Meera',
+      voiceName: 'Kore',
+      personaStyle: 'gentle',
+    },
+  });
+  console.log('  Seeded demo care user (Kavya).');
 }
 
 main()

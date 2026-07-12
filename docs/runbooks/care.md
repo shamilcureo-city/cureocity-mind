@@ -1,0 +1,81 @@
+# Runbook — Cureocity Care (the /care AI-therapist surface)
+
+Scope: the live voice loop, Pass 10 reports, the safety machinery, and
+the mock stack. Product spec: [`../AI_COUNSELING.md`](../AI_COUNSELING.md).
+
+## Env matrix
+
+| Var                    | Values                          | Notes                                                                                       |
+| ---------------------- | ------------------------------- | ------------------------------------------------------------------------------------------- |
+| `CARE_LIVE_BACKEND`    | `mock` (default) \| `ai-studio` | Only the LIVE loop touches AI Studio; Pass 10 rides `LLM_BACKEND` (Vertex) like every pass. |
+| `CARE_LIVE_TOKEN_MODE` | `ephemeral` (default) \| `url`  | `url` reproduces the source recipe (key in the WSS URL). Fallback only — never the default. |
+| `GEMINI_API_KEY`       | —                               | Required for `ai-studio`. Server-side only.                                                 |
+| `CARE_MOCK_LIVE_URL`   | `ws://localhost:8788`           | Append `?fixture=crisis` to force the crisis script (CI does this).                         |
+| `REDIS_URL`            | —                               | Start-token store. Unset = in-memory (single instance only). Needs `ioredis` in apps/web.   |
+
+## Model pin rotation (the two-outage lesson)
+
+The Live model is pinned in `packages/llm/src/live/config.ts`
+(`CARE_LIVE_MODEL_ID`) — a **dated** id, never `-latest`. To rotate:
+
+1. Point `scripts/live-probe.ts` (AC0 spike deliverable) at the candidate
+   model; verify setup→setupComplete, both transcription streams, audio
+   out, `flag_crisis` round-trip, and a 10-minute soak (the
+   `gemini-3.1-flash-live-preview` failure was a MID-conversation drop —
+   short probes pass on broken models).
+2. Change the pin in ONE place (`live/config.ts`), deploy to a canary,
+   watch `gemini_call_duration_ms{pass="LIVE_CARE_SESSION"}` and WS
+   reconnect counters for a day.
+3. Never rotate the pin and the prompt version in the same deploy.
+
+## Crisis escalation on-call
+
+`CARE_CRISIS_ESCALATED` audit rows are the source of truth. Every
+escalation also sets `CareUser.status = SAFETY_HOLD`.
+
+- Triggers: `keyword_screen` (deterministic, `packages/clinical/src/crisis-screen.ts`),
+  `model_tool` (flag_crisis), `user_button` (SOS tap).
+- The hold lifts ONLY via `POST /care/safety/resume` (≥12 h old, "safe",
+  fewer than 2 crisis events in 30 days). Do NOT lift holds via SQL
+  unless legal/clinical asks in writing; audit `CARE_SAFETY_HOLD_LIFTED`
+  is written by the route, not by hand.
+- Phrase lists are clinician-signed. Adding phrases is safe any time;
+  removing one requires clinician sign-off (same rule as the
+  reliable-change thresholds).
+
+## Report (Pass 10) failures
+
+Symptoms: report screen stuck on "Writing your report…".
+
+1. `GeminiCallLog` rows with `pass = PASS_10_CARE_REPORT` show the error.
+2. The user-facing recovery is already shipped: the report screen offers
+   "Generate now" (`POST /care/sessions/:id/report`, 120 s budget) after
+   ~20 s of polling.
+3. Abandoned sessions (client died mid-call) are finalized by
+   `GET /api/v1/cron/care-session-sweeper` — ABORTED + a best-effort
+   report from whatever was mirrored. Ensure the cron is scheduled.
+
+## Dev / CI quickstart
+
+```bash
+# Terminal 1 — the scripted Gemini Live twin
+pnpm --filter @cureocity/care-mock-live start        # ws://localhost:8788
+
+# Terminal 2 — the app (bypass auth engages automatically)
+DATABASE_URL=... LLM_BACKEND=mock CARE_LIVE_BACKEND=mock \
+  pnpm --filter @cureocity/web dev
+
+# http://localhost:3000/care → demo user (Kavya) walks the full arc:
+# onboarding → intake → assessment & plan → treatment → progress.
+# Crisis path: CARE_MOCK_LIVE_URL='ws://localhost:8788/?fixture=crisis'
+```
+
+## Known-good verification
+
+The arc that must always pass (this is what the pilot checklist runs):
+onboarding → INTAKE live session (setupComplete gate, audio, mirrored
+turns) → Pass 10 assessment & plan → plan accept v1 → kind flips to
+TREATMENT → session report → PHQ-9 check-in (item 9 = 0 → no hold;
+item 9 > 0 → hold) → crisis keyword mirror → `crisis_stop` +
+SAFETY_HOLD → session start 403 → resume rules ("struggling" keeps
+hold; same-day "safe" refused by the 12 h rule).
