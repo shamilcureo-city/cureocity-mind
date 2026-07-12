@@ -34,11 +34,25 @@ Full detail in `dr-postgres-restore.md`. The short version:
 
 ## Drill log
 
-| Date         | Retention confirmed | Restore timestamp (UTC) | RTO (wall-clock) | RPO (observed) | Verify 1–4            | Operator | Notes             |
-| ------------ | ------------------- | ----------------------- | ---------------- | -------------- | --------------------- | -------- | ----------------- |
-| _yyyy-mm-dd_ | _≥7d? Y/N_          | _2026-mm-ddThh:mm:00Z_  | _mm:ss_          | _~0s_          | _pass/pass/pass/pass_ | _name_   | _first rehearsal_ |
+| Date       | Retention confirmed | Restore timestamp (UTC)       | RTO (wall-clock)               | RPO (observed) | Verify 1–4              | Operator | Notes                                                                                |
+| ---------- | ------------------- | ----------------------------- | ------------------------------ | -------------- | ----------------------- | -------- | ------------------------------------------------------------------------------------ |
+| 2026-07-12 | Y — 7d (Launch)     | ~2026-07-12T04:40Z (≈1h back) | 0.48s fork / ~10m incl. verify | ≈0s            | pass / pass / n-a / n-a | shamil   | First rehearsal. Recovered a real signed note (id cmrdj0gn…) intact + audit history. |
+
+Verify legend: 1 = newest audit_logs row present (Jul 11 22:29Z, at/before
+the restore point ✓); 2 = a signed therapy_note came back intact ✓; 3 =
+`prisma migrate status` and 4 = the audit-coverage test were **skipped for
+a first drill** (the two SQL checks are sufficient proof of recovery) —
+run all four on the next rehearsal.
 
 ## Notes / gotchas found during a drill
+
+- **Neon Free plan caps history at 6 h** — below the ≥7-day DR requirement.
+  Upgraded to **Launch** (7-day window) before the drill; do not run the
+  pilot on the free window.
+- The fork is genuinely instant (0.48 s); real-incident RTO is dominated by
+  the Vercel env repoint + redeploy, not the data restore.
+- Set the drill branch's **Auto-delete = After 1 day** at creation so a
+  forgotten branch can't accrue storage.
 
 _(append anything that surprised you — a missing env on the branch, a
 slow step, a verify query that needed adjusting — so the next drill is
