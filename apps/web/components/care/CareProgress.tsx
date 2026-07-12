@@ -28,7 +28,8 @@ const STAGES: Array<{ key: ProgressPayload['stage']; label: string }> = [
   { key: 'REVIEW_DUE', label: 'Review' },
 ];
 
-/** Progress (AC5, S7) — the user's own journey, measured honestly. */
+/** Progress (AC5, S7) — the user's own journey, measured honestly. Wide
+ * two-column board on the web; single column on phones. */
 export function CareProgress() {
   const [data, setData] = useState<ProgressPayload | null>(null);
 
@@ -41,7 +42,9 @@ export function CareProgress() {
 
   if (!data) {
     return (
-      <div className="mx-auto max-w-md px-5 py-10 text-sm text-[var(--color-ink-3)]">Loading…</div>
+      <div className="mx-auto max-w-md px-5 py-10 text-sm text-[var(--color-ink-3)] md:max-w-4xl md:px-8">
+        Loading…
+      </div>
     );
   }
 
@@ -49,10 +52,10 @@ export function CareProgress() {
   const moods = data.moodSeries.slice(-30);
 
   return (
-    <div className="mx-auto max-w-md px-5 py-6 pb-24">
-      <h1 className="font-serif text-2xl font-semibold">Your progress</h1>
+    <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-4xl md:px-8 md:py-10">
+      <h1 className="font-serif text-2xl font-semibold md:text-3xl">Your progress</h1>
 
-      <Card className="mt-4 p-4">
+      <Card className="mt-4 p-4 md:mt-6 md:p-5">
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
           Where you are
         </span>
@@ -72,52 +75,61 @@ export function CareProgress() {
         </div>
       </Card>
 
-      {data.verdicts.map((v) => (
-        <Card key={v.instrumentKey} className="mt-3 p-4">
-          <div className="flex items-center justify-between">
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {data.verdicts.map((v) => (
+          <Card key={v.instrumentKey} className="p-4 md:p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                {v.instrumentKey}
+              </span>
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                  v.verdict === 'reliable_improvement'
+                    ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                    : v.verdict === 'deterioration'
+                      ? 'bg-[var(--color-warn-soft)] text-[var(--color-warn)]'
+                      : 'bg-[var(--color-surface-soft)] text-[var(--color-ink-3)]'
+                }`}
+              >
+                {v.verdict.replaceAll('_', ' ')}
+              </span>
+            </div>
+            <p className="mt-1.5 text-sm">{v.plainWords}</p>
+          </Card>
+        ))}
+
+        {moods.length >= 2 ? (
+          <Card className="p-4 md:p-5">
             <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-              {v.instrumentKey}
+              Mood · recent
             </span>
-            <span
-              className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                v.verdict === 'reliable_improvement'
-                  ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                  : v.verdict === 'deterioration'
-                    ? 'bg-[var(--color-warn-soft)] text-[var(--color-warn)]'
-                    : 'bg-[var(--color-surface-soft)] text-[var(--color-ink-3)]'
-              }`}
-            >
-              {v.verdict.replaceAll('_', ' ')}
-            </span>
-          </div>
-          <p className="mt-1.5 text-sm">{v.plainWords}</p>
-        </Card>
-      ))}
+            <svg viewBox="0 0 240 60" className="mt-2 w-full" aria-label="Mood trend">
+              <line
+                x1="0"
+                y1="55"
+                x2="240"
+                y2="55"
+                stroke="var(--color-line-soft)"
+                strokeWidth="1"
+              />
+              <polyline
+                fill="none"
+                stroke="var(--color-accent)"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                points={moods
+                  .map(
+                    (m, i) =>
+                      `${(i / Math.max(1, moods.length - 1)) * 240},${52 - (m.mood / 10) * 44}`,
+                  )
+                  .join(' ')}
+              />
+            </svg>
+          </Card>
+        ) : null}
+      </div>
 
-      {moods.length >= 2 ? (
-        <Card className="mt-3 p-4">
-          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-            Mood · recent
-          </span>
-          <svg viewBox="0 0 240 60" className="mt-2 w-full" aria-label="Mood trend">
-            <line x1="0" y1="55" x2="240" y2="55" stroke="var(--color-line-soft)" strokeWidth="1" />
-            <polyline
-              fill="none"
-              stroke="var(--color-accent)"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              points={moods
-                .map(
-                  (m, i) =>
-                    `${(i / Math.max(1, moods.length - 1)) * 240},${52 - (m.mood / 10) * 44}`,
-                )
-                .join(' ')}
-            />
-          </svg>
-        </Card>
-      ) : null}
-
-      <Card className="mt-3 p-4">
+      <Card className="mt-3 p-4 md:p-5">
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
           Sessions
         </span>
@@ -151,10 +163,7 @@ export function CareProgress() {
                     </span>
                   ) : null}
                   {s.report ? (
-                    <Link
-                      href={`/care/session/${s.id}/report`}
-                      className="text-[var(--color-accent)]"
-                    >
+                    <Link href={`/care/session/${s.id}/report`} className="text-[var(--color-accent)]">
                       →
                     </Link>
                   ) : null}

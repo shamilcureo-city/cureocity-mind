@@ -1,9 +1,7 @@
 import type { Metadata } from 'next';
 import { requireOnboardedCareUser } from '@/lib/care-auth-page';
-import { crisisResources } from '@/lib/care-safety';
 import { CARE_TIER_WEEKLY_CAP } from '@/lib/care-gate';
 import { Card } from '@/components/ui/Card';
-import { SafetyStrip } from '@/components/care/SafetyStrip';
 
 export const metadata: Metadata = { title: 'Your plan — Cureocity Care' };
 export const dynamic = 'force-dynamic';
@@ -12,17 +10,18 @@ export const dynamic = 'force-dynamic';
  * S8 — tier state. Caps are enforced server-side at session-create from
  * AC3; the Razorpay checkout wires in once the pricing decision (#3,
  * docs/AI_COUNSELING.md §14) is made — the mechanism (planTier + gate)
- * is already live.
+ * is already live. The crisis strip is chrome supplied by the (app)
+ * shell layout.
  */
 export default async function CarePlanTierPage() {
   const user = await requireOnboardedCareUser();
   const freeCap = CARE_TIER_WEEKLY_CAP['free']!;
   const plusCap = CARE_TIER_WEEKLY_CAP['plus']!;
   return (
-    <>
-      <div className="mx-auto max-w-md px-5 py-6 pb-24">
-        <h1 className="font-serif text-2xl font-semibold">Your plan</h1>
-        <Card className="mt-4 p-4">
+    <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-3xl md:px-8 md:py-10">
+      <h1 className="font-serif text-2xl font-semibold md:text-3xl">Your plan</h1>
+      <div className="mt-4 grid gap-3 md:mt-6 md:grid-cols-2">
+        <Card className="p-4 md:p-5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
               Free
@@ -37,7 +36,7 @@ export default async function CarePlanTierPage() {
             Intake + assessment &amp; plan free · {freeCap} sessions / week · full reports
           </p>
         </Card>
-        <Card className="mt-3 border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] p-4">
+        <Card className="border-[var(--color-accent)]/40 bg-[var(--color-accent-soft)] p-4 md:p-5">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)]">
               Care Plus
@@ -57,7 +56,6 @@ export default async function CarePlanTierPage() {
           </p>
         </Card>
       </div>
-      <SafetyStrip resources={crisisResources(user.spokenLanguages)} />
-    </>
+    </div>
   );
 }
