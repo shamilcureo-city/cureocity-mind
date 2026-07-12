@@ -17,6 +17,14 @@
     {
       "path": "/api/v1/cron/billing-reminders",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/v1/cron/reclaim-stuck",
+      "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/v1/cron/unsigned-digest",
+      "schedule": "30 2 * * *"
     }
   ],
   "env": {
