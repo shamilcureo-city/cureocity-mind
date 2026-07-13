@@ -118,6 +118,9 @@ export type RedeemLiveTokenInput = z.infer<typeof RedeemLiveTokenInputSchema>;
  *  - `url`       — the source recipe's fallback: full WSS URL (key embedded)
  *    + the setup payload the browser must send verbatim on open.
  *  - `mock`      — local scripted WS server (dev/CI). Behaves like `url`.
+ *  - `vertex`    — Vertex AI Live (LlmBidiService) in-region on the platform
+ *    service account. Browser opens the Vertex WSS with a short-lived GCP
+ *    access token in the query string; setup carries the full model path.
  */
 export const RedeemLiveTokenResponseSchema = z.discriminatedUnion('mode', [
   z.object({
@@ -130,6 +133,15 @@ export const RedeemLiveTokenResponseSchema = z.discriminatedUnion('mode', [
     /// which point the server stops shipping it and the prompt stays
     /// fully server-side.
     setup: z.unknown().optional(),
+  }),
+  z.object({
+    mode: z.literal('vertex'),
+    wsUrl: z.string().min(1),
+    /// The GCP OAuth access token (cloud-platform scope) the browser uses
+    /// to open the Vertex Live socket. Short-lived; bounded to the session.
+    accessToken: z.string().min(1),
+    setup: z.unknown(),
+    expiresAtMs: z.number().int().positive(),
   }),
   z.object({
     mode: z.literal('url'),
