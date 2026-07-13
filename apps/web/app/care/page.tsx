@@ -67,8 +67,8 @@ export default function CareLanding() {
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-[var(--color-ink-2)]">
             Real voice sessions in English, हिन्दी, മലയാളം — or the mix you actually speak. A real
-            intake, a plan with goals you choose, weekly sessions with homework, and progress you can
-            measure. Not a chatbot that agrees with you.
+            intake, a plan with goals you choose, weekly sessions with homework, and progress you
+            can measure. Not a chatbot that agrees with you.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
             <ButtonLink href="/care/login" size="lg">
@@ -134,8 +134,8 @@ export default function CareLanding() {
               sessions, reports, and plan included.
             </Honest>
             <Honest icon="🚨" title="Not for emergencies">
-              If you&apos;re in crisis, real people are one tap away — on this page below, and inside
-              every single session.
+              If you&apos;re in crisis, real people are one tap away — on this page below, and
+              inside every single session.
             </Honest>
           </div>
         </div>
@@ -186,7 +186,9 @@ export default function CareLanding() {
               <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--color-accent)] text-white">
                 ☾
               </span>
-              <span className="font-serif text-lg font-semibold tracking-tight">Cureocity Care</span>
+              <span className="font-serif text-lg font-semibold tracking-tight">
+                Cureocity Care
+              </span>
             </div>
             <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-[var(--color-ink-2)]">
               <Link href="#how" className="hover:text-[var(--color-ink)]">
@@ -303,8 +305,8 @@ function SessionPreview() {
             Wind down before 1am, four nights a week
           </li>
           <li className="flex items-center gap-2">
-            <span className="h-3.5 w-3.5 rounded-full border-2 border-[var(--color-accent)]" />
-            A Sunday-evening toolkit for the dread
+            <span className="h-3.5 w-3.5 rounded-full border-2 border-[var(--color-accent)]" />A
+            Sunday-evening toolkit for the dread
           </li>
         </ul>
       </div>

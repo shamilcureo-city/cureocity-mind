@@ -163,7 +163,10 @@ export function CareProgress() {
                     </span>
                   ) : null}
                   {s.report ? (
-                    <Link href={`/care/session/${s.id}/report`} className="text-[var(--color-accent)]">
+                    <Link
+                      href={`/care/session/${s.id}/report`}
+                      className="text-[var(--color-accent)]"
+                    >
                       →
                     </Link>
                   ) : null}
