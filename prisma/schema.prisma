@@ -2938,6 +2938,14 @@ model CareSession {
   /// 'keyword_screen' | 'model_tool' | 'user_button'
   crisisSource String?
 
+  /// Single-use live start-token guard (AC3). The token is minted at
+  /// session-create and redeemed exactly once at /sessions/[id]/token.
+  /// Storing the SHA-256 hash here (not a separate Redis/in-memory store)
+  /// makes the single-use check correct across every serverless instance
+  /// with no extra infra — the redeem is an atomic conditional update.
+  startTokenHash      String?
+  startTokenExpiresAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2946,6 +2954,7 @@ model CareSession {
 
   @@index([careUserId, createdAt])
   @@index([status, createdAt])
+  @@index([startTokenHash])
   @@map("care_sessions")
 }
 
