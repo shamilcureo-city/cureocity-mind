@@ -11,7 +11,13 @@ the mock stack. Product spec: [`../AI_COUNSELING.md`](../AI_COUNSELING.md).
 | `CARE_LIVE_TOKEN_MODE` | `ephemeral` (default) \| `url`  | `url` reproduces the source recipe (key in the WSS URL). Fallback only — never the default. |
 | `GEMINI_API_KEY`       | —                               | Required for `ai-studio`. Server-side only.                                                 |
 | `CARE_MOCK_LIVE_URL`   | `ws://localhost:8788`           | Append `?fixture=crisis` to force the crisis script (CI does this).                         |
-| `REDIS_URL`            | —                               | Start-token store. Unset = in-memory (single instance only). Needs `ioredis` in apps/web.   |
+
+**The single-use live start-token store is the `CareSession` row itself**
+(`startTokenHash` / `startTokenExpiresAt`) — no Redis. It was an in-memory
+map that silently failed on multi-instance serverless (token minted on one
+lambda, redeemed on another → "start token is invalid, expired, or already
+used"); moving it to Postgres made the redeem correct everywhere. `REDIS_URL`
+is no longer used by Care.
 
 **Sign-in (phone OTP) isn't in the table above** — it needs the patient
 Firebase _client_ keys (`NEXT_PUBLIC_FIREBASE_CLIENT_*`) pointed at the same

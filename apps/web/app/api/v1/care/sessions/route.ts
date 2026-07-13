@@ -80,15 +80,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   const startToken = mintStartToken();
-  await putStartToken(
-    startToken,
-    {
-      careSessionId: session.id,
-      careUserId,
-      expiresAtMs: Date.now() + CARE_START_TOKEN_TTL_SEC * 1000,
-    },
-    CARE_START_TOKEN_TTL_SEC,
-  );
+  await putStartToken(startToken, {
+    careSessionId: session.id,
+    careUserId,
+    expiresAtMs: Date.now() + CARE_START_TOKEN_TTL_SEC * 1000,
+  });
 
   return NextResponse.json({
     sessionId: session.id,
