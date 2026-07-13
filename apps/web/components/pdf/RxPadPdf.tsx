@@ -199,7 +199,15 @@ export function RxPadPdf(props: RxPadPdfProps) {
               </View>
             ))}
           </View>
-        ) : null}
+        ) : (
+          // A meds-free prescription (investigations/advice only) is normal
+          // OPD practice — say so explicitly so the sheet can't be misread
+          // as incomplete by the patient or a pharmacist.
+          <View style={styles.section}>
+            <Text style={styles.sectionHeading}>Medications</Text>
+            <Text style={styles.muted}>No medicines prescribed at this visit.</Text>
+          </View>
+        )}
 
         {rx.investigations.length > 0 ? (
           <View style={styles.section}>

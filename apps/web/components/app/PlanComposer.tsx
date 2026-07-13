@@ -40,8 +40,11 @@ export function PlanComposer({
 }: {
   sessionId: string;
   signed: boolean;
-  /** Fires with whether the pad has any prescribable content (meds). */
-  onPadChange?: (hasMeds: boolean) => void;
+  /** Fires with whether the pad has any prescribable content — meds,
+   *  investigations, advice or a follow-up. In Indian OPD practice the
+   *  prescription sheet is also where investigations + advice go, so a
+   *  meds-free "EEG, MRI, review with reports" pad is still a real Rx. */
+  onPadChange?: (hasContent: boolean) => void;
 }) {
   const [pad, setPad] = useState<RxPadDraft | null>(null);
   const [padLoaded, setPadLoaded] = useState(false);
@@ -54,7 +57,12 @@ export function PlanComposer({
 
   const setPadAndNotify = useCallback((next: RxPadDraft | null) => {
     setPad(next);
-    onPadChangeRef.current?.((next?.meds ?? []).length > 0);
+    onPadChangeRef.current?.(
+      (next?.meds ?? []).length > 0 ||
+        (next?.investigations ?? []).length > 0 ||
+        (next?.adviceLines ?? []).length > 0 ||
+        Boolean(next?.followUp?.when),
+    );
   }, []);
 
   // Load the draft pad once.
