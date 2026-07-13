@@ -2,10 +2,15 @@ import { GoogleGenAI } from '@google/genai';
 import {
   buildCareLiveSetup,
   CARE_LIVE_MODEL_ID,
+  CARE_LIVE_VERTEX_LOCATION_DEFAULT,
+  CARE_LIVE_VERTEX_MODEL_DEFAULT,
   CARE_LIVE_WSS_BASE,
+  careVertexModelPath,
+  careVertexWssBase,
   clampVadSilence,
 } from '@cureocity/llm';
 import type { RedeemLiveTokenResponse } from '@cureocity/contracts';
+import { gcpProjectId, mintGcpAccessToken } from './gcp-access-token';
 
 /**
  * Cureocity Care — the live-credential mint (AC3, §4.2 steps 4-5).
@@ -18,8 +23,14 @@ import type { RedeemLiveTokenResponse } from '@cureocity/contracts';
  *                    long-lived API key NEVER reaches the browser.
  *                  url — the source recipe's fallback: full WSS URL with
  *                    the key embedded. Behind the flag, never the default.
- *   vertex     — reserved (§13): wire LlmBidiService here the day the
- *                native-audio dialog models land in a usable region.
+ *   vertex     — Vertex AI Live (LlmBidiService) in-region on the platform
+ *                service account (no separate API key; DPDP posture). The
+ *                browser opens the Vertex WSS with a short-lived
+ *                cloud-platform GCP token; region + model are env-tunable
+ *                (CARE_LIVE_VERTEX_LOCATION / _MODEL — run the probe script to
+ *                discover the working pair). SECURITY: the browser receives a
+ *                broad cloud-platform token (Vertex has no narrower scope);
+ *                it is short-lived and single-session — see docs/runbooks/care.md.
  *
  * If the ephemeral-token API call fails (API drift, quota, project not
  * allowlisted) we log and fall back to `url` mode so a session can still
@@ -54,11 +65,12 @@ export async function mintLiveCredential(
     };
   }
 
+  if (backend === 'vertex') {
+    return await mintVertexCredential(input, expiresAtMs);
+  }
+
   if (backend !== 'ai-studio') {
-    throw new Error(
-      `CARE_LIVE_BACKEND=${backend} is not wired yet (mock | ai-studio). ` +
-        'vertex lands when native-audio dialog models are available on Vertex Live (§13).',
-    );
+    throw new Error(`CARE_LIVE_BACKEND=${backend} is not wired (mock | ai-studio | vertex).`);
   }
 
   const apiKey = process.env['GEMINI_API_KEY'];
@@ -92,6 +104,40 @@ export async function mintLiveCredential(
     wsUrl: `${CARE_LIVE_WSS_BASE}?key=${encodeURIComponent(apiKey)}`,
     setup,
     expiresAtMs,
+  };
+}
+
+/**
+ * Vertex AI Live credential: mint a cloud-platform GCP access token from the
+ * platform service account, target the regional LlmBidiService socket, and
+ * carry the full model resource path in the setup. Browser-direct — the same
+ * shape the client already handles (wsUrl + setup). The credential expires at
+ * the earlier of the session cap and the GCP token, so the browser never
+ * holds a usable token past the session.
+ */
+async function mintVertexCredential(
+  input: MintLiveCredentialInput,
+  sessionExpiresAtMs: number,
+): Promise<RedeemLiveTokenResponse> {
+  const project = gcpProjectId();
+  const location = process.env['CARE_LIVE_VERTEX_LOCATION'] ?? CARE_LIVE_VERTEX_LOCATION_DEFAULT;
+  const model = process.env['CARE_LIVE_VERTEX_MODEL'] ?? CARE_LIVE_VERTEX_MODEL_DEFAULT;
+
+  const { token, expiresAtMs: tokenExpiresAtMs } = await mintGcpAccessToken();
+
+  const setup = buildCareLiveSetup({
+    voiceName: input.voiceName,
+    vadSilenceMs: clampVadSilence(input.vadSilenceMs),
+    systemInstruction: input.systemInstruction,
+    model: careVertexModelPath(project, location, model),
+  });
+
+  return {
+    mode: 'vertex',
+    wsUrl: `${careVertexWssBase(location)}?access_token=${encodeURIComponent(token)}`,
+    accessToken: token,
+    setup,
+    expiresAtMs: Math.min(sessionExpiresAtMs, tokenExpiresAtMs),
   };
 }
 

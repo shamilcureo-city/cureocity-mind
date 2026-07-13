@@ -53,10 +53,39 @@ export const CARE_START_TOKEN_TTL_SEC = 2100;
 export const CARE_LIVE_WSS_BASE =
   'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
 
+/**
+ * Vertex AI Live (`CARE_LIVE_BACKEND=vertex`) — same Gemini models, in-region
+ * on the platform service account (DPDP posture; no separate API key). The
+ * region + model are env-overridable because native-audio dialog availability
+ * on Vertex differs by region and by preview name — run
+ * `scripts/care-vertex-live-probe.mjs` to discover the working pair, then set
+ * `CARE_LIVE_VERTEX_LOCATION` / `CARE_LIVE_VERTEX_MODEL`.
+ */
+export const CARE_LIVE_VERTEX_LOCATION_DEFAULT = 'us-central1';
+/// Bare model id (no `models/` prefix, no full path) — wrapped into the
+/// resource path by careVertexModelPath(). Default mirrors the AI Studio pin;
+/// the probe confirms the real Vertex name for your region.
+export const CARE_LIVE_VERTEX_MODEL_DEFAULT = 'gemini-2.5-flash-native-audio-preview-12-2025';
+
+/// Vertex Live WSS base for a region. `global` uses the non-regional host.
+export function careVertexWssBase(location: string): string {
+  const host =
+    location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+  return `wss://${host}/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent`;
+}
+
+/// The `setup.model` value Vertex expects — a full publisher resource path.
+export function careVertexModelPath(project: string, location: string, model: string): string {
+  return `projects/${project}/locations/${location}/publishers/google/models/${model}`;
+}
+
 export interface CareLiveSetupInput {
   voiceName: string;
   vadSilenceMs: number;
   systemInstruction: string;
+  /// Override the setup's `model` field. AI Studio uses the `models/…` pin
+  /// (the default); Vertex passes the full `projects/…/models/…` path.
+  model?: string;
 }
 
 /**
@@ -71,7 +100,7 @@ export interface CareLiveSetupInput {
 export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, unknown> {
   return {
     setup: {
-      model: CARE_LIVE_MODEL_ID,
+      model: input.model ?? CARE_LIVE_MODEL_ID,
       generation_config: {
         // AUDIO only — TEXT+AUDIO together produces echo. Captions come
         // from output transcription events instead.
