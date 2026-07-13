@@ -13,6 +13,10 @@ the mock stack. Product spec: [`../AI_COUNSELING.md`](../AI_COUNSELING.md).
 | `CARE_MOCK_LIVE_URL`   | `ws://localhost:8788`           | Append `?fixture=crisis` to force the crisis script (CI does this).                         |
 | `REDIS_URL`            | —                               | Start-token store. Unset = in-memory (single instance only). Needs `ioredis` in apps/web.   |
 
+**Sign-in (phone OTP) isn't in the table above** — it needs the patient
+Firebase _client_ keys (`NEXT_PUBLIC_FIREBASE_CLIENT_*`) pointed at the same
+project as the server admin. Full setup: [`care-auth-setup.md`](./care-auth-setup.md).
+
 ## Model pin rotation (the two-outage lesson)
 
 The Live model is pinned in `packages/llm/src/live/config.ts`

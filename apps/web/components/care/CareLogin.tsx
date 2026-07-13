@@ -11,10 +11,17 @@ import { getFirebaseAuth, isFirebaseClientConfigured } from '@/lib/firebase-clie
  * /care/login (AC1, S2) — phone-OTP-first, signup and sign-in unified.
  * On confirm, the id token is exchanged for the care-audience session
  * cookie at POST /api/v1/care/auth/session (NOT the practitioner mint).
- * When Firebase client env is absent (dev bypass), a demo button walks
- * straight in — the server guards resolve the seeded demo care user.
+ *
+ * `demoMode` is the SERVER's auth-bypass truth (from the page). The demo
+ * door only works when the server resolves the seeded demo user — i.e.
+ * when bypass is on — so we gate the demo button on that, NOT on the
+ * client Firebase keys (a separate signal that can diverge: e.g. server
+ * Firebase set but the public NEXT_PUBLIC_FIREBASE_* keys missing would
+ * otherwise show a demo button that just bounces off /care/home). When
+ * neither demo nor phone sign-in is available, we say so plainly instead
+ * of offering a button that goes nowhere.
  */
-export function CareLogin() {
+export function CareLogin({ demoMode = false }: { demoMode?: boolean }) {
   const router = useRouter();
   const configured = isFirebaseClientConfigured();
   const [phone, setPhone] = useState('+91 ');
@@ -66,7 +73,7 @@ export function CareLogin() {
         New or returning — same door. We&apos;ll text a 6-digit code.
       </p>
 
-      {!configured ? (
+      {demoMode ? (
         <Card className="mt-6 p-4">
           <p className="text-sm text-[var(--color-ink-2)]">
             Demo mode — phone sign-in is off in this environment.
@@ -74,6 +81,16 @@ export function CareLogin() {
           <Button className="mt-3 w-full" onClick={() => router.push('/care/home')}>
             Continue as the demo user
           </Button>
+        </Card>
+      ) : !configured ? (
+        <Card className="mt-6 p-4">
+          <p className="text-sm font-medium text-[var(--color-ink)]">
+            Sign-in isn&apos;t available on this deployment yet.
+          </p>
+          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+            Phone sign-in needs the Firebase keys configured here. To open this environment as a
+            demo instead, set <code className="text-[13px]">AUTH_BYPASS=true</code> and redeploy.
+          </p>
         </Card>
       ) : !confirmation ? (
         <Card className="mt-6 p-4">

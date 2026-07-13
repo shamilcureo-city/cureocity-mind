@@ -12,7 +12,7 @@ export function SafetyStrip({ resources }: { resources: CareResource[] }) {
   const primary = resources[0];
   const secondary = resources[1];
   return (
-    <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-warn)]/25 bg-[var(--color-warn-soft)] px-4 py-2 text-[13px] text-[#7c4322]">
+    <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--color-warn)]/25 bg-[var(--color-warn-soft)] px-4 py-2 text-[13px] text-[#7c4322] md:left-64">
       <span className="font-semibold">In crisis?</span>{' '}
       {primary ? (
         <a className="underline underline-offset-2" href={`tel:${primary.number}`}>

@@ -82,17 +82,21 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-md px-5 py-10 text-sm text-[var(--color-warn)]">{error}</div>
+      <div className="mx-auto max-w-md px-5 py-10 text-sm text-[var(--color-warn)] md:max-w-2xl md:px-8">
+        {error}
+      </div>
     );
   }
   if (!session) {
     return (
-      <div className="mx-auto max-w-md px-5 py-10 text-sm text-[var(--color-ink-3)]">Loading…</div>
+      <div className="mx-auto max-w-md px-5 py-10 text-sm text-[var(--color-ink-3)] md:max-w-2xl md:px-8">
+        Loading…
+      </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-md px-5 py-6 pb-24">
+    <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-2xl md:px-8 md:py-10">
       {session.moodAfter === null ? (
         <Card className="mb-4 p-4">
           <MoodDial value={moodAfter} onChange={(v) => void submitMoodAfter(v)} label="And now?" />
