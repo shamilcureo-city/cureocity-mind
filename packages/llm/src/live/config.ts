@@ -63,9 +63,12 @@ export const CARE_LIVE_WSS_BASE =
  */
 export const CARE_LIVE_VERTEX_LOCATION_DEFAULT = 'us-central1';
 /// Bare model id (no `models/` prefix, no full path) — wrapped into the
-/// resource path by careVertexModelPath(). Default mirrors the AI Studio pin;
-/// the probe confirms the real Vertex name for your region.
-export const CARE_LIVE_VERTEX_MODEL_DEFAULT = 'gemini-2.5-flash-native-audio-preview-12-2025';
+/// resource path by careVertexModelPath(). This is the CONFIRMED Vertex name
+/// for project cureocity-mind: `gemini-live-2.5-flash-native-audio` reaches
+/// setupComplete in us-central1 + us-east4 (NOT asia-south1, NOT global).
+/// Note the Vertex name differs from the AI Studio pin (no `-preview`, no
+/// date). Re-run scripts/care-vertex-live-probe.mjs if you change project/region.
+export const CARE_LIVE_VERTEX_MODEL_DEFAULT = 'gemini-live-2.5-flash-native-audio';
 
 /// Vertex Live WSS base for a region. `global` uses the non-regional host.
 export function careVertexWssBase(location: string): string {
