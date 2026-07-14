@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { RecaptchaVerifier, signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
 import { Button } from '@/components/ui/Button';
@@ -23,6 +23,17 @@ import { getFirebaseAuth, isFirebaseClientConfigured } from '@/lib/firebase-clie
  */
 export function CareLogin({ demoMode = false }: { demoMode?: boolean }) {
   const router = useRouter();
+
+  useEffect(() => {
+    // CG6 — gift-a-session attribution: ?ref rides localStorage into
+    // onboarding (the server validates the code there).
+    try {
+      const ref = new URLSearchParams(window.location.search).get('ref');
+      if (ref) localStorage.setItem('care-ref', ref.slice(0, 24));
+    } catch {
+      /* private mode */
+    }
+  }, []);
   const configured = isFirebaseClientConfigured();
   const [phone, setPhone] = useState('+91 ');
   const [code, setCode] = useState('');

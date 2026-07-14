@@ -141,6 +141,42 @@ export async function runCareReport(careSessionId: string): Promise<RunCareRepor
     return upserted;
   });
 
+  // CG6 — graduation is SUCCESS (docs/CARE_GROWTH_SYSTEM.md §9 #10): a
+  // STEP_DOWN review with reliable improvement stops Plus billing
+  // PROACTIVELY and marks the account graduated (outbound goes silent —
+  // the nudge cron skips graduates). The threshold is the review's own
+  // recommendation, which is clinician-governed copy: never soften it.
+  if (
+    report.kind === 'REVIEW' &&
+    report.progressReview.recommendation === 'STEP_DOWN' &&
+    report.progressReview.verdicts.some(
+      (v) => v.verdict.includes('improvement') || v.verdict.includes('remission'),
+    )
+  ) {
+    const user = await prisma.careUser.findUnique({
+      where: { id: session.careUserId },
+      select: { graduatedAt: true },
+    });
+    if (!user?.graduatedAt) {
+      await prisma.$transaction(async (tx) => {
+        await tx.careUser.update({
+          where: { id: session.careUserId },
+          data: { graduatedAt: new Date(), planExpiresAt: new Date() },
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'CARE_GRADUATED',
+            targetType: 'CareUser',
+            targetId: session.careUserId,
+            metadata: { careSessionId, recommendation: 'STEP_DOWN' },
+          },
+          tx,
+        );
+      });
+    }
+  }
+
   // §2 layer 5 — the post-session re-screen is a safety tripwire, not a
   // display value. HIGH risk locks sessions until the next-day check-in.
   if (riskLevel === 'HIGH' && session.careUser.status === 'ACTIVE') {

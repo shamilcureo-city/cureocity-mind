@@ -7,6 +7,7 @@ import { CARE_REVIEW_EVERY_N_SESSIONS } from '@/lib/care-session-kind';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { CareInstrumentForm } from './CareInstrumentForm';
+import { CareShareButton } from './CareShareButton';
 import { MoodDial } from './MoodDial';
 
 interface SessionPayload {
@@ -326,8 +327,48 @@ function ReportBody({
         ) : null}
         {pr.recommendation === 'HUMAN_THERAPIST' ? (
           <Section label="An honest recommendation">
-            The scores and this conversation suggest a human therapist is the right next step. An AI
-            has limits — this is one of them.
+            <p>
+              The scores and this conversation suggest a human therapist is the right next step. An
+              AI has limits — this is one of them.
+            </p>
+            {/* CG6 — the rails: a recommendation without an artefact is
+                designed to fail. The summary carries the plan + instrument
+                series + verdicts; transcripts stay yours. */}
+            <a
+              href="/api/v1/care/export/handover"
+              className="mt-2 inline-block text-[13px] font-semibold text-[var(--color-accent)] underline-offset-2 hover:underline"
+            >
+              Download a summary for your new therapist →
+            </a>
+            <p className="mt-1 text-[12px] text-[var(--color-ink-3)]">
+              Your plan, your scores, and how the work went — no transcripts. Hand it over so you
+              don&apos;t start from zero.
+            </p>
+          </Section>
+        ) : null}
+        {pr.recommendation === 'STEP_DOWN' ? (
+          <Section label="The outcome we work for">
+            <p>
+              You&apos;re near the point where people finish. Finishing is the goal — this was never
+              meant to be forever. If Plus billing was on, we&apos;ve stopped it ourselves.
+            </p>
+            <div className="mt-2">
+              <CareShareButton kind="GRADUATION" label="Make my graduation card" />
+            </div>
+          </Section>
+        ) : null}
+        {pr.recommendation === 'CONTINUE' &&
+        pr.verdicts.some(
+          (v) => v.verdict.includes('improvement') || v.verdict.includes('remission'),
+        ) ? (
+          <Section label="Worth keeping">
+            <p className="text-[13px] text-[var(--color-ink-2)]">
+              Your score moved past the bar clinicians use to call change reliable. Want a card that
+              says so? Numbers only — one person&apos;s numbers, not a promise.
+            </p>
+            <div className="mt-2">
+              <CareShareButton kind="VERDICT" label="Make my progress card" />
+            </div>
           </Section>
         ) : null}
         {pr.revisedGoals.length > 0 ? (

@@ -29,7 +29,7 @@ export async function POST(
 
   const session = await prisma.careSession.findUnique({
     where: { id: careSessionId },
-    select: { id: true, careUserId: true, status: true, startedAt: true },
+    select: { id: true, careUserId: true, kind: true, status: true, startedAt: true },
   });
   if (!session || session.careUserId !== auth.value.careUserId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -78,6 +78,56 @@ export async function POST(
       tx,
     );
   });
+
+  // CG6 — the friend finished their intake: the gift lands for both sides.
+  // The referrer's credit is capped at +2/week so free+gifts stay within
+  // the clinical cadence ceiling.
+  if (session.kind === 'INTAKE') {
+    try {
+      const referral = await prisma.careReferral.findUnique({
+        where: { redeemerCareUserId: auth.value.careUserId },
+        select: { id: true, referrerCareUserId: true, status: true },
+      });
+      if (referral && referral.status === 'SIGNED_UP') {
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const creditedThisWeek = await prisma.careReferral.count({
+          where: {
+            referrerCareUserId: referral.referrerCareUserId,
+            creditedAt: { gte: weekAgo },
+          },
+        });
+        await prisma.$transaction(async (tx) => {
+          await tx.careReferral.update({
+            where: { id: referral.id },
+            data: { status: 'INTAKE_DONE', creditedAt: new Date() },
+          });
+          if (creditedThisWeek < 2) {
+            await tx.careSessionCredit.create({
+              data: {
+                careUserId: referral.referrerCareUserId,
+                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+              },
+            });
+          }
+          await writeAudit(
+            {
+              actorType: 'SYSTEM',
+              action: 'CARE_REFERRAL_CREDITED',
+              targetType: 'CareReferral',
+              targetId: referral.id,
+              metadata: {
+                referrerCareUserId: referral.referrerCareUserId,
+                referrerCreditGranted: creditedThisWeek < 2,
+              },
+            },
+            tx,
+          );
+        });
+      }
+    } catch (e) {
+      console.error(`[care] referral credit failed: ${(e as Error).message}`);
+    }
+  }
 
   after(async () => {
     const result = await runCareReport(careSessionId);

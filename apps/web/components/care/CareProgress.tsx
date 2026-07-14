@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
+import { CareGiftButton } from './CareGiftButton';
+import { CareShareButton } from './CareShareButton';
 
 interface ProgressPayload {
   stage: 'GETTING_STARTED' | 'ASSESSMENT' | 'ACTIVE_WORK' | 'REVIEW_DUE';
@@ -175,6 +177,24 @@ export function CareProgress() {
             ))
           )}
         </div>
+      </Card>
+
+      {/* CG6 — the artefact loop: a pride-shaped milestone card (numbers
+          only, server-built) + the gift. Never diagnosis words. */}
+      <Card className="mt-3 p-4 md:p-5">
+        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+          Proud of this?
+        </span>
+        <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+          Make a card that says you've been showing up — just the numbers, nothing personal, and you
+          can take the link down any time.
+        </p>
+        <div className="mt-2">
+          <CareShareButton kind="MILESTONE" label="Make my showing-up card" />
+        </div>
+        <p className="mt-3 text-[13px] text-[var(--color-ink-2)]">
+          Someone come to mind lately? <CareGiftButton />
+        </p>
       </Card>
     </div>
   );

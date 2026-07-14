@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { CareGiftButton } from './CareGiftButton';
 import { CareInstrumentForm } from './CareInstrumentForm';
 import { MoodDial } from './MoodDial';
 import type { CareResource } from './SafetyStrip';
@@ -288,6 +289,12 @@ export function CareHome() {
               <Link href="/care/plan-tier" className="font-semibold text-[var(--color-accent)]">
                 Care Plus, or a one-time 2-session pack →
               </Link>
+            </p>
+          ) : null}
+          {!data.suppressUpsell ? (
+            <p className="mt-2 text-[13px] text-[var(--color-ink-2)]">
+              Or pay it forward: <CareGiftButton /> When they finish their intake, you both get one.
+              Kindness pays both ways.
             </p>
           ) : null}
         </>

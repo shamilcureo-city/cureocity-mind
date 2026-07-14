@@ -79,6 +79,47 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         tx,
       );
     }
+
+    // CG6 — gift-a-session attribution: a valid, non-self code links the
+    // referral and gives the FRIEND's first week a third session (one
+    // 7-day credit). The referrer's credit waits for the friend's
+    // completed intake — value received, not mere signup.
+    if (v.referralCode) {
+      const referrer = await tx.careUser.findUnique({
+        where: { referralCode: v.referralCode },
+        select: { id: true },
+      });
+      if (referrer && referrer.id !== auth.value.careUserId) {
+        const existing = await tx.careReferral.findUnique({
+          where: { redeemerCareUserId: auth.value.careUserId },
+          select: { id: true },
+        });
+        if (!existing) {
+          const referral = await tx.careReferral.create({
+            data: {
+              referrerCareUserId: referrer.id,
+              redeemerCareUserId: auth.value.careUserId,
+            },
+          });
+          await tx.careSessionCredit.create({
+            data: {
+              careUserId: auth.value.careUserId,
+              expiresAt: new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000),
+            },
+          });
+          await writeAudit(
+            {
+              actorType: 'CLIENT',
+              action: 'CARE_REFERRAL_LINKED',
+              targetType: 'CareReferral',
+              targetId: referral.id,
+              metadata: { ...auditMetadataFromRequest(req), referrerCareUserId: referrer.id },
+            },
+            tx,
+          );
+        }
+      }
+    }
   });
 
   if (held) {

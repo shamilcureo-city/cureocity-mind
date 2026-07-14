@@ -33,7 +33,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   // Pilot-scale walk (bounded): per-user lookups below stay acceptable at
   // this size; revisit with batched queries past ~500 opted-in users.
   const users = await prisma.careUser.findMany({
-    where: { whatsappOptInAt: { not: null }, status: 'ACTIVE' },
+    // Graduates get ZERO re-engagement — celebrating users leaving only
+    // works if we actually leave them alone (ethics charter #10).
+    where: { whatsappOptInAt: { not: null }, status: 'ACTIVE', graduatedAt: null },
     select: {
       id: true,
       displayName: true,

@@ -50,6 +50,10 @@ const SCAN_ROOTS = [
   // Sprint 15 — the public patient portal page at /p/[token] writes
   // PATIENT_PORTAL_OPENED when the patient opens a shared artefact.
   'apps/web/app/p',
+  // CG6 — the public Care share page at /care/s/[token] writes
+  // CARE_SHARE_OPENED when a shared card is opened (the /p pattern's
+  // Care twin).
+  'apps/web/app/care',
 ];
 
 /**
