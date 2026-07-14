@@ -19,6 +19,9 @@ export const AuditActionSchema = z.enum([
   'SESSION_CANCELLED',
   // Sprint 45 — Today screen status transitions on scheduled sessions.
   'SESSION_NO_SHOW',
+  // TS7.5 — no-show now acts immediately with a 5s undo (no confirm dialog);
+  // the undo is its own audited transition back to SCHEDULED.
+  'SESSION_NO_SHOW_UNDONE',
   'SESSION_RESCHEDULED',
   'AUDIO_CHUNK_UPLOADED',
   // Sprint 57 — transcribe-on-arrival.

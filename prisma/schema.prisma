@@ -2497,6 +2497,8 @@ enum AuditAction {
   SESSION_CANCELLED
   // Sprint 45 — Today screen status transitions.
   SESSION_NO_SHOW
+  // TS7.5 — the audited undo back to SCHEDULED.
+  SESSION_NO_SHOW_UNDONE
   SESSION_RESCHEDULED
 
   // Audio + notes (scribe-service, Sprint 2)

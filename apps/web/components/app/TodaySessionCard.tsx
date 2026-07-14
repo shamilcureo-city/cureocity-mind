@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
@@ -52,11 +52,21 @@ export function TodaySessionCard({
   dueMeasure = null,
 }: TodaySessionCardProps) {
   const router = useRouter();
-  const [busy, setBusy] = useState<'no-show' | null>(null);
+  const [busy, setBusy] = useState<'no-show' | 'undo' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [startMenuOpen, setStartMenuOpen] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState(false);
+  // TS7.5 — no-show acts immediately and shows a short Undo window instead
+  // of a browser confirm(). Fewer decisions, same safety.
+  const [undoOffer, setUndoOffer] = useState(false);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    },
+    [],
+  );
 
   // TS6 — the two ways to start, doctor-style: the preferred one is the
   // primary button; the other lives one tap away. Live opens the scribe;
@@ -84,7 +94,6 @@ export function TodaySessionCard({
 
   async function markNoShow() {
     if (busy) return;
-    if (!confirm(`Mark ${session.clientName}'s session as a no-show?`)) return;
     setBusy('no-show');
     setError(null);
     try {
@@ -97,6 +106,38 @@ export function TodaySessionCard({
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `Failed (${res.status})`);
       }
+      // Offer the undo for a few seconds BEFORE refreshing — a refresh
+      // re-slots this card (hero → timeline row) and would remount it,
+      // dropping the pill. The board commits visually when the window ends.
+      setUndoOffer(true);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = setTimeout(() => {
+        setUndoOffer(false);
+        router.refresh();
+      }, 7000);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function undoNoShow() {
+    if (busy) return;
+    setBusy('undo');
+    setError(null);
+    try {
+      const res = await fetch(`/api/v1/sessions/${session.id}/no-show/undo`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Failed (${res.status})`);
+      }
+      setUndoOffer(false);
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
       router.refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -104,6 +145,17 @@ export function TodaySessionCard({
       setBusy(null);
     }
   }
+
+  const undoPill = undoOffer ? (
+    <button
+      type="button"
+      onClick={() => void undoNoShow()}
+      disabled={busy !== null}
+      className="rounded-full bg-[var(--color-ink)] px-3.5 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+    >
+      {busy === 'undo' ? 'Undoing…' : 'Marked no-show — Undo'}
+    </button>
+  ) : null;
 
   // ------------------------------------------------------------------
   // Hero — the "Up next" treatment (SCHEDULED or IN_PROGRESS only).
@@ -186,22 +238,28 @@ export function TodaySessionCard({
 
           {session.status === 'SCHEDULED' && (
             <div className="mt-2 flex items-center justify-center gap-1">
-              <button
-                type="button"
-                onClick={() => setRescheduleOpen(true)}
-                disabled={busy !== null}
-                className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
-              >
-                Reschedule
-              </button>
-              <button
-                type="button"
-                onClick={() => void markNoShow()}
-                disabled={busy !== null}
-                className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
-              >
-                {busy === 'no-show' ? 'Marking…' : 'No-show'}
-              </button>
+              {undoOffer ? (
+                undoPill
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setRescheduleOpen(true)}
+                    disabled={busy !== null}
+                    className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
+                  >
+                    Reschedule
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void markNoShow()}
+                    disabled={busy !== null}
+                    className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
+                  >
+                    {busy === 'no-show' ? 'Marking…' : 'No-show'}
+                  </button>
+                </>
+              )}
             </div>
           )}
           {error && (
@@ -259,7 +317,8 @@ export function TodaySessionCard({
         </div>
 
         <div className="relative flex shrink-0 items-center gap-1.5">
-          {session.status === 'SCHEDULED' && (
+          {undoOffer && undoPill}
+          {!undoOffer && session.status === 'SCHEDULED' && (
             <>
               <Link
                 href={primaryStart.href}
