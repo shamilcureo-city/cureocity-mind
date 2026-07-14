@@ -62,7 +62,13 @@ All computable from existing tables — no new instrumentation needed.
   therapist per week — tells us whether live scribing survives contact
   with real rooms or everyone retreats to batch recording.
 
+Recruiting the cohort: message templates + objection cheat-sheet +
+tracker in **`docs/pilot/outreach.md`**.
+
 ## 4. Week 0 — setup checklist (per therapist)
+
+The full 45-minute run-of-show (with exit checklist) is
+**`docs/pilot/week0-runbook.md`** — the list below is the summary.
 
 1. Account provisioned; onboarding completed (vertical = THERAPIST).
 2. Passkey registered (Settings → sign hardening) — before
@@ -81,7 +87,9 @@ All computable from existing tables — no new instrumentation needed.
 
 Every Friday:
 
-1. **Pull the numbers** (§ 3) for the week — one row per therapist.
+1. **Pull the numbers** (§ 3) for the week — run
+   `scripts/pilot-scorecard.sql` in the Neon SQL editor (read-only; one
+   labelled section per metric, edit `week_start` at the top of each).
 2. **Rank the friction**: top 3 complaints/confusions from the WhatsApp
    group, each tagged fix-now / fix-next / won't-fix.
 3. **One coaching nudge per therapist**, chosen from their own data —
