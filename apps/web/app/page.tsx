@@ -920,7 +920,16 @@ function Footer() {
           </div>
         </div>
         <div className="mt-10 flex flex-col gap-2 border-t border-[var(--color-line-soft)] pt-6 text-xs text-[var(--color-ink-3)] sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Cureocity · Made for Indian practice</p>
+          <p>
+            © 2026 Cureocity · Made for Indian practice ·{' '}
+            <Link href="/privacy" className="underline underline-offset-2 hover:text-[var(--color-ink)]">
+              Privacy
+            </Link>{' '}
+            ·{' '}
+            <Link href="/terms" className="underline underline-offset-2 hover:text-[var(--color-ink)]">
+              Terms
+            </Link>
+          </p>
           <p>Not a medical device. Clinical decisions remain with the treating professional.</p>
         </div>
       </Container>
