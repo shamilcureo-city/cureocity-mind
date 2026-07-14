@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { CARE_PERSONAS } from './personas';
 import type { CareResource } from './SafetyStrip';
 
 interface SettingsPayload {
@@ -190,10 +191,34 @@ export function CareSettings({ resources }: { resources: CareResource[] }) {
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
           Your therapist
         </span>
-        <p className="mt-1">
-          {data.personaName} · voice {data.voiceName} · {data.personaStyle}
-        </p>
-        <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+        {/* CG2 — the switch Settings always promised. Persona choice is
+            clinical alliance: free on every tier, plan + history stay. */}
+        <div className="mt-2 grid grid-cols-3 gap-2">
+          {CARE_PERSONAS.map((p) => (
+            <button
+              key={p.name}
+              type="button"
+              onClick={() => {
+                setData({
+                  ...data,
+                  personaName: p.name,
+                  voiceName: p.voiceName,
+                  personaStyle: p.style,
+                });
+                void save({ personaName: p.name, voiceName: p.voiceName, personaStyle: p.style });
+              }}
+              className={`rounded-2xl border p-2.5 text-center ${
+                data.personaName === p.name
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
+                  : 'border-[var(--color-line)] bg-[var(--color-surface)]'
+              }`}
+            >
+              <span className="block text-sm font-semibold">{p.name}</span>
+              <span className="block text-[11px] text-[var(--color-ink-3)]">{p.blurb}</span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-[var(--color-ink-3)]">
           Changing your therapist keeps your plan and history.
         </p>
       </Card>

@@ -270,6 +270,8 @@ export const AuditActionSchema = z.enum([
   'CARE_ACCOUNT_DELETED',
   'CARE_ACCOUNT_PURGED',
   'CARE_DATA_EXPORTED',
+  'CARE_ASSESSMENT_RESONANCE',
+  'CARE_ALLIANCE_PULSE',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

@@ -19,6 +19,9 @@ interface SessionPayload {
   /// cadence forward (never a hardcoded default).
   currentPlan: { modalityTrack: string; cadence: string } | null;
   hasBaseline: boolean;
+  completedCount: number;
+  hasTrustedContact: boolean;
+  personaName: string;
   report: { id: string; kind: string; body: CareReportV1 } | null;
 }
 
@@ -38,6 +41,9 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
   /// After plan-accept: the "starting line" baseline ask (CG1). Peak
   /// commitment, post-value — never a pre-intake quiz, never nagged.
   const [showBaseline, setShowBaseline] = useState(false);
+  /// CG2 — the acceptance ceremony: the tap should feel like signing, not
+  /// submitting. Renders between accept success and the starting line.
+  const [ceremony, setCeremony] = useState<{ version: number } | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/v1/care/sessions/${sessionId}`);
@@ -117,6 +123,42 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
     );
   }
 
+  if (ceremony) {
+    // Quiet and typographic — no confetti. The AI is credited, never a
+    // signatory (clinical-ethics ruling: an AI countersigning a treatment
+    // contract reads as an unlicensed entity executing a clinical document).
+    const dateLine = new Date().toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+    return (
+      <div className="mx-auto flex min-h-[70vh] w-full max-w-md flex-col items-center justify-center px-5 py-6 text-center md:max-w-2xl">
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-accent)]">
+          Plan v{ceremony.version}
+        </span>
+        <h1 className="mt-2 font-serif text-3xl font-semibold">Yours, in writing.</h1>
+        <p className="mt-3 max-w-sm text-sm text-[var(--color-ink-2)]">
+          Goals in your words. After {CARE_REVIEW_EVERY_N_SESSIONS} sessions, the same questions
+          from day one — and an honest answer about whether it&apos;s working.
+        </p>
+        <p className="mt-4 text-[13px] text-[var(--color-ink-3)]">
+          Written with {session.personaName} (an AI). Accepted by you — {dateLine}.
+        </p>
+        <Button
+          className="mt-8 w-full max-w-xs"
+          onClick={() => {
+            setCeremony(null);
+            if (!session.hasBaseline) setShowBaseline(true);
+            else router.push('/care/home');
+          }}
+        >
+          Continue →
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-2xl md:px-8 md:py-10">
       {session.moodAfter === null ? (
@@ -124,7 +166,14 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
           <MoodDial value={moodAfter} onChange={(v) => void submitMoodAfter(v)} label="And now?" />
           {session.moodBefore !== null && moodAfter !== null && moodAfter > session.moodBefore ? (
             <p className="mt-2 text-sm font-semibold text-[var(--color-accent)]">
-              {session.moodBefore} → {moodAfter} · that&apos;s movement.
+              {session.moodBefore} → {moodAfter} tonight.
+            </p>
+          ) : null}
+          {session.moodBefore !== null && moodAfter !== null && moodAfter <= session.moodBefore ? (
+            // The not-improved branch — a shame-prone user who still feels
+            // heavy used to get silence here.
+            <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+              Still heavy. That&apos;s honest — and the plan will meet you there.
             </p>
           ) : null}
         </Card>
@@ -132,9 +181,15 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
 
       {!session.report ? (
         <Card className="p-5 text-center">
-          <div className="mx-auto h-10 w-10 animate-pulse rounded-full bg-[var(--color-accent-soft)]" />
+          <div className="mx-auto h-10 w-10 animate-pulse rounded-full bg-[var(--color-accent-soft)] motion-reduce:animate-none" />
           <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-            {session.kind === 'INTAKE' ? 'Writing your assessment & plan…' : 'Writing your report…'}
+            {session.kind === 'INTAKE'
+              ? `${session.personaName} is writing your assessment — about a minute. Your words, not a template.`
+              : 'Writing your report…'}
+          </p>
+          <p className="mt-3 text-[13px] text-[var(--color-ink-3)]">
+            While you wait — one slow breath. In… and out. That was the whole exercise. They&apos;re
+            all this small.
           </p>
           {polls > 6 ? (
             <Button
@@ -149,16 +204,35 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
           ) : null}
         </Card>
       ) : (
-        <ReportBody
-          report={session.report.body}
-          sessionId={sessionId}
-          currentPlan={session.currentPlan}
-          onAccepted={() => {
-            // The starting line rides the peak-commitment moment — once.
-            if (!session.hasBaseline) setShowBaseline(true);
-            else router.push('/care/home');
-          }}
-        />
+        <>
+          <ReportBody
+            report={session.report.body}
+            reportId={session.report.id}
+            sessionId={sessionId}
+            currentPlan={session.currentPlan}
+            personaName={session.personaName}
+            onAccepted={(version) => setCeremony({ version })}
+          />
+          {session.report.body.kind === 'TREATMENT' && session.completedCount === 3 ? (
+            <AlliancePulse personaName={session.personaName} />
+          ) : null}
+          {session.report.body.kind === 'TREATMENT' &&
+          session.completedCount === 2 &&
+          !session.hasTrustedContact ? (
+            <Card className="mt-3 p-4">
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                One quiet thing
+              </span>
+              <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                If things ever get heavy, who should {session.personaName} mention? A trusted
+                contact is shown only to you, as a one-tap call — never messaged automatically.
+              </p>
+              <ButtonLink variant="secondary" size="sm" className="mt-2" href="/care/settings">
+                Add one in Settings →
+              </ButtonLink>
+            </Card>
+          ) : null}
+        </>
       )}
 
       <div className="mt-5 text-center">
@@ -183,14 +257,18 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 
 function ReportBody({
   report,
+  reportId,
   sessionId,
   currentPlan,
+  personaName,
   onAccepted,
 }: {
   report: CareReportV1;
+  reportId: string;
   sessionId: string;
   currentPlan: { modalityTrack: string; cadence: string } | null;
-  onAccepted: () => void;
+  personaName: string;
+  onAccepted: (version: number) => void;
 }) {
   // Always narrow on kind before reading the body — the Pass-2/3 rule.
   if (report.kind === 'INTAKE') {
@@ -203,6 +281,9 @@ function ReportBody({
         cadence={report.assessmentAndPlan.cadence}
         sessionId={sessionId}
         onAccepted={onAccepted}
+        staged
+        reportId={reportId}
+        personaName={personaName}
       />
     );
   }
@@ -321,6 +402,9 @@ function PlanProposal({
   sessionId,
   onAccepted,
   title = 'Your assessment & plan',
+  staged = false,
+  reportId,
+  personaName,
 }: {
   formulation: string;
   concernAreas: Array<{ name: string; evidenceQuote: string }>;
@@ -328,12 +412,20 @@ function PlanProposal({
   modalityTrack: string;
   cadence: string;
   sessionId: string;
-  onAccepted: () => void;
+  onAccepted: (version: number) => void;
   title?: string;
+  /// CG2 — the INTAKE reveal is staged (tap-paced beats); REVIEW revisions
+  /// stay single-screen (no formulation/quotes to pace).
+  staged?: boolean;
+  reportId?: string;
+  personaName?: string;
 }) {
   const [goals, setGoals] = useState(proposedGoals.map((g) => ({ ...g })));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /// Staged reveal beats: 0 formulation · 1 in-your-words · 2 goals+terms.
+  const [beat, setBeat] = useState(staged ? 0 : 2);
+  const [resonance, setResonance] = useState<string | null>(null);
 
   async function accept(): Promise<void> {
     setBusy(true);
@@ -349,40 +441,99 @@ function PlanProposal({
           cadence,
         }),
       });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? 'Could not save the plan');
-      }
-      onAccepted();
+      const body = (await res.json().catch(() => ({}))) as { version?: number; error?: string };
+      if (!res.ok) throw new Error(body.error ?? 'Could not save the plan');
+      onAccepted(body.version ?? 1);
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
     }
   }
 
-  return (
+  async function submitResonance(answer: 'strong' | 'mostly' | 'not_really'): Promise<void> {
+    setResonance(answer);
+    if (answer === 'not_really') {
+      // Rupture-repair: the next session opens by asking what it missed.
+      // (CareHome reads this once and sends it as the session topic.)
+      try {
+        localStorage.setItem(
+          'care-topic-prefill',
+          'You said the assessment missed something — start there.',
+        );
+      } catch {
+        /* private mode — the repair just doesn't prefill */
+      }
+    }
+    if (reportId) {
+      await fetch(`/api/v1/care/reports/${reportId}/resonance`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ answer }),
+      }).catch(() => undefined);
+    }
+  }
+
+  const formulationCard = formulation ? (
+    <Card className="mt-3 border-[var(--color-accent)]/30 bg-[var(--color-accent-soft)] p-4">
+      <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)]">
+        What&apos;s going on — in plain words
+      </span>
+      <p className={`mt-1.5 ${staged ? 'font-serif text-[16px] leading-relaxed' : 'text-sm'}`}>
+        {formulation}
+      </p>
+    </Card>
+  ) : null;
+
+  const quotesCard =
+    concernAreas.length > 0 ? (
+      <Section label="In your own words">
+        {concernAreas.map((c, i) => (
+          <div key={i} className="mb-2">
+            <p className="font-semibold">{c.name}</p>
+            {c.evidenceQuote ? (
+              <p className="mt-0.5 border-l-2 border-[var(--color-accent)] pl-2 text-[13px] italic text-[var(--color-ink-2)]">
+                You said — “{c.evidenceQuote}”
+              </p>
+            ) : null}
+          </div>
+        ))}
+        {staged && resonance === null ? (
+          <div className="mt-3 border-t border-[var(--color-line-soft)] pt-3">
+            <p className="text-[13px] font-medium">Did this feel like it understood you?</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {(
+                [
+                  ['strong', 'Yes, strongly'],
+                  ['mostly', 'Mostly'],
+                  ['not_really', 'Not really'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => void submitResonance(key)}
+                  className="rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-1 text-xs"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {resonance === 'not_really' ? (
+          <p className="mt-2 text-[13px] text-[var(--color-ink-2)]">
+            Thank you for the honesty — that matters more than a polite yes. Next session,{' '}
+            {personaName ?? 'your therapist'} will start by asking what she missed.
+          </p>
+        ) : null}
+        {resonance === 'strong' || resonance === 'mostly' ? (
+          <p className="mt-2 text-[13px] text-[var(--color-ink-2)]">Noted. Keep going —</p>
+        ) : null}
+      </Section>
+    ) : null;
+
+  const goalsSection = (
     <>
-      <h1 className="font-serif text-xl font-semibold">{title}</h1>
-      {formulation ? (
-        <Card className="mt-3 border-[var(--color-accent)]/30 bg-[var(--color-accent-soft)] p-4">
-          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-accent)]">
-            What&apos;s going on — in plain words
-          </span>
-          <p className="mt-1.5 text-sm">{formulation}</p>
-        </Card>
-      ) : null}
-      {concernAreas.length > 0 ? (
-        <Section label="What we heard">
-          {concernAreas.map((c, i) => (
-            <p key={i} className="mb-1">
-              <b>{c.name}</b>
-              {c.evidenceQuote ? (
-                <span className="text-[var(--color-ink-2)]"> — “{c.evidenceQuote}”</span>
-              ) : null}
-            </p>
-          ))}
-        </Section>
-      ) : null}
       <Section label="Proposed goals — edit anything">
         <div className="space-y-2">
           {goals.map((g, i) => (
@@ -413,5 +564,124 @@ function PlanProposal({
         {busy ? 'Saving…' : 'This is my plan ✓'}
       </Button>
     </>
+  );
+
+  if (staged) {
+    // The reveal: user-paced taps, no timers, no artificial delay. Beat 1
+    // is the formulation ALONE — a letter, not a dashboard.
+    return (
+      <>
+        <h1 className="font-serif text-xl font-semibold">
+          {personaName ? `${personaName} wrote this for you` : title}
+        </h1>
+        {formulationCard}
+        {beat >= 1 ? quotesCard : null}
+        {beat >= 2 ? goalsSection : null}
+        {beat < 2 ? (
+          <Button variant="secondary" className="mt-4 w-full" onClick={() => setBeat((b) => b + 1)}>
+            Keep reading →
+          </Button>
+        ) : null}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <h1 className="font-serif text-xl font-semibold">{title}</h1>
+      {formulationCard}
+      {quotesCard}
+      {goalsSection}
+    </>
+  );
+}
+
+function AlliancePulse({ personaName }: { personaName: string }) {
+  /// CG2 — WAI-SR-short at session 3: the leading retention indicator
+  /// (alliance forms in days 3–5 and predicts retention before any verdict
+  /// exists). Low bond pairs with the free persona switch in Settings.
+  const ITEMS = [
+    ['agree', `${personaName} and I agree on what I'm working on`],
+    ['heard', 'I feel heard in our sessions'],
+    ['newWays', 'The sessions give me new ways of looking at my problem'],
+  ] as const;
+  const [scores, setScores] = useState<Record<string, number>>({});
+  const [done, setDone] = useState(false);
+  const complete = ITEMS.every(([k]) => scores[k] !== undefined);
+  const low = complete && (scores['agree']! + scores['heard']! + scores['newWays']!) / 3 < 3;
+
+  async function submit(): Promise<void> {
+    setDone(true);
+    await fetch('/api/v1/care/alliance-pulse', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(scores),
+    }).catch(() => undefined);
+  }
+
+  if (done) {
+    return (
+      <Card className="mt-3 p-4">
+        <p className="text-sm text-[var(--color-ink-2)]">
+          Thanks for the honesty.{' '}
+          {low ? (
+            <>
+              Would a different voice fit better? Dev is more direct; Asha is calmer. Your plan and
+              history stay put —{' '}
+              <a href="/care/settings" className="font-semibold text-[var(--color-accent)]">
+                change in Settings →
+              </a>
+            </>
+          ) : (
+            'Noted — quietly, just for making this better.'
+          )}
+        </p>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="mt-3 p-4">
+      <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+        30 seconds, honestly
+      </span>
+      <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+        How is it going with {personaName}? (1 = rarely · 5 = always)
+      </p>
+      <div className="mt-2 space-y-3">
+        {ITEMS.map(([key, label]) => (
+          <div key={key}>
+            <p className="text-[13px]">{label}</p>
+            <div className="mt-1 flex gap-1.5" role="radiogroup" aria-label={label}>
+              {[1, 2, 3, 4, 5].map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  role="radio"
+                  aria-checked={scores[key] === v}
+                  onClick={() => setScores((cur) => ({ ...cur, [key]: v }))}
+                  className={`h-8 w-8 rounded-lg text-xs font-semibold ${
+                    scores[key] === v
+                      ? 'bg-[var(--color-accent)] text-white'
+                      : 'bg-[var(--color-surface-soft)] text-[var(--color-ink-3)]'
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button
+        variant="secondary"
+        size="sm"
+        className="mt-3"
+        disabled={!complete}
+        onClick={() => void submit()}
+      >
+        Send
+      </Button>
+    </Card>
   );
 }

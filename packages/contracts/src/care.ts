@@ -359,6 +359,27 @@ export const CareInstrumentInputSchema = z.object({
 });
 export type CareInstrumentInput = z.infer<typeof CareInstrumentInputSchema>;
 
+/// CG2 — the reveal's one-tap resonance check ("did this feel like it
+/// understood you?"). The in-product assessment-quality signal: a
+/// "not_really" rate >15% in any language/persona slice is a prompt
+/// regression to fix. Stored as an audit row — the pilot analytics substrate.
+export const CareResonanceInputSchema = z.object({
+  answer: z.enum(['strong', 'mostly', 'not_really']),
+});
+export type CareResonanceInput = z.infer<typeof CareResonanceInputSchema>;
+
+/// CG2 — the session-3 alliance pulse (WAI-SR-short, 3 items, 1–5). Alliance
+/// forms in days and predicts retention before any verdict exists.
+export const CareAlliancePulseInputSchema = z.object({
+  /// "{persona} and I agree on what I'm working on"
+  agree: z.number().int().min(1).max(5),
+  /// "I feel heard in our sessions"
+  heard: z.number().int().min(1).max(5),
+  /// "The sessions give me new ways of looking at my problem"
+  newWays: z.number().int().min(1).max(5),
+});
+export type CareAlliancePulseInput = z.infer<typeof CareAlliancePulseInputSchema>;
+
 // ============================================================================
 // Live wire protocol (subset) — validated by BOTH the browser client and
 // services/care-mock-live so the mock stays honest to the recipe
