@@ -51,6 +51,53 @@ export async function POST(
 
   if (session.status === 'SCHEDULED') {
     const needsSnapshot = session.consentSnapshot === null;
+    // PROD5 (DPDP) — this route used to STAMP all three scopes onto the
+    // session unconditionally, fabricating a cross-border ack the patient
+    // may never have given. Now: a fresh snapshot is only written when the
+    // patient's STANDING consents actually cover the scribe scopes, and a
+    // pre-recorded snapshot must itself carry the cross-border scope.
+    if (needsSnapshot) {
+      const standing = await prisma.consent.findMany({
+        where: {
+          clientId: session.clientId,
+          scope: { in: [...LIVE_CONSENT_SCOPES] },
+          status: 'GRANTED',
+          withdrawnAt: null,
+        },
+        select: { scope: true },
+      });
+      const grantedSet = new Set(standing.map((c) => c.scope));
+      const missing = LIVE_CONSENT_SCOPES.filter((s) => !grantedSet.has(s));
+      if (missing.length > 0) {
+        return NextResponse.json(
+          {
+            error:
+              `The patient's consents on record do not cover the live scribe ` +
+              `(missing: ${missing.join(', ')}). Capture the missing consent on the ` +
+              `patient's record before starting a live consult — AI analysis processes ` +
+              `the transcript outside India.`,
+          },
+          { status: 409 },
+        );
+      }
+    } else {
+      const priorScopes = new Set(
+        ((session.consentSnapshot as { entries?: Array<{ scope?: string }> }).entries ?? []).map(
+          (e) => e.scope,
+        ),
+      );
+      if (!priorScopes.has('CROSS_BORDER_PROCESSING')) {
+        return NextResponse.json(
+          {
+            error:
+              'This session was consented without cross-border processing, which the live ' +
+              'scribe requires (AI analysis processes the transcript outside India). Capture ' +
+              'that consent before starting a live consult.',
+          },
+          { status: 409 },
+        );
+      }
+    }
     const ackedAt = new Date().toISOString();
     const snapshot: SessionConsentSnapshot = {
       entries: LIVE_CONSENT_SCOPES.map((scope) => ({
@@ -58,7 +105,7 @@ export async function POST(
         scriptVersion: 'v1.0',
         ackedAt,
       })),
-      notes: 'Acknowledged at live consult start',
+      notes: 'Standing consents re-acknowledged at live consult start',
     };
     await prisma.$transaction(async (tx) => {
       await tx.session.update({

@@ -186,9 +186,11 @@ export function RecordConfirmStrip({
         setLanguage(payload.defaults.language);
         const missing: Record<string, boolean> = {};
         for (const scope of payload.defaults.consentsNeeded) {
-          if (scope === 'AUDIO_RECORDING' || scope === 'AI_NOTE_GENERATION') {
-            missing[scope] = false;
-          }
+          // ALL required scopes are surfaced — including
+          // CROSS_BORDER_PROCESSING: Pass 2+ analysis runs on Google's
+          // global endpoint, so a session cannot start without that
+          // consent on record (the server enforces it at /start).
+          missing[scope] = false;
         }
         setMissingRequired(missing);
       } catch (e) {
@@ -260,12 +262,10 @@ export function RecordConfirmStrip({
 
       if (!alreadyStarted) {
         // Per-session consent: re-ack everything already granted (at signup or
-        // on the client's record) plus anything the therapist ticked here. The
-        // data-residency / retention consents are NOT a per-session decision —
-        // they're the client's standing consent (captured with a proper
-        // explanation when the client is added), so we simply honour whatever
-        // is on file rather than re-prompting a therapist who can't be expected
-        // to weigh data-residency per session.
+        // on the client's record) plus anything the therapist ticked here. A
+        // scope ticked here is persisted server-side as the client's standing
+        // consent (the /consent route upserts the Consent row), so it is asked
+        // at most once — not per session.
         const acked = new Set<ConsentScope>(defaults.consentsAlreadyGranted);
         for (const [scope, ticked] of Object.entries(missingRequired)) {
           if (ticked) acked.add(scope as ConsentScope);
@@ -413,7 +413,9 @@ export function RecordConfirmStrip({
                     label={
                       scope === 'AUDIO_RECORDING'
                         ? 'Audio recording — they’ve agreed today'
-                        : 'AI note generation — they’ve agreed today'
+                        : scope === 'AI_NOTE_GENERATION'
+                          ? 'AI note generation — they’ve agreed today'
+                          : 'AI analysis outside India (the transcript, not the audio) — they’ve agreed today'
                     }
                   />
                 ))}
@@ -423,8 +425,8 @@ export function RecordConfirmStrip({
 
           <p className="mt-5 text-xs leading-relaxed text-[var(--color-ink-3)]">
             {defaults.consentsAlreadyGranted.length > 0
-              ? 'Recording and AI notes were agreed at signup. Everything stays private and in India, and the recording is deleted after 30 days.'
-              : 'Recording and AI-note consent is pending — please tick the boxes above before you start.'}
+              ? 'Recording and AI notes were agreed at signup. Audio is processed in India and deleted after 30 days; AI note analysis may process the transcript outside India, under the consent on file.'
+              : 'Consent is pending — please tick the boxes above before you start.'}
           </p>
 
           <FieldError message={submitError} />

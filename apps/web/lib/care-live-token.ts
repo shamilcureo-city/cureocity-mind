@@ -8,6 +8,7 @@ import {
   careVertexModelPath,
   careVertexWssBase,
   clampVadSilence,
+  vercelPolicyInput,
 } from '@cureocity/llm';
 import type { RedeemLiveTokenResponse } from '@cureocity/contracts';
 import { gcpProjectId, mintGcpAccessToken } from './gcp-access-token';
@@ -45,6 +46,39 @@ export interface MintLiveCredentialInput {
   sessionCapMin: number;
 }
 
+/**
+ * The platform's no-mock-on-deploy rule (CLAUDE.md §7), applied to the Care
+ * live mint — the one LLM-serving path that used to bypass it. Unset or
+ * 'mock' CARE_LIVE_BACKEND on a deployed environment used to hand real D2C
+ * users a ws://localhost:8788 credential: a dead session that still burned
+ * their weekly cap. Same environment semantics as the batch pipeline
+ * (`vercelPolicyInput`): refused in production always; refused on previews
+ * unless ALLOW_MOCK_LLM=true; open locally.
+ *
+ * Returns the refusal message, or null when this environment may serve the
+ * resolved backend. Call it BEFORE creating a CareSession row.
+ */
+export function careLiveMockRefusalReason(): string | null {
+  const backend = process.env['CARE_LIVE_BACKEND'] ?? 'mock';
+  if (backend === 'vertex' || backend === 'ai-studio') return null;
+  const env = vercelPolicyInput(process.env);
+  if (env.production) {
+    return (
+      `[care] REFUSING the mock live backend in PRODUCTION (CARE_LIVE_BACKEND='${backend}'). ` +
+      `A fabricated AI-therapist session must never reach a real user — set ` +
+      `CARE_LIVE_BACKEND=vertex or ai-studio with credentials.`
+    );
+  }
+  if (env.deployed && !env.allowMockOptIn) {
+    return (
+      `[care] REFUSING the mock live backend on a deployed environment ` +
+      `(CARE_LIVE_BACKEND='${backend}'). Set CARE_LIVE_BACKEND=vertex/ai-studio, or ` +
+      `ALLOW_MOCK_LLM=true to deliberately permit a NON-production demo.`
+    );
+  }
+  return null;
+}
+
 export async function mintLiveCredential(
   input: MintLiveCredentialInput,
 ): Promise<RedeemLiveTokenResponse> {
@@ -57,6 +91,10 @@ export async function mintLiveCredential(
   });
 
   if (backend === 'mock') {
+    // Backstop for callers that skipped the route-level check — never serve
+    // a localhost credential from a deployed environment.
+    const refusal = careLiveMockRefusalReason();
+    if (refusal) throw new Error(refusal);
     return {
       mode: 'mock',
       wsUrl: process.env['CARE_MOCK_LIVE_URL'] ?? 'ws://localhost:8788',
@@ -93,10 +131,29 @@ export async function mintLiveCredential(
         setup,
       };
     } catch (e) {
+      // On a DEPLOYED environment the old "availability beats purity"
+      // fallback traded one failed session for handing the LONG-LIVED
+      // GEMINI_API_KEY to the user's browser (extractable from devtools).
+      // Fail closed there: the user retries; the key stays server-side.
+      // Local dev keeps the fallback so a flaky v1alpha endpoint doesn't
+      // block development.
+      if (vercelPolicyInput(process.env).deployed) {
+        throw new Error(
+          `[care] ephemeral auth-token mint failed (${(e as Error).message}) — ` +
+            `refusing the url-mode fallback on a deployed environment because it embeds ` +
+            `the long-lived GEMINI_API_KEY in the browser URL. The session was not started; ` +
+            `retry, or set CARE_LIVE_TOKEN_MODE=url only as a deliberate operator decision.`,
+        );
+      }
       console.error(
-        `[care] ephemeral auth-token mint failed (${(e as Error).message}) — falling back to url mode for this session`,
+        `[care] ephemeral auth-token mint failed (${(e as Error).message}) — falling back to url mode for this session (local dev only)`,
       );
     }
+  } else if (tokenMode === 'url' && vercelPolicyInput(process.env).deployed) {
+    // Explicit operator opt-in still works, but never silently.
+    console.warn(
+      '[care] CARE_LIVE_TOKEN_MODE=url on a deployed environment — the GEMINI_API_KEY is being embedded in browser WSS URLs. Rotate the key and switch to ephemeral as soon as possible.',
+    );
   }
 
   return {

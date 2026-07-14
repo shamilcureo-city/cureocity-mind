@@ -11,6 +11,7 @@ import { requireCareUserId } from '@/lib/care-auth';
 import { getCareCaseFile, inferKindFromCaseFile } from '@/lib/care-case-file';
 import { evaluateCareGate } from '@/lib/care-gate';
 import { mintStartToken, putStartToken } from '@/lib/care-live-store';
+import { careLiveMockRefusalReason } from '@/lib/care-live-token';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 
@@ -30,6 +31,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const { careUser, careUserId } = auth.value;
   const input = await parseJson(req, StartCareSessionInputSchema);
   if (!input.ok) return input.response;
+
+  // No-mock-on-deploy (CLAUDE.md §7), checked BEFORE the CareSession row is
+  // created: a misconfigured deploy used to mint rows pointing at
+  // ws://localhost:8788 — dead sessions that still counted against the
+  // user's weekly cap.
+  const mockRefusal = careLiveMockRefusalReason();
+  if (mockRefusal) {
+    console.error(mockRefusal);
+    return NextResponse.json(
+      { error: 'Live sessions are not available on this deployment right now.' },
+      { status: 503 },
+    );
+  }
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const sessionsThisWeek = await prisma.careSession.count({

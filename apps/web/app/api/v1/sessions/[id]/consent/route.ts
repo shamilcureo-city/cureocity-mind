@@ -43,11 +43,58 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     notes: dto.value.notes ?? null,
   };
 
+  // PROD5 — a scope acked here that the client has no standing consent for
+  // (e.g. CROSS_BORDER_PROCESSING ticked in the pre-flight because it was
+  // missed at client creation) is persisted as a client-level Consent row,
+  // so the pre-flight asks at most once and /start's cross-border gate sees
+  // a durable record — not just this session's snapshot.
+  const standing = await prisma.consent.findMany({
+    where: {
+      clientId: existing.clientId,
+      scope: { in: dto.value.scopes },
+      status: 'GRANTED',
+      withdrawnAt: null,
+    },
+    select: { scope: true },
+  });
+  const standingScopes = new Set(standing.map((c) => c.scope));
+  const newScopes = dto.value.scopes.filter((s) => !standingScopes.has(s));
+
   const updated = await prisma.$transaction(async (tx) => {
     const row = await tx.session.update({
       where: { id: sessionId },
       data: { consentSnapshot: snapshot },
     });
+    for (const scope of newScopes) {
+      const consentRow = await tx.consent.create({
+        data: {
+          clientId: existing.clientId,
+          psychologistId: auth.value.psychologistId,
+          scope,
+          status: 'GRANTED',
+          scriptVersion: dto.value.scriptVersion,
+          capturedVia: 'IN_PERSON',
+          grantedAt: new Date(),
+          notes: `Captured in the pre-session consent step (session ${sessionId})`,
+        },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'CONSENT_GRANTED',
+          targetType: 'Consent',
+          targetId: consentRow.id,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            scope,
+            clientId: existing.clientId,
+            source: 'SESSION_PRE_FLIGHT',
+          },
+        },
+        tx,
+      );
+    }
     await writeAudit(
       {
         actorType: 'PSYCHOLOGIST',

@@ -1,5 +1,6 @@
 import { INDIA_CRISIS_HOTLINES } from '@cureocity/clinical';
 import { writeAudit, type AuditWrite } from './audit';
+import { notifyCareCrisisOnCall } from './care-crisis-alert';
 import { prisma } from './prisma';
 
 /**
@@ -53,6 +54,17 @@ export async function escalateCareSession(input: {
       },
       tx,
     );
+  });
+
+  // PROD6 — audit rows don't wake anyone up: page the on-call human
+  // (email + Sentry) AFTER the hold has committed. Awaited deliberately —
+  // on a serverless runtime a fire-and-forget can be killed with the
+  // response, and losing the crisis page is worse than ~300ms of latency
+  // on a session that has already been hard-stopped. Never throws.
+  await notifyCareCrisisOnCall({
+    careSessionId: input.careSessionId,
+    careUserId: input.careUserId,
+    source: input.source,
   });
 }
 

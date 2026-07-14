@@ -156,6 +156,24 @@ export async function createDemoClient(
       select: { id: true },
     });
 
+    // PROD5 — grant the three scribe consents so the therapist's dry run
+    // starts without extra ticks (the demo client is a fixture, not a
+    // person; /start now refuses sessions missing CROSS_BORDER_PROCESSING).
+    await tx.consent.createMany({
+      data: (['AUDIO_RECORDING', 'AI_NOTE_GENERATION', 'CROSS_BORDER_PROCESSING'] as const).map(
+        (scope) => ({
+          clientId: client.id,
+          psychologistId,
+          scope,
+          status: 'GRANTED' as const,
+          scriptVersion: 'v1.0',
+          capturedVia: 'IN_PERSON' as const,
+          grantedAt: intakeAt,
+          notes: 'Demo fixture — synthetic client, seeded at onboarding',
+        }),
+      ),
+    });
+
     const episode = await tx.treatmentEpisode.create({
       data: {
         clientId: client.id,

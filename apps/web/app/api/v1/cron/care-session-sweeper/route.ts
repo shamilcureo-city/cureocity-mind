@@ -12,11 +12,26 @@ export const maxDuration = 120;
 const ABANDON_AFTER_MIN = Math.max(...Object.values(CARE_SESSION_CAP_MIN)) + 15;
 
 /**
+ * PROD7 — erasure grace window. A DELETE tombstones the account (PII
+ * cleared inline); after this many days the row is hard-deleted, and the
+ * onDelete:Cascade relations take the transcripts / reports / plans /
+ * check-ins with it. The window exists so an accidental deletion can be
+ * recovered by support before the data is gone for good.
+ */
+const TOMBSTONE_GRACE_DAYS = 30;
+
+/**
  * GET /api/v1/cron/care-session-sweeper (AC3, §4.6) — finalize sessions
  * whose client went dark mid-session (network death, closed tab): mark
  * ABORTED and, when any transcript was mirrored, still run Pass 10 so
  * the report degrades gracefully instead of vanishing. Also expires
  * CREATED rows that were never redeemed.
+ *
+ * PROD7 — additionally completes DPDP erasure: hard-deletes CareUser
+ * tombstones (status DELETED) older than the grace window. Until this
+ * ran, "deleted" users' full voice transcripts persisted indefinitely —
+ * the settings route's cascade comment promised a sweeper that did not
+ * exist.
  *
  * Auth mirrors the other cron routes: x-vercel-cron OR CRON_SECRET.
  */
@@ -67,7 +82,37 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  return NextResponse.json({ swept: stale.length, aborted, reported });
+  // ---- PROD7: hard-delete erasure tombstones past the grace window ----
+  const graceCutoff = new Date(Date.now() - TOMBSTONE_GRACE_DAYS * 24 * 60 * 60 * 1000);
+  const tombstones = await prisma.careUser.findMany({
+    where: { status: 'DELETED', deletedAt: { lt: graceCutoff } },
+    select: { id: true, deletedAt: true, _count: { select: { sessions: true } } },
+    take: 25,
+  });
+  let purged = 0;
+  for (const t of tombstones) {
+    await prisma.$transaction(async (tx) => {
+      // Cascades: sessions (→ reports), plans, check-ins, instruments.
+      await tx.careUser.delete({ where: { id: t.id } });
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'CARE_ACCOUNT_PURGED',
+          targetType: 'CareUser',
+          targetId: t.id,
+          metadata: {
+            deletedAt: t.deletedAt?.toISOString() ?? null,
+            graceDays: TOMBSTONE_GRACE_DAYS,
+            cascadedSessions: t._count.sessions,
+          },
+        },
+        tx,
+      );
+    });
+    purged += 1;
+  }
+
+  return NextResponse.json({ swept: stale.length, aborted, reported, purged });
 }
 
 function isAuthorized(req: NextRequest): boolean {

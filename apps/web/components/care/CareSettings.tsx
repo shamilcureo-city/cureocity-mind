@@ -27,6 +27,7 @@ export function CareSettings({ resources }: { resources: CareResource[] }) {
   const [data, setData] = useState<SettingsPayload | null>(null);
   const [saved, setSaved] = useState(false);
   const [holdMessage, setHoldMessage] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     void fetch('/api/v1/care/settings')
@@ -69,6 +70,31 @@ export function CareSettings({ resources }: { resources: CareResource[] }) {
     }
     await fetch('/api/v1/care/settings', { method: 'DELETE' });
     router.push('/care');
+  }
+
+  // PROD8 — the DPDP access right the onboarding consent promises:
+  // one JSON file with everything we hold (profile, plans, sessions +
+  // transcripts + reports, check-ins, instruments).
+  async function exportData(): Promise<void> {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const res = await fetch('/api/v1/care/export');
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `cureocity-care-export-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.alert('Could not prepare your export right now — please try again.');
+    } finally {
+      setExporting(false);
+    }
   }
 
   if (!data) {
@@ -177,11 +203,17 @@ export function CareSettings({ resources }: { resources: CareResource[] }) {
           Your data
         </span>
         <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-          Everything here is yours — sessions, reports, plan. Delete removes all of it.
+          Everything here is yours — sessions, reports, plan. Export downloads a copy of all of it;
+          delete removes all of it.
         </p>
-        <Button variant="secondary" size="sm" className="mt-2" onClick={() => void deleteAccount()}>
-          Delete my account
-        </Button>
+        <div className="mt-2 flex gap-2">
+          <Button variant="secondary" size="sm" onClick={() => void exportData()}>
+            {exporting ? 'Preparing…' : 'Download my data'}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => void deleteAccount()}>
+            Delete my account
+          </Button>
+        </div>
       </Card>
 
       {saved ? (
