@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requireCareUserId } from '@/lib/care-auth';
 import { getCareCaseFile, inferKindFromCaseFile } from '@/lib/care-case-file';
-import { evaluateCareGate, CARE_TIER_WEEKLY_CAP } from '@/lib/care-gate';
+import { effectiveCareTier, evaluateCareGate, CARE_TIER_WEEKLY_CAP } from '@/lib/care-gate';
+import { evaluateCareSuppression } from '@/lib/care-suppression';
 import { crisisResources } from '@/lib/care-safety';
 import { computeCareStreak, istDayKey } from '@/lib/care-streak';
 import { CARE_SESSION_CAP_MIN } from '@cureocity/llm';
@@ -21,33 +22,68 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { careUser, careUserId } = auth.value;
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [caseFile, weekSessions, checkins, lastReport] = await Promise.all([
-    getCareCaseFile(careUserId),
-    prisma.careSession.count({
-      where: {
-        careUserId,
-        createdAt: { gte: weekAgo },
-        status: { in: ['COMPLETED', 'IN_PROGRESS'] },
-      },
-    }),
-    prisma.careCheckin.findMany({
-      where: { careUserId },
-      orderBy: { createdAt: 'desc' },
-      take: 60,
-      select: { mood: true, createdAt: true },
-    }),
-    prisma.careReport.findFirst({
-      where: { careSession: { careUserId } },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, kind: true, body: true, careSessionId: true, createdAt: true },
-    }),
-  ]);
+  const [caseFile, weekSessions, oldestWeekSession, checkins, lastReport, lastCrisis] =
+    await Promise.all([
+      getCareCaseFile(careUserId),
+      prisma.careSession.count({
+        where: {
+          careUserId,
+          createdAt: { gte: weekAgo },
+          status: { in: ['COMPLETED', 'IN_PROGRESS'] },
+        },
+      }),
+      prisma.careSession.findFirst({
+        where: {
+          careUserId,
+          createdAt: { gte: weekAgo },
+          status: { in: ['COMPLETED', 'IN_PROGRESS'] },
+        },
+        orderBy: { createdAt: 'asc' },
+        select: { createdAt: true },
+      }),
+      prisma.careCheckin.findMany({
+        where: { careUserId },
+        orderBy: { createdAt: 'desc' },
+        take: 60,
+        select: { mood: true, createdAt: true },
+      }),
+      prisma.careReport.findFirst({
+        where: { careSession: { careUserId } },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          kind: true,
+          body: true,
+          careSessionId: true,
+          createdAt: true,
+          riskLevel: true,
+        },
+      }),
+      prisma.careSession.findFirst({
+        where: { careUserId, crisisAt: { not: null } },
+        orderBy: { crisisAt: 'desc' },
+        select: { crisisAt: true },
+      }),
+    ]);
 
   const gate = evaluateCareGate({
     status: careUser.status,
     onboardedAt: careUser.onboardedAt,
     planTier: careUser.planTier,
+    planExpiresAt: careUser.planExpiresAt,
     sessionsThisWeek: weekSessions,
+    oldestWeekSessionAt: oldestWeekSession?.createdAt ?? null,
+  });
+
+  // CG3 — the ONE suppression predicate (ethics charter #2): when true, NO
+  // commerce renders anywhere, including the graceful cap's quiet offer.
+  const suppression = evaluateCareSuppression({
+    status: careUser.status,
+    safetyHoldAt: careUser.safetyHoldAt,
+    lastCrisisAt: lastCrisis?.crisisAt ?? null,
+    latestRiskLevel: lastReport?.riskLevel ?? null,
+    worseningVerdict: caseFile.worseningVerdict,
+    recentMoods: checkins.slice(0, 6).map((c) => c.mood),
   });
   const kind = inferKindFromCaseFile(caseFile);
 
@@ -96,7 +132,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       null;
   }
 
-  const cap = CARE_TIER_WEEKLY_CAP[careUser.planTier] ?? CARE_TIER_WEEKLY_CAP['free']!;
+  const tier = effectiveCareTier(careUser.planTier, careUser.planExpiresAt);
+  const cap = CARE_TIER_WEEKLY_CAP[tier] ?? CARE_TIER_WEEKLY_CAP['free']!;
 
   return NextResponse.json({
     displayName: careUser.displayName,
@@ -116,6 +153,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     istHour,
     hasBaseline,
     needsCheckin,
+    effectiveTier: tier,
+    suppressUpsell: suppression.suppress,
+    nextUnlockAt: gate.nextUnlockAt ?? null,
     plan: caseFile.plan
       ? {
           version: caseFile.plan.version,

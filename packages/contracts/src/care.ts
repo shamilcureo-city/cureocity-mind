@@ -368,6 +368,20 @@ export const CareResonanceInputSchema = z.object({
 });
 export type CareResonanceInput = z.infer<typeof CareResonanceInputSchema>;
 
+/// CG3 — Care checkout. ONE SKU at launch (feasibility ruling): Plus as a
+/// prepaid 30-day Razorpay order — no UPI Autopay mandate, no auto-renewal.
+export const CareCheckoutInputSchema = z.object({
+  sku: z.literal('PLUS_MONTHLY'),
+});
+export type CareCheckoutInput = z.infer<typeof CareCheckoutInputSchema>;
+
+export const CareCheckoutResponseSchema = z.object({
+  orderId: z.string().min(1),
+  amountInr: z.number().int().positive(),
+  keyId: z.string().min(1),
+});
+export type CareCheckoutResponse = z.infer<typeof CareCheckoutResponseSchema>;
+
 /// CG2 — the session-3 alliance pulse (WAI-SR-short, 3 items, 1–5). Alliance
 /// forms in days and predicts retention before any verdict exists.
 export const CareAlliancePulseInputSchema = z.object({
