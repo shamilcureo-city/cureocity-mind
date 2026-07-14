@@ -130,20 +130,20 @@ function probeCombo(
 async function fetchLiveModels(
   token: string,
   location: string,
-): Promise<{ location: string; models?: string[]; error?: string }> {
+): Promise<{ location: string; total?: number; models?: string[]; error?: string }> {
   const host =
     location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
   try {
-    const res = await fetch(`https://${host}/v1beta1/publishers/google/models?pageSize=1000`, {
+    const res = await fetch(`https://${host}/v1beta1/publishers/google/models?pageSize=300`, {
       headers: { authorization: `Bearer ${token}` },
     });
     if (!res.ok) return { location, error: `${res.status} ${(await res.text()).slice(0, 300)}` };
     const body = (await res.json()) as { publisherModels?: Array<{ name?: string }> };
-    const models = (body.publisherModels ?? [])
-      .map((m) => (m.name ?? '').replace(/^publishers\/google\/models\//, ''))
-      .filter((n) => /live|audio|native/i.test(n))
-      .sort();
-    return { location, models };
+    const all = (body.publisherModels ?? []).map((m) =>
+      (m.name ?? '').replace(/^publishers\/google\/models\//, ''),
+    );
+    const models = all.filter((n) => /live|audio|native/i.test(n)).sort();
+    return { location, total: all.length, models };
   } catch (e) {
     return { location, error: (e as Error).message };
   }
