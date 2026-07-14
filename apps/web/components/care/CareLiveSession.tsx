@@ -255,15 +255,27 @@ export function CareLiveSession({
         })();
       };
       ws.onerror = () => {
-        if (phaseRef.current === 'live' || phaseRef.current === 'connecting') {
+        if (phaseRef.current === 'live') {
           setError(
             'The connection dropped. Your progress is saved — the report will cover what you talked about.',
           );
           setPhase('error');
         }
       };
-      ws.onclose = () => {
-        if (phaseRef.current === 'live') void endSessionRef.current();
+      ws.onclose = (event) => {
+        const detail = `code=${event.code}${event.reason ? ` · ${event.reason}` : ''}`;
+        console.error(`[care-live] websocket closed — ${detail}`);
+        if (phaseRef.current === 'live') {
+          void endSessionRef.current();
+          return;
+        }
+        // Closed BEFORE setupComplete → a setup/auth/config failure. Without
+        // this the screen sits on "Connecting…" forever. Surface the close
+        // code + reason so a rejected setup field is diagnosable, not silent.
+        if (phaseRef.current === 'ready' || phaseRef.current === 'connecting') {
+          setError(`Couldn't start the session — connection ${detail}.`);
+          setPhase('error');
+        }
       };
       setPhase('ready');
     }
