@@ -20,7 +20,9 @@ import { PRODUCTS, productFromHost } from '@/lib/product';
  * Never touches /api, /_next, static assets, or the patient portal.
  */
 
-const CANONICALIZE_FROM_PRIMARY = false;
+// Flipped ON 2026-07-14 — both product domains verified live on Vercel
+// (scribe.cureocity.in + care.cureocity.in serving with certificates).
+const CANONICALIZE_FROM_PRIMARY = true;
 
 export function middleware(req: NextRequest): NextResponse {
   const product = productFromHost(req.headers.get('host'));
