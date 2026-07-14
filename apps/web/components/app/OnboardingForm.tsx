@@ -11,6 +11,10 @@ interface Props {
   /// E.164 number; Google/email signups arrive with a `pending:<uid>`
   /// placeholder — in that case we let the user set it here.
   phone: string;
+  /// Three-products split: the vertical implied by the product domain the
+  /// user signed up on (scribe → DOCTOR, mind → THERAPIST). Presets the
+  /// choice (still changeable); null keeps the explicit must-pick flow.
+  presetVertical?: 'THERAPIST' | 'DOCTOR' | null;
 }
 
 const LANGUAGES: { value: string; label: string }[] = [
@@ -36,17 +40,19 @@ const COUNTRY_CODES = [
  * signup); a real OTP-verified phone stays read-only and is changed via
  * the recovery flow.
  */
-export function OnboardingForm({ phone }: Props) {
+export function OnboardingForm({ phone, presetVertical = null }: Props) {
   const router = useRouter();
   const phoneIsPlaceholder = phone.startsWith('pending:');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
-  const [vertical, setVertical] = useState<'THERAPIST' | 'DOCTOR'>('THERAPIST');
+  const [vertical, setVertical] = useState<'THERAPIST' | 'DOCTOR'>(presetVertical ?? 'THERAPIST');
   // The vertical drives which registration fields show and how the account is
   // provisioned, so make the therapist confirm the choice explicitly rather
-  // than silently defaulting. `vertical` keeps its concrete default for the
-  // payload; this flag just gates submit until the user has actually picked.
-  const [verticalChosen, setVerticalChosen] = useState(false);
+  // than silently defaulting — UNLESS the user arrived through a product
+  // domain (presetVertical), where the front door itself was the choice.
+  // `vertical` keeps its concrete default for the payload; this flag just
+  // gates submit until the user has actually picked.
+  const [verticalChosen, setVerticalChosen] = useState(presetVertical !== null);
   const [verticalError, setVerticalError] = useState<string | null>(null);
   const [rciNumber, setRciNumber] = useState('');
   const [medicalRegNumber, setMedicalRegNumber] = useState('');
