@@ -81,6 +81,11 @@ export const CareSettingsInputSchema = z.object({
   vadSilenceMs: z.number().int().min(400).max(1200).optional(),
   trustedContactName: z.string().max(80).nullable().optional(),
   trustedContactPhone: z.string().max(24).nullable().optional(),
+  /// CG4 — WhatsApp check-ins. Consent finalizes ONLY via this in-app tap
+  /// (timestamped server-side); false = instant opt-out.
+  whatsappOptIn: z.boolean().optional(),
+  /// CG4 — "same time next week?" picks (0=Sun … 6=Sat).
+  sessionDays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
 });
 export type CareSettingsInput = z.infer<typeof CareSettingsInputSchema>;
 
@@ -347,7 +352,10 @@ export type CarePlanGoal = z.infer<typeof CarePlanGoalSchema>;
 
 export const CareCheckinInputSchema = z.object({
   mood: z.number().int().min(0).max(10),
-  note: z.string().max(120).optional(),
+  /// CG4 — the one-line reflection (answers the last report's
+  /// reflectionPrompt); folds into the case file so the persona opens the
+  /// next session on it. The investment step of the loop.
+  note: z.string().max(280).optional(),
 });
 export type CareCheckinInput = z.infer<typeof CareCheckinInputSchema>;
 

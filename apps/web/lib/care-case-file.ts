@@ -100,17 +100,32 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
   const worseningVerdict = verdicts.some((v) => v.verdict === 'deterioration');
 
   // Last TREATMENT report — feeds LAST TIME / HOMEWORK / themes continuity.
-  const lastTreatmentReport = await prisma.careReport.findFirst({
-    where: { careSession: { careUserId }, kind: 'TREATMENT' },
-    orderBy: { createdAt: 'desc' },
-    select: { body: true },
-  });
-  const recentReports = await prisma.careReport.findMany({
-    where: { careSession: { careUserId }, kind: 'TREATMENT' },
-    orderBy: { createdAt: 'desc' },
-    take: 3,
-    select: { body: true },
-  });
+  const [lastTreatmentReport, recentReports, recentNotes, homeworkTicks] = await Promise.all([
+    prisma.careReport.findFirst({
+      where: { careSession: { careUserId }, kind: 'TREATMENT' },
+      orderBy: { createdAt: 'desc' },
+      select: { body: true },
+    }),
+    prisma.careReport.findMany({
+      where: { careSession: { careUserId }, kind: 'TREATMENT' },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { body: true },
+    }),
+    // CG4 — the daily micro-loop's investment step: the user's own check-in
+    // lines flow into the next session's prompt, so being remembered is
+    // demonstrable, never fabricated (personalization theater is the named
+    // anti-pattern).
+    prisma.careCheckin.findMany({
+      where: { careUserId, note: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 3,
+      select: { note: true },
+    }),
+    prisma.careHomeworkTick.count({
+      where: { careUserId, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+    }),
+  ]);
 
   let lastReportSummary: string | undefined;
   let homeworkLine: string | undefined;
@@ -123,12 +138,21 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
     const hw = bodyOf(sr['homework']);
     if (typeof hw['title'] === 'string') homeworkLine = hw['title'];
   }
+  // CG4 — the tick count rides the homework line into the prompt: "You did
+  // the breathing three nights — what did you notice?" is the loop's payoff.
+  if (homeworkLine && homeworkTicks > 0) {
+    homeworkLine = `${homeworkLine} (done ${homeworkTicks} day${homeworkTicks === 1 ? '' : 's'} this week)`;
+  }
   for (const r of recentReports) {
     const sr = bodyOf(bodyOf(r.body)['sessionReport']);
     const insights = Array.isArray(sr['insights']) ? sr['insights'] : [];
     for (const ins of insights as Array<Record<string, unknown>>) {
       if (typeof ins['observation'] === 'string') recentThemes.push(ins['observation']);
     }
+  }
+  // CG4 — their own check-in words, quoted (the persona opens on these).
+  for (const n of recentNotes) {
+    if (n.note) recentThemes.unshift(`They wrote on a recent check-in: "${n.note}"`);
   }
 
   return {
