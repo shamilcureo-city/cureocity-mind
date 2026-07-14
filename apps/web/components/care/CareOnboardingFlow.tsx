@@ -63,6 +63,14 @@ export function CareOnboardingFlow({ initialName }: { initialName: string }) {
           hasActiveSelfHarmThoughts: safetyAnswer === true,
           ...(tcName.trim() ? { trustedContactName: tcName.trim() } : {}),
           ...(tcPhone.trim() ? { trustedContactPhone: tcPhone.trim() } : {}),
+          ...(() => {
+            try {
+              const ref = localStorage.getItem('care-ref');
+              return ref ? { referralCode: ref } : {};
+            } catch {
+              return {};
+            }
+          })(),
         }),
       });
       const body = (await res.json()) as {

@@ -2768,6 +2768,12 @@ enum AuditAction {
   CARE_WAITLIST_JOINED
   CARE_SESSION_PACK_PURCHASED
   CARE_TRIAL_STARTED
+  CARE_SHARE_CREATED
+  CARE_SHARE_OPENED
+  CARE_SHARE_REVOKED
+  CARE_REFERRAL_LINKED
+  CARE_REFERRAL_CREDITED
+  CARE_GRADUATED
   CARE_NUDGE_OPTIN
   CARE_NUDGE_OPTOUT
   CARE_NUDGE_SENT
@@ -2868,6 +2874,13 @@ model CareUser {
   plusTrialStartedAt DateTime?
   plusTrialEndsAt    DateTime?
 
+  /// CG6 — gift-a-session: lazily provisioned share code (generosity, not
+  /// evangelism — the gift implies the sender is thoughtful, not ill).
+  referralCode String? @unique
+  /// CG6 — graduation is SUCCESS: set when a STEP_DOWN review lands with
+  /// reliable improvement. Billing stops proactively; outbound goes silent.
+  graduatedAt  DateTime?
+
   /// CG4 — the outbound channel. Consent finalizes ONLY by an explicit
   /// in-app tap (timestamped, TRAI DCA); a spoken yes in-session never
   /// enables sends. Null = no sends, ever.
@@ -2891,9 +2904,54 @@ model CareUser {
   nudges         CareNudge[]
   homeworkTicks  CareHomeworkTick[]
   sessionCredits CareSessionCredit[]
+  shareCards     CareShareCard[]
 
   @@index([status])
   @@map("care_users")
+}
+
+/// CG6 — pride-shaped share cards, leak-proof BY CONSTRUCTION: the server
+/// builds the snapshot from whitelisted numeric/milestone facts; the client
+/// sends only the KIND. Revocable tokens; cascade on delete; suppression-
+/// gated at creation; NEVER referral-incentivized (an incentivized outcome
+/// card is the company's own outcome claim under FTC/ASCI rules).
+model CareShareCard {
+  id         String @id @default(cuid())
+  careUserId String
+
+  /// Public URL token (/care/s/[token]).
+  token String @unique
+  /// MILESTONE | VERDICT | GRADUATION
+  kind  String
+  /// Server-built display payload (numbers + labels only, no free text).
+  snapshot Json
+
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@index([careUserId, createdAt])
+  @@map("care_share_cards")
+}
+
+/// CG6 — gift-a-session. The referrer earns a credit only when the friend
+/// COMPLETES INTAKE (a 30-min voice session behind OTP — expensive to fake),
+/// capped at +2/week so the free tier stays clinically coherent.
+model CareReferral {
+  id String @id @default(cuid())
+
+  referrerCareUserId String
+  redeemerCareUserId String @unique
+
+  /// SIGNED_UP | INTAKE_DONE
+  status String @default("SIGNED_UP")
+
+  createdAt   DateTime  @default(now())
+  creditedAt  DateTime?
+
+  @@index([referrerCareUserId, creditedAt])
+  @@map("care_referrals")
 }
 
 /// CG5 — the ₹149 session pack: +2 sessions this week, UPI one-tap, expires

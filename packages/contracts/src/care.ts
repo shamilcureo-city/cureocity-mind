@@ -68,8 +68,17 @@ export const CareOnboardingInputSchema = z.object({
   hasActiveSelfHarmThoughts: z.boolean(),
   trustedContactName: z.string().max(80).optional(),
   trustedContactPhone: z.string().max(24).optional(),
+  /// CG6 — gift-a-session attribution (captured from ?ref at login).
+  referralCode: z.string().max(24).optional(),
 });
 export type CareOnboardingInput = z.infer<typeof CareOnboardingInputSchema>;
+
+/// CG6 — share-card creation: the client sends ONLY the kind; the server
+/// builds the snapshot from whitelisted facts (leak-proof by construction).
+export const CareShareCreateInputSchema = z.object({
+  kind: z.enum(['MILESTONE', 'VERDICT', 'GRADUATION']),
+});
+export type CareShareCreateInput = z.infer<typeof CareShareCreateInputSchema>;
 
 export const CareSettingsInputSchema = z.object({
   personaName: z.string().min(1).max(40).optional(),
