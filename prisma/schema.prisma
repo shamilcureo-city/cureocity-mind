@@ -2765,6 +2765,7 @@ enum AuditAction {
   CARE_CHECKOUT_CREATED
   CARE_PLAN_UPGRADED
   CARE_PAYMENT_FAILED
+  CARE_WAITLIST_JOINED
 }
 
 enum AuditActorType {
@@ -3061,4 +3062,13 @@ model CareInstrumentResponse {
 
   @@index([careUserId, instrumentKey, createdAt])
   @@map("care_instrument_responses")
+}
+
+/// P3 — Care landing waitlist. Public capture, one row per contact.
+model CareWaitlistEntry {
+  id        String   @id @default(cuid())
+  contact   String   @unique
+  createdAt DateTime @default(now())
+
+  @@map("care_waitlist_entries")
 }

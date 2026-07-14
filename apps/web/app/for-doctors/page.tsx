@@ -23,7 +23,19 @@ export const metadata: Metadata = {
 
 export default function ForDoctorsLanding() {
   return (
-    <main className="overflow-x-clip">
+    // Three-products split — Scribe wears its own identity: the page-scoped
+    // token override recolors every accent use (buttons, chips, flourishes)
+    // to clinical indigo without touching the shared design system.
+    <main
+      className="overflow-x-clip"
+      style={
+        {
+          '--color-accent': '#3a5fa8',
+          '--color-accent-hover': '#2f4e8d',
+          '--color-accent-soft': '#e9effa',
+        } as React.CSSProperties
+      }
+    >
       <noscript>
         <style>{`[data-lp-reveal]{opacity:1 !important;transform:none !important}`}</style>
       </noscript>
@@ -105,9 +117,9 @@ function Hero() {
   return (
     <section className="relative">
       <div className="absolute inset-0 -z-10 overflow-hidden" aria-hidden>
-        <div className="lp-blob lp-blob-a left-[-10%] top-[-18%] h-[480px] w-[480px] bg-[#cfe3d6] opacity-70" />
-        <div className="lp-blob lp-blob-b right-[-12%] top-[-6%] h-[420px] w-[420px] bg-[#ead9bc] opacity-60" />
-        <div className="lp-blob lp-blob-c left-[28%] top-[30%] h-[360px] w-[360px] bg-[#dce9e2] opacity-60" />
+        <div className="lp-blob lp-blob-a left-[-10%] top-[-18%] h-[480px] w-[480px] bg-[#ccd8ee] opacity-70" />
+        <div className="lp-blob lp-blob-b right-[-12%] top-[-6%] h-[420px] w-[420px] bg-[#e8e0cf] opacity-60" />
+        <div className="lp-blob lp-blob-c left-[28%] top-[30%] h-[360px] w-[360px] bg-[#dde5f2] opacity-60" />
       </div>
 
       <Container className="grid items-center gap-14 pb-20 pt-16 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10 lg:pb-28 lg:pt-24">
@@ -119,8 +131,8 @@ function Hero() {
           </Reveal>
           <Reveal delay={90}>
             <h1 className="mt-4 font-serif text-5xl leading-[1.04] tracking-tight sm:text-6xl lg:text-[4.2rem]">
-              The note writes itself —{' '}
-              <span className="italic text-[var(--color-accent)]">while you consult.</span>
+              See the patient. The note — and the Rx —{' '}
+              <span className="italic text-[var(--color-accent)]">write themselves.</span>
             </h1>
           </Reveal>
           <Reveal delay={180}>
@@ -144,7 +156,7 @@ function Hero() {
           <Reveal delay={340}>
             <ul className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[var(--color-ink-3)]">
               {[
-                'DPDP-ready · runs in-region',
+                'Audio processed in India',
                 'Built for 2-minute consults',
                 'You confirm every clinical call',
               ].map((t) => (
@@ -331,8 +343,8 @@ function HowItWorks() {
 
 const TRUST = [
   {
-    title: 'Runs in-region',
-    body: 'Transcription + structuring run on Indian infrastructure (asia-south1) — DPDP residency by architecture, not by promise.',
+    title: 'Straight answer on your data',
+    body: 'Consult audio is transcribed on Indian infrastructure (asia-south1) and never stored. Note structuring runs on Google’s secure global AI service under the patient’s recorded consent — we say exactly where every byte goes.',
   },
   {
     title: 'Every line traceable',

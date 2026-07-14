@@ -275,6 +275,7 @@ export const AuditActionSchema = z.enum([
   'CARE_CHECKOUT_CREATED',
   'CARE_PLAN_UPGRADED',
   'CARE_PAYMENT_FAILED',
+  'CARE_WAITLIST_JOINED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

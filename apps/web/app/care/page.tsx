@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { ButtonLink } from '@/components/ui/Button';
 import { Container } from '@/components/ui/Container';
+import { CareWaitlistForm } from '@/components/care/CareWaitlistForm';
 
 /**
  * Sprint AC1 — the Cureocity Care consumer landing (`/care`).
@@ -18,21 +19,48 @@ import { Container } from '@/components/ui/Container';
  * flow lives.
  */
 export const metadata: Metadata = {
-  title: 'Cureocity Care — your own therapist. Tonight.',
+  title: 'Cureocity Care — someone to talk to. Tonight.',
   description:
     'Real voice sessions in your own language — English, हिन्दी, മലയാളം, or the mix you actually speak. A real intake, a plan with goals you choose, weekly sessions with homework, and progress measured honestly. Your therapist is an AI, and we say it plainly.',
 };
 
 export default function CareLanding() {
+  // P3 launch boundary — sign-ups stay a waitlist until the two Care
+  // launch blockers clear (live-token architecture + consumer legal
+  // surface). Flip by setting CARE_SIGNUPS_OPEN=true and redeploying.
+  const signupsOpen = process.env['CARE_SIGNUPS_OPEN'] === 'true';
+
   return (
-    <main className="min-h-screen bg-[var(--color-bg)]">
+    // Three-products split — Care wears its own night identity: warm
+    // charcoal ground, clay accent. The page-scoped token override
+    // recolors every shared component without touching the app theme.
+    <main
+      className="min-h-screen bg-[var(--color-bg)]"
+      style={
+        {
+          '--color-bg': '#211a17',
+          '--color-surface': '#2b211c',
+          '--color-surface-soft': '#281f1a',
+          '--color-line': '#43352e',
+          '--color-line-soft': '#382c25',
+          '--color-ink': '#f5ece6',
+          '--color-ink-2': '#c9b8ae',
+          '--color-ink-3': '#a08d82',
+          '--color-accent': '#c4634f',
+          '--color-accent-hover': '#a94f3d',
+          '--color-accent-soft': '#3a2a23',
+        } as React.CSSProperties
+      }
+    >
       <nav className="border-b border-[var(--color-line-soft)]">
         <Container className="flex h-16 items-center justify-between">
           <Link href="/care" className="flex items-center gap-2.5">
             <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--color-accent)] text-white">
               ☾
             </span>
-            <span className="font-serif text-lg font-semibold tracking-tight">Cureocity Care</span>
+            <span className="font-serif text-lg font-semibold tracking-tight text-[var(--color-ink)]">
+              Cureocity Care
+            </span>
           </Link>
           <div className="flex items-center gap-2 sm:gap-3">
             <Link
@@ -47,9 +75,15 @@ export default function CareLanding() {
             >
               Sign in
             </Link>
-            <ButtonLink href="/care/login" size="sm">
-              Start free
-            </ButtonLink>
+            {signupsOpen ? (
+              <ButtonLink href="/care/login" size="sm">
+                Start free
+              </ButtonLink>
+            ) : (
+              <ButtonLink href="#join" size="sm">
+                Join the waitlist
+              </ButtonLink>
+            )}
           </div>
         </Container>
       </nav>
@@ -62,21 +96,34 @@ export default function CareLanding() {
             An AI therapist — in the language you actually speak
           </span>
           <h1 className="mt-5 font-serif text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
-            Your own AI therapist.
-            <br className="hidden sm:block" /> Tonight.
+            Someone to talk to.
+            <br className="hidden sm:block" />{' '}
+            <span className="italic text-[var(--color-accent)]">Tonight.</span>
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-[var(--color-ink-2)]">
             Real voice sessions in English, हिन्दी, മലയാളം — or the mix you actually speak. A real
             intake, a plan with goals you choose, weekly sessions with homework, and progress you
             can measure. Not a chatbot that agrees with you.
           </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
-            <ButtonLink href="/care/login" size="lg">
-              Start free — 2 sessions a week
-            </ButtonLink>
-            <ButtonLink href="#how" size="lg" variant="secondary">
-              See how it works
-            </ButtonLink>
+          <div id="join" className="mt-8 flex scroll-mt-24 flex-col gap-3">
+            {signupsOpen ? (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <ButtonLink href="/care/login" size="lg">
+                  Start free — 2 sessions a week
+                </ButtonLink>
+                <ButtonLink href="#how" size="lg" variant="secondary">
+                  See how it works
+                </ButtonLink>
+              </div>
+            ) : (
+              <>
+                <CareWaitlistForm />
+                <p className="text-xs text-[var(--color-ink-3)]">
+                  Launching soon · your number, nothing else — we&rsquo;ll message you once, when
+                  sessions open.
+                </p>
+              </>
+            )}
           </div>
           <p className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--color-ink-3)]">
             <span>🤖 Your therapist is an AI — we never pretend otherwise</span>
@@ -164,17 +211,21 @@ export default function CareLanding() {
 
       {/* Final CTA. */}
       <Container className="pt-24">
-        <div className="flex flex-col items-center gap-6 rounded-3xl bg-[var(--color-ink)] px-8 py-14 text-center text-white sm:py-16">
+        <div className="flex flex-col items-center gap-6 rounded-3xl border border-[var(--color-line)] bg-[var(--color-surface)] px-8 py-14 text-center text-[var(--color-ink)] sm:py-16">
           <h2 className="max-w-2xl font-serif text-3xl font-semibold leading-tight sm:text-4xl">
-            2 free sessions every week — not a trial. Tonight is a good time to start.
+            {signupsOpen
+              ? '2 free sessions every week — not a trial. Tonight is a good time to start.'
+              : 'Be first in line. Tonight is a good time to start.'}
           </h2>
-          <ButtonLink
-            href="/care/login"
-            size="lg"
-            className="!bg-white !text-[var(--color-ink)] hover:!bg-white/90"
-          >
-            Start free — 2 sessions a week
-          </ButtonLink>
+          {signupsOpen ? (
+            <ButtonLink href="/care/login" size="lg">
+              Start free — 2 sessions a week
+            </ButtonLink>
+          ) : (
+            <ButtonLink href="#join" size="lg">
+              Join the waitlist
+            </ButtonLink>
+          )}
         </div>
       </Container>
 
@@ -202,6 +253,12 @@ export default function CareLanding() {
               </Link>
               <Link href="/for-doctors" className="hover:text-[var(--color-ink)]">
                 For doctors
+              </Link>
+              <Link href="/privacy" className="hover:text-[var(--color-ink)]">
+                Privacy
+              </Link>
+              <Link href="/terms" className="hover:text-[var(--color-ink)]">
+                Terms
               </Link>
             </div>
           </div>

@@ -443,3 +443,13 @@ export const CareLiveServerEventSchema = z.union([
   }),
 ]);
 export type CareLiveServerEvent = z.infer<typeof CareLiveServerEventSchema>;
+
+/**
+ * P3 — the public waitlist form on the Care landing (sign-ups stay gated
+ * until the launch blockers clear; the front door still captures intent).
+ */
+export const CareWaitlistInputSchema = z.object({
+  /** Phone or email — one free-text contact field, kept deliberately loose. */
+  contact: z.string().trim().min(5).max(200),
+});
+export type CareWaitlistInput = z.infer<typeof CareWaitlistInputSchema>;
