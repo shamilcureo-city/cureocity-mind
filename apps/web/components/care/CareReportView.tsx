@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CareReportV1 } from '@cureocity/contracts';
+import { CARE_REVIEW_EVERY_N_SESSIONS } from '@/lib/care-session-kind';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { CareInstrumentForm } from './CareInstrumentForm';
 import { MoodDial } from './MoodDial';
 
 interface SessionPayload {
@@ -13,6 +15,10 @@ interface SessionPayload {
   status: string;
   moodBefore: number | null;
   moodAfter: number | null;
+  /// The plan version in force — a REVIEW revision carries its track and
+  /// cadence forward (never a hardcoded default).
+  currentPlan: { modalityTrack: string; cadence: string } | null;
+  hasBaseline: boolean;
   report: { id: string; kind: string; body: CareReportV1 } | null;
 }
 
@@ -29,6 +35,9 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
   const [polls, setPolls] = useState(0);
   const [rerunning, setRerunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /// After plan-accept: the "starting line" baseline ask (CG1). Peak
+  /// commitment, post-value — never a pre-intake quiz, never nagged.
+  const [showBaseline, setShowBaseline] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/v1/care/sessions/${sessionId}`);
@@ -95,6 +104,19 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
     );
   }
 
+  if (showBaseline) {
+    return (
+      <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-2xl md:px-8 md:py-10">
+        <h1 className="font-serif text-xl font-semibold">Your plan is saved ✓</h1>
+        <CareInstrumentForm
+          framing="baseline"
+          onDone={() => router.push('/care/home')}
+          onSkip={() => router.push('/care/home')}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-2xl md:px-8 md:py-10">
       {session.moodAfter === null ? (
@@ -130,7 +152,12 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
         <ReportBody
           report={session.report.body}
           sessionId={sessionId}
-          onAccepted={() => router.push('/care/home')}
+          currentPlan={session.currentPlan}
+          onAccepted={() => {
+            // The starting line rides the peak-commitment moment — once.
+            if (!session.hasBaseline) setShowBaseline(true);
+            else router.push('/care/home');
+          }}
         />
       )}
 
@@ -157,10 +184,12 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 function ReportBody({
   report,
   sessionId,
+  currentPlan,
   onAccepted,
 }: {
   report: CareReportV1;
   sessionId: string;
+  currentPlan: { modalityTrack: string; cadence: string } | null;
   onAccepted: () => void;
 }) {
   // Always narrow on kind before reading the body — the Pass-2/3 rule.
@@ -216,8 +245,11 @@ function ReportBody({
             formulation=""
             concernAreas={[]}
             proposedGoals={pr.revisedGoals}
-            modalityTrack="CBT"
-            cadence="weekly-25min"
+            // A revision carries the CURRENT plan's track + cadence forward.
+            // The old hardcoded 'CBT' default silently reset a
+            // SLEEP/GROUNDING user's track on every plan v2.
+            modalityTrack={currentPlan?.modalityTrack ?? 'CBT'}
+            cadence={currentPlan?.cadence ?? 'weekly-25min'}
             sessionId={sessionId}
             onAccepted={onAccepted}
             title="Your revised plan"
@@ -371,8 +403,9 @@ function PlanProposal({
           ))}
         </div>
         <p className="mt-2 text-[12px] text-[var(--color-ink-2)]">
-          How we&apos;ll work: <b>{modalityTrack}</b> track · {cadence.replace('-', ' · ')} ·
-          progress check every 2 weeks.
+          How we&apos;ll work: <b>{modalityTrack}</b> track · {cadence.replace('-', ' · ')} · after{' '}
+          {CARE_REVIEW_EVERY_N_SESSIONS} sessions, the same questions from day one — and an honest
+          answer about whether it&apos;s working.
         </p>
       </Section>
       {error ? <p className="mt-2 text-sm text-[var(--color-warn)]">{error}</p> : null}

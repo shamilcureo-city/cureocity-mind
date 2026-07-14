@@ -57,6 +57,13 @@ export async function POST(
         endedAt: now,
         durationSec,
         moodAfter: input.value.moodAfter ?? null,
+        // CG1 COGS metering — cumulative Live usage relayed by the browser.
+        ...(input.value.usage
+          ? {
+              liveTokensIn: input.value.usage.tokensIn,
+              liveTokensOut: input.value.usage.tokensOut,
+            }
+          : {}),
       },
     });
     await writeAudit(

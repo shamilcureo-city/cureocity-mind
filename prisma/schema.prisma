@@ -2950,6 +2950,13 @@ model CareSession {
   startTokenHash      String?
   startTokenExpiresAt DateTime?
 
+  /// CG1 COGS metering — cumulative Live-API token counts relayed by the
+  /// browser at session end (the socket is browser↔Gemini direct, so the
+  /// server never sees usage otherwise). Null for sessions that predate
+  /// metering or died before end. ₹ is derived at rollup, never stored.
+  liveTokensIn  Int?
+  liveTokensOut Int?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

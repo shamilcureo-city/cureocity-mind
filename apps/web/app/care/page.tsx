@@ -62,7 +62,7 @@ export default function CareLanding() {
             An AI therapist — in the language you actually speak
           </span>
           <h1 className="mt-5 font-serif text-4xl font-semibold leading-[1.05] tracking-tight sm:text-5xl lg:text-6xl">
-            Your own therapist.
+            Your own AI therapist.
             <br className="hidden sm:block" /> Tonight.
           </h1>
           <p className="mt-5 max-w-xl text-lg leading-relaxed text-[var(--color-ink-2)]">
@@ -72,7 +72,7 @@ export default function CareLanding() {
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
             <ButtonLink href="/care/login" size="lg">
-              Start — first session free
+              Start free — 2 sessions a week
             </ButtonLink>
             <ButtonLink href="#how" size="lg" variant="secondary">
               See how it works
@@ -166,14 +166,14 @@ export default function CareLanding() {
       <Container className="pt-24">
         <div className="flex flex-col items-center gap-6 rounded-3xl bg-[var(--color-ink)] px-8 py-14 text-center text-white sm:py-16">
           <h2 className="max-w-2xl font-serif text-3xl font-semibold leading-tight sm:text-4xl">
-            The first session is free. Tonight is a good time to start.
+            2 free sessions every week — not a trial. Tonight is a good time to start.
           </h2>
           <ButtonLink
             href="/care/login"
             size="lg"
             className="!bg-white !text-[var(--color-ink)] hover:!bg-white/90"
           >
-            Start — first session free
+            Start free — 2 sessions a week
           </ButtonLink>
         </div>
       </Container>

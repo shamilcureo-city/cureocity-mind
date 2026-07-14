@@ -55,6 +55,7 @@ export function CareLiveSession({
   const flushTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mutedRef = useRef(false);
   const phaseRef = useRef<Phase>('connecting');
+  const usageRef = useRef({ tokensIn: 0, tokensOut: 0 });
   phaseRef.current = phase;
   mutedRef.current = muted;
 
@@ -142,10 +143,13 @@ export function CareLiveSession({
     wsRef.current?.close();
     await playbackRef.current?.close();
     try {
+      const usage = usageRef.current;
       await fetch(`/api/v1/care/sessions/${sessionId}/end`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          usage.tokensIn > 0 || usage.tokensOut > 0 ? { usage: { ...usage } } : {},
+        ),
       });
     } catch {
       /* the sweeper finalizes if this failed */
@@ -163,6 +167,22 @@ export function CareLiveSession({
         startedAtRef.current = Date.now();
         void micStartRef.current();
         return;
+      }
+      // CG1 COGS metering — usageMetadata frames carry CUMULATIVE counts;
+      // track the max seen and relay it at session end (the server never
+      // sees usage otherwise: the socket is browser↔Gemini direct).
+      const um = (msg['usageMetadata'] ?? msg['usage_metadata']) as
+        | Record<string, unknown>
+        | undefined;
+      if (um) {
+        const num = (v: unknown): number => (typeof v === 'number' && v >= 0 ? v : 0);
+        const inTok = num(um['promptTokenCount'] ?? um['prompt_token_count']);
+        const outTok = num(
+          um['candidatesTokenCount'] ?? um['candidates_token_count'] ?? um['responseTokenCount'],
+        );
+        const u = usageRef.current;
+        u.tokensIn = Math.max(u.tokensIn, Math.round(inTok));
+        u.tokensOut = Math.max(u.tokensOut, Math.round(outTok));
       }
       const sc = msg['serverContent'] as Record<string, unknown> | undefined;
       if (sc) {
