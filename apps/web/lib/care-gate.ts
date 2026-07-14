@@ -9,9 +9,24 @@
  * does not change.
  */
 
+/**
+ * Per-tier weekly session caps. Defaults are the product numbers (free: 2,
+ * plus: 7); each is overridable via env (`CARE_WEEKLY_CAP_FREE` /
+ * `CARE_WEEKLY_CAP_PLUS`) so a pilot/testing deploy can raise them WITHOUT
+ * changing the shipped default — set a high value in Vercel to test freely,
+ * unset to restore the product cap. A non-positive / unparseable value falls
+ * back to the default.
+ */
+function weeklyCapFromEnv(envName: string, fallback: number): number {
+  const raw = process.env[envName];
+  if (!raw) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
 export const CARE_TIER_WEEKLY_CAP: Record<string, number> = {
-  free: 2,
-  plus: 7,
+  free: weeklyCapFromEnv('CARE_WEEKLY_CAP_FREE', 2),
+  plus: weeklyCapFromEnv('CARE_WEEKLY_CAP_PLUS', 7),
 };
 
 export interface CareGateInput {

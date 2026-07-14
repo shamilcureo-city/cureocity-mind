@@ -13,6 +13,8 @@ the mock stack. Product spec: [`../AI_COUNSELING.md`](../AI_COUNSELING.md).
 | `CARE_LIVE_VERTEX_LOCATION` | `us-central1` (default)                        | `vertex` only — the region for the Live socket. `us-central1` / `us-east4` are confirmed (NOT `asia-south1`, NOT `global`).                                    |
 | `CARE_LIVE_VERTEX_MODEL`    | `gemini-live-2.5-flash-native-audio` (default) | `vertex` only — bare Vertex model id. This is the CONFIRMED native-audio Live model for the project (differs from the AI Studio pin — no `-preview`, no date). |
 | `CARE_MOCK_LIVE_URL`        | `ws://localhost:8788`                          | Append `?fixture=crisis` to force the crisis script (CI does this).                                                                                            |
+| `CARE_WEEKLY_CAP_FREE`      | `2` (default)                                  | Weekly session cap for the `free` tier. Raise on a pilot/testing deploy (e.g. `50`) to test without hitting the cap; unset restores the product default.       |
+| `CARE_WEEKLY_CAP_PLUS`      | `7` (default)                                  | Weekly session cap for the `plus` tier. Same override mechanism as above.                                                                                      |
 
 `vertex` reuses the SAME service account as the batch passes
 (`GOOGLE_APPLICATION_CREDENTIALS_JSON` / `VERTEX_PROJECT_ID`) — no `GEMINI_API_KEY`.
