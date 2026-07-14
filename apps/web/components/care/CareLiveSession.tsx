@@ -262,18 +262,28 @@ export function CareLiveSession({
           setPhase('error');
         }
       };
+      // host (not the token) + backend mode — tells us instantly whether the
+      // socket even reached the intended backend (vertex vs a stale mock URL).
+      const wsHost = (() => {
+        try {
+          return new URL(credential.wsUrl).host;
+        } catch {
+          return '?';
+        }
+      })();
       ws.onclose = (event) => {
         const detail = `code=${event.code}${event.reason ? ` · ${event.reason}` : ''}`;
-        console.error(`[care-live] websocket closed — ${detail}`);
+        console.error(`[care-live] websocket closed — ${credential.mode} · ${wsHost} — ${detail}`);
         if (phaseRef.current === 'live') {
           void endSessionRef.current();
           return;
         }
         // Closed BEFORE setupComplete → a setup/auth/config failure. Without
         // this the screen sits on "Connecting…" forever. Surface the close
-        // code + reason so a rejected setup field is diagnosable, not silent.
+        // code + reason (+ backend/host) so a rejected setup field or a
+        // wrong-backend URL is diagnosable, not silent.
         if (phaseRef.current === 'ready' || phaseRef.current === 'connecting') {
-          setError(`Couldn't start the session — connection ${detail}.`);
+          setError(`Couldn't start the session — ${credential.mode} · ${wsHost} — ${detail}.`);
           setPhase('error');
         }
       };
