@@ -1,24 +1,35 @@
 # Load test results
 
-Append a row per drill. Run via:
+Append a row per drill. The harness drives the REAL request path (the
+apps/web routes, same sequence as the recording flow: create session →
+consent → start → end). Run against a **local stack** or a **preview
+deployment with a throwaway DB branch** — production hostnames are
+refused by the script, and any non-localhost target requires
+`ALLOW_REMOTE=true`.
 
 ```bash
-pnpm exec tsx scripts/load-test.ts --therapists=30 --sessions=5 --duration-sec=60
+# Local (docker compose Postgres + dev server started with
+# AUTH_BYPASS=true and LLM_BACKEND=mock):
+pnpm exec tsx scripts/load-test.ts --workers=30 --iterations=5
+
+# Vercel preview (AUTH_BYPASS=true + a disposable Neon branch):
+LOAD_TEST_BASE_URL=https://<preview>.vercel.app ALLOW_REMOTE=true \
+  pnpm exec tsx scripts/load-test.ts --workers=30 --iterations=5
 ```
 
-The acceptance bar from the Sprint 10 plan: **30 therapists × 5
-concurrent sessions, system stable**, where stable means:
+The acceptance bar (carried from the Sprint 10 plan, re-based onto the
+serverless topology): **30 concurrent session workflows, system
+stable**, where stable means:
 
-- zero 5xx responses across the run
+- zero 5xx responses across the run (the script exits non-zero otherwise)
 - p95 latency for create/consent/start/end under 1.5 seconds each
-- audit_writes_total counter increments at the rate the request count
-  predicts (1 audit row per write endpoint × throughput)
+- fabricated clients are soft-deleted at the end (`--keep-data` skips)
 
 ## Drill log
 
-| Date         | Therapists | Sessions/T | Duration | p95 ms (create / consent / start / end) | Errors | Notes      |
-| ------------ | ---------- | ---------- | -------- | --------------------------------------- | ------ | ---------- |
-| _yyyy-mm-dd_ | _N_        | _N_        | _Ns_     | _XX/XX/XX/XX_                           | _0_    | _baseline_ |
+| Date         | Workers | Iterations | Duration | p95 ms (create / consent / start / end) | Errors | Notes      |
+| ------------ | ------- | ---------- | -------- | --------------------------------------- | ------ | ---------- |
+| _yyyy-mm-dd_ | _N_     | _N_        | _Ns_     | _XX/XX/XX/XX_                           | _0_    | _baseline_ |
 
 ## Interpreting failures
 
