@@ -25,6 +25,9 @@ interface HomePayload {
   istHour: number;
   hasBaseline: boolean;
   needsCheckin: boolean;
+  effectiveTier: string;
+  suppressUpsell: boolean;
+  nextUnlockAt: string | null;
   plan: {
     version: number;
     goals: Array<{ goal: string; status: string }>;
@@ -214,7 +217,40 @@ export function CareHome() {
               Do the check-in →
             </Link>
           ) : null}
+          {data.gate.code === 'WEEKLY_CAP' && data.nextUnlockAt ? (
+            <p className="mt-1 font-semibold">
+              Your next session unlocks{' '}
+              {new Date(data.nextUnlockAt).toLocaleDateString('en-IN', {
+                weekday: 'long',
+              })}
+              .
+            </p>
+          ) : null}
         </div>
+      ) : null}
+      {data.gate.code === 'WEEKLY_CAP' ? (
+        // CG3 — the graceful cap: something to DO now sits ABOVE any
+        // commerce (the daily check-in still feeds the record), and the
+        // quiet offer renders only when the suppression predicate allows.
+        <>
+          {!data.checkinToday ? (
+            <div className="mt-3">
+              <MoodDial
+                value={mood}
+                onChange={(v) => void submitCheckin(v)}
+                label="Until then — the daily check-in keeps your progress moving"
+              />
+            </div>
+          ) : null}
+          {!data.suppressUpsell && data.effectiveTier === 'free' ? (
+            <p className="mt-3 text-[13px] text-[var(--color-ink-2)]">
+              Want more this week?{' '}
+              <Link href="/care/plan-tier" className="font-semibold text-[var(--color-accent)]">
+                Care Plus — up to 4 sessions a week →
+              </Link>
+            </p>
+          ) : null}
+        </>
       ) : null}
     </Card>
   );

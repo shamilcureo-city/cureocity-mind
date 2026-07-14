@@ -32,11 +32,38 @@ describe('evaluateCareGate', () => {
     expect(v.code).toBe('WEEKLY_CAP');
   });
 
-  it('gives plus tier a higher cap and unknown tiers the free cap', () => {
-    expect(evaluateCareGate({ ...base, planTier: 'plus', sessionsThisWeek: 5 }).allowed).toBe(true);
+  it('gives plus tier a higher cap (4/wk — CG3) and unknown tiers the free cap', () => {
+    expect(evaluateCareGate({ ...base, planTier: 'plus', sessionsThisWeek: 3 }).allowed).toBe(true);
+    expect(evaluateCareGate({ ...base, planTier: 'plus', sessionsThisWeek: 4 }).allowed).toBe(
+      false,
+    );
     expect(evaluateCareGate({ ...base, planTier: 'mystery', sessionsThisWeek: 2 }).allowed).toBe(
       false,
     );
+  });
+
+  it('an expired Plus pass returns to the free cap; null expiry stays plus', () => {
+    const past = new Date(Date.now() - 1000);
+    expect(
+      evaluateCareGate({ ...base, planTier: 'plus', planExpiresAt: past, sessionsThisWeek: 2 })
+        .allowed,
+    ).toBe(false);
+    expect(
+      evaluateCareGate({ ...base, planTier: 'plus', planExpiresAt: null, sessionsThisWeek: 2 })
+        .allowed,
+    ).toBe(true);
+  });
+
+  it('the capped verdict names the unlock day when the window is known', () => {
+    const oldest = new Date('2026-08-20T10:00:00Z');
+    const v = evaluateCareGate({
+      ...base,
+      sessionsThisWeek: 2,
+      oldestWeekSessionAt: oldest,
+      now: new Date('2026-08-24T10:00:00Z'),
+    });
+    expect(v.code).toBe('WEEKLY_CAP');
+    expect(v.nextUnlockAt?.toISOString()).toBe('2026-08-27T10:00:00.000Z');
   });
 
   it('safety hold outranks every other verdict', () => {

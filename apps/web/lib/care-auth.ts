@@ -30,6 +30,7 @@ export interface AuthenticatedCareUser {
     status: 'ACTIVE' | 'SAFETY_HOLD' | 'DELETED';
     safetyHoldAt: Date | null;
     planTier: string;
+    planExpiresAt: Date | null;
     onboardedAt: Date | null;
     personaName: string;
     voiceName: string;
@@ -50,6 +51,7 @@ const CARE_USER_SELECT = {
   status: true,
   safetyHoldAt: true,
   planTier: true,
+  planExpiresAt: true,
   onboardedAt: true,
   personaName: true,
   voiceName: true,

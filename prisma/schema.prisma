@@ -2762,6 +2762,9 @@ enum AuditAction {
   CARE_DATA_EXPORTED
   CARE_ASSESSMENT_RESONANCE
   CARE_ALLIANCE_PULSE
+  CARE_CHECKOUT_CREATED
+  CARE_PLAN_UPGRADED
+  CARE_PAYMENT_FAILED
 }
 
 enum AuditActorType {
@@ -2846,6 +2849,12 @@ model CareUser {
 
   planTier String @default("free")
 
+  /// CG3 — Plus is a prepaid 30-day pass (no UPI Autopay mandate, no
+  /// auto-renewal): the webhook extends this on each captured payment; the
+  /// gate computes the EFFECTIVE tier (plus while unexpired; null = no
+  /// expiry, e.g. an operator grant). Expiry silently returns to free.
+  planExpiresAt DateTime?
+
   onboardedAt    DateTime?
   consentVersion String?
   consentAt      DateTime?
@@ -2858,9 +2867,40 @@ model CareUser {
   carePlans   CarePlan[]
   checkins    CareCheckin[]
   instruments CareInstrumentResponse[]
+  payments    CarePayment[]
 
   @@index([status])
   @@map("care_users")
+}
+
+/// CG3 — Care billing spine. One row per Razorpay ORDER (the Sprint-53
+/// therapist pattern, ported: the webhook — never the checkout success
+/// callback — is the source of truth). `BillingAccount`/`BillingPayment`
+/// stay psychologist-only; Care orders are branched in the shared webhook
+/// on this table's razorpayOrderId.
+model CarePayment {
+  id         String @id @default(cuid())
+  careUserId String
+
+  razorpayOrderId   String  @unique
+  razorpayPaymentId String?
+
+  /// 'PLUS_MONTHLY' (CG5 adds 'SESSION_PACK').
+  sku       String
+  amountInr Int
+  status    BillingPaymentStatus @default(CREATED)
+
+  periodStart DateTime?
+  periodEnd   DateTime?
+  rawEvent    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@index([careUserId, createdAt])
+  @@map("care_payments")
 }
 
 // The accepted Assessment & Plan — versioned like TreatmentPlan. A REVIEW

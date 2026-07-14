@@ -101,7 +101,12 @@ async function handleCaptured(
     },
   });
   if (!payment) {
-    console.warn(`[razorpay-webhook] captured event for unknown order ${orderId} (no-op)`);
+    // CG3 — not a therapist order: try the Care billing spine before
+    // declaring the order unknown.
+    const handledAsCare = await handleCareCaptured(orderId, event, meta);
+    if (!handledAsCare) {
+      console.warn(`[razorpay-webhook] captured event for unknown order ${orderId} (no-op)`);
+    }
     return;
   }
   if (payment.status === 'PAID') {
@@ -193,6 +198,105 @@ async function handleCaptured(
   });
 }
 
+/**
+ * CG3 — the Care twin of handleCaptured. Plus is a prepaid 30-day pass:
+ * each captured payment extends planExpiresAt from max(now, current expiry).
+ * Idempotent by CarePayment.status. Returns false when the order isn't a
+ * Care order (lets the caller log the genuine unknown).
+ */
+async function handleCareCaptured(
+  orderId: string,
+  event: ReturnType<typeof RazorpayWebhookEventSchema.parse>,
+  meta: Record<string, unknown>,
+): Promise<boolean> {
+  const payment = await prisma.carePayment.findUnique({
+    where: { razorpayOrderId: orderId },
+    select: { id: true, careUserId: true, sku: true, amountInr: true, status: true },
+  });
+  if (!payment) return false;
+  if (payment.status === 'PAID') return true; // Idempotent no-op.
+
+  const paymentId = event.payload?.payment?.entity?.id ?? null;
+  const now = new Date();
+  const periodDays = 30;
+
+  await prisma.$transaction(async (tx) => {
+    const user = await tx.careUser.findUnique({
+      where: { id: payment.careUserId },
+      select: { planExpiresAt: true },
+    });
+    const base =
+      user?.planExpiresAt && user.planExpiresAt.getTime() > now.getTime()
+        ? user.planExpiresAt
+        : now;
+    const newExpiry = new Date(base.getTime() + periodDays * 24 * 60 * 60 * 1000);
+
+    await tx.carePayment.update({
+      where: { id: payment.id },
+      data: {
+        status: 'PAID',
+        ...(paymentId && { razorpayPaymentId: paymentId }),
+        periodStart: now,
+        periodEnd: newExpiry,
+        rawEvent: event as unknown as Prisma.InputJsonValue,
+      },
+    });
+    await tx.careUser.update({
+      where: { id: payment.careUserId },
+      data: { planTier: 'plus', planExpiresAt: newExpiry },
+    });
+    await writeAudit(
+      {
+        actorType: 'SYSTEM',
+        action: 'CARE_PLAN_UPGRADED',
+        targetType: 'CarePayment',
+        targetId: payment.id,
+        metadata: {
+          ...meta,
+          careUserId: payment.careUserId,
+          sku: payment.sku,
+          amountInr: payment.amountInr,
+          razorpayOrderId: orderId,
+          planExpiresAt: newExpiry.toISOString(),
+        },
+      },
+      tx,
+    );
+  });
+  return true;
+}
+
+/** CG3 — Care payment failure: audit only. Access NEVER changes on a failed payment. */
+async function handleCareFailed(
+  orderId: string,
+  event: ReturnType<typeof RazorpayWebhookEventSchema.parse>,
+  meta: Record<string, unknown>,
+): Promise<boolean> {
+  const payment = await prisma.carePayment.findUnique({
+    where: { razorpayOrderId: orderId },
+    select: { id: true, careUserId: true, status: true },
+  });
+  if (!payment) return false;
+  if (payment.status === 'PAID') return true; // Stray failure after success — ignore.
+  await prisma.$transaction(async (tx) => {
+    await tx.carePayment.update({
+      where: { id: payment.id },
+      data: { status: 'FAILED', rawEvent: event as unknown as Prisma.InputJsonValue },
+    });
+    await writeAudit(
+      {
+        actorType: 'SYSTEM',
+        action: 'CARE_PAYMENT_FAILED',
+        targetType: 'CarePayment',
+        targetId: payment.id,
+        metadata: { ...meta, careUserId: payment.careUserId, razorpayOrderId: orderId },
+      },
+      tx,
+    );
+  });
+  return true;
+}
+
 async function handleFailed(
   orderId: string,
   event: ReturnType<typeof RazorpayWebhookEventSchema.parse>,
@@ -203,7 +307,10 @@ async function handleFailed(
     select: { id: true, psychologistId: true, status: true },
   });
   if (!payment) {
-    console.warn(`[razorpay-webhook] failed event for unknown order ${orderId} (no-op)`);
+    const handledAsCare = await handleCareFailed(orderId, event, meta);
+    if (!handledAsCare) {
+      console.warn(`[razorpay-webhook] failed event for unknown order ${orderId} (no-op)`);
+    }
     return;
   }
   if (payment.status === 'PAID') return; // Already paid — ignore stray failure.

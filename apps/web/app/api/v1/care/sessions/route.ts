@@ -57,6 +57,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     status: careUser.status,
     onboardedAt: careUser.onboardedAt,
     planTier: careUser.planTier,
+    planExpiresAt: careUser.planExpiresAt,
     sessionsThisWeek,
   });
   if (!gate.allowed) {
