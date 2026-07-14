@@ -32,9 +32,12 @@ const REGIONS = process.env.CARE_LIVE_VERTEX_LOCATION
 const MODELS = process.env.CARE_LIVE_VERTEX_MODEL
   ? [process.env.CARE_LIVE_VERTEX_MODEL]
   : [
+      // The CONFIRMED Vertex native-audio name (project cureocity-mind, 2026-07).
+      // Vertex ids drop the `-preview`/date that the AI Studio names carry.
+      'gemini-live-2.5-flash-native-audio',
+      // AI-Studio-style names kept only as negative controls (not on Vertex):
       'gemini-2.5-flash-native-audio-preview-12-2025',
       'gemini-2.5-flash-preview-native-audio-dialog',
-      'gemini-live-2.5-flash-preview-native-audio',
       'gemini-2.0-flash-live-preview-04-09',
     ];
 

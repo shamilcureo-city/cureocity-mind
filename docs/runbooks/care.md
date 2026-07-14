@@ -5,35 +5,56 @@ the mock stack. Product spec: [`../AI_COUNSELING.md`](../AI_COUNSELING.md).
 
 ## Env matrix
 
-| Var                         | Values                                      | Notes                                                                                     |
-| --------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `CARE_LIVE_BACKEND`         | `mock` (default) \| `ai-studio` \| `vertex` | The live voice loop. `ai-studio` = Gemini Developer API; `vertex` = Vertex AI, in-region. |
-| `CARE_LIVE_TOKEN_MODE`      | `ephemeral` (default) \| `url`              | `ai-studio` only. `url` reproduces the source recipe (key in the WSS URL). Fallback only. |
-| `GEMINI_API_KEY`            | —                                           | Required for `ai-studio`. Server-side only.                                               |
-| `CARE_LIVE_VERTEX_LOCATION` | `us-central1` (default)                     | `vertex` only — the region for the Live socket. Set from the probe (below).               |
-| `CARE_LIVE_VERTEX_MODEL`    | (native-audio model)                        | `vertex` only — bare Vertex model id. Set from the probe.                                 |
-| `CARE_MOCK_LIVE_URL`        | `ws://localhost:8788`                       | Append `?fixture=crisis` to force the crisis script (CI does this).                       |
+| Var                         | Values                                         | Notes                                                                                                                                                          |
+| --------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CARE_LIVE_BACKEND`         | `mock` (default) \| `ai-studio` \| `vertex`    | The live voice loop. `ai-studio` = Gemini Developer API; `vertex` = Vertex AI, in-region.                                                                      |
+| `CARE_LIVE_TOKEN_MODE`      | `ephemeral` (default) \| `url`                 | `ai-studio` only. `url` reproduces the source recipe (key in the WSS URL). Fallback only.                                                                      |
+| `GEMINI_API_KEY`            | —                                              | Required for `ai-studio`. Server-side only.                                                                                                                    |
+| `CARE_LIVE_VERTEX_LOCATION` | `us-central1` (default)                        | `vertex` only — the region for the Live socket. `us-central1` / `us-east4` are confirmed (NOT `asia-south1`, NOT `global`).                                    |
+| `CARE_LIVE_VERTEX_MODEL`    | `gemini-live-2.5-flash-native-audio` (default) | `vertex` only — bare Vertex model id. This is the CONFIRMED native-audio Live model for the project (differs from the AI Studio pin — no `-preview`, no date). |
+| `CARE_MOCK_LIVE_URL`        | `ws://localhost:8788`                          | Append `?fixture=crisis` to force the crisis script (CI does this).                                                                                            |
 
 `vertex` reuses the SAME service account as the batch passes
 (`GOOGLE_APPLICATION_CREDENTIALS_JSON` / `VERTEX_PROJECT_ID`) — no `GEMINI_API_KEY`.
 
 ### Turning on `CARE_LIVE_BACKEND=vertex`
 
-1. **Probe first** (native-audio Live availability on Vertex differs by region
-   and preview name):
-   ```bash
-   GOOGLE_APPLICATION_CREDENTIALS_JSON='{…sa json…}' VERTEX_PROJECT_ID=your-project \
-     node scripts/care-vertex-live-probe.mjs
-   ```
-   It opens the Vertex Live socket with browser-style `?access_token=` auth and
-   prints which `(region, model)` pairs reach `setupComplete`, plus the exact
-   env to set.
-2. Set `CARE_LIVE_BACKEND=vertex` + the probe's `CARE_LIVE_VERTEX_LOCATION` /
-   `CARE_LIVE_VERTEX_MODEL` in Vercel (Production) and redeploy.
-3. If the probe finds nothing: either native-audio Live isn't in those Vertex
-   regions yet, or Vertex rejects `?access_token=` browser auth (every fail is a
-   close/1008) — in which case browser-direct needs a socket gateway; use
-   `ai-studio` in the meantime.
+**Confirmed pair for project `cureocity-mind`** (probed 2026-07 — browser-style
+`?access_token=` auth reaches `setupComplete`):
+
+```
+CARE_LIVE_BACKEND=vertex
+CARE_LIVE_VERTEX_LOCATION=us-central1   # or us-east4; NOT asia-south1, NOT global
+CARE_LIVE_VERTEX_MODEL=gemini-live-2.5-flash-native-audio
+```
+
+Set those in Vercel (Production) and redeploy. `LOCATION` and `MODEL` are also
+the code defaults (`packages/llm/src/live/config.ts`), so `CARE_LIVE_BACKEND=vertex`
+alone is enough — the two env vars just make the choice explicit and let you
+switch region without a deploy.
+
+**Re-probe when the project, region, or model changes.** Native-audio Live
+availability on Vertex differs by region and by (Vertex-specific) preview name —
+the AI Studio model id (`gemini-2.5-flash-native-audio-preview-…`) does NOT
+exist on Vertex:
+
+```bash
+GOOGLE_APPLICATION_CREDENTIALS_JSON='{…sa json…}' VERTEX_PROJECT_ID=your-project \
+  node scripts/care-vertex-live-probe.mjs
+```
+
+It opens the Vertex Live socket, prints which `(region, model)` pairs reach
+`setupComplete`, and lists the project's visible Live/audio model catalog per
+region. If it finds nothing: either native-audio Live isn't in those Vertex
+regions for the project yet, or Vertex rejects `?access_token=` browser auth
+(every fail is a close/1008) — in which case browser-direct needs a socket
+gateway; use `ai-studio` in the meantime.
+
+> **Data residency.** `gemini-live-2.5-flash-native-audio` is not offered in
+> `asia-south1`, so the Live socket runs US-region (`us-central1`/`us-east4`).
+> The audio is transient (not persisted in-region), and AI Studio would be
+> US/global too — but for a strict DPDP posture this is a follow-up: either wait
+> for the model to reach `asia-south1`, or front it with an in-region gateway.
 
 > **Security note.** Browser-direct Vertex hands the browser a **cloud-platform**
 > GCP access token (Vertex has no narrower scope). It is short-lived and bounded
