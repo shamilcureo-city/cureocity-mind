@@ -183,6 +183,16 @@ export type MirrorTurnsResponse = z.infer<typeof MirrorTurnsResponseSchema>;
 
 export const EndCareSessionInputSchema = z.object({
   moodAfter: z.number().int().min(0).max(10).optional(),
+  /// CG1 COGS metering — the browser relays the Live API's cumulative
+  /// usageMetadata at session end (the doctor vertical's LiveConsultMetric
+  /// pattern). The server never sees usage otherwise: the socket runs
+  /// browser↔Gemini direct. Tokens only; ₹ is derived at rollup time.
+  usage: z
+    .object({
+      tokensIn: z.number().int().nonnegative().max(100_000_000),
+      tokensOut: z.number().int().nonnegative().max(100_000_000),
+    })
+    .optional(),
 });
 export type EndCareSessionInput = z.infer<typeof EndCareSessionInputSchema>;
 

@@ -108,6 +108,36 @@ export async function runCareReport(careSessionId: string): Promise<RunCareRepor
         tx,
       );
     }
+    // CG1 — persist per-goal outcomes onto the CURRENT plan's goals JSON.
+    // Status is the goal's LIVE field (CarePlanGoalSchema: "proposal fields
+    // + live status") — updating it never re-versions the plan, mirroring
+    // the therapist-side TreatmentGoalProgress rule. The review walked the
+    // goals with the user in-session; ACHIEVED here is their own verdict,
+    // and it's what lets the home strikethrough actually fire.
+    if (report.kind === 'REVIEW' && report.progressReview.goalOutcomes.length > 0) {
+      const currentPlan = await tx.carePlan.findFirst({
+        where: { careUserId: session.careUserId },
+        orderBy: { version: 'desc' },
+        select: { id: true, goals: true },
+      });
+      if (currentPlan && Array.isArray(currentPlan.goals)) {
+        const goals = currentPlan.goals as Array<Record<string, unknown>>;
+        let changed = false;
+        for (const outcome of report.progressReview.goalOutcomes) {
+          const goal = goals[outcome.goalIndex];
+          if (goal && outcome.status === 'ACHIEVED' && goal['status'] !== 'ACHIEVED') {
+            goal['status'] = 'ACHIEVED';
+            changed = true;
+          }
+        }
+        if (changed) {
+          await tx.carePlan.update({
+            where: { id: currentPlan.id },
+            data: { goals: goals as unknown as object },
+          });
+        }
+      }
+    }
     return upserted;
   });
 

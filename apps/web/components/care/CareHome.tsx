@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { CareInstrumentForm } from './CareInstrumentForm';
 import { MoodDial } from './MoodDial';
 import type { CareResource } from './SafetyStrip';
 
@@ -21,6 +22,9 @@ interface HomePayload {
   };
   sessionsThisWeek: number;
   weeklyCap: number;
+  istHour: number;
+  hasBaseline: boolean;
+  needsCheckin: boolean;
   plan: {
     version: number;
     goals: Array<{ goal: string; status: string }>;
@@ -48,6 +52,16 @@ export function CareHome() {
   const [topic, setTopic] = useState('Just talk');
   const [mood, setMood] = useState<number | null>(null);
   const [starting, setStarting] = useState(false);
+  /// Pre-review check-in (CG1): a REVIEW without a fresh score runs blind.
+  /// Soft gate — the UI asks first; "skip" still allows the session.
+  const [reviewCheckinDone, setReviewCheckinDone] = useState(false);
+  const [baselineDismissed, setBaselineDismissed] = useState(true);
+
+  useEffect(() => {
+    // The one gentle home re-prompt for the starting line — permanently
+    // dismissible, never nagged (localStorage survives sessions).
+    setBaselineDismissed(localStorage.getItem('care-baseline-later') === '1');
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -128,7 +142,16 @@ export function CareHome() {
           ~{n.capMin} min{n.modalityTrack ? ` · ${n.modalityTrack}` : ''}
         </span>
       </div>
-      {data.gate.allowed ? (
+      {data.gate.allowed && n.kind === 'REVIEW' && data.needsCheckin && !reviewCheckinDone ? (
+        // Before a review: the same questions from day one — so the verdict
+        // is real, not vibes. Soft gate: skipping still allows the session.
+        <CareInstrumentForm
+          framing="review"
+          onDone={() => setReviewCheckinDone(true)}
+          onSkip={() => setReviewCheckinDone(true)}
+        />
+      ) : null}
+      {data.gate.allowed && !(n.kind === 'REVIEW' && data.needsCheckin && !reviewCheckinDone) ? (
         <>
           {n.kind === 'TREATMENT' ? (
             <div className="mt-3 flex flex-wrap gap-1.5">
@@ -164,7 +187,8 @@ export function CareHome() {
             {data.weeklyCap} sessions this week.
           </p>
         </>
-      ) : (
+      ) : null}
+      {!data.gate.allowed ? (
         <div className="mt-3 rounded-xl bg-[var(--color-surface-soft)] p-3 text-sm text-[var(--color-ink-2)]">
           {data.gate.reason}
           {data.gate.code === 'SAFETY_HOLD' ? (
@@ -176,7 +200,7 @@ export function CareHome() {
             </Link>
           ) : null}
         </div>
-      )}
+      ) : null}
     </Card>
   );
 
@@ -228,23 +252,67 @@ export function CareHome() {
     </Link>
   ) : null;
 
-  const aside = planCard || homeworkCard || lastReportCard;
+  // The starting-line re-prompt: only when a plan exists with no baseline,
+  // never for a pending REVIEW (that flow has its own ask), and permanently
+  // dismissible — one gentle door, not a nag.
+  const baselineCard =
+    data.plan && !data.hasBaseline && !baselineDismissed && n.kind !== 'REVIEW' ? (
+      <Card className="p-4 md:p-5">
+        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+          Your starting line
+        </span>
+        <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+          9 questions, about 90 seconds — the same form clinicians use. Without it, your review
+          can&apos;t show real change.
+        </p>
+        <div className="mt-2 flex gap-2">
+          <Link
+            href="/care/checkin/baseline"
+            className="text-sm font-semibold text-[var(--color-accent)]"
+          >
+            Take it now →
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              localStorage.setItem('care-baseline-later', '1');
+              setBaselineDismissed(true);
+            }}
+            className="text-sm text-[var(--color-ink-3)] underline-offset-2 hover:underline"
+          >
+            Later is fine
+          </button>
+        </div>
+      </Card>
+    ) : null;
+
+  // All three cards stack — the old `a || b || c` rendered only the first
+  // truthy one, permanently hiding Homework and Last-time once a plan existed.
+  const asideCards = [baselineCard, planCard, homeworkCard, lastReportCard].filter(Boolean);
+
+  const first = data.displayName.split(' ')[0];
+  const greeting =
+    data.istHour >= 23 || data.istHour < 5
+      ? `It's late, ${first} — good that you're here.`
+      : data.istHour < 12
+        ? `Good morning, ${first} ☀️`
+        : data.istHour < 17
+          ? `Good afternoon, ${first}`
+          : `Good evening, ${first} 🌙`;
 
   return (
     <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-5xl md:px-8 md:py-10">
       <div className="flex items-baseline justify-between">
-        <h1 className="font-serif text-2xl font-semibold md:text-3xl">
-          Good evening, {data.displayName.split(' ')[0]} 🌙
-        </h1>
+        <h1 className="font-serif text-2xl font-semibold md:text-3xl">{greeting}</h1>
         {data.streak > 0 ? (
           <span className="text-sm text-[var(--color-ink-2)]">🔥 {data.streak}</span>
         ) : null}
       </div>
 
-      {aside ? (
+      {asideCards.length > 0 ? (
         <div className="mt-4 md:mt-7 md:grid md:grid-cols-[1.5fr_1fr] md:items-start md:gap-6">
           <div>{sessionCard}</div>
-          <div className="mt-3 space-y-3 md:mt-0">{aside}</div>
+          <div className="mt-3 space-y-3 md:mt-0">{asideCards}</div>
         </div>
       ) : (
         <div className="mt-4 md:mt-7 md:max-w-xl">{sessionCard}</div>

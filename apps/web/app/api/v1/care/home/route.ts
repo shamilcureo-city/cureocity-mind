@@ -63,6 +63,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const todayKey = istDayKey(new Date());
   const checkinToday = checkins.some((c) => istDayKey(c.createdAt) === todayKey);
 
+  // CG1 — the measurement loop's home-side state: does ANY baseline exist
+  // (drives the one gentle starting-line card), and is a fresh score
+  // (≤72h) in hand before a REVIEW (the soft pre-review gate — the UI
+  // honors it; a user who insists still gets their session).
+  const [instrumentCount, freshInstrument] = await Promise.all([
+    prisma.careInstrumentResponse.count({ where: { careUserId } }),
+    kind === 'REVIEW'
+      ? prisma.careInstrumentResponse.findFirst({
+          where: { careUserId, createdAt: { gte: new Date(Date.now() - 72 * 60 * 60 * 1000) } },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+  ]);
+  const hasBaseline = instrumentCount > 0;
+  const needsCheckin = kind === 'REVIEW' && freshInstrument === null;
+
+  // The server is the clock authority (IST) — the greeting must never say
+  // "Good evening" at 9am in a product whose moat is honesty.
+  const istHour = (new Date(Date.now() + 5.5 * 60 * 60 * 1000).getUTCHours() + 24) % 24;
+
   let lastReportHeadline: string | null = null;
   if (lastReport) {
     const body = lastReport.body as Record<string, unknown>;
@@ -93,6 +113,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     },
     sessionsThisWeek: weekSessions,
     weeklyCap: cap,
+    istHour,
+    hasBaseline,
+    needsCheckin,
     plan: caseFile.plan
       ? {
           version: caseFile.plan.version,
