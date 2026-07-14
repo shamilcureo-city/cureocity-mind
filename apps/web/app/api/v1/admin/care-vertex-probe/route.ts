@@ -105,7 +105,7 @@ function probeCombo(
       void asText(ev.data).then((txt) => {
         if (/setupcomplete/i.test(txt)) done({ location, model, ok: true });
         else if (/error|invalid|permission|not\s*found|unsupported/i.test(txt))
-          done({ location, model, ok: false, reason: txt.slice(0, 240) });
+          done({ location, model, ok: false, reason: txt.slice(0, 500) });
       });
     });
     ws.addEventListener('error', () => {
@@ -116,10 +116,37 @@ function probeCombo(
         location,
         model,
         ok: false,
-        reason: `close ${ev.code} ${(ev.reason || '').slice(0, 160)}`,
+        reason: `close ${ev.code} ${(ev.reason || '').slice(0, 500)}`,
       }),
     );
   });
+}
+
+/**
+ * List the Google publisher models this project can see in a region, filtered
+ * to the Live / audio ones — so we learn the exact model NAME to use (or prove
+ * native-audio Live isn't offered / enabled for the project there).
+ */
+async function fetchLiveModels(
+  token: string,
+  location: string,
+): Promise<{ location: string; models?: string[]; error?: string }> {
+  const host =
+    location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+  try {
+    const res = await fetch(`https://${host}/v1beta1/publishers/google/models?pageSize=1000`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { location, error: `${res.status} ${(await res.text()).slice(0, 300)}` };
+    const body = (await res.json()) as { publisherModels?: Array<{ name?: string }> };
+    const models = (body.publisherModels ?? [])
+      .map((m) => (m.name ?? '').replace(/^publishers\/google\/models\//, ''))
+      .filter((n) => /live|audio|native/i.test(n))
+      .sort();
+    return { location, models };
+  } catch (e) {
+    return { location, error: (e as Error).message };
+  }
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
@@ -148,6 +175,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const results = await Promise.all(
     combos.map((c) => probeCombo(token, project, c.location, c.model)),
   );
+  // What Live/audio models can this project actually see, per region?
+  const catalog = await Promise.all(regions.map((r) => fetchLiveModels(token, r)));
   const working = results
     .filter((r) => r.ok)
     .map((r) => ({ location: r.location, model: r.model }));
@@ -160,6 +189,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return NextResponse.json({
     project,
     working,
+    availableLiveModels: catalog,
     recommended: best
       ? {
           CARE_LIVE_BACKEND: 'vertex',
