@@ -20,3 +20,10 @@ export function carePlusMonthlyInr(): number {
 
 /** Days a Plus purchase buys. */
 export const CARE_PLUS_PERIOD_DAYS = 30;
+
+/** CG5 — the session pack: +2 sessions, 7-day expiry, nothing recurring. */
+export function careSessionPackInr(): number {
+  return priceFromEnv('CARE_SESSION_PACK_INR', 149);
+}
+export const CARE_PACK_CREDITS = 2;
+export const CARE_PACK_EXPIRY_DAYS = 7;

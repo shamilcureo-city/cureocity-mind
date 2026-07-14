@@ -376,10 +376,11 @@ export const CareResonanceInputSchema = z.object({
 });
 export type CareResonanceInput = z.infer<typeof CareResonanceInputSchema>;
 
-/// CG3 — Care checkout. ONE SKU at launch (feasibility ruling): Plus as a
-/// prepaid 30-day Razorpay order — no UPI Autopay mandate, no auto-renewal.
+/// CG3/CG5 — Care checkout SKUs: Plus as a prepaid 30-day Razorpay order
+/// (no UPI Autopay mandate, no auto-renewal) and the ₹149 session pack
+/// (+2 sessions this week, 7-day expiry, max one pack/week).
 export const CareCheckoutInputSchema = z.object({
-  sku: z.literal('PLUS_MONTHLY'),
+  sku: z.enum(['PLUS_MONTHLY', 'SESSION_PACK']),
 });
 export type CareCheckoutInput = z.infer<typeof CareCheckoutInputSchema>;
 

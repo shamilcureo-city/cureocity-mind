@@ -26,6 +26,8 @@ interface HomePayload {
   hasBaseline: boolean;
   needsCheckin: boolean;
   effectiveTier: string;
+  availableCredits: number;
+  trialUsed: boolean;
   suppressUpsell: boolean;
   nextUnlockAt: string | null;
   plan: {
@@ -90,6 +92,23 @@ export function CareHome() {
       // pre-fills the next session's topic so the persona opens by asking
       // what it missed. One-shot — consumed here.
       let effectiveTopic = topic;
+      // CG5 — the consented /care/check handoff: the anonymous score rides
+      // into the intake so the first session opens warm. One-shot.
+      let intakeArrival: string | null = null;
+      if (data.nextSession.kind === 'INTAKE') {
+        try {
+          const raw = sessionStorage.getItem('care-check-handoff');
+          if (raw) {
+            const h = JSON.parse(raw) as { instrument?: string; score?: number };
+            if (typeof h.score === 'number') {
+              intakeArrival = `Before signing up they took the anonymous 2-minute ${h.instrument ?? 'PHQ-9'} check and scored ${h.score}/27 — mention gently that you saw it, don't recite the number.`;
+            }
+            sessionStorage.removeItem('care-check-handoff');
+          }
+        } catch {
+          /* private mode */
+        }
+      }
       if (data.nextSession.kind === 'TREATMENT') {
         try {
           const prefill = localStorage.getItem('care-topic-prefill');
@@ -107,6 +126,7 @@ export function CareHome() {
         body: JSON.stringify({
           ...(mood !== null ? { moodBefore: mood } : {}),
           ...(data.nextSession.kind === 'TREATMENT' ? { topic: effectiveTopic } : {}),
+          ...(intakeArrival ? { topic: intakeArrival } : {}),
         }),
       });
       const body = (await res.json()) as {
@@ -256,11 +276,17 @@ export function CareHome() {
               />
             </div>
           ) : null}
-          {!data.suppressUpsell && data.effectiveTier === 'free' ? (
+          {data.availableCredits > 0 ? (
+            <p className="mt-3 text-[13px] font-semibold text-[var(--color-accent)]">
+              {data.availableCredits} extra session{data.availableCredits === 1 ? '' : 's'} from
+              your pack — ready this week.
+            </p>
+          ) : null}
+          {!data.suppressUpsell && data.effectiveTier === 'free' && data.availableCredits === 0 ? (
             <p className="mt-3 text-[13px] text-[var(--color-ink-2)]">
               Want more this week?{' '}
               <Link href="/care/plan-tier" className="font-semibold text-[var(--color-accent)]">
-                Care Plus — up to 4 sessions a week →
+                Care Plus, or a one-time 2-session pack →
               </Link>
             </p>
           ) : null}

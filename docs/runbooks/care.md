@@ -16,6 +16,7 @@ the mock stack. Product spec: [`../AI_COUNSELING.md`](../AI_COUNSELING.md).
 | `CARE_MOCK_LIVE_URL`         | `ws://localhost:8788`                          | Append `?fixture=crisis` to force the crisis script (CI does this).                                                                                            |
 | `CARE_WEEKLY_CAP_FREE`       | `2` (default)                                  | Weekly session cap for the `free` tier. Raise on a pilot/testing deploy (e.g. `50`) to test without hitting the cap; unset restores the product default.       |
 | `CARE_WEEKLY_CAP_PLUS`       | `4` (default)                                  | Weekly session cap for the `plus` tier (CG3: 4/wk, never daily — the ethics cap). Same override mechanism as above.                                            |
+| `CARE_SESSION_PACK_INR`      | `149` (default)                                | CG5: the session pack (+2 sessions, 7-day expiry, max one pack/week). Same Razorpay keys as Plus.                                                              |
 | `CARE_WATI_TEMPLATE_CHECKIN` | —                                              | CG4: Meta-APPROVED WATI template name for session-day + day-3 nudges. Unset → nudges record as SUPPRESSED `channel_unconfigured` (in-app surfaces carry on).   |
 | `CARE_WATI_TEMPLATE_DOOR`    | —                                              | CG4: template for the day-7 / day-30 door-open messages.                                                                                                       |
 | `CARE_WATI_TEMPLATE_REPORT`  | —                                              | CG4: template for the report-ready receipt. All three ride the shared `WATI_API_BASE` / `WATI_BEARER_TOKEN`.                                                   |
@@ -86,9 +87,9 @@ on day 1** of any pilot. Body rules (the ethics charter, enforced by
 sender, one first-name parameter at most (joint-family lock screens are a
 disclosure surface); ≤2 proactive sends/week; one/day; only in the user's
 quiet-hours window (default 21:00 IST); each ladder rung (day-3/7/30) once
-per lapse; **silence forever after day-30**; zero sends during SAFETY_HOLD
+per lapse; **silence forever after day-30**; zero sends during SAFETY*HOLD
 or any suppression state — and every suppressed decision is a `CareNudge`
-row + `CARE_NUDGE_SUPPRESSED` audit, so the invariant is _provable_:
+row + `CARE_NUDGE_SUPPRESSED` audit, so the invariant is \_provable*:
 
 ```sql
 -- Must always return 0:

@@ -120,6 +120,7 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
       head,
       `This is a FIRST SESSION — a real intake, ${input.sessionCapMin} minutes. At ${closeAt} minutes, begin closing.`,
       mood,
+      input.topic ? `THEY ARRIVED WITH: ${input.topic}` : '',
       `OPEN FIRST — 2-3 warm sentences, then pause and let them answer before anything else: greet ${input.userFirstName} by name; say in one line who you are (${input.personaName}, an AI here to listen — not a licensed human); and set the frame — this first session is just to understand what is going on for them, there are no forms, it is private, and you go at their pace. Then gently invite them to begin wherever feels right. Do NOT open with a bare "what brings you today" or fire the intake questions all at once.`,
       'THEN CONDUCT A REAL INTAKE, conversationally, one question at a time, following their lead — never a checklist:',
       '- what brings them here now; how long; what it is costing them',

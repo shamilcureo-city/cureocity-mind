@@ -31,6 +31,7 @@ export interface AuthenticatedCareUser {
     safetyHoldAt: Date | null;
     planTier: string;
     planExpiresAt: Date | null;
+    plusTrialEndsAt: Date | null;
     onboardedAt: Date | null;
     personaName: string;
     voiceName: string;
@@ -52,6 +53,7 @@ const CARE_USER_SELECT = {
   safetyHoldAt: true,
   planTier: true,
   planExpiresAt: true,
+  plusTrialEndsAt: true,
   onboardedAt: true,
   personaName: true,
   voiceName: true,
