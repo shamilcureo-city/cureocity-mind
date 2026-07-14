@@ -218,8 +218,49 @@ async function handleCareCaptured(
 
   const paymentId = event.payload?.payment?.entity?.id ?? null;
   const now = new Date();
-  const periodDays = 30;
 
+  // CG5 — the session pack grants 2 one-week credits instead of a tier flip.
+  if (payment.sku === 'SESSION_PACK') {
+    const packExpiry = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+    await prisma.$transaction(async (tx) => {
+      await tx.carePayment.update({
+        where: { id: payment.id },
+        data: {
+          status: 'PAID',
+          ...(paymentId && { razorpayPaymentId: paymentId }),
+          periodStart: now,
+          periodEnd: packExpiry,
+          rawEvent: event as unknown as Prisma.InputJsonValue,
+        },
+      });
+      await tx.careSessionCredit.createMany({
+        data: [
+          { careUserId: payment.careUserId, expiresAt: packExpiry },
+          { careUserId: payment.careUserId, expiresAt: packExpiry },
+        ],
+      });
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'CARE_SESSION_PACK_PURCHASED',
+          targetType: 'CarePayment',
+          targetId: payment.id,
+          metadata: {
+            ...meta,
+            careUserId: payment.careUserId,
+            amountInr: payment.amountInr,
+            razorpayOrderId: orderId,
+            credits: 2,
+            expiresAt: packExpiry.toISOString(),
+          },
+        },
+        tx,
+      );
+    });
+    return true;
+  }
+
+  const periodDays = 30;
   await prisma.$transaction(async (tx) => {
     const user = await tx.careUser.findUnique({
       where: { id: payment.careUserId },

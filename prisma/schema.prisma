@@ -2766,6 +2766,8 @@ enum AuditAction {
   CARE_PLAN_UPGRADED
   CARE_PAYMENT_FAILED
   CARE_WAITLIST_JOINED
+  CARE_SESSION_PACK_PURCHASED
+  CARE_TRIAL_STARTED
   CARE_NUDGE_OPTIN
   CARE_NUDGE_OPTOUT
   CARE_NUDGE_SENT
@@ -2861,6 +2863,11 @@ model CareUser {
   /// expiry, e.g. an operator grant). Expiry silently returns to free.
   planExpiresAt DateTime?
 
+  /// CG5 — the 7-day no-card Plus trial: one-shot, ends silently back to
+  /// Free (the gate computes the effective tier; no countdown mechanics).
+  plusTrialStartedAt DateTime?
+  plusTrialEndsAt    DateTime?
+
   /// CG4 — the outbound channel. Consent finalizes ONLY by an explicit
   /// in-app tap (timestamped, TRAI DCA); a spoken yes in-session never
   /// enables sends. Null = no sends, ever.
@@ -2880,12 +2887,33 @@ model CareUser {
   carePlans     CarePlan[]
   checkins      CareCheckin[]
   instruments   CareInstrumentResponse[]
-  payments      CarePayment[]
-  nudges        CareNudge[]
-  homeworkTicks CareHomeworkTick[]
+  payments       CarePayment[]
+  nudges         CareNudge[]
+  homeworkTicks  CareHomeworkTick[]
+  sessionCredits CareSessionCredit[]
 
   @@index([status])
   @@map("care_users")
+}
+
+/// CG5 — the ₹149 session pack: +2 sessions this week, UPI one-tap, expires
+/// in 7 days, nothing recurring. Max ONE pack per week (enforced at
+/// checkout) so free+pack tops out at 4/week — the same ethics ceiling as
+/// Plus. A credit is consumed inside the session-create transaction, so
+/// display and enforcement can't drift.
+model CareSessionCredit {
+  id         String @id @default(cuid())
+  careUserId String
+
+  grantedAt          DateTime  @default(now())
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  consumedBySessionId String?
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@index([careUserId, expiresAt])
+  @@map("care_session_credits")
 }
 
 /// CG4 — one row per outbound nudge DECISION (sent, suppressed, or failed).

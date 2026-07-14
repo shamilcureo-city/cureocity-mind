@@ -16,11 +16,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
   const row = await prisma.careUser.findUniqueOrThrow({
     where: { id: auth.value.careUserId },
-    select: { planTier: true, planExpiresAt: true },
+    select: { planTier: true, planExpiresAt: true, plusTrialEndsAt: true },
   });
   return NextResponse.json({
     planTier: row.planTier,
     planExpiresAt: row.planExpiresAt,
-    effectiveTier: effectiveCareTier(row.planTier, row.planExpiresAt),
+    plusTrialEndsAt: row.plusTrialEndsAt,
+    effectiveTier: effectiveCareTier(
+      row.planTier,
+      row.planExpiresAt,
+      new Date(),
+      row.plusTrialEndsAt,
+    ),
   });
 }

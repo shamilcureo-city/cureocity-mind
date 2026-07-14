@@ -22,7 +22,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const { careUser, careUserId } = auth.value;
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [caseFile, weekSessions, oldestWeekSession, checkins, lastReport, lastCrisis] =
+  const [caseFile, weekSessions, oldestWeekSession, checkins, lastReport, lastCrisis, credits] =
     await Promise.all([
       getCareCaseFile(careUserId),
       prisma.careSession.count({
@@ -64,6 +64,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         orderBy: { crisisAt: 'desc' },
         select: { crisisAt: true },
       }),
+      prisma.careSessionCredit.count({
+        where: { careUserId, consumedAt: null, expiresAt: { gt: new Date() } },
+      }),
     ]);
 
   const gate = evaluateCareGate({
@@ -71,6 +74,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     onboardedAt: careUser.onboardedAt,
     planTier: careUser.planTier,
     planExpiresAt: careUser.planExpiresAt,
+    trialEndsAt: careUser.plusTrialEndsAt,
+    availableCredits: credits,
     sessionsThisWeek: weekSessions,
     oldestWeekSessionAt: oldestWeekSession?.createdAt ?? null,
   });
@@ -162,7 +167,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       null;
   }
 
-  const tier = effectiveCareTier(careUser.planTier, careUser.planExpiresAt);
+  const tier = effectiveCareTier(
+    careUser.planTier,
+    careUser.planExpiresAt,
+    new Date(),
+    careUser.plusTrialEndsAt,
+  );
   const cap = CARE_TIER_WEEKLY_CAP[tier] ?? CARE_TIER_WEEKLY_CAP['free']!;
 
   return NextResponse.json({
@@ -184,6 +194,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     hasBaseline,
     needsCheckin,
     effectiveTier: tier,
+    availableCredits: credits,
+    trialUsed: careUser.plusTrialEndsAt !== null,
     suppressUpsell: suppression.suppress,
     nextUnlockAt: gate.nextUnlockAt ?? null,
     plan: caseFile.plan

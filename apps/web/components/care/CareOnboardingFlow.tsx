@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import type { CareResource } from './SafetyStrip';
 import { CrisisTakeover } from './CrisisTakeover';
 import { CARE_PERSONAS } from './personas';
+import { VoicePreviewButton } from './VoicePreviewButton';
 
 const LANGS = [
   { code: 'en', label: 'English' },
@@ -162,6 +163,7 @@ export function CareOnboardingFlow({ initialName }: { initialName: string }) {
                 <span className="mx-auto mb-1.5 block h-9 w-9 rounded-full bg-[radial-gradient(circle_at_35%_30%,#9fd3bd,#3f8a6d_65%)]" />
                 <span className="block font-semibold">{p.name}</span>
                 <span className="block text-[11px] text-[var(--color-ink-3)]">{p.blurb}</span>
+                <VoicePreviewButton persona={p.name} lang={langs[0] ?? 'en'} />
               </button>
             ))}
           </div>

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { CareCheckoutInputSchema, type CareCheckoutResponse } from '@cureocity/contracts';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { requireCareUserId } from '@/lib/care-auth';
-import { carePlusMonthlyInr } from '@/lib/care-pricing';
+import { carePlusMonthlyInr, careSessionPackInr } from '@/lib/care-pricing';
 import { evaluateCareSuppression } from '@/lib/care-suppression';
 import { publicRazorpayKeyId, razorpay } from '@/lib/billing';
 import { parseJson } from '@/lib/validate';
@@ -58,7 +58,31 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const amountInr = carePlusMonthlyInr();
+  // CG5 — the pack is capped at ONE per week: free + pack tops out at
+  // 4 sessions/week, the same ethics ceiling as Plus. The limit copy is
+  // honest about when more sessions stops being the answer.
+  if (input.value.sku === 'SESSION_PACK') {
+    const packsThisWeek = await prisma.carePayment.count({
+      where: {
+        careUserId,
+        sku: 'SESSION_PACK',
+        status: 'PAID',
+        createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      },
+    });
+    if (packsThisWeek >= 1) {
+      return NextResponse.json(
+        {
+          error:
+            'One pack a week is the ceiling. Wanting more than 4 sessions a week is worth a conversation — about Plus, or about whether a human therapist is the better fit right now.',
+        },
+        { status: 409 },
+      );
+    }
+  }
+
+  const amountInr =
+    input.value.sku === 'SESSION_PACK' ? careSessionPackInr() : carePlusMonthlyInr();
   const keyId = publicRazorpayKeyId();
   if (!keyId) {
     return NextResponse.json(

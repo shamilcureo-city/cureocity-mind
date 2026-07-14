@@ -46,18 +46,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const sessionsThisWeek = await prisma.careSession.count({
-    where: {
-      careUserId,
-      createdAt: { gte: weekAgo },
-      status: { in: ['COMPLETED', 'IN_PROGRESS'] },
-    },
-  });
+  const [sessionsThisWeek, availableCredits] = await Promise.all([
+    prisma.careSession.count({
+      where: {
+        careUserId,
+        createdAt: { gte: weekAgo },
+        status: { in: ['COMPLETED', 'IN_PROGRESS'] },
+      },
+    }),
+    prisma.careSessionCredit.count({
+      where: { careUserId, consumedAt: null, expiresAt: { gt: new Date() } },
+    }),
+  ]);
   const gate = evaluateCareGate({
     status: careUser.status,
     onboardedAt: careUser.onboardedAt,
     planTier: careUser.planTier,
     planExpiresAt: careUser.planExpiresAt,
+    trialEndsAt: careUser.plusTrialEndsAt,
+    availableCredits,
     sessionsThisWeek,
   });
   if (!gate.allowed) {
@@ -81,6 +88,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       },
       select: { id: true, kind: true },
     });
+    // CG5 — a start that rode a session-pack credit consumes it inside
+    // this transaction, so display and enforcement can't drift.
+    if (gate.usingCredit) {
+      const credit = await tx.careSessionCredit.findFirst({
+        where: { careUserId, consumedAt: null, expiresAt: { gt: new Date() } },
+        orderBy: { expiresAt: 'asc' },
+        select: { id: true },
+      });
+      if (!credit) throw new Error('Session credit vanished between gate and create');
+      await tx.careSessionCredit.update({
+        where: { id: credit.id },
+        data: { consumedAt: new Date(), consumedBySessionId: created.id },
+      });
+    }
     await writeAudit(
       {
         actorType: 'CLIENT',

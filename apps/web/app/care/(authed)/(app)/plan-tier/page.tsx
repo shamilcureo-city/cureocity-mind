@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import { requireOnboardedCareUser } from '@/lib/care-auth-page';
 import { CARE_TIER_WEEKLY_CAP, effectiveCareTier } from '@/lib/care-gate';
-import { carePlusMonthlyInr } from '@/lib/care-pricing';
+import { carePlusMonthlyInr, careSessionPackInr } from '@/lib/care-pricing';
 import { evaluateCareSuppression } from '@/lib/care-suppression';
 import { prisma } from '@/lib/prisma';
 import { Card } from '@/components/ui/Card';
 import { CarePlusCheckout } from '@/components/care/CarePlusCheckout';
+import { CarePackCheckout, CareTrialButton } from '@/components/care/CareTrialAndPack';
 
 export const metadata: Metadata = { title: 'Your plan — Cureocity Care' };
 export const dynamic = 'force-dynamic';
@@ -28,7 +29,14 @@ export default async function CarePlanTierPage() {
   const [row, lastCrisis, latestReport] = await Promise.all([
     prisma.careUser.findUniqueOrThrow({
       where: { id: user.id },
-      select: { planTier: true, planExpiresAt: true, status: true, safetyHoldAt: true },
+      select: {
+        planTier: true,
+        planExpiresAt: true,
+        plusTrialStartedAt: true,
+        plusTrialEndsAt: true,
+        status: true,
+        safetyHoldAt: true,
+      },
     }),
     prisma.careSession.findFirst({
       where: { careUserId: user.id, crisisAt: { not: null } },
@@ -41,7 +49,7 @@ export default async function CarePlanTierPage() {
       select: { riskLevel: true },
     }),
   ]);
-  const tier = effectiveCareTier(row.planTier, row.planExpiresAt);
+  const tier = effectiveCareTier(row.planTier, row.planExpiresAt, new Date(), row.plusTrialEndsAt);
   const suppression = evaluateCareSuppression({
     status: row.status,
     safetyHoldAt: row.safetyHoldAt,
@@ -102,10 +110,25 @@ export default async function CarePlanTierPage() {
           ) : (
             <div className="mt-3">
               <CarePlusCheckout priceInr={priceInr} />
+              {tier === 'free' && row.plusTrialStartedAt === null ? <CareTrialButton /> : null}
             </div>
           )}
         </Card>
       </div>
+      {!suppression.suppress ? (
+        <Card className="mt-3 p-4 md:p-5">
+          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+            Or just this week
+          </span>
+          <p className="mt-1 text-sm">
+            Add 2 sessions for this week — ₹{careSessionPackInr()}. One tap, UPI, done. They expire
+            in 7 days; no subscription, nothing recurring. One pack a week is the ceiling.
+          </p>
+          <div className="mt-2">
+            <CarePackCheckout priceInr={careSessionPackInr()} />
+          </div>
+        </Card>
+      ) : null}
       <p className="mt-4 text-[13px] text-[var(--color-ink-2)]">
         Human therapy in India runs ₹800–3,500 a session. Care Plus covers a whole month for less
         than one human hour — and to be clear:{' '}

@@ -43,7 +43,10 @@ export function effectiveCareTier(
   planTier: string,
   planExpiresAt: Date | null | undefined,
   now: Date = new Date(),
+  /// CG5 — the 7-day no-card trial: computed-plus while unexpired.
+  trialEndsAt?: Date | null,
 ): string {
+  if (trialEndsAt && trialEndsAt.getTime() > now.getTime()) return 'plus';
   if (planTier !== 'plus') return planTier;
   if (planExpiresAt && planExpiresAt.getTime() <= now.getTime()) return 'free';
   return 'plus';
@@ -55,6 +58,10 @@ export interface CareGateInput {
   planTier: string;
   /** Plus pass expiry (CG3) — see effectiveCareTier. */
   planExpiresAt?: Date | null;
+  /** Trial expiry (CG5) — see effectiveCareTier. */
+  trialEndsAt?: Date | null;
+  /** Unconsumed, unexpired session-pack credits (CG5). */
+  availableCredits?: number;
   /** COMPLETED or IN_PROGRESS sessions in the trailing 7 days. */
   sessionsThisWeek: number;
   /**
@@ -75,6 +82,8 @@ export interface CareGateVerdict {
   reason?: string;
   /** WEEKLY_CAP only — when the oldest in-window session ages out. */
   nextUnlockAt?: Date;
+  /** CG5 — this start rides a session-pack credit (the create route consumes one). */
+  usingCredit?: boolean;
 }
 
 export function evaluateCareGate(input: CareGateInput): CareGateVerdict {
@@ -97,9 +106,15 @@ export function evaluateCareGate(input: CareGateInput): CareGateVerdict {
     };
   }
   const now = input.now ?? new Date();
-  const tier = effectiveCareTier(input.planTier, input.planExpiresAt, now);
+  const tier = effectiveCareTier(input.planTier, input.planExpiresAt, now, input.trialEndsAt);
   const cap = CARE_TIER_WEEKLY_CAP[tier] ?? CARE_TIER_WEEKLY_CAP['free']!;
   if (input.sessionsThisWeek >= cap) {
+    // CG5 — a session-pack credit lifts the cap for exactly one start; the
+    // create route consumes it inside the same transaction. Free + pack
+    // tops out at 4/week — the same ethics ceiling as Plus.
+    if ((input.availableCredits ?? 0) > 0 && input.sessionsThisWeek < cap + 2) {
+      return { allowed: true, code: 'OK', usingCredit: true };
+    }
     const nextUnlockAt = input.oldestWeekSessionAt
       ? new Date(input.oldestWeekSessionAt.getTime() + 7 * 24 * 60 * 60 * 1000)
       : undefined;
