@@ -40,13 +40,16 @@ export async function GET(
   // REVIEW revision carries them forward (a hardcoded 'CBT' default was
   // silently resetting SLEEP/GROUNDING users' tracks on plan v2), and (b)
   // whether a baseline instrument exists (drives the "starting line" ask).
-  const [currentPlan, baselineCount] = await Promise.all([
+  const [currentPlan, baselineCount, completedCount] = await Promise.all([
     prisma.carePlan.findFirst({
       where: { careUserId: auth.value.careUserId },
       orderBy: { version: 'desc' },
       select: { modalityTrack: true, cadence: true },
     }),
     prisma.careInstrumentResponse.count({ where: { careUserId: auth.value.careUserId } }),
+    prisma.careSession.count({
+      where: { careUserId: auth.value.careUserId, status: 'COMPLETED' },
+    }),
   ]);
 
   return NextResponse.json({
@@ -61,6 +64,9 @@ export async function GET(
     durationSec: session.durationSec,
     currentPlan,
     hasBaseline: baselineCount > 0,
+    completedCount,
+    hasTrustedContact: auth.value.careUser.trustedContactName !== null,
+    personaName: auth.value.careUser.personaName,
     report: session.report
       ? { id: session.report.id, kind: session.report.kind, body: session.report.body }
       : null,

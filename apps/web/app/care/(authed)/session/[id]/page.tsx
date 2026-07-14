@@ -4,7 +4,7 @@ import { requireOnboardedCareUser } from '@/lib/care-auth-page';
 import { crisisResources } from '@/lib/care-safety';
 import { CARE_SESSION_CAP_MIN } from '@cureocity/llm';
 import { prisma } from '@/lib/prisma';
-import { CareLiveSession } from '@/components/care/CareLiveSession';
+import { CareSessionFlow } from '@/components/care/CareSessionFlow';
 
 export const metadata: Metadata = { title: 'Session — Cureocity Care' };
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,7 @@ export default async function CareSessionPage({ params }: { params: Promise<{ id
   if (!session || session.careUserId !== user.id) notFound();
 
   return (
-    <CareLiveSession
+    <CareSessionFlow
       sessionId={session.id}
       kind={session.kind}
       capMin={CARE_SESSION_CAP_MIN[session.kind]}

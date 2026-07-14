@@ -45,12 +45,12 @@ export function CareLogin({ demoMode = false }: { demoMode?: boolean }) {
     }
   }
 
-  async function verify(): Promise<void> {
+  async function verify(codeOverride?: string): Promise<void> {
     if (!confirmation) return;
     setBusy(true);
     setError(null);
     try {
-      const cred = await confirmation.confirm(code.trim());
+      const cred = await confirmation.confirm(codeOverride ?? code.trim());
       const idToken = await cred.user.getIdToken();
       const res = await fetch('/api/v1/care/auth/session', {
         method: 'POST',
@@ -100,9 +100,14 @@ export function CareLogin({ demoMode = false }: { demoMode?: boolean }) {
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
               inputMode="tel"
+              autoComplete="tel"
               className="mt-1 w-full rounded-xl border border-[var(--color-line)] px-3 py-2.5 text-[15px] font-semibold tracking-normal"
             />
           </label>
+          <p className="mt-2 text-[12px] text-[var(--color-ink-3)]">
+            No email. No real name yet. Just a number so your sessions stay yours — no calls, no
+            marketing, only messages you switch on.
+          </p>
           <div id="care-recaptcha" />
           {error ? <p className="mt-2 text-sm text-[var(--color-warn)]">{error}</p> : null}
           <Button className="mt-4 w-full" disabled={busy} onClick={() => void sendCode()}>
@@ -115,12 +120,22 @@ export function CareLogin({ demoMode = false }: { demoMode?: boolean }) {
             Enter code
             <input
               value={code}
-              onChange={(e) => setCode(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setCode(v);
+                // Zero-friction: the code autofills on most phones — submit
+                // the moment the 6th digit lands.
+                if (v.trim().length === 6 && !busy) void verify(v.trim());
+              }}
               inputMode="numeric"
+              autoComplete="one-time-code"
               maxLength={6}
               className="mt-1 w-full rounded-xl border border-[var(--color-line)] px-3 py-2.5 text-center text-xl font-bold tracking-[0.4em]"
             />
           </label>
+          <p className="mt-2 text-[12px] text-[var(--color-ink-3)]">
+            Check your messages — it autofills on most phones.
+          </p>
           {error ? <p className="mt-2 text-sm text-[var(--color-warn)]">{error}</p> : null}
           <Button
             className="mt-4 w-full"

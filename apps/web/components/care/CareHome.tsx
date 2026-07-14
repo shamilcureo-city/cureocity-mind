@@ -79,12 +79,27 @@ export function CareHome() {
     setStarting(true);
     setError(null);
     try {
+      // CG2 rupture-repair: a "not really" on the assessment resonance check
+      // pre-fills the next session's topic so the persona opens by asking
+      // what it missed. One-shot — consumed here.
+      let effectiveTopic = topic;
+      if (data.nextSession.kind === 'TREATMENT') {
+        try {
+          const prefill = localStorage.getItem('care-topic-prefill');
+          if (prefill) {
+            effectiveTopic = prefill;
+            localStorage.removeItem('care-topic-prefill');
+          }
+        } catch {
+          /* private mode */
+        }
+      }
       const res = await fetch('/api/v1/care/sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           ...(mood !== null ? { moodBefore: mood } : {}),
-          ...(data.nextSession.kind === 'TREATMENT' ? { topic } : {}),
+          ...(data.nextSession.kind === 'TREATMENT' ? { topic: effectiveTopic } : {}),
         }),
       });
       const body = (await res.json()) as {
