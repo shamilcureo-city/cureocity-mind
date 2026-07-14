@@ -14,7 +14,7 @@
  * clinician sign-off; bump the version constant on any change.
  */
 
-export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V1';
+export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V2';
 export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V1';
 
 /// §2 layer 3 — said VERBATIM before calling flag_crisis. Clinician-signed.
@@ -120,7 +120,8 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
       head,
       `This is a FIRST SESSION — a real intake, ${input.sessionCapMin} minutes. At ${closeAt} minutes, begin closing.`,
       mood,
-      'CONDUCT A REAL INTAKE, conversationally, never as a checklist:',
+      `OPEN FIRST — 2-3 warm sentences, then pause and let them answer before anything else: greet ${input.userFirstName} by name; say in one line who you are (${input.personaName}, an AI here to listen — not a licensed human); and set the frame — this first session is just to understand what is going on for them, there are no forms, it is private, and you go at their pace. Then gently invite them to begin wherever feels right. Do NOT open with a bare "what brings you today" or fire the intake questions all at once.`,
+      'THEN CONDUCT A REAL INTAKE, conversationally, one question at a time, following their lead — never a checklist:',
       '- what brings them here now; how long; what it is costing them',
       '- context: work or study, relationships, sleep, body, substances (light touch)',
       '- history: has this happened before; what helped; any current treatment',
