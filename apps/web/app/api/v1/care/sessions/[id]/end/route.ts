@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest, after } from 'next/server';
 import { EndCareSessionInputSchema } from '@cureocity/contracts';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { requireCareUserId } from '@/lib/care-auth';
+import { recordAndSendCareNudge } from '@/lib/care-nudge-send';
 import { runCareReport } from '@/lib/care-report';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -82,6 +83,39 @@ export async function POST(
     const result = await runCareReport(careSessionId);
     if (!result.ok) {
       console.error(`[care] after() Pass 10 failed for ${careSessionId}: ${result.error}`);
+      return;
+    }
+    // CG4 — the report-ready ping: a receipt for something the user just
+    // did, opted-in only, discreet template, and never on an elevated risk
+    // screen (the report's own re-screen is the freshest signal we have).
+    try {
+      const user = await prisma.careUser.findUnique({
+        where: { id: auth.value.careUserId },
+        select: {
+          whatsappOptInAt: true,
+          status: true,
+          phone: true,
+          displayName: true,
+        },
+      });
+      const risk = result.riskLevel ?? 'NONE';
+      if (
+        user?.whatsappOptInAt &&
+        user.status === 'ACTIVE' &&
+        risk !== 'MODERATE' &&
+        risk !== 'HIGH'
+      ) {
+        await recordAndSendCareNudge(
+          {
+            careUserId: auth.value.careUserId,
+            phone: user.phone,
+            firstName: user.displayName.split(' ')[0] ?? user.displayName,
+          },
+          'REPORT_READY',
+        );
+      }
+    } catch (e) {
+      console.error(`[care] report-ready nudge failed: ${(e as Error).message}`);
     }
   });
 

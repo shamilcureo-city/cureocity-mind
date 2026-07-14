@@ -35,6 +35,10 @@ interface HomePayload {
   } | null;
   homework: string | null;
   streak: number;
+  record: { weeks: number; totalSessions: number; totalCheckins: number } | null;
+  welcomeBack: boolean;
+  homeworkTickedToday: boolean;
+  homeworkTicksThisWeek: number;
   checkinToday: boolean;
   lastReport: { careSessionId: string; kind: string; headline: string | null } | null;
   resources: CareResource[];
@@ -120,6 +124,16 @@ export function CareHome() {
       setError((e as Error).message);
       setStarting(false);
     }
+  }
+
+  async function tickHomework(): Promise<void> {
+    if (!data || data.homeworkTickedToday) return;
+    setData({
+      ...data,
+      homeworkTickedToday: true,
+      homeworkTicksThisWeek: data.homeworkTicksThisWeek + 1,
+    });
+    await fetch('/api/v1/care/homework/tick', { method: 'POST' }).catch(() => undefined);
   }
 
   async function submitCheckin(v: number): Promise<void> {
@@ -283,9 +297,19 @@ export function CareHome() {
   const homeworkCard = data.homework ? (
     <Card className="p-4 md:p-5">
       <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-        Homework
+        This week, tiny
       </span>
       <p className="mt-1 text-sm">{data.homework}</p>
+      {data.homeworkTickedToday ? (
+        <p className="mt-2 text-sm font-semibold text-[var(--color-accent)]">
+          Done ✓ — that&apos;s {data.homeworkTicksThisWeek} day
+          {data.homeworkTicksThisWeek === 1 ? '' : 's'} this week. Small is the point.
+        </p>
+      ) : (
+        <Button variant="secondary" size="sm" className="mt-2" onClick={() => void tickHomework()}>
+          Done today ✓
+        </Button>
+      )}
     </Card>
   ) : null;
 
@@ -353,12 +377,30 @@ export function CareHome() {
 
   return (
     <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-5xl md:px-8 md:py-10">
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-3">
         <h1 className="font-serif text-2xl font-semibold md:text-3xl">{greeting}</h1>
-        {data.streak > 0 ? (
-          <span className="text-sm text-[var(--color-ink-2)]">🔥 {data.streak}</span>
+        {/* CG4 — the showing-up record replaces the breakable 🔥: it only
+            counts up, and it freezes (null) under a safety hold. */}
+        {data.record && (data.record.weeks > 0 || data.record.totalSessions > 0) ? (
+          <span className="whitespace-nowrap text-right text-[12px] leading-tight text-[var(--color-ink-2)]">
+            {data.record.weeks > 0 ? (
+              <>
+                Showing up · week {data.record.weeks}
+                <br />
+              </>
+            ) : null}
+            <span className="text-[var(--color-ink-3)]">
+              {data.record.totalSessions} session{data.record.totalSessions === 1 ? '' : 's'} ·{' '}
+              {data.record.totalCheckins} check-in{data.record.totalCheckins === 1 ? '' : 's'}
+            </span>
+          </span>
         ) : null}
       </div>
+      {data.welcomeBack ? (
+        <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+          Welcome back. Coming back is the skill — the gap doesn&apos;t erase anything.
+        </p>
+      ) : null}
 
       {asideCards.length > 0 ? (
         <div className="mt-4 md:mt-7 md:grid md:grid-cols-[1.5fr_1fr] md:items-start md:gap-6">

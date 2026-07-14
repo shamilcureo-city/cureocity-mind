@@ -276,6 +276,11 @@ export const AuditActionSchema = z.enum([
   'CARE_PLAN_UPGRADED',
   'CARE_PAYMENT_FAILED',
   'CARE_WAITLIST_JOINED',
+  'CARE_NUDGE_OPTIN',
+  'CARE_NUDGE_OPTOUT',
+  'CARE_NUDGE_SENT',
+  'CARE_NUDGE_SUPPRESSED',
+  'CARE_HOMEWORK_TICKED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

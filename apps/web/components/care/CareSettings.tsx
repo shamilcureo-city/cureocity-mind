@@ -16,6 +16,8 @@ interface SettingsPayload {
   trustedContactPhone: string | null;
   planTier: string;
   status: string;
+  whatsappOptedIn: boolean;
+  sessionDays: number[];
 }
 
 /**
@@ -221,6 +223,29 @@ export function CareSettings({ resources }: { resources: CareResource[] }) {
         <p className="mt-2 text-xs text-[var(--color-ink-3)]">
           Changing your therapist keeps your plan and history.
         </p>
+      </Card>
+
+      <Card className="mt-3 p-4 text-sm">
+        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+          WhatsApp check-ins
+        </span>
+        <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+          At most two short messages a week, in the evening, never with anything personal in them —
+          and stopping is instant, right here. Nothing is sent without this switch.
+        </p>
+        <div className="mt-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              const next = !data.whatsappOptedIn;
+              setData({ ...data, whatsappOptedIn: next });
+              void save({ whatsappOptIn: next });
+            }}
+          >
+            {data.whatsappOptedIn ? 'On — turn off' : 'Off — turn on'}
+          </Button>
+        </div>
       </Card>
 
       <Card className="mt-3 p-4 text-sm">

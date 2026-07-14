@@ -67,6 +67,18 @@ export async function GET(
     completedCount,
     hasTrustedContact: auth.value.careUser.trustedContactName !== null,
     personaName: auth.value.careUser.personaName,
+    ...(await (async () => {
+      // CG4 — the weekly-ritual picker's state.
+      const row = await prisma.careUser.findUnique({
+        where: { id: auth.value.careUserId },
+        select: { whatsappOptInAt: true, nudgePrefs: true },
+      });
+      const prefs = (row?.nudgePrefs ?? {}) as { sessionDays?: number[] };
+      return {
+        whatsappOptedIn: row?.whatsappOptInAt != null,
+        sessionDays: prefs.sessionDays ?? [],
+      };
+    })()),
     report: session.report
       ? { id: session.report.id, kind: session.report.kind, body: session.report.body }
       : null,

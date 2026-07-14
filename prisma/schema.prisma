@@ -2766,6 +2766,11 @@ enum AuditAction {
   CARE_PLAN_UPGRADED
   CARE_PAYMENT_FAILED
   CARE_WAITLIST_JOINED
+  CARE_NUDGE_OPTIN
+  CARE_NUDGE_OPTOUT
+  CARE_NUDGE_SENT
+  CARE_NUDGE_SUPPRESSED
+  CARE_HOMEWORK_TICKED
 }
 
 enum AuditActorType {
@@ -2856,6 +2861,13 @@ model CareUser {
   /// expiry, e.g. an operator grant). Expiry silently returns to free.
   planExpiresAt DateTime?
 
+  /// CG4 — the outbound channel. Consent finalizes ONLY by an explicit
+  /// in-app tap (timestamped, TRAI DCA); a spoken yes in-session never
+  /// enables sends. Null = no sends, ever.
+  whatsappOptInAt DateTime?
+  /// {windowStartHour?: number (IST, default 21), sessionDays?: number[] (0=Sun)}
+  nudgePrefs      Json?
+
   onboardedAt    DateTime?
   consentVersion String?
   consentAt      DateTime?
@@ -2864,14 +2876,60 @@ model CareUser {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  sessions    CareSession[]
-  carePlans   CarePlan[]
-  checkins    CareCheckin[]
-  instruments CareInstrumentResponse[]
-  payments    CarePayment[]
+  sessions      CareSession[]
+  carePlans     CarePlan[]
+  checkins      CareCheckin[]
+  instruments   CareInstrumentResponse[]
+  payments      CarePayment[]
+  nudges        CareNudge[]
+  homeworkTicks CareHomeworkTick[]
 
   @@index([status])
   @@map("care_users")
+}
+
+/// CG4 — one row per outbound nudge DECISION (sent, suppressed, or failed).
+/// The (careUserId, kind, istDay) uniqueness is the dedupe; SUPPRESSED rows
+/// prove the negative (the ethics charter's "nudges during a hold = 0" is
+/// auditable because suppression is recorded, not silent).
+model CareNudge {
+  id         String @id @default(cuid())
+  careUserId String
+
+  /// SESSION_DAY | LADDER_D3 | LADDER_D7 | LADDER_D30 | REPORT_READY
+  kind   String
+  /// SENT | SUPPRESSED | FAILED
+  status String
+  /// Suppression/failure reason (policy code), null on success.
+  reason String?
+
+  providerMessageId String?
+  /// IST day key (yyyy-mm-dd) — the dedupe axis.
+  istDay            String
+
+  createdAt DateTime @default(now())
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@unique([careUserId, kind, istDay])
+  @@index([careUserId, createdAt])
+  @@map("care_nudges")
+}
+
+/// CG4 — homework as tiny habits: one tap per IST day. "Not done" is never
+/// mentioned by any nudge; only the persona may explore it in-session.
+model CareHomeworkTick {
+  id         String @id @default(cuid())
+  careUserId String
+
+  /// IST day key (yyyy-mm-dd).
+  istDay    String
+  createdAt DateTime @default(now())
+
+  careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+
+  @@unique([careUserId, istDay])
+  @@map("care_homework_ticks")
 }
 
 /// CG3 — Care billing spine. One row per Razorpay ORDER (the Sprint-53

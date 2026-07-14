@@ -5,17 +5,20 @@ the mock stack. Product spec: [`../AI_COUNSELING.md`](../AI_COUNSELING.md).
 
 ## Env matrix
 
-| Var                         | Values                                         | Notes                                                                                                                                                          |
-| --------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CARE_LIVE_BACKEND`         | `mock` (default) \| `ai-studio` \| `vertex`    | The live voice loop. `ai-studio` = Gemini Developer API; `vertex` = Vertex AI, in-region.                                                                      |
-| `CARE_LIVE_TOKEN_MODE`      | `ephemeral` (default) \| `url`                 | `ai-studio` only. `url` reproduces the source recipe (key in the WSS URL). Fallback only.                                                                      |
-| `GEMINI_API_KEY`            | —                                              | Required for `ai-studio`. Server-side only.                                                                                                                    |
-| `CARE_LIVE_VERTEX_LOCATION` | `us-central1` (default)                        | `vertex` only — the region for the Live socket. `us-central1` / `us-east4` are confirmed (NOT `asia-south1`, NOT `global`).                                    |
-| `CARE_LIVE_VERTEX_MODEL`    | `gemini-live-2.5-flash-native-audio` (default) | `vertex` only — bare Vertex model id. This is the CONFIRMED native-audio Live model for the project (differs from the AI Studio pin — no `-preview`, no date). |
-| `CARE_PLUS_MONTHLY_INR`     | `599` (default)                                | Care Plus price (prepaid 30 days, no auto-renewal). Requires the shared Razorpay keys (`RAZORPAY_*` + `NEXT_PUBLIC_RAZORPAY_KEY_ID`).                          |
-| `CARE_MOCK_LIVE_URL`        | `ws://localhost:8788`                          | Append `?fixture=crisis` to force the crisis script (CI does this).                                                                                            |
-| `CARE_WEEKLY_CAP_FREE`      | `2` (default)                                  | Weekly session cap for the `free` tier. Raise on a pilot/testing deploy (e.g. `50`) to test without hitting the cap; unset restores the product default.       |
-| `CARE_WEEKLY_CAP_PLUS`      | `4` (default)                                  | Weekly session cap for the `plus` tier (CG3: 4/wk, never daily — the ethics cap). Same override mechanism as above.                                            |
+| Var                          | Values                                         | Notes                                                                                                                                                          |
+| ---------------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CARE_LIVE_BACKEND`          | `mock` (default) \| `ai-studio` \| `vertex`    | The live voice loop. `ai-studio` = Gemini Developer API; `vertex` = Vertex AI, in-region.                                                                      |
+| `CARE_LIVE_TOKEN_MODE`       | `ephemeral` (default) \| `url`                 | `ai-studio` only. `url` reproduces the source recipe (key in the WSS URL). Fallback only.                                                                      |
+| `GEMINI_API_KEY`             | —                                              | Required for `ai-studio`. Server-side only.                                                                                                                    |
+| `CARE_LIVE_VERTEX_LOCATION`  | `us-central1` (default)                        | `vertex` only — the region for the Live socket. `us-central1` / `us-east4` are confirmed (NOT `asia-south1`, NOT `global`).                                    |
+| `CARE_LIVE_VERTEX_MODEL`     | `gemini-live-2.5-flash-native-audio` (default) | `vertex` only — bare Vertex model id. This is the CONFIRMED native-audio Live model for the project (differs from the AI Studio pin — no `-preview`, no date). |
+| `CARE_PLUS_MONTHLY_INR`      | `599` (default)                                | Care Plus price (prepaid 30 days, no auto-renewal). Requires the shared Razorpay keys (`RAZORPAY_*` + `NEXT_PUBLIC_RAZORPAY_KEY_ID`).                          |
+| `CARE_MOCK_LIVE_URL`         | `ws://localhost:8788`                          | Append `?fixture=crisis` to force the crisis script (CI does this).                                                                                            |
+| `CARE_WEEKLY_CAP_FREE`       | `2` (default)                                  | Weekly session cap for the `free` tier. Raise on a pilot/testing deploy (e.g. `50`) to test without hitting the cap; unset restores the product default.       |
+| `CARE_WEEKLY_CAP_PLUS`       | `4` (default)                                  | Weekly session cap for the `plus` tier (CG3: 4/wk, never daily — the ethics cap). Same override mechanism as above.                                            |
+| `CARE_WATI_TEMPLATE_CHECKIN` | —                                              | CG4: Meta-APPROVED WATI template name for session-day + day-3 nudges. Unset → nudges record as SUPPRESSED `channel_unconfigured` (in-app surfaces carry on).   |
+| `CARE_WATI_TEMPLATE_DOOR`    | —                                              | CG4: template for the day-7 / day-30 door-open messages.                                                                                                       |
+| `CARE_WATI_TEMPLATE_REPORT`  | —                                              | CG4: template for the report-ready receipt. All three ride the shared `WATI_API_BASE` / `WATI_BEARER_TOKEN`.                                                   |
 
 `vertex` reuses the SAME service account as the batch passes
 (`GOOGLE_APPLICATION_CREDENTIALS_JSON` / `VERTEX_PROJECT_ID`) — no `GEMINI_API_KEY`.
@@ -73,6 +76,29 @@ map that silently failed on multi-instance serverless (token minted on one
 lambda, redeemed on another → "start token is invalid, expired, or already
 used"); moving it to Postgres made the redeem correct everywhere. `REDIS_URL`
 is no longer used by Care.
+
+### The WhatsApp channel (CG4)
+
+Template messages ONLY — WATI's API sends Meta-approved templates, not
+free-form text, and **approval takes days to weeks: file the three templates
+on day 1** of any pilot. Body rules (the ethics charter, enforced by
+`care-nudge.ts` + its spec): discreet — no clinical vocabulary, no persona
+sender, one first-name parameter at most (joint-family lock screens are a
+disclosure surface); ≤2 proactive sends/week; one/day; only in the user's
+quiet-hours window (default 21:00 IST); each ladder rung (day-3/7/30) once
+per lapse; **silence forever after day-30**; zero sends during SAFETY_HOLD
+or any suppression state — and every suppressed decision is a `CareNudge`
+row + `CARE_NUDGE_SUPPRESSED` audit, so the invariant is _provable_:
+
+```sql
+-- Must always return 0:
+SELECT count(*) FROM care_nudges n JOIN care_users u ON u.id = n."careUserId"
+WHERE n.status = 'SENT' AND u.status = 'SAFETY_HOLD';
+```
+
+Consent is the timestamped in-app tap (`whatsappOptInAt`, TRAI DCA) — a
+spoken "yes" in-session never enables sends. The cron is
+`/api/v1/cron/care-nudges` (hourly, vercel.json).
 
 **Sign-in (phone OTP) isn't in the table above** — it needs the patient
 Firebase _client_ keys (`NEXT_PUBLIC_FIREBASE_CLIENT_*`) pointed at the same

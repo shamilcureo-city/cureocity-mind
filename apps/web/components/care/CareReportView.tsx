@@ -22,6 +22,8 @@ interface SessionPayload {
   completedCount: number;
   hasTrustedContact: boolean;
   personaName: string;
+  whatsappOptedIn: boolean;
+  sessionDays: number[];
   report: { id: string; kind: string; body: CareReportV1 } | null;
 }
 
@@ -213,6 +215,13 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
             personaName={session.personaName}
             onAccepted={(version) => setCeremony({ version })}
           />
+          {session.report.body.kind === 'TREATMENT' ? (
+            <NextWeekPicker
+              personaName={session.personaName}
+              initialDays={session.sessionDays}
+              optedIn={session.whatsappOptedIn}
+            />
+          ) : null}
           {session.report.body.kind === 'TREATMENT' && session.completedCount === 3 ? (
             <AlliancePulse personaName={session.personaName} />
           ) : null}
@@ -593,6 +602,84 @@ function PlanProposal({
       {quotesCard}
       {goalsSection}
     </>
+  );
+}
+
+function NextWeekPicker({
+  personaName,
+  initialDays,
+  optedIn,
+}: {
+  personaName: string;
+  initialDays: number[];
+  optedIn: boolean;
+}) {
+  /// CG4 — "same time next week?": a stated plan, not a calendar
+  /// obligation. Picks drive the session-day reminder (only if the
+  /// WhatsApp switch is on — consent is a separate, explicit tap).
+  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const [days, setDays] = useState<number[]>(initialDays);
+  const [isOptedIn, setIsOptedIn] = useState(optedIn);
+  const [saved, setSaved] = useState(false);
+
+  async function save(patch: Record<string, unknown>): Promise<void> {
+    await fetch('/api/v1/care/settings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).catch(() => undefined);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
+  return (
+    <Card className="mt-3 p-4">
+      <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+        Same time next week?
+      </span>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        {DAYS.map((label, i) => {
+          const on = days.includes(i);
+          return (
+            <button
+              key={label}
+              type="button"
+              onClick={() => {
+                const next = on ? days.filter((d) => d !== i) : [...days, i].slice(0, 7);
+                setDays(next);
+                void save({ sessionDays: next });
+              }}
+              className={`rounded-full border px-3 py-1 text-xs ${
+                on
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-white'
+                  : 'border-[var(--color-line)] bg-[var(--color-surface)]'
+              }`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+      {!isOptedIn && days.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => {
+            setIsOptedIn(true);
+            void save({ whatsappOptIn: true });
+          }}
+          className="mt-2 text-[13px] font-semibold text-[var(--color-accent)]"
+        >
+          Remind me on WhatsApp those evenings → (a short, plain message — stop it anytime)
+        </button>
+      ) : null}
+      {isOptedIn && days.length > 0 ? (
+        <p className="mt-2 text-[12px] text-[var(--color-ink-3)]">
+          Pencilled in. {personaName} will send one plain line those evenings — Settings turns it
+          off anytime.
+        </p>
+      ) : null}
+      {saved ? <p className="mt-1 text-[12px] text-[var(--color-accent)]">Saved ✓</p> : null}
+    </Card>
   );
 }
 

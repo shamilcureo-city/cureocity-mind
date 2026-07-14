@@ -15,7 +15,7 @@
  */
 
 export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V2';
-export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V1';
+export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V2';
 
 /// §2 layer 3 — said VERBATIM before calling flag_crisis. Clinician-signed.
 export const CARE_BRIDGING_SCRIPT_V1 =
@@ -194,7 +194,7 @@ kind=TREATMENT → {"kind":"TREATMENT","sessionReport":{
   "summary": 3-5 sentences on what you worked on, second person,
   "insights": [{"observation","evidenceQuote"}] 1-3 patterns noticed, plain words,
   "goalProgress": [{"goalIndex","movement":"FORWARD"|"NONE"|"BACK","evidence"}] only for goals actually touched,
-  "homework": {"title","steps":[...],"whyItHelps"} or null if none was agreed,
+  "homework": {"title","steps":[...],"whyItHelps"} or null if none was agreed. Homework MUST be a TINY habit: a single ≤2-minute action written as an if-then anchored to an existing routine ("After I put my phone on charge → one slow breath cycle") — the title IS the if-then; steps stay ≤3 and trivially small. Never assign worksheets, journaling quotas, or anything that takes willpower,
   "reflectionPrompt": one journal question for the week,
   "riskScreen": see below }}
 

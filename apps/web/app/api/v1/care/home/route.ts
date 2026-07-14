@@ -4,7 +4,7 @@ import { getCareCaseFile, inferKindFromCaseFile } from '@/lib/care-case-file';
 import { effectiveCareTier, evaluateCareGate, CARE_TIER_WEEKLY_CAP } from '@/lib/care-gate';
 import { evaluateCareSuppression } from '@/lib/care-suppression';
 import { crisisResources } from '@/lib/care-safety';
-import { computeCareStreak, istDayKey } from '@/lib/care-streak';
+import { computeCareStreak, computeCareWeeks, istDayKey } from '@/lib/care-streak';
 import { CARE_SESSION_CAP_MIN } from '@cureocity/llm';
 import { prisma } from '@/lib/prisma';
 
@@ -87,17 +87,47 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   });
   const kind = inferKindFromCaseFile(caseFile);
 
-  const completedSessionDates = await prisma.careSession.findMany({
-    where: { careUserId, status: 'COMPLETED' },
-    select: { endedAt: true },
-  });
-  const streak = computeCareStreak([
-    ...checkins.map((c) => c.createdAt),
-    ...completedSessionDates.map((s) => s.endedAt).filter((d): d is Date => d !== null),
-  ]);
+  const [completedSessionDates, allCheckinDates, homeworkTickToday, homeworkTicksWeek] =
+    await Promise.all([
+      prisma.careSession.findMany({
+        where: { careUserId, status: 'COMPLETED' },
+        select: { endedAt: true },
+      }),
+      prisma.careCheckin.findMany({ where: { careUserId }, select: { createdAt: true } }),
+      prisma.careHomeworkTick.findFirst({
+        where: { careUserId, istDay: istDayKey(new Date()) },
+        select: { id: true },
+      }),
+      prisma.careHomeworkTick.count({
+        where: { careUserId, createdAt: { gte: weekAgo } },
+      }),
+    ]);
+  const sessionDates = completedSessionDates
+    .map((s) => s.endedAt)
+    .filter((d): d is Date => d !== null);
+  const streak = computeCareStreak([...checkins.map((c) => c.createdAt), ...sessionDates]);
+  // CG4 — the showing-up record (streak v2): counts UP, auto-bridges thin
+  // weeks, and FREEZES under a safety hold ("you matter more than a
+  // streak" is mechanical now, not just copy).
+  const record =
+    careUser.status === 'ACTIVE'
+      ? computeCareWeeks({
+          sessionDates,
+          checkinDates: allCheckinDates.map((c) => c.createdAt),
+        })
+      : null;
 
   const todayKey = istDayKey(new Date());
   const checkinToday = checkins.some((c) => istDayKey(c.createdAt) === todayKey);
+
+  // CG4 — return celebration: a gap ≥7 days with real history gets a
+  // welcome, never a measurement of the gap.
+  const lastActivityMs = Math.max(
+    checkins[0]?.createdAt.getTime() ?? 0,
+    ...sessionDates.map((d) => d.getTime()),
+    0,
+  );
+  const welcomeBack = lastActivityMs > 0 && Date.now() - lastActivityMs >= 7 * 24 * 60 * 60 * 1000;
 
   // CG1 — the measurement loop's home-side state: does ANY baseline exist
   // (drives the one gentle starting-line card), and is a fresh score
@@ -166,6 +196,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       : null,
     homework: caseFile.homeworkLine ?? null,
     streak,
+    record,
+    welcomeBack,
+    homeworkTickedToday: homeworkTickToday !== null,
+    homeworkTicksThisWeek: homeworkTicksWeek,
     checkinToday,
     lastReport: lastReport
       ? {
