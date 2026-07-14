@@ -10,8 +10,13 @@ import {
 import { buildBackends } from './llm';
 import { LiveSession } from './live-session';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
+import { initSentry } from './sentry';
 import { ledgerFromEnv } from './tenant-spend';
 import { windowOptionsFromEnv } from './vad';
+
+// Error reporting first — init before any pipeline construction so a
+// boot-time failure (e.g. the mock-refusal guard) is captured too.
+initSentry();
 
 /**
  * Sprint DV4 (full) — the live copilot's streaming gateway.

@@ -30,6 +30,7 @@ import { CaseStateStore } from './case-state';
 import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
+import { reportError } from './sentry';
 import { ReasoningScheduler } from './reasoning-loop';
 import { TherapyReasoningStore } from './therapy-reasoning';
 import { assembleRxPad } from './rx-pad';
@@ -268,7 +269,7 @@ export class LiveSession {
         await this.processWindow(windowPcm, boundary.durationMs, boundary.endByte);
       }
     } catch (err) {
-      console.error('[live-gateway] window failed:', (err as Error).message);
+      reportError('window failed', err);
     } finally {
       this.busy = false;
     }
@@ -468,7 +469,7 @@ export class LiveSession {
         this.caseStore.markAskEmitted();
       }
     } catch (err) {
-      console.error('[live-gateway] reasoning pass failed:', (err as Error).message);
+      reportError('reasoning pass failed', err);
     }
   }
 
@@ -503,7 +504,7 @@ export class LiveSession {
       const { changed, snapshot } = store.apply(res.output, this.elapsedMs());
       if (changed) this.emit({ type: 'therapyReasoning', reasoning: snapshot });
     } catch (err) {
-      console.error('[live-gateway] therapy reasoning pass failed:', (err as Error).message);
+      reportError('therapy reasoning pass failed', err);
     }
   }
 
@@ -546,7 +547,7 @@ export class LiveSession {
         await this.runNote(false);
         this.emit({ type: 'meter', summary: this.meterSummary() });
       } catch (err) {
-        console.error('[live-gateway] note refresh failed:', (err as Error).message);
+        reportError('note refresh failed', err);
       } finally {
         this.busy = false;
       }
@@ -866,7 +867,7 @@ export class LiveSession {
         ),
       ]);
     } catch (err) {
-      console.error('[live-gateway] finalize failed:', (err as Error).message);
+      reportError('finalize failed', err);
       this.emitFinalFromLatest();
     } finally {
       this.emit({ type: 'meter', summary: this.meterSummary() });

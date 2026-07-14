@@ -15,6 +15,7 @@
     "@cureocity/clinical": "workspace:*",
     "@cureocity/contracts": "workspace:*",
     "@cureocity/llm": "workspace:*",
+    "@sentry/node": "^10.65.0",
     "ws": "^8.21.0"
   },
   "devDependencies": {
