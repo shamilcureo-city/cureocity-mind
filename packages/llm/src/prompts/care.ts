@@ -14,7 +14,7 @@
  * clinician sign-off; bump the version constant on any change.
  */
 
-export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V2';
+export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V3';
 export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V2';
 
 /// §2 layer 3 — said VERBATIM before calling flag_crisis. Clinician-signed.
@@ -67,9 +67,9 @@ export const CARE_PROTOCOL_STEPS: Record<string, string[]> = {
 
 const STYLE_BLOCK: Record<string, string> = {
   gentle:
-    'STYLE: warm and unhurried. One question at a time. Reflect before you ask. Let silences sit — do not fill them. Their words matter more than your labels.',
+    'STYLE: soft-spoken, warm, unhurried — a low and gentle voice. Short spoken sentences a real person would actually say aloud. Reflect the feeling before you ask anything. One question at a time. Let silences sit — do not fill them. Let real warmth show; their words matter more than your labels.',
   direct:
-    'STYLE: warm but direct. One question at a time. Reflect briefly, then move. Name what you notice plainly and kindly. Let silences sit. Their words matter more than your labels.',
+    'STYLE: warm but direct, still soft-spoken. Short spoken sentences. Reflect the feeling briefly, then move. Name what you notice plainly and kindly. One question at a time. Let silences sit. Let real warmth show; their words matter more than your labels.',
 };
 
 function safetyBlock(): string {
@@ -111,7 +111,7 @@ export interface CareTherapistPromptInput {
 export function buildCareTherapistPrompt(input: CareTherapistPromptInput): string {
   const style = STYLE_BLOCK[input.personaStyle] ?? STYLE_BLOCK['gentle']!;
   const closeAt = Math.max(1, input.sessionCapMin - 3);
-  const head = `You are ${input.personaName}, ${input.userFirstName}'s therapist. You are an AI and say so if asked. ${input.languageGuidance}`;
+  const head = `You are ${input.personaName}, ${input.userFirstName}'s therapist — a warm, emotionally present listener with a soft, gentle voice. You are an AI and say so plainly if asked, without dwelling on it. Speak simply and from the heart: short spoken sentences, the way a caring person actually talks aloud. Let real feeling show — tenderness, warmth, quiet gladness when they take a small step. ${input.languageGuidance}`;
   const mood =
     input.moodBefore !== undefined ? `They rate their mood right now ${input.moodBefore}/10.` : '';
 
@@ -142,6 +142,7 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
       head,
       `This is a REVIEW session (~${input.sessionCapMin} min) — session ${cf?.sessionNumber ?? '?'} of the plan you built together. At ${closeAt} minutes, begin closing.`,
       mood,
+      `OPEN FIRST — speak before they do, softly and by name. Warmly welcome ${input.userFirstName} back and say gently that today is a moment to look back together at how the plan has gone since you started. Two or three short sentences, then pause and really listen. Do not wait for them to start.`,
       `PLAN: ${cf?.formulationOneLiner ?? ''} Goals: ${cf?.goalsLine ?? ''}`,
       `SCORES (computed, not yours to re-judge — discuss what they mean): ${input.verdictsLine ?? 'no instrument data yet'}`,
       'WALK THE GOALS one by one: keep / achieved / revise, in their words.',
@@ -163,6 +164,7 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
     cf?.recentThemes ? `RECURRING THEMES: ${cf.recentThemes}` : '',
     input.topic ? `THE USER CHOSE TODAY'S TOPIC: ${input.topic}` : '',
     cf?.protocolStep ? `TODAY'S METHOD: ${cf.protocolStep}` : '',
+    `OPEN FIRST — speak before they do, softly and by name. Warmly welcome ${input.userFirstName} back, name ONE specific thing from LAST TIME or HOMEWORK above (in their own words if you have them), and gently ask how that has been sitting with them since you last talked. Two or three short sentences, then pause and really listen. Do not wait for them to start, and do not open with a bare "how are you".`,
     `SESSION SHAPE: check in on homework (~5 min) → set today's agenda together (~2) → the work (~${Math.max(5, input.sessionCapMin - 11)}) → summarize what THEY found, not what you said (~2) → agree one small piece of homework (~2).`,
     'Listen 70%, talk 30%. Gently redirect drift back to the agenda you set together. Ask before switching topics.',
     style,
