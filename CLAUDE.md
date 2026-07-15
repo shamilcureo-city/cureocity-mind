@@ -18,18 +18,18 @@ therapist-only until the doctor vertical was grafted on at Sprint DV1.)
 
 **...and a third, D2C product: Cureocity Care** — a standalone
 consumer AI voice-therapist (its own `CareUser` identity, not a
-practitioner vertical) built into the same app under `/care` +
-`apps/web/{lib,components}/care*` + `apps/web/app/api/v1/care/**`. As of
-2026-07 the one app serves **three products split by domain** —
-`scribe.` / `mind.` / `care.cureocity.in` — via `apps/web/middleware.ts`
-
-- `apps/web/lib/product.ts`. Care's landing is live but its **sign-ups
-  stay gated behind a waitlist** until its launch blockers clear. See
-  **[`docs/THREE_PRODUCTS.md`](docs/THREE_PRODUCTS.md)** (the split),
-  **[`docs/AI_COUNSELING.md`](docs/AI_COUNSELING.md)** +
-  **[`docs/CARE_GROWTH_SYSTEM.md`](docs/CARE_GROWTH_SYSTEM.md)** (Care), and
-  **[`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)** (what's
-  live vs pending).
+practitioner vertical) built into the same app under `/care`,
+`apps/web/{lib,components}/care*`, and `apps/web/app/api/v1/care/**`. As
+of 2026-07 the one app serves **three products split by domain** —
+`scribe.` / `mind.` / `care.cureocity.in` — routed in
+`apps/web/middleware.ts` off the host map in `apps/web/lib/product.ts`.
+Care's landing is live but its **sign-ups stay gated behind a waitlist**
+until its launch blockers clear. See
+**[`docs/THREE_PRODUCTS.md`](docs/THREE_PRODUCTS.md)** (the split),
+**[`docs/AI_COUNSELING.md`](docs/AI_COUNSELING.md)** and
+**[`docs/CARE_GROWTH_SYSTEM.md`](docs/CARE_GROWTH_SYSTEM.md)** (Care), and
+**[`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)** (what's
+live vs pending).
 
 **Therapist — psychology co-pilot.** The therapist records a session in
 the browser; five Gemini passes (§3) produce a transcript, a SOAP note (or
