@@ -50,23 +50,26 @@ See [`docs/DOCTOR_VERTICAL.md`](docs/DOCTOR_VERTICAL.md) + CLAUDE.md § 3b.
 
 ## Start here
 
-| Doc                                                                    | Purpose                                                                             |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [`CLAUDE.md`](CLAUDE.md)                                               | Agent + developer operational guide — read this first                               |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                         | System overview — both verticals, request paths, deploy topology, the two pipelines |
-| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md)                             | Schema guide — the core spine, entity groups, Session lifecycle, key enums          |
-| [`docs/GLOSSARY.md`](docs/GLOSSARY.md)                                 | Domain vocabulary — the load-bearing terms decoded                                  |
-| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)                           | Config + deploy — env-var matrix by subsystem (Vercel vs Cloud Run)                 |
-| [`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md)                 | Product context — Sprints 13-19, clinical co-pilot pivot + intake-aware flow        |
-| [`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md)     | Sprint 20 — the journey hub, reliable-change engine, progress report, episodes      |
-| [`docs/SPRINT_21.md`](docs/SPRINT_21.md)                               | Sprint 21 — diagnosis history, intake-note modify, My Practice view, goal status    |
-| [`docs/SETUP.md`](docs/SETUP.md)                                       | Account procurement + env var matrix per sprint                                     |
-| [`docs/dpdp-data-flow.md`](docs/dpdp-data-flow.md)                     | DPDP compliance data flows                                                          |
-| [`docs/security-audit.md`](docs/security-audit.md)                     | Pre-pilot security audit                                                            |
-| [`docs/EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md)                     | **Historical** — original 13-sprint scribe plan, superseded for Sprint 13+          |
-| [`docs/DOCTOR_VERTICAL.md`](docs/DOCTOR_VERTICAL.md)                   | Doctor vertical — architecture + rationale (DV0–DV8 shipped)                        |
-| [`docs/DOCTOR_SCRIBE_V2_SPRINTS.md`](docs/DOCTOR_SCRIBE_V2_SPRINTS.md) | Doctor Scribe V2 (DS0–DS9) — live reasoning engine, Rx pad, OPD queue, insights     |
-| [`docs/DS11_CONSULT_UX_SPRINTS.md`](docs/DS11_CONSULT_UX_SPRINTS.md)   | Consult UX v3 (DS11) — live-first single Review & Sign surface + capture modes      |
+| Doc                                                                    | Purpose                                                                              |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`CLAUDE.md`](CLAUDE.md)                                               | Agent + developer operational guide — read this first                                |
+| [`docs/THREE_PRODUCTS.md`](docs/THREE_PRODUCTS.md)                     | **Three products, one platform** — scribe/mind/care.cureocity.in, the domain split   |
+| [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)         | **Operational truth** — what's live on prod vs pending; the `/health` config readout |
+| [`docs/CHANGELOG.md`](docs/CHANGELOG.md)                               | **Dated record of changes** — newest first                                           |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                         | System overview — both verticals, request paths, deploy topology, the two pipelines  |
+| [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md)                             | Schema guide — the core spine, entity groups, Session lifecycle, key enums           |
+| [`docs/GLOSSARY.md`](docs/GLOSSARY.md)                                 | Domain vocabulary — the load-bearing terms decoded                                   |
+| [`docs/ENVIRONMENT.md`](docs/ENVIRONMENT.md)                           | Config + deploy — env-var matrix by subsystem (Vercel vs Cloud Run)                  |
+| [`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md)                 | Product context — Sprints 13-19, clinical co-pilot pivot + intake-aware flow         |
+| [`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md)     | Sprint 20 — the journey hub, reliable-change engine, progress report, episodes       |
+| [`docs/SPRINT_21.md`](docs/SPRINT_21.md)                               | Sprint 21 — diagnosis history, intake-note modify, My Practice view, goal status     |
+| [`docs/SETUP.md`](docs/SETUP.md)                                       | Account procurement + env var matrix per sprint                                      |
+| [`docs/dpdp-data-flow.md`](docs/dpdp-data-flow.md)                     | DPDP compliance data flows                                                           |
+| [`docs/security-audit.md`](docs/security-audit.md)                     | Pre-pilot security audit                                                             |
+| [`docs/EXECUTION_PLAN.md`](docs/EXECUTION_PLAN.md)                     | **Historical** — original 13-sprint scribe plan, superseded for Sprint 13+           |
+| [`docs/DOCTOR_VERTICAL.md`](docs/DOCTOR_VERTICAL.md)                   | Doctor vertical — architecture + rationale (DV0–DV8 shipped)                         |
+| [`docs/DOCTOR_SCRIBE_V2_SPRINTS.md`](docs/DOCTOR_SCRIBE_V2_SPRINTS.md) | Doctor Scribe V2 (DS0–DS9) — live reasoning engine, Rx pad, OPD queue, insights      |
+| [`docs/DS11_CONSULT_UX_SPRINTS.md`](docs/DS11_CONSULT_UX_SPRINTS.md)   | Consult UX v3 (DS11) — live-first single Review & Sign surface + capture modes       |
 
 ## Status
 

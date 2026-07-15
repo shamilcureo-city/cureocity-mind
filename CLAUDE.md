@@ -84,6 +84,10 @@ apps/
                                 # - Therapist UI under /app/*
                                 # - Patient portal under /p/[token]
                                 # - API routes under /api/v1/*
+                                # - middleware.ts + lib/product.ts:
+                                #   THREE products, one app, split by DOMAIN
+                                #   (scribe./mind./care.cureocity.in) — see
+                                #   docs/THREE_PRODUCTS.md
 
 packages/                       # Shared TypeScript libraries
   contracts/                    # Zod schemas — single source of truth for DTOs
@@ -565,6 +569,27 @@ The five existing passes are the template — pick the closest analogue.
   → `suicidal_ideation`, `moderate` → `medium`, …); unknown values still
   fail validation (clinical safety). Any new Pass-3 backend must route its
   raw JSON through `normalisePass3Output` before parsing.
+- **Three products, one app (2026-07)** — `scribe.` / `mind.` /
+  `care.cureocity.in` are one Next.js app split by domain in
+  `apps/web/middleware.ts` (host → landing rewrite) reading
+  `apps/web/lib/product.ts` (the host→product map). Unknown hosts
+  (localhost, previews) fall back to `mind`, so nothing changed for
+  existing URLs. Never hardcode a product domain — read `productFromHost`.
+  Full guide: `docs/THREE_PRODUCTS.md`.
+- **Cross-border consent is ENFORCED server-side (PROD5, 2026-07)** —
+  `POST /sessions/[id]/start` and the `live-token` route now REFUSE (409)
+  a session whose consent snapshot lacks `CROSS_BORDER_PROCESSING`
+  (Pass 2–5 run on the global endpoint). The pre-flight surfaces it as a
+  tickable consent and persists it as a standing client `Consent` row; the
+  demo client seeds all three scribe consents. Don't reintroduce the old
+  behaviour where the live-token route stamped all three scopes
+  unconditionally.
+- **Care live mint refuses mock on deploy (PROD2, 2026-07)** — like
+  `LLM_BACKEND`, `CARE_LIVE_BACKEND` unset/`mock` on a deployed env now
+  503s BEFORE a `CareSession` row is created (`careLiveMockRefusalReason`
+  in `apps/web/lib/care-live-token.ts`). Care sign-ups stay behind a
+  waitlist until the launch blockers clear — see `docs/THREE_PRODUCTS.md`
+  - `docs/PRODUCTION_READINESS.md`.
 
 ## 8. Documentation map
 
@@ -594,7 +619,10 @@ The five existing passes are the template — pick the closest analogue.
 | `docs/EXECUTION_PLAN.md`           | **Historical** — original 13-sprint plan; superseded by CLINICAL_COPILOT for Sprint 13+                                                                                                                         |
 | `docs/SETUP.md`                    | Account procurement + env var matrix per sprint                                                                                                                                                                 |
 | `docs/dpdp-data-flow.md`           | DPDP compliance data flows + DSR endpoints + cross-border — rewritten AUD3 to the deployed topology (Postgres-inline audio, Vercel cron purge)                                                                  |
-| `docs/PILOT_PLAYBOOK.md`           | The therapist pilot one-pager — cohort shape, success criteria, metric definitions, weekly ritual, kill/continue/scale                                                                                          |
+| `docs/THREE_PRODUCTS.md`           | **Three products, one platform** — the domain split (scribe/mind/care.cureocity.in): middleware host routing, `lib/product.ts`, per-host identity, Care launch boundary. SHIPPED 2026-07                        |
+| `docs/PRODUCTION_READINESS.md`     | **The operational truth** — what's configured on prod vs pending, the recent env-var set (WebAuthn/SendGrid/health-token/DB-branch-split), the `/health` config reference, remaining checklist. Living doc      |
+| `docs/CHANGELOG.md`                | **Dated record of changes** — newest first; the 2026-07 pilot-readiness push (three products + production hardening)                                                                                            |
+| `docs/PILOT_PLAYBOOK.md`           | The therapist pilot one-pager — cohort shape, success criteria, metric definitions, weekly ritual, kill/continue/scale (+ `docs/pilot/` execution kit: outreach, week-0 runbook, scorecard SQL)                 |
 | `docs/security-audit.md`           | OWASP top-10 + secrets + IAM matrix                                                                                                                                                                             |
 | `docs/AUTH_SESSION.md`             | **Auth & session model** — `__session` cookie, page vs API guards, Bearer self-heal, the sign-out-must-be-POST rule, "bounced to /login" troubleshooting (2026-06 incident)                                     |
 | `docs/runbooks/README.md`          | Operational runbooks index                                                                                                                                                                                      |
@@ -654,10 +682,25 @@ all run with deterministic mocks. No GCP creds needed for dev.
 | Add a route with a side effect                   | Make it **POST-only** (prefetchers fire `GET`). Pattern: `apps/web/app/api/v1/auth/signout/route.ts`                               |
 | Make a client component call `/api/v1`           | Just `fetch('/api/v1/...')` — `AuthedFetchProvider` adds the Bearer token (`apps/web/components/app/AuthedFetchProvider.tsx`)      |
 | Change the Pass-3 crisis-flag normaliser         | `packages/llm/src/backends/pass3-normalise.ts` (+ its spec) — wired into `vertex-clinical.backend.ts`                              |
+| Change / add a product (domain split)            | `apps/web/lib/product.ts` (host map) + `apps/web/middleware.ts` (routing) — see `docs/THREE_PRODUCTS.md`                           |
+| Change the Care landing / waitlist               | `apps/web/app/care/page.tsx` + `apps/web/components/care/CareWaitlistForm.tsx` + `apps/web/app/api/v1/care/waitlist/route.ts`      |
+| Enforce / change cross-border consent            | `apps/web/app/api/v1/sessions/[id]/start/route.ts` + `.../live-token/route.ts` + `apps/web/components/app/RecordConfirmStrip.tsx`  |
+| Check what's configured on prod                  | `GET /api/v1/health?token=…` + `docs/PRODUCTION_READINESS.md`                                                                      |
 
 ## 11. What's NOT in scope (still on the backlog)
 
 These gate a real Indian pilot. **Critical-path items live at the top.**
+
+> **⚠️ 2026-07 update — much of the operational backlog below is now DONE.**
+> Before treating any item here as open, check **`docs/PRODUCTION_READINESS.md`**
+> (the live posture) and **`docs/CHANGELOG.md`**. As of the pilot-readiness
+> push: `CRON_SECRET`, `SENTRY_DSN` (web + gateway), WebAuthn env,
+> `HEALTH_CHECK_TOKEN`, SendGrid, the Neon preview-branch isolation, the DR
+> drill, the three-product domain split, the founder ADMIN grant, and uptime
+> monitors are all SET/LIVE. Genuinely remaining: Razorpay live keys (before
+> the first _paying_ therapist), the Care launch blockers (token architecture
+>
+> - consumer legal), WhatsApp/WATI (nice-to-have), and recruiting.
 
 **Pilot-blocking (security + identity — needs your env to verify):**
 
