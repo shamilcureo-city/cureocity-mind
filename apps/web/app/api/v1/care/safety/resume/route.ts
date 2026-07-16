@@ -34,6 +34,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   const resources = crisisResources(careUser.spokenLanguages);
 
+  // "Struggling" never forces a session — it keeps surfacing human help,
+  // and the account stays paused until they tap "I'm safe".
   if (!input.value.safe) {
     return NextResponse.json({
       status: 'SAFETY_HOLD',
@@ -43,32 +45,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const holdAgeMs = careUser.safetyHoldAt
-    ? Date.now() - careUser.safetyHoldAt.getTime()
-    : Number.POSITIVE_INFINITY;
-  if (holdAgeMs < 12 * 60 * 60 * 1000) {
-    return NextResponse.json({
-      status: 'SAFETY_HOLD',
-      reason:
-        "Let's give it until tomorrow. Sessions unlock after a night's rest — help is one tap away until then.",
-      resources,
-    });
-  }
-
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const recentCrises = await prisma.careSession.count({
-    where: { careUserId, crisisAt: { gte: thirtyDaysAgo } },
-  });
-  if (recentCrises >= 2) {
-    return NextResponse.json({
-      status: 'SAFETY_HOLD',
-      reason:
-        'This has come up more than once this month — that deserves a person, not an AI. Sessions stay paused; a licensed therapist is the right next step.',
-      resources,
-      humanTherapistBridge: true,
-    });
-  }
-
+  // Tap-to-continue (product decision, 2026-07). A genuine crisis still ends
+  // the session and shows the hotlines (the takeover + `resources` above are
+  // the safety FLOOR), but the account is NEVER punitively locked out: the
+  // moment they confirm they're safe, the hold lifts — no overnight wait, no
+  // "twice this month → human only" hard lock. The earlier 12h + 30-day gate
+  // was too heavy for the product to carry.
   await prisma.$transaction(async (tx) => {
     await tx.careUser.update({
       where: { id: careUserId },

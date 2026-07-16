@@ -57,7 +57,7 @@ export function CrisisTakeover({
           ) : null}
         </div>
         <p className="mt-5 text-center text-xs text-[var(--color-ink-3)]">
-          Sessions pause until a quick check-in tomorrow. You matter more than a streak.
+          Pause here for now — a quick check-in brings you back. You matter more than a streak.
         </p>
       </div>
     </div>
