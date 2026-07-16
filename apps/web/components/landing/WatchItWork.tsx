@@ -83,7 +83,6 @@ export function WatchItWork() {
       }
     };
     raf.current = requestAnimationFrame(tick);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const goTo = useCallback(
