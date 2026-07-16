@@ -69,10 +69,15 @@ export async function POST(
     });
   }
 
-  // §2 layer 4a — deterministic, zero-LLM, every batch. Both roles are
-  // screened: a user disclosure matters most, but a runaway model turn
-  // repeating crisis content should end the session too.
-  const screen = screenForCrisis(fresh.map((t) => t.text));
+  // §2 layer 4a — deterministic, zero-LLM, every batch. Screen ONLY the
+  // USER's turns. The therapist is an AI conducting a real intake and is
+  // explicitly instructed to ask the risk-screen question ("any thoughts of
+  // harming yourself?"), so its OWN turns necessarily contain phrases from
+  // the crisis list. Screening them self-terminated every session that
+  // reached the risk screen and put the account on a 12h SAFETY_HOLD. The
+  // user's own disclosures stay fully screened here; a crisis the model
+  // itself detects comes in through its flag_crisis tool (the /crisis route).
+  const screen = screenForCrisis(fresh.filter((t) => t.role === 'user').map((t) => t.text));
   if (screen.hit) {
     await escalateCareSession({
       careSessionId,

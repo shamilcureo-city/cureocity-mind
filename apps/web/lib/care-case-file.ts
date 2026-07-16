@@ -134,7 +134,13 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
     b && typeof b === 'object' ? (b as Record<string, unknown>) : {};
   if (lastTreatmentReport) {
     const sr = bodyOf(bodyOf(lastTreatmentReport.body)['sessionReport']);
-    if (typeof sr['summary'] === 'string') lastReportSummary = sr['summary'];
+    // Lead the continuity line with the warm headline (the emotional
+    // through-line) then the detail, so the persona can "start from where we
+    // left off" grounded in the last report rather than a cold recap.
+    const headline = typeof sr['headline'] === 'string' ? sr['headline'].trim() : '';
+    const summary = typeof sr['summary'] === 'string' ? sr['summary'].trim() : '';
+    const joined = [headline, summary].filter(Boolean).join(' ');
+    if (joined) lastReportSummary = joined;
     const hw = bodyOf(sr['homework']);
     if (typeof hw['title'] === 'string') homeworkLine = hw['title'];
   }
@@ -147,7 +153,12 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
     const sr = bodyOf(bodyOf(r.body)['sessionReport']);
     const insights = Array.isArray(sr['insights']) ? sr['insights'] : [];
     for (const ins of insights as Array<Record<string, unknown>>) {
-      if (typeof ins['observation'] === 'string') recentThemes.push(ins['observation']);
+      if (typeof ins['observation'] !== 'string') continue;
+      const observation = ins['observation'];
+      // Carry the user's OWN words alongside the pattern — "start from there"
+      // means the persona can recall what they actually said, not a summary.
+      const quote = typeof ins['evidenceQuote'] === 'string' ? ins['evidenceQuote'].trim() : '';
+      recentThemes.push(quote ? `${observation} (they said: "${quote}")` : observation);
     }
   }
   // CG4 — their own check-in words, quoted (the persona opens on these).

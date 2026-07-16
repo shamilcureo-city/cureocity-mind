@@ -113,7 +113,7 @@ export function CareSettings({ resources }: { resources: CareResource[] }) {
       {data.status === 'SAFETY_HOLD' ? (
         <Card className="mb-4 border-[var(--color-warn)]/30 p-4">
           <h1 className="font-serif text-xl font-semibold">
-            Yesterday was heavy. How are you today?
+            That felt heavy. Are you okay to pick back up?
           </h1>
           <div className="mt-3 flex gap-2">
             <Button size="sm" onClick={() => void resume(true)}>

@@ -25,7 +25,8 @@ interface Props {
  * Flow (docs/AI_COUNSELING.md §4): redeem the single-use start token →
  * open the WSS → send the setup (url/mock modes; ephemeral carries it
  * until the locked-constraints flow is probe-verified) → WAIT for
- * setupComplete → stream 16 kHz PCM mic frames up, play 24 kHz PCM
+ * setupComplete → cue the therapist to open FIRST → stream 16 kHz PCM
+ * mic frames up, play 24 kHz PCM
  * down → stitch both transcription streams into turns → mirror every
  * finished turn to the server (which crisis-screens each batch) →
  * flag_crisis/end_session tool calls → done screen.
@@ -165,6 +166,31 @@ export function CareLiveSession({
       if ('setupComplete' in msg) {
         setPhase('live');
         startedAtRef.current = Date.now();
+        // Meera opens the session — she speaks FIRST. The model stays silent
+        // until it receives an input turn, so send a one-time, non-spoken cue
+        // telling it to greet now (per its system instruction). This text turn
+        // is NOT mirrored to the transcript — only audio-transcription events
+        // are pushed — so it never appears as if the user said it.
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              client_content: {
+                turns: [
+                  {
+                    role: 'user',
+                    parts: [
+                      {
+                        text: 'You are now connected and they can hear you. Begin the session now — speak first, softly and warmly, exactly as your instructions say. Do not wait for them to speak.',
+                      },
+                    ],
+                  },
+                ],
+                turn_complete: true,
+              },
+            }),
+          );
+        }
         void micStartRef.current();
         return;
       }
