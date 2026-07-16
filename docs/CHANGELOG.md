@@ -6,6 +6,39 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-16 — Mind landing redesign (neon-blue glass, copilot-forward)
+
+The `mind.cureocity.in` landing (`apps/web/app/page.tsx`) rebuilt from a
+user-approved mockup series (v9.3): pure-white base, neon-blue system
+(`#2563EB` / `#38BDF8` gradient), glassmorphism (sticky glass pill nav,
+frosted cards), Fraunces display serif + Caveat hand annotations, and
+copilot-first messaging ("a clinical copilot listens alongside you").
+
+- **`apps/web/app/landing.css`** — the whole landing design system,
+  scoped under `.lnd` (keyframes prefixed `lnd-*`) so nothing leaks into
+  `/app`, `/for-doctors`, or `/care`. Root uses `overflow-x: clip` (not
+  `hidden`) so the sticky nav keeps sticking.
+- **`apps/web/components/landing/`** — client islands, all
+  `prefers-reduced-motion`-aware: `LandingNav` (sticky glass pill +
+  burger menu), `CollageDemo` (hero note that records → drafts → signs on
+  loop), `LiveRailDemo` (the during-session copilot rail playing a
+  scripted minute; SSR renders the finished state), `EvidencePairs`
+  (brief claims ↔ verbatim transcript quotes), `DocsTabs` (the five
+  documents, auto-advancing), `WatchItWork` (a built-in 60-second
+  8-scene animated explainer — no video file), `LandingFx`
+  (scroll-reveal + rotating language word + count-up stats),
+  `landing-art` (static SVG illustrations).
+- **Font wiring fix (was broken since Sprint 34)** — `@theme` font tokens
+  in `globals.css` referenced literal family names (`'Fraunces'`), but
+  `next/font` registers hashed names exposed only through its CSS
+  variables — so Fraunces never actually rendered anywhere (Georgia
+  fallback). Tokens now route through the variables
+  (`--font-serif: var(--font-fraunces), …`); added IBM Plex Mono +
+  Caveat to the `layout.tsx` font set.
+- Honesty rules kept: every claim on the page is a shipped product fact,
+  the WhatsApp vignette is labelled an illustration, the pilot section
+  says the product is new, no fabricated logos or testimonials.
+
 ## 2026-07 — Pilot-readiness push (three products + production hardening)
 
 A multi-part cycle taking the platform from "built" to genuinely

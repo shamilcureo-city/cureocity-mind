@@ -16,8 +16,13 @@
   --color-warn-soft: #fbe9dc;
   --color-warn-border: #e5c39c;
   --color-warn-bg: #fbe9dc;
-  --font-serif: 'Fraunces', 'Iowan Old Style', 'Source Serif Pro', Georgia, serif;
-  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* next/font registers hashed family names exposed only through these
+     variables — referencing the literal family name ('Fraunces') silently
+     falls back to the local stack. Always route through the next/font var. */
+  --font-serif: var(--font-fraunces), 'Iowan Old Style', 'Source Serif Pro', Georgia, serif;
+  --font-sans: var(--font-inter), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-hand: var(--font-caveat), 'Comic Sans MS', cursive;
 }
 
 html,
