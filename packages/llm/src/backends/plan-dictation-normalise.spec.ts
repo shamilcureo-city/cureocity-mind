@@ -41,19 +41,29 @@ describe('normalisePlanDictationOutput', () => {
     expect(parsed.edits).toHaveLength(1);
   });
 
-  it('coerces durationDays drift ("5 days", "2 weeks", floats)', () => {
+  it('coerces durationDays drift ("5 days", "2 weeks", "3 months", floats)', () => {
     const parsed = PlanDictationV1Schema.parse(
       normalisePlanDictationOutput({
         edits: [
           { action: 'addMed', drug: 'A', durationDays: '5 days' },
           { action: 'addMed', drug: 'B', duration: '2 weeks' },
           { action: 'addMed', drug: 'C', days: 3.4 },
+          { action: 'addMed', drug: 'D', duration: '3 months' },
         ],
       }),
     );
     expect(parsed.edits.map((e) => (e as { durationDays?: number }).durationDays)).toEqual([
-      5, 14, 3,
+      5, 14, 3, 90,
     ]);
+  });
+
+  it('drops the duration (not the edit) on an unrecognised unit', () => {
+    const parsed = PlanDictationV1Schema.parse(
+      normalisePlanDictationOutput({
+        edits: [{ action: 'addMed', drug: 'A', duration: '2 fortnights' }],
+      }),
+    );
+    expect(parsed.edits[0]).toEqual({ action: 'addMed', drug: 'A' });
   });
 
   it('drops malformed edits with an honest clarification instead of failing everything', () => {

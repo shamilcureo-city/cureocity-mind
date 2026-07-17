@@ -85,9 +85,19 @@ function coerceDurationDays(v: unknown): number | undefined {
     return Math.min(365, Math.max(1, Math.round(v)));
   }
   if (typeof v === 'string') {
-    const m = /(\d+(?:\.\d+)?)\s*(week|wk)?/i.exec(v);
+    const m = /(\d+(?:\.\d+)?)\s*([a-z]+)?/i.exec(v.trim());
     if (m?.[1]) {
-      const n = Number.parseFloat(m[1]) * (m[2] ? 7 : 1);
+      // Recognised units only — "3 months" must never quietly become 3 days.
+      const unit = (m[2] ?? 'day').toLowerCase();
+      const perUnit = /^d(ays?)?$/.test(unit)
+        ? 1
+        : /^w(ee)?ks?$/.test(unit)
+          ? 7
+          : /^months?$|^mo$/.test(unit)
+            ? 30
+            : null;
+      if (perUnit === null) return undefined;
+      const n = Number.parseFloat(m[1]) * perUnit;
       if (Number.isFinite(n) && n > 0) return Math.min(365, Math.max(1, Math.round(n)));
     }
   }

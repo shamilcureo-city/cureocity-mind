@@ -112,6 +112,12 @@ export const RxPadAddMedSchema = z.object({
     timing: z.string().max(60).optional(),
     durationDays: z.number().int().positive().max(365).optional(),
     route: z.string().max(40).optional(),
+    /**
+     * Sprint DS12 — preserve the carried-forward badge when a continued med
+     * is re-added by a voice change or an undo restore. Display provenance
+     * only; the prescribing decision is still carried by `status`.
+     */
+    continued: z.boolean().optional(),
   }),
 });
 

@@ -209,4 +209,86 @@ describe('proposePlanEdits', () => {
     });
     expect(clarifications).toEqual(['Atorvastatin 20 — at night?']);
   });
+
+  it('keeps a PENDING med pending through a voice change — and says so', () => {
+    const withPending: RxPadDraft = {
+      ...pad,
+      meds: [
+        {
+          drug: 'Amlodipine',
+          strength: '5 mg',
+          continued: false,
+          status: 'pending',
+          warnings: [],
+        },
+      ],
+    };
+    const { changes } = proposePlanEdits(
+      withPending,
+      dictation([{ action: 'changeMed', drug: 'Amlodipine', strength: '10 mg' }]),
+    );
+    const change = changes[0]!;
+    expect(change.after).toContain('stays pending confirm');
+    expect(change.ops).toEqual([
+      { op: 'removeMed', drug: 'Amlodipine' },
+      { op: 'addMed', source: 'dictated', med: { drug: 'Amlodipine', strength: '10 mg' } },
+      { op: 'unconfirmMed', drug: 'Amlodipine' },
+    ]);
+  });
+
+  it('keeps the continued badge through a change of a carried-forward med', () => {
+    const { changes } = proposePlanEdits(
+      pad,
+      dictation([{ action: 'changeMed', drug: 'Warfarin', strength: '3 mg' }]),
+    );
+    const addOp = changes[0]!.ops.find((o) => o.op === 'addMed');
+    expect(addOp).toMatchObject({ med: { drug: 'Warfarin', continued: true } });
+  });
+
+  it('composes two edits on the same drug into ONE diff line', () => {
+    const { changes } = proposePlanEdits(
+      pad,
+      dictation([
+        { action: 'changeMed', drug: 'Amlodipine', strength: '10 mg' },
+        { action: 'changeMed', drug: 'Amlodipine', frequency: 'BD' },
+      ]),
+    );
+    expect(changes).toHaveLength(1);
+    expect(changes[0]!.after).toBe('Amlodipine · 10 mg · BD');
+    expect(changes[0]!.ops.filter((o) => o.op === 'removeMed')).toHaveLength(1);
+  });
+
+  it('change then remove of the same drug collapses to a single remove', () => {
+    const { changes } = proposePlanEdits(
+      pad,
+      dictation([
+        { action: 'changeMed', drug: 'Amlodipine', strength: '10 mg' },
+        { action: 'removeMed', drug: 'Amlodipine' },
+      ]),
+    );
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ kind: 'remove', target: 'med', label: 'Amlodipine' });
+    expect(changes[0]!.ops).toEqual([{ op: 'removeMed', drug: 'Amlodipine' }]);
+  });
+
+  it('add then remove of a new drug nets to no change', () => {
+    const { changes, skipped } = proposePlanEdits(
+      pad,
+      dictation([
+        { action: 'addMed', drug: 'Paracetamol', strength: '650 mg' },
+        { action: 'removeMed', drug: 'Paracetamol' },
+      ]),
+    );
+    expect(changes).toEqual([]);
+    expect(skipped.some((s) => s.includes('Paracetamol'))).toBe(true);
+  });
+
+  it('attaches a brand-name interaction to the diff line (Ecosprin → Aspirin)', () => {
+    const { changes } = proposePlanEdits(
+      pad,
+      dictation([{ action: 'addMed', drug: 'Ecosprin', strength: '75 mg' }]),
+    );
+    expect(changes[0]!.warnings.length).toBeGreaterThan(0);
+    expect(changes[0]!.warnings[0]).toMatch(/warfarin/i);
+  });
 });

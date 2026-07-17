@@ -12,7 +12,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Input, Label } from '../ui/Field';
-import { VoicePlanEditor } from './VoicePlanEditor';
+import { VoicePlanEditor, type PatchOpsResult } from './VoicePlanEditor';
 
 /**
  * Sprint DS10-B — the plan composer: two plans, one sign-off.
@@ -122,42 +122,68 @@ export function PlanComposer({
     };
   }, [sessionId]);
 
-  // Apply typed ops to the draft pad; the response is the new pad. The PATCH
-  // input caps at 10 ops per request, so larger batches (Sprint DS12 voice
-  // edits) are chunked — each chunk lands atomically and refreshes the pad.
+  // Sprint DS12 — every pad mutation bumps this; the voice editor uses it to
+  // retire a stale Undo once OTHER edits have landed on top of it.
+  const [editSeq, setEditSeq] = useState(0);
+
+  // Apply typed op GROUPS to the draft pad; the response is the new pad.
+  // The PATCH input caps at 10 ops per request, so larger batches (voice
+  // edits) are packed greedily into ≤10-op requests — but a group (e.g. a
+  // change's removeMed + addMed, or an undo's addMed + unconfirmMed) is
+  // NEVER split across requests: each request applies atomically
+  // server-side, so a mid-batch failure can only leave whole groups
+  // unapplied — a "change" can't decay into a bare delete.
   const patchOps = useCallback(
-    async (ops: RxPadPatchOp[], key: string): Promise<boolean> => {
-      if (ops.length === 0) return true;
+    async (groups: RxPadPatchOp[][], key: string): Promise<PatchOpsResult> => {
+      const nonEmpty = groups.filter((g) => g.length > 0);
+      if (nonEmpty.length === 0) return { ok: true, appliedGroups: 0 };
       setBusyKey(key);
       setError(null);
+      // Greedy packing on group boundaries.
+      const batches: { ops: RxPadPatchOp[]; groupCount: number }[] = [];
+      for (const group of nonEmpty) {
+        const last = batches[batches.length - 1];
+        if (last && last.ops.length + group.length <= 10) {
+          last.ops.push(...group);
+          last.groupCount += 1;
+        } else {
+          batches.push({ ops: [...group], groupCount: 1 });
+        }
+      }
+      let appliedGroups = 0;
       try {
-        for (let i = 0; i < ops.length; i += 10) {
+        for (const batch of batches) {
           const res = await fetch(`/api/v1/sessions/${sessionId}/rx-pad`, {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ ops: ops.slice(i, i + 10) }),
+            body: JSON.stringify({ ops: batch.ops }),
           });
           if (!res.ok) {
             const body = (await res.json().catch(() => ({}))) as { error?: string };
             setError(body.error ?? 'Could not update the plan.');
-            return false;
+            return { ok: false, appliedGroups };
           }
           const parsed = RxPadResponseSchema.safeParse(await res.json());
           if (parsed.success) setPadAndNotify(parsed.data.rxPad);
+          appliedGroups += batch.groupCount;
         }
-        return true;
+        return { ok: true, appliedGroups };
       } catch {
         setError('Could not update the plan — check your connection.');
-        return false;
+        return { ok: false, appliedGroups };
       } finally {
         setBusyKey(null);
+        setEditSeq((s) => s + 1);
       }
     },
     [sessionId, setPadAndNotify],
   );
 
   const patch = useCallback(
-    (op: RxPadPatchOp, key: string): Promise<boolean> => patchOps([op], key),
+    async (op: RxPadPatchOp, key: string): Promise<boolean> => {
+      const result = await patchOps([[op]], key);
+      return result.ok;
+    },
     [patchOps],
   );
 
@@ -246,6 +272,7 @@ export function PlanComposer({
           sessionId={sessionId}
           pad={pad}
           disabled={busyKey != null}
+          editSeq={editSeq}
           onApply={patchOps}
         />
       )}

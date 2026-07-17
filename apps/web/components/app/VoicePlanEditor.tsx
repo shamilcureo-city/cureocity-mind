@@ -32,18 +32,27 @@ const MIN_CLIP_BYTES = 12_800;
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'proposal';
 
+export interface PatchOpsResult {
+  ok: boolean;
+  /** How many op GROUPS actually landed (whole batches apply atomically). */
+  appliedGroups: number;
+}
+
 export function VoicePlanEditor({
   sessionId,
   pad,
   disabled,
+  editSeq,
   onApply,
 }: {
   sessionId: string;
   /** The composer's current pad — the base the Undo inverse is computed from. */
   pad: RxPadDraft | null;
   disabled: boolean;
-  /** Applies ops through the composer's PATCH path (chunked, audited). */
-  onApply: (ops: RxPadPatchOp[], key: string) => Promise<boolean>;
+  /** Bumped by the composer on EVERY pad mutation — retires a stale Undo. */
+  editSeq: number;
+  /** Applies op groups through the composer's PATCH path (packed, audited). */
+  onApply: (groups: RxPadPatchOp[][], key: string) => Promise<PatchOpsResult>;
 }) {
   const [phase, setPhase] = useState<Phase>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -53,11 +62,28 @@ export function VoicePlanEditor({
   const [textDraft, setTextDraft] = useState('');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [applying, setApplying] = useState(false);
-  const [applied, setApplied] = useState<{ count: number; undoOps: RxPadPatchOp[] } | null>(null);
+  const [applied, setApplied] = useState<{
+    count: number;
+    undoGroups: RxPadPatchOp[][];
+    /** The composer editSeq the apply landed as — later edits retire Undo. */
+    seq: number;
+  } | null>(null);
   const [undoing, setUndoing] = useState(false);
+
+  // Undo only makes sense against the pad state it captured. Any OTHER edit
+  // (a manual confirm/remove/adopt bumps editSeq past the apply's own bump)
+  // retires it rather than blindly replaying inverse ops over newer state.
+  useEffect(() => {
+    if (applied && editSeq > applied.seq) setApplied(null);
+  }, [editSeq, applied]);
 
   const framesRef = useRef<Uint8Array[]>([]);
   const startedAtRef = useRef(0);
+  // Re-entrancy guards: the 60s auto-stop ticks every 250ms and the mic
+  // button can be double-tapped — start and finish must each run exactly
+  // once (a doubled getUserMedia would leak a live MediaStream).
+  const finishingRef = useRef(false);
+  const startingRef = useRef(false);
   const stream = useLiveStream({
     onFrame: (pcm) => framesRef.current.push(pcm),
   });
@@ -73,7 +99,6 @@ export function VoicePlanEditor({
       if (ms >= MAX_CLIP_MS) void finishListening();
     }, 250);
     return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
   // Never leave the mic open on unmount.
@@ -84,6 +109,8 @@ export function VoicePlanEditor({
   }, []);
 
   async function startListening(): Promise<void> {
+    if (phase !== 'idle' || startingRef.current) return;
+    startingRef.current = true;
     setError(null);
     setApplied(null);
     framesRef.current = [];
@@ -91,9 +118,12 @@ export function VoicePlanEditor({
     try {
       await stream.start();
       startedAtRef.current = Date.now();
+      finishingRef.current = false;
       setPhase('listening');
     } catch {
       setError('Could not open the microphone.');
+    } finally {
+      startingRef.current = false;
     }
   }
 
@@ -104,6 +134,8 @@ export function VoicePlanEditor({
   }
 
   async function finishListening(): Promise<void> {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
     setPhase('thinking');
     await stream.stop();
     const frames = framesRef.current;
@@ -166,35 +198,52 @@ export function VoicePlanEditor({
   }
 
   async function applyProposal(): Promise<void> {
-    if (!proposal) return;
+    if (!proposal || applying) return;
     const included = proposal.changes.filter((_, i) => !excluded.has(i));
-    const ops = included.flatMap((c) => c.ops);
-    if (ops.length === 0) {
+    const groups = included.map((c) => c.ops).filter((g) => g.length > 0);
+    if (groups.length === 0) {
       discardProposal();
       return;
     }
     setApplying(true);
     setError(null);
-    // The inverse is computed against the pad as it reads RIGHT NOW —
-    // undo restores this exact state.
-    const undoOps = invertOps(pad, ops);
-    const ok = await onApply(ops, 'voice:apply');
+    // Per-group inverses against the pad as it reads RIGHT NOW — undo
+    // restores this exact state, and a partial apply can still undo the
+    // prefix that landed (groups apply atomically, in order).
+    const inverseGroups = invertGroups(pad, groups);
+    const result = await onApply(groups, 'voice:apply');
     setApplying(false);
-    if (!ok) {
-      setError('Could not apply the changes — the plan shows the details.');
+    const undoFor = (n: number): RxPadPatchOp[][] => inverseGroups.slice(0, n).reverse();
+    if (result.ok) {
+      setProposal(null);
+      setPhase('idle');
+      setApplied({ count: groups.length, undoGroups: undoFor(groups.length), seq: editSeq + 1 });
       return;
     }
-    setProposal(null);
-    setPhase('idle');
-    setApplied({ count: included.length, undoOps });
+    if (result.appliedGroups > 0) {
+      // Some changes landed, the rest didn't. Close the proposal (a re-tap
+      // would re-run already-applied groups) and offer Undo for what landed.
+      setProposal(null);
+      setPhase('idle');
+      setApplied({
+        count: result.appliedGroups,
+        undoGroups: undoFor(result.appliedGroups),
+        seq: editSeq + 1,
+      });
+      setError(
+        `Applied ${result.appliedGroups} of ${groups.length} changes before the connection failed — review the plan below, or Undo.`,
+      );
+      return;
+    }
+    setError('Could not apply the changes — the plan shows the details.');
   }
 
   async function undo(): Promise<void> {
-    if (!applied) return;
+    if (!applied || undoing) return;
     setUndoing(true);
-    const ok = await onApply(applied.undoOps, 'voice:undo');
+    const result = await onApply(applied.undoGroups, 'voice:undo');
     setUndoing(false);
-    if (ok) setApplied(null);
+    if (result.ok) setApplied(null);
   }
 
   const listening = phase === 'listening';
@@ -452,12 +501,18 @@ function toBase64(bytes: Uint8Array): string {
 const key = (s: string): string => s.trim().toLowerCase();
 
 /**
- * Build the ops that restore `prePad` after `ops` are applied. Each op's
- * inverse is computed against the simulated state right before it, and the
- * inverse GROUPS are replayed in reverse order (a group keeps its own order —
- * re-adding a pending med is addMed THEN unconfirmMed).
+ * Build, per input GROUP, the ops that undo that whole group. Inverses are
+ * computed op-by-op against a running simulation of the server's applyOp
+ * semantics, so `invertGroups(pad, groups)[i]` undoes `groups[i]` given
+ * everything before it applied. To undo the first k applied groups, replay
+ * `result.slice(0, k).reverse()` — each inverse group keeps its own
+ * internal order (re-adding a pending med is addMed THEN unconfirmMed, so a
+ * restored suggestion is never silently prescribed).
  */
-export function invertOps(prePad: RxPadDraft | null, ops: RxPadPatchOp[]): RxPadPatchOp[] {
+export function invertGroups(
+  prePad: RxPadDraft | null,
+  groups: RxPadPatchOp[][],
+): RxPadPatchOp[][] {
   const meds = new Map<string, RxMedRow>();
   for (const m of prePad?.meds ?? []) meds.set(key(m.drug), m);
   const investigations = new Map<string, RxInvestigation>();
@@ -466,133 +521,139 @@ export function invertOps(prePad: RxPadDraft | null, ops: RxPadPatchOp[]): RxPad
   for (const a of prePad?.adviceLines ?? []) advice.set(key(a), a);
   let followUp: RxFollowUp | undefined = prePad?.followUp;
 
-  const groups: RxPadPatchOp[][] = [];
-  for (const op of ops) {
-    switch (op.op) {
-      case 'addMed': {
-        if (!meds.has(key(op.med.drug))) {
-          groups.push([{ op: 'removeMed', drug: op.med.drug }]);
-          meds.set(key(op.med.drug), {
-            ...op.med,
-            continued: false,
-            status: 'confirmed',
-            warnings: [],
-            source: op.source,
-          });
+  const inverseGroups: RxPadPatchOp[][] = [];
+  for (const group of groups) {
+    // One inverse mini-group per op, reversed at the end of the group.
+    const perOp: RxPadPatchOp[][] = [];
+    for (const op of group) {
+      switch (op.op) {
+        case 'addMed': {
+          if (!meds.has(key(op.med.drug))) {
+            perOp.push([{ op: 'removeMed', drug: op.med.drug }]);
+            meds.set(key(op.med.drug), {
+              ...op.med,
+              continued: op.med.continued ?? false,
+              status: 'confirmed',
+              warnings: [],
+              source: op.source,
+            });
+          }
+          break; // duplicate add is a server-side no-op — nothing to invert
         }
-        break; // duplicate add is a server-side no-op — nothing to invert
-      }
-      case 'removeMed': {
-        const row = meds.get(key(op.drug));
-        if (row) {
-          const restore: RxPadPatchOp[] = [
-            {
-              op: 'addMed',
-              source: row.source ?? 'manual',
-              med: {
-                drug: row.drug,
-                ...(row.strength !== undefined && { strength: row.strength }),
-                ...(row.dose !== undefined && { dose: row.dose }),
-                ...(row.frequency !== undefined && { frequency: row.frequency }),
-                ...(row.timing !== undefined && { timing: row.timing }),
-                ...(row.durationDays !== undefined && { durationDays: row.durationDays }),
-                ...(row.route !== undefined && { route: row.route }),
+        case 'removeMed': {
+          const row = meds.get(key(op.drug));
+          if (row) {
+            const restore: RxPadPatchOp[] = [
+              {
+                op: 'addMed',
+                source: row.source ?? 'manual',
+                med: {
+                  drug: row.drug,
+                  ...(row.strength !== undefined && { strength: row.strength }),
+                  ...(row.dose !== undefined && { dose: row.dose }),
+                  ...(row.frequency !== undefined && { frequency: row.frequency }),
+                  ...(row.timing !== undefined && { timing: row.timing }),
+                  ...(row.durationDays !== undefined && { durationDays: row.durationDays }),
+                  ...(row.route !== undefined && { route: row.route }),
+                  ...(row.continued && { continued: true }),
+                },
               },
-            },
-          ];
-          // A pending row must come back pending — never silently prescribed.
-          if (row.status === 'pending') restore.push({ op: 'unconfirmMed', drug: row.drug });
-          groups.push(restore);
-          meds.delete(key(op.drug));
+            ];
+            // A pending row must come back pending — never silently prescribed.
+            if (row.status === 'pending') restore.push({ op: 'unconfirmMed', drug: row.drug });
+            perOp.push(restore);
+            meds.delete(key(op.drug));
+          }
+          break;
         }
-        break;
-      }
-      case 'confirmMed': {
-        const row = meds.get(key(op.drug));
-        if (row && row.status === 'pending') {
-          groups.push([{ op: 'unconfirmMed', drug: row.drug }]);
-          meds.set(key(op.drug), { ...row, status: 'confirmed' });
+        case 'confirmMed': {
+          const row = meds.get(key(op.drug));
+          if (row && row.status === 'pending') {
+            perOp.push([{ op: 'unconfirmMed', drug: row.drug }]);
+            meds.set(key(op.drug), { ...row, status: 'confirmed' });
+          }
+          break;
         }
-        break;
-      }
-      case 'unconfirmMed': {
-        const row = meds.get(key(op.drug));
-        if (row && row.status === 'confirmed') {
-          groups.push([{ op: 'confirmMed', drug: row.drug }]);
-          meds.set(key(op.drug), { ...row, status: 'pending' });
+        case 'unconfirmMed': {
+          const row = meds.get(key(op.drug));
+          if (row && row.status === 'confirmed') {
+            perOp.push([{ op: 'confirmMed', drug: row.drug }]);
+            meds.set(key(op.drug), { ...row, status: 'pending' });
+          }
+          break;
         }
-        break;
-      }
-      case 'addInvestigation': {
-        if (!investigations.has(key(op.name))) {
-          groups.push([{ op: 'removeInvestigation', name: op.name }]);
-          investigations.set(key(op.name), {
-            name: op.name,
-            ...(op.rationale !== undefined && { rationale: op.rationale }),
-            source: op.source,
-          });
+        case 'addInvestigation': {
+          if (!investigations.has(key(op.name))) {
+            perOp.push([{ op: 'removeInvestigation', name: op.name }]);
+            investigations.set(key(op.name), {
+              name: op.name,
+              ...(op.rationale !== undefined && { rationale: op.rationale }),
+              source: op.source,
+            });
+          }
+          break;
         }
-        break;
-      }
-      case 'removeInvestigation': {
-        const row = investigations.get(key(op.name));
-        if (row) {
-          groups.push([
-            {
-              op: 'addInvestigation',
-              source: row.source ?? 'manual',
-              name: row.name,
-              ...(row.rationale !== undefined && { rationale: row.rationale }),
-            },
+        case 'removeInvestigation': {
+          const row = investigations.get(key(op.name));
+          if (row) {
+            perOp.push([
+              {
+                op: 'addInvestigation',
+                source: row.source ?? 'manual',
+                name: row.name,
+                ...(row.rationale !== undefined && { rationale: row.rationale }),
+              },
+            ]);
+            investigations.delete(key(op.name));
+          }
+          break;
+        }
+        case 'addAdvice': {
+          if (!advice.has(key(op.text))) {
+            perOp.push([{ op: 'removeAdvice', text: op.text }]);
+            advice.set(key(op.text), op.text);
+          }
+          break;
+        }
+        case 'removeAdvice': {
+          const line = advice.get(key(op.text));
+          if (line !== undefined) {
+            perOp.push([{ op: 'addAdvice', source: 'manual', text: line }]);
+            advice.delete(key(op.text));
+          }
+          break;
+        }
+        case 'setFollowUp': {
+          perOp.push([
+            followUp
+              ? {
+                  op: 'setFollowUp',
+                  source: 'manual',
+                  when: followUp.when,
+                  ...(followUp.withWhat !== undefined && { withWhat: followUp.withWhat }),
+                }
+              : { op: 'clearFollowUp' },
           ]);
-          investigations.delete(key(op.name));
+          followUp = { when: op.when, ...(op.withWhat !== undefined && { withWhat: op.withWhat }) };
+          break;
         }
-        break;
-      }
-      case 'addAdvice': {
-        if (!advice.has(key(op.text))) {
-          groups.push([{ op: 'removeAdvice', text: op.text }]);
-          advice.set(key(op.text), op.text);
-        }
-        break;
-      }
-      case 'removeAdvice': {
-        const line = advice.get(key(op.text));
-        if (line !== undefined) {
-          groups.push([{ op: 'addAdvice', source: 'manual', text: line }]);
-          advice.delete(key(op.text));
-        }
-        break;
-      }
-      case 'setFollowUp': {
-        groups.push([
-          followUp
-            ? {
+        case 'clearFollowUp': {
+          if (followUp) {
+            perOp.push([
+              {
                 op: 'setFollowUp',
                 source: 'manual',
                 when: followUp.when,
                 ...(followUp.withWhat !== undefined && { withWhat: followUp.withWhat }),
-              }
-            : { op: 'clearFollowUp' },
-        ]);
-        followUp = { when: op.when, ...(op.withWhat !== undefined && { withWhat: op.withWhat }) };
-        break;
-      }
-      case 'clearFollowUp': {
-        if (followUp) {
-          groups.push([
-            {
-              op: 'setFollowUp',
-              source: 'manual',
-              when: followUp.when,
-              ...(followUp.withWhat !== undefined && { withWhat: followUp.withWhat }),
-            },
-          ]);
-          followUp = undefined;
+              },
+            ]);
+            followUp = undefined;
+          }
+          break;
         }
-        break;
       }
     }
+    inverseGroups.push(perOp.reverse().flat());
   }
-  return groups.reverse().flat();
+  return inverseGroups;
 }

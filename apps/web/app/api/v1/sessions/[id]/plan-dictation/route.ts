@@ -9,8 +9,7 @@ import { proposePlanEdits } from '@cureocity/clinical';
 import type { ClinicalLocale } from '@cureocity/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { CostCircuitOpenError } from '@/lib/cost-guard';
-import { modelRouter } from '@/lib/llm';
-import { runPlanDictation } from '@/lib/plan-dictation';
+import { runPlanDictation, transcribePlanCommand } from '@/lib/plan-dictation';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 
@@ -20,6 +19,12 @@ export const maxDuration = 60;
 
 /** Raw 16 kHz s16le PCM — 90 s is the schema ceiling, ~2.9 MB decoded. */
 const MAX_AUDIO_BYTES = 3 * 1024 * 1024;
+
+/** Fixed-window per-doctor rate limit (the practice-assistant pattern). */
+const RATE_LIMIT_PER_MINUTE = Number.parseInt(
+  process.env['PLAN_DICTATION_RATE_LIMIT_PER_MINUTE'] ?? '10',
+  10,
+);
 
 /**
  * Sprint DS12 — voice-edit the plan.
@@ -83,8 +88,26 @@ export async function POST(
     );
   }
 
+  // Fixed-window rate limit BEFORE any LLM spend (counts the persisted
+  // PASS_14 rows, success or failure, in the last 60s — audio can't bypass
+  // it because the check runs before the ASR call too).
+  const recentCalls = await prisma.geminiCallLog.count({
+    where: {
+      pass: 'PASS_14_PLAN_DICTATION',
+      psychologistId: auth.value.psychologistId,
+      createdAt: { gte: new Date(Date.now() - 60_000) },
+    },
+  });
+  if (recentCalls >= RATE_LIMIT_PER_MINUTE) {
+    return NextResponse.json(
+      { error: 'Too many voice edits in a row — wait a moment and try again.' },
+      { status: 429 },
+    );
+  }
+
   // What was said — typed text passes straight through; audio goes through
-  // the medical Pass-1 ASR (drug names + dosing shorthand, asia-south1).
+  // the medical Pass-1 ASR (drug names + dosing shorthand, asia-south1),
+  // metered + cost-circuit-gated in transcribePlanCommand.
   let transcript: string;
   if (parsed.value.text !== undefined) {
     transcript = parsed.value.text;
@@ -96,29 +119,32 @@ export async function POST(
         { status: 413 },
       );
     }
-    // s16le @ 16 kHz → 32 bytes/ms. Derived from the bytes, not trusted
-    // from the client (it only feeds cost estimation).
-    const durationMs = Math.max(1, Math.round(audioBytes.length / 32));
     try {
-      const hints =
-        session.client && session.client.spokenLanguages.length > 0
-          ? { spokenLanguageHints: session.client.spokenLanguages }
-          : undefined;
-      const pass1 = await modelRouter().pass1({
+      const heard = await transcribePlanCommand({
         sessionId,
+        psychologistId: auth.value.psychologistId,
         audioBytes,
-        durationMs,
-        vertical: 'DOCTOR',
-        ...(hints && { hints }),
+        // s16le @ 16 kHz → 32 bytes/ms. Derived from the bytes, not trusted
+        // from the client (it only feeds cost estimation).
+        durationMs: Math.max(1, Math.round(audioBytes.length / 32)),
+        ...(session.client && session.client.spokenLanguages.length > 0
+          ? { spokenLanguageHints: session.client.spokenLanguages }
+          : {}),
       });
-      if (pass1.callLog.status !== 'SUCCESS') {
+      if (heard === null) {
         return NextResponse.json(
           { error: 'Could not transcribe the instruction — please try again.' },
           { status: 502 },
         );
       }
-      transcript = pass1.output.transcript;
-    } catch {
+      transcript = heard;
+    } catch (e) {
+      if (e instanceof CostCircuitOpenError) {
+        return NextResponse.json(
+          { error: 'The AI budget for this session is used up — edit the plan by hand.' },
+          { status: 429 },
+        );
+      }
       return NextResponse.json(
         { error: 'Could not transcribe the instruction — please try again.' },
         { status: 502 },
