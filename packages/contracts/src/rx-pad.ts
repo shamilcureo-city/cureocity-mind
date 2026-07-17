@@ -112,6 +112,12 @@ export const RxPadAddMedSchema = z.object({
     timing: z.string().max(60).optional(),
     durationDays: z.number().int().positive().max(365).optional(),
     route: z.string().max(40).optional(),
+    /**
+     * Sprint DS12 — preserve the carried-forward badge when a continued med
+     * is re-added by a voice change or an undo restore. Display provenance
+     * only; the prescribing decision is still carried by `status`.
+     */
+    continued: z.boolean().optional(),
   }),
 });
 
@@ -120,6 +126,12 @@ export const RxPadPatchOpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('removeMed'), drug: z.string().min(1).max(120) }),
   /** Flip a pending (voice/AI-drafted) med to confirmed — the prescribe tap. */
   z.object({ op: z.literal('confirmMed'), drug: z.string().min(1).max(120) }),
+  /**
+   * Sprint DS12 — flip a confirmed med back to pending. The inverse of
+   * confirmMed; lets the voice-edit Undo restore a removed PENDING row
+   * without silently elevating it to prescribed (nothing auto-prescribes).
+   */
+  z.object({ op: z.literal('unconfirmMed'), drug: z.string().min(1).max(120) }),
   z.object({
     op: z.literal('addInvestigation'),
     source: RxRowSourceSchema,

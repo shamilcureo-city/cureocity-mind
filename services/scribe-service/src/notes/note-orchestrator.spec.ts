@@ -87,6 +87,7 @@ function makeRouter(opts: {
           ...(opts.pass2NoteOverride?.riskFlags ?? {}),
         },
         phaseHints: [],
+        linkedEvidence: [],
         ...opts.pass2NoteOverride,
       };
       return {
@@ -137,6 +138,12 @@ function makeRouter(opts: {
     }),
     passReasoning: vi.fn(async () => {
       throw new Error('passReasoning not used by note orchestrator');
+    }),
+    passTherapyReasoning: vi.fn(async () => {
+      throw new Error('passTherapyReasoning not used by note orchestrator');
+    }),
+    passPlanDictation: vi.fn(async () => {
+      throw new Error('passPlanDictation not used by note orchestrator');
     }),
     passCareReport: vi.fn(async () => {
       throw new Error('passCareReport not used by note orchestrator');

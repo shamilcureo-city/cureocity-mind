@@ -46,7 +46,11 @@ describe('ClinicalReportV1Schema', () => {
     ],
     primaryDiagnosisIndex: 0,
     assessmentGaps: [
-      { question: 'Has the worry been daily for 6 months?', rationale: 'GAD criterion A' },
+      {
+        question: 'Has the worry been daily for 6 months?',
+        rationale: 'GAD criterion A',
+        targets: [],
+      },
     ],
     formulation:
       'Working hypothesis: client presents with persistent worry triggered by work demands.',

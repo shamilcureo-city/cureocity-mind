@@ -4,6 +4,7 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
+  MockGeminiTherapyReasoningBackend,
 } from '@cureocity/llm';
 import { LiveSession } from './live-session';
 import type { LiveBackends } from './llm';
@@ -40,6 +41,7 @@ function mockBackends(): LiveBackends {
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
     reasoning: new MockGeminiReasoningBackend(),
+    therapyReasoning: new MockGeminiTherapyReasoningBackend(),
   };
 }
 

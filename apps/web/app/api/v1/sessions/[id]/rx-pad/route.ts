@@ -154,7 +154,9 @@ function applyOp(pad: RxPadDraft, op: RxPadPatchOp): RxPadDraft {
       if (meds.some((m) => eq(m.drug, op.med.drug))) return pad; // idempotent adopt
       const row: RxMedRow = {
         ...op.med,
-        continued: false,
+        // DS12 — a voice change / undo restore of a carried-forward med
+        // keeps its 'continued' badge; plain adds stay false.
+        continued: op.med.continued ?? false,
         // The adopt / manual-add tap IS the prescribing decision.
         status: 'confirmed',
         warnings: [],
@@ -168,6 +170,13 @@ function applyOp(pad: RxPadDraft, op: RxPadPatchOp): RxPadDraft {
       return {
         ...pad,
         meds: meds.map((m) => (eq(m.drug, op.drug) ? { ...m, status: 'confirmed' } : m)),
+      };
+    // Sprint DS12 — the inverse of confirmMed. Lets the voice-edit Undo
+    // restore a removed PENDING row without silently prescribing it.
+    case 'unconfirmMed':
+      return {
+        ...pad,
+        meds: meds.map((m) => (eq(m.drug, op.drug) ? { ...m, status: 'pending' } : m)),
       };
     case 'addInvestigation': {
       if (investigations.some((i) => eq(i.name, op.name))) return pad;
@@ -232,6 +241,7 @@ function itemLabel(op: RxPadPatchOp): string {
       return op.med.drug;
     case 'removeMed':
     case 'confirmMed':
+    case 'unconfirmMed':
       return op.drug;
     case 'addInvestigation':
     case 'removeInvestigation':

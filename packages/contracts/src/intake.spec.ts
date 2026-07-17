@@ -189,6 +189,7 @@ describe('InitialAssessmentBriefV1Schema', () => {
       {
         question: 'How many discrete panic attacks in the last month?',
         rationale: 'Required to confirm ICD-11 6B01 frequency criterion.',
+        targets: [],
       },
     ],
     formulation:

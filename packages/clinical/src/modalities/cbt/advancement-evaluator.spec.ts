@@ -16,6 +16,7 @@ function makeNote(opts: {
       plan: 'p',
       riskFlags: { severity: opts.severity ?? 'none', indicators: [] },
       phaseHints: opts.phaseHints ?? [],
+      linkedEvidence: [],
     },
     endedAt: new Date(),
   };

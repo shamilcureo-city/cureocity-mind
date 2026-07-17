@@ -22,6 +22,7 @@ const draftContent: TherapyNoteV1 = {
   plan: 'Continue weekly CBT; assign thought record for week.',
   riskFlags: { severity: 'none', indicators: [] },
   phaseHints: [],
+  linkedEvidence: [],
 };
 
 const editedNote: TherapyNoteV1 = {

@@ -49,6 +49,8 @@ export * from './live-reasoning';
 // live-encounter (which imports from it) to keep the CJS eval order clean.
 export * from './live-therapy-reasoning';
 export * from './rx-pad';
+// Sprint DS12 — voice-edit the plan (imports from rx-pad, so after it).
+export * from './plan-edit';
 export * from './live-encounter';
 export * from './differential';
 export * from './medication-order';

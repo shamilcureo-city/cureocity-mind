@@ -13,6 +13,7 @@ import {
   type IPassCareReportBackend,
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
+  type IPassPlanDictationBackend,
   type IPassReasoningBackend,
   type IPassTherapyReasoningBackend,
   MockGeminiPass1Backend,
@@ -26,6 +27,7 @@ import {
   MockGeminiCareReportBackend,
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
+  MockGeminiPlanDictationBackend,
   MockGeminiReasoningBackend,
   MockGeminiTherapyReasoningBackend,
   ModelRouter,
@@ -34,6 +36,7 @@ import {
   VertexGeminiCareReportBackend,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
+  VertexGeminiPlanDictationBackend,
   VertexGeminiReasoningBackend,
   VertexGeminiTherapyReasoningBackend,
   VertexGeminiFlashIndiaBackend,
@@ -75,6 +78,7 @@ const modelRouterProvider: Provider = {
     let passFindings: IPassFindingsBackend;
     let passReasoning: IPassReasoningBackend;
     let passTherapyReasoning: IPassTherapyReasoningBackend;
+    let passPlanDictation: IPassPlanDictationBackend;
 
     if (!projectId) {
       // TS-safety — defence in depth. This service is a scaffold with no
@@ -100,6 +104,7 @@ const modelRouterProvider: Provider = {
       passFindings = new MockGeminiFindingsBackend();
       passReasoning = new MockGeminiReasoningBackend();
       passTherapyReasoning = new MockGeminiTherapyReasoningBackend();
+      passPlanDictation = new MockGeminiPlanDictationBackend();
     } else {
       const saKeyPath = config.get<string>('GCP_SA_KEY_PATH');
       pass1 = new VertexGeminiFlashIndiaBackend({
@@ -216,6 +221,16 @@ const modelRouterProvider: Provider = {
           'gemini-1.5-flash-002',
         ...(saKeyPath !== undefined && { saKeyPath }),
       });
+      // Sprint DS12 — plan dictation. Flash in asia-south1 (DPDP).
+      passPlanDictation = new VertexGeminiPlanDictationBackend({
+        projectId,
+        location: config.get<string>('GEMINI_FLASH_REGION') ?? 'asia-south1',
+        model:
+          config.get<string>('GEMINI_PLAN_DICTATION_MODEL') ??
+          config.get<string>('GEMINI_FLASH_MODEL') ??
+          'gemini-1.5-flash-002',
+        ...(saKeyPath !== undefined && { saKeyPath }),
+      });
       logger.log(`Vertex backends initialised for project ${projectId}`);
     }
 
@@ -233,6 +248,7 @@ const modelRouterProvider: Provider = {
       passFindings,
       passReasoning,
       passTherapyReasoning,
+      passPlanDictation,
       onCallLog: async (log) => {
         await prisma.geminiCallLog.create({
           data: {

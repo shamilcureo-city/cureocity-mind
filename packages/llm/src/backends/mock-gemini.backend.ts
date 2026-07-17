@@ -13,6 +13,7 @@ import {
   type IPassCareReportBackend,
   type IPassDifferentialBackend,
   type IPassFindingsBackend,
+  type IPassPlanDictationBackend,
   type IPassReasoningBackend,
   type IPassTherapyReasoningBackend,
   type PassTherapyReasoningInput,
@@ -39,6 +40,8 @@ import {
   type PassDifferentialOutput,
   type PassFindingsInput,
   type PassFindingsOutput,
+  type PassPlanDictationInput,
+  type PassPlanDictationOutput,
   type PassReasoningInput,
   type PassReasoningOutput,
   type PreSessionBriefV1,
@@ -59,6 +62,7 @@ import {
   CASE_CONSULT_PROMPT_VERSION,
   DIFFERENTIAL_PROMPT_VERSION,
   FINDINGS_PROMPT_VERSION,
+  PLAN_DICTATION_PROMPT_VERSION,
   REASONING_PROMPT_VERSION,
   THERAPY_REASONING_PROMPT_VERSION,
 } from '../prompts';
@@ -1760,3 +1764,126 @@ type CareReportV1extractVerdicts = Array<{
   verdict: string;
   plainWords: string;
 }>;
+
+/**
+ * Sprint DS12 — deterministic plan-dictation mock. Parses the command with a
+ * small grammar (add/change/remove med, order/cancel test, advice,
+ * follow-up) so the whole voice-edit loop — diff, interaction preview,
+ * apply, undo — runs end-to-end in dev with no creds. Drug/test names stay
+ * untagged so the interaction engine sees real names; the fallback
+ * clarification carries the [mock] tag.
+ */
+export class MockGeminiPlanDictationBackend implements IPassPlanDictationBackend {
+  async run(
+    input: PassPlanDictationInput,
+  ): Promise<{ output: PassPlanDictationOutput; callLog: GeminiCallLogData }> {
+    const start = Date.now();
+    const edits: PassPlanDictationOutput['dictation']['edits'] = [];
+    const clarifications: string[] = [];
+
+    const clauses = input.command
+      .split(/[,;.]| and | aur | then /i)
+      .map((c) => c.trim())
+      .filter(Boolean);
+    for (const clause of clauses) {
+      const lower = clause.toLowerCase();
+      const strength = /(\d+(?:\.\d+)?)\s*(mg|mcg|g|ml)\b/i.exec(clause);
+      const bareNumber = /\b(?:to|se)\s+(\d+(?:\.\d+)?)\b/i.exec(clause);
+      const freq = /\b(od|bd|tds|qid|hs|sos|stat)\b/i.exec(clause);
+      const night = /at night|raat/i.test(clause);
+      const followUp = /follow.?up|review|bulao/i.exec(lower);
+      const days = /(\d+)\s*(day|week|hafte|din)/i.exec(lower);
+
+      if (followUp && days?.[1] && days[2]) {
+        const n = Number.parseInt(days[1], 10);
+        const unit = /week|hafte/i.test(days[2]) ? 'week' : 'day';
+        edits.push({ action: 'setFollowUp', when: `In ${n} ${unit}${n === 1 ? '' : 's'}` });
+        continue;
+      }
+      const removeTest =
+        /(?:cancel|drop|remove)\s+(?:the\s+)?([a-z][a-z0-9 -]{1,60}?)\s*(?:test)?$/i.exec(clause);
+      if (/order|test|karwao|send for/i.test(lower)) {
+        const m = /(?:order|send for|karwao)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z0-9 -]{1,60})/i.exec(
+          clause,
+        );
+        if (m?.[1]) {
+          edits.push({ action: 'addInvestigation', name: titleCaseMock(m[1]) });
+          continue;
+        }
+      }
+      const removeMed =
+        /(?:stop|discontinue|band karo|hata do)\s+(?:the\s+)?([a-z][a-z -]{1,40})/i.exec(clause);
+      if (removeMed?.[1]) {
+        edits.push({ action: 'removeMed', drug: titleCaseMock(removeMed[1]) });
+        continue;
+      }
+      if (removeTest?.[1]) {
+        const target = titleCaseMock(removeTest[1]);
+        const onPad = (input.rxPad.meds ?? []).some((x) =>
+          x.drug.toLowerCase().includes(target.toLowerCase()),
+        );
+        edits.push(
+          onPad
+            ? { action: 'removeMed', drug: target }
+            : { action: 'removeInvestigation', name: target },
+        );
+        continue;
+      }
+      const change =
+        /(?:change|increase|decrease|make|badha do|badal)\s+(?:the\s+)?([a-z][a-z -]{1,40}?)(?:\s+(?:to|se)\b|\s+\d)/i.exec(
+          clause,
+        );
+      const add = /(?:add|start|prescribe|give|de do)\s+([a-z][a-z -]{1,40}?)(?=\s+\d|\s*$)/i.exec(
+        clause,
+      );
+      const medMatch = change ?? add;
+      if (medMatch?.[1]) {
+        const drug = titleCaseMock(medMatch[1]);
+        const fields = {
+          ...(strength
+            ? { strength: `${strength[1]} ${strength[2]!.toLowerCase()}` }
+            : bareNumber
+              ? { strength: bareNumber[1]! }
+              : {}),
+          ...(freq ? { frequency: freq[1]!.toUpperCase() } : night ? { frequency: 'HS' } : {}),
+        };
+        edits.push(
+          change ? { action: 'changeMed', drug, ...fields } : { action: 'addMed', drug, ...fields },
+        );
+        continue;
+      }
+      if (/advice|advise|batao/i.test(lower)) {
+        edits.push({ action: 'addAdvice', text: clause });
+      }
+    }
+
+    if (edits.length === 0 && clarifications.length === 0) {
+      clarifications.push(
+        '[mock] Could not parse that — try “add <drug> <n> mg”, “change <drug> to <n>”, “stop <drug>”, “order <test>”, or “follow up in <n> days”.',
+      );
+    }
+
+    return {
+      output: { dictation: { version: 'V1', edits, clarifications } },
+      callLog: {
+        sessionId: input.sessionId,
+        pass: 'PASS_14_PLAN_DICTATION',
+        model: 'mock-flash',
+        region: 'mock-asia-south1',
+        promptVersion: PLAN_DICTATION_PROMPT_VERSION,
+        inputTokens: Math.ceil(input.command.length / 4),
+        outputTokens: 80,
+        costInr: 0,
+        latencyMs: Date.now() - start,
+        status: 'SUCCESS',
+      },
+    };
+  }
+}
+
+function titleCaseMock(s: string): string {
+  return s
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
