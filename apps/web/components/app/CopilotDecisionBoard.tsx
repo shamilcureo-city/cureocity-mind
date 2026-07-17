@@ -1290,7 +1290,7 @@ function AskNextStep({
       sub={
         gaps.length === 0
           ? 'The AI found nothing material still open.'
-          : `${gaps.length} still open · regenerated each session against what's already been answered — this list shrinks as your assessment completes.`
+          : `${gaps.length} still open · tick the ones to seed next session's AI opening brief. Regenerated each session — shrinks as your assessment completes.`
       }
     >
       {gaps.length === 0 ? (
@@ -1384,6 +1384,21 @@ function AskNextStep({
         )}
         {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
       </div>
+
+      {/* Cross-link (R3b): the carried picks are what you seed here; the full,
+          durable open-questions ledger — ranked, stale-flagged, closeable —
+          lives on Progress. Naming them apart stops the two reading as one. */}
+      <p className="mt-3 border-t border-[var(--color-line-soft)] pt-2.5 text-[11px] text-[var(--color-ink-3)]">
+        Ticked questions seed the next pre-session brief. The full open-questions ledger lives on
+        the{' '}
+        <Link
+          href={`/app/sessions/${sessionId}?tab=copilot&sub=progress`}
+          className="font-medium text-[var(--color-accent)] hover:underline"
+        >
+          Progress tab
+        </Link>
+        .
+      </p>
     </Step>
   );
 }

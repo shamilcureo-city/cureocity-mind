@@ -1,11 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type {
   CareCadence,
   CareQuestionRank,
   CareQuestions,
+  CarriedQuestion,
   PreSessionBrief,
   PreSessionBriefV1,
 } from '@cureocity/contracts';
@@ -17,6 +19,12 @@ interface Props {
   questions: CareQuestions;
   cadence: CareCadence;
   clientId: string;
+  /** The therapist's carried picks (≤8) that seed the next AI opening brief —
+   * set on the Review tab's "Ask next session" step. Distinct from the open
+   * assessment ledger above; shown here so the two never read as the same list. */
+  carried: CarriedQuestion[];
+  /** Link to the Review sub-tab where carried questions are chosen. */
+  reviewHref: string;
 }
 
 const RANK_META: Record<CareQuestionRank, { label: string; chip: string }> = {
@@ -38,14 +46,21 @@ const RANK_META: Record<CareQuestionRank, { label: string; chip: string }> = {
  * Replaces three stacked cards (cadence, carried questions, the LLM
  * pre-session brief) that overlapped each other. Structure:
  *   1. The cadence line — when, and why that interval.
- *   2. The carried questions — the deterministic truth from the engine,
+ *   2. "Still open to establish" — the assessment LEDGER (durable
+ *      AssessmentItem rows): the deterministic truth from the engine,
  *      ranked, stale-flagged, closeable in one tap, full list on demand.
- *   3. "Opens with" — the LLM brief's UNIQUE fields only (context line,
+ *      This is what's OUTSTANDING, not what the therapist chose to carry.
+ *   3. "Carried for the opening brief" — the ≤8 picks the therapist ticked
+ *      on the Review tab (Client.carriedQuestions). These SEED the AI brief
+ *      below. Copilot IA redesign (R3b): the ledger and the carry-picks used
+ *      to both read as "carry into the session" and could silently disagree;
+ *      they're now named + shown distinctly, on one card, cross-linked.
+ *   4. "Opens with" — the LLM brief's UNIQUE fields only (context line,
  *      last-session recap, today's focus, opening line, watchpoints,
  *      homework). Its crisis banner and instrument scores are deliberately
  *      NOT rendered — safety lives on the board, scores in "Is it working?".
  */
-export function CareNextSessionPanel({ questions, cadence, clientId }: Props) {
+export function CareNextSessionPanel({ questions, cadence, clientId, carried, reviewHref }: Props) {
   const [showAll, setShowAll] = useState(false);
   const shown = showAll ? questions.all : questions.top;
   const hasMore = questions.all.length > questions.top.length;
@@ -66,11 +81,12 @@ export function CareNextSessionPanel({ questions, cadence, clientId }: Props) {
         <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">{cadence.rationale}</p>
       </header>
 
-      {/* Carried questions — the engine's ranked list. */}
+      {/* The assessment ledger — the engine's ranked list of what's still
+          OPEN (durable AssessmentItems). Not the therapist's carry-picks. */}
       <div className="mt-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-            Carry into the session
+            Still open to establish
           </p>
           <p className="text-xs text-[var(--color-ink-3)]">
             {questions.openCount} open
@@ -105,9 +121,63 @@ export function CareNextSessionPanel({ questions, cadence, clientId }: Props) {
         )}
       </div>
 
+      {/* The therapist's carried picks (Client.carriedQuestions) — what SEEDS
+          the AI brief below. Distinct from the open ledger above; set on Review. */}
+      <CarriedForBrief carried={carried} reviewHref={reviewHref} />
+
       {/* The AI brief — only the fields nothing else on the page owns. */}
       <BriefSection clientId={clientId} />
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Copilot IA redesign (R3b) — the therapist's carried picks, shown read-only
+// so the "open ledger" above and the "AI opening brief" below can't be
+// mistaken for one another. Carry-picks are chosen on the Review tab
+// ("Ask next session"); they seed the pre-session brief. This card only
+// mirrors them, with a link back to where they're set.
+// ---------------------------------------------------------------------------
+
+function CarriedForBrief({
+  carried,
+  reviewHref,
+}: {
+  carried: CarriedQuestion[];
+  reviewHref: string;
+}) {
+  return (
+    <div className="mt-6 border-t border-[var(--color-line-soft)] pt-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+          Carried for the opening brief
+        </p>
+        <Link
+          href={reviewHref}
+          className="text-xs font-medium text-[var(--color-accent)] hover:underline"
+        >
+          {carried.length > 0 ? 'Change on Review →' : 'Pick on Review →'}
+        </Link>
+      </div>
+
+      {carried.length === 0 ? (
+        <p className="mt-2 text-sm text-[var(--color-ink-3)]">
+          No questions carried yet. Tick a few on the Review tab as you wrap up — they seed the AI
+          opening brief below, and are separate from the open list above.
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-1.5">
+          {carried.map((q, i) => (
+            <li
+              key={i}
+              className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-accent-soft)]/40 p-2.5 text-sm text-[var(--color-ink)]"
+            >
+              {q.question}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

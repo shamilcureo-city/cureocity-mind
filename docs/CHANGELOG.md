@@ -6,6 +6,44 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-17 — Copilot IA redesign · R3b (two next-session stores, disambiguated)
+
+Final phase: the audit found next-session questions living in **two
+disconnected stores** rendered as if they were one list — they could (and
+would) silently disagree. The two are genuinely different concepts, so R3b
+**names them apart and cross-links them** rather than force-merging the data
+model (which would have touched the care engine, Pass-5, and the therapy-
+reasoning backend for no clinical gain):
+
+- **The assessment ledger** (`AssessmentItem` rows) — the durable, ranked,
+  stale-flagged, closeable record of _what's still open to establish_ about
+  the client. It gates the diagnosis and shrinks as assessment resolves.
+- **The carry-picks** (`Client.carriedQuestions`, ≤8) — the questions the
+  therapist deliberately ticks to _seed the next session's AI opening
+  brief_ (Pass-5). A forward-looking pick-list, not a ledger.
+
+What changed (UI copy + one cross-link fetch — **no contract / schema /
+route / engine change**, so zero data-model risk):
+
+- **Progress · "Next session" card** (`CareNextSessionPanel`) — the
+  `AssessmentItem` list is relabelled from the ambiguous "Carry into the
+  session" to **"Still open to establish"** (it's the ledger, closeable). A
+  new **"Carried for the opening brief"** subsection now mirrors the actual
+  carry-picks read-only, with a "Change on Review →" link — so the ledger,
+  the carry-picks, and the AI brief they feed read as three distinct things
+  on one card.
+- **Review · board step 3** (`AskNextStep`) — the sub-copy now says ticks
+  "seed next session's AI opening brief", and a footnote cross-links to the
+  full open-questions ledger on the **Progress tab**.
+- **Wiring** — `AICopilotTab`'s Progress sub fetches
+  `Client.carriedQuestions` (defensive `CarriedQuestionSchema` parse) and
+  passes it + the Review href to the panel.
+
+Verified end-to-end against the offline mock: Progress shows the ledger
+("1 open", closeable) above the two carried picks ("Change on Review →")
+above the AI brief; the board's step 3 footnote links to Progress; the
+right-lane "Next session will open with" still mirrors the carry-picks.
+
 ## 2026-07-17 — Copilot IA redesign · R3a (plan-as-diff)
 
 Fourth phase: on a **follow-up** session the copilot proposes **edits** to

@@ -264,7 +264,7 @@ async function JourneySub({
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
 }) {
-  const [care, briefing] = await Promise.all([
+  const [care, briefing, clientRow] = await Promise.all([
     computeCareEngineForClient(clientId, psychologistId, sessionId).catch((e) => {
       if (e instanceof JourneyError) return null;
       throw e;
@@ -273,7 +273,17 @@ async function JourneySub({
       if (e instanceof JourneyError) return null;
       throw e;
     }),
+    // The therapist's carried picks (Client.carriedQuestions) — mirrored on the
+    // "Next session" card so the open assessment ledger and the carry-picks that
+    // seed the AI brief read as two distinct lists (R3b).
+    prisma.client.findFirst({
+      where: { id: clientId, psychologistId },
+      select: { carriedQuestions: true },
+    }),
   ]);
+
+  const carried = z.array(CarriedQuestionSchema).safeParse(clientRow?.carriedQuestions);
+  const reviewHref = `/app/sessions/${sessionId}?tab=copilot&sub=review`;
 
   if (!care) {
     return (
@@ -322,7 +332,13 @@ async function JourneySub({
         </Card>
       )}
 
-      <CareNextSessionPanel questions={care.questions} cadence={care.cadence} clientId={clientId} />
+      <CareNextSessionPanel
+        questions={care.questions}
+        cadence={care.cadence}
+        clientId={clientId}
+        carried={carried.success ? carried.data : []}
+        reviewHref={reviewHref}
+      />
     </div>
   );
 }
