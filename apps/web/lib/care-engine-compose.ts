@@ -145,8 +145,8 @@ export async function computeCareEngineForClient(
     latestAt: latestCrisisAt,
   };
 
-  const journeySub = sessionId ? `/app/sessions/${sessionId}?tab=copilot&sub=journey` : null;
-  const sessionSub = sessionId ? `/app/sessions/${sessionId}?tab=copilot&sub=session` : null;
+  const journeySub = sessionId ? `/app/sessions/${sessionId}?tab=copilot&sub=progress` : null;
+  const sessionSub = sessionId ? `/app/sessions/${sessionId}?tab=copilot&sub=review` : null;
 
   const input: CareEngineInput = {
     clientId,

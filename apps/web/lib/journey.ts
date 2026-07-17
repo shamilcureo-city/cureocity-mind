@@ -294,7 +294,7 @@ function deriveNextBestAction(input: {
     // Consult, now in the Journey page's "story so far" section. That's
     // the exact "I'm stuck" moment the consult was built for.
     const consultHref = input.lastCompletedSessionId
-      ? `/app/sessions/${input.lastCompletedSessionId}?tab=copilot&sub=journey`
+      ? `/app/sessions/${input.lastCompletedSessionId}?tab=copilot&sub=progress`
       : null;
     return {
       kind: 'REVIEW_PLAN_NOT_IMPROVING',

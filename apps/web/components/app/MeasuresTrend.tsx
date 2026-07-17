@@ -128,7 +128,14 @@ function verdictTone(verdict: MeasureTrend['verdict']): {
     case 'deterioration':
       return { color: 'var(--color-warn)', bg: 'var(--color-warn-bg)', label: 'Worsening' };
     default:
-      return { color: 'var(--color-ink-3)', bg: 'var(--color-surface-2)', label: 'Steady' };
+      // One vocabulary for the reliable-change verdict across therapist
+      // surfaces (matches CareMeasurePanel). The client-facing progress
+      // report keeps its own plain-language wording. (R1 · C·27)
+      return {
+        color: 'var(--color-ink-3)',
+        bg: 'var(--color-surface-2)',
+        label: 'No reliable change',
+      };
   }
 }
 

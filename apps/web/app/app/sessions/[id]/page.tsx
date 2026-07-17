@@ -13,7 +13,9 @@ import { Badge } from '@/components/ui/Badge';
 import { AICopilotTab } from '@/components/app/AICopilotTab';
 import type { CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { ClientTab } from '@/components/app/ClientTab';
+import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
+import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs, type TabKey } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
@@ -42,14 +44,16 @@ const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'client',
 ]);
 
-const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['session', 'journey', 'plan']);
+const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['review', 'progress', 'plan']);
 
-// Sprint TSC-V2 — the five sub-tabs collapsed to three. Old links
-// (measures/briefing fold into Journey; formulation into Plan & toolkit)
-// keep working via this map.
+// Copilot IA redesign (R1) renamed the sub keys: session→review,
+// journey→progress (plan unchanged). Old links — including the pre-R1
+// three-key scheme and the earlier five-tab keys — keep working via this map.
 const LEGACY_SUB_MAP: Record<string, CopilotSubKey> = {
-  measures: 'journey',
-  briefing: 'journey',
+  session: 'review',
+  journey: 'progress',
+  measures: 'progress',
+  briefing: 'progress',
   formulation: 'plan',
 };
 
@@ -66,8 +70,16 @@ function parseTab(raw: string | undefined): { tab: TabKey; subOverride: CopilotS
   if ((VALID_TABS as ReadonlySet<string>).has(raw)) {
     return { tab: raw as TabKey, subOverride: null };
   }
-  if (raw === 'clinical-brief' || raw === 'mindmap' || raw === 'reflection') {
-    return { tab: 'copilot', subOverride: 'session' };
+  // Mindmap now lives on Transcript, reflection on Notes (R1 relocation),
+  // but old bookmarks for the clinical brief still land on the Review board.
+  if (raw === 'clinical-brief') {
+    return { tab: 'copilot', subOverride: 'review' };
+  }
+  if (raw === 'mindmap') {
+    return { tab: 'transcript', subOverride: null };
+  }
+  if (raw === 'reflection') {
+    return { tab: 'notes', subOverride: null };
   }
   return { tab: 'notes', subOverride: null };
 }
@@ -77,7 +89,7 @@ function parseSub(raw: string | undefined): CopilotSubKey {
     return raw as CopilotSubKey;
   }
   if (raw && raw in LEGACY_SUB_MAP) return LEGACY_SUB_MAP[raw]!;
-  return 'session';
+  return 'review';
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
@@ -255,6 +267,8 @@ async function NotesTabPanel({
       }
     : null;
 
+  const noteJson = (signedNote?.content ?? draft?.content ?? null) as TherapyNoteV1 | null;
+
   return (
     <div className="space-y-6">
       {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
@@ -284,6 +298,22 @@ async function NotesTabPanel({
         clientPreferredLanguage={clientPreferredLanguage}
         noteTemplateId={noteTemplateId}
       />
+      {/* Reflection questions live with the note now (R1 relocation from the
+          copilot Review sub — they're client-facing content, not a decision). */}
+      {sessionKind !== 'INTAKE' && noteJson && (
+        <section>
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
+            Reflection questions
+          </h3>
+          <ReflectionTab
+            sessionId={sessionId}
+            clientId={clientId}
+            note={noteJson}
+            clientHasContactPhone={clientHasContactPhone}
+            clientHasContactEmail={clientHasContactEmail}
+          />
+        </section>
+      )}
     </div>
   );
 }
@@ -344,7 +374,7 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
 }
 
 async function TranscriptTabPanel({ sessionId }: { sessionId: string }) {
-  const [draftRow, lastCall] = await Promise.all([
+  const [draftRow, signedRow, lastCall] = await Promise.all([
     prisma.noteDraft.findUnique({
       where: { sessionId },
       select: {
@@ -353,8 +383,10 @@ async function TranscriptTabPanel({ sessionId }: { sessionId: string }) {
         speakerSegments: true,
         totalCostInr: true,
         errorMessage: true,
+        content: true,
       },
     }),
+    prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
     prisma.geminiCallLog.findFirst({
       where: { sessionId },
       orderBy: { createdAt: 'desc' },
@@ -372,18 +404,31 @@ async function TranscriptTabPanel({ sessionId }: { sessionId: string }) {
   }
 
   const segments = (draftRow.speakerSegments as SpeakerSegment[] | null) ?? null;
+  // Mindmap moved here (R1) — it's a view OF the note, so it belongs beside
+  // the transcript, not in the copilot decision flow.
+  const noteJson = (signedRow?.content ?? draftRow.content ?? null) as TherapyNoteV1 | null;
 
   return (
-    <TranscriptTab
-      data={{
-        status: draftRow.status,
-        segments,
-        transcript: draftRow.transcript,
-        totalCostInr: draftRow.totalCostInr.toString(),
-        backend: lastCall ? `${lastCall.model} (${lastCall.region})` : null,
-        errorMessage: draftRow.errorMessage,
-      }}
-    />
+    <div className="space-y-6">
+      <TranscriptTab
+        data={{
+          status: draftRow.status,
+          segments,
+          transcript: draftRow.transcript,
+          totalCostInr: draftRow.totalCostInr.toString(),
+          backend: lastCall ? `${lastCall.model} (${lastCall.region})` : null,
+          errorMessage: draftRow.errorMessage,
+        }}
+      />
+      {noteJson && (
+        <section>
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
+            Session mindmap
+          </h3>
+          <MindmapTab note={noteJson} />
+        </section>
+      )}
+    </div>
   );
 }
 

@@ -6,6 +6,40 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-17 — Copilot IA redesign · R1 (renames + relocations)
+
+Second phase: the naming + information-architecture cleanup, no data or
+contract changes. Directly addresses the audit's "what is this called /
+where does it live" findings.
+
+- **The three copilot sub-tabs are renamed** to plain questions:
+  `This session` → **Review** ("What the copilot heard — you decide"),
+  `Journey` → **Progress** ("The arc · is it working · next session").
+  The third stays "Plan & toolkit" until R2 gives it a real plan. URL sub
+  keys changed to match (`review`/`progress`/`plan`); every legacy key
+  (`session`/`journey`/`measures`/`briefing`/`formulation`) redirects, so
+  old bookmarks keep working. The decision-board header is now "Review this
+  session" (was "This session's reading").
+- **Mindmap and reflection questions left the decision flow.** The mindmap
+  (a view of the note) moved to the **Transcript** tab; reflection
+  questions (client-facing) moved to the **Notes** tab. The Review board
+  leaves a quiet "Also from this session →" link row. Old `?tab=mindmap` /
+  `?tab=reflection` bookmarks redirect to the new homes.
+- **"Care journey" is retired** (it collided with the Cureocity Care
+  product) — the Progress arc card is now "Treatment arc". Gamified
+  wording dropped: "M of N earned" → "N of M done", "Earns: X" → "Moves
+  to: X".
+- **Diagnosis is shown once, as a pointer to its home.** The Progress arc
+  header dropped the contradictory "Current best fit (provisional — may
+  change)" restatement (which fought the "confirmed" framing on the Review
+  rail); it's now "Working diagnosis" with a "diagnosis + plan live on
+  Plan ↗" link.
+- **One verdict vocabulary across therapist surfaces.** The measures-trend
+  card said "Steady" while the Progress "Is it working?" card said "No
+  reliable change" for the same deterministic verdict; both now say "No
+  reliable change" (the client-facing progress report keeps its own
+  plain-language wording).
+
 ## 2026-07-17 — Copilot IA redesign · R0 (clinical-safety fixes)
 
 First phase of the therapist-copilot information-architecture redesign

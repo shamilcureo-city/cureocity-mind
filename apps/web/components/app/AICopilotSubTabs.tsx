@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-export type CopilotSubKey = 'session' | 'journey' | 'plan';
+export type CopilotSubKey = 'review' | 'progress' | 'plan';
 
 interface Props {
   sessionId: string;
@@ -8,24 +8,28 @@ interface Props {
 }
 
 const TABS: { key: CopilotSubKey; label: string; hint: string }[] = [
-  { key: 'session', label: 'This session', hint: "This recording's decision board" },
-  { key: 'journey', label: 'Journey', hint: 'Where they are · is it working · what next' },
+  { key: 'review', label: 'Review', hint: 'What the copilot heard — you decide' },
+  { key: 'progress', label: 'Progress', hint: 'The arc · is it working · next session' },
+  // R2 renames this to "Plan" once it renders the real treatment plan.
   { key: 'plan', label: 'Plan & toolkit', hint: 'Plan, diagnosis history, map, library' },
 ];
 
 /**
- * Sprint 28 → Sprint TSC-V2 — secondary tab bar inside the AI Copilot tab.
+ * Sprint 28 → TSC-V2 → Copilot IA redesign (R1) — secondary tab bar inside
+ * the AI Copilot tab.
  *
- * The five altitude tabs collapsed to three that match how a psychologist
- * actually thinks: "This session" (the decision board), "Journey" (the one
- * longitudinal page — stage, measures, the story, what next session opens
- * with), and "Plan & toolkit" (the working tools). Measures moved inside
- * Journey (a score only means something against the timeline); Case
- * Briefing + Consult became the story section of Journey. Smaller/lighter
- * than the top-level `SessionWorkspaceTabs`. URL: `?tab=copilot&sub=…`,
- * defaulting to `session`; old sub keys redirect in the page parser.
+ * Three plain questions that match how a psychologist thinks:
+ * - **Review** (was "This session") — what the copilot heard this session;
+ *   you decide. The decision board.
+ * - **Progress** (was "Journey") — the arc, is it working, what next session
+ *   opens with. "Care journey" was dropped: it collided with the Care product.
+ * - **Plan** (was "Plan & toolkit") — the client's own treatment plan, with
+ *   the scripts + formulation tools around it.
+ *
+ * URL: `?tab=copilot&sub=…`, defaulting to `review`; old sub keys
+ * (session/journey/measures/briefing/formulation) redirect in the page parser.
  */
-export function AICopilotSubTabs({ sessionId, active = 'session' }: Props) {
+export function AICopilotSubTabs({ sessionId, active = 'review' }: Props) {
   return (
     <nav
       className="flex flex-wrap items-center gap-1 border-b border-[var(--color-line-soft)]"

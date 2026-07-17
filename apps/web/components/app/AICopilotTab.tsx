@@ -20,8 +20,6 @@ import {
   type CaseRecordSnapshot,
 } from '@/components/app/CopilotDecisionBoard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
-import { MindmapTab } from '@/components/app/MindmapTab';
-import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
 import { AICopilotSubTabs, type CopilotSubKey } from '@/components/app/AICopilotSubTabs';
@@ -57,25 +55,23 @@ const LIBRARY_THERAPIES: string[] = [
 ];
 
 /**
- * Sprint 28 — the session AI Copilot is the *full* copilot.
+ * Sprint 28 → Copilot IA redesign (R1) — the session AI Copilot.
  *
- * The session page is the therapist's primary workspace, so the
- * whole decision-support layer lives here behind one opt-in tab,
- * grouped into five sub-tabs by altitude:
+ * The session page is the therapist's primary workspace, so the whole
+ * decision-support layer lives here behind one opt-in tab, grouped into
+ * three sub-tabs that each answer a plain question:
  *
- * - **This session** — this recording's AI analysis (Clinical Brief
- *   / Initial Assessment + Mindmap + Reflection). The default.
- * - **Journey** — care-of-episode stage, Next-Best-Action,
- *   discharge/share, pre-session brief.
- * - **Case Briefing** — the cross-session synthesis.
- * - **Measures** — instruments + affect trend.
- * - **Formulation & Plan** — conceptual map, diagnosis history,
- *   therapy library, workflow.
+ * - **Review** (`sub=review`, default) — what the copilot heard this
+ *   session; you decide. The decision board. (Mindmap + reflection
+ *   questions moved out — to Transcript and Notes respectively.)
+ * - **Progress** (`sub=progress`) — the treatment arc, is it working, and
+ *   what next session opens with (the Care Engine page).
+ * - **Plan & toolkit** (`sub=plan`) — the client's plan + formulation
+ *   tools. (R2 renames this to "Plan" once it renders the real plan.)
  *
- * Loading is sub-aware: each sub-tab fetches only what it renders,
- * so a therapist who only opens "This session" never pays for the
- * journey/briefing/formulation queries. The client page is a lean
- * record and carries none of this.
+ * Loading is sub-aware: each sub-tab fetches only what it renders, so a
+ * therapist who only opens Review never pays for the progress/plan
+ * queries. The client page is a lean record and carries none of this.
  */
 export async function AICopilotTab({
   sessionId,
@@ -91,16 +87,10 @@ export async function AICopilotTab({
   return (
     <div className="space-y-6">
       <AICopilotSubTabs sessionId={sessionId} active={sub} />
-      {sub === 'session' && (
-        <SessionSub
-          sessionId={sessionId}
-          clientId={clientId}
-          sessionKind={sessionKind}
-          clientHasContactPhone={clientHasContactPhone}
-          clientHasContactEmail={clientHasContactEmail}
-        />
+      {sub === 'review' && (
+        <SessionSub sessionId={sessionId} clientId={clientId} sessionKind={sessionKind} />
       )}
-      {sub === 'journey' && (
+      {sub === 'progress' && (
         <JourneySub
           sessionId={sessionId}
           clientId={clientId}
@@ -128,14 +118,10 @@ async function SessionSub({
   sessionId,
   clientId,
   sessionKind,
-  clientHasContactPhone,
-  clientHasContactEmail,
 }: {
   sessionId: string;
   clientId: string;
   sessionKind: SessionKind;
-  clientHasContactPhone: boolean;
-  clientHasContactEmail: boolean;
 }) {
   const isIntake = sessionKind === 'INTAKE';
   // The board's right lane is the client's confirmed record — loaded here
@@ -214,27 +200,27 @@ async function SessionSub({
         reviewedAt={reportRow?.reviewedAt?.toISOString() ?? null}
         record={record}
       />
+      {/* Mindmap + reflection questions moved out of the decision flow (R1):
+          the mindmap is a view of the note (→ Transcript), reflection
+          questions are client-facing (→ Notes). Left here as quiet links so
+          the Review board stays a pure decision surface. */}
       {!isIntake && noteJson && (
-        <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
-            Mindmap
-          </h3>
-          <MindmapTab note={noteJson} />
-        </section>
-      )}
-      {!isIntake && noteJson && (
-        <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
-            Reflection questions
-          </h3>
-          <ReflectionTab
-            sessionId={sessionId}
-            clientId={clientId}
-            note={noteJson}
-            clientHasContactPhone={clientHasContactPhone}
-            clientHasContactEmail={clientHasContactEmail}
-          />
-        </section>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-[var(--color-ink-3)]">
+          <span className="font-semibold uppercase tracking-[0.12em]">Also from this session</span>
+          <a
+            href={`/app/sessions/${sessionId}?tab=transcript`}
+            className="font-medium text-[var(--color-accent)] hover:underline"
+          >
+            Session mindmap →
+          </a>
+          <span aria-hidden>·</span>
+          <a
+            href={`/app/sessions/${sessionId}?tab=notes`}
+            className="font-medium text-[var(--color-accent)] hover:underline"
+          >
+            Reflection questions →
+          </a>
+        </div>
       )}
     </div>
   );
@@ -310,6 +296,7 @@ async function JourneySub({
         clientName={clientName}
         clientHasContactPhone={clientHasContactPhone}
         clientHasContactEmail={clientHasContactEmail}
+        planHref={`/app/sessions/${sessionId}?tab=copilot&sub=plan`}
       />
 
       <CareMeasurePanel

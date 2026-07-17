@@ -316,7 +316,7 @@ export function CopilotDecisionBoard({
 
   // ----- pre-reading states -----
 
-  const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=journey`;
+  const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=progress`;
   const readingNoun = isIntake ? 'initial assessment' : 'clinical brief';
 
   if (status === null || (status === 'COMPLETED' && !data)) {
@@ -378,7 +378,7 @@ export function CopilotDecisionBoard({
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-center gap-3">
-        <h2 className="font-serif text-2xl">This session's reading</h2>
+        <h2 className="font-serif text-2xl">Review this session</h2>
         <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] px-3.5 py-1.5 text-xs text-[var(--color-ink-2)]">
           <AiChip inline />
           Suggestions only — nothing joins the record until you accept it.

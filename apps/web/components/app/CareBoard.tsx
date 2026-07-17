@@ -22,6 +22,8 @@ interface Props {
   clientName: string;
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
+  /** Link to the Plan tab — the one home for diagnosis + plan (R1). */
+  planHref?: string;
 }
 
 const PRIORITY_META: Record<CareActionPriority, { label: string; chip: string }> = {
@@ -62,6 +64,7 @@ export function CareBoard({
   clientName,
   clientHasContactPhone,
   clientHasContactEmail,
+  planHref,
 }: Props) {
   const [shareOpen, setShareOpen] = useState(false);
   const [dischargeOpen, setDischargeOpen] = useState(false);
@@ -83,30 +86,35 @@ export function CareBoard({
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]">
-            Care journey
+            Treatment arc
           </p>
           <h2 className="mt-1 font-serif text-2xl">
-            {isDischarged ? 'Episode closed' : (currentNode?.label ?? 'Care journey')}
+            {isDischarged ? 'Episode closed' : (currentNode?.label ?? 'Treatment arc')}
           </h2>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
             {arc.sessionsCompleted} session{arc.sessionsCompleted === 1 ? '' : 's'} completed
             {arc.lastSessionAt && ` · last ${formatRelative(arc.lastSessionAt)}`}
           </p>
         </div>
+        {/* Diagnosis is shown once, as a pointer to its one home (the Plan tab),
+            not restated with a competing "provisional" framing. (R1 · C·4/C·17) */}
         {workingDiagnosis && (
           <div className="text-right">
             <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              {isDischarged ? 'Diagnosis at discharge' : 'Current best fit'}
-              {!isDischarged && (
-                <span className="ml-2 normal-case tracking-normal text-[10px] text-[var(--color-ink-3)]">
-                  (provisional — may change as you learn more)
-                </span>
-              )}
+              {isDischarged ? 'Diagnosis at discharge' : 'Working diagnosis'}
             </p>
             <p className="mt-1 text-sm">
               <span className="font-mono">{workingDiagnosis.icd11Code}</span>{' '}
               {workingDiagnosis.icd11Label}
             </p>
+            {planHref && !isDischarged && (
+              <a
+                href={planHref}
+                className="text-xs font-medium text-[var(--color-accent)] hover:underline"
+              >
+                diagnosis + plan live on Plan ↗
+              </a>
+            )}
           </div>
         )}
       </header>
@@ -171,7 +179,7 @@ export function CareBoard({
                 </p>
                 {gate.totalCount > 1 && (
                   <p className="text-xs font-medium text-[var(--color-ink-2)] tabular-nums">
-                    {gate.metCount} of {gate.totalCount} earned
+                    {gate.metCount} of {gate.totalCount} done
                   </p>
                 )}
               </div>
@@ -308,7 +316,7 @@ function ActionBody({ action, earns }: { action: CareAction; earns: string | nul
         </span>
       </div>
       <p className="mt-0.5 text-sm text-[var(--color-ink-2)]">{action.why}</p>
-      {earns && <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">Earns: {earns}</p>}
+      {earns && <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">Moves to: {earns}</p>}
       {action.ctaLabel && action.ctaHref && (
         <a
           href={action.ctaHref}
