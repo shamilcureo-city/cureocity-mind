@@ -44,7 +44,7 @@ export default function GlobalError({
           minHeight: '100vh',
           display: 'grid',
           placeItems: 'center',
-          background: '#faf7f2',
+          background: '#f7f9fd',
           color: '#0f1b2a',
           fontFamily: 'Inter, system-ui, sans-serif',
           padding: 24,
@@ -57,7 +57,7 @@ export default function GlobalError({
               fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: '0.18em',
-              color: '#2d5f4d',
+              color: '#2563eb',
             }}
           >
             Something went wrong
@@ -65,12 +65,12 @@ export default function GlobalError({
           <h1 style={{ marginTop: 12, fontSize: 28, fontWeight: 600 }}>
             We couldn&rsquo;t load the app.
           </h1>
-          <p style={{ marginTop: 12, fontSize: 14, color: '#4a5566', lineHeight: 1.5 }}>
+          <p style={{ marginTop: 12, fontSize: 14, color: '#404756', lineHeight: 1.5 }}>
             Your data is safe — this is a display error. Try again, and if it keeps happening, sign
             out and back in.
           </p>
           {error.digest && (
-            <p style={{ marginTop: 8, fontSize: 12, color: '#7b8694', fontFamily: 'monospace' }}>
+            <p style={{ marginTop: 8, fontSize: 12, color: '#717886', fontFamily: 'monospace' }}>
               ref: {error.digest}
             </p>
           )}
@@ -82,7 +82,7 @@ export default function GlobalError({
               padding: '0 24px',
               borderRadius: 9999,
               border: 'none',
-              background: '#2d5f4d',
+              background: '#2563eb',
               color: 'white',
               fontSize: 15,
               fontWeight: 500,

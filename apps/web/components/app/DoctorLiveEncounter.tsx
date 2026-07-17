@@ -2038,7 +2038,7 @@ const REC_STYLES: Record<Tone, { color: string; border: string; icon: ReactNode 
   warn: { color: '#b86a3c', border: '#f2d9c8', icon: <AlertIcon /> },
   interaction: { color: '#b86a3c', border: '#f2d9c8', icon: <PillIcon /> },
   coding: { color: '#2f5aa8', border: '#cdd9ef', icon: <TagIcon /> },
-  command: { color: '#2d5f4d', border: '#cfe0d6', icon: <MicIcon className="h-[15px] w-[15px]" /> },
+  command: { color: '#2563eb', border: '#cfdcf5', icon: <MicIcon className="h-[15px] w-[15px]" /> },
   info: { color: '#6b4fa8', border: '#dccdf1', icon: <QIcon /> },
 };
 

@@ -93,16 +93,29 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
   // spine, so no secondary section for them.
   const secondary = vertical === 'DOCTOR' ? [] : SECONDARY;
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] md:flex">
+    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-white/65 backdrop-blur-xl md:flex">
       <div className="px-6 py-6">
-        <Link href="/app" className="inline-flex items-center gap-2">
+        <Link href="/app" className="inline-flex items-center gap-2.5">
           <span
             aria-hidden
-            className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] font-serif text-base text-white"
+            className="grid h-8 w-8 place-items-center rounded-[10px] bg-[linear-gradient(135deg,var(--color-accent-bright),var(--color-accent))] shadow-[0_6px_14px_-6px_rgba(37,99,235,0.6)]"
           >
-            cm
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
+                stroke="#fff"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </span>
-          <span className="font-serif text-lg tracking-tight">Cureocity Mind</span>
+          <span className="font-serif text-lg tracking-tight">
+            Cureocity{' '}
+            <em className="italic text-[var(--color-accent)]">
+              {vertical === 'DOCTOR' ? 'Scribe' : 'Mind'}
+            </em>
+          </span>
         </Link>
       </div>
 
@@ -116,8 +129,8 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
                   href={item.href}
                   className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                     active
-                      ? 'bg-white font-medium text-[var(--color-ink)] shadow-sm'
-                      : 'text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)]'
+                      ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                      : 'text-[var(--color-ink-2)] hover:bg-white/80 hover:text-[var(--color-ink)]'
                   }`}
                   aria-current={active ? 'page' : undefined}
                 >
@@ -143,8 +156,8 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
                       href={item.href}
                       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                         active
-                          ? 'bg-white font-medium text-[var(--color-ink)] shadow-sm'
-                          : 'text-[var(--color-ink-3)] hover:bg-white/60 hover:text-[var(--color-ink)]'
+                          ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                          : 'text-[var(--color-ink-3)] hover:bg-white/80 hover:text-[var(--color-ink)]'
                       }`}
                       aria-current={active ? 'page' : undefined}
                     >
@@ -227,7 +240,7 @@ function FooterLinks() {
         <li key={it.href}>
           <Link
             href={it.href}
-            className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
+            className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-[var(--color-ink-2)] hover:bg-white/80 hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
           >
             <Glyph kind={it.icon} />
             {it.label}
@@ -246,7 +259,7 @@ function FooterLinks() {
         <form method="POST" action="/api/v1/auth/signout">
           <button
             type="submit"
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--color-ink-2)] hover:bg-white/60 hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-sm text-[var(--color-ink-2)] hover:bg-white/80 hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
           >
             <Glyph kind="signout" />
             Sign out

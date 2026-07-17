@@ -340,11 +340,21 @@ function LoginPageInner() {
             <Link href="/" className="inline-flex items-center gap-2.5">
               <span
                 aria-hidden
-                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent)] font-serif text-base text-white shadow-sm"
+                className="grid h-9 w-9 place-items-center rounded-xl bg-[linear-gradient(135deg,var(--color-accent-bright),var(--color-accent))] shadow-[0_6px_14px_-6px_rgba(37,99,235,0.6)]"
               >
-                cm
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
+                    stroke="#fff"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </span>
-              <span className="font-serif text-lg tracking-tight">Cureocity Mind</span>
+              <span className="font-serif text-lg tracking-tight">
+                Cureocity <em className="italic text-[var(--color-accent)]">Mind</em>
+              </span>
             </Link>
             <h1 className="mt-10 font-serif text-5xl leading-[1.1] tracking-tight text-[var(--color-ink)]">
               Get your evenings back.
@@ -399,11 +409,21 @@ function LoginPageInner() {
             <div className="mb-6 flex items-center gap-2 lg:hidden">
               <span
                 aria-hidden
-                className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] font-serif text-base text-white"
+                className="grid h-8 w-8 place-items-center rounded-[10px] bg-[linear-gradient(135deg,var(--color-accent-bright),var(--color-accent))] shadow-[0_6px_14px_-6px_rgba(37,99,235,0.6)]"
               >
-                cm
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
+                    stroke="#fff"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </span>
-              <span className="font-serif text-base tracking-tight">Cureocity Mind</span>
+              <span className="font-serif text-base tracking-tight">
+                Cureocity <em className="italic text-[var(--color-accent)]">Mind</em>
+              </span>
             </div>
 
             {stage === 'pick' && (

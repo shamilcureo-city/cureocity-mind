@@ -109,7 +109,7 @@ export function MindmapTab({ note }: Props) {
                   dx="0"
                   dy="0"
                   stdDeviation="9"
-                  floodColor="#2d5f4d"
+                  floodColor="#2563eb"
                   floodOpacity="0.4"
                 />
               </filter>

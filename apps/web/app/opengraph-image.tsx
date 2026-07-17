@@ -18,8 +18,8 @@ export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
 export default function OpengraphImage() {
-  const accent = '#2d5f4d';
-  const cream = '#faf7f2';
+  const accent = '#2563eb';
+  const cream = '#f7f9fd';
   return new ImageResponse(
     <div
       style={{

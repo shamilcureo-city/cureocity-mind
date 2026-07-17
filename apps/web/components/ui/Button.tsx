@@ -5,13 +5,13 @@ type Variant = 'primary' | 'secondary' | 'ghost';
 type Size = 'sm' | 'md' | 'lg';
 
 const base =
-  'inline-flex items-center justify-center gap-2 rounded-full font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap';
+  'inline-flex items-center justify-center gap-2 rounded-full font-medium transition-all disabled:cursor-not-allowed disabled:opacity-50 whitespace-nowrap';
 
 const variants: Record<Variant, string> = {
   primary:
-    'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]',
+    'bg-[linear-gradient(135deg,var(--color-accent-bright),var(--color-accent))] text-white shadow-[0_10px_22px_-10px_rgba(37,99,235,0.55)] hover:brightness-105 hover:shadow-[0_12px_26px_-10px_rgba(37,99,235,0.65)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]',
   secondary:
-    'border border-[var(--color-line)] bg-white text-[var(--color-ink)] hover:border-[var(--color-ink)]',
+    'border border-[var(--color-line)] bg-white text-[var(--color-ink)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]',
   ghost: 'text-[var(--color-ink)] hover:bg-[var(--color-surface-soft)]',
 };
 

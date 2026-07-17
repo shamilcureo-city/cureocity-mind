@@ -1,17 +1,22 @@
 @import 'tailwindcss';
 
 @theme {
-  --color-bg: #faf7f2;
+  /* 2026-07 — the neon-blue system from the mind.cureocity.in landing
+     (landing.css), carried into the app: cool near-white base, #2563EB
+     accent, #38BDF8 bright edge. /for-doctors and /care keep their own
+     page-scoped accent overrides. */
+  --color-bg: #f7f9fd;
   --color-surface: #ffffff;
-  --color-surface-soft: #f4efe7;
-  --color-ink: #0f1b2a;
-  --color-ink-2: #4a5566;
-  --color-ink-3: #7b8694;
-  --color-line: #e6e2d8;
-  --color-line-soft: #ede9df;
-  --color-accent: #2d5f4d;
-  --color-accent-hover: #23493b;
-  --color-accent-soft: #e8f0eb;
+  --color-surface-soft: #eef2f9;
+  --color-ink: #0a101f;
+  --color-ink-2: #404756;
+  --color-ink-3: #717886;
+  --color-line: #e2e7ed;
+  --color-line-soft: #eaeef5;
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-soft: #e8effc;
+  --color-accent-bright: #38bdf8;
   --color-warn: #b86a3c;
   --color-warn-soft: #fbe9dc;
   --color-warn-border: #e5c39c;
@@ -44,6 +49,23 @@ body {
 ::selection {
   background: var(--color-accent);
   color: white;
+}
+
+/* ============================================================================
+   App wash (2026-07 blue-glass retheme). A fixed pair of faint radial glows
+   behind the whole authenticated shell — the same treatment as the landing's
+   body washes at roughly half strength. Sits at z-index -1 so the translucent
+   sidebar / bottom bar pick it up through their backdrop blur.
+   ========================================================================== */
+.app-wash::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(52vw 42vh at 6% -8%, rgba(56, 189, 248, 0.08), transparent 62%),
+    radial-gradient(48vw 40vh at 102% 10%, rgba(37, 99, 235, 0.06), transparent 65%);
 }
 
 /* ============================================================================

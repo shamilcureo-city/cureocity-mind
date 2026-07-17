@@ -6,6 +6,34 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-17 — Inner app carried onto the landing's design system
+
+The authenticated shell (`/app/*`), login, and portal now share the
+landing's neon-blue glass system. Because the whole app styles through
+the `@theme` tokens in `apps/web/app/globals.css`, most of this is one
+token swap: warm-paper green (`#faf7f2` / `#2d5f4d`) → cool-white blue
+(`#f7f9fd` / `#2563eb`, hover `#1d4ed8`, soft `#e8effc`, new
+`--color-accent-bright: #38bdf8`). Ink/line values match `landing.css`.
+`/for-doctors` (indigo) and `/care` (warm charcoal) keep their own
+page-scoped overrides and are unaffected.
+
+- **Chrome** — Sidebar and mobile bottom bar are translucent glass
+  (`bg-white/65 + backdrop-blur`) over a new `.app-wash` fixed radial
+  glow layer (the landing's washes at half strength). Active nav items
+  use the accent-soft pill. The sidebar wordmark is the landing brand
+  mark (gradient tile + pulse line) and is vertical-aware: therapists
+  see "Cureocity _Mind_", doctors "Cureocity _Scribe_".
+- **Primitives** — `Button` primary is the landing gradient
+  (`#38BDF8→#2563EB`) with the blue glow shadow; secondary hovers to
+  accent. `Card` gains the landing's soft double shadow.
+- **Login** — both brand marks (desktop rail + mobile head) updated to
+  the gradient mark with the italic-blue product word.
+- **Hardcoded greens swept** — `opengraph-image`, `global-error`,
+  `DoctorLiveEncounter` (voice-command chip), `MindmapTab` (flood
+  color), `ClinicalBriefPdf` accent now use the blue system.
+- Fraunces page headings render app-wide as a side effect of the
+  2026-07-16 font-token fix (pages already used `font-serif`).
+
 ## 2026-07-16 — Mind landing redesign (neon-blue glass, copilot-forward)
 
 The `mind.cureocity.in` landing (`apps/web/app/page.tsx`) rebuilt from a

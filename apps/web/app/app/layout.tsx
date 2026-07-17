@@ -57,7 +57,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   });
 
   return (
-    <div className="flex min-h-screen flex-col bg-[var(--color-bg)]">
+    <div className="app-wash relative flex min-h-screen flex-col bg-[var(--color-bg)]">
       <AuthedFetchProvider />
       {showBypassBanner && (
         <div className="bg-[var(--color-warn-soft)] px-4 py-2 text-center text-xs text-[var(--color-warn)]">
