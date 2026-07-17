@@ -6,6 +6,20 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-17 — Care "Proper Psychologist" plan (CP1–CP8) — design doc
+
+`docs/CARE_PSYCHOLOGIST.md` added: the audited diagnosis of why Care
+sessions auto-wrap (unhandled WS close → `endSession()`, a clockless
+model ordered to timekeep, unconditional `end_session` obedience, no
+resumption/reconnect path) and the eight-sprint plan to make Care a
+proper psychologist — CP1 clock authority + negotiated endings +
+resumable transport, CP2 the live structure engine (six tools + phase
+rail + `CareLiveEvent`), CP3 baseline battery + graded risk ladder,
+CP4 5-Ps formulation + My Plan, CP5 manualized mastery-gated arcs +
+toolkit, CP6 document-grade reports + archive, CP7 measurement every
+session + case file, CP8 e2e/probe/observability proof. Plan only — no
+behaviour change in this commit. CLAUDE.md doc map updated.
+
 ## 2026-07-17 — Inner app carried onto the landing's design system
 
 The authenticated shell (`/app/*`), login, and portal now share the
