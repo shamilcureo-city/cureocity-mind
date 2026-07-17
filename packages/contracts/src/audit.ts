@@ -242,6 +242,11 @@ export const AuditActionSchema = z.enum([
   // pad (adopt an AI suggestion / manual add / confirm / remove) — one row
   // per op, with { op, source, item } metadata. The prescribing trail.
   'RX_PAD_EDITED',
+  // Doctor vertical — Sprint DS12. The doctor spoke a plan instruction and
+  // the dictation pass produced a reviewed edit proposal (nothing applied —
+  // the apply taps land RX_PAD_EDITED rows). Metadata: { sessionId,
+  // editCount, clarificationCount, costInr }.
+  'PLAN_DICTATION_PROPOSED',
   // NEXT2 — the reclaim cron marks generations stranded IN_PROGRESS/PENDING
   // (function killed mid-run) as FAILED so the UI offers a re-run instead of
   // an infinite spinner. One row per reclaimed draft/report.

@@ -16,6 +16,7 @@ export {
   MockGeminiDifferentialBackend,
   MockGeminiCareReportBackend,
   MockGeminiFindingsBackend,
+  MockGeminiPlanDictationBackend,
   MockGeminiReasoningBackend,
   MockGeminiTherapyReasoningBackend,
 } from './backends/mock-gemini.backend';
@@ -87,4 +88,10 @@ export {
   PassCareReportBackendError,
   type VertexGeminiCareReportOptions,
 } from './backends/vertex-care-report.backend';
+export {
+  VertexGeminiPlanDictationBackend,
+  PlanDictationBackendError,
+  type VertexGeminiPlanDictationOptions,
+} from './backends/vertex-plan-dictation.backend';
+export { normalisePlanDictationOutput } from './backends/plan-dictation-normalise';
 export * from './live/config';

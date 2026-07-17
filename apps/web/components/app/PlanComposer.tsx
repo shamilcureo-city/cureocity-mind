@@ -12,6 +12,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Input, Label } from '../ui/Field';
+import { VoicePlanEditor } from './VoicePlanEditor';
 
 /**
  * Sprint DS10-B — the plan composer: two plans, one sign-off.
@@ -121,24 +122,29 @@ export function PlanComposer({
     };
   }, [sessionId]);
 
-  // Apply one typed op to the draft pad; the response is the new pad.
-  const patch = useCallback(
-    async (op: RxPadPatchOp, key: string): Promise<boolean> => {
+  // Apply typed ops to the draft pad; the response is the new pad. The PATCH
+  // input caps at 10 ops per request, so larger batches (Sprint DS12 voice
+  // edits) are chunked — each chunk lands atomically and refreshes the pad.
+  const patchOps = useCallback(
+    async (ops: RxPadPatchOp[], key: string): Promise<boolean> => {
+      if (ops.length === 0) return true;
       setBusyKey(key);
       setError(null);
       try {
-        const res = await fetch(`/api/v1/sessions/${sessionId}/rx-pad`, {
-          method: 'PATCH',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ops: [op] }),
-        });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          setError(body.error ?? 'Could not update the plan.');
-          return false;
+        for (let i = 0; i < ops.length; i += 10) {
+          const res = await fetch(`/api/v1/sessions/${sessionId}/rx-pad`, {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ops: ops.slice(i, i + 10) }),
+          });
+          if (!res.ok) {
+            const body = (await res.json().catch(() => ({}))) as { error?: string };
+            setError(body.error ?? 'Could not update the plan.');
+            return false;
+          }
+          const parsed = RxPadResponseSchema.safeParse(await res.json());
+          if (parsed.success) setPadAndNotify(parsed.data.rxPad);
         }
-        const parsed = RxPadResponseSchema.safeParse(await res.json());
-        if (parsed.success) setPadAndNotify(parsed.data.rxPad);
         return true;
       } catch {
         setError('Could not update the plan — check your connection.');
@@ -148,6 +154,11 @@ export function PlanComposer({
       }
     },
     [sessionId, setPadAndNotify],
+  );
+
+  const patch = useCallback(
+    (op: RxPadPatchOp, key: string): Promise<boolean> => patchOps([op], key),
+    [patchOps],
   );
 
   // Best-effort suggestion-lifecycle audit (feeds the DS9 insights funnel).
@@ -228,6 +239,16 @@ export function PlanComposer({
         Dictated orders land on your plan automatically. AI suggestions never enter the prescription
         unless you add them — every adoption is recorded.
       </p>
+
+      {/* Sprint DS12 — speak the change; approve it as a diff. */}
+      {!signed && (
+        <VoicePlanEditor
+          sessionId={sessionId}
+          pad={pad}
+          disabled={busyKey != null}
+          onApply={patchOps}
+        />
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* ------------------------------- Your plan ------------------------------ */}

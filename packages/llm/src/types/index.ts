@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CareReportV1Schema, type CareSessionKind } from '@cureocity/contracts';
+import { PlanDictationV1Schema, type RxPadDraft } from '@cureocity/contracts';
 import {
   AffectFeatureSchema,
   CaseBriefingV1Schema,
@@ -600,6 +601,30 @@ export const PassCareReportOutputSchema = z.object({
 });
 export type PassCareReportOutput = z.infer<typeof PassCareReportOutputSchema>;
 
+// ============================================================================
+// Sprint DS12 — PassPlanDictation. The doctor's spoken plan instruction +
+// the current Rx pad → typed PlanEditCommands (+ clarifications where the
+// model refuses to guess). Flash asia-south1 (the command references the
+// consult's meds — PII posture matches the live passes), temperature 0,
+// interactive latency. Output is proposal-only: a deterministic mapper +
+// the doctor's review tap sit between this pass and any write.
+// ============================================================================
+
+export interface PassPlanDictationInput {
+  sessionId: string;
+  /** The doctor's spoken instruction (ASR transcript, or typed text). */
+  command: string;
+  /** The current draft Rx pad the edits are resolved against. */
+  rxPad: RxPadDraft;
+  /** Output language hint for clarification questions. */
+  language: ClinicalLocale;
+}
+
+export const PassPlanDictationOutputSchema = z.object({
+  dictation: PlanDictationV1Schema,
+});
+export type PassPlanDictationOutput = z.infer<typeof PassPlanDictationOutputSchema>;
+
 export type GeminiPass =
   | 'PASS_1_TRANSCRIBE_AND_ANALYSE'
   | 'PASS_2_NOTE_GENERATION'
@@ -615,6 +640,7 @@ export type GeminiPass =
   | 'PASS_11_REASONING'
   | 'PASS_12_THERAPY_REASONING'
   | 'PASS_13_CARE_REPORT'
+  | 'PASS_14_PLAN_DICTATION'
   | 'LIVE_CARE_SESSION';
 
 export type GeminiCallStatus = 'SUCCESS' | 'ERROR' | 'TIMEOUT' | 'CIRCUIT_OPEN';
@@ -700,6 +726,12 @@ export interface IPassCareReportBackend {
   ): Promise<{ output: PassCareReportOutput; callLog: GeminiCallLogData }>;
 }
 
+export interface IPassPlanDictationBackend {
+  run(
+    input: PassPlanDictationInput,
+  ): Promise<{ output: PassPlanDictationOutput; callLog: GeminiCallLogData }>;
+}
+
 export interface IModelRouter {
   pass1(input: Pass1Input): Promise<{ output: Pass1Output; callLog: GeminiCallLogData }>;
   pass2(input: Pass2Input): Promise<{ output: Pass2Output; callLog: GeminiCallLogData }>;
@@ -724,6 +756,9 @@ export interface IModelRouter {
   passCareReport(
     input: PassCareReportInput,
   ): Promise<{ output: PassCareReportOutput; callLog: GeminiCallLogData }>;
+  passPlanDictation(
+    input: PassPlanDictationInput,
+  ): Promise<{ output: PassPlanDictationOutput; callLog: GeminiCallLogData }>;
 }
 
 // Re-export DTOs that consumers of @cureocity/llm need but don't yet

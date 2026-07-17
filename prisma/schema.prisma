@@ -1087,6 +1087,7 @@ enum GeminiPass {
   PASS_12_THERAPY_REASONING // Sprint TS5 — live therapy copilot (risk + ask-next + threads)
   ASSISTANT_CHAT // AUD1 — practice-assistant chat turns (metered + rate-limited)
   PASS_13_CARE_REPORT // Sprint AC4 — Cureocity Care kind-branched session report
+  PASS_14_PLAN_DICTATION // Sprint DS12 — spoken plan instruction → typed Rx-pad edits
   LIVE_CARE_SESSION // Sprint AC3 — Cureocity Care live voice session (Gemini Live)
 }
 
@@ -2779,6 +2780,7 @@ enum AuditAction {
   CARE_NUDGE_SENT
   CARE_NUDGE_SUPPRESSED
   CARE_HOMEWORK_TICKED
+  PLAN_DICTATION_PROPOSED // Sprint DS12 — voice plan-edit proposal produced (apply lands RX_PAD_EDITED)
 }
 
 enum AuditActorType {
@@ -2876,7 +2878,7 @@ model CareUser {
 
   /// CG6 — gift-a-session: lazily provisioned share code (generosity, not
   /// evangelism — the gift implies the sender is thoughtful, not ill).
-  referralCode String? @unique
+  referralCode String?   @unique
   /// CG6 — graduation is SUCCESS: set when a STEP_DOWN review lands with
   /// reliable improvement. Billing stops proactively; outbound goes silent.
   graduatedAt  DateTime?
@@ -2896,10 +2898,10 @@ model CareUser {
   updatedAt DateTime  @updatedAt
   deletedAt DateTime?
 
-  sessions      CareSession[]
-  carePlans     CarePlan[]
-  checkins      CareCheckin[]
-  instruments   CareInstrumentResponse[]
+  sessions       CareSession[]
+  carePlans      CarePlan[]
+  checkins       CareCheckin[]
+  instruments    CareInstrumentResponse[]
   payments       CarePayment[]
   nudges         CareNudge[]
   homeworkTicks  CareHomeworkTick[]
@@ -2920,9 +2922,9 @@ model CareShareCard {
   careUserId String
 
   /// Public URL token (/care/s/[token]).
-  token String @unique
+  token    String @unique
   /// MILESTONE | VERDICT | GRADUATION
-  kind  String
+  kind     String
   /// Server-built display payload (numbers + labels only, no free text).
   snapshot Json
 
@@ -2947,8 +2949,8 @@ model CareReferral {
   /// SIGNED_UP | INTAKE_DONE
   status String @default("SIGNED_UP")
 
-  createdAt   DateTime  @default(now())
-  creditedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  creditedAt DateTime?
 
   @@index([referrerCareUserId, creditedAt])
   @@map("care_referrals")
@@ -2963,9 +2965,9 @@ model CareSessionCredit {
   id         String @id @default(cuid())
   careUserId String
 
-  grantedAt          DateTime  @default(now())
-  expiresAt          DateTime
-  consumedAt         DateTime?
+  grantedAt           DateTime  @default(now())
+  expiresAt           DateTime
+  consumedAt          DateTime?
   consumedBySessionId String?
 
   careUser CareUser @relation(fields: [careUserId], references: [id], onDelete: Cascade)

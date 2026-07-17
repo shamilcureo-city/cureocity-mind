@@ -20,6 +20,7 @@ export * from './chronic';
 export * from './voice-commands';
 export * from './fhir';
 export * from './rx-edit';
+export * from './plan-edits';
 export * from './reports/session-summary';
 export * from './reports/letter';
 export * from './reports/progress-narrative';

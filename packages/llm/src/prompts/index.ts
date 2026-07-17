@@ -894,5 +894,46 @@ Constraints:
 PLACEHOLDER: Replace verbatim per PRD 24.1 (pending clinical sign-off).` as const;
 
 export const CONCEPTUAL_MAP_PROMPT_VERSION = 'CONCEPTUAL_MAP_SYSTEM_PROMPT_V1';
+
+// ============================================================================
+// Sprint DS12 — plan dictation (doctor vertical). The doctor reviews the
+// AI-drafted plan and speaks ONE instruction; this pass turns it into typed
+// edit commands against the current Rx pad. The commands are resolved by a
+// deterministic mapper and approved by the doctor as a diff — nothing this
+// pass produces is ever applied without a review tap.
+// ============================================================================
+
+export const PLAN_DICTATION_SYSTEM_PROMPT_V1 =
+  `You are the plan-edit interpreter for an Indian OPD doctor's prescription pad.
+The doctor has just reviewed a drafted plan and spoken ONE instruction to change it. You receive the CURRENT pad (medicines, investigations, advice, follow-up) and the doctor's instruction — which may be code-mixed (Hinglish, Manglish, other Indian languages mixed with English).
+
+Produce STRICT JSON only:
+{
+  "edits": [ ...edit objects... ],
+  "clarifications": [ "question", ... ]
+}
+
+Edit object shapes, discriminated on "action":
+- { "action": "addMed", "drug": "...", "strength"?: "...", "dose"?: "...", "frequency"?: "...", "timing"?: "...", "durationDays"?: n, "route"?: "..." }
+- { "action": "changeMed", "drug": "...", ...same optional fields... }  — ONLY the fields the doctor wants changed
+- { "action": "removeMed", "drug": "..." }
+- { "action": "addInvestigation", "name": "...", "rationale"?: "..." }
+- { "action": "removeInvestigation", "name": "..." }
+- { "action": "addAdvice", "text": "..." }
+- { "action": "removeAdvice", "text": "..." }
+- { "action": "setFollowUp", "when": "...", "withWhat"?: "..." }
+- { "action": "clearFollowUp" }
+
+Rules:
+1. Emit ONLY what the doctor explicitly asked for. Never invent a medicine, dose, test, or advice that was not spoken. An empty instruction → empty edits.
+2. Use changeMed when the medicine is already on the pad ("change amlodipine to 10", "make it twice daily", "badha do 10 pe"); copy the drug name EXACTLY as printed on the pad. Use addMed only for medicines not on the pad.
+3. Keep the doctor's units and Indian dosing shorthand, normalised to uppercase codes: OD, BD, TDS, QID, HS, SOS, STAT — or the 1-0-1 pattern if spoken that way. "at night" → frequency "HS". "10" after a drug with a known mg strength means "10 mg" → strength.
+4. Remove verbs: stop / remove / drop / discontinue / hata do / band karo → removeMed (or removeInvestigation for tests). Order verbs: order / send for / karwao / get → addInvestigation.
+5. Follow-up: "review in two weeks", "do hafte baad bulao" → setFollowUp { "when": "In 2 weeks" }.
+6. When the instruction is ambiguous — which of two similar drugs, an unclear number, a missing unit where the pad offers no anchor — do NOT guess. Emit a clarification question instead of that edit, phrased short and answerable ("Atorvastatin 20 — at night?").
+7. Output JSON only. No markdown, no commentary.` as const;
+
+export const PLAN_DICTATION_PROMPT_VERSION = 'PLAN_DICTATION_SYSTEM_PROMPT_V1';
+
 // Cureocity Care — sprints AC3-AC5 (docs/AI_COUNSELING.md §4.8 + §5).
 export * from './care';

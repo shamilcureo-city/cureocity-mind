@@ -120,6 +120,12 @@ export const RxPadPatchOpSchema = z.discriminatedUnion('op', [
   z.object({ op: z.literal('removeMed'), drug: z.string().min(1).max(120) }),
   /** Flip a pending (voice/AI-drafted) med to confirmed — the prescribe tap. */
   z.object({ op: z.literal('confirmMed'), drug: z.string().min(1).max(120) }),
+  /**
+   * Sprint DS12 — flip a confirmed med back to pending. The inverse of
+   * confirmMed; lets the voice-edit Undo restore a removed PENDING row
+   * without silently elevating it to prescribed (nothing auto-prescribes).
+   */
+  z.object({ op: z.literal('unconfirmMed'), drug: z.string().min(1).max(120) }),
   z.object({
     op: z.literal('addInvestigation'),
     source: RxRowSourceSchema,

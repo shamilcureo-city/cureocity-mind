@@ -12,6 +12,7 @@ import {
   MockGeminiPass8Backend,
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
+  MockGeminiPlanDictationBackend,
   MockGeminiReasoningBackend,
   MockGeminiTherapyReasoningBackend,
   ModelRouter,
@@ -22,6 +23,7 @@ import {
   VertexGeminiCareReportBackend,
   VertexGeminiDifferentialBackend,
   VertexGeminiFindingsBackend,
+  VertexGeminiPlanDictationBackend,
   VertexGeminiReasoningBackend,
   VertexGeminiTherapyReasoningBackend,
   VertexGeminiFlashIndiaBackend,
@@ -243,6 +245,16 @@ function build(): IModelRouter {
           process.env['VERTEX_FLASH_MODEL'] ??
           'gemini-2.5-flash',
       }),
+      // Sprint DS12 — plan dictation (voice-edit the plan). Flash in
+      // asia-south1 (DPDP) — interactive latency, temp 0.
+      passPlanDictation: new VertexGeminiPlanDictationBackend({
+        projectId: project,
+        location: flashRegion,
+        model:
+          process.env['VERTEX_PLAN_DICTATION_MODEL'] ??
+          process.env['VERTEX_FLASH_MODEL'] ??
+          'gemini-2.5-flash',
+      }),
     });
   }
   // Reachable only on a local/dev machine — resolveLlmBackend() above throws on
@@ -265,6 +277,7 @@ function build(): IModelRouter {
     passFindings: new MockGeminiFindingsBackend(),
     passReasoning: new MockGeminiReasoningBackend(),
     passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),
+    passPlanDictation: new MockGeminiPlanDictationBackend(),
   });
 }
 
