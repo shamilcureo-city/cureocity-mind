@@ -436,6 +436,13 @@ export const AcceptIntakeDiagnosisInputSchema = z.object({
   candidateIndexes: z.array(z.number().int().nonnegative()).min(1).max(5),
   /** Which of the SELECTED candidates is primary (index into candidateIndexes). */
   primarySelectionIndex: z.number().int().nonnegative().nullable(),
+  /**
+   * ICD-11 codes of currently-active diagnoses (from earlier sessions, NOT in
+   * this brief's differential) that the therapist chose to KEEP. Active rows
+   * whose code is absent here are superseded; kept rows are left untouched. An
+   * empty/absent list preserves the legacy "supersede all active" behaviour.
+   */
+  keepDiagnosisCodes: z.array(z.string().min(1).max(32)).max(10).optional(),
 });
 export type AcceptIntakeDiagnosisInput = z.infer<typeof AcceptIntakeDiagnosisInputSchema>;
 

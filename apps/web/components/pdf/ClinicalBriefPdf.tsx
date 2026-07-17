@@ -175,9 +175,15 @@ export function ClinicalBriefPdf(props: ClinicalBriefPdfProps) {
           <Text style={styles.body}>{report.formulation}</Text>
         </View>
 
-        {/* Treatment plan */}
+        {/* Treatment plan — the AI's suggestion at generation time. This is
+            NOT necessarily the plan of record (the therapist may have edited
+            it before accepting, or accepted a different version). (R0 · A·02) */}
         <View style={styles.section}>
-          <Text style={styles.sectionHeading}>Treatment plan</Text>
+          <Text style={styles.sectionHeading}>Treatment plan — AI suggestion</Text>
+          <Text style={{ fontSize: 8, color: '#888889', marginTop: -4, marginBottom: 6 }}>
+            The AI&rsquo;s suggested plan at the time this brief was generated — not necessarily the
+            confirmed plan of record.
+          </Text>
           <View style={styles.planGrid}>
             <Text style={styles.chip}>Modality: {report.treatmentPlan.modality}</Text>
             <Text style={styles.chip}>

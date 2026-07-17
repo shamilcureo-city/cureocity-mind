@@ -80,13 +80,26 @@ export async function POST(
 
   const confirmedAt = new Date();
   const createdIds: string[] = [];
+  const keepCodes = body.value.keepDiagnosisCodes ?? [];
   await prisma.$transaction(async (tx) => {
-    // Same correctness model as the sections route: each confirmation
-    // rebuilds the client's active diagnosis set from what was accepted.
+    // Rebuild the client's active diagnosis set from (accepted candidates ∪
+    // kept rows). Kept codes are comorbid diagnoses from earlier sessions the
+    // therapist chose to preserve; an empty list reproduces the legacy
+    // supersede-everything behaviour.
     await tx.clientDiagnosis.updateMany({
-      where: { clientId: report.clientId, supersededAt: null },
+      where: {
+        clientId: report.clientId,
+        supersededAt: null,
+        ...(keepCodes.length > 0 ? { icd11Code: { notIn: keepCodes } } : {}),
+      },
       data: { supersededAt: confirmedAt },
     });
+    if (primarySel !== null && keepCodes.length > 0) {
+      await tx.clientDiagnosis.updateMany({
+        where: { clientId: report.clientId, supersededAt: null, icd11Code: { in: keepCodes } },
+        data: { isPrimary: false },
+      });
+    }
     for (let i = 0; i < selected.length; i++) {
       const candidate = selected[i]!;
       const created = await tx.clientDiagnosis.create({

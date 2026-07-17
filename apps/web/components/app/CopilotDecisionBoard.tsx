@@ -257,12 +257,20 @@ export function CopilotDecisionBoard({
   );
 
   const acceptIntakeDiagnosis = useCallback(
-    async (candidateIndexes: number[], primarySelectionIndex: number | null): Promise<void> => {
+    async (
+      candidateIndexes: number[],
+      primarySelectionIndex: number | null,
+      keepCodes: string[],
+    ): Promise<void> => {
       if (!report) throw new Error('No report to confirm against.');
       const res = await fetch(`/api/v1/clinical-reports/${report.id}/intake-diagnosis`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidateIndexes, primarySelectionIndex }),
+        body: JSON.stringify({
+          candidateIndexes,
+          primarySelectionIndex,
+          keepDiagnosisCodes: keepCodes,
+        }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
@@ -285,6 +293,16 @@ export function CopilotDecisionBoard({
     },
     [report, router],
   );
+
+  const acceptIntakeCrisis = useCallback(async (): Promise<void> => {
+    if (!report) throw new Error('No report to acknowledge against.');
+    const res = await fetch(`/api/v1/clinical-reports/${report.id}/intake-crisis`, {
+      method: 'POST',
+    });
+    const payload = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+    router.refresh();
+  }, [report, router]);
 
   const finishReview = useCallback(async (): Promise<void> => {
     if (!report) throw new Error('No report to finish.');
@@ -346,7 +364,12 @@ export function CopilotDecisionBoard({
 
   const confirmations = report?.confirmations ?? null;
   const highest = highestCrisisSeverity(data.crisisFlags);
-  const crisisAcknowledged = isIntake || confirmations?.crisis.status !== 'PENDING';
+  // Both kinds gate on an unacknowledged high/critical flag. Intake used to
+  // skip the gate entirely (the highest-risk first contact had the weakest
+  // safety step); it now lifts only when the crisis section is acknowledged
+  // OR a safety plan is already on file. (R0 · finding D·18)
+  const crisisConfirmed = confirmations != null && confirmations.crisis.status !== 'PENDING';
+  const crisisAcknowledged = crisisConfirmed || (isIntake && record.safetyPlanConfirmedAt !== null);
   const crisisBlocking =
     !crisisAcknowledged &&
     data.crisisFlags.length > 0 &&
@@ -386,7 +409,9 @@ export function CopilotDecisionBoard({
             isIntake={isIntake}
             confirmation={confirmations?.crisis ?? null}
             safetyPlanConfirmedAt={record.safetyPlanConfirmedAt}
-            onAcknowledge={() => patchSection('crisis', { action: 'accept' })}
+            onAcknowledge={
+              isIntake ? acceptIntakeCrisis : () => patchSection('crisis', { action: 'accept' })
+            }
           />
 
           <div className={crisisBlocking ? 'space-y-4 opacity-40' : 'space-y-4'}>
@@ -399,16 +424,16 @@ export function CopilotDecisionBoard({
                 impression={data.impression}
                 fullFormulation={data.fullFormulation}
                 candidates={data.candidates}
-                primaryIndex={data.primaryIndex}
                 confirmation={confirmations?.diagnosis ?? null}
                 recordDiagnoses={record.diagnoses}
-                onAcceptTreatment={(selected, primaryInSelected, reason) =>
+                onAcceptTreatment={(selected, primaryInSelected, reason, keepCodes) =>
                   patchSection('diagnosis', {
                     action: 'modify',
                     reason,
                     edits: {
                       diagnosisCandidates: selected,
                       primaryDiagnosisIndex: primaryInSelected,
+                      keepDiagnosisCodes: keepCodes,
                     },
                   })
                 }
@@ -435,6 +460,7 @@ export function CopilotDecisionBoard({
                 therapies={data.therapies}
                 confirmation={confirmations?.plan ?? null}
                 recordPlan={record.plan}
+                planHref={`/app/sessions/${sessionId}?tab=copilot&sub=plan`}
                 onAccept={() => patchSection('plan', { action: 'accept' })}
                 onModify={(edits, reason) =>
                   patchSection('plan', { action: 'modify', reason, edits })
@@ -467,7 +493,15 @@ export function CopilotDecisionBoard({
         </div>
 
         {/* ================= Your record lane ================= */}
-        <div className="space-y-2 lg:sticky lg:top-4">
+        {/* Dimmed under an unacknowledged high/critical flag so the therapist
+            can't skip ahead to the record's other decisions. (R0 · D·18) */}
+        <div
+          className={
+            crisisBlocking
+              ? 'pointer-events-none select-none space-y-2 opacity-40 lg:sticky lg:top-4'
+              : 'space-y-2 lg:sticky lg:top-4'
+          }
+        >
           <LaneLabel>Your case record — what you've decided</LaneLabel>
           <RecordLane record={record} crisisFlags={data.crisisFlags} measuresHref={measuresHref} />
         </div>
@@ -684,12 +718,19 @@ function SafetyStep({
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {isIntake ? (
-          safetyPlanConfirmedAt ? (
+          acknowledged ? (
+            <DoneChip>Safety reviewed {formatDate(confirmation.confirmedAt)}</DoneChip>
+          ) : safetyPlanConfirmedAt ? (
             <DoneChip>Safety plan on file · {formatDate(safetyPlanConfirmedAt)}</DoneChip>
           ) : (
-            <p className="text-xs text-[var(--color-ink-3)]">
-              No safety plan on file yet — build one with the client before they leave.
-            </p>
+            <>
+              <Act primary onClick={() => void acknowledge()} disabled={busy}>
+                {busy ? 'Saving…' : 'Acknowledge safety review'}
+              </Act>
+              <span className="text-xs text-[var(--color-ink-3)]">
+                Build a safety plan with the client before they leave.
+              </span>
+            </>
           )
         ) : acknowledged ? (
           <DoneChip>Reviewed {formatDate(confirmation.confirmedAt)}</DoneChip>
@@ -714,7 +755,6 @@ function ImpressionStep({
   impression,
   fullFormulation,
   candidates,
-  primaryIndex,
   confirmation,
   recordDiagnoses,
   onAcceptTreatment,
@@ -725,26 +765,36 @@ function ImpressionStep({
   impression: string;
   fullFormulation: string | null;
   candidates: ClinicalDiagnosisCandidate[];
-  primaryIndex: number | null;
   confirmation: ClinicalSectionConfirmation | null;
   recordDiagnoses: RecordDiagnosis[];
   onAcceptTreatment: (
     selected: ClinicalDiagnosisCandidate[],
     primaryInSelected: number | null,
     reason: string,
+    keepCodes: string[],
   ) => Promise<void>;
   onAcceptIntake: (
     candidateIndexes: number[],
     primarySelectionIndex: number | null,
+    keepCodes: string[],
   ) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  // Treatment defaults to the AI's full slate (matching the old accept-all);
-  // intake starts empty — the therapist owns what enters the record.
-  const [selected, setSelected] = useState<Set<number>>(
-    () => new Set(isIntake ? [] : candidates.map((_, i) => i)),
+  // Both kinds start empty — the therapist owns exactly what enters the
+  // record; nothing is accepted by a habitual click. (R0 · finding C·19)
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [primary, setPrimary] = useState<number | null>(null);
+
+  // Carryover: diagnoses already active on the record whose ICD-11 code is NOT
+  // in today's candidate list — comorbid diagnoses from earlier sessions.
+  // Accepting rebuilds the active set, so unless these are explicitly KEPT they
+  // are silently retired. Show them as pre-ticked keep-rows. (R0 · C·19)
+  const candidateCodes = useMemo(() => new Set(candidates.map((c) => c.icd11Code)), [candidates]);
+  const carryover = useMemo(
+    () => recordDiagnoses.filter((d) => !candidateCodes.has(d.icd11Code)),
+    [recordDiagnoses, candidateCodes],
   );
-  const [primary, setPrimary] = useState<number | null>(primaryIndex);
+  const [kept, setKept] = useState<Set<string>>(() => new Set(carryover.map((d) => d.icd11Code)));
   const [dismissed, setDismissed] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -771,13 +821,22 @@ function ImpressionStep({
         if (rec.isPrimary) prim = i;
       }
     });
-    // Fall back to the AI slate if nothing in the record matches a candidate.
-    setSelected(sel.size > 0 ? sel : new Set(isIntake ? [] : candidates.map((_, i) => i)));
-    setPrimary(sel.size > 0 ? prim : primaryIndex);
+    // Start from what the record says today; nothing pre-selected otherwise.
+    setSelected(sel);
+    setPrimary(sel.size > 0 ? prim : null);
+    setKept(new Set(carryover.map((d) => d.icd11Code)));
     setDismissed(new Set());
     setError(null);
     setReopened(true);
   };
+
+  const toggleKeep = (code: string) =>
+    setKept((s) => {
+      const next = new Set(s);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
 
   const toggleExpand = (i: number) =>
     setExpanded((s) => {
@@ -815,6 +874,9 @@ function ImpressionStep({
     });
   };
 
+  const keptCodes = carryover.filter((d) => kept.has(d.icd11Code)).map((d) => d.icd11Code);
+  const retiring = carryover.filter((d) => !kept.has(d.icd11Code));
+
   const accept = async () => {
     const selectedIdxs = candidates.map((_, i) => i).filter((i) => selected.has(i));
     if (selectedIdxs.length === 0) return;
@@ -823,12 +885,15 @@ function ImpressionStep({
     setError(null);
     try {
       if (isIntake) {
-        await onAcceptIntake(selectedIdxs, primaryPos >= 0 ? primaryPos : null);
+        await onAcceptIntake(selectedIdxs, primaryPos >= 0 ? primaryPos : null, keptCodes);
       } else {
+        const retiredNote =
+          retiring.length > 0 ? `; retired ${retiring.length} prior active diagnosis(es)` : '';
         await onAcceptTreatment(
           selectedIdxs.map((i) => candidates[i]!),
           primaryPos >= 0 ? primaryPos : null,
-          `Decision board: accepted ${selectedIdxs.length} of ${candidates.length} candidate(s) as the working diagnosis.`,
+          `Decision board: accepted ${selectedIdxs.length} of ${candidates.length} candidate(s) as the working diagnosis${retiredNote}.`,
+          keptCodes,
         );
       }
       setReopened(false);
@@ -984,6 +1049,58 @@ function ImpressionStep({
         </button>
       )}
 
+      {/* Carryover — active diagnoses from earlier sessions not in today's
+          candidates. Pre-ticked to KEEP; untick to retire on this accept.
+          Without this, accepting silently wiped comorbid diagnoses. (R0 · C·19) */}
+      {carryover.length > 0 && !done && (
+        <div className="mt-3 rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+          <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--color-ink-3)]">
+            Already in the record — keep or retire
+          </p>
+          <div className="space-y-1.5">
+            {carryover.map((d) => {
+              const keep = kept.has(d.icd11Code);
+              return (
+                <label
+                  key={d.icd11Code}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg border p-2.5 ${
+                    keep
+                      ? 'border-[var(--color-line)] bg-white/60'
+                      : 'border-dashed border-[var(--color-warn-border)] bg-[var(--color-warn-bg)]/40'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={keep}
+                    onChange={() => toggleKeep(d.icd11Code)}
+                    className="accent-[var(--color-accent)]"
+                    aria-label={`Keep ${d.icd11Code} ${d.icd11Label}`}
+                  />
+                  <span className="flex-none rounded-md bg-[var(--color-surface-soft)] px-1.5 py-0.5 font-mono text-xs font-bold text-[var(--color-ink-2)]">
+                    {d.icd11Code}
+                  </span>
+                  <span className="min-w-0 flex-1 text-[13px] font-medium">
+                    {d.icd11Label}
+                    {d.isPrimary && (
+                      <span className="ml-2 align-middle">
+                        <Badge tone="accent">primary</Badge>
+                      </span>
+                    )}
+                  </span>
+                  <span
+                    className={`flex-none text-[11px] font-medium ${
+                      keep ? 'text-[var(--color-ink-3)]' : 'text-[var(--color-warn)]'
+                    }`}
+                  >
+                    {keep ? 'keeping' : 'will retire'}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         {done ? (
           <>
@@ -1008,9 +1125,9 @@ function ImpressionStep({
                 </Act>
               )}
               <span className="text-[11px] text-[var(--color-ink-3)]">
-                {reopened
-                  ? 'Re-accepting supersedes the prior diagnosis; history is kept.'
-                  : 'Accepted diagnoses persist to the client’s record; prior active ones are superseded.'}
+                {retiring.length > 0
+                  ? `Accepting adds your selection and retires ${retiring.length} unkept diagnosis(es); history is kept.`
+                  : 'Accepting adds your selection to the record; kept diagnoses stay active.'}
               </span>
             </>
           )
@@ -1260,6 +1377,7 @@ function PlanStep({
   therapies,
   confirmation,
   recordPlan,
+  planHref,
   onAccept,
   onModify,
   onDraftPlan,
@@ -1271,6 +1389,8 @@ function PlanStep({
   /// The client's active plan (right-lane truth). On intakes, its presence
   /// means "plan v1 already drafted".
   recordPlan: RecordPlan | null;
+  /// Link to the Plan tab where the plan of record lives + is editable.
+  planHref: string;
   onAccept: () => Promise<void>;
   onModify: (edits: unknown, reason: string) => Promise<void>;
   /// Intake only — create/replace treatment-plan v1 from the drafted plan.
@@ -1313,12 +1433,11 @@ function PlanStep({
     );
   }
 
-  return (
-    <Step
-      no={4}
-      title="Suggested plan"
-      sub="Accepting versions this client's treatment plan — yours to edit, and every future session builds on it."
-    >
+  // The AI's suggested plan detail. Shown live before a decision; collapsed
+  // behind a disclosure once the plan is in the record, so the step never
+  // presents the AI suggestion AS the plan of record. (R0 · finding A·02)
+  const aiPlanDetail = (
+    <>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
         <div>
           <dt className="text-[11px] uppercase tracking-wide text-[var(--color-ink-3)]">
@@ -1367,8 +1486,61 @@ function PlanStep({
           </div>
         </details>
       )}
+    </>
+  );
 
-      {editing && !confirmed ? (
+  if (confirmed) {
+    return (
+      <Step
+        no={4}
+        title="Plan update"
+        sub="This session's plan decision is in your record — the plan itself lives on the Plan tab."
+      >
+        <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-accent-soft)] p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">
+              {recordPlan
+                ? `Plan v${recordPlan.version} is in your record`
+                : 'Plan is in your record'}
+              {recordPlan && (
+                <span className="ml-2 text-xs font-normal capitalize text-[var(--color-ink-3)]">
+                  {recordPlan.modality} · {recordPlan.goalCount} goal
+                  {recordPlan.goalCount === 1 ? '' : 's'} ·{' '}
+                  <span className="lowercase">{confirmation!.status.toLowerCase()}</span>{' '}
+                  {formatDate(confirmation!.confirmedAt)}
+                </span>
+              )}
+            </p>
+            <a href={planHref} className="text-xs font-semibold text-[var(--color-accent)]">
+              View &amp; edit on the Plan tab →
+            </a>
+          </div>
+          {confirmation!.status === 'MODIFIED' && (
+            <p className="mt-1.5 text-xs text-[var(--color-ink-2)]">
+              You edited this before accepting — your saved plan may differ from the AI's original
+              suggestion below.
+            </p>
+          )}
+        </div>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs font-medium text-[var(--color-accent)]">
+            What the AI suggested for this session
+          </summary>
+          <div className="mt-2">{aiPlanDetail}</div>
+        </details>
+      </Step>
+    );
+  }
+
+  return (
+    <Step
+      no={4}
+      title="Suggested plan"
+      sub="Accepting versions this client's treatment plan — yours to edit, and every future session builds on it."
+    >
+      {aiPlanDetail}
+
+      {editing ? (
         <div className="mt-3.5">
           <PlanEditor
             initialPlan={plan}
@@ -1383,21 +1555,12 @@ function PlanStep({
         </div>
       ) : (
         <div className="mt-3.5 flex flex-wrap items-center gap-2">
-          {confirmed ? (
-            <DoneChip>
-              In your record — {confirmation!.status.toLowerCase()}{' '}
-              {formatDate(confirmation!.confirmedAt)}
-            </DoneChip>
-          ) : (
-            <>
-              <Act primary onClick={() => void accept()} disabled={busy !== null}>
-                {busy === 'accept' ? 'Saving…' : 'Accept into plan'}
-              </Act>
-              <Act onClick={() => setEditing(true)} disabled={busy !== null}>
-                Edit &amp; accept
-              </Act>
-            </>
-          )}
+          <Act primary onClick={() => void accept()} disabled={busy !== null}>
+            {busy === 'accept' ? 'Saving…' : 'Accept into plan'}
+          </Act>
+          <Act onClick={() => setEditing(true)} disabled={busy !== null}>
+            Edit &amp; accept
+          </Act>
           {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
         </div>
       )}

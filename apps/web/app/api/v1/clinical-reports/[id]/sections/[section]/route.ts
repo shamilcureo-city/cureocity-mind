@@ -214,6 +214,10 @@ function parseSectionEdits(section: ClinicalSectionKey, edits: unknown): EditsRe
       schema = z.object({
         diagnosisCandidates: z.array(ClinicalDiagnosisCandidateSchema).min(0).max(5),
         primaryDiagnosisIndex: z.number().int().nonnegative().nullable(),
+        // ICD-11 codes of currently-active diagnoses (not in this session's
+        // candidate list) the therapist chose to KEEP. Absent/empty preserves
+        // the legacy "supersede every active diagnosis" behaviour.
+        keepDiagnosisCodes: z.array(z.string().min(1).max(32)).max(10).optional(),
       });
       break;
     case 'gaps':
@@ -265,16 +269,24 @@ function resolveDiagnosisBody(
 ): {
   diagnosisCandidates: ClinicalReportV1['diagnosisCandidates'];
   primaryDiagnosisIndex: number | null;
+  keepDiagnosisCodes: string[];
 } {
   if (edits && typeof edits === 'object' && 'diagnosisCandidates' in edits) {
-    return edits as {
+    const e = edits as {
       diagnosisCandidates: ClinicalReportV1['diagnosisCandidates'];
       primaryDiagnosisIndex: number | null;
+      keepDiagnosisCodes?: string[];
+    };
+    return {
+      diagnosisCandidates: e.diagnosisCandidates,
+      primaryDiagnosisIndex: e.primaryDiagnosisIndex,
+      keepDiagnosisCodes: e.keepDiagnosisCodes ?? [],
     };
   }
   return {
     diagnosisCandidates: report.diagnosisCandidates,
     primaryDiagnosisIndex: report.primaryDiagnosisIndex,
+    keepDiagnosisCodes: [],
   };
 }
 
@@ -306,6 +318,7 @@ async function applyDiagnosisConfirmation(args: {
   diagnosisBody: {
     diagnosisCandidates: ClinicalReportV1['diagnosisCandidates'];
     primaryDiagnosisIndex: number | null;
+    keepDiagnosisCodes: string[];
   };
   confirmedAt: Date;
   psychologistId: string;
@@ -314,17 +327,32 @@ async function applyDiagnosisConfirmation(args: {
   const { tx, report, diagnosisBody, confirmedAt, psychologistId, req } = args;
   if (diagnosisBody.diagnosisCandidates.length === 0) return;
 
-  // Supersede prior active diagnoses for this client. This is the
-  // simplest correctness model: each diagnosis-confirmation rebuilds
-  // the client's active diagnosis set from the candidates in the
-  // confirmed section. The therapist can re-edit + re-confirm to
-  // refine.
+  // Supersede prior active diagnoses — but preserve the ones the therapist
+  // explicitly chose to KEEP (comorbid diagnoses from earlier sessions that
+  // aren't in today's candidate list). This confirmation rebuilds the active
+  // set from (accepted candidates ∪ kept rows). An empty keep list reproduces
+  // the legacy "supersede everything" behaviour. Kept codes never overlap
+  // candidate codes (the UI derives keep = active − candidates), so a matching
+  // candidate still supersedes+recreates its own prior row.
+  const keepCodes = diagnosisBody.keepDiagnosisCodes;
   await tx.clientDiagnosis.updateMany({
-    where: { clientId: report.clientId, supersededAt: null },
+    where: {
+      clientId: report.clientId,
+      supersededAt: null,
+      ...(keepCodes.length > 0 ? { icd11Code: { notIn: keepCodes } } : {}),
+    },
     data: { supersededAt: confirmedAt },
   });
 
   const primaryIdx = diagnosisBody.primaryDiagnosisIndex;
+  // If a newly-accepted candidate is primary, demote any kept row that was
+  // primary so the client keeps exactly one primary diagnosis.
+  if (primaryIdx !== null && keepCodes.length > 0) {
+    await tx.clientDiagnosis.updateMany({
+      where: { clientId: report.clientId, supersededAt: null, icd11Code: { in: keepCodes } },
+      data: { isPrimary: false },
+    });
+  }
   for (let i = 0; i < diagnosisBody.diagnosisCandidates.length; i++) {
     const candidate = diagnosisBody.diagnosisCandidates[i]!;
     const created = await tx.clientDiagnosis.create({

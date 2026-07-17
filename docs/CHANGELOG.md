@@ -6,6 +6,39 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-17 — Copilot IA redesign · R0 (clinical-safety fixes)
+
+First phase of the therapist-copilot information-architecture redesign
+(from the 17 Jul UX audit). R0 fixes three verified clinical-safety
+defects in the decision board, independent of the wider IA rework:
+
+- **Intake sessions now gate on crisis flags (D·18).** A high/critical
+  safety flag on a first-ever session used to leave the whole board
+  interactive (`crisisAcknowledged` was hardcoded `true` for intake) with
+  no acknowledge action and no `CRISIS_ACKNOWLEDGED` audit. Intake now
+  gates steps 2-6 (and the record rail) until the therapist either has a
+  safety plan on file or explicitly acknowledges — via the new
+  `POST /clinical-reports/[id]/intake-crisis` route (the shared sections
+  route can't confirm crisis on an intake, whose body is an
+  `InitialAssessmentBriefV1`, not a `ClinicalReportV1`). Reuses the
+  existing `CLINICAL_SECTION_CONFIRMED` + `CRISIS_ACKNOWLEDGED` audits.
+- **Accepting a diagnosis no longer silently wipes comorbid ones (C·19).**
+  The accept used to supersede _every_ active `ClientDiagnosis` and rebuild
+  from the session's candidates, so a comorbid diagnosis from an earlier
+  session (not in today's list) vanished unseen. The board now shows those
+  as pre-ticked "Already in the record — keep or retire" rows; only unticked
+  rows are superseded (new optional `keepDiagnosisCodes` on the sections +
+  intake-diagnosis write paths, empty = legacy behaviour). Treatment
+  selection also starts **empty** (was pre-select-all), so no habitual click
+  rewrites the record. Honest copy names what will be retired.
+- **The board no longer shows the AI's plan as the plan of record (A·02).**
+  Once the plan section is confirmed, step 4 becomes "Plan update": it shows
+  the record plan (version, modality, goal count) with a link to the Plan
+  tab, flags when an "Edit & accept" made the saved plan differ, and
+  collapses the AI's original suggestion behind a disclosure. The Clinical
+  Brief PDF's plan section is retitled "Treatment plan — AI suggestion" with
+  a caption clarifying it isn't necessarily the plan of record.
+
 ## 2026-07-17 — Care "Proper Psychologist" plan (CP1–CP8) — design doc
 
 `docs/CARE_PSYCHOLOGIST.md` added: the audited diagnosis of why Care
