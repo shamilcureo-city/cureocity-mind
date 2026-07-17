@@ -11,6 +11,7 @@ const baseNote: TherapyNoteV1 = {
   plan: 'Continue thought records; introduce graded exposure.',
   riskFlags: { severity: 'none', indicators: [] },
   phaseHints: [{ phase: 'behavioral_activation', confidence: 0.7, rationale: 'goals met' }],
+  linkedEvidence: [],
 };
 
 describe('renderSessionNoteHtml', () => {

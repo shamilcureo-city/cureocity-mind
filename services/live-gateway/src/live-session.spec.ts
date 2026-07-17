@@ -4,6 +4,7 @@ import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
   MockGeminiReasoningBackend,
+  MockGeminiTherapyReasoningBackend,
   type GeminiCallLogData,
   type IPass1Backend,
   type IPassReasoningBackend,
@@ -41,6 +42,7 @@ function mockBackends(): LiveBackends {
     pass1: new MockGeminiPass1Backend(),
     pass2: new MockGeminiPass2Backend(),
     reasoning: new MockGeminiReasoningBackend(),
+    therapyReasoning: new MockGeminiTherapyReasoningBackend(),
   };
 }
 
@@ -293,6 +295,7 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
         pass1: new MockGeminiPass1Backend(),
         pass2: new MockGeminiPass2Backend(),
         reasoning: new ScriptedReasoning(),
+        therapyReasoning: new MockGeminiTherapyReasoningBackend(),
       },
       (e) => events.push(e),
       OPTS,
@@ -358,6 +361,7 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
         pass2: interim,
         pass2Final: final,
         reasoning: new MockGeminiReasoningBackend(),
+        therapyReasoning: new MockGeminiTherapyReasoningBackend(),
       },
       (e) => events.push(e),
       OPTS,
@@ -407,6 +411,7 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
         pass1: new MockGeminiPass1Backend(),
         pass2: interim,
         reasoning: new MockGeminiReasoningBackend(),
+        therapyReasoning: new MockGeminiTherapyReasoningBackend(),
       },
       (e) => events.push(e),
       OPTS,
@@ -459,6 +464,7 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
         pass1: new ScriptedPass1('now with sudden chest pain radiating to the arm'),
         pass2: new MockGeminiPass2Backend(),
         reasoning: new MockGeminiReasoningBackend(),
+        therapyReasoning: new MockGeminiTherapyReasoningBackend(),
       },
       (e) => {
         expect(LiveGatewayEventSchema.safeParse(e).success).toBe(true);
@@ -498,6 +504,7 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
         pass1: new CountingPass1(),
         pass2: new MockGeminiPass2Backend(),
         reasoning: new MockGeminiReasoningBackend(),
+        therapyReasoning: new MockGeminiTherapyReasoningBackend(),
       },
       (e) => events.push(e),
       OPTS,

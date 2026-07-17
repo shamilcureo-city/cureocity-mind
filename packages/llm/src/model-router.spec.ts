@@ -12,6 +12,9 @@ import {
   MockGeminiDifferentialBackend,
   MockGeminiFindingsBackend,
   MockGeminiReasoningBackend,
+  MockGeminiTherapyReasoningBackend,
+  MockGeminiCareReportBackend,
+  MockGeminiPlanDictationBackend,
 } from './backends/mock-gemini.backend';
 import {
   computeCostInr,
@@ -36,6 +39,9 @@ describe('ModelRouter', () => {
       passDifferential: new MockGeminiDifferentialBackend(),
       passFindings: new MockGeminiFindingsBackend(),
       passReasoning: new MockGeminiReasoningBackend(),
+      passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),
+      passCareReport: new MockGeminiCareReportBackend(),
+      passPlanDictation: new MockGeminiPlanDictationBackend(),
       onCallLog,
     });
 
@@ -104,6 +110,9 @@ describe('ModelRouter', () => {
       passDifferential: new MockGeminiDifferentialBackend(),
       passFindings: new MockGeminiFindingsBackend(),
       passReasoning: new MockGeminiReasoningBackend(),
+      passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),
+      passCareReport: new MockGeminiCareReportBackend(),
+      passPlanDictation: new MockGeminiPlanDictationBackend(),
     });
     const r = await router.pass1({
       sessionId: 's_lang_default',
@@ -127,6 +136,9 @@ describe('ModelRouter', () => {
       passDifferential: new MockGeminiDifferentialBackend(),
       passFindings: new MockGeminiFindingsBackend(),
       passReasoning: new MockGeminiReasoningBackend(),
+      passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),
+      passCareReport: new MockGeminiCareReportBackend(),
+      passPlanDictation: new MockGeminiPlanDictationBackend(),
     });
     const r = await router.pass1({
       sessionId: 's_lang_manglish',
@@ -152,6 +164,9 @@ describe('ModelRouter', () => {
       passDifferential: new MockGeminiDifferentialBackend(),
       passFindings: new MockGeminiFindingsBackend(),
       passReasoning: new MockGeminiReasoningBackend(),
+      passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),
+      passCareReport: new MockGeminiCareReportBackend(),
+      passPlanDictation: new MockGeminiPlanDictationBackend(),
     });
     // The mock backend itself produces a deterministic English script,
     // but the routing layer must accept the new field without errors.
@@ -176,6 +191,9 @@ describe('ModelRouter', () => {
       passDifferential: new MockGeminiDifferentialBackend(),
       passFindings: new MockGeminiFindingsBackend(),
       passReasoning: new MockGeminiReasoningBackend(),
+      passTherapyReasoning: new MockGeminiTherapyReasoningBackend(),
+      passCareReport: new MockGeminiCareReportBackend(),
+      passPlanDictation: new MockGeminiPlanDictationBackend(),
     });
     const result = await router.pass1({
       sessionId: 's_2',
