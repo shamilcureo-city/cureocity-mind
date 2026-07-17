@@ -169,6 +169,40 @@ export const ClinicalTreatmentPlanSchema = z.object({
 export type ClinicalTreatmentPlan = z.infer<typeof ClinicalTreatmentPlanSchema>;
 
 // ============================================================================
+// Plan-as-diff (copilot IA redesign R3). On a FOLLOW-UP session (an active
+// TreatmentPlan already exists), Pass 3 may propose specific EDITS to that
+// plan instead of a whole competing plan — each a typed diff with a one-line
+// rationale. Purely OPTIONAL + ADDITIVE: older reports (and any AI response
+// that omits the field) default to [], and the board falls back to the full
+// `treatmentPlan` flow, so there is no possible regression. The board applies
+// one suggestion at a time via the plan-suggestion route → a new plan version.
+// ============================================================================
+
+export const ClinicalPlanSuggestionTypeSchema = z.enum([
+  'ADD_GOAL',
+  'REVISE_GOAL',
+  'REMOVE_GOAL',
+  'ADJUST_DURATION',
+  'CHANGE_MODALITY',
+]);
+export type ClinicalPlanSuggestionType = z.infer<typeof ClinicalPlanSuggestionTypeSchema>;
+
+export const ClinicalPlanSuggestionSchema = z.object({
+  type: ClinicalPlanSuggestionTypeSchema,
+  /** One-line clinical rationale for this edit. */
+  rationale: z.string().min(1).max(500),
+  /** ADD_GOAL: the new goal. REVISE_GOAL: the replacement goal. */
+  goal: ClinicalGoalSchema.nullable().default(null),
+  /** REVISE_GOAL / REMOVE_GOAL: index into the active plan's `goals`. */
+  goalIndex: z.number().int().nonnegative().nullable().default(null),
+  /** ADJUST_DURATION: the new expected session count. */
+  expectedDurationSessions: z.number().int().min(1).max(60).nullable().default(null),
+  /** CHANGE_MODALITY: the new modality. */
+  modality: ClinicalPlanModalitySchema.nullable().default(null),
+});
+export type ClinicalPlanSuggestion = z.infer<typeof ClinicalPlanSuggestionSchema>;
+
+// ============================================================================
 // Recommended therapy — a named technique the AI thinks fits this
 // client. Pass 4 (Sprint 14) generates an in-session script for any
 // chosen name; the rationale + when-in-plan help the therapist pick.
@@ -235,6 +269,13 @@ export const ClinicalReportV1Schema = z.object({
   /** 3-6 sentence case-formulation narrative. */
   formulation: z.string().min(1).max(4000),
   treatmentPlan: ClinicalTreatmentPlanSchema,
+  /**
+   * Plan-as-diff (R3). On a follow-up session, edits proposed to the client's
+   * ACTIVE plan rather than a whole new plan. Optional + additive — empty on
+   * intakes, first plans, and any response that omits it (the board then uses
+   * the full `treatmentPlan` flow).
+   */
+  planSuggestions: z.array(ClinicalPlanSuggestionSchema).max(6).default([]),
   recommendedTherapies: z.array(ClinicalRecommendedTherapySchema).min(0).max(8),
   crisisFlags: z.array(ClinicalCrisisFlagSchema).default([]),
 });
@@ -431,6 +472,15 @@ export type ConfirmClinicalSectionInput = z.infer<typeof ConfirmClinicalSectionI
 /// through the sections route above; intakes have no plan/section
 /// confirmations, so this is the intake-shaped equivalent.
 /// POST /api/v1/clinical-reports/[id]/intake-diagnosis
+/// Apply ONE plan suggestion (a diff from a follow-up report) to the client's
+/// active plan, producing a new plan version.
+/// POST /api/v1/clinical-reports/[id]/plan-suggestion
+export const AcceptPlanSuggestionInputSchema = z.object({
+  /** Index into the report's `planSuggestions` array. */
+  suggestionIndex: z.number().int().nonnegative(),
+});
+export type AcceptPlanSuggestionInput = z.infer<typeof AcceptPlanSuggestionInputSchema>;
+
 export const AcceptIntakeDiagnosisInputSchema = z.object({
   /** Indexes into the brief's `differential` array. */
   candidateIndexes: z.array(z.number().int().nonnegative()).min(1).max(5),

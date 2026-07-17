@@ -543,6 +543,33 @@ export class MockGeminiPass3Backend implements IPass3Backend {
           ],
           expectedDurationSessions: 12,
         },
+        // Plan-as-diff (R3): on a follow-up (a prior plan exists) the mock
+        // proposes a couple of concrete edits so the plan-suggestion UX has
+        // something to render offline. First plans emit none.
+        planSuggestions: input.clientContext.priorTreatmentPlan
+          ? [
+              {
+                type: 'ADD_GOAL',
+                rationale:
+                  '[mock] The current goal is nearly met; add a durability goal before consolidation.',
+                goal: {
+                  description: 'Sustain the gain across two consecutive administrations',
+                  measure: 'Screener stays in range at two administrations ≥ 2 weeks apart',
+                },
+                goalIndex: null,
+                expectedDurationSessions: null,
+                modality: null,
+              },
+              {
+                type: 'ADJUST_DURATION',
+                rationale: '[mock] Progress is ahead of schedule; a shorter course is realistic.',
+                goal: null,
+                goalIndex: null,
+                expectedDurationSessions: 10,
+                modality: null,
+              },
+            ]
+          : [],
         recommendedTherapies: [
           {
             name: 'Cognitive Restructuring',

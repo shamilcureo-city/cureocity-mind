@@ -762,6 +762,7 @@ function buildClinicalReport(): ClinicalReportV1 {
     formulation:
       'Moderate depressive episode in the context of work-stress and post-relationship adjustment, responding well to behavioural activation and cognitive restructuring. Engagement strong, outcome trend favourable, no current safety concerns.',
     treatmentPlan: buildTreatmentPlan(),
+    planSuggestions: [],
     recommendedTherapies: [
       {
         name: 'Behavioural Activation',

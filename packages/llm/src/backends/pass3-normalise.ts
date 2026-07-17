@@ -169,12 +169,58 @@ function normalisePurpose(raw: unknown): string | undefined {
   return PURPOSE_SYNONYMS[key];
 }
 
+// ============================================================================
+// Copilot IA redesign (R3) — plan-suggestion normalisation.
+//
+// planSuggestions is OPTIONAL and additive. A drifted `type` ("add-goal",
+// "add goal") or a suggestion missing the field its type needs would fail the
+// enum / apply step. We uppercase-canonicalise the type and DROP any
+// suggestion that is unrecognised or self-inconsistent — a bad plan
+// suggestion must never sink the whole report (which carries the diagnosis,
+// formulation and crisis). The plan itself is untouched: dropping a
+// suggestion just means the therapist doesn't see that one proposed edit.
+// ============================================================================
+
+const SUGGESTION_TYPES = new Set([
+  'ADD_GOAL',
+  'REVISE_GOAL',
+  'REMOVE_GOAL',
+  'ADJUST_DURATION',
+  'CHANGE_MODALITY',
+]);
+
+function normaliseSuggestion(s: unknown): unknown | null {
+  if (!s || typeof s !== 'object') return null;
+  const o = s as Record<string, unknown>;
+  const type =
+    typeof o['type'] === 'string'
+      ? o['type']
+          .trim()
+          .toUpperCase()
+          .replace(/[-\s]+/g, '_')
+      : '';
+  if (!SUGGESTION_TYPES.has(type)) return null;
+  if (typeof o['rationale'] !== 'string' || o['rationale'].trim() === '') return null;
+  // Drop a suggestion that lacks the payload its type requires — an
+  // unappliable suggestion is worse than a missing one.
+  const hasGoal = o['goal'] && typeof o['goal'] === 'object';
+  const hasIndex = typeof o['goalIndex'] === 'number';
+  const hasDuration = typeof o['expectedDurationSessions'] === 'number';
+  const hasModality = typeof o['modality'] === 'string';
+  if ((type === 'ADD_GOAL' || type === 'REVISE_GOAL') && !hasGoal) return null;
+  if ((type === 'REVISE_GOAL' || type === 'REMOVE_GOAL') && !hasIndex) return null;
+  if (type === 'ADJUST_DURATION' && !hasDuration) return null;
+  if (type === 'CHANGE_MODALITY' && !hasModality) return null;
+  return { ...o, type };
+}
+
 /**
  * Walks the raw Pass 3 JSON (intake brief or clinical report) and
  * normalises every `crisisFlags[].kind` and `crisisFlags[].severity`
- * to a canonical enum value, plus every `assessmentGaps[].purpose` to a
- * canonical assessment-engine purpose (dropping unknowns). Idempotent.
- * Returns a new object — the input is not mutated.
+ * to a canonical enum value, every `assessmentGaps[].purpose` to a
+ * canonical assessment-engine purpose (dropping unknowns), and every
+ * `planSuggestions[]` (dropping unappliable ones). Idempotent. Returns a
+ * new object — the input is not mutated.
  */
 export function normalisePass3Output(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw;
@@ -183,6 +229,11 @@ export function normalisePass3Output(raw: unknown): unknown {
   if (Array.isArray(r['crisisFlags'])) out['crisisFlags'] = r['crisisFlags'].map(normaliseFlag);
   if (Array.isArray(r['assessmentGaps'])) {
     out['assessmentGaps'] = r['assessmentGaps'].map(normaliseGap);
+  }
+  if (Array.isArray(r['planSuggestions'])) {
+    out['planSuggestions'] = r['planSuggestions']
+      .map(normaliseSuggestion)
+      .filter((s) => s !== null);
   }
   return out;
 }

@@ -6,6 +6,41 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-17 — Copilot IA redesign · R3a (plan-as-diff)
+
+Fourth phase: on a **follow-up** session the copilot proposes **edits** to
+the therapist's existing plan instead of a whole competing plan — the last
+piece of "the AI proposes, you own the plan".
+
+- **Contract** — `ClinicalReportV1` gains an OPTIONAL, additive
+  `planSuggestions: ClinicalPlanSuggestion[]` (typed diffs: `ADD_GOAL` /
+  `REVISE_GOAL` / `REMOVE_GOAL` / `ADJUST_DURATION` / `CHANGE_MODALITY`,
+  each with a one-line rationale). `.default([])` means every existing
+  stored report still parses.
+- **Zero-regression by design.** planSuggestions is optional and the board
+  falls back to the full-plan flow when it's empty, so if real Gemini
+  doesn't populate it the therapist sees exactly today's behaviour — no
+  possible regression. (Verified against the offline mock; the real
+  Vertex plan-diff behaviour still wants a clinician glance before it's
+  trusted in prod.)
+- **Prompt** — Pass-3 (`CLINICAL_ANALYSIS_SYSTEM_PROMPT` → version bumped
+  to `…_V3`) instructed: with a prior plan present, echo it into
+  `treatmentPlan` and put changes into `planSuggestions`; with none, emit a
+  full plan and leave suggestions empty. Mock emits sample suggestions when
+  a prior plan is in context.
+- **Normaliser** — `normalisePass3Output` canonicalises each suggestion's
+  `type` and DROPS any unappliable one, so a bad suggestion never sinks the
+  whole report (same safety philosophy as the crisis / gap normalisers).
+- **Accept route** — `POST /clinical-reports/[id]/plan-suggestion` applies
+  ONE suggestion to the active plan → a new versioned `TreatmentPlan`
+  (audited `PLAN_CONFIRMED`, `source: PLAN_SUGGESTION`). Verified: accepting
+  an `ADD_GOAL` took the demo plan v1 (2 goals) → v2 (3 goals), v1
+  superseded.
+- **Board** — step 4 "Plan update" renders the suggestions as accept-able
+  diff cards (with the current plan summary + a "full plan (reference)"
+  disclosure) when a plan already exists; the full "Suggested plan" flow now
+  runs only for a first plan.
+
 ## 2026-07-17 — Copilot IA redesign · R2 (the Plan tab)
 
 Third phase, and the centre of the audit: **the therapist's treatment plan

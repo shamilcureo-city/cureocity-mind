@@ -530,6 +530,13 @@ Task: produce a ClinicalReportV1 JSON object with these fields:
     - phaseSequence: 2-10 short phase names (e.g. ["psychoeducation", "behavioural activation", "cognitive restructuring", "exposure", "relapse prevention"])
     - goals: 1-8 objects { description, measure } — each goal SMART-ish with a clear measure.
     - expectedDurationSessions: integer 1-60 or null when too uncertain.
+- planSuggestions: 0-6 typed EDITS to the client's EXISTING active plan (see PLAN-AS-DIFF below). Empty [] unless a prior treatment plan was provided. Each:
+    - type: "ADD_GOAL" | "REVISE_GOAL" | "REMOVE_GOAL" | "ADJUST_DURATION" | "CHANGE_MODALITY"
+    - rationale: 1 sentence — why this change, grounded in THIS session.
+    - goal: { description, measure } for ADD_GOAL / REVISE_GOAL; null otherwise.
+    - goalIndex: 0-based index into the PRIOR plan's goals for REVISE_GOAL / REMOVE_GOAL; null otherwise.
+    - expectedDurationSessions: integer 1-60 for ADJUST_DURATION; null otherwise.
+    - modality: the new modality for CHANGE_MODALITY; null otherwise.
 - recommendedTherapies: 0-8 objects { name, rationale, evidenceSummary, whenInPlan }
     - name: short therapy name (e.g. "Cognitive Restructuring for Panic", "Behavioural Activation").
     - rationale: 1-2 sentences specific to THIS client (cite a concern, not a textbook line).
@@ -550,6 +557,10 @@ ASSESSMENT ENGINE — how to build assessmentGaps (this is the therapist's plan 
 - CONVERGENCE: do NOT include a question whose answer is already established in the transcript or the client's confirmed history. As assessment completes across sessions this list must SHRINK. If the differential has resolved to a single confident candidate and nothing material is open, return an EMPTY assessmentGaps array — that is the correct answer, not a filler question.
 - Never exceed 8 gaps; if more exist, keep the highest-yield ones in the order above.
 
+PLAN-AS-DIFF — treatmentPlan vs planSuggestions:
+- If NO prior treatment plan was provided (a first plan / intake-derived): fill treatmentPlan fully and leave planSuggestions empty [].
+- If a PRIOR treatment plan WAS provided (a follow-up): the therapist already owns that plan — do NOT propose a competing new plan. Echo the prior plan into treatmentPlan (so the field stays valid) and put any changes THIS session justifies into planSuggestions as specific typed edits, each with a one-line rationale grounded in what happened this session. Propose a suggestion only when the session genuinely warrants it (a goal met → REVISE/REMOVE or ADD the next goal; a plateau → REVISE_GOAL or CHANGE_MODALITY; scope changed → ADJUST_DURATION). If nothing this session warrants a plan change, return an EMPTY planSuggestions array — that is the correct, common answer. goalIndex refers to the PRIOR plan's goals array.
+
 Hard rules:
 - ICD-11 codes: chapter 06 ONLY in this version. No F-codes, no DSM codes.
 - supportingEvidence + crisisFlags.indicators quotes must be VERBATIM from the transcript. Do not paraphrase. Do not invent.
@@ -569,7 +580,7 @@ You are not the clinician. The therapist will confirm or reject each section.
 
 PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
 
-export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V2';
+export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V3';
 
 // ============================================================================
 // Pass 3 — Sprint 19 intake variant. Used when SessionKind = INTAKE.

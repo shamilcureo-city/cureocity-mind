@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type {
@@ -10,6 +10,7 @@ import type {
   ClinicalCrisisFlag,
   ClinicalCrisisSeverity,
   ClinicalDiagnosisCandidate,
+  ClinicalPlanSuggestion,
   ClinicalRecommendedTherapy,
   ClinicalReport,
   ClinicalSectionConfirmation,
@@ -102,6 +103,7 @@ interface BoardData {
   gaps: ClinicalAssessmentGap[];
   therapies: ClinicalRecommendedTherapy[];
   plan: ClinicalTreatmentPlan | null;
+  planSuggestions: ClinicalPlanSuggestion[];
   recommendedInstruments: string[];
 }
 
@@ -217,6 +219,7 @@ export function CopilotDecisionBoard({
         gaps: brief.assessmentGaps,
         therapies: brief.recommendedTherapies,
         plan: null,
+        planSuggestions: [],
         recommendedInstruments: brief.recommendedInstruments,
       };
     }
@@ -231,6 +234,7 @@ export function CopilotDecisionBoard({
       gaps: body.assessmentGaps,
       therapies: body.recommendedTherapies,
       plan: body.treatmentPlan,
+      planSuggestions: body.planSuggestions ?? [],
       recommendedInstruments: [],
     };
   }, [isIntake, brief, report?.body]);
@@ -286,6 +290,21 @@ export function CopilotDecisionBoard({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ treatmentPlan: plan }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      router.refresh();
+    },
+    [report, router],
+  );
+
+  const acceptPlanSuggestion = useCallback(
+    async (suggestionIndex: number): Promise<void> => {
+      if (!report) throw new Error('No report to apply against.');
+      const res = await fetch(`/api/v1/clinical-reports/${report.id}/plan-suggestion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ suggestionIndex }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
@@ -457,6 +476,7 @@ export function CopilotDecisionBoard({
               <PlanStep
                 isIntake={isIntake}
                 plan={data.plan}
+                planSuggestions={data.planSuggestions}
                 therapies={data.therapies}
                 confirmation={confirmations?.plan ?? null}
                 recordPlan={record.plan}
@@ -465,6 +485,7 @@ export function CopilotDecisionBoard({
                 onModify={(edits, reason) =>
                   patchSection('plan', { action: 'modify', reason, edits })
                 }
+                onAcceptSuggestion={acceptPlanSuggestion}
                 onDraftPlan={acceptIntakePlan}
               />
 
@@ -1374,16 +1395,21 @@ function AskNextStep({
 function PlanStep({
   isIntake,
   plan,
+  planSuggestions,
   therapies,
   confirmation,
   recordPlan,
   planHref,
   onAccept,
   onModify,
+  onAcceptSuggestion,
   onDraftPlan,
 }: {
   isIntake: boolean;
   plan: ClinicalTreatmentPlan | null;
+  /// Plan-as-diff (R3): edits proposed to the client's ACTIVE plan on a
+  /// follow-up. Empty on intakes / first plans / when the AI proposed none.
+  planSuggestions: ClinicalPlanSuggestion[];
   therapies: ClinicalRecommendedTherapy[];
   confirmation: ClinicalSectionConfirmation | null;
   /// The client's active plan (right-lane truth). On intakes, its presence
@@ -1393,6 +1419,8 @@ function PlanStep({
   planHref: string;
   onAccept: () => Promise<void>;
   onModify: (edits: unknown, reason: string) => Promise<void>;
+  /// Apply one plan suggestion (by index) → a new plan version.
+  onAcceptSuggestion: (suggestionIndex: number) => Promise<void>;
   /// Intake only — create/replace treatment-plan v1 from the drafted plan.
   onDraftPlan: (plan: ClinicalTreatmentPlan) => Promise<void>;
 }) {
@@ -1532,6 +1560,22 @@ function PlanStep({
     );
   }
 
+  // Plan-as-diff (R3): a follow-up where the client ALREADY has a plan. The
+  // therapist owns that plan, so the copilot proposes EDITS to it, not a whole
+  // competing plan. Graceful fallback: if the AI proposed no suggestions, show
+  // "no changes" — never re-present a full "new" plan over an existing one.
+  if (recordPlan) {
+    return (
+      <PlanDiffStep
+        suggestions={planSuggestions}
+        recordPlan={recordPlan}
+        planHref={planHref}
+        aiPlanDetail={aiPlanDetail}
+        onAcceptSuggestion={onAcceptSuggestion}
+      />
+    );
+  }
+
   return (
     <Step
       no={4}
@@ -1564,6 +1608,157 @@ function PlanStep({
           {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
         </div>
       )}
+    </Step>
+  );
+}
+
+// ============================================================================
+// Plan-as-diff (R3). A follow-up where an active plan already exists: the AI
+// proposes typed EDITS to it, applied one at a time (each → a new plan
+// version), rather than a competing full plan. Empty suggestions = "no change".
+// ============================================================================
+
+function suggestionLabel(s: ClinicalPlanSuggestion): { op: string; tone: string; text: string } {
+  switch (s.type) {
+    case 'ADD_GOAL':
+      return { op: '+ GOAL', tone: 'ok', text: s.goal?.description ?? '' };
+    case 'REVISE_GOAL':
+      return {
+        op: '→ GOAL',
+        tone: 'accent',
+        text: `Revise goal ${(s.goalIndex ?? 0) + 1}: ${s.goal?.description ?? ''}`,
+      };
+    case 'REMOVE_GOAL':
+      return { op: '− GOAL', tone: 'warn', text: `Remove goal ${(s.goalIndex ?? 0) + 1}` };
+    case 'ADJUST_DURATION':
+      return {
+        op: 'DURATION',
+        tone: 'accent',
+        text: `Change expected duration to ${s.expectedDurationSessions} sessions`,
+      };
+    case 'CHANGE_MODALITY':
+      return { op: 'MODALITY', tone: 'accent', text: `Change modality to ${s.modality}` };
+  }
+}
+
+function PlanDiffStep({
+  suggestions,
+  recordPlan,
+  planHref,
+  aiPlanDetail,
+  onAcceptSuggestion,
+}: {
+  suggestions: ClinicalPlanSuggestion[];
+  recordPlan: RecordPlan;
+  planHref: string;
+  aiPlanDetail: ReactNode;
+  onAcceptSuggestion: (index: number) => Promise<void>;
+}) {
+  const [applied, setApplied] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const apply = async (i: number) => {
+    setBusy(i);
+    setError(null);
+    try {
+      await onAcceptSuggestion(i);
+      setApplied((s) => new Set(s).add(i));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const planSummary = (
+    <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-accent-soft)] p-3.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium capitalize">
+          Plan v{recordPlan.version} · {recordPlan.modality} · {recordPlan.goalCount} goal
+          {recordPlan.goalCount === 1 ? '' : 's'}
+        </p>
+        <a href={planHref} className="text-xs font-semibold text-[var(--color-accent)]">
+          View &amp; edit on the Plan tab →
+        </a>
+      </div>
+    </div>
+  );
+
+  if (suggestions.length === 0) {
+    return (
+      <Step
+        no={4}
+        title="Plan"
+        sub="This client already has a plan — the copilot only suggests changes when a session warrants one."
+      >
+        {planSummary}
+        <p className="mt-3 text-sm text-[var(--color-ink-2)]">
+          No plan changes suggested this session — the plan continues as-is. Edit it any time on the{' '}
+          <a href={planHref} className="font-medium text-[var(--color-accent)]">
+            Plan tab
+          </a>
+          .
+        </p>
+      </Step>
+    );
+  }
+
+  const toneClass = (t: string) =>
+    t === 'ok'
+      ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+      : t === 'warn'
+        ? 'bg-[var(--color-warn-soft)] text-[var(--color-warn)]'
+        : 'bg-[var(--color-surface-soft)] text-[var(--color-ink-2)]';
+
+  return (
+    <Step
+      no={4}
+      title="Plan update"
+      sub="Suggested edits to your existing plan — accept each one you agree with; each makes a new plan version. Your plan is never replaced wholesale."
+    >
+      {planSummary}
+      <div className="mt-3 space-y-2">
+        {suggestions.map((s, i) => {
+          const { op, tone, text } = suggestionLabel(s);
+          const isApplied = applied.has(i);
+          return (
+            <div
+              key={i}
+              className="flex items-start gap-3 rounded-xl border border-[var(--color-line)] bg-white/40 p-3"
+            >
+              <span
+                className={`flex-none rounded-md px-2 py-0.5 font-mono text-[11px] font-bold ${toneClass(tone)}`}
+              >
+                {op}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-medium">{text}</p>
+                <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">{s.rationale}</p>
+                {s.type === 'ADD_GOAL' || s.type === 'REVISE_GOAL' ? (
+                  <p className="mt-0.5 text-[11px] text-[var(--color-ink-3)]">
+                    measure: {s.goal?.measure}
+                  </p>
+                ) : null}
+              </div>
+              {isApplied ? (
+                <DoneChip>Applied</DoneChip>
+              ) : (
+                <Act primary onClick={() => void apply(i)} disabled={busy !== null}>
+                  {busy === i ? 'Applying…' : 'Accept'}
+                </Act>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {error && <p className="mt-2 text-xs text-[var(--color-warn)]">{error}</p>}
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-medium text-[var(--color-accent)]">
+          What the AI would draft as a full plan (reference)
+        </summary>
+        <div className="mt-2">{aiPlanDetail}</div>
+      </details>
     </Step>
   );
 }
