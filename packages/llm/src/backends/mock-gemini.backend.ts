@@ -1774,19 +1774,18 @@ export class MockGeminiPlanDictationBackend implements IPassPlanDictationBackend
         continue;
       }
       const removeTest =
-        /(?:cancel|drop|remove)\s+(?:the\s+)?([a-z][a-z0-9 \-]{1,60}?)\s*(?:test)?$/i.exec(clause);
+        /(?:cancel|drop|remove)\s+(?:the\s+)?([a-z][a-z0-9 -]{1,60}?)\s*(?:test)?$/i.exec(clause);
       if (/order|test|karwao|send for/i.test(lower)) {
-        const m =
-          /(?:order|send for|karwao)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z0-9 \-]{1,60})/i.exec(
-            clause,
-          );
+        const m = /(?:order|send for|karwao)\s+(?:a\s+|an\s+|the\s+)?([a-z][a-z0-9 -]{1,60})/i.exec(
+          clause,
+        );
         if (m?.[1]) {
           edits.push({ action: 'addInvestigation', name: titleCaseMock(m[1]) });
           continue;
         }
       }
       const removeMed =
-        /(?:stop|discontinue|band karo|hata do)\s+(?:the\s+)?([a-z][a-z \-]{1,40})/i.exec(clause);
+        /(?:stop|discontinue|band karo|hata do)\s+(?:the\s+)?([a-z][a-z -]{1,40})/i.exec(clause);
       if (removeMed?.[1]) {
         edits.push({ action: 'removeMed', drug: titleCaseMock(removeMed[1]) });
         continue;
@@ -1804,10 +1803,10 @@ export class MockGeminiPlanDictationBackend implements IPassPlanDictationBackend
         continue;
       }
       const change =
-        /(?:change|increase|decrease|make|badha do|badal)\s+(?:the\s+)?([a-z][a-z \-]{1,40}?)(?:\s+(?:to|se)\b|\s+\d)/i.exec(
+        /(?:change|increase|decrease|make|badha do|badal)\s+(?:the\s+)?([a-z][a-z -]{1,40}?)(?:\s+(?:to|se)\b|\s+\d)/i.exec(
           clause,
         );
-      const add = /(?:add|start|prescribe|give|de do)\s+([a-z][a-z \-]{1,40}?)(?=\s+\d|\s*$)/i.exec(
+      const add = /(?:add|start|prescribe|give|de do)\s+([a-z][a-z -]{1,40}?)(?=\s+\d|\s*$)/i.exec(
         clause,
       );
       const medMatch = change ?? add;
