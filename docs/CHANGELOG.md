@@ -6,6 +6,34 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-17 — Copilot IA redesign · R2 (the Plan tab)
+
+Third phase, and the centre of the audit: **the therapist's treatment plan
+finally has a home.** The sub-tab named "Plan & toolkit" rendered a
+conceptual map, diagnosis history, a therapy library, and a "Workflow"
+form — but never the client's actual `TreatmentPlan`, which had no full
+in-app view anywhere (the founder's complaint: "the plan of psychologist
+should be there").
+
+- **New `PlanHero`** (`components/app/PlanHero.tsx`) leads the tab: the
+  active plan's modality + expected duration, version (+ how many versions
+  are on record), the anchored primary diagnosis, the phase sequence, and
+  every goal with its **live achievement status** — toggled through the
+  existing `/treatment-plans/[id]/goals/[index]` route (writes
+  `TreatmentGoalProgress`, never re-versions the plan). An empty state
+  points to a session's Review tab when no plan exists yet.
+- **The tab is renamed "Plan"** (was "Plan & toolkit") — now that it shows
+  a plan. Hint: "The client's plan — yours; AI can only suggest".
+- **"Workflow" is demoted, not deleted.** The CBT/EMDR phase-advancement
+  engine (a parallel plan-like object with its own goals) moves into a
+  collapsed "Phase advancement tracker (CBT / EMDR) — optional" section at
+  the bottom, clearly labelled as a separate aid — so it stops reading as a
+  second plan. The therapy library, diagnosis history, and conceptual map
+  remain as supporting cards.
+- Loader lives in `AICopilotTab`'s `PlanSub` (renamed from `FormulationSub`):
+  active plan body + `TreatmentGoalProgress` + version count + primary
+  diagnosis, composed into `PlanHeroData`.
+
 ## 2026-07-17 — Copilot IA redesign · R1 (renames + relocations)
 
 Second phase: the naming + information-architecture cleanup, no data or

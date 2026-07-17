@@ -20,6 +20,7 @@ import {
   type CaseRecordSnapshot,
 } from '@/components/app/CopilotDecisionBoard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
+import { PlanHero, type PlanHeroData } from '@/components/app/PlanHero';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
 import { AICopilotSubTabs, type CopilotSubKey } from '@/components/app/AICopilotSubTabs';
@@ -66,8 +67,9 @@ const LIBRARY_THERAPIES: string[] = [
  *   questions moved out — to Transcript and Notes respectively.)
  * - **Progress** (`sub=progress`) — the treatment arc, is it working, and
  *   what next session opens with (the Care Engine page).
- * - **Plan & toolkit** (`sub=plan`) — the client's plan + formulation
- *   tools. (R2 renames this to "Plan" once it renders the real plan.)
+ * - **Plan** (`sub=plan`) — the client's own treatment plan (phases, goals
+ *   with live status, versions), then the session scripts + formulation
+ *   tools + the optional CBT/EMDR advancement tracker around it.
  *
  * Loading is sub-aware: each sub-tab fetches only what it renders, so a
  * therapist who only opens Review never pays for the progress/plan
@@ -101,7 +103,8 @@ export async function AICopilotTab({
         />
       )}
       {sub === 'plan' && (
-        <FormulationSub
+        <PlanSub
+          sessionId={sessionId}
           clientId={clientId}
           preferredLanguage={preferredLanguage}
           clientHasContactPhone={clientHasContactPhone}
@@ -324,18 +327,31 @@ async function JourneySub({
   );
 }
 
-async function FormulationSub({
+/**
+ * Copilot IA redesign (R2) — the Plan sub-tab.
+ *
+ * The tab named "Plan & toolkit" used to render a map, diagnosis history, a
+ * therapy library and a "Workflow" form — but not the client's actual
+ * treatment plan, which had no full in-app view. This now leads with the
+ * plan itself (PlanHero: phases, goals + live status, versions), then the
+ * supporting tools: session scripts, formulation map, diagnosis history, and
+ * the CBT/EMDR advancement tracker (demoted to a collapsed "advanced" section
+ * — it's a separate phase engine, not a second plan).
+ */
+async function PlanSub({
+  sessionId,
   clientId,
   preferredLanguage,
   clientHasContactPhone,
   clientHasContactEmail,
 }: {
+  sessionId: string;
   clientId: string;
   preferredLanguage: string;
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
 }) {
-  const [latestReport, activePlan, diagnoses] = await Promise.all([
+  const [latestReport, activePlan, versionCount, diagnoses] = await Promise.all([
     prisma.clinicalReport.findFirst({
       where: { clientId, status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
@@ -344,8 +360,9 @@ async function FormulationSub({
     prisma.treatmentPlan.findFirst({
       where: { clientId, supersededAt: null },
       orderBy: { version: 'desc' },
-      select: { id: true },
+      select: { id: true, version: true, body: true, confirmedAt: true },
     }),
+    prisma.treatmentPlan.count({ where: { clientId } }),
     prisma.clientDiagnosis.findMany({
       where: { clientId },
       orderBy: [{ supersededAt: 'asc' }, { confirmedAt: 'desc' }],
@@ -361,14 +378,55 @@ async function FormulationSub({
     }),
   ]);
 
+  // Resolve the plan body + per-goal live status from the side table.
+  let planHero: PlanHeroData | null = null;
+  if (activePlan) {
+    const planBody = ClinicalTreatmentPlanSchema.safeParse(activePlan.body);
+    if (planBody.success) {
+      const progress = await prisma.treatmentGoalProgress.findMany({
+        where: { treatmentPlanId: activePlan.id },
+        select: { goalIndex: true, status: true },
+      });
+      const statusByIndex = new Map(progress.map((p) => [p.goalIndex, p.status]));
+      planHero = {
+        id: activePlan.id,
+        version: activePlan.version,
+        modality: planBody.data.modality,
+        expectedDurationSessions: planBody.data.expectedDurationSessions,
+        phaseSequence: planBody.data.phaseSequence,
+        goals: planBody.data.goals.map((g, i) => ({
+          description: g.description,
+          measure: g.measure,
+          status: statusByIndex.get(i) ?? 'NOT_STARTED',
+        })),
+        confirmedAt: activePlan.confirmedAt.toISOString(),
+      };
+    }
+  }
+
+  const primaryActive =
+    diagnoses.find((d) => d.supersededAt === null && d.isPrimary) ??
+    diagnoses.find((d) => d.supersededAt === null) ??
+    null;
+
   const recommendedTherapies = extractRecommended(latestReport?.body);
   const langParse = ClinicalLocaleSchema.safeParse(preferredLanguage);
   const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';
+  const reviewHref = `/app/sessions/${sessionId}?tab=copilot&sub=review`;
 
   return (
     <div className="space-y-6">
-      <ConceptualMapTab clientId={clientId} />
-      {diagnoses.length > 0 && <DiagnosisHistoryCard diagnoses={diagnoses} />}
+      <PlanHero
+        plan={planHero}
+        versionCount={versionCount}
+        primaryDiagnosis={
+          primaryActive
+            ? { icd11Code: primaryActive.icd11Code, icd11Label: primaryActive.icd11Label }
+            : null
+        }
+        reviewHref={reviewHref}
+      />
+
       <TherapyLibrary
         clientId={clientId}
         recommendedTherapies={recommendedTherapies}
@@ -378,7 +436,22 @@ async function FormulationSub({
         clientHasContactPhone={clientHasContactPhone}
         clientHasContactEmail={clientHasContactEmail}
       />
-      <WorkflowSection clientId={clientId} />
+
+      {diagnoses.length > 0 && <DiagnosisHistoryCard diagnoses={diagnoses} />}
+      <ConceptualMapTab clientId={clientId} />
+
+      {/* The CBT/EMDR advancement engine is a separate phase tracker, not a
+          second plan — demoted to an optional collapsed section (R2). */}
+      <details className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+        <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
+          Phase advancement tracker (CBT / EMDR) — optional
+        </summary>
+        <p className="mb-3 mt-1 text-xs text-[var(--color-ink-3)]">
+          A manualised phase-progression aid with exercise prescriptions. Separate from the plan
+          above — start it only if you want per-phase advancement suggestions.
+        </p>
+        <WorkflowSection clientId={clientId} />
+      </details>
     </div>
   );
 }

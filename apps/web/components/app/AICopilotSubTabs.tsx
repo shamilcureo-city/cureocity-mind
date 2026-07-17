@@ -10,8 +10,7 @@ interface Props {
 const TABS: { key: CopilotSubKey; label: string; hint: string }[] = [
   { key: 'review', label: 'Review', hint: 'What the copilot heard — you decide' },
   { key: 'progress', label: 'Progress', hint: 'The arc · is it working · next session' },
-  // R2 renames this to "Plan" once it renders the real treatment plan.
-  { key: 'plan', label: 'Plan & toolkit', hint: 'Plan, diagnosis history, map, library' },
+  { key: 'plan', label: 'Plan', hint: "The client's plan — yours; AI can only suggest" },
 ];
 
 /**
