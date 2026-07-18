@@ -446,6 +446,17 @@ function LoginPageInner() {
                   {busy && method === 'google' ? 'Opening Google…' : 'Continue with Google'}
                 </button>
 
+                {/* A Google sign-in error used to be invisible: the only error
+                    slots lived inside the email / phone forms, but the Google
+                    button sits above them and is the default method — so a
+                    failed Google sign-in set the message with nothing on screen
+                    to show it ("nothing happens"). Surface it right here. */}
+                {method === 'google' && error && (
+                  <div className="mt-3 rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] px-3.5 py-2.5 text-xs leading-relaxed text-[var(--color-warn)]">
+                    {error}
+                  </div>
+                )}
+
                 {/* Method tabs — Email | Phone */}
                 <div className="mt-6 flex items-center gap-3 text-xs text-[var(--color-ink-3)]">
                   <span className="h-px flex-1 bg-[var(--color-line-soft)]" />

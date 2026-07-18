@@ -86,6 +86,10 @@ export async function signInWithGoogle(): Promise<UserCredential | null> {
       await signInWithRedirect(getFirebaseAuth(), provider);
       return null;
     }
+    // Raw code + error to the console — friendlyAuthError rewrites the
+    // on-screen text, so this is what remote debugging (a pilot therapist on
+    // an unfamiliar laptop) reads. Mirrors the OTP paths in login/page.tsx.
+    console.error('[login] Google sign-in failed', code, err);
     throw err;
   }
 }
@@ -154,9 +158,15 @@ export function friendlyAuthError(err: unknown): string {
     case 'auth/network-request-failed':
       return 'Network problem reaching sign-in. Check your connection and retry.';
     case 'auth/popup-blocked':
-      return 'Your browser blocked the Google sign-in popup. Allow popups for this site and retry.';
+      return 'Your browser blocked the Google sign-in window. Allow pop-ups for this site and try again — or use Email sign-in below, which always works.';
     case 'auth/popup-closed-by-user':
-      return 'Google sign-in was closed before finishing.';
+      return 'Google sign-in was closed before finishing. Try again, or use Email sign-in below.';
+    case 'auth/web-storage-unsupported':
+    case 'auth/operation-not-supported-in-this-environment':
+      // The classic "works on my laptop, not my friend's" cause: the browser
+      // blocks the cross-site cookies/storage Google sign-in relies on
+      // (Safari, Brave, Firefox strict, or a private window).
+      return 'Your browser is blocking the cross-site cookies Google sign-in needs (common in Safari, Brave, or a private window). Allow third-party cookies for this site, or use Email sign-in below — it always works.';
     case 'auth/account-exists-with-different-credential':
       return 'An account with this email exists with a different sign-in method. Try Google or Phone, or reset your password.';
     case 'auth/invalid-credential':
