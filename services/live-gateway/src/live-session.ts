@@ -159,6 +159,17 @@ export class LiveSession {
   /** Set once a ceiling trips, so pump auto-finalizes exactly once. */
   private autoFinalizing = false;
 
+  /**
+   * Sprint DS13 — the optional streaming display rail. Attached by the
+   * server when LIVE_STREAM_TRANSCRIPT=true; null keeps the shipped path
+   * byte-identical. Display-only: partial text NEVER feeds utterances,
+   * reasoning, the Rx pad, or persistence.
+   */
+  private streamTranscriber: { feed(pcm: Buffer): void; stop(): void } | null = null;
+  /** Rolling provisional text since the last authoritative window. */
+  private partialText = '';
+  private lastPartialEmitMs = 0;
+
   /** Ordered finalized windows — the source of truth for the transcript. */
   private readonly utterances: Utterance[] = [];
   /** Accumulated diarized segments (wall-offset), fed to Pass 2. */
@@ -234,9 +245,33 @@ export class LiveSession {
     return this.meter.transcribeInputTokens;
   }
 
+  /**
+   * Sprint DS13 — attach the streaming display rail (call before start()).
+   * Wire the transcriber's onPartial to handleStreamPartial().
+   */
+  attachStreamTranscriber(t: { feed(pcm: Buffer): void; stop(): void }): void {
+    this.streamTranscriber = t;
+  }
+
+  /**
+   * Sprint DS13 — a transcription fragment from the streaming rail. Appends
+   * to the rolling provisional line and re-emits it, rate-limited to ~2/s so
+   * the browser socket isn't sprayed. The line is cleared whenever an
+   * authoritative window lands (commitUtterances) and at finalize.
+   */
+  handleStreamPartial(fragment: string): void {
+    if (this.stopped || fragment.length === 0) return;
+    this.partialText = (this.partialText + fragment).slice(-400);
+    const now = Date.now();
+    if (now - this.lastPartialEmitMs < 400) return;
+    this.lastPartialEmitMs = now;
+    this.emit({ type: 'partialTranscript', text: this.partialText });
+  }
+
   /** Append a chunk of PCM audio streamed from the browser. */
   pushAudio(chunk: Buffer): void {
     if (this.stopped || chunk.length === 0) return;
+    this.streamTranscriber?.feed(chunk);
     // DOC-9 — stamp the wall-clock of the very first audio byte. Because the
     // browser streams PCM in real time, a byte at offset b was spoken at
     // ≈ captureStartMs + bytesToMs(b), which lets us measure the honest
@@ -348,6 +383,12 @@ export class LiveSession {
       tEndMs,
     );
     this.recordSpeechToTranscript(tStartMs);
+    // DS13 — the authoritative window replaces the provisional line.
+    if (this.streamTranscriber && (this.partialText !== '' || utterances.length > 0)) {
+      this.partialText = '';
+      this.lastPartialEmitMs = 0;
+      this.emit({ type: 'partialTranscript', text: '' });
+    }
     for (const utterance of utterances) {
       this.emit({
         type: 'transcript',
@@ -853,6 +894,9 @@ export class LiveSession {
   /** Doctor ended the consult: flush the tail, close the note, report. */
   async finalize(): Promise<void> {
     if (this.stopped) return;
+    // DS13 — the display rail ends with the consult; failures here are moot.
+    this.streamTranscriber?.stop();
+    this.streamTranscriber = null;
     this.stopAudio(); // sets `stopped` → any in-flight pump loop exits after its window
     await this.waitIdle();
     this.emit({ type: 'status', state: 'finalizing' });

@@ -82,6 +82,10 @@ export function DoctorLiveEncounter({
   // Sprint DS4 — the transcript is utterance-anchored (ids from DS0) so an
   // evidence chip can scroll-highlight its source utterance.
   const [utterances, setUtterances] = useState<Utterance[]>([]);
+  // Sprint DS13 — the flag-gated streaming display rail: a provisional,
+  // undiarized line that renders sub-second and is replaced by the
+  // authoritative windowed utterances ('' clears it).
+  const [partialText, setPartialText] = useState('');
   // DOC-7 — the utterances mirrored in a ref so the `final` handler (a stale
   // effect closure) can read the FULL diarized transcript — including the tail
   // window committed just before `final` — and relay it for durable storage.
@@ -380,6 +384,7 @@ export function DoctorLiveEncounter({
   async function start(): Promise<void> {
     setError(null);
     setUtterances([]);
+    setPartialText(''); // DS13 — clear the provisional streaming line
     utterancesRef.current = []; // DOC-7 — clear the relayed-transcript mirror
     setHighlightIds(new Set());
     transcriptRefs.current = new Map();
@@ -516,6 +521,10 @@ export function DoctorLiveEncounter({
         case 'transcript':
           // Sprint DS4 — the utterance-anchored record (below) drives the
           // transcript display now; the delta is redundant.
+          break;
+        case 'partialTranscript':
+          // Sprint DS13 — display-only; never enters utterances/persistence.
+          setPartialText(event.text);
           break;
         case 'utterance':
           setUtterances((prev) => {
@@ -814,6 +823,7 @@ export function DoctorLiveEncounter({
         <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,420px)]">
           <TranscriptPanel
             utterances={utterances}
+            partialText={partialText}
             highlightIds={highlightIds}
             refs={transcriptRefs}
             listening={phase === 'listening'}
@@ -900,18 +910,21 @@ function StartPanel({ connecting }: { connecting: boolean }) {
 
 function TranscriptPanel({
   utterances,
+  partialText,
   highlightIds,
   refs,
   listening,
 }: {
   utterances: Utterance[];
+  /** DS13 — provisional streaming text; '' when the rail is off or caught up. */
+  partialText: string;
   highlightIds: Set<string>;
   refs: MutableRefObject<Map<string, HTMLDivElement | null>>;
   listening: boolean;
 }) {
   return (
     <PanelShell title="Live transcript">
-      {utterances.length === 0 ? (
+      {utterances.length === 0 && partialText === '' ? (
         <Empty>Your conversation appears here, speaker by speaker.</Empty>
       ) : (
         <div className="space-y-3.5">
@@ -943,6 +956,17 @@ function TranscriptPanel({
             );
           })}
         </div>
+      )}
+      {partialText !== '' && (
+        <p
+          aria-live="polite"
+          className="mt-3 text-[13px] italic leading-relaxed text-[var(--color-ink-3)]"
+        >
+          {partialText}
+          <span aria-hidden className="animate-pulse">
+            …
+          </span>
+        </p>
       )}
       {listening && (
         <div className="mt-4 flex items-center gap-2 text-[11.5px] text-[var(--color-ink-3)]">

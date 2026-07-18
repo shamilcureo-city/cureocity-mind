@@ -236,6 +236,16 @@ export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
+  /**
+   * Sprint DS13 — the STREAMING display rail (flag-gated, doctor path).
+   * A provisional, undiarized live transcription of the in-flight speech,
+   * sub-second via Gemini Live. DISPLAY-ONLY: nothing downstream (reasoning,
+   * Rx pad, note, persistence) may consume it — the windowed `transcript` /
+   * `utterance` events remain the authoritative, citation-gated record.
+   * `text` is the rolling tail; empty text clears the provisional line
+   * (sent whenever an authoritative window lands).
+   */
+  z.object({ type: z.literal('partialTranscript'), text: z.string() }),
   // Sprint DS0 — a finalized transcript window, emitted once per window as
   // the durable record (stable id + precise ms bounds). The `transcript`
   // delta still drives the running display; `utterance` is what DS1 builds
