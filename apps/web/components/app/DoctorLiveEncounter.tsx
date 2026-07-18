@@ -19,6 +19,7 @@ import {
 } from '@cureocity/contracts';
 import { useRouter } from 'next/navigation';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
+import { GatewayMockBanner } from './GatewayMockBanner';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { ReviewAndSign } from './ReviewAndSign';
@@ -716,6 +717,7 @@ export function DoctorLiveEncounter({
 
   return (
     <div className="space-y-4">
+      <GatewayMockBanner />
       {/* Capture bar */}
       <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-[var(--color-line)] bg-white px-5 py-3.5">
         <div className="flex items-center gap-3">
