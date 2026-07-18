@@ -49,8 +49,8 @@ export function GatewayMockBanner() {
         ⚠ Demo data — the live AI backend is in mock mode
       </p>
       <p className="mt-0.5 text-sm text-[var(--color-ink-2)]">
-        The transcript, note, and suggestions are canned samples — they do <b>not</b> come from
-        your microphone. To transcribe real consults, set{' '}
+        The transcript, note, and suggestions are canned samples — they do <b>not</b> come from your
+        microphone. To transcribe real consults, set{' '}
         <code className="rounded bg-white px-1 py-0.5 text-xs">LLM_BACKEND=vertex</code> (plus{' '}
         <code className="rounded bg-white px-1 py-0.5 text-xs">VERTEX_PROJECT_ID</code> and the
         service-account credentials) on the live gateway and restart it.
