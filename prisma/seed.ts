@@ -331,7 +331,9 @@ async function main(): Promise<void> {
         },
       });
     }
-    console.log(`  Seeded ${SAMPLE_BOOKINGS.length} booking requests for Dr. Priya.`);
+    console.log(
+      `  Seeded ${SAMPLE_BOOKINGS.length} booking rows for Dr. Priya (dormant Booking model — no app surface reads these yet).`,
+    );
   }
 
   const existingIntakes = await prisma.intakeSubmission.count();

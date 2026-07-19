@@ -81,8 +81,8 @@ export function DataRightsCard({ clientId, clientName }: Props) {
         Data rights (DPDP)
       </h3>
       <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-        Fulfil requests {clientName} makes under the DPDP Act. Every action audits as the
-        appropriate DSR_* verb.
+        Fulfil requests {clientName} makes under the DPDP Act. Every action here is recorded in the
+        audit log.
       </p>
 
       <div className="mt-4 flex flex-wrap gap-2">

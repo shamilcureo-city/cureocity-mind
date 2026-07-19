@@ -292,7 +292,13 @@ export async function GET(
       data: { status: 'FAILED', errorMessage: message },
     });
     console.error(`[pre-session-brief] clientId=${clientId} failed: ${message}`);
-    return NextResponse.json({ error: `Pass 5 failed: ${message}` }, { status: 502 });
+    // UI truth pass (2026-07 audit) — the raw message (module paths, stack
+    // fragments) was rendered verbatim in the brief panel. Full detail stays
+    // in the server log + the FAILED row; the client gets a human sentence.
+    return NextResponse.json(
+      { error: 'The brief couldn’t be generated just now. Tap Regenerate to retry.' },
+      { status: 502 },
+    );
   }
 }
 

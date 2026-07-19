@@ -1,4 +1,6 @@
 import { Badge } from '../ui/Badge';
+import { CopyChip } from './CopyChip';
+import { formatIstDateTime, formatIstTime } from '../../lib/ist';
 
 interface ConsentSnapshotEntry {
   scope: string;
@@ -78,36 +80,19 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
               </Badge>
             }
           />
-          <Field
-            label="Scheduled"
-            value={data.scheduledAt.toLocaleString('en-IN', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-            })}
-          />
+          <Field label="Scheduled" value={formatIstDateTime(data.scheduledAt)} />
           <Field
             label="Recorded"
             value={
               elapsed !== null
-                ? `${formatDuration(elapsed)} (${data.startedAt!.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} – ${data.endedAt!.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })})`
+                ? `${formatDuration(elapsed)} (${formatIstTime(data.startedAt!)} – ${formatIstTime(data.endedAt!)})`
                 : data.startedAt
                   ? 'Started, not ended'
                   : 'Not started'
             }
           />
-          <Field label="Session ID" value={data.id.slice(0, 12) + '…'} mono />
-          <Field
-            label="Created"
-            value={data.createdAt.toLocaleString('en-IN', {
-              month: 'short',
-              day: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-            })}
-          />
+          <Field label="Session ID" valueNode={<CopyChip value={data.id} />} />
+          <Field label="Created" value={formatIstDateTime(data.createdAt)} />
         </dl>
       </section>
 
@@ -128,7 +113,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
               >
                 <span className="font-medium">{c.scope.replace(/_/g, ' ')}</span>
                 <span className="text-xs text-[var(--color-ink-3)]">
-                  {c.scriptVersion} · {new Date(c.ackedAt).toLocaleString('en-IN')}
+                  {c.scriptVersion} · {formatIstDateTime(c.ackedAt)}
                 </span>
               </li>
             ))}
@@ -160,14 +145,7 @@ export function SessionInfoTab({ data }: { data: SessionInfoData }) {
               >
                 <span>{formatActionLabel(e.action)}</span>
                 <span className="text-xs text-[var(--color-ink-3)]">
-                  {e.actorType.toLowerCase()} ·{' '}
-                  {e.createdAt.toLocaleString('en-IN', {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    second: '2-digit',
-                  })}
+                  {e.actorType.toLowerCase()} · {formatIstDateTime(e.createdAt)}
                 </span>
               </li>
             ))}

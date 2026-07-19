@@ -31,9 +31,11 @@ const TABS: { key: CopilotSubKey; label: string; hint: string }[] = [
 export function AICopilotSubTabs({ sessionId, active = 'review' }: Props) {
   return (
     <nav
-      className="flex flex-wrap items-center gap-1 border-b border-[var(--color-line-soft)]"
+      className="flex items-center gap-1 overflow-x-auto border-b border-[var(--color-line-soft)]"
       aria-label="AI Copilot sections"
     >
+      {/* Mobile: the bar scrolls horizontally instead of wrapping (wrapping
+          orphaned "Plan" onto its own row); hints hide below sm. */}
       {TABS.map((t) => {
         const isActive = t.key === active;
         const href = `/app/sessions/${sessionId}?tab=copilot&sub=${t.key}`;
@@ -41,7 +43,7 @@ export function AICopilotSubTabs({ sessionId, active = 'review' }: Props) {
           <Link
             key={t.key}
             href={href}
-            className={`inline-flex flex-col items-start border-b-2 px-3 py-2 text-xs transition-colors ${
+            className={`inline-flex shrink-0 flex-col items-start border-b-2 px-3 py-2 text-xs transition-colors ${
               isActive
                 ? 'border-[var(--color-accent)] text-[var(--color-ink)]'
                 : 'border-transparent text-[var(--color-ink-3)] hover:text-[var(--color-ink)]'
@@ -49,7 +51,7 @@ export function AICopilotSubTabs({ sessionId, active = 'review' }: Props) {
             aria-current={isActive ? 'page' : undefined}
           >
             <span className="text-sm font-medium">{t.label}</span>
-            <span className="text-[10px] text-[var(--color-ink-3)]">{t.hint}</span>
+            <span className="hidden text-[10px] text-[var(--color-ink-3)] sm:block">{t.hint}</span>
           </Link>
         );
       })}

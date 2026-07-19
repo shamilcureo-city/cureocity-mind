@@ -532,14 +532,17 @@ function prettyKey(key: string): string {
     .trim();
 }
 
+// UI truth pass (2026-07 audit) — retinted from the pre-retheme warm pastels
+// to the blue-family system: cool hues for the note branches, amber reserved
+// for phase/modality context, red strictly for risk.
 const TONE_COLORS: Record<Branch['tone'], string> = {
-  subjective: '#e8d5b7',
-  objective: '#cfd9c8',
-  assessment: '#c5cfdc',
-  plan: '#d9c5dc',
-  risk: '#e8c5c5',
-  phase: '#d5dce8',
-  modality: '#e8e0c5',
+  subjective: '#bcd7f5',
+  objective: '#c4e3e9',
+  assessment: '#c9cff0',
+  plan: '#b7e0d0',
+  risk: '#f0c4c4',
+  phase: '#d4ddef',
+  modality: '#ecdfc4',
 };
 
 function toneColor(tone: Branch['tone']): string {

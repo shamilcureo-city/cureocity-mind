@@ -161,7 +161,7 @@ export function AccountSettingsForm({ initial }: Props) {
             placeholder="e.g. CBT for adult anxiety + EMDR for trauma"
           />
         </Field>
-        <Field label="Bio" hint="Markdown supported in the directory render">
+        <Field label="Bio" hint="Formatting (bold, lists) is kept when shown in the directory">
           <textarea
             value={state.bio}
             onChange={(e) => onChange('bio', e.target.value)}
@@ -169,7 +169,7 @@ export function AccountSettingsForm({ initial }: Props) {
             className="w-full rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3 text-sm"
           />
         </Field>
-        <Field label="Photo URL" hint="Public direct link to a square image">
+        <Field label="Photo URL" hint="Paste a link to a square photo of you — uploads coming soon">
           <input
             type="url"
             value={state.photoUrl}

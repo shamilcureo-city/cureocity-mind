@@ -56,10 +56,10 @@ export default async function DashboardPage() {
         <>
           <AttentionSection attention={data.attention} />
           <MetricStrip metrics={data.metrics} />
-          <CaseloadPulseSection pulse={data.caseloadPulse} />
+          <CaseloadPulseSection pulse={data.caseloadPulse} hasDemoClient={data.hasDemoClient} />
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
             <UpNextSection upNext={data.upNext} />
-            <RecentSection groups={data.recentSessions} />
+            <RecentSection groups={data.recentSessions} hasDemoClient={data.hasDemoClient} />
           </div>
           <QuickActions />
         </>
@@ -320,7 +320,13 @@ const STAGE_BAR: Record<JourneyStage, string> = {
   DISCHARGED: 'bg-[var(--color-ink-3)]',
 };
 
-function CaseloadPulseSection({ pulse }: { pulse: CaseloadPulse }) {
+function CaseloadPulseSection({
+  pulse,
+  hasDemoClient,
+}: {
+  pulse: CaseloadPulse;
+  hasDemoClient: boolean;
+}) {
   return (
     <section className="mt-8" aria-label="Caseload pulse">
       <h2 className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
@@ -331,6 +337,7 @@ function CaseloadPulseSection({ pulse }: { pulse: CaseloadPulse }) {
           <p className="text-sm text-[var(--color-ink-2)]">
             No active episodes of care yet. Start a treatment plan from a client&rsquo;s Clinical
             Brief to begin tracking outcomes here.
+            {hasDemoClient && ' (The example client is not counted anywhere on this page.)'}
           </p>
         ) : (
           <>
@@ -458,14 +465,23 @@ function UpNextSection({ upNext }: { upNext: UpNextSession[] }) {
   );
 }
 
-function RecentSection({ groups }: { groups: RecentSessionGroup[] }) {
+function RecentSection({
+  groups,
+  hasDemoClient,
+}: {
+  groups: RecentSessionGroup[];
+  hasDemoClient: boolean;
+}) {
   return (
     <section aria-label="Recent sessions">
       <h2 className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
         Recent sessions
       </h2>
       {groups.length === 0 ? (
-        <Card className="p-6 text-sm text-[var(--color-ink-3)]">No completed sessions yet.</Card>
+        <Card className="p-6 text-sm text-[var(--color-ink-3)]">
+          No completed sessions yet
+          {hasDemoClient ? ' — example-client sessions aren\u2019t counted here' : ''}.
+        </Card>
       ) : (
         <Card className="overflow-hidden">
           <ul className="divide-y divide-[var(--color-line-soft)]">

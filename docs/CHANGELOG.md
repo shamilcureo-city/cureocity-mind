@@ -6,6 +6,77 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-19 — UI truth pass (full-app audit → fixes)
+
+A screenshot audit of every therapist surface (desktop + mobile, live demo
+data) found one severity-1 bug, a cluster of coherence issues, and developer
+language leaking into clinical UI. All fixed in one pass:
+
+**Bugs**
+
+- **Signed-note attestation** showed the therapist's raw CUID ("Signed by
+  cmrs7va4l…"). `NotesTab` now threads the practitioner's display name
+  (`signerName`) from the page; the footer renders "Signed by Dr. …".
+- **One clock, one format.** New `formatIstDate`/`formatIstDateTime` in
+  `apps/web/lib/ist.ts` — "12 Jul 2026, 10:00 am", always IST, never
+  seconds. The same session had rendered as `12/7/2026` (header),
+  `7/12/2026` (signed line) and server-UTC times on the roster; D/M vs M/D
+  ambiguity in a clinical record was the audit's sharpest finding. Swept the
+  session header, note footers, session-info tab, and both client pages.
+- **Undecryptable client rows** rendered as blank ghosts. The roster and the
+  client header now show "Name unavailable" + a "needs encryption backfill"
+  badge instead of nothing.
+- **Raw internal errors reached the UI**: the pre-session-brief route
+  returned the exception text verbatim (webpack module paths in the brief
+  panel). It now logs the detail and returns a human retry message.
+- Empty-value labels: "Phone" with nothing under it → consistent muted "—"
+  on both client surfaces. Conceptual-map empty copy no longer claims the
+  client has no recorded sessions.
+
+**Coherence**
+
+- Demo-exclusion made visible: Dashboard/My-practice/checklist zeros next to
+  six visible example sessions read as the app contradicting itself. The
+  dashboard lib exposes `hasDemoClient`; empty states + checklist hints now
+  say "example-client activity isn't counted here". Session Client tab
+  relabels "Past sessions/Last session" → "Sessions before this one /
+  Previous session".
+- The decision board badges a candidate that already IS the active record
+  diagnosis ("on record · primary") instead of re-offering it as new; step 5
+  is "Lock in a baseline" only until a first score exists, then "Track the
+  measures" (a session-6 remission score is not a baseline); wrap-up +
+  right-rail labels follow ("Measures").
+- Disabled buttons are now visibly disabled (neutral gray, no gradient) in
+  `ui/Button` + the board's `Act`.
+
+**Language + polish**
+
+- Jargon out of clinical UI: DPDP card ("audits as the appropriate DSR\_\*
+  verb" → plain English), Templates header, settings hints; `spoken: en` →
+  "Spoken: English" via new `lib/language-names.ts` (Intl.DisplayNames +
+  fallback map); TherapyLibrary chip likewise.
+- Signed-note AI panel: real centred explainer instead of an empty column.
+  Session-info: full session ID with a Copy chip (new `CopyChip`) instead of
+  a truncated id. Mindmap retinted from pre-retheme pastels to the blue
+  system. Trial meter labelled "Sessions used". Demo client renamed "Ananya
+  Iyer" (the Example badge already marks it; the name doubled it).
+- Mobile: board sub-tabs scroll instead of wrapping (no orphaned "Plan");
+  the diagnosis-candidate row wraps with the confidence meter on its own
+  full-width line instead of squeezing the label to one word per line.
+
+**Structure**
+
+- Client page gains a "View journey & progress →" link (the journey had no
+  entry point outside a session's copilot tab).
+- The phase-advancement Workflow now has ONE home (the copilot Plan tab);
+  the session Client tab links there instead of rendering a second expanded
+  copy, and the create-workflow goal placeholder is modality-neutral (was
+  panic-specific for every client).
+- Deferred deliberately: merging Today/Dashboard/My-practice into fewer
+  overview surfaces (a nav-level product decision — proposal noted in the
+  audit), and relocating the Templates create button (state lives inside the
+  client editor; cosmetic-only).
+
 ## 2026-07-17 — Copilot IA redesign · R3b (two next-session stores, disambiguated)
 
 Final phase: the audit found next-session questions living in **two

@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { TherapyScript, TherapyScriptStep, TherapyScriptV1 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { languageName } from '../../lib/language-names';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { ShareModal } from './ShareModal';
@@ -122,7 +123,7 @@ export function TherapyLibrary({
               Share plan with patient
             </Button>
           )}
-          <Badge tone="muted">language: {defaultLanguage}</Badge>
+          <Badge tone="muted">Scripts in {languageName(defaultLanguage)}</Badge>
         </div>
       </header>
 

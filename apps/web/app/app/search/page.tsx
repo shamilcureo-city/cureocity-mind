@@ -15,7 +15,10 @@ export default async function SearchPage() {
   return (
     <Container className="py-10">
       <header className="mb-6">
-        <h1 className="font-serif text-3xl">Search your notes</h1>
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
+          Search
+        </p>
+        <h1 className="mt-2 font-serif text-3xl">Search your notes</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-ink-2)]">
           Look across every signed note in your caseload — a topic, a name, a phrase — and open the
           session it came from. Only your own clients’ notes are searched.

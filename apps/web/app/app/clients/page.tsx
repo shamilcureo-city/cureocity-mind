@@ -9,6 +9,7 @@ import { ClientSearchControls } from '@/components/app/ClientSearchControls';
 import { HelpNote } from '@/components/app/EduHeading';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
+import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -173,7 +174,12 @@ export default async function ClientsPage({
                   className="grid min-w-0 flex-1 grid-cols-[2fr_1fr_1fr_1fr_1.5fr] items-center gap-3 px-5 py-4 text-sm"
                 >
                   <span className="flex flex-wrap items-center gap-2 font-medium text-[var(--color-ink)]">
-                    {names[i]}
+                    {/* UI truth pass — an undecryptable name must never render as a
+                        blank ghost row. Label it and say how to fix it. */}
+                    {names[i] || (
+                      <span className="italic text-[var(--color-ink-3)]">Name unavailable</span>
+                    )}
+                    {!names[i] && <Badge tone="warn">needs encryption backfill</Badge>}
                     {c.isDemo && <Badge tone="warn">Example</Badge>}
                   </span>
                   <span>
@@ -218,14 +224,14 @@ export default async function ClientsPage({
 }
 
 function formatMonth(d: Date): string {
-  return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-IN', {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  });
 }
 
 function formatDateTime(d: Date): string {
-  return d.toLocaleDateString('en-IN', {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  // UI truth pass — same clock as the session pages (IST), not server-UTC.
+  return formatIstDateTime(d);
 }

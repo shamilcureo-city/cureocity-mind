@@ -217,7 +217,7 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
         </Link>
       </div>
       <div className="mt-3 flex items-baseline justify-between text-xs text-[var(--color-ink-3)]">
-        <span>Sessions</span>
+        <span>Sessions used</span>
         <span className="tabular-nums">
           {usage.used} of {usage.cap}
         </span>

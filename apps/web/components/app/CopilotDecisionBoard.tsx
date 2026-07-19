@@ -630,7 +630,7 @@ function Act({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:opacity-40 ${cls}`}
+      className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors disabled:border-transparent disabled:bg-[var(--color-line-soft)] disabled:text-[var(--color-ink-3)] ${cls}`}
     >
       {children}
     </button>
@@ -961,10 +961,14 @@ function ImpressionStep({
             const c = candidates[i]!;
             const isOpen = expanded.has(i);
             const isSelected = selected.has(i);
+            // UI truth pass — a candidate that IS the active record diagnosis
+            // used to render as a brand-new suggestion, silently asking the
+            // therapist to re-accept what they already confirmed. Badge it.
+            const onRecord = recordDiagnoses.find((d) => d.icd11Code === c.icd11Code);
             return (
               <div key={i}>
                 <div
-                  className={`flex items-center gap-3 rounded-xl border p-3 ${
+                  className={`flex flex-wrap items-center gap-3 rounded-xl border p-3 ${
                     isSelected
                       ? 'border-[#d8e6de] bg-[var(--color-accent-soft)]'
                       : 'border-[var(--color-line-soft)] bg-white/30'
@@ -988,13 +992,22 @@ function ImpressionStep({
                     className="min-w-0 flex-1 text-left text-sm font-semibold"
                   >
                     {c.icd11Label}
+                    {onRecord && (
+                      <span className="ml-2 align-middle">
+                        <Badge tone="muted">
+                          {onRecord.isPrimary ? 'on record · primary' : 'on record'}
+                        </Badge>
+                      </span>
+                    )}
                     {primary === i && (
                       <span className="ml-2 align-middle">
                         <Badge tone="accent">primary</Badge>
                       </span>
                     )}
                   </button>
-                  <span className="w-24 flex-none">
+                  {/* Mobile: the confidence meter drops to its own full-width
+                      row instead of squeezing the label to one word a line. */}
+                  <span className="w-24 flex-none max-sm:order-last max-sm:w-full">
                     <span className="block h-[5px] overflow-hidden rounded-full bg-[var(--color-line-soft)]">
                       <span
                         className="block h-full bg-[var(--color-accent)] opacity-75"
@@ -2014,11 +2027,20 @@ function BaselineStep({
     (k) => !ADMINISTERABLE.some((a) => a.key === normaliseInstrumentKey(k)),
   );
 
+  // UI truth pass — once a first score exists this step is a RE-measure, not
+  // a baseline. Calling a session-6 remission score a "baseline" was
+  // clinically wrong copy.
+  const hasAnyScore = instruments.length > 0;
+
   return (
     <Step
       no={5}
-      title="Lock in a baseline"
-      sub="Two minutes now — every later session measures change against it."
+      title={hasAnyScore ? 'Track the measures' : 'Lock in a baseline'}
+      sub={
+        hasAnyScore
+          ? 'Change is read against the earlier scores on file.'
+          : 'Two minutes now — every later session measures change against it.'
+      }
     >
       <div className="flex flex-wrap items-center gap-2">
         {ADMINISTERABLE.map((a) => {
@@ -2119,7 +2141,7 @@ function WrapUpStep({
           : 'not accepted',
     },
     {
-      label: 'Baseline measures',
+      label: 'Measures',
       done: hasBaseline,
       detail: hasBaseline ? 'on file' : 'administer now',
       href: hasBaseline ? undefined : measuresHref,
@@ -2265,7 +2287,7 @@ function RecordLane({
           <RecEmpty>No safety concerns on file.</RecEmpty>
         )}
       </RecBlock>
-      <RecBlock label="Baseline measures">
+      <RecBlock label="Measures">
         <div className="flex flex-wrap gap-1.5">
           {ADMINISTERABLE.map((a) => {
             const latest = record.instruments.find((r) => r.instrumentKey === a.key);

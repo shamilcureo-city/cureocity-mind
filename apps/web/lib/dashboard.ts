@@ -40,6 +40,10 @@ export interface DashboardData {
   recentSessions: RecentSessionGroup[];
   /** True when the therapist has no clients + no sessions (first-run). */
   isEmpty: boolean;
+  /** UI truth pass — every tally here excludes the seeded example client.
+   * When one exists, empty states say so; otherwise "0 here, 6 sessions on
+   * the Record page" reads as the app contradicting itself. */
+  hasDemoClient: boolean;
 }
 
 export interface DashboardMetrics {
@@ -142,6 +146,7 @@ export async function buildDashboard(
     upNextRowsRaw,
     recentRowsRaw,
     candidatesRaw,
+    demoClientCount,
   ] = await Promise.all([
     prisma.client.count({
       where: { psychologistId, status: 'ACTIVE', deletedAt: null, isDemo: false },
@@ -208,6 +213,7 @@ export async function buildDashboard(
       orderBy: { openedAt: 'desc' },
       select: { clientId: true, client: { select: { fullNameEncrypted: true } } },
     }),
+    prisma.client.count({ where: { psychologistId, isDemo: true, deletedAt: null } }),
   ]);
 
   // PII read cutover — the client name is envelope-encrypted, so decrypt it
@@ -397,7 +403,16 @@ export async function buildDashboard(
 
   const isEmpty = activeClients === 0 && recentRows.length === 0 && upNextRows.length === 0;
 
-  return { greetingName, metrics, attention, caseloadPulse, upNext, recentSessions, isEmpty };
+  return {
+    greetingName,
+    metrics,
+    attention,
+    caseloadPulse,
+    upNext,
+    recentSessions,
+    isEmpty,
+    hasDemoClient: demoClientCount > 0,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import type { TherapyNoteV1 } from '@cureocity/contracts';
 import type { NoteVerbosity } from '../../lib/note-format';
+import { formatIstDateTime } from '../../lib/ist';
 
 interface Props {
   note: TherapyNoteV1;
@@ -162,7 +163,7 @@ function SignedFooter({
   if (!signedAt) return null;
   return (
     <p className="border-t border-[var(--color-line-soft)] pt-4 text-xs text-[var(--color-ink-3)]">
-      ✓ Signed{signedBy ? ` by ${signedBy}` : ''} · {new Date(signedAt).toLocaleString()}
+      ✓ Signed{signedBy ? ` by ${signedBy}` : ''} · {formatIstDateTime(signedAt)}
     </p>
   );
 }

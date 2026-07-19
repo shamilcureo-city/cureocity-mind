@@ -71,3 +71,29 @@ export function formatIstTime(d: Date): string {
     timeZone: IST_TZ,
   });
 }
+
+// ---------------------------------------------------------------------------
+// UI truth pass (2026-07 audit) — the ONE date format for therapist-facing
+// surfaces. The audit found the same session date rendered three ways on one
+// page ("12/7/2026, 10:00:00 am", "7/12/2026, 11:00:00 AM", "12 Jul 2026,
+// 10:00 am") — and D/M vs M/D ambiguity is a clinical-safety problem, not a
+// style nit. "12 Jul 2026" is unambiguous in either reading order. Seconds
+// are never shown. Always IST (India-only product; server clock is UTC).
+// ---------------------------------------------------------------------------
+
+/** "12 Jul 2026" — unambiguous, no locale-order trap. */
+export function formatIstDate(value: Date | string): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  return d.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: IST_TZ,
+  });
+}
+
+/** "12 Jul 2026, 10:00 am" — the canonical date-time everywhere in-app. */
+export function formatIstDateTime(value: Date | string): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  return `${formatIstDate(d)}, ${formatIstTime(d)}`;
+}

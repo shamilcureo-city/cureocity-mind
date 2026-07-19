@@ -79,6 +79,12 @@ interface Props {
   /// Sprint 70 — the session's chosen note template (drives the picker +
   /// which structure Pass 2 writes the note into). Null = built-in SOAP.
   noteTemplateId: string | null;
+  /// UI truth pass (2026-07 audit) — the signing practitioner's display
+  /// name. TherapyNote.signedBy stores the psychologist ID, and the signed
+  /// footer was rendering that raw CUID ("Signed by cmrs7va4l…") on the
+  /// legal attestation line. In V1 the signer is always the owning
+  /// therapist, so the page passes their name down.
+  signerName: string;
 }
 
 type Phase =
@@ -123,6 +129,7 @@ export function NotesTab({
   noteLanguage,
   clientPreferredLanguage,
   noteTemplateId,
+  signerName,
 }: Props) {
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
   // notes use IntakeNoteV1, which doesn't yet have a sign DTO or edit
@@ -676,7 +683,7 @@ export function NotesTab({
               <IntakeNotePreview
                 note={signedIntake}
                 signedAt={note.signedAt}
-                signedBy={note.signedBy}
+                signedBy={signerName}
                 verbosity={verbosity}
               />
               <ShareModal
@@ -745,7 +752,7 @@ export function NotesTab({
             <NotePreview
               note={treatmentContent}
               signedAt={note.signedAt}
-              signedBy={note.signedBy}
+              signedBy={signerName}
               verbosity={verbosity}
             />
             <ShareModal
@@ -1355,10 +1362,17 @@ function ModifyPanel({
 
       {/* Conversation area — feedback + quick suggestions */}
       <div className="flex flex-1 flex-col justify-end gap-3 py-6">
+        {/* UI truth pass — the signed state used to leave this whole column an
+            empty void with one small line at the bottom. Give it a real,
+            centred explainer instead. */}
         {disabled && (
-          <p className="text-center text-xs text-[var(--color-ink-3)]">
-            This note is signed. Use “Edit note” in the Version history below to change it.
-          </p>
+          <div className="grid flex-1 place-content-center gap-2 text-center">
+            <p className="text-sm font-medium text-[var(--color-ink-2)]">This note is signed</p>
+            <p className="mx-auto max-w-[26ch] text-xs leading-relaxed text-[var(--color-ink-3)]">
+              The AI can only modify an unsigned draft. Use “Edit note” in the Version history to
+              reopen it — signing again re-locks it.
+            </p>
+          </div>
         )}
         {lastChanged && lastChanged.length > 0 && (
           <p className="rounded-xl bg-[var(--color-accent-soft)] px-3 py-2 text-xs text-[var(--color-accent)]">

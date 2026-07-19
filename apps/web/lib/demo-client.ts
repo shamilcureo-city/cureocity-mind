@@ -51,7 +51,7 @@ import { buildProgressReport } from './progress-report';
  *     packages/clinical/src/instruments/change-score.ts.
  */
 
-const DEMO_NAME = 'Ananya Iyer (Example)';
+const DEMO_NAME = 'Ananya Iyer';
 const DEMO_PRIMARY_LANGUAGE = 'en';
 const DEMO_SESSION_INTERVAL_DAYS = 7;
 const PHQ9_SCORES: ReadonlyArray<number> = [18, 14, 9, 4];

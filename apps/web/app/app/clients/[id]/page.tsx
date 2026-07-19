@@ -15,6 +15,7 @@ import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { JourneyError } from '@/lib/journey';
 import { resolveClientPii } from '@/lib/client-pii';
+import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -62,6 +63,11 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
   if (!client) notFound();
   const pii = await resolveClientPii(client);
+
+  // Latest completed session — the journey (Progress) surface lives on the
+  // session workspace, so that's where the header's journey link points.
+  const latestCompletedSessionId =
+    client.sessions.find((s) => s.status === 'COMPLETED')?.id ?? null;
 
   // Built only for the page-level crisis banner — the one clinical
   // signal that stays on the lean record for safety.
@@ -134,7 +140,10 @@ export default async function ClientDetailPage({ params }: PageProps) {
           <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h1 className="flex flex-wrap items-center gap-3 font-serif text-3xl">
-                {pii.fullName}
+                {pii.fullName || (
+                  <span className="italic text-[var(--color-ink-3)]">Name unavailable</span>
+                )}
+                {!pii.fullName && <Badge tone="warn">needs encryption backfill</Badge>}
                 {client.isDemo && <Badge tone="warn">Example</Badge>}
               </h1>
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
@@ -182,17 +191,21 @@ export default async function ClientDetailPage({ params }: PageProps) {
             </div>
           </header>
 
+          {/* UI truth pass — one empty-value treatment: a muted em-dash. A bare
+              "Phone" label with nothing under it read as a rendering bug. */}
           <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
             <div>
               <dt className="text-xs text-[var(--color-ink-3)]">Phone</dt>
-              <dd className="font-mono text-[var(--color-ink)]">{pii.contactPhone}</dd>
+              <dd className="font-mono text-[var(--color-ink)]">
+                {pii.contactPhone || <span className="text-[var(--color-ink-3)]">—</span>}
+              </dd>
             </div>
-            {pii.contactEmail && (
-              <div>
-                <dt className="text-xs text-[var(--color-ink-3)]">Email</dt>
-                <dd className="text-[var(--color-ink)]">{pii.contactEmail}</dd>
-              </div>
-            )}
+            <div>
+              <dt className="text-xs text-[var(--color-ink-3)]">Email</dt>
+              <dd className="text-[var(--color-ink)]">
+                {pii.contactEmail || <span className="text-[var(--color-ink-3)]">—</span>}
+              </dd>
+            </div>
           </dl>
 
           {client.presentingConcerns?.trim() && (
@@ -227,11 +240,26 @@ export default async function ClientDetailPage({ params }: PageProps) {
 
       <div className="mt-6">
         <Card className="overflow-hidden">
-          <header className="border-b border-[var(--color-line-soft)] px-5 py-4">
-            <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Sessions</h3>
-            <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
-            </p>
+          <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line-soft)] px-5 py-4">
+            <div>
+              <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+                Sessions
+              </h3>
+              <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+                {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
+              </p>
+            </div>
+            {/* UI truth pass — the journey (arc, measures, next session) had no
+                entry point from the client page; it was only reachable through
+                a session's copilot tab. Link it from the latest session. */}
+            {latestCompletedSessionId && (
+              <Link
+                href={`/app/sessions/${latestCompletedSessionId}?tab=copilot&sub=progress`}
+                className="rounded-full border border-[var(--color-line)] px-3.5 py-1.5 text-xs font-medium text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]"
+              >
+                View journey &amp; progress →
+              </Link>
+            )}
           </header>
           {client.sessions.length === 0 ? (
             <div className="px-5 py-8 text-center">
@@ -314,17 +342,16 @@ function calcAge(dob: Date): number {
 }
 
 function formatMonth(d: Date): string {
-  return d.toLocaleDateString('en-IN', { month: 'short', year: 'numeric' });
+  return d.toLocaleDateString('en-IN', {
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  });
 }
 
 function formatDateTime(d: Date): string {
-  return d.toLocaleDateString('en-IN', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  // UI truth pass — same clock as the session pages (IST), not server-UTC.
+  return formatIstDateTime(d);
 }
 
 function statusTone(status: string): 'accent' | 'warn' | 'muted' | 'default' {

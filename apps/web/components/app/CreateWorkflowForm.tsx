@@ -126,7 +126,7 @@ export function CreateWorkflowForm({ clientId, scribeBase = '/api/v1', onCreated
           id="wf-goals"
           rows={5}
           placeholder={
-            'Reduce panic episodes from 4/week to 1/week\nReturn to work full-time\nRebuild sleep schedule'
+            'One goal per line — e.g. Practice one coping skill daily\nReturn to valued activities\nRebuild sleep routine'
           }
           value={goalsText}
           onChange={(e) => setGoalsText(e.target.value)}

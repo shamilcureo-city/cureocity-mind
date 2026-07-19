@@ -63,12 +63,14 @@ export async function FirstRunChecklist({ psychologistId }: Props) {
     {
       label: 'Record your first session',
       done: sessions > 0,
-      hint: 'Pick a client above and tap Start.',
+      // UI truth pass — six example-client sessions sit right below this
+      // card while it says "not done". Say why, or it reads as a bug.
+      hint: 'Pick a client above and tap Start. (Example-client sessions don’t count.)',
     },
     {
       label: 'Sign your first note',
       done: signedNotes > 0,
-      hint: 'Review the SOAP draft, then Sign off.',
+      hint: 'Review the SOAP draft, then Sign off. (The example notes don’t count.)',
     },
     {
       label: 'Share a note with your client',

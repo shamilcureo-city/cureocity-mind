@@ -26,6 +26,8 @@ import { SessionProblemTags } from '@/components/app/SessionProblemTags';
 import { computeCaseThread, CaseThreadError, type CaseThread } from '@/lib/case-thread';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { resolveClientPii } from '@/lib/client-pii';
+import { formatIstDateTime } from '@/lib/ist';
+import { languageNames } from '@/lib/language-names';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 
@@ -154,14 +156,14 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             {session.client.isDemo && <Badge tone="warn">Example</Badge>}
           </h1>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {session.modality ?? session.kind} · {session.scheduledAt.toLocaleString('en-IN')}
+            {session.modality ?? session.kind} · {formatIstDateTime(session.scheduledAt)}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {isIntake && <Badge tone="accent">intake session</Badge>}
           {session.spokenLanguages.length > 0 && (
             <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface)] px-3 py-1 text-xs text-[var(--color-ink-2)]">
-              spoken: {session.spokenLanguages.join(' + ')}
+              Spoken: {languageNames(session.spokenLanguages)}
             </span>
           )}
           <Badge tone={statusTone(session.status)}>
@@ -188,6 +190,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientPreferredLanguage={session.client.preferredLanguage}
             noteTemplateId={session.noteTemplateId}
             caseThread={caseThread}
+            signerName={therapist.fullName}
           />
         )}
         {tab === 'copilot' && (
@@ -223,6 +226,7 @@ async function NotesTabPanel({
   clientPreferredLanguage,
   noteTemplateId,
   caseThread,
+  signerName,
 }: {
   sessionId: string;
   sessionStatus: SessionStatus;
@@ -235,6 +239,7 @@ async function NotesTabPanel({
   clientPreferredLanguage: string;
   noteTemplateId: string | null;
   caseThread: CaseThread | null;
+  signerName: string;
 }) {
   const [draftRow, signedRow] = await Promise.all([
     prisma.noteDraft.findUnique({ where: { sessionId } }),
@@ -297,6 +302,7 @@ async function NotesTabPanel({
         noteLanguage={noteLanguage}
         clientPreferredLanguage={clientPreferredLanguage}
         noteTemplateId={noteTemplateId}
+        signerName={signerName}
       />
       {/* Reflection questions live with the note now (R1 relocation from the
           copilot Review sub — they're client-facing content, not a decision). */}

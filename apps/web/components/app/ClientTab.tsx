@@ -1,6 +1,7 @@
+import Link from 'next/link';
 import { Badge } from '../ui/Badge';
 import { AffectCard } from './AffectCard';
-import { WorkflowSection } from './WorkflowSection';
+import { formatIstDate } from '../../lib/ist';
 
 interface ClientPanelData {
   id: string;
@@ -34,28 +35,23 @@ export function ClientTab({ data }: { data: ClientPanelData }) {
         {data.preferredModality && <Badge tone="muted">{data.preferredModality}</Badge>}
       </header>
 
+      {/* UI truth pass — consistent "—" for empty values, and both count
+          labels scoped to "before this one": on a session page, "Last
+          session: 5 Jul" while viewing 12 Jul read as a contradiction. */}
       <dl className="mt-6 grid gap-x-8 gap-y-4 text-sm sm:grid-cols-2">
-        <Field label="Phone" value={data.contactPhone} />
-        <Field label="Email" value={data.contactEmail ?? '—'} />
+        <Field label="Phone" value={data.contactPhone || '—'} />
+        <Field label="Email" value={data.contactEmail || '—'} />
         <Field
-          label="Past sessions"
+          label="Sessions before this one"
           value={
             data.pastSessionCount === 0
-              ? 'First session'
+              ? 'None — first session'
               : `${data.pastSessionCount} session${data.pastSessionCount === 1 ? '' : 's'}`
           }
         />
         <Field
-          label="Last session"
-          value={
-            data.lastSessionAt
-              ? data.lastSessionAt.toLocaleDateString('en-IN', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                })
-              : '—'
-          }
+          label="Previous session"
+          value={data.lastSessionAt ? formatIstDate(data.lastSessionAt) : '—'}
         />
       </dl>
 
@@ -69,8 +65,19 @@ export function ClientTab({ data }: { data: ClientPanelData }) {
         </p>
       </section>
 
-      <div className="mt-6 border-t border-[var(--color-line-soft)] pt-6">
-        <WorkflowSection clientId={data.id} />
+      {/* UI truth pass — the phase-advancement Workflow used to render fully
+          expanded here AND (collapsed) on the copilot Plan tab: two homes for
+          one engine, and this copy showed panic-themed placeholder goals to
+          every client regardless of diagnosis. One home now — the Plan tab. */}
+      <div className="mt-6 border-t border-[var(--color-line-soft)] pt-6 text-sm text-[var(--color-ink-2)]">
+        Phase tracking (CBT / EMDR advancement) lives on the{' '}
+        <Link
+          href={`?tab=copilot&sub=plan`}
+          className="font-medium text-[var(--color-accent)] hover:underline"
+        >
+          Plan tab
+        </Link>
+        , with the rest of the treatment plan.
       </div>
 
       <div className="mt-6">

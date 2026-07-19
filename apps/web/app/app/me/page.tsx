@@ -167,6 +167,7 @@ export default async function MeOverviewPage() {
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-ink-2)]">
           A quiet readout of your last 30 days and your lifetime totals on the co-pilot. No
           comparisons — this is here to help you notice patterns in your own work.
+          {demoClientIds.length > 0 && ' Example-client activity is not counted here.'}
         </p>
       </header>
 
