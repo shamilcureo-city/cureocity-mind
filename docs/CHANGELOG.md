@@ -43,8 +43,15 @@ loop, with the living case formulation as the record's centre of gravity):
   test gains `KNOWN_NON_AUDIT_ACTION_LITERALS` (FormulationSuggestion's
   `action: 'ADD'|'REVISE'` field collides with the naïve regex).
 
-Next phases: SL2 (Prepare upgrade — read agreements back, formulation
-snapshot, due measures), SL3 (full formulation renderer + author editing).
+**SL2 (same day) — the Prepare side.** The Today screen's Prepare panel now
+opens with **"Last time you both agreed"** — the previous session's
+agreements with one-tap follow-up (Done / Partly / Not yet, persisted to
+the agreement row), a **formulation snapshot** (version + headline + the
+maintaining-cycle chain), and a **"Today I want to…"** scratch line
+(localStorage-only, deliberately not part of the record). `PrepareSummaryV1`
+gains `lastAgreements` + `formulationSnapshot` (optional + defaulted).
+
+Next phase: SL3 (full formulation renderer + author editing).
 
 ---
 

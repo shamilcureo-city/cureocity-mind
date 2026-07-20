@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { PreSessionBriefV1Schema } from './brief';
+import { SessionAgreementDtoSchema } from './formulation';
 import { JourneyActivePlanSchema, JourneyStageSchema, NextBestActionSchema } from './journey';
 import { InstrumentChangeSchema } from './instrument';
 
@@ -87,5 +88,25 @@ export const PrepareSummaryV1Schema = z.object({
    * "Open last session's copilot". Null for a brand-new client.
    */
   lastCompletedSessionId: CuidSchema.nullable(),
+  /**
+   * The Session Loop (SL2) — "Last time you both agreed": the previous
+   * completed session's agreements, read back at prepare time so the
+   * therapist can mark follow-up (done / partly / not yet) before the
+   * client walks in. Optional + defaulted (zero-regression additive).
+   */
+  lastAgreements: z.array(SessionAgreementDtoSchema).max(8).default([]),
+  /**
+   * SL2 — one-glance snapshot of the ACTIVE living formulation (version +
+   * the narrative's first sentence + the maintaining-cycle chain). Null
+   * when no formulation has been confirmed yet.
+   */
+  formulationSnapshot: z
+    .object({
+      version: z.number().int().positive(),
+      headline: z.string(),
+      cycleLine: z.string().nullable(),
+    })
+    .nullable()
+    .default(null),
 });
 export type PrepareSummaryV1 = z.infer<typeof PrepareSummaryV1Schema>;

@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import {
+  CaseFormulationV1Schema,
   PreSessionBriefV1Schema,
   type PrepareHomeworkEntry,
   type PrepareSummaryV1,
+  type SessionAgreementDto,
 } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
@@ -95,7 +97,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const briefIsStale =
     cachedBrief !== null && cachedBriefRow?.lastSessionId !== (lastCompleted?.id ?? null);
 
-  const [assignments, openCrises] = await Promise.all([
+  const [assignments, openCrises, agreementRows, formulationRow] = await Promise.all([
     prisma.exerciseAssignment.findMany({
       where: { clientId },
       orderBy: { assignedAt: 'desc' },
@@ -112,6 +114,20 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
       },
     }),
     fetchOpenCrises(clientId),
+    // SL2 — "last time you both agreed": the previous completed session's
+    // agreements, read back so follow-up can be marked at prepare time.
+    lastCompleted
+      ? prisma.sessionAgreement.findMany({
+          where: { sessionId: lastCompleted.id },
+          orderBy: { createdAt: 'asc' },
+          take: 8,
+        })
+      : Promise.resolve([]),
+    prisma.caseFormulation.findFirst({
+      where: { clientId, supersededAt: null },
+      orderBy: { version: 'desc' },
+      select: { version: true, body: true },
+    }),
   ]);
 
   const homework: PrepareHomeworkEntry[] = assignments.map((a) => ({
@@ -127,6 +143,32 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     dueAt: a.dueAt?.toISOString() ?? null,
   }));
 
+  const lastAgreements: SessionAgreementDto[] = agreementRows.map((r) => ({
+    id: r.id,
+    sessionId: r.sessionId,
+    text: r.text,
+    speaker: r.speaker,
+    followUp: r.followUp,
+    createdAt: r.createdAt.toISOString(),
+  }));
+
+  // SL2 — formulation snapshot: version + first narrative sentence + the
+  // cycle chain, enough for a pre-session glance without the full body.
+  const formulationParsed = formulationRow
+    ? CaseFormulationV1Schema.safeParse(formulationRow.body)
+    : null;
+  const formulationSnapshot =
+    formulationRow && formulationParsed?.success
+      ? {
+          version: formulationRow.version,
+          headline: firstSentence(formulationParsed.data.narrative),
+          cycleLine:
+            formulationParsed.data.cycle.length > 0
+              ? formulationParsed.data.cycle.map((c) => c.text).join(' → ')
+              : null,
+        }
+      : null;
+
   const summary: PrepareSummaryV1 = {
     version: 'V1',
     clientId,
@@ -141,6 +183,8 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     homework,
     openCrises,
     lastCompletedSessionId: lastCompleted?.id ?? null,
+    lastAgreements,
+    formulationSnapshot,
   };
 
   await writeAudit({
@@ -160,4 +204,13 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   });
 
   return NextResponse.json(summary);
+}
+
+/** First sentence of the narrative (or the first ~140 chars), for the glance line. */
+function firstSentence(text: string): string {
+  const t = text.trim();
+  if (t === '') return '';
+  const dot = t.indexOf('. ');
+  if (dot > 0 && dot < 200) return t.slice(0, dot + 1);
+  return t.length <= 140 ? t : `${t.slice(0, 140)}…`;
 }

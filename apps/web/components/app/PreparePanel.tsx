@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import type { PrepareSummaryV1 } from '@cureocity/contracts';
+import type {
+  AgreementFollowUp,
+  PrepareSummaryV1,
+  SessionAgreementDto,
+} from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 
 /**
@@ -127,6 +131,29 @@ function PrepareBody({
         </div>
       )}
 
+      {/* SL2 — the thread: what was agreed last session, marked at a glance
+          before the client walks in. Follow-up persists to the agreement row
+          (the Close surface's counterpart). */}
+      {data.lastAgreements.length > 0 && <AgreementsThread agreements={data.lastAgreements} />}
+
+      {data.formulationSnapshot && (
+        <section className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+          <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+            Formulation v{data.formulationSnapshot.version}
+          </p>
+          {data.formulationSnapshot.headline && (
+            <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-2)]">
+              {data.formulationSnapshot.headline}
+            </p>
+          )}
+          {data.formulationSnapshot.cycleLine && (
+            <p className="mt-1 text-[11px] text-[var(--color-ink-3)]">
+              {data.formulationSnapshot.cycleLine}
+            </p>
+          )}
+        </section>
+      )}
+
       <section className="flex flex-wrap items-baseline gap-2">
         <Badge tone="muted">{journey.stage.replace(/_/g, ' ').toLowerCase()}</Badge>
         {journey.activePlan && (
@@ -140,7 +167,8 @@ function PrepareBody({
             key={c.instrumentKey}
             className="rounded-full bg-[var(--color-surface)] px-3 py-0.5 text-xs text-[var(--color-ink-2)]"
           >
-            {c.instrumentKey} {c.baselineScore}→{c.latestScore} · {verdictChip(c.verdict)}
+            {instrumentLabel(c.instrumentKey)} {c.baselineScore}→{c.latestScore} ·{' '}
+            {verdictChip(c.verdict)}
           </span>
         ))}
       </section>
@@ -221,6 +249,8 @@ function PrepareBody({
         </section>
       )}
 
+      <TodayIntent clientId={data.clientId} />
+
       {lastCompletedSessionId && (
         <div className="border-t border-[var(--color-line-soft)] pt-3">
           <Link
@@ -233,6 +263,133 @@ function PrepareBody({
       )}
     </div>
   );
+}
+
+/**
+ * SL2 — "Last time you both agreed". Each agreement carries a three-state
+ * follow-up (done / partly / not yet) persisted via
+ * PATCH /sessions/[id]/agreements/[agreementId]. Optimistic with rollback.
+ */
+function AgreementsThread({ agreements }: { agreements: SessionAgreementDto[] }) {
+  const [rows, setRows] = useState(agreements);
+  const [error, setError] = useState<string | null>(null);
+
+  const mark = useCallback(
+    async (a: SessionAgreementDto, followUp: AgreementFollowUp): Promise<void> => {
+      setError(null);
+      const prev = rows;
+      setRows((cur) => cur.map((r) => (r.id === a.id ? { ...r, followUp } : r)));
+      const res = await fetch(`/api/v1/sessions/${a.sessionId}/agreements/${a.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ followUp }),
+      }).catch(() => null);
+      if (!res || !res.ok) {
+        setRows(prev);
+        setError('Could not save the follow-up — try again.');
+      }
+    },
+    [rows],
+  );
+
+  return (
+    <section>
+      <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+        Last time you both agreed
+      </p>
+      <ul className="mt-1.5 space-y-2">
+        {rows.map((a) => (
+          <li
+            key={a.id}
+            className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3"
+          >
+            <p className="text-xs text-[var(--color-ink)]">
+              {a.speaker === 'CLIENT' ? <>&ldquo;{a.text}&rdquo;</> : a.text}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(
+                [
+                  ['DONE', 'Done'],
+                  ['PARTLY', 'Partly'],
+                  ['NOT_YET', 'Not yet'],
+                ] as const
+              ).map(([key, label]) => {
+                const active = a.followUp === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => void mark(a, key)}
+                    className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
+                      active
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+                        : 'border-[var(--color-line)] bg-white text-[var(--color-ink-3)] hover:text-[var(--color-ink)]'
+                    }`}
+                    aria-pressed={active}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-1.5 text-[11px] text-[var(--color-warn)]">{error}</p>}
+    </section>
+  );
+}
+
+/**
+ * SL2 — "Today I want to…": the therapist's private one-line intention for
+ * the session. Deliberately local (localStorage, per client) — a scratch
+ * thought, not a record.
+ */
+function TodayIntent({ clientId }: { clientId: string }) {
+  const storageKey = `prepare-intent-${clientId}`;
+  const [value, setValue] = useState('');
+
+  useEffect(() => {
+    try {
+      setValue(window.localStorage.getItem(storageKey) ?? '');
+    } catch {
+      // Private mode / storage disabled — the scratch just doesn't persist.
+    }
+  }, [storageKey]);
+
+  return (
+    <section>
+      <label
+        htmlFor={`intent-${clientId}`}
+        className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+      >
+        Today I want to…
+      </label>
+      <input
+        id={`intent-${clientId}`}
+        type="text"
+        value={value}
+        maxLength={200}
+        onChange={(e) => {
+          setValue(e.target.value);
+          try {
+            window.localStorage.setItem(storageKey, e.target.value);
+          } catch {
+            /* non-fatal */
+          }
+        }}
+        placeholder="e.g. test the Saturday prediction; stay out of advice mode"
+        className="mt-1.5 w-full rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-xs outline-none focus:border-[var(--color-accent)]"
+      />
+      <p className="mt-1 text-[10px] text-[var(--color-ink-3)]">
+        Stays on this device — a scratch thought, not part of the record.
+      </p>
+    </section>
+  );
+}
+
+function instrumentLabel(instrumentKey: string): string {
+  return instrumentKey === 'PHQ9' ? 'PHQ-9' : instrumentKey === 'GAD7' ? 'GAD-7' : instrumentKey;
 }
 
 function verdictChip(verdict: string): string {
