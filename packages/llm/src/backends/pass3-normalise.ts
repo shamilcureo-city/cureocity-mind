@@ -214,13 +214,57 @@ function normaliseSuggestion(s: unknown): unknown | null {
   return { ...o, type };
 }
 
+// ============================================================================
+// The Session Loop (SL1) — formulation-suggestion normalisation. Same policy
+// as plan suggestions: canonicalise the enums, DROP anything unrecognised or
+// self-inconsistent — a bad formulation suggestion must never sink the report.
+// ============================================================================
+
+const FORMULATION_TARGETS = new Set([
+  'NARRATIVE',
+  'CYCLE',
+  'PREDISPOSING',
+  'PRECIPITATING',
+  'PERPETUATING',
+  'PROTECTIVE',
+  'PREDICTION',
+]);
+const FORMULATION_ACTIONS = new Set(['ADD', 'REVISE']);
+const CYCLE_ROLES = new Set(['TRIGGER', 'THOUGHT', 'FEELING', 'BEHAVIOUR', 'CONSEQUENCE']);
+
+function normaliseFormulationSuggestion(s: unknown): unknown | null {
+  if (!s || typeof s !== 'object') return null;
+  const o = s as Record<string, unknown>;
+  const up = (v: unknown): string =>
+    typeof v === 'string'
+      ? v
+          .trim()
+          .toUpperCase()
+          .replace(/[-\s]+/g, '_')
+      : '';
+  const target = up(o['target']);
+  const action = up(o['action']);
+  if (!FORMULATION_TARGETS.has(target) || !FORMULATION_ACTIONS.has(action)) return null;
+  if (typeof o['text'] !== 'string' || o['text'].trim() === '') return null;
+  const roleRaw = up(o['cycleRole']);
+  // US spelling drift on the one enum value where it can happen.
+  const role = roleRaw === 'BEHAVIOR' ? 'BEHAVIOUR' : roleRaw;
+  return {
+    ...o,
+    target,
+    action,
+    cycleRole: CYCLE_ROLES.has(role) ? role : null,
+    evidenceQuote: typeof o['evidenceQuote'] === 'string' ? o['evidenceQuote'] : null,
+  };
+}
+
 /**
  * Walks the raw Pass 3 JSON (intake brief or clinical report) and
  * normalises every `crisisFlags[].kind` and `crisisFlags[].severity`
  * to a canonical enum value, every `assessmentGaps[].purpose` to a
  * canonical assessment-engine purpose (dropping unknowns), and every
- * `planSuggestions[]` (dropping unappliable ones). Idempotent. Returns a
- * new object — the input is not mutated.
+ * `planSuggestions[]` / `formulationSuggestions[]` (dropping unappliable
+ * ones). Idempotent. Returns a new object — the input is not mutated.
  */
 export function normalisePass3Output(raw: unknown): unknown {
   if (!raw || typeof raw !== 'object') return raw;
@@ -233,6 +277,11 @@ export function normalisePass3Output(raw: unknown): unknown {
   if (Array.isArray(r['planSuggestions'])) {
     out['planSuggestions'] = r['planSuggestions']
       .map(normaliseSuggestion)
+      .filter((s) => s !== null);
+  }
+  if (Array.isArray(r['formulationSuggestions'])) {
+    out['formulationSuggestions'] = r['formulationSuggestions']
+      .map(normaliseFormulationSuggestion)
       .filter((s) => s !== null);
   }
   return out;

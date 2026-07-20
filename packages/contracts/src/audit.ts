@@ -247,6 +247,11 @@ export const AuditActionSchema = z.enum([
   // the apply taps land RX_PAD_EDITED rows). Metadata: { sessionId,
   // editCount, clarificationCount, costInr }.
   'PLAN_DICTATION_PROPOSED',
+  // The Session Loop (SL1) — formulation versioning, session agreements,
+  // one-tap alliance feedback.
+  'FORMULATION_CONFIRMED',
+  'AGREEMENT_RECORDED',
+  'SESSION_FEEDBACK_RECORDED',
   // NEXT2 — the reclaim cron marks generations stranded IN_PROGRESS/PENDING
   // (function killed mid-run) as FAILED so the UI offers a re-run instead of
   // an infinite spinner. One row per reclaimed draft/report.

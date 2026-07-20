@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { SessionModalitySchema } from './client';
+import { FormulationSuggestionSchema } from './formulation';
 
 /**
  * Sprint 13 — Clinical Co-Pilot Pivot.
@@ -276,6 +277,12 @@ export const ClinicalReportV1Schema = z.object({
    * the full `treatmentPlan` flow).
    */
   planSuggestions: z.array(ClinicalPlanSuggestionSchema).max(6).default([]),
+  /**
+   * The Session Loop (SL1). Evidence-anchored updates the AI proposes to the
+   * client's LIVING FORMULATION. Same zero-regression pattern as
+   * planSuggestions: optional + additive; empty when omitted.
+   */
+  formulationSuggestions: z.array(FormulationSuggestionSchema).max(6).default([]),
   recommendedTherapies: z.array(ClinicalRecommendedTherapySchema).min(0).max(8),
   crisisFlags: z.array(ClinicalCrisisFlagSchema).default([]),
 });

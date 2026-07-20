@@ -6,6 +6,48 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-20 — The Session Loop, phase SL1: Close the loop
+
+First phase of the Session Loop model (Prepare → be present → Close the
+loop, with the living case formulation as the record's centre of gravity):
+
+- **Living case formulation** — new `CaseFormulation` table, versioned like
+  `TreatmentPlan` (supersede + MAX(version)+1 in one tx, audited
+  `FORMULATION_CONFIRMED`). Contract `CaseFormulationV1` (narrative,
+  maintaining cycle, five Ps, predictions) in
+  `packages/contracts/src/formulation.ts`. Pass 3 now proposes
+  **formulation-as-diff** updates (`formulationSuggestions` on
+  `ClinicalReportV1` — same optional+additive zero-regression pattern as
+  `planSuggestions`, normalised defensively in `pass3-normalise.ts`); the
+  therapist accepts one suggestion at a time via
+  `POST /api/v1/clients/[id]/formulation`, or authors the whole body.
+- **Session agreements** — `SessionAgreement` rows ("what we agreed", in the
+  client's words where possible; speaker-tagged CLIENT/THERAPIST), with a
+  follow-up status (`DONE/PARTLY/NOT_YET`) the next session's Prepare card
+  will mark (SL2). Routes under `/api/v1/sessions/[id]/agreements`,
+  audited `AGREEMENT_RECORDED`.
+- **Alliance one-tap** — `Session.allianceRating` (`ROUGH/FLAT/GOOD/STRONG`)
+  via `PATCH /api/v1/sessions/[id]/feedback`, audited
+  `SESSION_FEEDBACK_RECORDED`. Drift shows here before the scores move.
+- **"Close the loop" surface** — new first sub-tab on the session AI
+  Copilot (`CloseLoopBoard`): five moments — what happened (note excerpt) /
+  what it means (formulation + accept-able proposed updates with verbatim
+  evidence quotes) / what we agreed / is it working (measure delta + the
+  alliance read) / anything to watch (crisis flags + open assessment
+  questions) — closed by the ONE existing note signature (WebAuthn-stepped
+  `postSignNote`), then share. A completed-but-unsigned session now lands
+  here by default; signed sessions keep the Review default.
+- Migration `20260831000000_sl1_session_loop` (guarded/idempotent). Demo
+  client seeds a formulation v1, two agreements, an alliance arc, and two
+  formulation suggestions so the surface demos in minute one. Audit chaos
+  test gains `KNOWN_NON_AUDIT_ACTION_LITERALS` (FormulationSuggestion's
+  `action: 'ADD'|'REVISE'` field collides with the naïve regex).
+
+Next phases: SL2 (Prepare upgrade — read agreements back, formulation
+snapshot, due measures), SL3 (full formulation renderer + author editing).
+
+---
+
 ## 2026-07-19 — UI truth pass (full-app audit → fixes)
 
 A screenshot audit of every therapist surface (desktop + mobile, live demo

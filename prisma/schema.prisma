@@ -129,6 +129,8 @@ model Psychologist {
   clinicalReports     ClinicalReport[]
   clientDiagnoses     ClientDiagnosis[]
   treatmentPlans      TreatmentPlan[]
+  caseFormulations    CaseFormulation[]
+  sessionAgreements   SessionAgreement[]
   therapyScripts      TherapyScript[]
   patientShares       PatientShare[]
   preSessionBriefs    PreSessionBrief[]
@@ -462,6 +464,8 @@ model Client {
   clinicalReports     ClinicalReport[]
   diagnoses           ClientDiagnosis[]
   treatmentPlans      TreatmentPlan[]
+  caseFormulations    CaseFormulation[]
+  sessionAgreements   SessionAgreement[]
   therapyScripts      TherapyScript[]
   patientShares       PatientShare[]
   preSessionBriefs    PreSessionBrief[]
@@ -808,6 +812,10 @@ model Session {
   /// /app/clinic. See docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS7.
   tokenNumber Int?
 
+  /// The Session Loop (SL1) — one-tap alliance read at session close
+  /// ("how did the session land?"). Null = not asked.
+  allianceRating AllianceRating?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -833,6 +841,8 @@ model Session {
   clinicalReadings    ClinicalReading[]
   // Sprint 73 — problems this session worked on (session↔problem tags).
   problemLinks        SessionProblemLink[]
+  // The Session Loop (SL1) — "what we agreed", in the client's words.
+  agreements          SessionAgreement[]
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -1599,6 +1609,92 @@ model TreatmentPlan {
   @@index([clientId, supersededAt])
   @@index([psychologistId, createdAt])
   @@map("treatment_plans")
+}
+
+// ============================================================================
+// The Session Loop (SL1) — the living case formulation. Versioned like
+// TreatmentPlan: the AI proposes evidence-anchored updates (Pass 3
+// formulationSuggestions), the therapist authors freely; each confirmed
+// change supersedes the prior version. Body validated against
+// CaseFormulationV1Schema before write.
+// ============================================================================
+
+model CaseFormulation {
+  id              String  @id @default(cuid())
+  clientId        String
+  psychologistId  String
+  /// The session whose close produced this version (null for authored edits
+  /// made outside a session context).
+  sourceSessionId String?
+
+  /// Auto-incrementing per client (MAX(version)+1 within client scope).
+  version Int
+
+  body Json
+
+  confirmedAt  DateTime
+  supersededAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@unique([clientId, version])
+  @@index([clientId, supersededAt])
+  @@map("case_formulations")
+}
+
+/// The Session Loop (SL1) — the alliance read captured at session close.
+enum AllianceRating {
+  ROUGH
+  FLAT
+  GOOD
+  STRONG
+}
+
+enum AgreementSpeaker {
+  CLIENT
+  THERAPIST
+}
+
+enum AgreementFollowUp {
+  DONE
+  PARTLY
+  NOT_YET
+}
+
+// ============================================================================
+// The Session Loop (SL1) — session agreements: "what we agreed", in the
+// client's own words where possible. The client-facing contract each session
+// produces; the NEXT session's Prepare card reads these back and marks
+// follow-up (done / partly / not yet).
+// ============================================================================
+
+model SessionAgreement {
+  id             String @id @default(cuid())
+  sessionId      String
+  clientId       String
+  psychologistId String
+
+  speaker AgreementSpeaker
+  text    String
+
+  /// Marked at the NEXT session's prepare step — never at creation.
+  followUp   AgreementFollowUp?
+  followUpAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session      Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@index([sessionId])
+  @@index([clientId, createdAt])
+  @@map("session_agreements")
 }
 
 // ============================================================================
@@ -2781,6 +2877,9 @@ enum AuditAction {
   CARE_NUDGE_SUPPRESSED
   CARE_HOMEWORK_TICKED
   PLAN_DICTATION_PROPOSED // Sprint DS12 — voice plan-edit proposal produced (apply lands RX_PAD_EDITED)
+  FORMULATION_CONFIRMED // SL1 — a new living-formulation version confirmed (accepted suggestion or authored)
+  AGREEMENT_RECORDED // SL1 — a session agreement recorded / follow-up marked
+  SESSION_FEEDBACK_RECORDED // SL1 — one-tap alliance rating captured at close
 }
 
 enum AuditActorType {

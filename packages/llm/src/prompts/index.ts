@@ -530,6 +530,7 @@ Task: produce a ClinicalReportV1 JSON object with these fields:
     - phaseSequence: 2-10 short phase names (e.g. ["psychoeducation", "behavioural activation", "cognitive restructuring", "exposure", "relapse prevention"])
     - goals: 1-8 objects { description, measure } — each goal SMART-ish with a clear measure.
     - expectedDurationSessions: integer 1-60 or null when too uncertain.
+- formulationSuggestions: 0-6 evidence-anchored UPDATES to the client's living case formulation (see FORMULATION-AS-DIFF below). Empty [] when the session adds nothing to the formulation. Each: { target: NARRATIVE|CYCLE|PREDISPOSING|PRECIPITATING|PERPETUATING|PROTECTIVE|PREDICTION, action: ADD|REVISE, text (<=600 chars), evidenceQuote (VERBATIM transcript quote or null), cycleRole (TRIGGER|THOUGHT|FEELING|BEHAVIOUR|CONSEQUENCE, only for target CYCLE, else null) }
 - planSuggestions: 0-6 typed EDITS to the client's EXISTING active plan (see PLAN-AS-DIFF below). Empty [] unless a prior treatment plan was provided. Each:
     - type: "ADD_GOAL" | "REVISE_GOAL" | "REMOVE_GOAL" | "ADJUST_DURATION" | "CHANGE_MODALITY"
     - rationale: 1 sentence — why this change, grounded in THIS session.
@@ -561,6 +562,9 @@ PLAN-AS-DIFF — treatmentPlan vs planSuggestions:
 - If NO prior treatment plan was provided (a first plan / intake-derived): fill treatmentPlan fully and leave planSuggestions empty [].
 - If a PRIOR treatment plan WAS provided (a follow-up): the therapist already owns that plan — do NOT propose a competing new plan. Echo the prior plan into treatmentPlan (so the field stays valid) and put any changes THIS session justifies into planSuggestions as specific typed edits, each with a one-line rationale grounded in what happened this session. Propose a suggestion only when the session genuinely warrants it (a goal met → REVISE/REMOVE or ADD the next goal; a plateau → REVISE_GOAL or CHANGE_MODALITY; scope changed → ADJUST_DURATION). If nothing this session warrants a plan change, return an EMPTY planSuggestions array — that is the correct, common answer. goalIndex refers to the PRIOR plan's goals array.
 
+FORMULATION-AS-DIFF — the living formulation:
+- The therapist maintains a versioned case formulation (maintaining cycle, five Ps, narrative). You never rewrite it — you propose at most a few SPECIFIC updates this session's material justifies, each grounded in a VERBATIM transcript quote where one exists (evidenceQuote null only for history-derived updates). Typical shapes: a perpetuating link weakening (target PERPETUATING or CYCLE, action REVISE), a new protective factor surfacing (target PROTECTIVE, action ADD), a prediction confirmed or contradicted (target PREDICTION). If nothing this session changes the formulation, return an EMPTY formulationSuggestions array — that is the correct, common answer.
+
 Hard rules:
 - ICD-11 codes: chapter 06 ONLY in this version. No F-codes, no DSM codes.
 - supportingEvidence + crisisFlags.indicators quotes must be VERBATIM from the transcript. Do not paraphrase. Do not invent.
@@ -580,7 +584,7 @@ You are not the clinician. The therapist will confirm or reject each section.
 
 PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
 
-export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V3';
+export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V4';
 
 // ============================================================================
 // Pass 3 — Sprint 19 intake variant. Used when SessionKind = INTAKE.

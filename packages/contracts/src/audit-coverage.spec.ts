@@ -108,6 +108,20 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   'INTAKE_MATCHED',
 ]);
 
+/**
+ * `action: 'X'` literals in the scan roots that are NOT audit actions —
+ * other contracts also have an `action` field and the naïve regex can't
+ * tell them apart. Each entry must name its owning contract. Values here
+ * are excluded from the typo check, so never add a real AuditAction.
+ */
+const KNOWN_NON_AUDIT_ACTION_LITERALS = new Set<string>([
+  // FormulationSuggestion.action (SL1) — 'ADD' | 'REVISE': the AI's
+  // proposed edit kind on the living case formulation (demo fixture +
+  // any route body literals).
+  'ADD',
+  'REVISE',
+]);
+
 function listSourceFiles(dir: string): string[] {
   const result: string[] = [];
   let entries: string[];
@@ -180,7 +194,9 @@ describe('Audit coverage (DPDP chaos test)', () => {
   it('every writer site references a valid AuditActionSchema value (no typos)', () => {
     const enumValues = new Set<string>(AuditActionSchema.options);
     const writtenActions = extractWrittenActions();
-    const stranger = [...writtenActions].filter((a) => !enumValues.has(a));
+    const stranger = [...writtenActions].filter(
+      (a) => !enumValues.has(a) && !KNOWN_NON_AUDIT_ACTION_LITERALS.has(a),
+    );
     if (stranger.length > 0) {
       throw new Error(
         `Found 'action: <value>' literals that are NOT in AuditActionSchema (likely typo):\n  ${stranger.join('\n  ')}`,
@@ -198,5 +214,11 @@ describe('Audit coverage (DPDP chaos test)', () => {
       );
     }
     expect(stale).toEqual([]);
+  });
+
+  it('KNOWN_NON_AUDIT_ACTION_LITERALS never shadows a real AuditAction (that would hide typo coverage)', () => {
+    const enumValues = new Set<string>(AuditActionSchema.options);
+    const shadowed = [...KNOWN_NON_AUDIT_ACTION_LITERALS].filter((a) => enumValues.has(a));
+    expect(shadowed).toEqual([]);
   });
 });

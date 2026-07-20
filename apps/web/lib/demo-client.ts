@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  CaseFormulationV1Schema,
   ClinicalReportV1Schema,
   ClinicalTreatmentPlanSchema,
   InitialAssessmentBriefV1Schema,
@@ -8,6 +9,7 @@ import {
   PENDING_SECTION_CONFIRMATIONS,
   TherapyNoteV1Schema,
   TherapyScriptV1Schema,
+  type CaseFormulationV1,
   type ClinicalReportV1,
   type ClinicalSectionConfirmations,
   type ClinicalTreatmentPlan,
@@ -117,6 +119,7 @@ export async function createDemoClient(
   const clinicalReportBody: ClinicalReportV1 = ClinicalReportV1Schema.parse(buildClinicalReport());
   const planBody: ClinicalTreatmentPlan = ClinicalTreatmentPlanSchema.parse(buildTreatmentPlan());
   const scriptBody: TherapyScriptV1 = TherapyScriptV1Schema.parse(buildTherapyScript());
+  const formulationBody: CaseFormulationV1 = CaseFormulationV1Schema.parse(buildCaseFormulation());
 
   // Score every PHQ-9 administration through the real scorer so the
   // responses / score / severity tuple is internally consistent and
@@ -468,6 +471,51 @@ export async function createDemoClient(
       ],
     });
 
+    // ---------- The Session Loop (SL1) ----------
+    // Alliance arc: flat start, warming as the work lands — the drift signal
+    // the Close surface makes visible before the scores move.
+    const allianceArc = ['FLAT', 'GOOD', 'GOOD', 'STRONG', 'STRONG'] as const;
+    for (let i = 0; i < treatmentSessions.length && i < allianceArc.length; i++) {
+      await tx.session.update({
+        where: { id: treatmentSessions[i]!.id },
+        data: { allianceRating: allianceArc[i] },
+      });
+    }
+
+    // Agreements on the latest session — in the client's words where
+    // possible; the next session's Prepare card reads these back.
+    const lastTreatmentId = treatmentSessions.at(-1)?.id ?? firstTreatmentSessionId;
+    await tx.sessionAgreement.createMany({
+      data: [
+        {
+          sessionId: lastTreatmentId,
+          clientId: client.id,
+          psychologistId,
+          speaker: 'CLIENT' as const,
+          text: "I'll go to badminton on Saturday even if I don't feel like it — mood follows action.",
+        },
+        {
+          sessionId: lastTreatmentId,
+          clientId: client.id,
+          psychologistId,
+          speaker: 'THERAPIST' as const,
+          text: 'Bring the thought record for the Sunday-evening dread; we review it first thing.',
+        },
+      ],
+    });
+
+    // The living case formulation — v1, confirmed alongside the plan.
+    await tx.caseFormulation.create({
+      data: {
+        clientId: client.id,
+        psychologistId,
+        sourceSessionId: firstTreatmentSessionId,
+        version: 1,
+        body: formulationBody as unknown as Prisma.InputJsonValue,
+        confirmedAt: new Date(firstTreatmentDate.getTime() + 35 * 60 * 1000),
+      },
+    });
+
     return client.id;
   });
 
@@ -563,6 +611,8 @@ export async function removeDemoClient(
     await tx.preSessionBrief.deleteMany({ where: { clientId } });
     await tx.clientConceptualMap.deleteMany({ where: { clientId } });
     await tx.assessmentItem.deleteMany({ where: { clientId } });
+    await tx.sessionAgreement.deleteMany({ where: { clientId } });
+    await tx.caseFormulation.deleteMany({ where: { clientId } });
     await tx.exerciseAssignment.deleteMany({ where: { clientId } });
     await tx.treatmentEpisode.deleteMany({ where: { clientId } });
     await tx.consent.deleteMany({ where: { clientId } });
@@ -763,6 +813,25 @@ function buildClinicalReport(): ClinicalReportV1 {
       'Moderate depressive episode in the context of work-stress and post-relationship adjustment, responding well to behavioural activation and cognitive restructuring. Engagement strong, outcome trend favourable, no current safety concerns.',
     treatmentPlan: buildTreatmentPlan(),
     planSuggestions: [],
+    // SL1 — evidence-anchored updates the Close surface offers to fold into
+    // the living formulation (accepting one versions it to v2).
+    formulationSuggestions: [
+      {
+        target: 'PERPETUATING',
+        action: 'REVISE',
+        text: 'Evening rumination now centres on work appraisal rather than the relationship — the maintaining loop has narrowed.',
+        evidenceQuote: 'It is the Monday review I replay at night now, not the breakup.',
+        cycleRole: null,
+      },
+      {
+        target: 'PROTECTIVE',
+        action: 'ADD',
+        text: 'Saturday badminton group re-established as a reliable behavioural-activation anchor.',
+        evidenceQuote:
+          'They keep asking me to come back on Saturdays, and I have gone three weeks straight.',
+        cycleRole: null,
+      },
+    ],
     recommendedTherapies: [
       {
         name: 'Behavioural Activation',
@@ -780,6 +849,42 @@ function buildClinicalReport(): ClinicalReportV1 {
       },
     ],
     crisisFlags: [],
+  };
+}
+
+/**
+ * SL1 — the living case formulation, v1. Confirmed off the first treatment
+ * session so the Close surface shows a real formulation with a maintaining
+ * cycle, the five Ps, and one prediction under test.
+ */
+function buildCaseFormulation(): CaseFormulationV1 {
+  return {
+    version: 'V1',
+    narrative:
+      'A moderate depressive episode precipitated by a relationship ending and sustained by a work-appraisal rumination loop: withdrawal from valued activity removes the evidence that would disconfirm the "I am falling behind everyone" appraisal, which keeps mood low and withdrawal going. Behavioural activation is re-opening the loop; the badminton group is the strongest lever.',
+    cycle: [
+      { role: 'TRIGGER', text: 'Sunday evening; the week ahead comes into view', breaking: false },
+      { role: 'THOUGHT', text: '"I am falling behind everyone at work"', breaking: false },
+      { role: 'FEELING', text: 'Low, heavy, drained before the week starts', breaking: false },
+      { role: 'BEHAVIOUR', text: 'Cancels plans, stays in, scrolls late', breaking: true },
+      {
+        role: 'CONSEQUENCE',
+        text: 'No disconfirming evidence — the appraisal survives another week',
+        breaking: false,
+      },
+    ],
+    fivePs: {
+      predisposing: ['High self-standards tied to career progress since college'],
+      precipitating: ['Relationship ended four months ago', 'Missed promotion cycle at work'],
+      perpetuating: ['Evening rumination loop', 'Withdrawal from valued activities'],
+      protective: ['Stable job and housing', 'Sister she trusts and talks to weekly'],
+    },
+    predictions: [
+      {
+        text: 'If Saturday activity holds for three weeks, PHQ-9 stays in remission at the next administration.',
+        status: 'HOLDING',
+      },
+    ],
   };
 }
 

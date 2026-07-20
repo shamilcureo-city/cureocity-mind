@@ -46,7 +46,7 @@ const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'client',
 ]);
 
-const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['review', 'progress', 'plan']);
+const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['close', 'review', 'progress', 'plan']);
 
 // Copilot IA redesign (R1) renamed the sub keys: session→review,
 // journey→progress (plan unchanged). Old links — including the pre-R1
@@ -86,12 +86,14 @@ function parseTab(raw: string | undefined): { tab: TabKey; subOverride: CopilotS
   return { tab: 'notes', subOverride: null };
 }
 
-function parseSub(raw: string | undefined): CopilotSubKey {
+// Null means "no explicit sub" — the page picks the default from session
+// state (SL1: a completed-but-unsigned session lands on Close the loop).
+function parseSub(raw: string | undefined): CopilotSubKey | null {
   if (raw && (VALID_SUBS as ReadonlySet<string>).has(raw)) {
     return raw as CopilotSubKey;
   }
   if (raw && raw in LEGACY_SUB_MAP) return LEGACY_SUB_MAP[raw]!;
-  return 'review';
+  return raw ? 'review' : null;
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
@@ -105,7 +107,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const { tab: rawTab, sub: rawSub } = await searchParams;
   const { tab, subOverride } = parseTab(rawTab);
-  const sub = subOverride ?? parseSub(rawSub);
+  const explicitSub = subOverride ?? parseSub(rawSub);
 
   const session = await prisma.session.findFirst({
     where: { id, psychologistId: therapist.id },
@@ -126,6 +128,18 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
   const sessionKind: SessionKind = session.kind;
   const isIntake = sessionKind === 'INTAKE';
+
+  // SL1 — with no explicit sub, a completed session that hasn't been signed
+  // lands on "Close the loop" (the end-of-session ritual); everything else
+  // keeps the Review default.
+  let sub: CopilotSubKey = explicitSub ?? 'review';
+  if (explicitSub === null && tab === 'copilot' && session.status === 'COMPLETED') {
+    const signedExists = await prisma.therapyNote.findUnique({
+      where: { sessionId: id },
+      select: { id: true },
+    });
+    if (!signedExists) sub = 'close';
+  }
 
   // Sprint 73 — case thread: where this document sits in the client's
   // arc + what carried over. Defensive: a compose failure must never

@@ -574,6 +574,24 @@ export class MockGeminiPass3Backend implements IPass3Backend {
               },
             ]
           : [],
+        // SL1: evidence-anchored updates to the living formulation, so the
+        // Close-the-loop surface has something to render offline.
+        formulationSuggestions: [
+          {
+            target: 'PERPETUATING',
+            action: 'REVISE',
+            text: '[mock] The avoidance link is weakening — activation is holding for a second week.',
+            evidenceQuote: 'I actually wanted to go on Thursday, it was not just the plan.',
+            cycleRole: null,
+          },
+          {
+            target: 'PROTECTIVE',
+            action: 'ADD',
+            text: '[mock] Reconnected with a valued social group — add as a protective factor.',
+            evidenceQuote: 'They keep texting me to come back on Saturdays.',
+            cycleRole: null,
+          },
+        ],
         recommendedTherapies: [
           {
             name: 'Cognitive Restructuring',

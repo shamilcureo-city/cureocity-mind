@@ -1,15 +1,23 @@
 import { z } from 'zod';
 import {
   CarriedQuestionSchema,
+  CaseFormulationV1Schema,
   ClinicalLocaleSchema,
   ClinicalReportV1Schema,
   ClinicalTreatmentPlanSchema,
+  IntakeNoteV1Schema,
   type ClinicalLocale,
+  type SessionAgreementDto,
   type SessionKind,
   type TherapyNoteV1,
 } from '@cureocity/contracts';
 import { Card } from '@/components/ui/Card';
 import { CareBoard } from '@/components/app/CareBoard';
+import {
+  CloseLoopBoard,
+  type CloseLoopCrisisFlag,
+  type CloseLoopData,
+} from '@/components/app/CloseLoopBoard';
 import { CareMeasurePanel } from '@/components/app/CareMeasurePanel';
 import { CareNextSessionPanel } from '@/components/app/CareNextSessionPanel';
 import { CareStoryPanel } from '@/components/app/CareStoryPanel';
@@ -89,6 +97,18 @@ export async function AICopilotTab({
   return (
     <div className="space-y-6">
       <AICopilotSubTabs sessionId={sessionId} active={sub} />
+      {sub === 'close' && (
+        <CloseSub
+          sessionId={sessionId}
+          clientId={clientId}
+          psychologistId={psychologistId}
+          clientName={clientName}
+          clientHasContactPhone={clientHasContactPhone}
+          clientHasContactEmail={clientHasContactEmail}
+          preferredLanguage={preferredLanguage}
+          sessionKind={sessionKind}
+        />
+      )}
       {sub === 'review' && (
         <SessionSub sessionId={sessionId} clientId={clientId} sessionKind={sessionKind} />
       )}
@@ -116,6 +136,177 @@ export async function AICopilotTab({
 }
 
 // ----- sub-tab bodies -----
+
+/**
+ * The Session Loop (SL1) — "Close the loop": the five-moment end-of-session
+ * surface (what happened / what it means / what we agreed / is it working /
+ * anything to watch), closed by the ONE note signature. Default sub when a
+ * completed session hasn't been signed yet.
+ */
+async function CloseSub({
+  sessionId,
+  clientId,
+  psychologistId,
+  clientName,
+  clientHasContactPhone,
+  clientHasContactEmail,
+  preferredLanguage,
+  sessionKind,
+}: {
+  sessionId: string;
+  clientId: string;
+  psychologistId: string;
+  clientName: string;
+  clientHasContactPhone: boolean;
+  clientHasContactEmail: boolean;
+  preferredLanguage: string;
+  sessionKind: SessionKind;
+}) {
+  const isIntake = sessionKind === 'INTAKE';
+  const [
+    sessionRow,
+    draft,
+    signedRow,
+    reportRow,
+    formulationRow,
+    agreementRows,
+    instruments,
+    openItems,
+    signer,
+  ] = await Promise.all([
+    prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { status: true, allianceRating: true },
+    }),
+    prisma.noteDraft.findUnique({ where: { sessionId }, select: { status: true, content: true } }),
+    prisma.therapyNote.findUnique({
+      where: { sessionId },
+      select: { signedAt: true, content: true },
+    }),
+    prisma.clinicalReport.findUnique({ where: { sessionId } }),
+    prisma.caseFormulation.findFirst({
+      where: { clientId, supersededAt: null },
+      orderBy: { version: 'desc' },
+    }),
+    prisma.sessionAgreement.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' } }),
+    prisma.instrumentResponse.findMany({
+      where: { clientId },
+      orderBy: { administeredAt: 'desc' },
+      take: 8,
+      select: { instrumentKey: true, score: true, severity: true, administeredAt: true },
+    }),
+    prisma.assessmentItem.findMany({
+      where: { clientId, status: 'OPEN' },
+      orderBy: { createdAt: 'asc' },
+      take: 5,
+      select: { question: true },
+    }),
+    prisma.psychologist.findUnique({ where: { id: psychologistId }, select: { fullName: true } }),
+  ]);
+
+  // The note to display + sign: the signed content when it exists, else the
+  // completed draft. Summary line narrows by session kind (Sprint 19 union).
+  const noteContent = signedRow?.content ?? (draft?.status === 'COMPLETED' ? draft.content : null);
+  let noteSummary: string | null = null;
+  if (noteContent) {
+    if (isIntake) {
+      const parsed = IntakeNoteV1Schema.safeParse(noteContent);
+      noteSummary = parsed.success ? excerpt(parsed.data.presentingConcerns) : null;
+    } else {
+      const note = noteContent as unknown as TherapyNoteV1;
+      noteSummary = excerpt(note.summary ?? note.subjective ?? '');
+    }
+  }
+
+  // Formulation suggestions + crisis flags come from the session's Pass 3
+  // output — the report shape for treatment sessions, the intake brief for
+  // intakes (which carries crisis flags but no formulation suggestions).
+  let suggestions: CloseLoopData['suggestions'] = [];
+  let crisisFlags: CloseLoopCrisisFlag[] = [];
+  let reportId: string | null = null;
+  if (reportRow && reportRow.status === 'COMPLETED' && reportRow.body) {
+    if (isIntake) {
+      const brief = readInitialAssessmentBrief(reportRow);
+      crisisFlags = (brief?.crisisFlags ?? []).map((f) => ({
+        kind: f.kind,
+        severity: f.severity,
+        recommendedAction: f.recommendedAction,
+      }));
+    } else {
+      const parsed = ClinicalReportV1Schema.safeParse(reportRow.body);
+      if (parsed.success) {
+        reportId = reportRow.id;
+        suggestions = parsed.data.formulationSuggestions;
+        crisisFlags = parsed.data.crisisFlags.map((f) => ({
+          kind: f.kind,
+          severity: f.severity,
+          recommendedAction: f.recommendedAction,
+        }));
+      }
+    }
+  }
+
+  const formulationParse = formulationRow
+    ? CaseFormulationV1Schema.safeParse(formulationRow.body)
+    : null;
+
+  const agreements: SessionAgreementDto[] = agreementRows.map((r) => ({
+    id: r.id,
+    sessionId: r.sessionId,
+    text: r.text,
+    speaker: r.speaker,
+    followUp: r.followUp,
+    createdAt: r.createdAt.toISOString(),
+  }));
+
+  const data: CloseLoopData = {
+    sessionId,
+    clientId,
+    clientName,
+    sessionKind,
+    sessionCompleted: sessionRow?.status === 'COMPLETED',
+    hasContactPhone: clientHasContactPhone,
+    hasContactEmail: clientHasContactEmail,
+    preferredLanguage,
+    noteReady: noteContent !== null,
+    noteContent,
+    noteSummary,
+    signed: signedRow
+      ? { signedAt: signedRow.signedAt.toISOString(), signerName: signer?.fullName ?? '' }
+      : null,
+    reportId,
+    suggestions,
+    formulation:
+      formulationRow && formulationParse?.success
+        ? {
+            version: formulationRow.version,
+            confirmedAt: formulationRow.confirmedAt.toISOString(),
+            body: formulationParse.data,
+          }
+        : null,
+    agreements,
+    measures: instruments.map((i) => ({
+      instrumentKey: i.instrumentKey,
+      score: i.score,
+      severity: i.severity,
+      administeredAt: i.administeredAt.toISOString(),
+    })),
+    alliance: sessionRow?.allianceRating ?? null,
+    crisisFlags,
+    openQuestions: openItems.map((i) => i.question),
+  };
+
+  return <CloseLoopBoard data={data} />;
+}
+
+/** First ~360 chars of a note section, cut at a word boundary. */
+function excerpt(text: string): string | null {
+  const t = text.trim();
+  if (t === '') return null;
+  if (t.length <= 360) return t;
+  const cut = t.slice(0, 360);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 300))}…`;
+}
 
 async function SessionSub({
   sessionId,

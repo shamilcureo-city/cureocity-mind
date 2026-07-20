@@ -62,3 +62,5 @@ export * from './care';
 export * from './letter';
 export * from './problem';
 export * from './note-review';
+// The Session Loop (SL1) — living formulation + agreements + feedback.
+export * from './formulation';
