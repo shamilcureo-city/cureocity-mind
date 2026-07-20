@@ -17,6 +17,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { postSignNote } from '../../lib/sign-note';
 import { formatIstDateTime } from '../../lib/ist';
+import { isSuggestionApplied } from '../../lib/formulation-applied';
 import { ShareModal } from './ShareModal';
 
 /**
@@ -257,7 +258,9 @@ export function CloseLoopBoard({ data }: { data: CloseLoopData }) {
   const notesHref = `/app/sessions/${data.sessionId}?tab=notes`;
   const visibleSuggestions = data.suggestions
     .map((s, i) => ({ s, i }))
-    .filter(({ i }) => !acceptedIdx.has(i));
+    .filter(
+      ({ s, i }) => !acceptedIdx.has(i) && !isSuggestionApplied(data.formulation?.body ?? null, s),
+    );
 
   return (
     <div className="space-y-4">

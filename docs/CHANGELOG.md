@@ -51,7 +51,17 @@ maintaining-cycle chain), and a **"Today I want to…"** scratch line
 (localStorage-only, deliberately not part of the record). `PrepareSummaryV1`
 gains `lastAgreements` + `formulationSnapshot` (optional + defaulted).
 
-Next phase: SL3 (full formulation renderer + author editing).
+**SL3 (same day) — the formulation in full.** The copilot Plan sub now
+LEADS with the living formulation (`FormulationCard`): narrative, the
+maintaining cycle rendered as a role-labelled chain with the link being
+broken marked ("breaking here"), the five Ps grid, and predictions with
+holding / to-test / not-matching status — plus a structured **author
+editor** (one save = one new version via `action: 'author'`; empty rows
+dropped). Pending AI-proposed updates render beneath with the same accept
+route as the Close surface, and a shared `isSuggestionApplied` filter
+(`apps/web/lib/formulation-applied.ts`) stops offering a suggestion once
+its content is already on the record — on both surfaces. The plan remains
+directly below: the formulation is why, the plan is what we're doing.
 
 ---
 

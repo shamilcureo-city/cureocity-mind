@@ -28,6 +28,7 @@ import {
   type CaseRecordSnapshot,
 } from '@/components/app/CopilotDecisionBoard';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
+import { FormulationCard, type FormulationCardData } from '@/components/app/FormulationCard';
 import { PlanHero, type PlanHeroData } from '@/components/app/PlanHero';
 import { TherapyLibrary } from '@/components/app/TherapyLibrary';
 import { WorkflowSection } from '@/components/app/WorkflowSection';
@@ -535,15 +536,17 @@ async function JourneySub({
 }
 
 /**
- * Copilot IA redesign (R2) — the Plan sub-tab.
+ * Copilot IA redesign (R2) → Session Loop (SL3) — the Plan sub-tab.
  *
  * The tab named "Plan & toolkit" used to render a map, diagnosis history, a
  * therapy library and a "Workflow" form — but not the client's actual
- * treatment plan, which had no full in-app view. This now leads with the
- * plan itself (PlanHero: phases, goals + live status, versions), then the
- * supporting tools: session scripts, formulation map, diagnosis history, and
- * the CBT/EMDR advancement tracker (demoted to a collapsed "advanced" section
- * — it's a separate phase engine, not a second plan).
+ * treatment plan, which had no full in-app view. R2 made the plan the hero;
+ * SL3 put the LIVING FORMULATION above it (the plan is what we're doing,
+ * the formulation is why — diagnosis demoted to a supporting element).
+ * Order now: FormulationCard → PlanHero (phases, goals + live status,
+ * versions) → session scripts → diagnosis history → conceptual map → the
+ * CBT/EMDR advancement tracker (collapsed — a separate phase engine, not a
+ * second plan).
  */
 async function PlanSub({
   sessionId,
@@ -558,11 +561,11 @@ async function PlanSub({
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
 }) {
-  const [latestReport, activePlan, versionCount, diagnoses] = await Promise.all([
+  const [latestReport, activePlan, versionCount, formulationRow, diagnoses] = await Promise.all([
     prisma.clinicalReport.findFirst({
       where: { clientId, status: 'COMPLETED' },
       orderBy: { createdAt: 'desc' },
-      select: { body: true },
+      select: { id: true, body: true },
     }),
     prisma.treatmentPlan.findFirst({
       where: { clientId, supersededAt: null },
@@ -570,6 +573,10 @@ async function PlanSub({
       select: { id: true, version: true, body: true, confirmedAt: true },
     }),
     prisma.treatmentPlan.count({ where: { clientId } }),
+    prisma.caseFormulation.findFirst({
+      where: { clientId, supersededAt: null },
+      orderBy: { version: 'desc' },
+    }),
     prisma.clientDiagnosis.findMany({
       where: { clientId },
       orderBy: [{ supersededAt: 'asc' }, { confirmedAt: 'desc' }],
@@ -621,8 +628,33 @@ async function PlanSub({
   const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';
   const reviewHref = `/app/sessions/${sessionId}?tab=copilot&sub=review`;
 
+  // SL3 — the living formulation leads the tab: the plan is what we're
+  // doing; the formulation is why. Pending AI-proposed updates come from
+  // the latest completed report (same accept route as the Close surface).
+  const formulationParse = formulationRow
+    ? CaseFormulationV1Schema.safeParse(formulationRow.body)
+    : null;
+  const latestReportParse = latestReport?.body
+    ? ClinicalReportV1Schema.safeParse(latestReport.body)
+    : null;
+  const formulationCard: FormulationCardData = {
+    clientId,
+    formulation:
+      formulationRow && formulationParse?.success
+        ? {
+            version: formulationRow.version,
+            confirmedAt: formulationRow.confirmedAt.toISOString(),
+            body: formulationParse.data,
+          }
+        : null,
+    reportId: latestReportParse?.success ? (latestReport?.id ?? null) : null,
+    suggestions: latestReportParse?.success ? latestReportParse.data.formulationSuggestions : [],
+  };
+
   return (
     <div className="space-y-6">
+      <FormulationCard data={formulationCard} />
+
       <PlanHero
         plan={planHero}
         versionCount={versionCount}
