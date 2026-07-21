@@ -5,6 +5,12 @@ import { useRouter } from 'next/navigation';
 import type { CareTurn, RedeemLiveTokenResponse } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { LivePlayback } from '@/lib/audio/live-playback';
+import {
+  CARE_OPENING_CUE,
+  CARE_END_SESSION_MIN_REMAINING_SEC,
+  careCueFrame,
+  dueCareTimeCues,
+} from '@/lib/care-live-cues';
 import { CrisisTakeover } from './CrisisTakeover';
 import type { CareResource } from './SafetyStrip';
 
@@ -57,8 +63,16 @@ export function CareLiveSession({
   const mutedRef = useRef(false);
   const phaseRef = useRef<Phase>('connecting');
   const usageRef = useRef({ tokensIn: 0, tokensOut: 0 });
+  // CP1 — the browser is the clock. remainingSecRef is the source of truth
+  // read by the tool-call handler + countdown; pendingCuesRef holds time cues
+  // crossed while the model was mid-utterance, flushed once it pauses.
+  const remainingSecRef = useRef(capMin * 60);
+  const speakingRef = useRef(false);
+  const pendingCuesRef = useRef<string[]>([]);
   phaseRef.current = phase;
   mutedRef.current = muted;
+  remainingSecRef.current = remainingSec;
+  speakingRef.current = speaking;
 
   const mic = useLiveStream({
     onFrame: (pcm) => {
@@ -166,31 +180,17 @@ export function CareLiveSession({
       if ('setupComplete' in msg) {
         setPhase('live');
         startedAtRef.current = Date.now();
+        // CP1 — the countdown only starts NOW (not at page mount), so connect +
+        // setup latency no longer eats therapy time. Reset the clock to full.
+        remainingSecRef.current = capMin * 60;
+        setRemainingSec(capMin * 60);
         // Meera opens the session — she speaks FIRST. The model stays silent
         // until it receives an input turn, so send a one-time, non-spoken cue
-        // telling it to greet now (per its system instruction). This text turn
-        // is NOT mirrored to the transcript — only audio-transcription events
-        // are pushed — so it never appears as if the user said it.
+        // telling it to greet now. This text turn is NOT mirrored to the
+        // transcript — only audio-transcription events are pushed — so it
+        // never appears as if the user said it.
         const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              client_content: {
-                turns: [
-                  {
-                    role: 'user',
-                    parts: [
-                      {
-                        text: 'You are now connected and they can hear you. Begin the session now — speak first, softly and warmly, exactly as your instructions say. Do not wait for them to speak.',
-                      },
-                    ],
-                  },
-                ],
-                turn_complete: true,
-              },
-            }),
-          );
-        }
+        if (ws && ws.readyState === WebSocket.OPEN) ws.send(careCueFrame(CARE_OPENING_CUE));
         void micStartRef.current();
         return;
       }
@@ -235,13 +235,43 @@ export function CareLiveSession({
         return;
       }
       const toolCall = msg['toolCall'] as
-        | { functionCalls?: Array<{ name?: string; args?: Record<string, unknown> }> }
+        | { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> }
         | undefined;
       for (const call of toolCall?.functionCalls ?? []) {
         if (call.name === 'flag_crisis') {
           void enterCrisis('model_tool', String(call.args?.['reason'] ?? ''));
         } else if (call.name === 'end_session') {
-          void endSessionRef.current();
+          // CP1 — the model has no reliable clock. DECLINE a close it proposes
+          // while there is still real time left (the honest close is driven by
+          // the wind-down [TIME SIGNAL] near the end); accept once inside the
+          // closing window. A user-tapped end never routes through here.
+          const ws = wsRef.current;
+          if (
+            remainingSecRef.current > CARE_END_SESSION_MIN_REMAINING_SEC &&
+            ws &&
+            ws.readyState === WebSocket.OPEN
+          ) {
+            ws.send(
+              JSON.stringify({
+                tool_response: {
+                  function_responses: [
+                    {
+                      id: call.id,
+                      name: 'end_session',
+                      response: {
+                        accepted: false,
+                        minutes_remaining: Math.round(remainingSecRef.current / 60),
+                        instruction:
+                          'Not time to end yet — keep the session going and wait for the closing time signal.',
+                      },
+                    },
+                  ],
+                },
+              }),
+            );
+          } else {
+            void endSessionRef.current();
+          }
         }
       }
     },
@@ -339,13 +369,29 @@ export function CareLiveSession({
     void connect();
     flushTimerRef.current = setInterval(() => void flushTurns(), 3000);
     const countdown = setInterval(() => {
-      setRemainingSec((s) => {
-        if (s <= 1) {
-          void endSessionRef.current();
-          return 0;
+      // CP1 — the clock only runs once the session is actually live.
+      if (phaseRef.current !== 'live') return;
+      const prev = remainingSecRef.current;
+      const next = prev - 1;
+      // Silent time cues — the model's clock. Queue any crossed this tick and
+      // flush them only when the model isn't mid-utterance, so a cue never
+      // cuts across its speech. dueCareTimeCues ranges over (prev, next], so a
+      // multi-second tick still catches every crossing.
+      for (const cue of dueCareTimeCues(prev, next)) pendingCuesRef.current.push(cue.text);
+      if (pendingCuesRef.current.length > 0 && !speakingRef.current) {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          for (const text of pendingCuesRef.current) ws.send(careCueFrame(text));
+          pendingCuesRef.current = [];
         }
-        return s - 1;
-      });
+      }
+      remainingSecRef.current = next <= 0 ? 0 : next;
+      if (next <= 0) {
+        setRemainingSec(0);
+        void endSessionRef.current();
+        return;
+      }
+      setRemainingSec(next);
     }, 1000);
 
     return () => {

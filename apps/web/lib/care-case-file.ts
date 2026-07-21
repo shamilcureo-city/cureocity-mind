@@ -214,8 +214,15 @@ const LANGUAGE_NAMES: Record<string, string> = {
 export function languageGuidance(preferred: string, spoken: string[]): string {
   const langs = spoken.length > 0 ? spoken : [preferred];
   const names = langs.map((l) => LANGUAGE_NAMES[l] ?? l);
-  if (names.length === 1) return `Speak ${names[0]}.`;
-  return `Speak a natural ${names.join('-')} mix, mirroring how the user speaks.`;
+  if (names.length === 1) {
+    const only = names[0]!;
+    // Native-audio models drift into a formal/literary or mispronounced
+    // register for Indian languages unless steered hard toward everyday
+    // spoken speech. Be explicit about register, pace, and keeping the
+    // English words people actually use.
+    return `Speak with them in ${only}. Use clear, natural, EVERYDAY spoken ${only} — the way people actually talk at home, not a formal, literary, or news-reader register. Keep sentences short and simple, pronounce words carefully and unhurriedly, and where an English word is what people normally say in speech, keep it rather than forcing a stiff or unusual translation.`;
+  }
+  return `Speak with them in a natural ${names.join('-')} mix, the way real speakers blend these in everyday conversation (e.g. Manglish, Hinglish) — mirror how the user speaks. Everyday spoken register, short simple sentences, careful and unhurried pronunciation; keep the common English words people normally use rather than forcing stilted translations.`;
 }
 
 export interface BuildSessionPromptInput {

@@ -151,10 +151,11 @@ wss.on('connection', (ws, req) => {
     if (!script || script.done) return;
     const exchange = SCRIPTS[script.fixture][script.step];
     if (!exchange) {
+      // CP1 — do NOT auto-fire end_session on script exhaustion. That trained
+      // the client (and the team) to accept auto-wrap; the real close is now
+      // driven by the wind-down time cue or the user tapping "end session".
+      // The mock simply falls quiet after its scripted exchanges.
       script.done = true;
-      send({
-        toolCall: { functionCalls: [{ name: 'end_session', args: { reason: 'script complete' } }] },
-      });
       return;
     }
     // Echo the "user's" line as an input transcription (the client
