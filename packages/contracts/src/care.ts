@@ -253,6 +253,22 @@ export const CareAssessmentAndPlanSchema = z.object({
   proposedGoals: z.array(CareProposedGoalSchema).min(1).max(6),
   modalityTrack: CareModalityTrackSchema.catch('CBT'),
   cadence: z.string().max(60).catch('weekly-25min'),
+  /// CP3 — measured screening scores COPIED from the case file (not re-scored):
+  /// the "where you're starting" band read. Empty when nothing was measured.
+  /// Additive + defaulted so pre-CP3 reports still parse.
+  measures: z
+    .array(
+      z.object({
+        instrumentKey: z.string().max(20),
+        score: z.number().int().nonnegative(),
+        band: z.string().max(60),
+      }),
+    )
+    .catch([]),
+  /// CP3 — a plain-language, SCREENING-LEVEL provisional impression: names the
+  /// likely picture in provisional words, explicitly NOT a formal diagnosis or
+  /// ICD code, with a nudge that a licensed clinician confirms diagnoses.
+  provisionalImpression: z.string().max(1500).catch(''),
   riskScreen: CareRiskScreenSchema,
 });
 export type CareAssessmentAndPlan = z.infer<typeof CareAssessmentAndPlanSchema>;

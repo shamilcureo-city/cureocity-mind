@@ -5,7 +5,7 @@ import {
   type CareSessionKind,
   type CareTurn,
 } from '@cureocity/contracts';
-import { computeInstrumentChange, type InstrumentKey } from '@cureocity/clinical';
+import { computeInstrumentChange, INSTRUMENTS, type InstrumentKey } from '@cureocity/clinical';
 import {
   buildCareTherapistPrompt,
   CARE_PROTOCOL_STEPS,
@@ -30,6 +30,15 @@ export interface CareInstrumentVerdict {
   verdict: string;
 }
 
+/// CP3 — the LATEST measured score + its severity band per instrument (the
+/// "where you're starting" read the intake report shows). Present from the
+/// first response, unlike verdicts which need two.
+export interface CareMeasure {
+  instrumentKey: InstrumentKey;
+  score: number;
+  band: string;
+}
+
 export interface CareCaseFile {
   plan: {
     id: string;
@@ -47,6 +56,7 @@ export interface CareCaseFile {
   homeworkLine?: string;
   recentThemes: string[];
   verdicts: CareInstrumentVerdict[];
+  measures: CareMeasure[];
   worseningVerdict: boolean;
 }
 
@@ -83,8 +93,16 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
   // Instrument series → deterministic reliable-change verdicts. Baseline
   // is the FIRST response; the engine (change-score.ts) is the only judge.
   const verdicts: CareInstrumentVerdict[] = [];
+  // CP3 — the LATEST score + its severity band per instrument (needs only one
+  // response), the "where you're starting" read for the intake report.
+  const measures: CareMeasure[] = [];
   for (const key of ['PHQ9', 'GAD7'] as InstrumentKey[]) {
     const series = instrumentRows.filter((r) => r.instrumentKey === key);
+    if (series.length >= 1) {
+      const latest = series[series.length - 1]!.totalScore;
+      const band = INSTRUMENTS[key].severityBands.find((b) => latest >= b.min && latest <= b.max);
+      measures.push({ instrumentKey: key, score: latest, band: band?.label.en ?? '' });
+    }
     if (series.length >= 2) {
       const baseline = series[0]!.totalScore;
       const latest = series[series.length - 1]!.totalScore;
@@ -185,6 +203,7 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
     homeworkLine,
     recentThemes: recentThemes.slice(0, 5),
     verdicts,
+    measures,
     worseningVerdict,
   };
 }
@@ -323,6 +342,9 @@ export function caseFileJsonForReport(
         : null,
       completedSessions: cf.completedCount,
       reviewEveryNSessions: CARE_REVIEW_EVERY_N_SESSIONS,
+      // CP3 — the measured "where you're starting" read; the INTAKE report
+      // copies these into `measures` (it never re-scores them).
+      baselineMeasures: cf.measures,
       lastReportSummary: cf.lastReportSummary ?? null,
       homework: cf.homeworkLine ?? null,
       recentThemes: cf.recentThemes,
