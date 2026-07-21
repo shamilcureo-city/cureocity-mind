@@ -146,7 +146,7 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
             {
               name: 'end_session',
               description:
-                'Call when the session reaches its natural close or time is up, after the closing summary and goodbye.',
+                'Call ONLY after you have given your closing summary and warm goodbye at the very end. You do NOT track time yourself — wait for the [TIME SIGNAL] that tells you to begin closing (or for the user to end). Never call this to finish early; if you feel done sooner, gently ask if there is anything else instead.',
               parameters: {
                 type: 'OBJECT',
                 properties: { reason: { type: 'STRING' } },
