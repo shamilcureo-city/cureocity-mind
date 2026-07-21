@@ -211,18 +211,32 @@ const LANGUAGE_NAMES: Record<string, string> = {
   pa: 'Punjabi',
 };
 
+/// The natural CODE-MIX name for each regional language — how people
+/// actually speak conversationally in India (Malayalam → Manglish, …).
+const CODE_MIX_NAMES: Record<string, string> = {
+  ml: 'Manglish (a natural Malayalam–English mix)',
+  hi: 'Hinglish (a natural Hindi–English mix)',
+  ta: 'Tanglish (a natural Tamil–English mix)',
+  te: 'Tenglish (a natural Telugu–English mix)',
+  kn: 'Kanglish (a natural Kannada–English mix)',
+  bn: 'Banglish (a natural Bengali–English mix)',
+};
+
 export function languageGuidance(preferred: string, spoken: string[]): string {
   const langs = spoken.length > 0 ? spoken : [preferred];
-  const names = langs.map((l) => LANGUAGE_NAMES[l] ?? l);
-  if (names.length === 1) {
-    const only = names[0]!;
-    // Native-audio models drift into a formal/literary or mispronounced
-    // register for Indian languages unless steered hard toward everyday
-    // spoken speech. Be explicit about register, pace, and keeping the
-    // English words people actually use.
-    return `Speak with them in ${only}. Use clear, natural, EVERYDAY spoken ${only} — the way people actually talk at home, not a formal, literary, or news-reader register. Keep sentences short and simple, pronounce words carefully and unhurriedly, and where an English word is what people normally say in speech, keep it rather than forcing a stiff or unusual translation.`;
+  const nonEnglish = langs.filter((l) => l !== 'en');
+  // English-only → plain everyday English.
+  if (nonEnglish.length === 0) {
+    return 'Speak natural, everyday English — short, simple, warm sentences.';
   }
-  return `Speak with them in a natural ${names.join('-')} mix, the way real speakers blend these in everyday conversation (e.g. Manglish, Hinglish) — mirror how the user speaks. Everyday spoken register, short simple sentences, careful and unhurried pronunciation; keep the common English words people normally use rather than forcing stilted translations.`;
+  // Code-mix-first: any Indian regional language means the CODE-MIXED register
+  // people actually speak (Manglish/Hinglish/…), NEVER pure formal regional
+  // language and never pure English. Native-audio models default to a stiff,
+  // literary register unless steered hard toward real conversational speech.
+  const primary = nonEnglish[0]!;
+  const primaryName = LANGUAGE_NAMES[primary] ?? primary;
+  const mixName = CODE_MIX_NAMES[primary] ?? `a natural ${primaryName}–English mix`;
+  return `Speak with them in ${mixName} — the everyday, code-mixed way people actually talk, NOT pure formal ${primaryName} and NOT pure English. Keep the common English words and phrases people naturally use in speech (things like stress, feeling, okay, work, sleep, relax); keep sentences short and simple; pronounce carefully and unhurriedly. Mirror the user — if they lean more English or more ${primaryName}, follow them.`;
 }
 
 export interface BuildSessionPromptInput {
