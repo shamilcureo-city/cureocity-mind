@@ -6,6 +6,35 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-21 — Demo client rebuilt as a complex case (the full-capacity arc)
+
+The one-click example client (Ananya Iyer) previously repeated one note and
+one report across five sessions. Rebuilt as a deliberately complex case so
+a trialing therapist sees the system's full capacity in minute one:
+
+- **Six sessions, each distinct** — its own note (summary + topics), its
+  own Pass-3 report, and its own diarized transcript. Every evidence quote
+  cited in a report appears **verbatim in a transcript** — the citation
+  trail a therapist follows is real. Two sessions carry Hindi code-mix
+  lines (`Spoken: English + Hindi`).
+- **Comorbidity** — 6A70.1 (primary) + 6B00 GAD, tracked with PHQ-9 *and*
+  GAD-7 (15→11→4).
+- **A real setback** — a layoff round at session 3 spikes PHQ-9 to 19
+  (18→15→19→9→4), surfaces passive ideation (medium crisis flag on that
+  report, full risk-assessment dialogue in the transcript), and produces a
+  collaborative **SafetyPlan**; resolved by the next session. The alliance
+  arc dips to ROUGH the same week.
+- **Versioned thinking on display** — plan v1→v2 (sleep + worry goals
+  added after the setback), formulation v1→v2 (the "workload eases"
+  prediction NOT_MATCHING → revision), agreements every session with
+  follow-ups marked the following week (last pair unmarked for Prepare).
+- **Endgame** — remission on both instruments, homework in mixed states,
+  four assessment-ledger items (three closed with findings, one open),
+  and report-5 carrying a plan-as-diff (ADJUST_DURATION) plus the two
+  formulation-as-diff suggestions awaiting the therapist's call.
+
+---
+
 ## 2026-07-20 — The Session Loop, phase SL1: Close the loop
 
 First phase of the Session Loop model (Prepare → be present → Close the
