@@ -14,7 +14,24 @@ import {
 import { CrisisTakeover } from './CrisisTakeover';
 import type { CareResource } from './SafetyStrip';
 
-type Phase = 'connecting' | 'ready' | 'live' | 'ending' | 'ended' | 'crisis' | 'error';
+type Phase =
+  | 'connecting'
+  | 'ready'
+  | 'live'
+  | 'reconnecting'
+  | 'ending'
+  | 'ended'
+  | 'crisis'
+  | 'error';
+
+// CP1 reconnect — behind NEXT_PUBLIC_CARE_LIVE_ENGINE_V2 so flag-off is a
+// byte-identical rollback (a WS drop ends the session exactly as before).
+const CARE_ENGINE_V2 = process.env['NEXT_PUBLIC_CARE_LIVE_ENGINE_V2'] === 'true';
+const RECONNECT_MAX_ATTEMPTS = 3; // per drop
+const RECONNECT_MAX_TOTAL = 8; // per session — guards a pathological loop
+const RECONNECT_BACKOFF_MS = [1000, 2000, 4000];
+const RECONNECT_FLOOR_SEC = 120; // below this remaining, finalize instead of resuming
+const OPEN_TIMEOUT_MS = 12000; // give up on a socket that never reaches setupComplete
 
 interface Props {
   sessionId: string;
@@ -69,6 +86,16 @@ export function CareLiveSession({
   const remainingSecRef = useRef(capMin * 60);
   const speakingRef = useRef(false);
   const pendingCuesRef = useRef<string[]>([]);
+  // CP1 reconnect state
+  const resumeHandleRef = useRef<string | null>(null); // latest Gemini session-resumption handle
+  const reconnectingRef = useRef(false); // single-flight guard for the reconnect loop
+  const reconnectTotalRef = useRef(0); // per-session reconnect count (bounded)
+  const openResolveRef = useRef<((ok: boolean) => void) | null>(null); // resolves on setupComplete
+  const reconnectRef = useRef<() => void>(() => {});
+  const openLiveSocketRef = useRef<
+    (credential: RedeemLiveTokenResponse, resumeHandle: string | null) => Promise<boolean>
+  >(() => Promise.resolve(false));
+  const cancelledRef = useRef(false);
   phaseRef.current = phase;
   mutedRef.current = muted;
   remainingSecRef.current = remainingSec;
@@ -178,21 +205,50 @@ export function CareLiveSession({
   const handleServerMessage = useCallback(
     (msg: Record<string, unknown>) => {
       if ('setupComplete' in msg) {
+        const resuming = reconnectingRef.current;
         setPhase('live');
-        startedAtRef.current = Date.now();
-        // CP1 — the countdown only starts NOW (not at page mount), so connect +
-        // setup latency no longer eats therapy time. Reset the clock to full.
-        remainingSecRef.current = capMin * 60;
-        setRemainingSec(capMin * 60);
-        // Meera opens the session — she speaks FIRST. The model stays silent
-        // until it receives an input turn, so send a one-time, non-spoken cue
-        // telling it to greet now. This text turn is NOT mirrored to the
-        // transcript — only audio-transcription events are pushed — so it
-        // never appears as if the user said it.
         const ws = wsRef.current;
-        if (ws && ws.readyState === WebSocket.OPEN) ws.send(careCueFrame(CARE_OPENING_CUE));
+        if (!resuming) {
+          startedAtRef.current = Date.now();
+          // CP1 — the countdown only starts NOW (not at page mount), so connect +
+          // setup latency no longer eats therapy time. Reset the clock to full.
+          remainingSecRef.current = capMin * 60;
+          setRemainingSec(capMin * 60);
+          // Meera opens the session — she speaks FIRST. The model stays silent
+          // until it receives an input turn, so send a one-time, non-spoken cue
+          // telling it to greet now. This text turn is NOT mirrored to the
+          // transcript — only audio-transcription events are pushed — so it
+          // never appears as if the user said it.
+          if (ws && ws.readyState === WebSocket.OPEN) ws.send(careCueFrame(CARE_OPENING_CUE));
+        } else if (ws && ws.readyState === WebSocket.OPEN && !resumeHandleRef.current) {
+          // Resumed after a drop but with NO handle (dropped before the first
+          // resumption update) — the model has no restored context, so at least
+          // stop it re-greeting or restarting. The clock keeps running.
+          ws.send(
+            careCueFrame(
+              '[RESUME — do not read aloud] The call dropped for a moment and reconnected. Continue naturally where the conversation was; do NOT greet again or restart.',
+            ),
+          );
+        }
         void micStartRef.current();
+        openResolveRef.current?.(true);
         return;
+      }
+      // CP1 reconnect — capture the resumption handle Gemini offers, and treat
+      // goAway (imminent server-side close) as a signal to reconnect early.
+      if (CARE_ENGINE_V2) {
+        const sru = (msg['sessionResumptionUpdate'] ?? msg['session_resumption_update']) as
+          | { newHandle?: string; new_handle?: string; resumable?: boolean }
+          | undefined;
+        if (sru) {
+          const handle = sru.newHandle ?? sru.new_handle;
+          if (handle && sru.resumable !== false) resumeHandleRef.current = handle;
+          return;
+        }
+        if ('goAway' in msg || 'go_away' in msg) {
+          reconnectRef.current();
+          return;
+        }
       }
       // CG1 COGS metering — usageMetadata frames carry CUMULATIVE counts;
       // track the max seen and relay it at session end (the server never
@@ -278,6 +334,149 @@ export function CareLiveSession({
     [enterCrisis, pushTurn],
   );
 
+  // CP1 — open (or re-open) the live socket, wire the shared handlers, send the
+  // setup (injecting a resumption handle on a reconnect), and resolve on
+  // setupComplete. onclose decides: a drop mid-session reconnects (engine v2), a
+  // pre-setup close is a start error, and a close during a reconnect attempt is
+  // left to the reconnect loop.
+  const openLiveSocket = useCallback(
+    (credential: RedeemLiveTokenResponse, resumeHandle: string | null): Promise<boolean> =>
+      new Promise<boolean>((resolve) => {
+        let settled = false;
+        const finish = (ok: boolean): void => {
+          if (settled) return;
+          settled = true;
+          if (openResolveRef.current === finish) openResolveRef.current = null;
+          resolve(ok);
+        };
+        openResolveRef.current = finish;
+
+        const wsHost = (() => {
+          try {
+            return new URL(credential.wsUrl).host;
+          } catch {
+            return '?';
+          }
+        })();
+
+        const ws = new WebSocket(credential.wsUrl);
+        wsRef.current = ws;
+        ws.onopen = () => {
+          const raw = 'setup' in credential ? credential.setup : undefined;
+          if (!raw) return;
+          let payload: unknown = raw;
+          if (resumeHandle) {
+            try {
+              const cloned = JSON.parse(JSON.stringify(raw)) as { setup?: Record<string, unknown> };
+              if (cloned.setup) cloned.setup['session_resumption'] = { handle: resumeHandle };
+              payload = cloned;
+            } catch {
+              payload = raw;
+            }
+          }
+          ws.send(JSON.stringify(payload));
+        };
+        ws.onmessage = (ev) => {
+          void (async () => {
+            try {
+              const text = typeof ev.data === 'string' ? ev.data : await (ev.data as Blob).text();
+              handleServerMessage(JSON.parse(text) as Record<string, unknown>);
+            } catch {
+              /* non-JSON frame — ignore */
+            }
+          })();
+        };
+        ws.onerror = () => {
+          /* a close event always follows; the decision is made there */
+        };
+        ws.onclose = (event) => {
+          const detail = `code=${event.code}${event.reason ? ` · ${event.reason}` : ''}`;
+          console.error(
+            `[care-live] websocket closed — ${credential.mode} · ${wsHost} — ${detail}`,
+          );
+          finish(false);
+          if (
+            phaseRef.current === 'ending' ||
+            phaseRef.current === 'ended' ||
+            phaseRef.current === 'crisis'
+          ) {
+            return;
+          }
+          // Inside a reconnect attempt: the loop drives retries; don't recurse.
+          if (reconnectingRef.current) return;
+          if (phaseRef.current === 'live') {
+            if (
+              CARE_ENGINE_V2 &&
+              remainingSecRef.current > RECONNECT_FLOOR_SEC &&
+              reconnectTotalRef.current < RECONNECT_MAX_TOTAL
+            ) {
+              reconnectRef.current();
+            } else {
+              void endSessionRef.current();
+            }
+            return;
+          }
+          // Closed BEFORE ever going live → a setup/auth/config failure.
+          if (phaseRef.current === 'ready' || phaseRef.current === 'connecting') {
+            setError(`Couldn't start the session — ${credential.mode} · ${wsHost} — ${detail}.`);
+            setPhase('error');
+          }
+        };
+        setTimeout(() => finish(false), OPEN_TIMEOUT_MS);
+      }),
+    [handleServerMessage],
+  );
+  openLiveSocketRef.current = openLiveSocket;
+
+  // CP1 — a bounded, single-flight reconnect loop. Pauses the mic, re-mints a
+  // credential (the start token is long gone), and re-opens with the resumption
+  // handle so Gemini restores the conversation. Exhausting the retries finalizes
+  // the session honestly rather than dead-ending.
+  const reconnect = useCallback((): void => {
+    if (reconnectingRef.current || cancelledRef.current) return;
+    if (
+      remainingSecRef.current <= RECONNECT_FLOOR_SEC ||
+      reconnectTotalRef.current >= RECONNECT_MAX_TOTAL
+    ) {
+      void endSessionRef.current();
+      return;
+    }
+    reconnectingRef.current = true;
+    reconnectTotalRef.current += 1;
+    setPhase('reconnecting');
+    void micStopRef.current();
+    try {
+      wsRef.current?.close();
+    } catch {
+      /* already closing */
+    }
+    void (async () => {
+      for (let attempt = 0; attempt < RECONNECT_MAX_ATTEMPTS; attempt++) {
+        if (cancelledRef.current || remainingSecRef.current <= RECONNECT_FLOOR_SEC) break;
+        let credential: RedeemLiveTokenResponse | null = null;
+        try {
+          const res = await fetch(`/api/v1/care/sessions/${sessionId}/reconnect-token`, {
+            method: 'POST',
+          });
+          if (res.ok) credential = (await res.json()) as RedeemLiveTokenResponse;
+        } catch {
+          /* transient — retry */
+        }
+        if (credential) {
+          const ok = await openLiveSocketRef.current(credential, resumeHandleRef.current);
+          if (ok) {
+            reconnectingRef.current = false; // setupComplete has put us back to 'live'
+            return;
+          }
+        }
+        await new Promise((r) => setTimeout(r, RECONNECT_BACKOFF_MS[attempt] ?? 4000));
+      }
+      reconnectingRef.current = false;
+      if (!cancelledRef.current) void endSessionRef.current();
+    })();
+  }, [sessionId]);
+  reconnectRef.current = reconnect;
+
   useEffect(() => {
     let cancelled = false;
     playbackRef.current = new LivePlayback((s) => setSpeaking(s));
@@ -311,66 +510,19 @@ export function CareLiveSession({
         return;
       }
       if (cancelled) return;
-
-      const ws = new WebSocket(credential.wsUrl);
-      wsRef.current = ws;
-      ws.onopen = () => {
-        // §4.3 — the setup is the FIRST message; audio only after
-        // setupComplete comes back.
-        const setup = 'setup' in credential ? credential.setup : undefined;
-        if (setup) ws.send(JSON.stringify(setup));
-      };
-      ws.onmessage = (ev) => {
-        void (async () => {
-          try {
-            const text = typeof ev.data === 'string' ? ev.data : await (ev.data as Blob).text();
-            handleServerMessage(JSON.parse(text) as Record<string, unknown>);
-          } catch {
-            /* non-JSON frame — ignore */
-          }
-        })();
-      };
-      ws.onerror = () => {
-        if (phaseRef.current === 'live') {
-          setError(
-            'The connection dropped. Your progress is saved — the report will cover what you talked about.',
-          );
-          setPhase('error');
-        }
-      };
-      // host (not the token) + backend mode — tells us instantly whether the
-      // socket even reached the intended backend (vertex vs a stale mock URL).
-      const wsHost = (() => {
-        try {
-          return new URL(credential.wsUrl).host;
-        } catch {
-          return '?';
-        }
-      })();
-      ws.onclose = (event) => {
-        const detail = `code=${event.code}${event.reason ? ` · ${event.reason}` : ''}`;
-        console.error(`[care-live] websocket closed — ${credential.mode} · ${wsHost} — ${detail}`);
-        if (phaseRef.current === 'live') {
-          void endSessionRef.current();
-          return;
-        }
-        // Closed BEFORE setupComplete → a setup/auth/config failure. Without
-        // this the screen sits on "Connecting…" forever. Surface the close
-        // code + reason (+ backend/host) so a rejected setup field or a
-        // wrong-backend URL is diagnosable, not silent.
-        if (phaseRef.current === 'ready' || phaseRef.current === 'connecting') {
-          setError(`Couldn't start the session — ${credential.mode} · ${wsHost} — ${detail}.`);
-          setPhase('error');
-        }
-      };
+      // The socket wiring, reconnect decisions, and setup-send all live in the
+      // shared openLiveSocket (initial connect passes no resumption handle).
+      void openLiveSocketRef.current(credential, null);
       setPhase('ready');
     }
 
+    cancelledRef.current = false;
     void connect();
     flushTimerRef.current = setInterval(() => void flushTurns(), 3000);
     const countdown = setInterval(() => {
-      // CP1 — the clock only runs once the session is actually live.
-      if (phaseRef.current !== 'live') return;
+      // CP1 — the clock runs while the session is live OR reconnecting (a drop
+      // must not stop the clock), but not before it has ever gone live.
+      if (phaseRef.current !== 'live' && phaseRef.current !== 'reconnecting') return;
       const prev = remainingSecRef.current;
       const next = prev - 1;
       // Silent time cues — the model's clock. Queue any crossed this tick and
@@ -396,6 +548,7 @@ export function CareLiveSession({
 
     return () => {
       cancelled = true;
+      cancelledRef.current = true;
       if (flushTimerRef.current) clearInterval(flushTimerRef.current);
       clearInterval(countdown);
       wsRef.current?.close();
@@ -431,18 +584,22 @@ export function CareLiveSession({
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
         <div
           aria-hidden
-          className={`h-28 w-28 rounded-full bg-[radial-gradient(circle_at_34%_30%,#9fd3bd,#3f8a6d_58%,#22503f)] shadow-[0_0_0_14px_rgba(95,156,133,0.12),0_0_0_30px_rgba(95,156,133,0.06)] transition-transform duration-700 motion-safe:animate-pulse ${
-            speaking ? 'scale-110' : 'scale-100'
-          }`}
+          className={`h-28 w-28 rounded-full shadow-[0_0_0_14px_rgba(95,156,133,0.12),0_0_0_30px_rgba(95,156,133,0.06)] transition-transform duration-700 motion-safe:animate-pulse ${
+            phase === 'reconnecting'
+              ? 'bg-[radial-gradient(circle_at_34%_30%,#e6c79a,#b98a4e_58%,#6f5027)] opacity-70'
+              : 'bg-[radial-gradient(circle_at_34%_30%,#9fd3bd,#3f8a6d_58%,#22503f)]'
+          } ${speaking ? 'scale-110' : 'scale-100'}`}
         />
         <div className="min-h-10 max-w-xs text-[15px] text-[#cfe4d8]">
           {phase === 'connecting' || phase === 'ready'
             ? `Connecting your ${kindLabel.toLowerCase()}…`
-            : phase === 'ending'
-              ? 'Wrapping up…'
-              : captionsOn
-                ? caption
-                : ''}
+            : phase === 'reconnecting'
+              ? 'Reconnecting — nothing is lost. One moment…'
+              : phase === 'ending'
+                ? 'Wrapping up…'
+                : captionsOn
+                  ? caption
+                  : ''}
           {phase === 'error' ? <span className="text-[#eec3a8]">{error}</span> : null}
         </div>
         {phase === 'error' ? (

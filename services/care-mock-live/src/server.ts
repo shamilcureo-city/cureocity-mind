@@ -194,6 +194,10 @@ wss.on('connection', (ws, req) => {
       const setup = msg['setup'] as Record<string, unknown>;
       const si = setup['system_instruction'] as { parts?: Array<{ text?: string }> } | undefined;
       const promptText = si?.parts?.map((p) => p.text ?? '').join('\n') ?? '';
+      // CP1 — a reconnect carries a session_resumption.handle in the setup.
+      const resuming = Boolean(
+        (setup['session_resumption'] as { handle?: string } | undefined)?.handle,
+      );
       script = {
         fixture: pickFixture(req.url, promptText),
         step: 0,
@@ -202,9 +206,15 @@ wss.on('connection', (ws, req) => {
         done: false,
       };
       send({ setupComplete: {} });
-      // Greeting, then the scripted exchanges begin.
-      speak('[mock] Hello — good to hear you. Take a breath; we have time.');
-      script.timer = setTimeout(advance, 2500);
+      // CP1 — hand the client a resumption handle so the reconnect path is
+      // exercisable offline (the client stores it and replays it on a drop).
+      send({ sessionResumptionUpdate: { newHandle: 'mock-resume-handle', resumable: true } });
+      if (!resuming) {
+        // Greeting, then the scripted exchanges begin. On a RESUME we stay
+        // quiet — the client's resume cue tells the model to continue.
+        speak('[mock] Hello — good to hear you. Take a breath; we have time.');
+        script.timer = setTimeout(advance, 2500);
+      }
       return;
     }
 
