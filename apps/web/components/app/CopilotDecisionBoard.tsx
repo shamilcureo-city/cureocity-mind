@@ -1628,7 +1628,7 @@ function PlanStep({
       ) : (
         <div className="mt-3.5 flex flex-wrap items-center gap-2">
           <Act primary onClick={() => void accept()} disabled={busy !== null}>
-            {busy === 'accept' ? 'Saving…' : 'Accept into plan'}
+            {busy === 'accept' ? 'Adding…' : '＋ Add to plan of care'}
           </Act>
           <Act onClick={() => setEditing(true)} disabled={busy !== null}>
             Edit &amp; accept
@@ -1770,10 +1770,10 @@ function PlanDiffStep({
                 ) : null}
               </div>
               {isApplied ? (
-                <DoneChip>Applied</DoneChip>
+                <DoneChip>On the plan of care</DoneChip>
               ) : (
                 <Act primary onClick={() => void apply(i)} disabled={busy !== null}>
-                  {busy === i ? 'Applying…' : 'Accept'}
+                  {busy === i ? 'Adding…' : '＋ Add to plan of care'}
                 </Act>
               )}
             </div>
@@ -1984,10 +1984,12 @@ function seedIntakePlan(approaches: ClinicalRecommendedTherapy[]): ClinicalTreat
     {
       description: 'Reduce symptom severity',
       measure: 'PHQ-9 / GAD-7 trend toward reliable change',
+      interventions: [],
     },
     ...names.slice(0, 4).map((n) => ({
       description: `Engage in ${n}`.slice(0, 400),
       measure: 'Therapist-rated engagement + between-session practice',
+      interventions: [],
     })),
   ];
 

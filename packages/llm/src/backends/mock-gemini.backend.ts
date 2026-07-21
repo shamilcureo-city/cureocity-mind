@@ -539,10 +539,12 @@ export class MockGeminiPass3Backend implements IPass3Backend {
             {
               description: 'Reduce GAD-7 score by 4 points',
               measure: 'GAD-7 administered at session 1 and every 4th session',
+              interventions: ['Cognitive restructuring', 'Worry postponement'],
             },
             {
               description: 'Attend one team meeting per week without avoidance',
               measure: 'Self-report log shared at session start',
+              interventions: ['Graded exposure'],
             },
           ],
           expectedDurationSessions: 12,
@@ -559,6 +561,7 @@ export class MockGeminiPass3Backend implements IPass3Backend {
                 goal: {
                   description: 'Sustain the gain across two consecutive administrations',
                   measure: 'Screener stays in range at two administrations ≥ 2 weeks apart',
+                  interventions: ['Relapse prevention'],
                 },
                 goalIndex: null,
                 expectedDurationSessions: null,

@@ -2,11 +2,9 @@ import { z } from 'zod';
 import {
   CarriedQuestionSchema,
   CaseFormulationV1Schema,
-  ClinicalLocaleSchema,
   ClinicalReportV1Schema,
   ClinicalTreatmentPlanSchema,
   IntakeNoteV1Schema,
-  type ClinicalLocale,
   type SessionAgreementDto,
   type SessionKind,
   type TherapyNoteV1,
@@ -22,16 +20,10 @@ import { CareMeasurePanel } from '@/components/app/CareMeasurePanel';
 import { CareNextSessionPanel } from '@/components/app/CareNextSessionPanel';
 import { CareStoryPanel } from '@/components/app/CareStoryPanel';
 import { CaseConsultPanel } from '@/components/app/CaseConsultPanel';
-import { ConceptualMapTab } from '@/components/app/ConceptualMapTab';
 import {
   CopilotDecisionBoard,
   type CaseRecordSnapshot,
 } from '@/components/app/CopilotDecisionBoard';
-import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
-import { FormulationCard, type FormulationCardData } from '@/components/app/FormulationCard';
-import { PlanHero, type PlanHeroData } from '@/components/app/PlanHero';
-import { TherapyLibrary } from '@/components/app/TherapyLibrary';
-import { WorkflowSection } from '@/components/app/WorkflowSection';
 import { AICopilotSubTabs, type CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { computeCareEngineForClient } from '@/lib/care-engine-compose';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
@@ -51,19 +43,6 @@ interface Props {
   sub: CopilotSubKey;
 }
 
-const LIBRARY_THERAPIES: string[] = [
-  'Cognitive Restructuring',
-  'Behavioural Activation',
-  'Graded Exposure',
-  'Mindfulness-Based Cognitive Therapy',
-  'Acceptance and Commitment Therapy',
-  'Problem-Solving Therapy',
-  'Sleep Hygiene + Stimulus Control',
-  'EMDR Phase 3 — Assessment',
-  'EMDR Phase 4 — Desensitisation',
-  'Motivational Interviewing',
-];
-
 /**
  * Sprint 28 → Copilot IA redesign (R1) — the session AI Copilot.
  *
@@ -76,13 +55,14 @@ const LIBRARY_THERAPIES: string[] = [
  *   questions moved out — to Transcript and Notes respectively.)
  * - **Progress** (`sub=progress`) — the treatment arc, is it working, and
  *   what next session opens with (the Care Engine page).
- * - **Plan** (`sub=plan`) — the client's own treatment plan (phases, goals
- *   with live status, versions), then the session scripts + formulation
- *   tools + the optional CBT/EMDR advancement tracker around it.
  *
- * Loading is sub-aware: each sub-tab fetches only what it renders, so a
- * therapist who only opens Review never pays for the progress/plan
- * queries. The client page is a lean record and carries none of this.
+ * PC1 moved the plan out entirely: the client's plan, formulation and the
+ * supporting tools live on the top-level **Plan of care** tab
+ * (`PlanOfCareTab`) — the copilot proposes, the paper holds what the
+ * psychologist accepted.
+ *
+ * Loading is sub-aware: each sub-tab fetches only what it renders. The
+ * client page is a lean record and carries none of this.
  */
 export async function AICopilotTab({
   sessionId,
@@ -119,15 +99,6 @@ export async function AICopilotTab({
           clientId={clientId}
           psychologistId={psychologistId}
           clientName={clientName}
-          clientHasContactPhone={clientHasContactPhone}
-          clientHasContactEmail={clientHasContactEmail}
-        />
-      )}
-      {sub === 'plan' && (
-        <PlanSub
-          sessionId={sessionId}
-          clientId={clientId}
-          preferredLanguage={preferredLanguage}
           clientHasContactPhone={clientHasContactPhone}
           clientHasContactEmail={clientHasContactEmail}
         />
@@ -535,166 +506,6 @@ async function JourneySub({
   );
 }
 
-/**
- * Copilot IA redesign (R2) → Session Loop (SL3) — the Plan sub-tab.
- *
- * The tab named "Plan & toolkit" used to render a map, diagnosis history, a
- * therapy library and a "Workflow" form — but not the client's actual
- * treatment plan, which had no full in-app view. R2 made the plan the hero;
- * SL3 put the LIVING FORMULATION above it (the plan is what we're doing,
- * the formulation is why — diagnosis demoted to a supporting element).
- * Order now: FormulationCard → PlanHero (phases, goals + live status,
- * versions) → session scripts → diagnosis history → conceptual map → the
- * CBT/EMDR advancement tracker (collapsed — a separate phase engine, not a
- * second plan).
- */
-async function PlanSub({
-  sessionId,
-  clientId,
-  preferredLanguage,
-  clientHasContactPhone,
-  clientHasContactEmail,
-}: {
-  sessionId: string;
-  clientId: string;
-  preferredLanguage: string;
-  clientHasContactPhone: boolean;
-  clientHasContactEmail: boolean;
-}) {
-  const [latestReport, activePlan, versionCount, formulationRow, diagnoses] = await Promise.all([
-    prisma.clinicalReport.findFirst({
-      where: { clientId, status: 'COMPLETED' },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true, body: true },
-    }),
-    prisma.treatmentPlan.findFirst({
-      where: { clientId, supersededAt: null },
-      orderBy: { version: 'desc' },
-      select: { id: true, version: true, body: true, confirmedAt: true },
-    }),
-    prisma.treatmentPlan.count({ where: { clientId } }),
-    prisma.caseFormulation.findFirst({
-      where: { clientId, supersededAt: null },
-      orderBy: { version: 'desc' },
-    }),
-    prisma.clientDiagnosis.findMany({
-      where: { clientId },
-      orderBy: [{ supersededAt: 'asc' }, { confirmedAt: 'desc' }],
-      select: {
-        id: true,
-        icd11Code: true,
-        icd11Label: true,
-        confidence: true,
-        isPrimary: true,
-        confirmedAt: true,
-        supersededAt: true,
-      },
-    }),
-  ]);
-
-  // Resolve the plan body + per-goal live status from the side table.
-  let planHero: PlanHeroData | null = null;
-  if (activePlan) {
-    const planBody = ClinicalTreatmentPlanSchema.safeParse(activePlan.body);
-    if (planBody.success) {
-      const progress = await prisma.treatmentGoalProgress.findMany({
-        where: { treatmentPlanId: activePlan.id },
-        select: { goalIndex: true, status: true },
-      });
-      const statusByIndex = new Map(progress.map((p) => [p.goalIndex, p.status]));
-      planHero = {
-        id: activePlan.id,
-        version: activePlan.version,
-        modality: planBody.data.modality,
-        expectedDurationSessions: planBody.data.expectedDurationSessions,
-        phaseSequence: planBody.data.phaseSequence,
-        goals: planBody.data.goals.map((g, i) => ({
-          description: g.description,
-          measure: g.measure,
-          status: statusByIndex.get(i) ?? 'NOT_STARTED',
-        })),
-        confirmedAt: activePlan.confirmedAt.toISOString(),
-      };
-    }
-  }
-
-  const primaryActive =
-    diagnoses.find((d) => d.supersededAt === null && d.isPrimary) ??
-    diagnoses.find((d) => d.supersededAt === null) ??
-    null;
-
-  const recommendedTherapies = extractRecommended(latestReport?.body);
-  const langParse = ClinicalLocaleSchema.safeParse(preferredLanguage);
-  const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';
-  const reviewHref = `/app/sessions/${sessionId}?tab=copilot&sub=review`;
-
-  // SL3 — the living formulation leads the tab: the plan is what we're
-  // doing; the formulation is why. Pending AI-proposed updates come from
-  // the latest completed report (same accept route as the Close surface).
-  const formulationParse = formulationRow
-    ? CaseFormulationV1Schema.safeParse(formulationRow.body)
-    : null;
-  const latestReportParse = latestReport?.body
-    ? ClinicalReportV1Schema.safeParse(latestReport.body)
-    : null;
-  const formulationCard: FormulationCardData = {
-    clientId,
-    formulation:
-      formulationRow && formulationParse?.success
-        ? {
-            version: formulationRow.version,
-            confirmedAt: formulationRow.confirmedAt.toISOString(),
-            body: formulationParse.data,
-          }
-        : null,
-    reportId: latestReportParse?.success ? (latestReport?.id ?? null) : null,
-    suggestions: latestReportParse?.success ? latestReportParse.data.formulationSuggestions : [],
-  };
-
-  return (
-    <div className="space-y-6">
-      <FormulationCard data={formulationCard} />
-
-      <PlanHero
-        plan={planHero}
-        versionCount={versionCount}
-        primaryDiagnosis={
-          primaryActive
-            ? { icd11Code: primaryActive.icd11Code, icd11Label: primaryActive.icd11Label }
-            : null
-        }
-        reviewHref={reviewHref}
-      />
-
-      <TherapyLibrary
-        clientId={clientId}
-        recommendedTherapies={recommendedTherapies}
-        libraryTherapies={LIBRARY_THERAPIES}
-        defaultLanguage={defaultLanguage}
-        activeTreatmentPlanId={activePlan?.id ?? null}
-        clientHasContactPhone={clientHasContactPhone}
-        clientHasContactEmail={clientHasContactEmail}
-      />
-
-      {diagnoses.length > 0 && <DiagnosisHistoryCard diagnoses={diagnoses} />}
-      <ConceptualMapTab clientId={clientId} />
-
-      {/* The CBT/EMDR advancement engine is a separate phase tracker, not a
-          second plan — demoted to an optional collapsed section (R2). */}
-      <details className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
-        <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
-          Phase advancement tracker (CBT / EMDR) — optional
-        </summary>
-        <p className="mb-3 mt-1 text-xs text-[var(--color-ink-3)]">
-          A manualised phase-progression aid with exercise prescriptions. Separate from the plan
-          above — start it only if you want per-phase advancement suggestions.
-        </p>
-        <WorkflowSection clientId={clientId} />
-      </details>
-    </div>
-  );
-}
-
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <Card className="p-10 text-center">
@@ -702,11 +513,4 @@ function EmptyState({ title, body }: { title: string; body: string }) {
       <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">{body}</p>
     </Card>
   );
-}
-
-function extractRecommended(body: unknown): string[] {
-  if (body === null || body === undefined) return [];
-  const parsed = ClinicalReportV1Schema.safeParse(body);
-  if (!parsed.success) return [];
-  return parsed.data.recommendedTherapies.map((t) => t.name);
 }

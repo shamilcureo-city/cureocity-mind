@@ -341,7 +341,7 @@ export function CloseLoopBoard({ data }: { data: CloseLoopData }) {
                     onClick={() => void acceptSuggestion(i)}
                     disabled={suggestionBusy !== null}
                   >
-                    {suggestionBusy === i ? 'Updating…' : 'Accept into formulation'}
+                    {suggestionBusy === i ? 'Adding…' : '＋ Add to plan of care'}
                   </Button>
                 </div>
               </div>
@@ -350,8 +350,14 @@ export function CloseLoopBoard({ data }: { data: CloseLoopData }) {
         )}
         {acceptedIdx.size > 0 && (
           <p className="mt-3 text-xs text-[var(--color-ink-3)]">
-            {acceptedIdx.size} update{acceptedIdx.size > 1 ? 's' : ''} accepted — the formulation is
-            now v{(data.formulation?.version ?? 0) + acceptedIdx.size}.
+            ✓ Added to the plan of care — the formulation is now v
+            {(data.formulation?.version ?? 0) + acceptedIdx.size}.{' '}
+            <Link
+              href={`/app/sessions/${data.sessionId}?tab=plan-of-care`}
+              className="font-medium text-[var(--color-accent)] hover:underline"
+            >
+              See it →
+            </Link>
           </p>
         )}
         {suggestionError && <ErrorLine text={suggestionError} />}

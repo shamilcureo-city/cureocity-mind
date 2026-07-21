@@ -93,7 +93,7 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
   // spine, so no secondary section for them.
   const secondary = vertical === 'DOCTOR' ? [] : SECONDARY;
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-white/65 backdrop-blur-xl md:flex">
+    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-white/65 backdrop-blur-xl md:flex print:!hidden">
       <div className="px-6 py-6">
         <Link href="/app" className="inline-flex items-center gap-2.5">
           <span

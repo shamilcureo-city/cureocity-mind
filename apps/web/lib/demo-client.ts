@@ -236,6 +236,38 @@ export async function createDemoClient(
       select: { id: true },
     });
 
+    // Problem list (POMR) — the Plan of care's first section: named
+    // problems with status, one resolved mid-arc.
+    await tx.problemListItem.createMany({
+      data: [
+        {
+          clientId: client.id,
+          psychologistId,
+          title: 'Depressed mood with withdrawal from valued activity',
+          detail: 'Four months of low mood and anhedonia; activity re-engagement is the lever.',
+          status: 'ACTIVE' as const,
+          createdAt: intakeAt,
+        },
+        {
+          clientId: client.id,
+          psychologistId,
+          title: 'Generalised worry across work, family and health domains',
+          detail: 'Cross-domain worry persisting at lower intensity as mood lifts; GAD-7 tracked.',
+          status: 'ACTIVE' as const,
+          createdAt: intakeAt,
+        },
+        {
+          clientId: client.id,
+          psychologistId,
+          title: 'Sleep-onset disruption maintaining next-day appraisal',
+          detail: 'Resolved with the fixed sleep window after the layoff-week collapse.',
+          status: 'RESOLVED' as const,
+          resolvedAt: sessionDates[4]!,
+          createdAt: intakeAt,
+        },
+      ],
+    });
+
     // ---------- INTAKE SESSION ----------
     const intakeSession = await tx.session.create({
       data: {
@@ -858,6 +890,8 @@ export async function removeDemoClient(
     await tx.assessmentItem.deleteMany({ where: { clientId } });
     await tx.sessionAgreement.deleteMany({ where: { clientId } });
     await tx.caseFormulation.deleteMany({ where: { clientId } });
+    await tx.sessionProblemLink.deleteMany({ where: { sessionId: { in: sessionIds } } });
+    await tx.problemListItem.deleteMany({ where: { clientId } });
     await tx.exerciseAssignment.deleteMany({ where: { clientId } });
     await tx.treatmentEpisode.deleteMany({ where: { clientId } });
     await tx.consent.deleteMany({ where: { clientId } });
@@ -1526,11 +1560,13 @@ function buildTreatmentPlan(): ClinicalTreatmentPlan {
       {
         description: 'Re-engage with three previously valued activities each week.',
         measure: 'Self-report log; activity count >= 3 for 4 consecutive weeks.',
+        interventions: ['Behavioural activation', 'Activity scheduling'],
       },
       {
         description:
           'Reduce PHQ-9 from moderate range to minimal range and sustain for two administrations.',
         measure: 'PHQ-9 score <= 4 at two consecutive administrations >= 2 weeks apart.',
+        interventions: ['Cognitive restructuring', 'Thought records'],
       },
     ],
     expectedDurationSessions: 12,
@@ -1550,10 +1586,12 @@ function buildTreatmentPlanV2(): ClinicalTreatmentPlan {
       {
         description: 'Restore sleep to at least 6.5 hours with a fixed wind-down window.',
         measure: 'Sleep diary: >= 6.5h average across a week, window kept 5 of 7 nights.',
+        interventions: ['Sleep window', 'Stimulus control'],
       },
       {
         description: 'Contain worry to one daily 20-minute postponement window.',
         measure: 'Worry-postponement log kept 5 of 7 days for 3 consecutive weeks.',
+        interventions: ['Worry postponement'],
       },
     ],
   };

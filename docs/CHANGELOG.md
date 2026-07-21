@@ -6,6 +6,42 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-21 — PC1: the Plan of care (two pages, one bridge)
+
+The copilot restructure the founder asked for: **the copilot stays the
+analysis engine; the psychologist's plan becomes its own page** — a
+clinical-grade document — and the only connection is one action,
+"＋ Add to plan of care".
+
+- **New top-level session tab "Plan of care"** (`PlanOfCareTab` +
+  `PlanOfCareSheet`): a record-styled sheet (warm paper, serif prose, sans
+  data, numbered sections, print-ready) in the canonical clinical order —
+  problem list (POMR, with status chips) · case formulation (narrative +
+  maintaining cycle, versioned) · ICD-11 diagnosis · goals→objectives→
+  interventions (SMART; live goal-status dots, same side-table as PlanHero)
+  · outcome monitoring (baseline→course→now→target with Jacobson–Truax
+  verdicts + the alliance course) · risk & safety (status line, safety plan
+  referenced) · strengths · "Agreed with <client>" (their words) · review &
+  discharge criteria · signature block. Footer: Print/PDF (app chrome is
+  `print:hidden`) and the existing TREATMENT_PLAN share.
+- **º provenance** — lines that entered the record via an accepted copilot
+  suggestion carry a small gold º; hover shows the client's verbatim words
+  (derived from report suggestions matched against the active record — no
+  new storage).
+- **The copilot slims to three subs** (Close the loop · Review · Progress):
+  the old Plan sub retired; its tools (therapy library, formulation editor,
+  diagnosis history, conceptual map, phase tracker) moved into a collapsed
+  Tools drawer under the sheet. Old links (`?tab=copilot&sub=plan` /
+  `sub=formulation`) redirect to the new tab.
+- **One verb everywhere**: accept buttons across the decision board, Close
+  surface and formulation editor now read "＋ Add to plan of care", with a
+  "See it →" link after adding. Same routes underneath — labels only.
+- `ClinicalGoalSchema` gains optional defaulted `interventions[]`
+  (zero-regression additive); demo plan goals + mock backend populate it.
+  Demo client also seeds a three-item problem list (one resolved).
+
+---
+
 ## 2026-07-21 — Demo client rebuilt as a complex case (the full-capacity arc)
 
 The one-click example client (Ananya Iyer) previously repeated one note and

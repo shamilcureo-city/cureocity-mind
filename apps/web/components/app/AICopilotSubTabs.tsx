@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-export type CopilotSubKey = 'close' | 'review' | 'progress' | 'plan';
+export type CopilotSubKey = 'close' | 'review' | 'progress';
 
 interface Props {
   sessionId: string;
@@ -11,14 +11,15 @@ const TABS: { key: CopilotSubKey; label: string; hint: string }[] = [
   { key: 'close', label: 'Close the loop', hint: 'Five moments · one signature' },
   { key: 'review', label: 'Review', hint: 'What the copilot heard — you decide' },
   { key: 'progress', label: 'Progress', hint: 'The arc · is it working · next session' },
-  { key: 'plan', label: 'Plan', hint: "The client's plan — yours; AI can only suggest" },
 ];
 
 /**
  * Sprint 28 → TSC-V2 → Copilot IA redesign (R1) — secondary tab bar inside
  * the AI Copilot tab.
  *
- * Four plain questions that match how a psychologist thinks:
+ * Three plain questions that match how a psychologist thinks (PC1 moved the
+ * plan out to its own top-level "Plan of care" tab — the copilot proposes,
+ * the paper holds what was accepted):
  * - **Close the loop** (SL1) — the five-moment end-of-session ritual, closed
  *   by the one note signature. Default sub for a completed, unsigned session.
  * - **Review** (was "This session") — what the copilot heard this session;

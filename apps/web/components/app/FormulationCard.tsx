@@ -251,7 +251,7 @@ export function FormulationCard({ data }: { data: FormulationCardData }) {
                     onClick={() => void acceptSuggestion(i)}
                     disabled={acceptBusy !== null}
                   >
-                    {acceptBusy === i ? 'Updating…' : 'Accept'}
+                    {acceptBusy === i ? 'Adding…' : '＋ Add to plan of care'}
                   </Button>
                 </div>
               </div>

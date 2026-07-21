@@ -11,6 +11,7 @@ import type {
 import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
 import { AICopilotTab } from '@/components/app/AICopilotTab';
+import { PlanOfCareTab } from '@/components/app/PlanOfCareTab';
 import type { CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { ClientTab } from '@/components/app/ClientTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
@@ -41,22 +42,23 @@ interface PageProps {
 const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'notes',
   'copilot',
+  'plan-of-care',
   'transcript',
   'session-info',
   'client',
 ]);
 
-const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['close', 'review', 'progress', 'plan']);
+const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['close', 'review', 'progress']);
 
 // Copilot IA redesign (R1) renamed the sub keys: session→review,
-// journey→progress (plan unchanged). Old links — including the pre-R1
-// three-key scheme and the earlier five-tab keys — keep working via this map.
+// journey→progress. PC1 moved the plan out of the copilot entirely — the
+// old 'plan'/'formulation' subs now land on the Plan of care tab (handled
+// in SessionPage below, since they cross a tab boundary).
 const LEGACY_SUB_MAP: Record<string, CopilotSubKey> = {
   session: 'review',
   journey: 'progress',
   measures: 'progress',
   briefing: 'progress',
-  formulation: 'plan',
 };
 
 /**
@@ -106,7 +108,13 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
   const { id } = await params;
   const { tab: rawTab, sub: rawSub } = await searchParams;
-  const { tab, subOverride } = parseTab(rawTab);
+  let { tab, subOverride } = parseTab(rawTab);
+  // PC1 — the copilot's old 'plan'/'formulation' subs became the Plan of
+  // care tab; old bookmarks cross the tab boundary here.
+  if (tab === 'copilot' && (rawSub === 'plan' || rawSub === 'formulation')) {
+    tab = 'plan-of-care';
+    subOverride = null;
+  }
   const explicitSub = subOverride ?? parseSub(rawSub);
 
   const session = await prisma.session.findFirst({
@@ -153,7 +161,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
   return (
     <Container className="py-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 print:hidden">
         <Link
           href={`/app/clients/${session.clientId}`}
           className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
@@ -163,7 +171,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         {caseThread && <CaseThreadNav position={caseThread.position} />}
       </div>
 
-      <header className="mt-4 flex flex-wrap items-end justify-between gap-3">
+      <header className="mt-4 flex flex-wrap items-end justify-between gap-3 print:hidden">
         <div>
           <h1 className="flex flex-wrap items-center gap-3 font-serif text-3xl">
             {pii.fullName}
@@ -186,7 +194,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         </div>
       </header>
 
-      <div className="mt-8">
+      <div className="mt-8 print:hidden">
         <SessionWorkspaceTabs sessionId={id} active={tab} sessionKind={sessionKind} />
       </div>
 
@@ -218,6 +226,18 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             preferredLanguage={session.client.preferredLanguage}
             sessionKind={sessionKind}
             sub={sub}
+          />
+        )}
+        {tab === 'plan-of-care' && (
+          <PlanOfCareTab
+            sessionId={id}
+            clientId={session.clientId}
+            psychologistId={session.psychologistId}
+            clientName={pii.fullName}
+            clientHasContactPhone={!!pii.contactPhone}
+            clientHasContactEmail={!!pii.contactEmail}
+            preferredLanguage={session.client.preferredLanguage}
+            sessionKind={sessionKind}
           />
         )}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}

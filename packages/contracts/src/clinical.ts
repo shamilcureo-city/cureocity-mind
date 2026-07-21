@@ -126,6 +126,13 @@ export type ClinicalAssessmentGap = z.infer<typeof ClinicalAssessmentGapSchema>;
 export const ClinicalGoalSchema = z.object({
   description: z.string().min(1).max(400),
   measure: z.string().min(1).max(400),
+  /**
+   * Plan-of-care (PC1) — named evidence-based interventions serving this
+   * goal (e.g. "Behavioural activation", "Thought records"). Optional +
+   * defaulted (zero-regression additive): plans written before this field
+   * parse unchanged and render without intervention tags.
+   */
+  interventions: z.array(z.string().min(1).max(80)).max(6).default([]),
 });
 export type ClinicalGoal = z.infer<typeof ClinicalGoalSchema>;
 

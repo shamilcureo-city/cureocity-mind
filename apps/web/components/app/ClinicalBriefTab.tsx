@@ -680,7 +680,8 @@ export function PlanEditor({
 
   const setGoal = (i: number, patch: Partial<Goal>) =>
     setGoals((gs) => gs.map((g, j) => (j === i ? { ...g, ...patch } : g)));
-  const addGoal = () => setGoals((gs) => [...gs, { description: '', measure: '' }]);
+  const addGoal = () =>
+    setGoals((gs) => [...gs, { description: '', measure: '', interventions: [] }]);
   const removeGoal = (i: number) => setGoals((gs) => gs.filter((_, j) => j !== i));
 
   const handleSubmit = () => {

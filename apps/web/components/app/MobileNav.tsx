@@ -119,7 +119,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
 
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-line-soft)] bg-white/80 backdrop-blur-xl md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-line-soft)] bg-white/80 backdrop-blur-xl md:hidden print:!hidden"
       >
         <ul className="grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {items.map((item) => {
