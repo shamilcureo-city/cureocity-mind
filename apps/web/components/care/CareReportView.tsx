@@ -286,6 +286,8 @@ function ReportBody({
       <PlanProposal
         formulation={report.assessmentAndPlan.formulation}
         concernAreas={report.assessmentAndPlan.concernAreas}
+        measures={report.assessmentAndPlan.measures}
+        provisionalImpression={report.assessmentAndPlan.provisionalImpression}
         proposedGoals={report.assessmentAndPlan.proposedGoals}
         modalityTrack={report.assessmentAndPlan.modalityTrack}
         cadence={report.assessmentAndPlan.cadence}
@@ -443,9 +445,17 @@ function ReportBody({
   );
 }
 
+/// CP3 — friendly labels for the measured instruments on the intake report.
+const CARE_INSTRUMENT_LABELS: Record<string, string> = {
+  PHQ9: 'Mood (PHQ-9)',
+  GAD7: 'Anxiety (GAD-7)',
+};
+
 function PlanProposal({
   formulation,
   concernAreas,
+  measures = [],
+  provisionalImpression = '',
   proposedGoals,
   modalityTrack,
   cadence,
@@ -458,6 +468,8 @@ function PlanProposal({
 }: {
   formulation: string;
   concernAreas: Array<{ name: string; evidenceQuote: string }>;
+  measures?: Array<{ instrumentKey: string; score: number; band: string }>;
+  provisionalImpression?: string;
   proposedGoals: Array<{ goal: string; why: string; measure: string }>;
   modalityTrack: string;
   cadence: string;
@@ -530,6 +542,46 @@ function PlanProposal({
       </span>
       <p className={`mt-1.5 ${staged ? 'font-serif text-[16px] leading-relaxed' : 'text-sm'}`}>
         {formulation}
+      </p>
+    </Card>
+  ) : null;
+
+  // CP3 — the measured "where you're starting" read (validated scales, band
+  // labels), and a plain-language provisional impression. Both render only
+  // when present, so pre-CP3 reports and un-measured intakes stay clean.
+  const measuresCard =
+    measures.length > 0 ? (
+      <Card className="mt-3 p-4">
+        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+          Where you&apos;re starting
+        </span>
+        <div className="mt-2 space-y-1.5">
+          {measures.map((m) => (
+            <div key={m.instrumentKey} className="flex items-baseline justify-between text-sm">
+              <span>{CARE_INSTRUMENT_LABELS[m.instrumentKey] ?? m.instrumentKey}</span>
+              <span className="font-semibold tabular-nums">
+                {m.score}
+                {m.band ? ` · ${m.band}` : ''}
+              </span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-2 text-[12px] text-[var(--color-ink-3)]">
+          The same scales clinicians use — the shelf we&apos;ll measure change against, not a
+          diagnosis.
+        </p>
+      </Card>
+    ) : null;
+
+  const impressionCard = provisionalImpression ? (
+    <Card className="mt-3 p-4">
+      <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+        A first impression
+      </span>
+      <p className="mt-1.5 text-sm">{provisionalImpression}</p>
+      <p className="mt-2 text-[12px] text-[var(--color-ink-3)]">
+        A screening-level impression from what you shared — not a formal diagnosis. Only a licensed
+        clinician can confirm that.
       </p>
     </Card>
   ) : null;
@@ -625,6 +677,8 @@ function PlanProposal({
           {personaName ? `${personaName} wrote this for you` : title}
         </h1>
         {formulationCard}
+        {measuresCard}
+        {beat >= 1 ? impressionCard : null}
         {beat >= 1 ? quotesCard : null}
         {beat >= 2 ? goalsSection : null}
         {beat < 2 ? (
@@ -640,6 +694,8 @@ function PlanProposal({
     <>
       <h1 className="font-serif text-xl font-semibold">{title}</h1>
       {formulationCard}
+      {measuresCard}
+      {impressionCard}
       {quotesCard}
       {goalsSection}
     </>

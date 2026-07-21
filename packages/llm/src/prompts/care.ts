@@ -15,7 +15,7 @@
  */
 
 export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V4';
-export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V2';
+export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V3';
 
 /// §2 layer 3 — said VERBATIM before calling flag_crisis. Clinician-signed.
 export const CARE_BRIDGING_SCRIPT_V1 =
@@ -205,6 +205,8 @@ Output STRICT JSON only — no prose, no markdown fences — matching the branch
 kind=INTAKE → {"kind":"INTAKE","assessmentAndPlan":{
   "formulation": 3-6 plain sentences: what is going on and why it makes sense, provisional wording ("this pattern looks like", never a diagnosis as fact),
   "concernAreas": [{"name","evidenceQuote"}] 2-4 areas, quotes verbatim from the user,
+  "measures": COPY the case file's baselineMeasures VERBATIM into [{"instrumentKey","score","band"}] — do NOT re-score or invent numbers; [] if none were given,
+  "provisionalImpression": ONE short paragraph (2-4 plain sentences) naming, in provisional everyday words, what the picture looks like ("what you're describing looks consistent with low mood and worry that's been building"). This is a SCREENING-LEVEL impression drawn from what they told you (and the scores, if any) — it is NOT a formal diagnosis and carries no ICD/DSM code; end it by saying plainly that only a licensed clinician can confirm a diagnosis. If there is genuinely too little to say, leave it "",
   "proposedGoals": [{"goal","why","measure"}] 2-4 concrete, small, measurable goals in the user's language,
   "modalityTrack": one of "CBT"|"BEHAVIOURAL_ACTIVATION"|"GROUNDING"|"SLEEP" — pick what best fits the concerns,
   "cadence": e.g. "weekly-25min",

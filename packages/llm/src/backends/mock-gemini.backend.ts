@@ -1670,6 +1670,12 @@ export class MockGeminiCareReportBackend implements IPassCareReportBackend {
             { name: '[mock] Sleep', evidenceQuote: 'I lie awake till 3 most nights' },
             { name: '[mock] Work worry', evidenceQuote: 'every Sunday I start dreading the week' },
           ],
+          measures: [
+            { instrumentKey: 'PHQ9', score: 14, band: '[mock] Moderate' },
+            { instrumentKey: 'GAD7', score: 11, band: '[mock] Moderate' },
+          ],
+          provisionalImpression:
+            '[mock] What you are describing looks consistent with low mood and worry that has been building around work and sleep. This is a screening-level impression from what you shared, not a formal diagnosis — only a licensed clinician can confirm that.',
           proposedGoals: [
             {
               goal: '[mock] Sleep before 1am, 5 nights a week',
