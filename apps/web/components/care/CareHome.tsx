@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { CareGiftButton } from './CareGiftButton';
-import { CareInstrumentForm } from './CareInstrumentForm';
+import { CareInstrumentSequence } from './CareInstrumentSequence';
+import { careBaselineInstruments } from '@/lib/care-instrument-select';
 import { MoodDial } from './MoodDial';
 import type { CareResource } from './SafetyStrip';
 
@@ -198,7 +199,8 @@ export function CareHome() {
       {data.gate.allowed && n.kind === 'REVIEW' && data.needsCheckin && !reviewCheckinDone ? (
         // Before a review: the same questions from day one — so the verdict
         // is real, not vibes. Soft gate: skipping still allows the session.
-        <CareInstrumentForm
+        <CareInstrumentSequence
+          instrumentKeys={careBaselineInstruments(n.modalityTrack)}
           framing="review"
           onDone={() => setReviewCheckinDone(true)}
           onSkip={() => setReviewCheckinDone(true)}

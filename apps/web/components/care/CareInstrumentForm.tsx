@@ -32,12 +32,18 @@ export function CareInstrumentForm({
   framing,
   onDone,
   onSkip,
+  doneLabel,
+  positionLabel,
 }: {
   instrumentKey?: InstrumentKey;
   /** 'baseline' = the post-plan-accept starting line; 'review' = the pre-review check-in. */
   framing: 'baseline' | 'review';
   onDone: () => void;
   onSkip?: () => void;
+  /** Override the finish-button label (a sequence uses "Next set →" mid-run). */
+  doneLabel?: string;
+  /** Override the eyebrow (a sequence shows "Your starting line · 1 of 2"). */
+  positionLabel?: string;
 }) {
   const definition = INSTRUMENTS[instrumentKey];
   const [answers, setAnswers] = useState<Record<string, number>>({});
@@ -81,7 +87,7 @@ export function CareInstrumentForm({
     return (
       <Card className="mt-3 p-4">
         <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-          {framing === 'baseline' ? 'Your starting line' : 'Before your review'}
+          {positionLabel ?? (framing === 'baseline' ? 'Your starting line' : 'Before your review')}
         </span>
         <p className="mt-2 text-sm">
           Done — <b>{result.totalScore}</b>/{maxScore}, the &ldquo;
@@ -91,7 +97,7 @@ export function CareInstrumentForm({
             : 'Both photos are in now — your review can show real change, not vibes.'}
         </p>
         <Button className="mt-3 w-full" onClick={onDone}>
-          {framing === 'baseline' ? 'Done for tonight →' : 'Continue →'}
+          {doneLabel ?? (framing === 'baseline' ? 'Done for tonight →' : 'Continue →')}
         </Button>
       </Card>
     );
@@ -100,7 +106,8 @@ export function CareInstrumentForm({
   return (
     <Card className="mt-3 p-4">
       <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-        {framing === 'baseline' ? 'One last thing — your starting line' : 'Before your review'}
+        {positionLabel ??
+          (framing === 'baseline' ? 'One last thing — your starting line' : 'Before your review')}
       </span>
       <p className="mt-1.5 text-sm text-[var(--color-ink-2)]">
         {framing === 'baseline'

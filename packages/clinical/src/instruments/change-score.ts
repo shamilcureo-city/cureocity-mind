@@ -110,3 +110,44 @@ export function computeInstrumentChange(
     latestSeverityKey: severityKeyForScore(key, latestScore),
   };
 }
+
+export interface InstrumentTrajectory {
+  /** Best (lowest) score across the whole series. */
+  nadir: number;
+  /** Worst (highest) score across the whole series. */
+  peak: number;
+  /** Most recent score. */
+  latest: number;
+  /**
+   * The latest score has risen back above the best point that PRECEDED it by
+   * at least the instrument's reliable-change threshold — a relapse the plain
+   * baseline-vs-latest verdict misses (e.g. PHQ-9 18 → 8 → 16 reads as "no
+   * reliable change" first-vs-last, but is a clear slide from the nadir).
+   */
+  recentlyWorsening: boolean;
+}
+
+/**
+ * CP-B — trajectory-aware reliable change. `computeInstrumentChange` only sees
+ * the first and latest administrations, so a client who got better then
+ * slipped back is invisible to it. This looks at the whole series and flags a
+ * reliable rise from the pre-latest nadir, so a review can be pulled forward.
+ * Reuses RELIABLE_CHANGE_THRESHOLD — it never loosens the clinical thresholds.
+ * Returns null for a series shorter than two readings.
+ */
+export function computeInstrumentTrajectory(
+  key: InstrumentKey,
+  series: number[],
+): InstrumentTrajectory | null {
+  const clean = series.filter((s) => Number.isFinite(s));
+  if (clean.length < 2) return null;
+  const latest = clean[clean.length - 1]!;
+  const priorNadir = Math.min(...clean.slice(0, clean.length - 1));
+  const threshold = RELIABLE_CHANGE_THRESHOLD[key];
+  return {
+    nadir: Math.min(...clean),
+    peak: Math.max(...clean),
+    latest,
+    recentlyWorsening: latest - priorNadir >= threshold,
+  };
+}
