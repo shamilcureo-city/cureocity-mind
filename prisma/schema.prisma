@@ -2656,6 +2656,11 @@ enum AuditAction {
   ADMIN_AUDIT_LOG_READ
   ADMIN_ROLE_GRANTED
   ADMIN_ROLE_REVOKED
+  // PC2 — super-admin console account/waitlist ops.
+  ADMIN_ACCOUNT_STATUS_CHANGED
+  ADMIN_TRIAL_CAP_ADJUSTED
+  CARE_WAITLIST_INVITED
+  CARE_WAITLIST_REMOVED
   DSR_ACCESS_REQUESTED
   DSR_ACCESS_FULFILLED
   DSR_CORRECTION_REQUESTED
@@ -3315,5 +3320,11 @@ model CareWaitlistEntry {
   contact   String   @unique
   createdAt DateTime @default(now())
 
+  // PC2 — the super-admin waitlist manager marks an entry invited (kept for
+  // the record) or removes it. Null invitedAt = still waiting.
+  invitedAt DateTime?
+  notes     String?   @db.Text
+
+  @@index([invitedAt, createdAt])
   @@map("care_waitlist_entries")
 }

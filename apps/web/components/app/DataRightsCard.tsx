@@ -128,7 +128,7 @@ export function DataRightsCard({ clientId, clientName }: Props) {
             post(
               'erasure',
               { reason },
-              'Erasure request filed. Review queue at /app/admin/erasure-queue.',
+              'Erasure request filed. Review queue at /app/data-rights/erasure-queue.',
             )
           }
         />

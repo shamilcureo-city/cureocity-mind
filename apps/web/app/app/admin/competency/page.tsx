@@ -1,5 +1,3 @@
-import Link from 'next/link';
-import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { requirePageAdmin } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
@@ -119,12 +117,7 @@ export default async function CompetencyPage() {
   );
 
   return (
-    <Container className="py-10">
-      <p className="mb-4 text-xs text-[var(--color-ink-3)]">
-        <Link href="/app" className="hover:text-[var(--color-ink)]">
-          ← Dashboard
-        </Link>
-      </p>
+    <>
       <header className="mb-6">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
           Admin
@@ -190,7 +183,7 @@ export default async function CompetencyPage() {
           </tbody>
         </table>
       </Card>
-    </Container>
+    </>
   );
 }
 

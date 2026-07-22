@@ -63,6 +63,12 @@ export const AuditActionSchema = z.enum([
   'ADMIN_AUDIT_LOG_READ',
   'ADMIN_ROLE_GRANTED',
   'ADMIN_ROLE_REVOKED',
+  // PC2 — super-admin console. Account lifecycle + Care waitlist ops, each
+  // written from apps/web/app/api/v1/admin/*.
+  'ADMIN_ACCOUNT_STATUS_CHANGED',
+  'ADMIN_TRIAL_CAP_ADJUSTED',
+  'CARE_WAITLIST_INVITED',
+  'CARE_WAITLIST_REMOVED',
   'DSR_ACCESS_REQUESTED',
   'DSR_ACCESS_FULFILLED',
   'DSR_CORRECTION_REQUESTED',

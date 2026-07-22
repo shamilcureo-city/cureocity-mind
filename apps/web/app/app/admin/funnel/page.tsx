@@ -1,5 +1,3 @@
-import Link from 'next/link';
-import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { requirePageAdmin } from '@/lib/auth-page';
 import { planAmountInr } from '@/lib/billing';
@@ -158,11 +156,8 @@ export default async function FunnelPage() {
   ];
 
   return (
-    <Container className="py-10">
-      <Link href="/app" className="text-sm text-[var(--color-accent)] hover:underline">
-        ← Dashboard
-      </Link>
-      <header className="mt-4">
+    <>
+      <header>
         <p className="text-xs uppercase tracking-[0.16em] text-[var(--color-accent)]">
           Admin · growth
         </p>
@@ -316,7 +311,7 @@ export default async function FunnelPage() {
           </tbody>
         </table>
       </Card>
-    </Container>
+    </>
   );
 }
 

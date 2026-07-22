@@ -6,6 +6,50 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-22 — PC2: the super-admin console
+
+A single console at `/app/admin` for running the platform, gated once in
+`app/app/admin/layout.tsx` (`requirePageAdmin` — the whole tree is
+ADMIN-only) with a horizontal `AdminNav`. The main-app Sidebar now shows an
+"Admin console" link for ADMIN accounts; the `/app/me` admin block collapses
+to one "Open admin console →" link. Shared presentational primitives live in
+`components/app/admin/AdminUI.tsx` so every surface reads as one system.
+
+Surfaces:
+
+- **Overview** — platform pulse: practitioners by vertical, MRR, AI cost
+  today/30d, "needs attention" (pending verification + open erasures +
+  grievances), recent admin actions, jump-links.
+- **Accounts** — practitioner directory (search name/email/phone/RCI, filter
+  vertical + status) → account detail (profile, registration/verification,
+  usage, billing) with an action panel: grant/revoke ADMIN, set lifecycle
+  status, adjust the free-trial cap. Guards against lock-out (no self-role
+  change; can't demote the last admin). Never renders client PHI.
+- **Billing**, **AI costs**, **Compliance (DPDP)**, **System** — read-only
+  dashboards over existing tables (revenue + payments; spend by pass/model +
+  guardrails; erasure/grievance queues with SLA aging; env-config topology
+  showing presence/booleans/backends, never secret values).
+- **Growth** (funnel) and **Quality** (competency) — the existing admin
+  pages, now folded into the console nav.
+- **Audit** — filtered browser over the append-only log; each query itself
+  writes `ADMIN_AUDIT_LOG_READ`.
+- **Care** — signup gate + caps readout + the waitlist manager (invite /
+  remove, audited).
+
+Data + wiring:
+
+- New audited mutations, each admin-gated + re-checking the role server-side:
+  `POST accounts/[id]/role` (`ADMIN_ROLE_GRANTED`/`ADMIN_ROLE_REVOKED`),
+  `POST accounts/[id]/status` (`ADMIN_ACCOUNT_STATUS_CHANGED`),
+  `PATCH accounts/[id]/trial-cap` (`ADMIN_TRIAL_CAP_ADJUSTED`),
+  `GET admin/audit`, `POST/DELETE admin/care-waitlist/[id]`
+  (`CARE_WAITLIST_INVITED`/`CARE_WAITLIST_REMOVED`). Four new `AuditAction`
+  values + `CareWaitlistEntry.invitedAt`/`notes` via the guarded migration
+  `20260901000000_pc2_admin_console`. DTOs in `contracts/src/admin.ts`.
+- The therapist-scoped erasure queue moved out of the admin tree to
+  `/app/data-rights/erasure-queue` so the ADMIN-only console guard doesn't
+  lock therapists out of their own DSR worker.
+
 ## 2026-07-21 — PC1: the Plan of care (two pages, one bridge)
 
 The copilot restructure the founder asked for: **the copilot stays the
@@ -53,7 +97,7 @@ a trialing therapist sees the system's full capacity in minute one:
   cited in a report appears **verbatim in a transcript** — the citation
   trail a therapist follows is real. Two sessions carry Hindi code-mix
   lines (`Spoken: English + Hindi`).
-- **Comorbidity** — 6A70.1 (primary) + 6B00 GAD, tracked with PHQ-9 *and*
+- **Comorbidity** — 6A70.1 (primary) + 6B00 GAD, tracked with PHQ-9 _and_
   GAD-7 (15→11→4).
 - **A real setback** — a layoff round at session 3 spikes PHQ-9 to 19
   (18→15→19→9→4), surfaces passive ideation (medium crisis flag on that

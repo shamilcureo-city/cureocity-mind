@@ -172,22 +172,16 @@ export default async function MeOverviewPage() {
       </header>
 
       {therapist.role === 'ADMIN' && (
-        <div className="mb-8 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-line)] bg-white/50 px-5 py-3">
-          <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">
-            Admin
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] px-5 py-3">
+          <span className="text-sm text-[var(--color-ink-2)]">
+            <span className="font-semibold text-[var(--color-accent)]">Admin</span> — platform
+            accounts, billing, AI costs, compliance and the audit trail live in the console.
           </span>
           <Link
-            href="/app/admin/invite-codes"
-            className="text-sm text-[var(--color-ink-2)] underline-offset-2 hover:text-[var(--color-ink)] hover:underline"
+            href="/app/admin"
+            className="shrink-0 rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
-            Pilot invite codes
-          </Link>
-          <span className="text-[var(--color-line)]">·</span>
-          <Link
-            href="/app/admin/erasure-queue"
-            className="text-sm text-[var(--color-ink-2)] underline-offset-2 hover:text-[var(--color-ink)] hover:underline"
-          >
-            Erasure queue
+            Open admin console →
           </Link>
         </div>
       )}

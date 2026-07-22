@@ -1,5 +1,3 @@
-import Link from 'next/link';
-import { Container } from '@/components/ui/Container';
 import { CompForm } from '@/components/app/CompForm';
 import { requirePageAdmin } from '@/lib/auth-page';
 
@@ -14,12 +12,7 @@ export const dynamic = 'force-dynamic';
 export default async function AdminCompPage() {
   await requirePageAdmin();
   return (
-    <Container className="py-10">
-      <p className="mb-4 text-xs text-[var(--color-ink-3)]">
-        <Link href="/app" className="hover:text-[var(--color-ink)]">
-          ← Home
-        </Link>
-      </p>
+    <>
       <header className="mb-6">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
           Pilot admin
@@ -34,6 +27,6 @@ export default async function AdminCompPage() {
         </p>
       </header>
       <CompForm />
-    </Container>
+    </>
   );
 }

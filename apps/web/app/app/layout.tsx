@@ -71,7 +71,11 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </div>
       )}
       <div className="flex flex-1">
-        <Sidebar usage={usage} vertical={psy?.vertical ?? 'THERAPIST'} />
+        <Sidebar
+          usage={usage}
+          vertical={psy?.vertical ?? 'THERAPIST'}
+          isAdmin={psy?.role === 'ADMIN'}
+        />
         <div className="flex flex-1 flex-col pb-16 md:pb-0">{children}</div>
         <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
       </div>

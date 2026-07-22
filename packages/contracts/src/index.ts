@@ -1,5 +1,6 @@
 export * from './common';
 export * from './psychologist';
+export * from './admin';
 export * from './consent';
 export * from './client';
 export * from './briefing';
