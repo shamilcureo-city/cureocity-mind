@@ -175,13 +175,14 @@ export default async function MeOverviewPage() {
         <div className="mb-8 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] px-5 py-3">
           <span className="text-sm text-[var(--color-ink-2)]">
             <span className="font-semibold text-[var(--color-accent)]">Admin</span> — platform
-            accounts, billing, AI costs, compliance and the audit trail live in the console.
+            accounts, billing, AI costs, compliance and the audit trail live in the separate
+            operator console.
           </span>
           <Link
-            href="/app/admin"
+            href="/console"
             className="shrink-0 rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:opacity-90"
           >
-            Open admin console →
+            Open operator console ↗
           </Link>
         </div>
       )}

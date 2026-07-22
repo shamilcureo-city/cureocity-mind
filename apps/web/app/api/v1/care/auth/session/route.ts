@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
-import { isAuthBypassed, SESSION_COOKIE_MAX_AGE_MS, SESSION_COOKIE_NAME } from '@/lib/auth-server';
+import {
+  isAuthBypassed,
+  SESSION_COOKIE_MAX_AGE_MS,
+  SESSION_COOKIE_NAME,
+  sessionCookieDomain,
+} from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { firebaseAuth } from '@/lib/firebase-admin';
 import { parseJson } from '@/lib/validate';
@@ -99,6 +104,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
+    domain: sessionCookieDomain(),
     maxAge: SESSION_COOKIE_MAX_AGE_MS / 1000,
   });
   return res;
@@ -107,6 +113,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 /** DELETE — sign out of the care surface (clears the shared cookie). */
 export async function DELETE(): Promise<NextResponse> {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE_NAME, '', { httpOnly: true, path: '/', maxAge: 0 });
+  // Domain must match the set (see the shared-cookie note in the signout route).
+  res.cookies.set(SESSION_COOKIE_NAME, '', {
+    httpOnly: true,
+    path: '/',
+    domain: sessionCookieDomain(),
+    maxAge: 0,
+  });
   return res;
 }

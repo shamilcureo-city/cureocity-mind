@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { SESSION_COOKIE_NAME } from '@/lib/auth-server';
+import { SESSION_COOKIE_NAME, sessionCookieDomain } from '@/lib/auth-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +21,15 @@ export const dynamic = 'force-dynamic';
  */
 export function POST(req: NextRequest): NextResponse {
   const res = NextResponse.redirect(new URL('/care', req.url), 303);
-  res.cookies.set(SESSION_COOKIE_NAME, '', { httpOnly: true, path: '/', maxAge: 0 });
+  // Same `domain` as the practitioner writers — the shared `__session` cookie
+  // can only be DELETED by a Set-Cookie whose name+domain+path all match, so a
+  // domain-scoped cookie (SESSION_COOKIE_DOMAIN set) needs the domain here too
+  // or this "sign out of every audience" clear silently leaves it behind.
+  res.cookies.set(SESSION_COOKIE_NAME, '', {
+    httpOnly: true,
+    path: '/',
+    domain: sessionCookieDomain(),
+    maxAge: 0,
+  });
   return res;
 }

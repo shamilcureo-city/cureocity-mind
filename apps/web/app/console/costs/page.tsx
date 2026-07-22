@@ -12,9 +12,10 @@ import {
   EmptyRow,
   DefRow,
   inr,
-} from '@/components/app/admin/AdminUI';
+} from '@/components/console/AdminUI';
 import { prisma } from '@/lib/prisma';
 import { computeDayBoundaries, formatIstDateTime } from '@/lib/ist';
+import { requirePageAdmin } from '@/lib/auth-page';
 import type { GeminiCallStatus } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
@@ -35,6 +36,7 @@ function num(d: unknown): number {
 }
 
 export default async function AdminCostsPage() {
+  await requirePageAdmin();
   const now = new Date();
   const todayStart = computeDayBoundaries(now).startOfToday;
   const d7 = new Date(now.getTime() - 7 * DAY_MS);

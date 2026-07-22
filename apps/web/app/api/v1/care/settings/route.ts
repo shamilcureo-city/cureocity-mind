@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { CareSettingsInputSchema } from '@cureocity/contracts';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { SESSION_COOKIE_NAME, sessionCookieDomain } from '@/lib/auth-server';
 import { requireCareUserId } from '@/lib/care-auth';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -134,6 +135,13 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
   });
 
   const res = NextResponse.json({ ok: true });
-  res.cookies.set('__session', '', { httpOnly: true, path: '/', maxAge: 0 });
+  // Domain must match how the cookie was set (see the shared-cookie note in
+  // care/auth/signout) or a domain-scoped `__session` survives account deletion.
+  res.cookies.set(SESSION_COOKIE_NAME, '', {
+    httpOnly: true,
+    path: '/',
+    domain: sessionCookieDomain(),
+    maxAge: 0,
+  });
   return res;
 }

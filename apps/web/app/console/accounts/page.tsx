@@ -11,9 +11,10 @@ import {
   EmptyRow,
   Pill,
   type PillTone,
-} from '@/components/app/admin/AdminUI';
+} from '@/components/console/AdminUI';
 import { formatIstDate } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
+import { requirePageAdmin } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,7 @@ const STATUS_TONE: Record<string, PillTone> = {
  * (name/email) is the account holder's own — not client PII.
  */
 export default async function AdminAccountsPage({ searchParams }: PageProps) {
+  await requirePageAdmin();
   const { q, vertical, status } = await searchParams;
   const query = (q ?? '').trim();
 
@@ -114,7 +116,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
         </button>
         {(query || vertical || status) && (
           <Link
-            href="/app/admin/accounts"
+            href="/console/accounts"
             className="h-[38px] rounded-full border border-[var(--color-line)] px-4 py-2 text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
           >
             Clear
@@ -147,7 +149,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
                   <Tr key={a.id}>
                     <Td>
                       <Link
-                        href={`/app/admin/accounts/${a.id}`}
+                        href={`/console/accounts/${a.id}`}
                         className="font-medium text-[var(--color-ink)] hover:text-[var(--color-accent)]"
                       >
                         {a.fullName || '(no name)'}

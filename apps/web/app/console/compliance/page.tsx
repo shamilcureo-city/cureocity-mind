@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { requirePageAdmin } from '@/lib/auth-page';
 import {
   AdminPageHeader,
   StatGrid,
@@ -12,7 +13,7 @@ import {
   EmptyRow,
   DefRow,
   type PillTone,
-} from '@/components/app/admin/AdminUI';
+} from '@/components/console/AdminUI';
 import type { AuditAction, DsrErasureStatus, DsrGrievanceStatus } from '@prisma/client';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +27,7 @@ export const dynamic = 'force-dynamic';
  * aggregates over existing tables — no new schema, no mutations. Never
  * renders client PHI/PII: only ids, statuses, ages, and counts.
  *
- * Guard + shell (Container, AdminNav) come from the /app/admin layout.
+ * Guard + shell (Container, AdminNav) come from the /console layout.
  */
 
 const ERASURE_SLA_DAYS = 30;
@@ -68,6 +69,7 @@ function shortId(id: string): string {
 }
 
 export default async function AdminCompliancePage() {
+  await requirePageAdmin();
   const now = Date.now();
   const dsrSince = new Date(now - DSR_WINDOW_DAYS * 86_400_000);
   const audioRetentionDays = process.env.AUDIO_RETENTION_DAYS ?? '30';
@@ -236,7 +238,7 @@ export default async function AdminCompliancePage() {
 
         <AdminCard
           title="Encryption & retention"
-          hint="PII is envelope-encrypted (KMS-backed); audio purges on the retention cron. System config detail lives at /app/admin/system."
+          hint="PII is envelope-encrypted (KMS-backed); audio purges on the retention cron. System config detail lives at /console/system."
         >
           <DefRow label="KMS backend">
             <span className="font-mono text-xs">{kmsBackend}</span>

@@ -65,6 +65,7 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 | `NEXT_PUBLIC_FIREBASE_*` (public)                                        | Browser Firebase SDK config.                                                                                  |
 | `AUTH_BYPASS`                                                            | Explicit override. `true` = every sign-in resolves to the demo therapist.                                     |
 | `BOOTSTRAP_ADMIN_EMAILS`                                                 | Comma-separated emails auto-granted ADMIN on first sign-in.                                                   |
+| `SESSION_COOKIE_DOMAIN`                                                  | Unset = host-only login cookie (default; localhost/previews need this). Set `.cureocity.in` in prod to share login across subdomains for the `admin.cureocity.in` operator console. |
 | `WEBAUTHN_TICKET_SECRET`                                                 | HMAC key for the registration ticket (≥32 chars).                                                             |
 | `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS`               | Passkey relying-party + origin allowlist for note-sign assertions.                                            |
 | `REQUIRE_WEBAUTHN_SIGNING`                                               | When `true`, an account with no passkey is refused (403) until it enrols.                                     |

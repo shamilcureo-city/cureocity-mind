@@ -39,6 +39,27 @@ export const SESSION_COOKIE_NAME = '__session';
 /// weekly-practice therapist signed in between sessions.
 export const SESSION_COOKIE_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
 
+/**
+ * Optional parent-domain scope for the session cookie.
+ *
+ * UNSET (default) → the cookie is host-only: set by `mind.cureocity.in`,
+ * it is sent only back to `mind.cureocity.in`. This is today's behaviour
+ * and what localhost / `*.vercel.app` previews need (a domain attr for
+ * those hosts would silently drop the cookie).
+ *
+ * Set to `.cureocity.in` in prod → the cookie is shared across every
+ * subdomain, which is what lets the operator console at
+ * `admin.cureocity.in` ride the same practitioner login. MUST be applied
+ * to every place the cookie is written or cleared (set on sign-in, cleared
+ * on sign-out) or a domain-scoped cookie can't be deleted. Returns
+ * `undefined` when unset so callers can spread it into cookie options with
+ * zero effect.
+ */
+export function sessionCookieDomain(): string | undefined {
+  const d = process.env['SESSION_COOKIE_DOMAIN']?.trim();
+  return d && d.length > 0 ? d : undefined;
+}
+
 let warnedFailClosed = false;
 
 export function isAuthBypassed(): boolean {

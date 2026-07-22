@@ -5,9 +5,10 @@ import {
   AdminCard,
   DefRow,
   Pill,
-} from '@/components/app/admin/AdminUI';
-import { CareWaitlistManager } from '@/components/app/admin/CareWaitlistManager';
+} from '@/components/console/AdminUI';
+import { CareWaitlistManager } from '@/components/console/CareWaitlistManager';
 import { prisma } from '@/lib/prisma';
+import { requirePageAdmin } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,7 @@ export const dynamic = 'force-dynamic';
  * details on the waitlist are shown to the admin who manages invitations.
  */
 export default async function AdminCarePage() {
+  await requirePageAdmin();
   const [active, safetyHold, deleted, waitingCount, invitedCount, entries, sessions30d] =
     await Promise.all([
       prisma.careUser.count({ where: { status: 'ACTIVE' } }),

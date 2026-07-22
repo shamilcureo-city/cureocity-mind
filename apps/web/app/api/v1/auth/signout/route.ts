@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { SESSION_COOKIE_NAME } from '@/lib/auth-server';
+import { SESSION_COOKIE_NAME, sessionCookieDomain } from '@/lib/auth-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +21,11 @@ export const dynamic = 'force-dynamic';
  */
 export function POST(req: NextRequest): NextResponse {
   const res = NextResponse.redirect(new URL('/login', req.url), 303);
-  res.cookies.set(SESSION_COOKIE_NAME, '', { httpOnly: true, path: '/', maxAge: 0 });
+  res.cookies.set(SESSION_COOKIE_NAME, '', {
+    httpOnly: true,
+    path: '/',
+    domain: sessionCookieDomain(),
+    maxAge: 0,
+  });
   return res;
 }

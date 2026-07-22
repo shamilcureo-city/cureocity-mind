@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
-import { SESSION_COOKIE_MAX_AGE_MS, SESSION_COOKIE_NAME, isAuthBypassed } from '@/lib/auth-server';
+import {
+  SESSION_COOKIE_MAX_AGE_MS,
+  SESSION_COOKIE_NAME,
+  isAuthBypassed,
+  sessionCookieDomain,
+} from '@/lib/auth-server';
 import { writeAudit } from '@/lib/audit';
 import { ensurePersonalClinic } from '@/lib/clinic';
 import { firebaseAuth } from '@/lib/firebase-admin';
@@ -45,7 +50,7 @@ class InviteRejectedError extends Error {}
  * Sprint 56 ops — auto-grant ADMIN to a new signup whose email is in the
  * comma-separated BOOTSTRAP_ADMIN_EMAILS env. Solves the chicken-and-egg
  * where the first real account (post-bypass) provisions as THERAPIST and
- * can't reach /app/admin/* without manual SQL. Case-insensitive match;
+ * can't reach the /console operator surface without manual SQL. Case-insensitive match;
  * empty/unset env = nobody is auto-promoted.
  */
 function isBootstrapAdminEmail(email: string | undefined): boolean {
@@ -287,6 +292,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
+    domain: sessionCookieDomain(),
     maxAge: SESSION_COOKIE_MAX_AGE_MS / 1000,
   });
   return res;
@@ -295,6 +301,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 /** DELETE /api/v1/auth/session — sign out (clear the cookie). */
 export async function DELETE(): Promise<NextResponse> {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(SESSION_COOKIE_NAME, '', { httpOnly: true, path: '/', maxAge: 0 });
+  res.cookies.set(SESSION_COOKIE_NAME, '', {
+    httpOnly: true,
+    path: '/',
+    domain: sessionCookieDomain(),
+    maxAge: 0,
+  });
   return res;
 }

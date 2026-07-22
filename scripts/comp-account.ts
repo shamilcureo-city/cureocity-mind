@@ -2,7 +2,7 @@
  * One-shot account comp script (Sprint 56 ops).
  *
  * Thin CLI wrapper around apps/web/lib/comp.ts → compAccount(). Use
- * POST /api/v1/admin/comp (or the form at /app/admin/comp) as the
+ * POST /api/v1/admin/comp (or the form at /console/comp) as the
  * primary path; this script exists for emergencies where the deployed
  * app isn't reachable.
  *

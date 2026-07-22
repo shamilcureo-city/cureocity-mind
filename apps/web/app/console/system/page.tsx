@@ -10,7 +10,8 @@ import {
   Thead,
   Tr,
   Td,
-} from '@/components/app/admin/AdminUI';
+} from '@/components/console/AdminUI';
+import { requirePageAdmin } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,6 +95,7 @@ const CRONS: { path: string; schedule: string; note: string }[] = [
 ];
 
 export default async function AdminSystemPage() {
+  await requirePageAdmin();
   const vercelEnv = env('VERCEL_ENV') ?? 'local';
   const isProd = vercelEnv === 'production';
   const nodeEnv = env('NODE_ENV') ?? '—';

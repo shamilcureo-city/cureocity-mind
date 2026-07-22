@@ -11,10 +11,11 @@ import {
   Td,
   EmptyRow,
   inr,
-} from '@/components/app/admin/AdminUI';
+} from '@/components/console/AdminUI';
 import { planAmountInr } from '@/lib/billing';
 import { computeDayBoundaries, formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
+import { requirePageAdmin } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,7 @@ const PAID_GRACE_MS = 3 * DAY_MS;
  * existing tables — no new storage.
  */
 export default async function AdminOverviewPage() {
+  await requirePageAdmin();
   const now = new Date();
   // IST midnight (not server-local/UTC) so this agrees with the costs page's
   // "spend today" — the product is India-only. Review fix.
@@ -122,27 +124,27 @@ export default async function AdminOverviewPage() {
           label="Practitioners"
           value={String(therapistCount + doctorCount)}
           sub={`${therapistCount} therapist · ${doctorCount} doctor`}
-          href="/app/admin/accounts"
+          href="/console/accounts"
         />
         <StatTile
           label="MRR"
           value={inr(mrr)}
           sub={`${paying} paying`}
           tone="accent"
-          href="/app/admin/billing"
+          href="/console/billing"
         />
         <StatTile
           label="AI cost · today"
           value={inr(costTodayInr)}
           sub={`${inr(costMonthInr)} last 30d`}
-          href="/app/admin/costs"
+          href="/console/costs"
         />
         <StatTile
           label="Needs attention"
           value={String(attentionCount)}
           sub={`${pendingVerification} to verify · ${openErasures} erasure · ${openGrievances} grievance`}
           tone={attentionCount > 0 ? 'warn' : 'default'}
-          href="/app/admin/compliance"
+          href="/console/compliance"
         />
       </StatGrid>
 
@@ -154,7 +156,7 @@ export default async function AdminOverviewPage() {
             <Row
               label="Care waitlist · waiting"
               value={String(waitlistWaiting)}
-              href="/app/admin/care"
+              href="/console/care"
             />
           </div>
         </AdminCard>
@@ -163,7 +165,7 @@ export default async function AdminOverviewPage() {
           title="Recent admin actions"
           right={
             <Link
-              href="/app/admin/audit"
+              href="/console/audit"
               className="text-xs font-medium text-[var(--color-accent)] hover:underline"
             >
               Full audit →
@@ -198,17 +200,17 @@ export default async function AdminOverviewPage() {
       <AdminCard title="Jump to" className="mt-4">
         <div className="flex flex-wrap gap-2">
           {[
-            ['/app/admin/accounts', 'Accounts'],
-            ['/app/admin/billing', 'Billing'],
-            ['/app/admin/costs', 'AI costs'],
-            ['/app/admin/funnel', 'Growth funnel'],
-            ['/app/admin/competency', 'Quality'],
-            ['/app/admin/compliance', 'Compliance'],
-            ['/app/admin/care', 'Care'],
-            ['/app/admin/system', 'System'],
-            ['/app/admin/audit', 'Audit'],
-            ['/app/admin/invite-codes', 'Invite codes'],
-            ['/app/admin/comp', 'Comp an account'],
+            ['/console/accounts', 'Accounts'],
+            ['/console/billing', 'Billing'],
+            ['/console/costs', 'AI costs'],
+            ['/console/funnel', 'Growth funnel'],
+            ['/console/competency', 'Quality'],
+            ['/console/compliance', 'Compliance'],
+            ['/console/care', 'Care'],
+            ['/console/system', 'System'],
+            ['/console/audit', 'Audit'],
+            ['/console/invite-codes', 'Invite codes'],
+            ['/console/comp', 'Comp an account'],
           ].map(([href, label]) => (
             <Link
               key={href}

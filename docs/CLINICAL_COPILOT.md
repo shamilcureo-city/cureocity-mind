@@ -319,7 +319,7 @@ version, token counts, latency, cost INR.
 
 ## 9. The competency dashboard (Sprint 17)
 
-`/app/admin/competency` is a read-only roll-up table per therapist:
+`/console/competency` is a read-only roll-up table per therapist:
 
 - Sessions completed
 - Clinical reports generated
@@ -370,7 +370,7 @@ Client.preferredLanguage are the four language fields.
 | `POST /api/v1/clients/[id]/safety-plan`                          | 17     | Save (supersedes prior)     |
 | `GET /api/v1/clients/[id]/safety-plan`                           | 17     | Active plan                 |
 
-Plus the new admin page `/app/admin/competency`.
+Plus the new admin page `/console/competency`.
 
 ## 12. Limits + caveats
 

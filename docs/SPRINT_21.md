@@ -56,7 +56,7 @@ larger refactor than a single Sprint 21 PR can safely cover.
 **File:** `apps/web/app/app/me/page.tsx`, sidebar link in
 `apps/web/components/app/Sidebar.tsx`.
 
-The admin Competency dashboard (`/app/admin/competency`) already
+The admin Competency dashboard (`/console/competency`) already
 computed per-therapist signal; Sprint 21 surfaces that signal to
 the therapist themselves at **`/app/me`** with self-reflective
 framing.

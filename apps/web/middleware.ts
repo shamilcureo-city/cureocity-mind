@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { PRODUCTS, productFromHost } from '@/lib/product';
+import { PRODUCTS, isAdminConsoleHost, productFromHost } from '@/lib/product';
 
 /**
  * Three products, one platform — host-based routing.
@@ -25,8 +25,24 @@ import { PRODUCTS, productFromHost } from '@/lib/product';
 const CANONICALIZE_FROM_PRIMARY = true;
 
 export function middleware(req: NextRequest): NextResponse {
-  const product = productFromHost(req.headers.get('host'));
+  const host = req.headers.get('host');
   const { pathname } = req.nextUrl;
+
+  // The operator console fronts its own host. On `admin.cureocity.in`, `/`
+  // serves the console overview (`/console`); every deeper path (`/console/*`,
+  // `/login`, `/api/*`) is served as-is and never reaches this rewrite (the
+  // matcher only runs middleware on `/`). Checked FIRST so this host never
+  // falls through to the MIND landing.
+  if (isAdminConsoleHost(host)) {
+    if (pathname === '/') {
+      const url = req.nextUrl.clone();
+      url.pathname = '/console';
+      return NextResponse.rewrite(url);
+    }
+    return NextResponse.next();
+  }
+
+  const product = productFromHost(host);
 
   if (product.key === 'scribe') {
     if (pathname === '/') {

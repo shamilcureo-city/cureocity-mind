@@ -297,7 +297,7 @@ fire hose off until you know the product holds up under real load.
          Plan page header reads "Pro · monthly".
    - [ ] Download a tax invoice for that payment. Confirm GSTIN
          is yours (not `__PENDING__`).
-   - [ ] Open `/app/admin/funnel` as an admin. MRR should show
+   - [ ] Open `/console/funnel` as an admin. MRR should show
          the test ₹3,499 you just paid.
 
 ---
@@ -323,7 +323,7 @@ renders blank until `/admin/encryption/backfill` is run for it.
 
 Every morning, open these in order:
 
-1. **`/app/admin/funnel`** — yesterday's signups, MRR delta, top
+1. **`/console/funnel`** — yesterday's signups, MRR delta, top
    acquisition sources, cap-event count.
 2. **Vercel function logs** — search for `Error` in the last 24h.
    Spike = a cron job or webhook broke.

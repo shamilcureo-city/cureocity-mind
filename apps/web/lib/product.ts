@@ -54,6 +54,25 @@ const HOST_TO_PRODUCT: Record<string, ProductKey> = Object.fromEntries(
 ) as Record<string, ProductKey>;
 
 /**
+ * The internal operator console's production host. Deliberately NOT a
+ * `Product` (it has no landing / marketing / onboarding vertical) — it's
+ * the platform-admin surface, host-gated here and route-gated by
+ * `requirePageAdmin` at `/console`. The middleware rewrites this host's
+ * `/` to `/console`; everything else on the host serves normally.
+ *
+ * Reaching it over the subdomain in prod additionally needs (a) DNS + a
+ * Vercel domain for this host, and (b) `SESSION_COOKIE_DOMAIN=.cureocity.in`
+ * so the practitioner login cookie is shared across subdomains. Until then
+ * the console is always reachable at the `/console` path on any host.
+ */
+export const ADMIN_CONSOLE_HOST = 'admin.cureocity.in';
+
+export function isAdminConsoleHost(host: string | null | undefined): boolean {
+  const bare = (host ?? '').toLowerCase().split(':')[0] ?? '';
+  return bare === ADMIN_CONSOLE_HOST;
+}
+
+/**
  * Resolve the product for a request host. Ports are stripped; unknown
  * hosts resolve to MIND (the original product — previews, localhost, and
  * the bare vercel.app domain keep today's behaviour exactly).

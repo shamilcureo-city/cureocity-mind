@@ -10,8 +10,8 @@ import {
   StatTile,
   inr,
   type PillTone,
-} from '@/components/app/admin/AdminUI';
-import { AccountActions } from '@/components/app/admin/AccountActions';
+} from '@/components/console/AdminUI';
+import { AccountActions } from '@/components/console/AccountActions';
 import { requirePageAdmin } from '@/lib/auth-page';
 import { getEntitlement } from '@/lib/billing';
 import { formatIstDate, formatIstDateTime } from '@/lib/ist';
@@ -78,7 +78,7 @@ export default async function AdminAccountDetailPage({
   return (
     <>
       <Link
-        href="/app/admin/accounts"
+        href="/console/accounts"
         className="text-sm text-[var(--color-accent)] hover:underline"
       >
         ← All accounts
@@ -165,11 +165,11 @@ export default async function AdminAccountDetailPage({
       <p className="mt-4 text-xs text-[var(--color-ink-3)]">
         Client records and session content are never shown here — the console sees account state and
         counts, not a practitioner&rsquo;s clinical data. Use{' '}
-        <Link href="/app/admin/comp" className="text-[var(--color-accent)] hover:underline">
+        <Link href="/console/comp" className="text-[var(--color-accent)] hover:underline">
           Comp
         </Link>{' '}
         to grant a paid tier, or{' '}
-        <Link href="/app/admin/audit" className="text-[var(--color-accent)] hover:underline">
+        <Link href="/console/audit" className="text-[var(--color-accent)] hover:underline">
           Audit
         </Link>{' '}
         to see this account&rsquo;s activity.

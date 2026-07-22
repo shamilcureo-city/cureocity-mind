@@ -6,14 +6,48 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-07-22 — Operator console moved OUT of the practitioner app
+
+The super-admin console is now a **standalone surface at `/console`**, no
+longer nested under the practitioner dashboard at `/app/admin`. It has its
+own shell — a dark "control-room" top bar (brand · operator email · "Open
+app ↗" · POST sign-out) and its own `AdminNav`, with **no** therapist
+Sidebar / MobileNav / plan widget. The whole `/console/*` tree keeps the
+single `requirePageAdmin` guard (in `app/console/layout.tsx`) and mounts its
+own `AuthedFetchProvider`. The admin components moved
+`components/app/admin/*` → `components/console/*`; the `/api/v1/admin/*`
+routes are unchanged.
+
+- **Removed from the dashboard chrome**: the Sidebar's "Platform → Admin
+  console" group is gone (and the `isAdmin` prop with it). The `/app/me`
+  admin block now links out to the separate console ("Open operator console
+  ↗").
+- **Own host, ready but opt-in**: `admin.cureocity.in` is registered in
+  `lib/product.ts` (`ADMIN_CONSOLE_HOST` / `isAdminConsoleHost`) and the
+  middleware rewrites that host's `/` → `/console`. Cross-subdomain login
+  rides a new **opt-in** `SESSION_COOKIE_DOMAIN` env (unset = today's
+  host-only cookie, so localhost / previews are unaffected); set it to
+  `.cureocity.in` in prod — alongside DNS + a Vercel domain — to use the
+  subdomain. Until then the console is always reachable at `/console` on any
+  host. `sessionCookieDomain()` is applied to **every** `__session` writer —
+  the practitioner AND Care sign-in/out/delete routes (they share the cookie)
+  — so a domain-scoped cookie is deletable from any audience.
+- **Authorization is defence-in-depth, not layout-only**: every `/console/*`
+  page calls `requirePageAdmin()` itself (not just the layout). A Next.js
+  App Router layout is not re-rendered on client-side `<Link>` navigation, so
+  a layout-only guard would let a mid-session-revoked admin keep loading
+  console data by clicking the nav until a full reload — the per-page guard
+  re-runs on every navigation and closes that window. (Found + fixed by an
+  adversarial multi-lens review of this refactor.)
+
 ## 2026-07-22 — PC2: the super-admin console
 
-A single console at `/app/admin` for running the platform, gated once in
-`app/app/admin/layout.tsx` (`requirePageAdmin` — the whole tree is
-ADMIN-only) with a horizontal `AdminNav`. The main-app Sidebar now shows an
-"Admin console" link for ADMIN accounts; the `/app/me` admin block collapses
-to one "Open admin console →" link. Shared presentational primitives live in
-`components/app/admin/AdminUI.tsx` so every surface reads as one system.
+A single console for running the platform, gated once in the console
+layout (`requirePageAdmin` — the whole tree is ADMIN-only) with a
+horizontal `AdminNav`, and shared presentational primitives in `AdminUI.tsx`
+so every surface reads as one system. (Originally shipped at `/app/admin`
+inside the dashboard; **relocated the same day** to the standalone
+`/console` surface — see the entry above.)
 
 Surfaces:
 

@@ -1,5 +1,6 @@
-import { AdminPageHeader, AdminCard } from '@/components/app/admin/AdminUI';
-import { AuditBrowser } from '@/components/app/admin/AuditBrowser';
+import { AdminPageHeader, AdminCard } from '@/components/console/AdminUI';
+import { AuditBrowser } from '@/components/console/AuditBrowser';
+import { requirePageAdmin } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +9,8 @@ export const dynamic = 'force-dynamic';
  * browser component queries the admin-gated audit route (which re-checks
  * the role and logs each read).
  */
-export default function AdminAuditPage() {
+export default async function AdminAuditPage() {
+  await requirePageAdmin();
   return (
     <>
       <AdminPageHeader

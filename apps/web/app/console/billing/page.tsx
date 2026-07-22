@@ -13,10 +13,11 @@ import {
   EmptyRow,
   inr,
   type PillTone,
-} from '@/components/app/admin/AdminUI';
+} from '@/components/console/AdminUI';
 import { planAmountInr } from '@/lib/billing';
 import { prisma } from '@/lib/prisma';
 import { formatIstDateTime } from '@/lib/ist';
+import { requirePageAdmin } from '@/lib/auth-page';
 import {
   PLAN_CATALOG,
   TIER_ORDER,
@@ -55,6 +56,7 @@ const PAYMENT_TONE: Record<'PAID' | 'FAILED' | 'CREATED', PillTone> = {
 };
 
 export default async function AdminBillingPage() {
+  await requirePageAdmin();
   const now = Date.now();
   const graceFloor = new Date(now - PAID_GRACE_MS);
   const since30 = new Date(now - THIRTY_DAYS_MS);
@@ -221,7 +223,7 @@ export default async function AdminBillingPage() {
             Comps / manual grants don&rsquo;t create a payment row — they appear as{' '}
             <code className="text-[var(--color-ink-2)]">PLAN_UPGRADED</code> audit rows with{' '}
             <code className="text-[var(--color-ink-2)]">metadata.comp=true</code>. See the{' '}
-            <Link href="/app/admin/audit" className="text-[var(--color-accent)] hover:underline">
+            <Link href="/console/audit" className="text-[var(--color-accent)] hover:underline">
               audit log
             </Link>
             .
