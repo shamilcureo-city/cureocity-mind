@@ -13,7 +13,7 @@ import {
   inr,
 } from '@/components/app/admin/AdminUI';
 import { planAmountInr } from '@/lib/billing';
-import { formatIstDateTime } from '@/lib/ist';
+import { computeDayBoundaries, formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -29,7 +29,9 @@ const PAID_GRACE_MS = 3 * DAY_MS;
  */
 export default async function AdminOverviewPage() {
   const now = new Date();
-  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // IST midnight (not server-local/UTC) so this agrees with the costs page's
+  // "spend today" — the product is India-only. Review fix.
+  const dayStart = computeDayBoundaries(now).startOfToday;
   const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
   const monthAgo = new Date(now.getTime() - 30 * DAY_MS);
   const graceFloor = new Date(now.getTime() - PAID_GRACE_MS);

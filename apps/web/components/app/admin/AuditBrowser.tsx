@@ -13,21 +13,26 @@ interface AuditRow {
   createdAt: string;
 }
 
+// Quick-filters headline PLATFORM/ACCOUNT ops — not clinical categories.
+// Clinical actions are still reachable by typing an action, but their
+// metadata is redacted server-side, so no client content is ever exposed.
 const QUICK_ACTIONS: { label: string; action: string }[] = [
   { label: 'All', action: '' },
   { label: 'Admin ops', action: 'ADMIN_ROLE_GRANTED' },
   { label: 'Status changes', action: 'ADMIN_ACCOUNT_STATUS_CHANGED' },
+  { label: 'Trial caps', action: 'ADMIN_TRIAL_CAP_ADJUSTED' },
   { label: 'Comps', action: 'PLAN_UPGRADED' },
-  { label: 'Notes signed', action: 'SIGNED_NOTE' },
+  { label: 'Waitlist', action: 'CARE_WAITLIST_INVITED' },
   { label: 'Erasures', action: 'DSR_ERASURE_FULFILLED' },
-  { label: 'Crisis flags', action: 'CRISIS_FLAG_RAISED' },
 ];
 
 /**
  * PC2 — audit browser. Filters over the append-only log via the admin-gated
  * GET /api/v1/admin/audit (which itself writes an ADMIN_AUDIT_LOG_READ row).
- * Newest first, capped at 200. Metadata is shown collapsed; it never
- * contains client PHI (audit writers store ids + before/after, not content).
+ * Newest first, capped at 200. The API REDACTS metadata to structural fields
+ * only (request info, account-op before/after, counts) — client clinical
+ * payloads (crisis details, note instructions, diagnoses) never reach this
+ * view even when a clinical action is filtered.
  */
 export function AuditBrowser() {
   const [action, setAction] = useState('');
@@ -188,8 +193,9 @@ export function AuditBrowser() {
         </table>
       </div>
       <p className="mt-3 text-[11px] text-[var(--color-ink-3)]">
-        Rows are capped at 100, newest first. Tap a row to see its metadata. Every search you run is
-        itself logged as <span className="font-mono">ADMIN_AUDIT_LOG_READ</span>.
+        Rows are capped at 100, newest first. Tap a row to see its (redacted) metadata — client
+        clinical content is stripped server-side. Every search you run is itself logged as{' '}
+        <span className="font-mono">ADMIN_AUDIT_LOG_READ</span>.
       </p>
     </div>
   );
