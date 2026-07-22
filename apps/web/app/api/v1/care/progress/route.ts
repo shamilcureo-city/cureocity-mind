@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { CARE_PROTOCOL_STEPS } from '@cureocity/llm';
 import { requireCareUserId } from '@/lib/care-auth';
 import { getCareCaseFile, inferKindFromCaseFile } from '@/lib/care-case-file';
 import { prisma } from '@/lib/prisma';
@@ -66,10 +67,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     plainWords: plainWordsForVerdict(v.instrumentKey, v.verdict, v.baselineScore, v.latestScore),
   }));
 
+  // CP-D — where they are in the method arc (progresses, then maintenance).
+  const arcSteps = caseFile.plan ? (CARE_PROTOCOL_STEPS[caseFile.plan.modalityTrack] ?? null) : null;
+  const arc = arcSteps
+    ? {
+        track: caseFile.plan!.modalityTrack,
+        total: arcSteps.length,
+        done: Math.min(caseFile.treatmentSessionsCompleted, arcSteps.length),
+        complete: caseFile.treatmentSessionsCompleted >= arcSteps.length,
+      }
+    : null;
+
   return NextResponse.json({
     stage,
     plan: caseFile.plan,
     planHistory: plans,
+    arc,
     verdicts,
     instrumentSeries: instrumentRows,
     moodSeries: [

@@ -323,8 +323,17 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
           `${i + 1}. ${g.goal}${g.status !== 'ACTIVE' ? ` (${g.status.toLowerCase()})` : ''}`,
       )
       .join(' · ') ?? '';
-  const steps = CARE_PROTOCOL_STEPS[cf.plan?.modalityTrack ?? 'CBT'] ?? CARE_PROTOCOL_STEPS['CBT']!;
-  const protocolStep = steps[cf.treatmentSessionsCompleted % steps.length];
+  const track = cf.plan?.modalityTrack ?? 'CBT';
+  const steps = CARE_PROTOCOL_STEPS[track] ?? CARE_PROTOCOL_STEPS['CBT']!;
+  // CP-D — the arc PROGRESSES and then holds in maintenance; it never loops
+  // back to step 1 (which made session 7 replay session 1 — the no-progression
+  // property of a chat thread). Index by completed count, capped at the arc's
+  // length; past the arc, switch to a maintenance / generalisation framing.
+  const stepIdx = cf.treatmentSessionsCompleted;
+  const protocolStep =
+    stepIdx < steps.length
+      ? `Step ${stepIdx + 1} of ${steps.length} in the ${track} arc — ${steps[stepIdx]!}`
+      : `The ${steps.length}-step ${track} arc is complete — this is MAINTENANCE & generalisation. Do NOT restart from step 1: consolidate the tools that have helped, apply them to whatever they bring today, rehearse independent use, and watch for relapse signs.`;
   const label = (k: string) => (k === 'PHQ9' ? 'PHQ-9' : k === 'GAD7' ? 'GAD-7' : k);
   const verdictsLine =
     cf.verdicts.length > 0
