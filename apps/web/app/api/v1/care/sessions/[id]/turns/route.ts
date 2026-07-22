@@ -1,9 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { MirrorTurnsInputSchema, type CareTurn } from '@cureocity/contracts';
-import { screenForCrisis } from '@cureocity/clinical';
 import { CARE_SESSION_CAP_MIN } from '@cureocity/llm';
 import { requireCareUserId } from '@/lib/care-auth';
-import { escalateCareSession } from '@/lib/care-safety';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 
@@ -13,12 +11,12 @@ export const dynamic = 'force-dynamic';
 const EXPIRY_GRACE_MS = 5 * 60 * 1000;
 
 /**
- * POST /api/v1/care/sessions/[id]/turns (AC3 §4.6, AC6 §2 layer 4a) —
+ * POST /api/v1/care/sessions/[id]/turns (AC3 §4.6) —
  * the batched transcript mirror. Every finished transcription turn lands
  * here; the server appends (deduped on seq — the mirrored copy is the
- * ONLY transcript Pass 10 reads) and runs the deterministic crisis
- * screen on the batch. A hit escalates server-side FIRST, then tells the
- * client to hard-stop: `{action: 'crisis_stop'}`.
+ * ONLY transcript Pass 10 reads). Crisis support is user-initiated via the
+ * "Need urgent help?" button (POST /crisis); there is no automatic
+ * escalation on this path.
  */
 export async function POST(
   req: NextRequest,
@@ -69,26 +67,12 @@ export async function POST(
     });
   }
 
-  // §2 layer 4a — deterministic, zero-LLM, every batch. Screen ONLY the
-  // USER's turns. The therapist is an AI conducting a real intake and is
-  // explicitly instructed to ask the risk-screen question ("any thoughts of
-  // harming yourself?"), so its OWN turns necessarily contain phrases from
-  // the crisis list. Screening them self-terminated every session that
-  // reached the risk screen and put the account on a 12h SAFETY_HOLD. The
-  // user's own disclosures stay fully screened here; a crisis the model
-  // itself detects comes in through its flag_crisis tool (the /crisis route).
-  const screen = screenForCrisis(fresh.filter((t) => t.role === 'user').map((t) => t.text));
-  if (screen.hit) {
-    await escalateCareSession({
-      careSessionId,
-      careUserId: auth.value.careUserId,
-      source: 'keyword_screen',
-      metadata: {
-        matches: screen.matches.slice(0, 10) as unknown as Record<string, unknown>[],
-      },
-    });
-    return NextResponse.json({ action: 'crisis_stop' });
-  }
-
+  // Crisis support is user-initiated: the "Need urgent help?" button in the
+  // live UI routes to POST /crisis (escalateCareSession + CrisisTakeover).
+  // There is deliberately NO automatic keyword/model escalation here — the
+  // deterministic substring screen fired on the AI's own risk-screen question
+  // and on users' *denials* ("no thoughts of harming myself"), ending healthy
+  // sessions and locking accounts. An already-escalated session is short-
+  // circuited above (status === 'CRISIS_ESCALATED').
   return NextResponse.json({ action: 'continue' });
 }
