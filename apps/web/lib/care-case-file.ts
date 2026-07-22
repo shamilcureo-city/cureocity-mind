@@ -5,7 +5,12 @@ import {
   type CareSessionKind,
   type CareTurn,
 } from '@cureocity/contracts';
-import { computeInstrumentChange, INSTRUMENTS, type InstrumentKey } from '@cureocity/clinical';
+import {
+  computeInstrumentChange,
+  computeInstrumentTrajectory,
+  INSTRUMENTS,
+  type InstrumentKey,
+} from '@cureocity/clinical';
 import {
   buildCareTherapistPrompt,
   CARE_PROTOCOL_STEPS,
@@ -96,6 +101,10 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
   // CP3 — the LATEST score + its severity band per instrument (needs only one
   // response), the "where you're starting" read for the intake report.
   const measures: CareMeasure[] = [];
+  // CP-B — a plain baseline-vs-latest verdict misses a client who improved then
+  // slipped back (18 → 8 → 16). Track the trajectory too, so a relapse pulls a
+  // review forward instead of reading as "no reliable change".
+  let recentlyWorsening = false;
   for (const key of ['PHQ9', 'GAD7'] as InstrumentKey[]) {
     const series = instrumentRows.filter((r) => r.instrumentKey === key);
     if (series.length >= 1) {
@@ -113,9 +122,15 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
         latestScore: latest,
         verdict: change.verdict,
       });
+      const trajectory = computeInstrumentTrajectory(
+        key,
+        series.map((s) => s.totalScore),
+      );
+      if (trajectory?.recentlyWorsening) recentlyWorsening = true;
     }
   }
-  const worseningVerdict = verdicts.some((v) => v.verdict === 'deterioration');
+  const worseningVerdict =
+    verdicts.some((v) => v.verdict === 'deterioration') || recentlyWorsening;
 
   // Last TREATMENT report — feeds LAST TIME / HOMEWORK / themes continuity.
   // Plus the latest INTAKE report as a fallback, so the FIRST treatment

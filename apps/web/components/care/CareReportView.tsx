@@ -6,7 +6,8 @@ import type { CareReportV1 } from '@cureocity/contracts';
 import { CARE_REVIEW_EVERY_N_SESSIONS } from '@/lib/care-session-kind';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
-import { CareInstrumentForm } from './CareInstrumentForm';
+import { CareInstrumentSequence } from './CareInstrumentSequence';
+import { careBaselineInstruments } from '@/lib/care-instrument-select';
 import { CareShareButton } from './CareShareButton';
 import { MoodDial } from './MoodDial';
 
@@ -114,10 +115,19 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
   }
 
   if (showBaseline) {
+    // Measure on the instrument(s) the plan's track points at (CP-B). currentPlan
+    // may still be the pre-accept snapshot here, so fall back to the intake
+    // report's proposed track.
+    const baselineTrack =
+      session.currentPlan?.modalityTrack ??
+      (session.report?.body.kind === 'INTAKE'
+        ? session.report.body.assessmentAndPlan.modalityTrack
+        : null);
     return (
       <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-2xl md:px-8 md:py-10">
         <h1 className="font-serif text-xl font-semibold">Your plan is saved ✓</h1>
-        <CareInstrumentForm
+        <CareInstrumentSequence
+          instrumentKeys={careBaselineInstruments(baselineTrack)}
           framing="baseline"
           onDone={() => router.push('/care/home')}
           onSkip={() => router.push('/care/home')}

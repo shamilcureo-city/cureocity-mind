@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   computeInstrumentChange,
+  computeInstrumentTrajectory,
   severityKeyForScore,
   REMISSION_CUTOFF,
   RELIABLE_CHANGE_THRESHOLD,
@@ -109,5 +110,38 @@ describe('computeInstrumentChange — percentChange + edge cases', () => {
 
   it('throws on non-finite scores', () => {
     expect(() => computeInstrumentChange('PHQ9', Number.NaN, 5)).toThrow(InstrumentChangeError);
+  });
+});
+
+describe('computeInstrumentTrajectory — relapse detection', () => {
+  it('returns null for fewer than two readings', () => {
+    expect(computeInstrumentTrajectory('PHQ9', [])).toBeNull();
+    expect(computeInstrumentTrajectory('PHQ9', [12])).toBeNull();
+  });
+
+  it('flags a slide back from the nadir the first-vs-latest verdict misses', () => {
+    // 18 → 8 → 16: first-vs-latest is only -2 (no reliable change), but the
+    // rise from the nadir of 8 to 16 is +8 ≥ the PHQ-9 threshold of 5.
+    const traj = computeInstrumentTrajectory('PHQ9', [18, 8, 16]);
+    expect(traj?.nadir).toBe(8);
+    expect(traj?.peak).toBe(18);
+    expect(traj?.latest).toBe(16);
+    expect(traj?.recentlyWorsening).toBe(true);
+    expect(computeInstrumentChange('PHQ9', 18, 16).verdict).toBe('no_reliable_change');
+  });
+
+  it('does not flag a steady improver', () => {
+    expect(computeInstrumentTrajectory('PHQ9', [18, 11, 8])?.recentlyWorsening).toBe(false);
+  });
+
+  it('does not over-trigger on a sub-threshold wobble', () => {
+    // 8 → 6 → 9: the rise from nadir 6 to 9 is +3, below the threshold of 5.
+    expect(computeInstrumentTrajectory('PHQ9', [8, 6, 9])?.recentlyWorsening).toBe(false);
+  });
+
+  it('uses the tighter GAD-7 threshold of 4', () => {
+    // Rise from nadir 5 to 9 is +4 = the GAD-7 threshold.
+    expect(computeInstrumentTrajectory('GAD7', [12, 5, 9])?.recentlyWorsening).toBe(true);
+    expect(computeInstrumentTrajectory('GAD7', [12, 5, 8])?.recentlyWorsening).toBe(false); // +3
   });
 });
