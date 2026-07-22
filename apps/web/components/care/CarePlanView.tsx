@@ -38,6 +38,7 @@ interface PlanPayload {
     plainWords: string;
   }>;
   instrumentSeries: Array<{ instrumentKey: string; totalScore: number }>;
+  arc: { track: string; total: number; done: number; complete: boolean } | null;
 }
 
 const STATUS_STYLE: Record<string, { label: string; cls: string }> = {
@@ -80,6 +81,7 @@ export function CarePlanView() {
   }
 
   const plan = data.plan;
+  const arc = data.arc;
 
   if (!plan) {
     return (
@@ -158,6 +160,33 @@ export function CarePlanView() {
           </ol>
         )}
       </Card>
+
+      {arc ? (
+        <Card className="mt-3 p-4 md:p-5">
+          <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+            Where you are in the work
+          </span>
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span>{TRACK_LABEL[arc.track] ?? arc.track}</span>
+            <span className="font-semibold">
+              {arc.complete ? 'Maintenance' : `Step ${arc.done + 1} of ${arc.total}`}
+            </span>
+          </div>
+          <div className="mt-2 flex gap-1">
+            {Array.from({ length: arc.total }).map((_, i) => (
+              <div
+                key={i}
+                className={`h-1.5 flex-1 rounded ${i < arc.done ? 'bg-[var(--color-accent)]' : 'bg-[var(--color-line-soft)]'}`}
+              />
+            ))}
+          </div>
+          <p className="mt-2 text-[12px] text-[var(--color-ink-3)]">
+            {arc.complete
+              ? 'You’ve worked through the core skills — now it’s keeping them and catching dips early.'
+              : 'A structured series of skills, roughly one per session — this is where you are in it.'}
+          </p>
+        </Card>
+      ) : null}
 
       {data.verdicts.length > 0 ? (
         <Card className="mt-3 p-4 md:p-5">
