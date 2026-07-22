@@ -44,6 +44,9 @@ export interface MintLiveCredentialInput {
   vadSilenceMs: number;
   systemInstruction: string;
   sessionCapMin: number;
+  /// CP2 (flagged: CARE_LIVE_STRUCTURE) — include the mark_phase tool in the
+  /// setup and echo `structure: true` back so the client renders the rail.
+  structure?: boolean;
 }
 
 /**
@@ -88,6 +91,7 @@ export async function mintLiveCredential(
     voiceName: input.voiceName,
     vadSilenceMs: clampVadSilence(input.vadSilenceMs),
     systemInstruction: input.systemInstruction,
+    phaseTool: input.structure,
   });
 
   if (backend === 'mock') {
@@ -100,6 +104,7 @@ export async function mintLiveCredential(
       wsUrl: process.env['CARE_MOCK_LIVE_URL'] ?? 'ws://localhost:8788',
       setup,
       expiresAtMs,
+      ...(input.structure ? { structure: true as const } : {}),
     };
   }
 
@@ -129,6 +134,7 @@ export async function mintLiveCredential(
         // (AC0 exit criterion) — then this field is dropped and the
         // system prompt never leaves the server.
         setup,
+        ...(input.structure ? { structure: true as const } : {}),
       };
     } catch (e) {
       // On a DEPLOYED environment the old "availability beats purity"
@@ -161,6 +167,7 @@ export async function mintLiveCredential(
     wsUrl: `${CARE_LIVE_WSS_BASE}?key=${encodeURIComponent(apiKey)}`,
     setup,
     expiresAtMs,
+    ...(input.structure ? { structure: true as const } : {}),
   };
 }
 
@@ -187,6 +194,7 @@ async function mintVertexCredential(
     vadSilenceMs: clampVadSilence(input.vadSilenceMs),
     systemInstruction: input.systemInstruction,
     model: careVertexModelPath(project, location, model),
+    phaseTool: input.structure,
   });
 
   return {
@@ -195,6 +203,7 @@ async function mintVertexCredential(
     accessToken: token,
     setup,
     expiresAtMs: Math.min(sessionExpiresAtMs, tokenExpiresAtMs),
+    ...(input.structure ? { structure: true as const } : {}),
   };
 }
 

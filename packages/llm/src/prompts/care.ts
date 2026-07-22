@@ -14,6 +14,8 @@
  * clinician sign-off; bump the version constant on any change.
  */
 
+import { CARE_SESSION_PHASES } from '../live/config';
+
 export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V6';
 export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V3';
 
@@ -121,6 +123,22 @@ function stanceBlock(): string {
   ].join('\n');
 }
 
+/**
+ * CP2 (flagged: CARE_LIVE_STRUCTURE) — the silent phase rail. Lists this
+ * kind's ordered phases and tells the model to call mark_phase on each
+ * transition; the client renders the same CARE_SESSION_PHASES list on-screen.
+ * Included only when structureEnabled, so the default prompt is unchanged.
+ */
+function phasesBlock(kind: 'INTAKE' | 'TREATMENT' | 'REVIEW'): string {
+  const phases = CARE_SESSION_PHASES[kind];
+  return [
+    'SESSION PHASES (silent structure — the user sees a small progress rail):',
+    `- The session moves through these phases in order: ${phases.map((p) => p.key).join(' → ')}.`,
+    '- The MOMENT you move into a phase, silently call mark_phase with that phase key (for every phase, including the first).',
+    '- NEVER say a phase name aloud and never mention the rail — it only updates the on-screen progress. Keep following the session content above; the phases just track where you are.',
+  ].join('\n');
+}
+
 export interface CareTherapistPromptInput {
   kind: 'INTAKE' | 'TREATMENT' | 'REVIEW';
   personaName: string;
@@ -148,6 +166,8 @@ export interface CareTherapistPromptInput {
   /// — TREATMENT baseline read when there is not yet a change verdict.
   measuresLine?: string;
   moodBefore?: number;
+  /// CP2 (flagged) — emit the SESSION PHASES block + mark_phase instructions.
+  structureEnabled?: boolean;
 }
 
 /** The live system prompt, kind-branched. Target ≤ ~4 KB on the wire. */
@@ -174,6 +194,7 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
       'CLOSE (only when the closing [TIME SIGNAL] arrives, or the user ends): reflect what you heard in two or three sentences, tell them their written assessment and plan will be ready to read in a minute and that you will agree the goals together, say goodbye warmly, then call end_session.',
       style,
       stanceBlock(),
+      input.structureEnabled ? phasesBlock(input.kind) : '',
       timingBlock(),
       safetyBlock(),
     ]
@@ -194,6 +215,7 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
       'CLOSE (when the closing [TIME SIGNAL] arrives, or the user ends) with what the next stretch of work is — or, if the scores are worsening, an honest, kind conversation about seeing a human therapist. Then summarize, say goodbye warmly, and call end_session.',
       style,
       stanceBlock(),
+      input.structureEnabled ? phasesBlock(input.kind) : '',
       timingBlock(),
       safetyBlock(),
     ]
@@ -221,6 +243,7 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
     'Balance listening with doing the work — reflect, but also guide. When the talk drifts from the agenda, name it kindly and steer back; if the drift is avoidance, gently say so.',
     style,
     stanceBlock(),
+    input.structureEnabled ? phasesBlock(input.kind) : '',
     timingBlock(),
     safetyBlock(),
   ]

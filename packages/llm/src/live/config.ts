@@ -48,6 +48,42 @@ export const CARE_SESSION_CAP_MIN: Record<'INTAKE' | 'TREATMENT' | 'REVIEW', num
 /// Redeem-token TTL — ≥ the longest session cap (§4.2 step 2).
 export const CARE_START_TOKEN_TTL_SEC = 2100;
 
+/**
+ * CP2 (flagged: CARE_LIVE_STRUCTURE) — the ordered, per-kind phase rail. The
+ * live prompt lists these keys and instructs the model to call `mark_phase`
+ * on each transition; the client renders the ordered labels and highlights
+ * the current one. ONE source of truth for both the server prompt and the
+ * browser rail, so the keys never drift.
+ */
+export const CARE_SESSION_PHASES: Record<
+  'INTAKE' | 'TREATMENT' | 'REVIEW',
+  { key: string; label: string }[]
+> = {
+  INTAKE: [
+    { key: 'OPENING', label: 'Getting started' },
+    { key: 'STORY', label: 'Your story' },
+    { key: 'IMPACT', label: 'Daily life' },
+    { key: 'HISTORY', label: 'History' },
+    { key: 'RISK', label: 'Safety check' },
+    { key: 'HOPES', label: 'Strengths & hopes' },
+    { key: 'CLOSING', label: 'Wrapping up' },
+  ],
+  TREATMENT: [
+    { key: 'OPENING', label: 'Checking in' },
+    { key: 'HOMEWORK', label: 'Last week' },
+    { key: 'AGENDA', label: "Today's focus" },
+    { key: 'THE_WORK', label: 'The work' },
+    { key: 'CLOSING', label: 'Wrapping up' },
+  ],
+  REVIEW: [
+    { key: 'OPENING', label: 'Checking in' },
+    { key: 'SCORES', label: 'The numbers' },
+    { key: 'GOALS', label: 'Your goals' },
+    { key: 'NEXT', label: 'Next steps' },
+    { key: 'CLOSING', label: 'Wrapping up' },
+  ],
+};
+
 /// AI Studio v1beta Live endpoint (the `url`-mode base; `key` or
 /// `access_token` is appended by the token mint).
 export const CARE_LIVE_WSS_BASE =
@@ -89,6 +125,9 @@ export interface CareLiveSetupInput {
   /// Override the setup's `model` field. AI Studio uses the `models/…` pin
   /// (the default); Vertex passes the full `projects/…/models/…` path.
   model?: string;
+  /// CP2 (flagged) — include the silent `mark_phase` tool that drives the
+  /// on-screen phase rail. Off by default → byte-identical setup.
+  phaseTool?: boolean;
 }
 
 /**
@@ -101,6 +140,22 @@ export interface CareLiveSetupInput {
  * transcription entirely in the source project (their May-30 revert).
  */
 export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, unknown> {
+  const functionDeclarations: Record<string, unknown>[] = [];
+  // CP2 (flagged) — the silent phase signal that advances the on-screen rail.
+  if (input.phaseTool) {
+    functionDeclarations.push({
+      name: 'mark_phase',
+      description:
+        'Silently signal that you have moved the session into a new phase. Call it the MOMENT you move into a phase, passing the phase key from the list in your instructions. NEVER say the phase name aloud — it only updates the on-screen progress rail for the user.',
+      parameters: { type: 'OBJECT', properties: { phase: { type: 'STRING' } } },
+    });
+  }
+  functionDeclarations.push({
+    name: 'end_session',
+    description:
+      'Call ONLY after you have given your closing summary and warm goodbye at the very end. You do NOT track time yourself — wait for the [TIME SIGNAL] that tells you to begin closing (or for the user to end). Never call this to finish early; if you feel done sooner, gently ask if there is anything else instead.',
+    parameters: { type: 'OBJECT', properties: { reason: { type: 'STRING' } } },
+  });
   return {
     setup: {
       model: input.model ?? CARE_LIVE_MODEL_ID,
@@ -128,21 +183,7 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
       // handles + sliding-window compression keep a 30-min intake alive.
       session_resumption: {},
       context_window_compression: { sliding_window: {} },
-      tools: [
-        {
-          function_declarations: [
-            {
-              name: 'end_session',
-              description:
-                'Call ONLY after you have given your closing summary and warm goodbye at the very end. You do NOT track time yourself — wait for the [TIME SIGNAL] that tells you to begin closing (or for the user to end). Never call this to finish early; if you feel done sooner, gently ask if there is anything else instead.',
-              parameters: {
-                type: 'OBJECT',
-                properties: { reason: { type: 'STRING' } },
-              },
-            },
-          ],
-        },
-      ],
+      tools: [{ function_declarations: functionDeclarations }],
       system_instruction: { parts: [{ text: input.systemInstruction }] },
     },
   };

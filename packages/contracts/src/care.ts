@@ -139,6 +139,8 @@ export type RedeemLiveTokenInput = z.infer<typeof RedeemLiveTokenInputSchema>;
 export const RedeemLiveTokenResponseSchema = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('ephemeral'),
+    /// CP2 (flagged) — the live phase rail is active for this session.
+    structure: z.boolean().optional(),
     wsUrl: z.string().min(1),
     accessToken: z.string().min(1),
     expiresAtMs: z.number().int().positive(),
@@ -150,6 +152,7 @@ export const RedeemLiveTokenResponseSchema = z.discriminatedUnion('mode', [
   }),
   z.object({
     mode: z.literal('vertex'),
+    structure: z.boolean().optional(),
     wsUrl: z.string().min(1),
     /// The GCP OAuth access token (cloud-platform scope) the browser uses
     /// to open the Vertex Live socket. Short-lived; bounded to the session.
@@ -159,12 +162,14 @@ export const RedeemLiveTokenResponseSchema = z.discriminatedUnion('mode', [
   }),
   z.object({
     mode: z.literal('url'),
+    structure: z.boolean().optional(),
     wsUrl: z.string().min(1),
     setup: z.unknown(),
     expiresAtMs: z.number().int().positive(),
   }),
   z.object({
     mode: z.literal('mock'),
+    structure: z.boolean().optional(),
     wsUrl: z.string().min(1),
     setup: z.unknown(),
     expiresAtMs: z.number().int().positive(),

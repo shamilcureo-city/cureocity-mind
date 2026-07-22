@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CareTurn, RedeemLiveTokenResponse } from '@cureocity/contracts';
+import { CARE_SESSION_PHASES } from '@cureocity/llm';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { LivePlayback } from '@/lib/audio/live-playback';
 import {
@@ -69,6 +70,10 @@ export function CareLiveSession({
   const [muted, setMuted] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [remainingSec, setRemainingSec] = useState(capMin * 60);
+  // CP2 (flagged: CARE_LIVE_STRUCTURE) — the live phase rail. structureOn is
+  // echoed by the mint; livePhase is advanced by the model's mark_phase calls.
+  const [structureOn, setStructureOn] = useState(false);
+  const [livePhase, setLivePhase] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const playbackRef = useRef<LivePlayback | null>(null);
@@ -293,7 +298,24 @@ export function CareLiveSession({
         | { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> }
         | undefined;
       for (const call of toolCall?.functionCalls ?? []) {
-        if (call.name === 'end_session') {
+        if (call.name === 'mark_phase') {
+          // CP2 — silent phase signal; advance the rail and ack so the model
+          // is not left waiting on a function response.
+          const p = typeof call.args?.['phase'] === 'string' ? (call.args['phase'] as string) : null;
+          if (p) setLivePhase(p);
+          const ws = wsRef.current;
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(
+              JSON.stringify({
+                tool_response: {
+                  function_responses: [
+                    { id: call.id, name: 'mark_phase', response: { acknowledged: true } },
+                  ],
+                },
+              }),
+            );
+          }
+        } else if (call.name === 'end_session') {
           // CP1 — the model has no reliable clock. DECLINE a close it proposes
           // while there is still real time left (the honest close is driven by
           // the wind-down [TIME SIGNAL] near the end); accept once inside the
@@ -507,6 +529,7 @@ export function CareLiveSession({
         return;
       }
       if (cancelled) return;
+      setStructureOn(credential.structure === true);
       // The socket wiring, reconnect decisions, and setup-send all live in the
       // shared openLiveSocket (initial connect passes no resumption handle).
       void openLiveSocketRef.current(credential, null);
@@ -577,6 +600,31 @@ export function CareLiveSession({
           captions {captionsOn ? 'on' : 'off'}
         </button>
       </div>
+
+      {structureOn && (phase === 'live' || phase === 'reconnecting') ? (
+        <div className="flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1 px-5 pb-1 pt-1 text-[11px] tracking-wide">
+          {CARE_SESSION_PHASES[kind].map((p, i) => {
+            const curIdx = CARE_SESSION_PHASES[kind].findIndex((x) => x.key === livePhase);
+            const active = curIdx === i;
+            const done = curIdx > -1 && i < curIdx;
+            return (
+              <span
+                key={p.key}
+                className={
+                  active
+                    ? 'font-semibold text-[#9fd3bd]'
+                    : done
+                      ? 'text-[#5f8a79]'
+                      : 'text-[#3f5f55]'
+                }
+              >
+                {active ? '● ' : done ? '✓ ' : '○ '}
+                {p.label}
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
         <div
