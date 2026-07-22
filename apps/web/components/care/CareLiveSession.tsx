@@ -51,8 +51,7 @@ interface Props {
  * setupComplete → cue the therapist to open FIRST → stream 16 kHz PCM
  * mic frames up, play 24 kHz PCM
  * down → stitch both transcription streams into turns → mirror every
- * finished turn to the server (which crisis-screens each batch) →
- * flag_crisis/end_session tool calls → done screen.
+ * finished turn to the server → end_session tool call → done screen.
  */
 export function CareLiveSession({
   sessionId,
@@ -294,9 +293,7 @@ export function CareLiveSession({
         | { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> }
         | undefined;
       for (const call of toolCall?.functionCalls ?? []) {
-        if (call.name === 'flag_crisis') {
-          void enterCrisis('model_tool', String(call.args?.['reason'] ?? ''));
-        } else if (call.name === 'end_session') {
+        if (call.name === 'end_session') {
           // CP1 — the model has no reliable clock. DECLINE a close it proposes
           // while there is still real time left (the honest close is driven by
           // the wind-down [TIME SIGNAL] near the end); accept once inside the
@@ -331,7 +328,7 @@ export function CareLiveSession({
         }
       }
     },
-    [enterCrisis, pushTurn],
+    [pushTurn],
   );
 
   // CP1 — open (or re-open) the live socket, wire the shared handlers, send the
