@@ -308,6 +308,8 @@ export interface BuildSessionPromptInput {
   topic?: string;
   moodBefore?: number;
   caseFile: CareCaseFile;
+  /// CP2 (flagged: CARE_LIVE_STRUCTURE) — emit the session-phases block.
+  structureEnabled?: boolean;
 }
 
 export function buildSessionPrompt(input: BuildSessionPromptInput): {
@@ -372,6 +374,7 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
     },
     verdictsLine,
     measuresLine,
+    structureEnabled: input.structureEnabled,
   });
   return { prompt, sessionCapMin: capMin };
 }

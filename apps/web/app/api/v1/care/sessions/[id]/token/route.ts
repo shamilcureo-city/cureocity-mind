@@ -56,6 +56,8 @@ export async function POST(
 
   const { careUser } = auth.value;
   const caseFile = await getCareCaseFile(auth.value.careUserId);
+  // CP2 — the live structure engine (phase rail) is a server flag, default off.
+  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] === 'true';
   const { prompt, sessionCapMin } = buildSessionPrompt({
     displayName: careUser.displayName,
     personaName: careUser.personaName,
@@ -66,6 +68,7 @@ export async function POST(
     topic: session.topic ?? undefined,
     moodBefore: session.moodBefore ?? undefined,
     caseFile,
+    structureEnabled,
   });
 
   const credential = await mintLiveCredential({
@@ -73,6 +76,7 @@ export async function POST(
     vadSilenceMs: careUser.vadSilenceMs,
     systemInstruction: prompt,
     sessionCapMin,
+    structure: structureEnabled,
   });
 
   if (session.status === 'CREATED') {

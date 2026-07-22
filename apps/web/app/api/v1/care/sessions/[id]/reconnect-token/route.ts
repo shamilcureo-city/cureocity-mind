@@ -55,6 +55,7 @@ export async function POST(
 
   const { careUser } = auth.value;
   const caseFile = await getCareCaseFile(auth.value.careUserId);
+  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] === 'true';
   const { prompt, sessionCapMin } = buildSessionPrompt({
     displayName: careUser.displayName,
     personaName: careUser.personaName,
@@ -65,6 +66,7 @@ export async function POST(
     topic: session.topic ?? undefined,
     moodBefore: session.moodBefore ?? undefined,
     caseFile,
+    structureEnabled,
   });
 
   const credential = await mintLiveCredential({
@@ -72,6 +74,7 @@ export async function POST(
     vadSilenceMs: careUser.vadSilenceMs,
     systemInstruction: prompt,
     sessionCapMin,
+    structure: structureEnabled,
   });
   return NextResponse.json(credential);
 }
