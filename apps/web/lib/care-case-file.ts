@@ -118,32 +118,40 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
   const worseningVerdict = verdicts.some((v) => v.verdict === 'deterioration');
 
   // Last TREATMENT report — feeds LAST TIME / HOMEWORK / themes continuity.
-  const [lastTreatmentReport, recentReports, recentNotes, homeworkTicks] = await Promise.all([
-    prisma.careReport.findFirst({
-      where: { careSession: { careUserId }, kind: 'TREATMENT' },
-      orderBy: { createdAt: 'desc' },
-      select: { body: true },
-    }),
-    prisma.careReport.findMany({
-      where: { careSession: { careUserId }, kind: 'TREATMENT' },
-      orderBy: { createdAt: 'desc' },
-      take: 3,
-      select: { body: true },
-    }),
-    // CG4 — the daily micro-loop's investment step: the user's own check-in
-    // lines flow into the next session's prompt, so being remembered is
-    // demonstrable, never fabricated (personalization theater is the named
-    // anti-pattern).
-    prisma.careCheckin.findMany({
-      where: { careUserId, note: { not: null } },
-      orderBy: { createdAt: 'desc' },
-      take: 3,
-      select: { note: true },
-    }),
-    prisma.careHomeworkTick.count({
-      where: { careUserId, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
-    }),
-  ]);
+  // Plus the latest INTAKE report as a fallback, so the FIRST treatment
+  // session (no treatment report yet) opens on the intake instead of cold.
+  const [lastTreatmentReport, recentReports, recentNotes, homeworkTicks, lastIntakeReport] =
+    await Promise.all([
+      prisma.careReport.findFirst({
+        where: { careSession: { careUserId }, kind: 'TREATMENT' },
+        orderBy: { createdAt: 'desc' },
+        select: { body: true },
+      }),
+      prisma.careReport.findMany({
+        where: { careSession: { careUserId }, kind: 'TREATMENT' },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+        select: { body: true },
+      }),
+      // CG4 — the daily micro-loop's investment step: the user's own check-in
+      // lines flow into the next session's prompt, so being remembered is
+      // demonstrable, never fabricated (personalization theater is the named
+      // anti-pattern).
+      prisma.careCheckin.findMany({
+        where: { careUserId, note: { not: null } },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+        select: { note: true },
+      }),
+      prisma.careHomeworkTick.count({
+        where: { careUserId, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
+      }),
+      prisma.careReport.findFirst({
+        where: { careSession: { careUserId }, kind: 'INTAKE' },
+        orderBy: { createdAt: 'desc' },
+        select: { body: true },
+      }),
+    ]);
 
   let lastReportSummary: string | undefined;
   let homeworkLine: string | undefined;
@@ -182,6 +190,23 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
   // CG4 — their own check-in words, quoted (the persona opens on these).
   for (const n of recentNotes) {
     if (n.note) recentThemes.unshift(`They wrote on a recent check-in: "${n.note}"`);
+  }
+
+  // CP-A (V6) — first treatment session has no TREATMENT report yet; without
+  // this it would open cold, exactly like a fresh chat. Carry the INTAKE
+  // report's formulation + the user's own concern quotes forward as LAST TIME
+  // / themes so session one is grounded in what they told us at intake.
+  if (!lastReportSummary && lastIntakeReport) {
+    const ap = bodyOf(bodyOf(lastIntakeReport.body)['assessmentAndPlan']);
+    const formulation = typeof ap['formulation'] === 'string' ? ap['formulation'].trim() : '';
+    if (formulation) lastReportSummary = `From your first session together: ${formulation}`;
+    const areas = Array.isArray(ap['concernAreas']) ? ap['concernAreas'] : [];
+    for (const a of areas as Array<Record<string, unknown>>) {
+      const name = typeof a['name'] === 'string' ? a['name'].trim() : '';
+      const quote = typeof a['evidenceQuote'] === 'string' ? a['evidenceQuote'].trim() : '';
+      if (name && quote) recentThemes.push(`${name} (they said: "${quote}")`);
+      else if (name) recentThemes.push(name);
+    }
   }
 
   return {
@@ -285,10 +310,19 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
       .join(' · ') ?? '';
   const steps = CARE_PROTOCOL_STEPS[cf.plan?.modalityTrack ?? 'CBT'] ?? CARE_PROTOCOL_STEPS['CBT']!;
   const protocolStep = steps[cf.treatmentSessionsCompleted % steps.length];
+  const label = (k: string) => (k === 'PHQ9' ? 'PHQ-9' : k === 'GAD7' ? 'GAD-7' : k);
   const verdictsLine =
     cf.verdicts.length > 0
       ? cf.verdicts
-          .map((v) => `${v.instrumentKey} ${v.baselineScore}→${v.latestScore} (${v.verdict})`)
+          .map((v) => `${label(v.instrumentKey)} ${v.baselineScore}→${v.latestScore} (${v.verdict})`)
+          .join('; ')
+      : undefined;
+  // CP-A (V6) — the latest measured score + band, so a treatment session that
+  // has a baseline but not yet a change verdict can still name where they are.
+  const measuresLine =
+    cf.measures.length > 0
+      ? cf.measures
+          .map((m) => `${label(m.instrumentKey)} ${m.score}${m.band ? ` (${m.band})` : ''}`)
           .join('; ')
       : undefined;
 
@@ -303,7 +337,9 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
     moodBefore: input.moodBefore,
     caseFile: {
       sessionNumber: cf.completedCount + 1,
-      formulationOneLiner: (cf.plan?.formulation ?? '').split('\n')[0] ?? '',
+      // CP-A (V6) — pass the FULL working formulation, not a truncated first
+      // line, so Meera holds the whole case, not a headline.
+      formulation: cf.plan?.formulation ?? '',
       goalsLine,
       lastSummary: cf.lastReportSummary,
       homeworkLine: cf.homeworkLine,
@@ -311,6 +347,7 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
       protocolStep,
     },
     verdictsLine,
+    measuresLine,
   });
   return { prompt, sessionCapMin: capMin };
 }
