@@ -14,21 +14,24 @@ export const maxDuration = 300;
  * reach Neon directly). It inserts the deterministic `seed-*` cohort defined in
  * `lib/demo-seed.ts` and NOTHING else; it is idempotent (re-run = no dupes).
  *
- * TEMPORARY OPS TOOL — this route exists to populate a fresh pilot database and
- * should be removed once that's done. It is fail-closed and gated on the same
- * `CRON_SECRET` used by the cron routes (which Vercel already has set on prod),
- * so it can't be triggered without that secret. It writes NO audit rows and
- * touches no real accounts.
+ * TEMPORARY OPS TOOL — this route exists ONLY to populate a fresh pilot
+ * database and should be DELETED right after. Fail-closed and gated on a
+ * dedicated `DEMO_SEED_SECRET` env var the operator sets to a value of their
+ * choosing (CRON_SECRET is marked Sensitive/write-only on Vercel and can't be
+ * read back for a manual call, so it isn't usable here). No secret is baked
+ * into the code. Writes NO audit rows and touches no real accounts.
  *
- *   Seed:  curl -X POST -H "Authorization: Bearer $CRON_SECRET" \
+ *   Seed:  curl -X POST -H "Authorization: Bearer $DEMO_SEED_SECRET" \
  *            https://mind.cureocity.in/api/v1/ops/seed-demo
  *   Purge: add ?purge=1 to the URL.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const secret = process.env['CRON_SECRET'];
+  const secret = process.env['DEMO_SEED_SECRET'];
   if (!secret) {
-    console.error('[ops/seed-demo] CRON_SECRET is not set — refusing (fail closed).');
-    return NextResponse.json({ error: 'Not configured' }, { status: 503 });
+    return NextResponse.json(
+      { error: 'Not configured — set the DEMO_SEED_SECRET env var and redeploy.' },
+      { status: 503 },
+    );
   }
   if (req.headers.get('authorization') !== `Bearer ${secret}`) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
