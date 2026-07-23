@@ -25,6 +25,22 @@ export const maxDuration = 300;
  *            https://mind.cureocity.in/api/v1/ops/seed-demo
  *   Purge: add ?purge=1 to the URL.
  */
+/**
+ * GET — read-only status probe (no secret required, reveals no secret value).
+ * Confirms this newer version is the one deployed and whether DEMO_SEED_SECRET
+ * is set on the running deployment, so a failing POST can be diagnosed without
+ * guessing. `secretLength` helps spot a stray trailing space/newline.
+ */
+export async function GET(): Promise<NextResponse> {
+  const secret = process.env['DEMO_SEED_SECRET'];
+  return NextResponse.json({
+    route: 'ops/seed-demo',
+    gate: 'DEMO_SEED_SECRET',
+    configured: !!secret,
+    secretLength: secret ? secret.length : 0,
+  });
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const secret = process.env['DEMO_SEED_SECRET'];
   if (!secret) {
