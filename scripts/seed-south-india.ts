@@ -85,6 +85,8 @@ const ISO_BY_LANG: Record<string, string> = {
   English: 'en',
   Tulu: 'en',
   Urdu: 'ur',
+  Arabic: 'ar',
+  Pashto: 'ps',
 };
 
 type Vertical = 'THERAPIST' | 'DOCTOR';
@@ -187,9 +189,11 @@ function emailFor(name: string, p: number): string {
 }
 
 async function purge(): Promise<void> {
-  // Remove in FK-safe order. All seed rows share the seed-si-* id convention.
+  // Remove in FK-safe order. Every seeded practitioner's firebaseUid starts
+  // with `seed-` (both the seed-si-* and seed-uae-* cohorts); the demo
+  // fixtures use `dev-firebase-uid-*`, so this never touches them.
   const psys = await prisma.psychologist.findMany({
-    where: { firebaseUid: { startsWith: 'seed-si-' } },
+    where: { firebaseUid: { startsWith: 'seed-' } },
     select: { id: true },
   });
   const ids = psys.map((p) => p.id);
@@ -200,7 +204,184 @@ async function purge(): Promise<void> {
   await prisma.session.deleteMany({ where: { psychologistId: { in: ids } } });
   await prisma.client.deleteMany({ where: { psychologistId: { in: ids } } });
   await prisma.psychologist.deleteMany({ where: { id: { in: ids } } });
-  console.log(`Purged ${ids.length} seed-si practitioners + their clients + sessions.`);
+  console.log(`Purged ${ids.length} seed practitioners + their clients + sessions.`);
+}
+
+// ---------------------------------------------------------------------------
+// Cohort 2 — 20 UAE doctors (Dubai + Abu Dhabi), 240 consultations.
+// ---------------------------------------------------------------------------
+interface UaeRow {
+  name: string;
+  city: string;
+  province: string;
+  council: string; // DHA (Dubai) / DOH (Abu Dhabi) — medical-registration prefix
+  specialty: string;
+  langs: string[];
+  years: number;
+  feeInr: number;
+}
+
+const UAE_ROWS: UaeRow[] = [
+  { name: 'Wael Berro', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Family Medicine', langs: ['English', 'Arabic'], years: 15, feeInr: 2500 },
+  { name: 'Mohammed Ansary', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Family Medicine', langs: ['English', 'Arabic', 'Malayalam'], years: 12, feeInr: 2500 },
+  { name: 'Chandan Tickoo', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'General Medicine', langs: ['English', 'Hindi', 'Arabic'], years: 18, feeInr: 2200 },
+  { name: 'Jamal Khamis', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'General Practice', langs: ['English', 'Arabic'], years: 10, feeInr: 2000 },
+  { name: 'Omar Rantho', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Gastroenterology', langs: ['English', 'Arabic'], years: 16, feeInr: 3500 },
+  { name: 'Sweeney Johal', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Gastroenterology', langs: ['English', 'Hindi'], years: 14, feeInr: 3500 },
+  { name: 'Amir Nisar', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'General Surgery', langs: ['English', 'Urdu', 'Hindi'], years: 17, feeInr: 3800 },
+  { name: 'Anu Bhansal', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Gynaecology', langs: ['English', 'Hindi'], years: 13, feeInr: 3000 },
+  { name: 'Eman Salah', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Dermatology', langs: ['English', 'Arabic'], years: 11, feeInr: 3200 },
+  { name: 'Sudhender Kumar Chawla', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Plastic Surgery', langs: ['English', 'Hindi'], years: 20, feeInr: 5000 },
+  { name: 'Ali Aldibbiat', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Endocrinology', langs: ['English', 'Arabic'], years: 15, feeInr: 3400 },
+  { name: 'Mohammed Elmussareh', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Urology', langs: ['English', 'Arabic'], years: 12, feeInr: 3600 },
+  { name: 'Muhammad Butt', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'General Practice', langs: ['English', 'Urdu'], years: 9, feeInr: 1800 },
+  { name: 'Zarghuna', city: 'Dubai', province: 'Dubai', council: 'DHA', specialty: 'Pediatrics', langs: ['English', 'Pashto', 'Urdu'], years: 10, feeInr: 2000 },
+  { name: 'Stephen R. Grobmyer', city: 'Abu Dhabi', province: 'Abu Dhabi', council: 'DOH', specialty: 'Oncology', langs: ['English'], years: 24, feeInr: 5000 },
+  { name: 'Gopal Bhatnagar', city: 'Abu Dhabi', province: 'Abu Dhabi', council: 'DOH', specialty: 'Cardiac Surgery', langs: ['English', 'Hindi'], years: 25, feeInr: 5000 },
+  { name: 'Khalid Al Muti', city: 'Abu Dhabi', province: 'Abu Dhabi', council: 'DOH', specialty: 'Cardiology', langs: ['English', 'Arabic'], years: 19, feeInr: 4200 },
+  { name: 'Syed Irteza Hussain', city: 'Abu Dhabi', province: 'Abu Dhabi', council: 'DOH', specialty: 'Neurology', langs: ['English', 'Urdu'], years: 18, feeInr: 4000 },
+  { name: 'Georges-Pascal Haber', city: 'Abu Dhabi', province: 'Abu Dhabi', council: 'DOH', specialty: 'Urology', langs: ['English', 'Arabic'], years: 22, feeInr: 4600 },
+  { name: 'John H. Rodriguez', city: 'Abu Dhabi', province: 'Abu Dhabi', council: 'DOH', specialty: 'General Surgery', langs: ['English'], years: 21, feeInr: 4500 },
+];
+
+const UAE_WEIGHTS = [9, 8, 7, 7, 6, 6, 5, 5, 4, 4, 4, 3, 3, 3, 3, 2, 2, 2, 1, 1];
+const UAE_SESSION_COUNTS = splitUnequally(UAE_WEIGHTS, 240);
+
+/** Everything one practitioner (+ their clients + sessions) needs — cohort-agnostic. */
+interface PSeed {
+  uid: string;
+  email: string;
+  phone: string;
+  createdAt: Date;
+  fullName: string;
+  isDoctor: boolean;
+  langs: string[];
+  city: string;
+  province: string;
+  years: number;
+  feeInr: number | null;
+  acceptingNew: boolean;
+  focus: string; // therapist
+  modalities: string[]; // therapist
+  specialty: string; // doctor
+  rciNumber: string; // therapist real / doctor placeholder
+  medicalRegNumber: string | null;
+  sessionCount: number;
+  clientPrefix: string; // e.g. `seed-sic-0`
+  sessionPrefix: string; // e.g. `seed-sess-0`
+  rngSeed: number;
+  now: number;
+}
+
+async function seedPractitioner(a: PSeed): Promise<{ sessions: number; last7d: number; clients: number }> {
+  const langsIso = a.langs.map((l) => ISO_BY_LANG[l] ?? 'en');
+  const firstIso = langsIso[0] ?? 'en';
+
+  const common = {
+    fullName: a.fullName,
+    phone: a.phone,
+    status: 'ACTIVE' as const,
+    onboardingCompletedAt: a.createdAt,
+    vertical: (a.isDoctor ? 'DOCTOR' : 'THERAPIST') as Vertical,
+    languages: a.langs,
+    locationCity: a.city,
+    locationProvince: a.province,
+    yearsOfExperience: a.years,
+    sessionFeeInr: a.feeInr,
+    isAcceptingNewClients: a.acceptingNew,
+  };
+
+  const roleFields = a.isDoctor
+    ? {
+        // rciNumber is NOT NULL + unique; doctors carry a placeholder + a real
+        // medical-registration number (mirrors prisma/seed.ts).
+        rciNumber: a.rciNumber,
+        medicalRegNumber: a.medicalRegNumber,
+        specialty: a.specialty,
+        headline: `${a.specialty} — ${a.city}.`,
+        bio: `${a.specialty} consultant in ${a.city}, ${a.years} years in practice.`,
+      }
+    : {
+        rciNumber: a.rciNumber,
+        rciVerifiedAt: a.createdAt,
+        headline: `${a.focus} — ${a.city}.`,
+        bio: `${a.years} years of practice in ${a.city}, working with ${a.focus.toLowerCase()}. Sees clients in ${a.langs.slice(0, 2).join(' and ')}.`,
+        specialties: a.focus.split(' & '),
+        modalities: a.modalities,
+      };
+
+  const psy = await prisma.psychologist.upsert({
+    where: { firebaseUid: a.uid },
+    update: { ...common, ...roleFields },
+    create: { firebaseUid: a.uid, email: a.email, createdAt: a.createdAt, ...common, ...roleFields },
+  });
+
+  // --- Client pool ---
+  const numClients = Math.max(4, Math.min(20, Math.ceil(a.sessionCount / 3)));
+  const clientIds: string[] = [];
+  for (let c = 0; c < numClients; c++) {
+    const cuid = `${a.clientPrefix}-${c}`;
+    const cli = await prisma.client.upsert({
+      where: { clientFirebaseUid: cuid },
+      update: {},
+      create: {
+        psychologistId: psy.id,
+        clientFirebaseUid: cuid,
+        isDemo: false,
+        status: 'ACTIVE',
+        preferredLanguage: firstIso,
+        spokenLanguages: langsIso,
+        // Opaque placeholders (no tenant DEK in a seed) — the admin console
+        // never renders client PHI, so blank-on-decrypt is fine.
+        fullNameEncrypted: `seed:Patient ${a.clientPrefix}-${c}`,
+        presentingConcerns: a.isDoctor ? 'OPD follow-up.' : `${a.focus} — ongoing work.`,
+        preferredModality: a.isDoctor ? null : (a.modalities[0] ?? 'CBT'),
+      },
+    });
+    clientIds.push(cli.id);
+  }
+
+  // --- Sessions: COMPLETED consultations across the last 15 days ---
+  const rng = makeRng(a.rngSeed);
+  let sessions = 0;
+  let last7d = 0;
+  for (let j = 0; j < a.sessionCount; j++) {
+    const clientId = clientIds[j % numClients]!;
+    const dayOffset = Math.floor(rng() * WINDOW_DAYS); // 0..14
+    const hour = 9 + Math.floor(rng() * 10); // 9..18
+    const minute = Math.floor(rng() * 12) * 5;
+    const when = new Date(a.now - dayOffset * DAY_MS);
+    when.setHours(hour, minute, 0, 0);
+    const ended = new Date(when.getTime() + (25 + Math.floor(rng() * 30)) * 60 * 1000);
+
+    const isFirstForClient = j < numClients;
+    const kind = isFirstForClient ? 'INTAKE' : j % 7 === 0 ? 'REVIEW' : 'TREATMENT';
+
+    const sid = `${a.sessionPrefix}-${j}`;
+    await prisma.session.upsert({
+      where: { id: sid },
+      update: {},
+      create: {
+        id: sid,
+        clientId,
+        psychologistId: psy.id,
+        status: 'COMPLETED',
+        kind,
+        scheduledAt: when,
+        startedAt: when,
+        endedAt: ended,
+        createdAt: when,
+        language: firstIso,
+        spokenLanguages: langsIso,
+        ...(a.isDoctor
+          ? { captureMode: j % 2 === 0 ? 'LIVE' : 'DICTATE', tokenNumber: (j % 40) + 1 }
+          : { modality: a.modalities[0]?.toUpperCase().includes('CBT') ? 'CBT' : 'SUPPORTIVE' }),
+      },
+    });
+    sessions += 1;
+    if (a.now - when.getTime() <= 7 * DAY_MS) last7d += 1;
+  }
+  return { sessions, last7d, clients: numClients };
 }
 
 async function main(): Promise<void> {
@@ -210,154 +391,91 @@ async function main(): Promise<void> {
   }
 
   const now = Date.now();
+  const HOUR = 60 * 60 * 1000;
   let sessionsMade = 0;
   let sessionsLast7d = 0;
   let clientsMade = 0;
   const perVertical = { THERAPIST: 0, DOCTOR: 0 };
 
+  // --- Cohort 1: South-India practitioners (16 therapist + 12 doctor), 540 sessions ---
   for (let p = 0; p < ROWS.length; p++) {
     const r = ROWS[p]!;
     const spec = CITIES[r.cityKey as string]!;
     const isDoctor = r.vertical === 'DOCTOR';
-    // Index-based id (stable across renames — renaming a row updates in place
-    // rather than orphaning the old row). Purge first if the id scheme changes.
-    const uid = `seed-si-${p}`;
-    const email = emailFor(r.name, p);
-    const phone = `+9198${String(40000000 + p * 137).padStart(8, '0')}`;
-    // Signups spread over the last ~4 months so funnel cohorts aren't all "this month".
-    const createdAt = new Date(now - (14 + p * 4) * DAY_MS);
-
-    const common = {
+    const res = await seedPractitioner({
+      // Index-based id (stable across renames — a rename updates in place).
+      uid: `seed-si-${p}`,
+      email: emailFor(r.name, p),
+      phone: `+9198${String(40000000 + p * 137).padStart(8, '0')}`,
+      // Signups spread over the last ~4 months so funnel cohorts aren't all "this month".
+      createdAt: new Date(now - (14 + p * 4) * DAY_MS),
       fullName: displayName(r.name, isDoctor),
-      phone,
-      status: 'ACTIVE' as const,
-      onboardingCompletedAt: createdAt,
-      vertical: r.vertical,
-      languages: spec.langs,
-      locationCity: spec.city,
-      locationProvince: spec.province,
-      yearsOfExperience: r.years,
-      sessionFeeInr: r.feeInr,
-      isAcceptingNewClients: p % 5 !== 0,
-    };
-
-    const therapistFields = isDoctor
-      ? {}
-      : {
-          rciNumber: `SI-A${1000 + p}`,
-          rciVerifiedAt: createdAt,
-          headline: `${r.focus} — ${spec.city}.`,
-          bio: `${r.years} years of practice in ${spec.city}, working with ${r.focus.toLowerCase()}. Sees clients in ${spec.langs.slice(0, 2).join(' and ')}.`,
-          specialties: r.focus.split(' & '),
-          modalities: r.modalities ?? [],
-        };
-
-    const doctorFields = isDoctor
-      ? {
-          // rciNumber is NOT NULL + unique; doctors carry a placeholder + a real
-          // medical-registration number (mirrors prisma/seed.ts).
-          rciNumber: `PENDING-${uid}`,
-          medicalRegNumber: `${spec.council}-${20000 + p * 311}`,
-          specialty: r.specialty ?? 'General Medicine',
-          headline: `${r.specialty} — ${spec.city}.`,
-          bio: `${r.specialty} consultant in ${spec.city}, ${r.years} years in practice.`,
-        }
-      : {};
-
-    const psy = await prisma.psychologist.upsert({
-      where: { firebaseUid: uid },
-      update: { ...common, ...therapistFields, ...doctorFields },
-      create: {
-        firebaseUid: uid,
-        email,
-        createdAt,
-        ...common,
-        ...therapistFields,
-        ...doctorFields,
-      },
+      isDoctor,
+      langs: spec.langs,
+      city: spec.city,
+      province: spec.province,
+      years: r.years,
+      feeInr: r.feeInr,
+      acceptingNew: p % 5 !== 0,
+      focus: r.focus,
+      modalities: r.modalities ?? [],
+      specialty: r.specialty ?? 'General Medicine',
+      rciNumber: isDoctor ? `PENDING-seed-si-${p}` : `SI-A${1000 + p}`,
+      medicalRegNumber: isDoctor ? `${spec.council}-${20000 + p * 311}` : null,
+      sessionCount: SESSION_COUNTS[p]!,
+      clientPrefix: `seed-sic-${p}`,
+      sessionPrefix: `seed-sess-${p}`,
+      rngSeed: 1000 + p * 7919,
+      now,
     });
+    sessionsMade += res.sessions;
+    sessionsLast7d += res.last7d;
+    clientsMade += res.clients;
     perVertical[r.vertical] += 1;
-
-    // --- Client pool for this practitioner ---
-    const count = SESSION_COUNTS[p]!;
-    const numClients = Math.max(4, Math.min(20, Math.ceil(count / 3)));
-    const clientIds: string[] = [];
-    for (let c = 0; c < numClients; c++) {
-      const cuid = `seed-sic-${p}-${c}`;
-      const cli = await prisma.client.upsert({
-        where: { clientFirebaseUid: cuid },
-        update: {},
-        create: {
-          psychologistId: psy.id,
-          clientFirebaseUid: cuid,
-          isDemo: false,
-          status: 'ACTIVE',
-          preferredLanguage: ISO_BY_LANG[spec.langs[0]!] ?? 'en',
-          spokenLanguages: spec.langs.map((l) => ISO_BY_LANG[l] ?? 'en'),
-          // Opaque placeholders (no tenant DEK in a seed) — the admin console
-          // never renders client PHI, so blank-on-decrypt is fine.
-          fullNameEncrypted: `seed:Patient ${p}-${c}`,
-          presentingConcerns: isDoctor ? 'OPD follow-up.' : `${r.focus} — ongoing work.`,
-          preferredModality: isDoctor ? null : (r.modalities?.[0] ?? 'CBT'),
-        },
-      });
-      clientIds.push(cli.id);
-      clientsMade += 1;
-    }
-
-    // --- Sessions: `count` COMPLETED consultations across the last 15 days ---
-    const rng = makeRng(1000 + p * 7919);
-    const lang = ISO_BY_LANG[spec.langs[0]!] ?? 'en';
-    for (let j = 0; j < count; j++) {
-      const clientIdx = j % numClients;
-      const clientId = clientIds[clientIdx]!;
-      const dayOffset = Math.floor(rng() * WINDOW_DAYS); // 0..14
-      const hour = 9 + Math.floor(rng() * 10); // 9..18
-      const minute = Math.floor(rng() * 12) * 5;
-      const when = new Date(now - dayOffset * DAY_MS);
-      when.setHours(hour, minute, 0, 0);
-      const durationMin = 25 + Math.floor(rng() * 30);
-      const ended = new Date(when.getTime() + durationMin * 60 * 1000);
-
-      // First visit for a client = INTAKE; occasional REVIEW; else TREATMENT.
-      const isFirstForClient = j < numClients;
-      const kind = isFirstForClient ? 'INTAKE' : j % 7 === 0 ? 'REVIEW' : 'TREATMENT';
-
-      const sid = `seed-sess-${p}-${j}`;
-      await prisma.session.upsert({
-        where: { id: sid },
-        update: {},
-        create: {
-          id: sid,
-          clientId,
-          psychologistId: psy.id,
-          status: 'COMPLETED',
-          kind,
-          scheduledAt: when,
-          startedAt: when,
-          endedAt: ended,
-          createdAt: when,
-          language: lang,
-          spokenLanguages: spec.langs.map((l) => ISO_BY_LANG[l] ?? 'en'),
-          ...(isDoctor
-            ? { captureMode: j % 2 === 0 ? 'LIVE' : 'DICTATE', tokenNumber: (j % 40) + 1 }
-            : { modality: r.modalities?.[0]?.toUpperCase().includes('CBT') ? 'CBT' : 'SUPPORTIVE' }),
-        },
-      });
-      sessionsMade += 1;
-      if (now - when.getTime() <= 7 * DAY_MS) sessionsLast7d += 1;
-    }
-
-    console.log(
-      `  ${String(p + 1).padStart(2)}. ${psy.fullName.padEnd(24)} ${r.vertical.padEnd(9)} ${spec.city.padEnd(20)} ${count} sessions / ${numClients} clients`,
-    );
   }
 
+  // --- Cohort 2: UAE doctors (Dubai + Abu Dhabi), 240 sessions. Joined in the
+  // last ~2 days (newest = last-listed) so the batch sorts to the TOP of the
+  // accounts list (which is createdAt DESC), Dr. John H. Rodriguez first. ---
+  for (let u = 0; u < UAE_ROWS.length; u++) {
+    const d = UAE_ROWS[u]!;
+    const res = await seedPractitioner({
+      uid: `seed-uae-${u}`,
+      email: emailFor(d.name, 100 + u),
+      phone: `+97150${String(1000000 + u * 273).padStart(7, '0')}`,
+      createdAt: new Date(now - (UAE_ROWS.length - u) * 2 * HOUR),
+      fullName: `Dr. ${bareName(d.name)}`,
+      isDoctor: true,
+      langs: d.langs,
+      city: d.city,
+      province: d.province,
+      years: d.years,
+      feeInr: d.feeInr,
+      acceptingNew: u % 4 !== 0,
+      focus: '',
+      modalities: [],
+      specialty: d.specialty,
+      rciNumber: `PENDING-seed-uae-${u}`,
+      medicalRegNumber: `${d.council}-${50000 + u * 137}`,
+      sessionCount: UAE_SESSION_COUNTS[u]!,
+      clientPrefix: `seed-uac-${u}`,
+      sessionPrefix: `seed-uas-${u}`,
+      rngSeed: 5000 + u * 7919,
+      now,
+    });
+    sessionsMade += res.sessions;
+    sessionsLast7d += res.last7d;
+    clientsMade += res.clients;
+    perVertical.DOCTOR += 1;
+  }
+
+  const totalPractitioners = ROWS.length + UAE_ROWS.length;
   console.log('\nSeed complete.');
-  console.log(`  Practitioners: ${ROWS.length} (${perVertical.THERAPIST} therapist · ${perVertical.DOCTOR} doctor)`);
+  console.log(`  Practitioners: ${totalPractitioners} (${perVertical.THERAPIST} therapist · ${perVertical.DOCTOR} doctor)`);
   console.log(`  Clients:       ${clientsMade}`);
   console.log(`  Sessions:      ${sessionsMade} over ${WINDOW_DAYS} days (${sessionsLast7d} in the last 7d)`);
-  console.log(`  Distribution:  [${SESSION_COUNTS.slice().sort((a, b) => b - a).join(', ')}]  (sum ${SESSION_COUNTS.reduce((a, b) => a + b, 0)})`);
+  console.log(`    South India: ${SESSION_COUNTS.reduce((a, b) => a + b, 0)} across ${ROWS.length} — [${SESSION_COUNTS.slice().sort((a, b) => b - a).join(', ')}]`);
+  console.log(`    UAE:         ${UAE_SESSION_COUNTS.reduce((a, b) => a + b, 0)} across ${UAE_ROWS.length} — [${UAE_SESSION_COUNTS.slice().sort((a, b) => b - a).join(', ')}]`);
 }
 
 main()
