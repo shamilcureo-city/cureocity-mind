@@ -90,8 +90,8 @@ const ISO_BY_LANG: Record<string, string> = {
 type Vertical = 'THERAPIST' | 'DOCTOR';
 
 interface Row {
-  first: string;
-  last: string;
+  /** Display name exactly as it should appear (no "Dr." — added for doctors). */
+  name: string;
   vertical: Vertical;
   cityKey: keyof typeof CITIES | string;
   /** Therapist specialties / doctor specialty area. */
@@ -104,39 +104,41 @@ interface Row {
   feeInr: number | null;
 }
 
-// 28 practitioners — 16 therapists, 12 doctors — across the four South-India states.
+// 28 practitioners — 16 therapists, 12 doctors — across the four South-India
+// states. Names are real-world Kerala practitioner names; the vertical / city /
+// specialty / fee structure is ours.
 const ROWS: Row[] = [
-  // ---- Therapists (16) ----
-  { first: 'Ananya', last: 'Iyer', vertical: 'THERAPIST', cityKey: 'chennai', focus: 'Anxiety & perfectionism', modalities: ['CBT', 'ACT'], years: 11, feeInr: 2200 },
-  { first: 'Karthik', last: 'Subramanian', vertical: 'THERAPIST', cityKey: 'coimbatore', focus: 'Trauma & grief', modalities: ['EMDR', 'IFS'], years: 9, feeInr: 2000 },
-  { first: 'Divya', last: 'Nair', vertical: 'THERAPIST', cityKey: 'kochi', focus: 'Adolescents & mood', modalities: ['CBT', 'DBT-informed'], years: 7, feeInr: 1800 },
-  { first: 'Rahul', last: 'Menon', vertical: 'THERAPIST', cityKey: 'tvm', focus: 'Couples & relationships', modalities: ['EFT', 'Gottman Method'], years: 13, feeInr: 2600 },
-  { first: 'Meenakshi', last: 'Rao', vertical: 'THERAPIST', cityKey: 'hyderabad', focus: 'Depression & burnout', modalities: ['CBT', 'MBCT'], years: 8, feeInr: 2400 },
-  { first: 'Sandeep', last: 'Reddy', vertical: 'THERAPIST', cityKey: 'vizag', focus: 'OCD & anxiety', modalities: ['CBT', 'ERP'], years: 6, feeInr: 1600 },
-  { first: 'Lakshmi', last: 'Pillai', vertical: 'THERAPIST', cityKey: 'kozhikode', focus: 'Psychodynamic & identity', modalities: ['Psychodynamic'], years: 15, feeInr: 3000 },
-  { first: 'Vignesh', last: 'Raman', vertical: 'THERAPIST', cityKey: 'madurai', focus: 'Addiction & motivation', modalities: ['MI', 'CBT'], years: 10, feeInr: 1500 },
-  { first: 'Deepa', last: 'Kamath', vertical: 'THERAPIST', cityKey: 'mangaluru', focus: 'Postpartum & maternal', modalities: ['Supportive', 'CBT'], years: 9, feeInr: 2100 },
-  { first: 'Harish', last: 'Gowda', vertical: 'THERAPIST', cityKey: 'bengaluru', focus: 'Workplace stress & ADHD', modalities: ['CBT', 'Coaching'], years: 7, feeInr: 2800 },
-  { first: 'Sneha', last: 'Varma', vertical: 'THERAPIST', cityKey: 'tvm', focus: 'Eating & body image', modalities: ['CBT-E', 'ACT'], years: 8, feeInr: 2300 },
-  { first: 'Praveen', last: 'Acharya', vertical: 'THERAPIST', cityKey: 'hubballi', focus: 'Anger & impulse', modalities: ['DBT-informed', 'CBT'], years: 6, feeInr: 1400 },
-  { first: 'Anjali', last: 'Krishnan', vertical: 'THERAPIST', cityKey: 'kochi', focus: 'LGBTQ+ affirming', modalities: ['Narrative', 'ACT'], years: 5, feeInr: 1900 },
-  { first: 'Naveen', last: 'Shetty', vertical: 'THERAPIST', cityKey: 'mysuru', focus: 'Sleep & health anxiety', modalities: ['CBT-I', 'CBT'], years: 12, feeInr: 2500 },
-  { first: 'Gayathri', last: 'Prasad', vertical: 'THERAPIST', cityKey: 'vijayawada', focus: 'Grief & life transitions', modalities: ['Existential', 'Supportive'], years: 10, feeInr: 1700 },
-  { first: 'Suresh', last: 'Kurup', vertical: 'THERAPIST', cityKey: 'thrissur', focus: 'Men & relationships', modalities: ['CBT', 'EFT'], years: 14, feeInr: 2000 },
+  // ---- Therapists / psychologists (16) ----
+  { name: 'Ahlam Naseer', vertical: 'THERAPIST', cityKey: 'chennai', focus: 'Anxiety & perfectionism', modalities: ['CBT', 'ACT'], years: 11, feeInr: 2200 },
+  { name: 'Haneena Farhath M', vertical: 'THERAPIST', cityKey: 'coimbatore', focus: 'Trauma & grief', modalities: ['EMDR', 'IFS'], years: 9, feeInr: 2000 },
+  { name: 'Niyatha Sathy', vertical: 'THERAPIST', cityKey: 'kochi', focus: 'Adolescents & mood', modalities: ['CBT', 'DBT-informed'], years: 7, feeInr: 1800 },
+  { name: 'Fathima Thasnim', vertical: 'THERAPIST', cityKey: 'tvm', focus: 'Couples & relationships', modalities: ['EFT', 'Gottman Method'], years: 13, feeInr: 2600 },
+  { name: 'Arwa Binth Abeebacker', vertical: 'THERAPIST', cityKey: 'hyderabad', focus: 'Depression & burnout', modalities: ['CBT', 'MBCT'], years: 8, feeInr: 2400 },
+  { name: 'Anupama Surendran K', vertical: 'THERAPIST', cityKey: 'vizag', focus: 'OCD & anxiety', modalities: ['CBT', 'ERP'], years: 6, feeInr: 1600 },
+  { name: 'Sharika Pramod', vertical: 'THERAPIST', cityKey: 'kozhikode', focus: 'Psychodynamic & identity', modalities: ['Psychodynamic'], years: 15, feeInr: 3000 },
+  { name: 'Anshida Sheri C', vertical: 'THERAPIST', cityKey: 'madurai', focus: 'Addiction & motivation', modalities: ['MI', 'CBT'], years: 10, feeInr: 1500 },
+  { name: 'Rahsha Shirin V P', vertical: 'THERAPIST', cityKey: 'mangaluru', focus: 'Postpartum & maternal', modalities: ['Supportive', 'CBT'], years: 9, feeInr: 2100 },
+  { name: 'Rosemary Babu', vertical: 'THERAPIST', cityKey: 'bengaluru', focus: 'Workplace stress & ADHD', modalities: ['CBT', 'Coaching'], years: 7, feeInr: 2800 },
+  { name: 'Muhsina P R', vertical: 'THERAPIST', cityKey: 'tvm', focus: 'Eating & body image', modalities: ['CBT-E', 'ACT'], years: 8, feeInr: 2300 },
+  { name: 'Sophiya Babu Rajendran', vertical: 'THERAPIST', cityKey: 'hubballi', focus: 'Anger & impulse', modalities: ['DBT-informed', 'CBT'], years: 6, feeInr: 1400 },
+  { name: 'Noor Fareeda', vertical: 'THERAPIST', cityKey: 'kochi', focus: 'LGBTQ+ affirming', modalities: ['Narrative', 'ACT'], years: 5, feeInr: 1900 },
+  { name: 'Swaliha Hashik', vertical: 'THERAPIST', cityKey: 'mysuru', focus: 'Sleep & health anxiety', modalities: ['CBT-I', 'CBT'], years: 12, feeInr: 2500 },
+  { name: 'Gayatri R', vertical: 'THERAPIST', cityKey: 'vijayawada', focus: 'Grief & life transitions', modalities: ['Existential', 'Supportive'], years: 10, feeInr: 1700 },
+  { name: 'Bella Ann Oommen', vertical: 'THERAPIST', cityKey: 'thrissur', focus: 'Men & relationships', modalities: ['CBT', 'EFT'], years: 14, feeInr: 2000 },
 
-  // ---- Doctors (12) ----
-  { first: 'Ramesh', last: 'Naidu', vertical: 'DOCTOR', cityKey: 'hyderabad', focus: '', specialty: 'General Medicine', years: 16, feeInr: 600 },
-  { first: 'Priyanka', last: 'Hegde', vertical: 'DOCTOR', cityKey: 'bengaluru', focus: '', specialty: 'Pediatrics', years: 11, feeInr: 700 },
-  { first: 'Vijay', last: 'Chandran', vertical: 'DOCTOR', cityKey: 'chennai', focus: '', specialty: 'Cardiology', years: 18, feeInr: 900 },
-  { first: 'Kavya', last: 'Bhat', vertical: 'DOCTOR', cityKey: 'mangaluru', focus: '', specialty: 'Dermatology', years: 9, feeInr: 800 },
-  { first: 'Balaji', last: 'Murthy', vertical: 'DOCTOR', cityKey: 'coimbatore', focus: '', specialty: 'Diabetology', years: 14, feeInr: 650 },
-  { first: 'Revathi', last: 'Pillai', vertical: 'DOCTOR', cityKey: 'kochi', focus: '', specialty: 'Gynaecology', years: 13, feeInr: 750 },
-  { first: 'Sathish', last: 'Kumar', vertical: 'DOCTOR', cityKey: 'salem', focus: '', specialty: 'Orthopedics', years: 12, feeInr: 700 },
-  { first: 'Aishwarya', last: 'Rao', vertical: 'DOCTOR', cityKey: 'vizag', focus: '', specialty: 'ENT', years: 8, feeInr: 550 },
-  { first: 'Ganesh', last: 'Iyengar', vertical: 'DOCTOR', cityKey: 'warangal', focus: '', specialty: 'Pulmonology', years: 15, feeInr: 700 },
-  { first: 'Nithya', last: 'Menon', vertical: 'DOCTOR', cityKey: 'tvm', focus: '', specialty: 'General Medicine', years: 7, feeInr: 500 },
-  { first: 'Manoj', last: 'Reddy', vertical: 'DOCTOR', cityKey: 'guntur', focus: '', specialty: 'Nephrology', years: 17, feeInr: 850 },
-  { first: 'Shruti', last: 'Kulkarni', vertical: 'DOCTOR', cityKey: 'hubballi', focus: '', specialty: 'Psychiatry', years: 10, feeInr: 650 },
+  // ---- Doctors (12) — displayed with a "Dr." prefix ----
+  { name: 'Jobin Jose Jacob', vertical: 'DOCTOR', cityKey: 'hyderabad', focus: '', specialty: 'General Medicine', years: 16, feeInr: 600 },
+  { name: 'Vasudha V C', vertical: 'DOCTOR', cityKey: 'bengaluru', focus: '', specialty: 'Pediatrics', years: 11, feeInr: 700 },
+  { name: 'Thasleema Nujumudheen', vertical: 'DOCTOR', cityKey: 'chennai', focus: '', specialty: 'Cardiology', years: 18, feeInr: 900 },
+  { name: 'Thejas Elsa George', vertical: 'DOCTOR', cityKey: 'mangaluru', focus: '', specialty: 'Dermatology', years: 9, feeInr: 800 },
+  { name: 'Surya P S', vertical: 'DOCTOR', cityKey: 'coimbatore', focus: '', specialty: 'Diabetology', years: 14, feeInr: 650 },
+  { name: 'Aneetta Tomy', vertical: 'DOCTOR', cityKey: 'kochi', focus: '', specialty: 'Gynaecology', years: 13, feeInr: 750 },
+  { name: 'Sahla Mohammed', vertical: 'DOCTOR', cityKey: 'salem', focus: '', specialty: 'Orthopedics', years: 12, feeInr: 700 },
+  { name: 'Irine Saji', vertical: 'DOCTOR', cityKey: 'vizag', focus: '', specialty: 'ENT', years: 8, feeInr: 550 },
+  { name: 'Surya Gayathri', vertical: 'DOCTOR', cityKey: 'warangal', focus: '', specialty: 'Pulmonology', years: 15, feeInr: 700 },
+  { name: 'Jils P V', vertical: 'DOCTOR', cityKey: 'tvm', focus: '', specialty: 'General Medicine', years: 7, feeInr: 500 },
+  { name: 'Athira Satheesh', vertical: 'DOCTOR', cityKey: 'guntur', focus: '', specialty: 'Nephrology', years: 17, feeInr: 850 },
+  { name: 'Manju P C', vertical: 'DOCTOR', cityKey: 'hubballi', focus: '', specialty: 'Psychiatry', years: 10, feeInr: 650 },
 ];
 
 const EMAIL_DOMAINS = ['gmail.com', 'outlook.com', 'yahoo.in', 'rediffmail.com'];
@@ -163,6 +165,25 @@ const SESSION_COUNTS = splitUnequally(WEIGHTS, TOTAL_SESSIONS);
 
 function slug(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+/** Strip any leading "Dr." so it isn't doubled / leaked into emails. */
+function bareName(name: string): string {
+  return name.replace(/^dr\.?\s+/i, '').trim();
+}
+
+/** Display name: doctors get a "Dr." prefix, therapists keep the name as-is. */
+function displayName(name: string, isDoctor: boolean): string {
+  return isDoctor ? `Dr. ${bareName(name)}` : name;
+}
+
+/** A realistic-looking email: first.last (or just first) + index. */
+function emailFor(name: string, p: number): string {
+  const words = bareName(name).split(/\s+/).map(slug).filter(Boolean);
+  const first = words[0] ?? 'user';
+  const last = words.length > 1 ? words[words.length - 1] : '';
+  const local = last ? `${first}.${last}` : first;
+  return `${local}${p}@${EMAIL_DOMAINS[p % EMAIL_DOMAINS.length]}`;
 }
 
 async function purge(): Promise<void> {
@@ -197,15 +218,17 @@ async function main(): Promise<void> {
   for (let p = 0; p < ROWS.length; p++) {
     const r = ROWS[p]!;
     const spec = CITIES[r.cityKey as string]!;
-    const uid = `seed-si-${p}-${slug(r.first)}-${slug(r.last)}`;
-    const email = `${slug(r.first)}.${slug(r.last)}${p}@${EMAIL_DOMAINS[p % EMAIL_DOMAINS.length]}`;
-    const phone = `+9198${String(40000000 + p * 137).padStart(8, '0')}`;
     const isDoctor = r.vertical === 'DOCTOR';
+    // Index-based id (stable across renames — renaming a row updates in place
+    // rather than orphaning the old row). Purge first if the id scheme changes.
+    const uid = `seed-si-${p}`;
+    const email = emailFor(r.name, p);
+    const phone = `+9198${String(40000000 + p * 137).padStart(8, '0')}`;
     // Signups spread over the last ~4 months so funnel cohorts aren't all "this month".
     const createdAt = new Date(now - (14 + p * 4) * DAY_MS);
 
     const common = {
-      fullName: `Dr. ${r.first} ${r.last}`,
+      fullName: displayName(r.name, isDoctor),
       phone,
       status: 'ACTIVE' as const,
       onboardingCompletedAt: createdAt,
