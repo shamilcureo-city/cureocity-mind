@@ -57,7 +57,9 @@ describe('ClinicalReportV1Schema', () => {
     treatmentPlan: {
       modality: 'CBT',
       phaseSequence: ['psychoeducation', 'restructuring'],
-      goals: [{ description: 'Reduce GAD-7 by 4', measure: 'GAD-7 every 4 sessions' }],
+      goals: [
+        { description: 'Reduce GAD-7 by 4', measure: 'GAD-7 every 4 sessions', interventions: [] },
+      ],
       expectedDurationSessions: 12,
     },
     recommendedTherapies: [
@@ -69,6 +71,8 @@ describe('ClinicalReportV1Schema', () => {
       },
     ],
     crisisFlags: [],
+    planSuggestions: [],
+    formulationSuggestions: [],
   };
 
   it('accepts a representative report', () => {

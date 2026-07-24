@@ -75,7 +75,9 @@ const validReport: ClinicalReportV1 = {
   treatmentPlan: {
     modality: 'CBT',
     phaseSequence: ['psychoeducation', 'restructuring'],
-    goals: [{ description: 'Reduce GAD-7 by 4', measure: 'GAD-7 every 4 sessions' }],
+    goals: [
+      { description: 'Reduce GAD-7 by 4', measure: 'GAD-7 every 4 sessions', interventions: [] },
+    ],
     expectedDurationSessions: 12,
   },
   recommendedTherapies: [
@@ -87,6 +89,8 @@ const validReport: ClinicalReportV1 = {
     },
   ],
   crisisFlags: [],
+  planSuggestions: [],
+  formulationSuggestions: [],
 };
 
 describe('normalisePass3Output', () => {
