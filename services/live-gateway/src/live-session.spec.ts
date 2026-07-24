@@ -576,3 +576,64 @@ describe('LiveSession — cross-visit drug interactions (DOC-3)', () => {
     expect(drugGaps.some((e) => e.type === 'gap' && /warfarin/i.test(e.gap.message))).toBe(false);
   });
 });
+
+describe('LiveSession — streaming display rail (DS13)', () => {
+  it('tees pushed audio to the attached transcriber and stops it at finalize', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const fed: number[] = [];
+    let stopped = 0;
+    const session = new LiveSession('sess-ds13', null, mockBackends(), (e) => events.push(e), OPTS);
+    session.attachStreamTranscriber({
+      feed: (pcm) => fed.push(pcm.length),
+      stop: () => {
+        stopped += 1;
+      },
+    });
+    session.pushAudio(BLOCK);
+    expect(fed).toEqual([BLOCK.length]);
+    await session.finalize();
+    expect(stopped).toBe(1);
+    // Stopped session drops audio — the transcriber must not be fed either.
+    session.pushAudio(BLOCK);
+    expect(fed).toEqual([BLOCK.length]);
+  });
+
+  it('emits rate-limited partialTranscript text and clears it when a window lands', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-ds13b',
+      null,
+      mockBackends(),
+      (e) => events.push(e),
+      OPTS,
+    );
+    session.attachStreamTranscriber({ feed: () => {}, stop: () => {} });
+
+    session.handleStreamPartial('seene mein ');
+    session.handleStreamPartial('dard'); // within the 400ms window — buffered, not re-emitted
+    const partials = events.filter((e) => e.type === 'partialTranscript');
+    expect(partials).toHaveLength(1);
+    expect(partials[0]).toEqual({ type: 'partialTranscript', text: 'seene mein ' });
+
+    // An authoritative window replaces the provisional line with ''.
+    session.pushAudio(BLOCK);
+    await session.pump();
+    const after = events.filter((e) => e.type === 'partialTranscript');
+    expect(after[after.length - 1]).toEqual({ type: 'partialTranscript', text: '' });
+    expect(events.some((e) => e.type === 'transcript')).toBe(true);
+  });
+
+  it('emits nothing on the partial rail when no transcriber is attached', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-ds13c',
+      null,
+      mockBackends(),
+      (e) => events.push(e),
+      OPTS,
+    );
+    session.pushAudio(BLOCK);
+    await session.pump();
+    expect(events.filter((e) => e.type === 'partialTranscript')).toHaveLength(0);
+  });
+});

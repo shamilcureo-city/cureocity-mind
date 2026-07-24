@@ -1,0 +1,57 @@
+# Sprint DS13 — one-click Gemini Live transcript probe.
+#
+# Answers the questions gating LIVE_STREAM_TRANSCRIPT=true without anyone
+# running credentials on a laptop: generates a spoken OPD-style sample with
+# espeak-ng on the runner, then runs scripts/doctor-live-transcript-probe.mjs
+# against Vertex. The log ends with either the exact env vars to set on the
+# gateway (PASS) or the per-region failure reasons.
+#
+# One-time setup (repo Settings → Secrets and variables → Actions):
+#   GOOGLE_APPLICATION_CREDENTIALS_JSON — the platform service-account key
+#                                         (same value as on Vercel)
+#   VERTEX_PROJECT_ID                   — the GCP project id
+#
+# Trigger from the Actions tab ("Run workflow"), optionally pinning one
+# region/model pair. Secrets are auto-masked in logs; the probe never prints
+# the token.
+name: Doctor Live Transcript Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: 'Pin one region (e.g. us-central1). Empty = try all.'
+        required: false
+        default: ''
+      model:
+        description: 'Pin one model (e.g. gemini-live-2.5-flash). Empty = try all.'
+        required: false
+        default: ''
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate a spoken sample (espeak-ng → 16 kHz mono PCM)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq espeak-ng ffmpeg
+          espeak-ng -v en-in -s 150 \
+            "The patient has chest pain since two days. Blood pressure is one forty over ninety. \
+             Start amlodipine five milligrams once daily. Also start metformin five hundred \
+             milligrams twice daily. Order an E C G and a lipid profile. Review after two weeks." \
+            -w sample.wav
+          ffmpeg -hide_banner -loglevel error -i sample.wav -ar 16000 -ac 1 -f s16le speech.pcm
+          ls -la speech.pcm
+      - name: Run the probe
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+          VERTEX_PROJECT_ID: ${{ secrets.VERTEX_PROJECT_ID }}
+          LIVE_STREAM_LOCATION: ${{ inputs.location }}
+          LIVE_STREAM_MODEL: ${{ inputs.model }}
+        run: node scripts/doctor-live-transcript-probe.mjs speech.pcm
