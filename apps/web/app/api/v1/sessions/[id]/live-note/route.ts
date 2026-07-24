@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, after, type NextRequest } from 'next/server';
 import {
   LiveNoteInputSchema,
   TherapyLiveNoteInputSchema,
+  type ClinicalLocale,
   type ClinicalOrderV1,
   type IntakeNoteV1,
   type MedicalEncounterNoteV1,
@@ -11,7 +12,11 @@ import {
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { ensureEnglishNote } from '@/lib/ensure-english-note';
-import { persistDraftedOrders, persistVitalReadings } from '@/lib/note-orchestrator';
+import {
+  persistDraftedOrders,
+  persistVitalReadings,
+  runDifferential,
+} from '@/lib/note-orchestrator';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -19,6 +24,10 @@ import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// The response returns as soon as the note is persisted; the differential
+// pre-warm (DS-perf, below) runs in after() and needs headroom for the Pro
+// call — give the function the same 120s budget the /differential route uses.
+export const maxDuration = 120;
 
 /**
  * Sprint DV9 — POST /api/v1/sessions/:id/live-note
@@ -48,7 +57,8 @@ export async function POST(
       clientId: true,
       scheduledAt: true,
       status: true,
-      psychologist: { select: { vertical: true } },
+      language: true,
+      psychologist: { select: { vertical: true, specialty: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
@@ -249,6 +259,50 @@ export async function POST(
     session.scheduledAt,
     note.vitals,
   );
+
+  // DS-perf — pre-warm the differential. Previously the Review & Sign panel
+  // fired the differential (a 15-40s Vertex Pro pass) only when it MOUNTED,
+  // so the doctor watched "Thinking through the differential…" from zero — and
+  // because that panel renders in the same tick the note is set (before this
+  // route finishes persisting it), its POST could even race the note into a
+  // 409 NOTE_NOT_READY. Kicking it off HERE fixes both: the note is already
+  // COMPLETED in this request, and generation starts the instant the consult
+  // ends. We mark the row IN_PROGRESS synchronously so the panel polls the
+  // pending row instead of triggering a duplicate run, then do the heavy pass
+  // in after() so the doctor's response isn't blocked. Skipped when a
+  // COMPLETED differential already exists (a re-POST must not wipe it).
+  const existingDiff = await prisma.differential.findUnique({
+    where: { sessionId },
+    select: { status: true },
+  });
+  if (existingDiff?.status !== 'COMPLETED') {
+    await prisma.differential.upsert({
+      where: { sessionId },
+      update: { status: 'IN_PROGRESS', errorMessage: null },
+      create: { sessionId, psychologistId: auth.value.psychologistId, status: 'IN_PROGRESS' },
+    });
+    after(async () => {
+      // runDifferential owns its own error handling (marks the row FAILED,
+      // never throws) — this guard is belt-and-braces for the after() context.
+      try {
+        await runDifferential({
+          sessionId,
+          psychologistId: auth.value.psychologistId,
+          language: (session.language as ClinicalLocale | undefined) ?? 'en',
+          specialty: session.psychologist.specialty,
+          transcript: transcriptText,
+          // Live notes don't persist diarized segments; the /differential route
+          // already runs with [] for live consults, so match that.
+          speakerSegments: [],
+          encounterNote: note,
+        });
+      } catch (e) {
+        console.warn(
+          `[live-note] differential pre-warm failed for session=${sessionId}: ${(e as Error).message}`,
+        );
+      }
+    });
+  }
 
   return NextResponse.json({ draftId: draft.id, status: 'COMPLETED' }, { status: 201 });
 }

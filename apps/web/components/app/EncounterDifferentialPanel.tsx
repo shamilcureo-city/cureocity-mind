@@ -29,6 +29,25 @@ export function EncounterDifferentialPanel({ sessionId }: { sessionId: string })
   const [state, setState] = useState<State>({ kind: 'loading' });
   const triggered = useRef(false);
 
+  const applyResponse = useCallback((raw: unknown): 'done' | 'failed' | 'pending' => {
+    const parsed = DifferentialResponseSchema.safeParse(raw);
+    if (!parsed.success) {
+      setState({ kind: 'failed', message: 'The differential could not be read.' });
+      return 'failed';
+    }
+    if (parsed.data.status === 'COMPLETED' && parsed.data.differential) {
+      setState({ kind: 'done', differential: parsed.data.differential });
+      return 'done';
+    }
+    if (parsed.data.status === 'FAILED') {
+      setState({ kind: 'failed', message: parsed.data.errorMessage ?? 'Differential failed.' });
+      return 'failed';
+    }
+    setState({ kind: 'generating' });
+    return 'pending';
+  }, []);
+
+  // Manual (re-)generate — the Re-run / Try again buttons. Synchronous POST.
   const generate = useCallback(async () => {
     setState({ kind: 'generating' });
     try {
@@ -42,40 +61,73 @@ export function EncounterDifferentialPanel({ sessionId }: { sessionId: string })
     } catch (e) {
       setState({ kind: 'failed', message: (e as Error).message });
     }
-  }, [sessionId]);
+  }, [sessionId, applyResponse]);
 
-  const applyResponse = useCallback((raw: unknown) => {
-    const parsed = DifferentialResponseSchema.safeParse(raw);
-    if (!parsed.success) {
-      setState({ kind: 'failed', message: 'The differential could not be read.' });
-      return;
-    }
-    if (parsed.data.status === 'COMPLETED' && parsed.data.differential) {
-      setState({ kind: 'done', differential: parsed.data.differential });
-    } else if (parsed.data.status === 'FAILED') {
-      setState({ kind: 'failed', message: parsed.data.errorMessage ?? 'Differential failed.' });
-    } else {
-      setState({ kind: 'generating' });
-    }
-  }, []);
-
-  // On mount: read the existing differential; if none, generate once.
+  // On mount: POLL the differential until it resolves. The live-note route
+  // pre-warms it server-side the instant the consult ends, so we usually just
+  // read a row that's already IN_PROGRESS → COMPLETED — no more staring at a
+  // fresh 15-40s Pro call. If no row appears after a short grace (the
+  // dictate/upload path has no pre-warm), we trigger one generation ourselves.
+  // A 409 (note still being persisted by live-note) is transient — keep
+  // polling rather than surfacing a "note not ready" error to the doctor.
   useEffect(() => {
     if (triggered.current) return;
     triggered.current = true;
-    void (async () => {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/differential`);
-      if (res.status === 404) {
-        void generate();
-        return;
+    let cancelled = false;
+    let tries = 0;
+    let notFound = 0;
+    let triggeredGen = false;
+
+    const triggerGen = async (): Promise<void> => {
+      if (triggeredGen) return;
+      triggeredGen = true;
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/differential`, { method: 'POST' });
+        if (res.ok) {
+          if (!cancelled) applyResponse(await res.json());
+          return;
+        }
+        // Note not COMPLETED yet — let the poller keep trying; it'll land soon.
+        if (res.status === 409) {
+          triggeredGen = false;
+          return;
+        }
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (!cancelled)
+          setState({ kind: 'failed', message: body.error ?? `Could not run (${res.status}).` });
+      } catch (e) {
+        if (!cancelled) setState({ kind: 'failed', message: (e as Error).message });
       }
-      if (!res.ok) {
-        setState({ kind: 'failed', message: `Could not load (${res.status}).` });
-        return;
+    };
+
+    const tick = async (): Promise<void> => {
+      tries += 1;
+      try {
+        const res = await fetch(`/api/v1/sessions/${sessionId}/differential`);
+        if (res.status === 404) {
+          notFound += 1;
+          if (!cancelled) setState({ kind: 'generating' });
+          // No row after ~12s → nothing is pre-warming it; kick one off.
+          if (notFound >= 3) void triggerGen();
+        } else if (res.ok) {
+          const outcome = applyResponse(await res.json());
+          if (outcome === 'done' || outcome === 'failed') return;
+        }
+      } catch {
+        /* transient — retry */
       }
-      applyResponse(await res.json());
-    })();
-  }, [sessionId, generate, applyResponse]);
+      if (!cancelled && tries < 30) setTimeout(() => void tick(), 4000);
+      else if (!cancelled)
+        setState({
+          kind: 'failed',
+          message: 'The differential is taking longer than expected — try re-running.',
+        });
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, applyResponse]);
 
   return (
     <Card className="p-6">
