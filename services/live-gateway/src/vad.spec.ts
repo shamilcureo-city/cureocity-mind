@@ -7,6 +7,7 @@ import {
   msToBytes,
   nextWindowBoundary,
   rms,
+  speechFraction,
   windowOptionsFromEnv,
   type WindowOptions,
 } from './vad';
@@ -29,6 +30,7 @@ const OPTS: WindowOptions = {
   minWindowMs: 4_000,
   maxWindowMs: 8_000,
   silenceMs: 400,
+  minSpeechFraction: 0.05,
 };
 
 describe('byte/ms conversion', () => {
@@ -59,6 +61,14 @@ describe('classifyFrames / isSilent', () => {
   it('flags a silent buffer as silent', () => {
     expect(isSilent(pcm(100, SILENCE), OPTS)).toBe(true);
     expect(isSilent(pcm(100, SPEECH), OPTS)).toBe(false);
+  });
+  it('speechFraction: ~1 for all speech, near 0 for a quiet window with a blip', () => {
+    expect(speechFraction(pcm(500, SPEECH), OPTS)).toBe(1);
+    // 2 s of silence + a 100 ms noise blip → ~5% speech (the hallucination case
+    // isSilent misses because the blip lifts the window average above threshold).
+    const quietWithBlip = Buffer.concat([pcm(2_000, SILENCE), pcm(100, SPEECH)]);
+    expect(isSilent(quietWithBlip, OPTS)).toBe(false); // average is NOT silent…
+    expect(speechFraction(quietWithBlip, OPTS)).toBeLessThan(0.06); // …but density is tiny
   });
 });
 
@@ -107,6 +117,8 @@ describe('windowOptionsFromEnv', () => {
     expect(o.minWindowMs).toBe(2_500);
     expect(o.maxWindowMs).toBe(6_000);
     expect(o.silenceMs).toBe(400);
+    expect(o.threshold).toBe(0.015);
+    expect(o.minSpeechFraction).toBe(0.05);
   });
 
   it('applies valid overrides', () => {
@@ -114,10 +126,20 @@ describe('windowOptionsFromEnv', () => {
       LIVE_MIN_WINDOW_MS: '4000',
       LIVE_MAX_WINDOW_MS: '9000',
       LIVE_SILENCE_MS: '800',
+      LIVE_VAD_THRESHOLD: '0.025',
+      LIVE_MIN_SPEECH_FRACTION: '0.15',
     });
     expect(o.minWindowMs).toBe(4_000);
     expect(o.maxWindowMs).toBe(9_000);
     expect(o.silenceMs).toBe(800);
+    expect(o.threshold).toBe(0.025);
+    expect(o.minSpeechFraction).toBe(0.15);
+  });
+
+  it('falls back on out-of-range noise knobs', () => {
+    const o = windowOptionsFromEnv({ LIVE_VAD_THRESHOLD: '9', LIVE_MIN_SPEECH_FRACTION: '2' });
+    expect(o.threshold).toBe(0.015);
+    expect(o.minSpeechFraction).toBe(0.05);
   });
 
   it('falls back per-field on garbage or out-of-range values', () => {

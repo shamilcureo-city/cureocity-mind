@@ -34,6 +34,7 @@ const OPTS: WindowOptions = {
   minWindowMs: 4_000,
   maxWindowMs: 8_000,
   silenceMs: 400,
+  minSpeechFraction: 0.05,
 };
 
 function mockBackends(): LiveBackends {

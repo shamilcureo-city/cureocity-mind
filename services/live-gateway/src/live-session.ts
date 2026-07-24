@@ -39,6 +39,7 @@ import {
   DEFAULT_WINDOW_OPTIONS,
   isSilent,
   nextWindowBoundary,
+  speechFraction,
   type WindowOptions,
 } from './vad';
 
@@ -306,7 +307,19 @@ export class LiveSession {
     // force-cut at maxWindowMs) has nothing to transcribe. Drop it before
     // Pass 1 so dead air never runs up the Vertex bill. Advance the cursor so
     // the pump doesn't re-scan it.
-    if (this.guards.skipSilentWindows && isSilent(windowPcm, this.windowOpts)) {
+    //
+    // Anti-hallucination: `isSilent` only catches a window whose AVERAGE is
+    // below threshold. A mostly-quiet room with a cough / fan / distant voice
+    // averages ABOVE it, reaches Gemini, and Gemini invents words ("text when
+    // nobody spoke"). So ALSO drop a window that is overwhelmingly non-speech
+    // by frame count (speechFraction < minSpeechFraction). The default (5%) is
+    // low enough it never drops a real utterance — raise LIVE_MIN_SPEECH_FRACTION
+    // for a noisy room.
+    if (
+      this.guards.skipSilentWindows &&
+      (isSilent(windowPcm, this.windowOpts) ||
+        speechFraction(windowPcm, this.windowOpts) < this.windowOpts.minSpeechFraction)
+    ) {
       this.flushedBytes += consumedBytes;
       this.pending = this.pending.subarray(consumedBytes);
       return;

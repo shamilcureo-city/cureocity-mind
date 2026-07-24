@@ -28,6 +28,17 @@ export interface WindowOptions {
   maxWindowMs: number;
   /** A silence gap this long (after minWindow) is a natural boundary. */
   silenceMs: number;
+  /**
+   * Anti-hallucination gate: the minimum fraction (0..1) of a window's frames
+   * that must be speech before it is transcribed at all. `isSilent` only
+   * catches a window whose AVERAGE is below threshold — a mostly-quiet room
+   * with a cough / fan spike / distant voice averages above it and gets sent
+   * to Gemini, which then invents words ("text when nobody spoke"). This gate
+   * drops a window that is overwhelmingly non-speech. Kept low (5%) so it
+   * never drops a real utterance (which is always a large fraction of a
+   * speech-cut window); raise via LIVE_MIN_SPEECH_FRACTION for a noisy room.
+   */
+  minSpeechFraction: number;
 }
 
 /**
@@ -52,13 +63,20 @@ export const DEFAULT_WINDOW_OPTIONS: WindowOptions = {
   minWindowMs: 2_500,
   maxWindowMs: 6_000,
   silenceMs: 400,
+  minSpeechFraction: 0.05,
 };
 
 /**
  * Window options with env overrides (LIVE_MIN_WINDOW_MS, LIVE_MAX_WINDOW_MS,
- * LIVE_SILENCE_MS). Each value is validated independently and falls back to
- * the default when absent or out of range; max is always kept ≥ min + 1 s so
- * a partial override can't produce an uncloseable window.
+ * LIVE_SILENCE_MS, LIVE_VAD_THRESHOLD, LIVE_MIN_SPEECH_FRACTION). Each value
+ * is validated independently and falls back to the default when absent or out
+ * of range; max is always kept ≥ min + 1 s so a partial override can't produce
+ * an uncloseable window.
+ *
+ * The last two are the anti-noise knobs: raise `LIVE_VAD_THRESHOLD` (e.g. 0.025)
+ * so more ambient noise counts as silence, and/or raise
+ * `LIVE_MIN_SPEECH_FRACTION` (e.g. 0.15) so windows that are mostly quiet are
+ * dropped before Gemini can hallucinate words from them.
  */
 export function windowOptionsFromEnv(
   env: Record<string, string | undefined> = process.env,
@@ -67,6 +85,13 @@ export function windowOptionsFromEnv(
     const raw = env[key];
     if (!raw) return fallback;
     const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n < lo || n > hi) return fallback;
+    return n;
+  };
+  const readFloat = (key: string, fallback: number, lo: number, hi: number): number => {
+    const raw = env[key];
+    if (!raw) return fallback;
+    const n = Number.parseFloat(raw);
     if (!Number.isFinite(n) || n < lo || n > hi) return fallback;
     return n;
   };
@@ -81,7 +106,14 @@ export function windowOptionsFromEnv(
     readMs('LIVE_MAX_WINDOW_MS', DEFAULT_WINDOW_OPTIONS.maxWindowMs, 3_000, 120_000),
   );
   const silenceMs = readMs('LIVE_SILENCE_MS', DEFAULT_WINDOW_OPTIONS.silenceMs, 200, 3_000);
-  return { ...DEFAULT_WINDOW_OPTIONS, minWindowMs, maxWindowMs, silenceMs };
+  const threshold = readFloat('LIVE_VAD_THRESHOLD', DEFAULT_WINDOW_OPTIONS.threshold, 0.005, 0.2);
+  const minSpeechFraction = readFloat(
+    'LIVE_MIN_SPEECH_FRACTION',
+    DEFAULT_WINDOW_OPTIONS.minSpeechFraction,
+    0,
+    0.9,
+  );
+  return { ...DEFAULT_WINDOW_OPTIONS, minWindowMs, maxWindowMs, silenceMs, threshold, minSpeechFraction };
 }
 
 export type WindowReason = 'silence' | 'max';
@@ -141,6 +173,18 @@ export function classifyFrames(
 /** True if the whole buffer is below the speech threshold. */
 export function isSilent(pcm: Buffer, opts: WindowOptions = DEFAULT_WINDOW_OPTIONS): boolean {
   return rms(pcm) < opts.threshold;
+}
+
+/**
+ * Fraction (0..1) of a buffer's frames classified as speech. Finer-grained
+ * than `isSilent` (which only looks at the whole-buffer average): a window
+ * that's 95% silence with a few noise spikes has a HIGH average-RMS-passing
+ * chance but a LOW speech fraction — that's the window Gemini hallucinates on.
+ */
+export function speechFraction(pcm: Buffer, opts: WindowOptions = DEFAULT_WINDOW_OPTIONS): number {
+  const frames = classifyFrames(pcm, opts);
+  if (frames.length === 0) return 0;
+  return frames.filter(Boolean).length / frames.length;
 }
 
 /**

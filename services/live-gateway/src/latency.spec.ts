@@ -32,6 +32,7 @@ const OPTS: WindowOptions = {
   minWindowMs: 4_000,
   maxWindowMs: 8_000,
   silenceMs: 400,
+  minSpeechFraction: 0.05,
 };
 const BLOCK = Buffer.concat([pcm(5_000, 8_000), pcm(500, 0)]);
 
