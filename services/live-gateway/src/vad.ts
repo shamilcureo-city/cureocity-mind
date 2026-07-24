@@ -44,9 +44,14 @@ export const DEFAULT_WINDOW_OPTIONS: WindowOptions = {
   sampleRate: SAMPLE_RATE,
   frameMs: 20,
   threshold: 0.015,
-  minWindowMs: 6_000,
-  maxWindowMs: 12_000,
-  silenceMs: 600,
+  // DS-era default was 6–12 s. Lowered so the transcript follows speech in
+  // ~3 s instead of ~6–8 s: the old 6 s floor meant a short utterance had to
+  // wait for the window to FILL before it could be transcribed at all, which
+  // read as a 4–5 s lag. Utterances still cut at natural pauses; the env
+  // overrides below (LIVE_MIN/MAX_WINDOW_MS, LIVE_SILENCE_MS) tune per deploy.
+  minWindowMs: 2_500,
+  maxWindowMs: 6_000,
+  silenceMs: 400,
 };
 
 /**

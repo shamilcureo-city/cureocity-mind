@@ -104,8 +104,9 @@ describe('windowOptionsFromEnv', () => {
   it('returns the latency-tuned defaults with no env set', () => {
     const o = windowOptionsFromEnv({});
     expect(o).toEqual(DEFAULT_WINDOW_OPTIONS);
-    expect(o.minWindowMs).toBe(6_000);
-    expect(o.maxWindowMs).toBe(12_000);
+    expect(o.minWindowMs).toBe(2_500);
+    expect(o.maxWindowMs).toBe(6_000);
+    expect(o.silenceMs).toBe(400);
   });
 
   it('applies valid overrides', () => {
