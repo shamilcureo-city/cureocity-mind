@@ -77,10 +77,7 @@ export default async function AdminAccountDetailPage({
 
   return (
     <>
-      <Link
-        href="/console/accounts"
-        className="text-sm text-[var(--color-accent)] hover:underline"
-      >
+      <Link href="/console/accounts" className="text-sm text-[var(--color-accent)] hover:underline">
         ← All accounts
       </Link>
       <AdminPageHeader

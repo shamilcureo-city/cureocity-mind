@@ -170,7 +170,6 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
             </ul>
           </>
         )}
-
       </nav>
 
       <div className="mt-auto px-4 pb-6">

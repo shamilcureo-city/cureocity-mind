@@ -31,8 +31,7 @@ export function AdminNav() {
       aria-label="Admin console"
     >
       {ADMIN_NAV.map((item) => {
-        const active =
-          item.href === '/console' ? path === '/console' : path.startsWith(item.href);
+        const active = item.href === '/console' ? path === '/console' : path.startsWith(item.href);
         return (
           <Link
             key={item.href}

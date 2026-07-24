@@ -59,17 +59,17 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 
 ## 4. Auth, identity & signing
 
-| Var                                                                      | Purpose                                                                                                       |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | Server-side Firebase Admin. **If any is missing → `AUTH_BYPASS` auto-engages** (fails closed on Vercel prod). |
-| `NEXT_PUBLIC_FIREBASE_*` (public)                                        | Browser Firebase SDK config.                                                                                  |
-| `AUTH_BYPASS`                                                            | Explicit override. `true` = every sign-in resolves to the demo therapist.                                     |
-| `BOOTSTRAP_ADMIN_EMAILS`                                                 | Comma-separated emails auto-granted ADMIN on first sign-in.                                                   |
+| Var                                                                      | Purpose                                                                                                                                                                             |
+| ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | Server-side Firebase Admin. **If any is missing → `AUTH_BYPASS` auto-engages** (fails closed on Vercel prod).                                                                       |
+| `NEXT_PUBLIC_FIREBASE_*` (public)                                        | Browser Firebase SDK config.                                                                                                                                                        |
+| `AUTH_BYPASS`                                                            | Explicit override. `true` = every sign-in resolves to the demo therapist.                                                                                                           |
+| `BOOTSTRAP_ADMIN_EMAILS`                                                 | Comma-separated emails auto-granted ADMIN on first sign-in.                                                                                                                         |
 | `SESSION_COOKIE_DOMAIN`                                                  | Unset = host-only login cookie (default; localhost/previews need this). Set `.cureocity.in` in prod to share login across subdomains for the `admin.cureocity.in` operator console. |
-| `WEBAUTHN_TICKET_SECRET`                                                 | HMAC key for the registration ticket (≥32 chars).                                                             |
-| `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS`               | Passkey relying-party + origin allowlist for note-sign assertions.                                            |
-| `REQUIRE_WEBAUTHN_SIGNING`                                               | When `true`, an account with no passkey is refused (403) until it enrols.                                     |
-| `PILOT_INVITE_REQUIRED`                                                  | Gate new signups behind an admin-minted invite code.                                                          |
+| `WEBAUTHN_TICKET_SECRET`                                                 | HMAC key for the registration ticket (≥32 chars).                                                                                                                                   |
+| `WEBAUTHN_RP_ID` / `WEBAUTHN_RP_NAME` / `WEBAUTHN_ORIGINS`               | Passkey relying-party + origin allowlist for note-sign assertions.                                                                                                                  |
+| `REQUIRE_WEBAUTHN_SIGNING`                                               | When `true`, an account with no passkey is refused (403) until it enrols.                                                                                                           |
+| `PILOT_INVITE_REQUIRED`                                                  | Gate new signups behind an admin-minted invite code.                                                                                                                                |
 
 ## 5. Crypto / KMS (PII envelope encryption)
 

@@ -68,7 +68,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }));
 
   // CP-D — where they are in the method arc (progresses, then maintenance).
-  const arcSteps = caseFile.plan ? (CARE_PROTOCOL_STEPS[caseFile.plan.modalityTrack] ?? null) : null;
+  const arcSteps = caseFile.plan
+    ? (CARE_PROTOCOL_STEPS[caseFile.plan.modalityTrack] ?? null)
+    : null;
   const arc = arcSteps
     ? {
         track: caseFile.plan!.modalityTrack,

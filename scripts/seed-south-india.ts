@@ -28,7 +28,9 @@ async function main(): Promise<void> {
   }
 
   console.log('\nSeed complete.');
-  console.log(`  Practitioners: ${s.practitioners} (${s.therapist} therapist · ${s.doctor} doctor)`);
+  console.log(
+    `  Practitioners: ${s.practitioners} (${s.therapist} therapist · ${s.doctor} doctor)`,
+  );
   console.log(`  Clients:       ${s.clients}`);
   console.log(`  Sessions:      ${s.sessions} (${s.sessionsLast7d} in the last 7d)`);
   console.log(`    South India: ${s.southIndia.total} — [${s.southIndia.distribution.join(', ')}]`);

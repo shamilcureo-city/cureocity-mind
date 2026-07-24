@@ -88,9 +88,8 @@ export function CarePlanView() {
       <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-2xl md:px-8 md:py-10">
         <h1 className="font-serif text-2xl font-semibold md:text-3xl">Your plan</h1>
         <Card className="mt-4 p-5 text-sm text-[var(--color-ink-2)]">
-          Your plan appears here after your first session — that&apos;s where you and{' '}
-          your therapist agree what you&apos;re working on and how you&apos;ll know it&apos;s
-          working.
+          Your plan appears here after your first session — that&apos;s where you and your therapist
+          agree what you&apos;re working on and how you&apos;ll know it&apos;s working.
           <div className="mt-3">
             <Link href="/care/home" className="font-medium text-[var(--color-accent)]">
               Go to your first session →
@@ -135,7 +134,10 @@ export function CarePlanView() {
             {plan.goals.map((g, i) => {
               const s = STATUS_STYLE[g.status] ?? STATUS_STYLE.ACTIVE!;
               return (
-                <li key={i} className="border-t border-[var(--color-line-soft)] pt-3 first:border-0 first:pt-0">
+                <li
+                  key={i}
+                  className="border-t border-[var(--color-line-soft)] pt-3 first:border-0 first:pt-0"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <p className="text-sm font-medium">
                       {i + 1}. {g.goal}

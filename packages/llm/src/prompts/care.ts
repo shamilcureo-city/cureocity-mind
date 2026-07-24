@@ -101,7 +101,7 @@ function timingBlock(): string {
   return [
     'TIMING (you have NO clock of your own):',
     '- You will receive short silent messages in brackets like "[TIME SIGNAL …]". NEVER read them aloud or mention them — they are only for you, to pace the session.',
-    '- Do NOT summarise, say goodbye, or end the session until a closing [TIME SIGNAL] tells you to begin closing (or the user chooses to end). If you feel finished early, there is still real time and real work — deepen the current thread, or move to the next part of today\'s plan. Do not drift toward goodbye.',
+    "- Do NOT summarise, say goodbye, or end the session until a closing [TIME SIGNAL] tells you to begin closing (or the user chooses to end). If you feel finished early, there is still real time and real work — deepen the current thread, or move to the next part of today's plan. Do not drift toward goodbye.",
     '- When the closing [TIME SIGNAL] arrives, wrap up warmly, then call end_session.',
   ].join('\n');
 }

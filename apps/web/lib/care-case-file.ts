@@ -129,8 +129,7 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
       if (trajectory?.recentlyWorsening) recentlyWorsening = true;
     }
   }
-  const worseningVerdict =
-    verdicts.some((v) => v.verdict === 'deterioration') || recentlyWorsening;
+  const worseningVerdict = verdicts.some((v) => v.verdict === 'deterioration') || recentlyWorsening;
 
   // Last TREATMENT report — feeds LAST TIME / HOMEWORK / themes continuity.
   // Plus the latest INTAKE report as a fallback, so the FIRST treatment
@@ -340,7 +339,9 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
   const verdictsLine =
     cf.verdicts.length > 0
       ? cf.verdicts
-          .map((v) => `${label(v.instrumentKey)} ${v.baselineScore}→${v.latestScore} (${v.verdict})`)
+          .map(
+            (v) => `${label(v.instrumentKey)} ${v.baselineScore}→${v.latestScore} (${v.verdict})`,
+          )
           .join('; ')
       : undefined;
   // CP-A (V6) — the latest measured score + band, so a treatment session that

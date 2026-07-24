@@ -301,7 +301,8 @@ export function CareLiveSession({
         if (call.name === 'mark_phase') {
           // CP2 — silent phase signal; advance the rail and ack so the model
           // is not left waiting on a function response.
-          const p = typeof call.args?.['phase'] === 'string' ? (call.args['phase'] as string) : null;
+          const p =
+            typeof call.args?.['phase'] === 'string' ? (call.args['phase'] as string) : null;
           if (p) setLivePhase(p);
           const ws = wsRef.current;
           if (ws && ws.readyState === WebSocket.OPEN) {

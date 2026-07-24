@@ -113,7 +113,14 @@ export function windowOptionsFromEnv(
     0,
     0.9,
   );
-  return { ...DEFAULT_WINDOW_OPTIONS, minWindowMs, maxWindowMs, silenceMs, threshold, minSpeechFraction };
+  return {
+    ...DEFAULT_WINDOW_OPTIONS,
+    minWindowMs,
+    maxWindowMs,
+    silenceMs,
+    threshold,
+    minSpeechFraction,
+  };
 }
 
 export type WindowReason = 'silence' | 'max';
