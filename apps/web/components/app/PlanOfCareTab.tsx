@@ -366,7 +366,12 @@ export async function PlanOfCareTab({
     <div className="space-y-6">
       <PlanOfCareSheet data={data} />
 
-      <details className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 print:hidden">
+      {/* id lets the sheet's per-section "Edit" actions open + scroll to the
+          right tool (formulation, diagnosis history) without leaving the tab. */}
+      <details
+        id="poc-tools"
+        className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 print:hidden"
+      >
         <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
           Tools — scripts, formulation editor, diagnosis history, conceptual map
         </summary>

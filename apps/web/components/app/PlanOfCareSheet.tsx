@@ -193,7 +193,18 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
         </div>
 
         {/* 1 · Problem list */}
-        <Section no={sectionNo()} title="Problem list" std="prioritised · with status">
+        <Section
+          no={sectionNo()}
+          title="Problem list"
+          std="prioritised · with status"
+          action={
+            <SectionLink
+              href={`/app/clients/${data.clientId}`}
+              label="Edit"
+              hint="Add, re-prioritise or resolve problems — opens the client's problem list."
+            />
+          }
+        >
           {data.problems.length > 0 ? (
             data.problems.map((p, i) => (
               <div key={i} className="mt-1.5 flex items-baseline gap-2.5 font-serif text-sm">
@@ -229,6 +240,12 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
             data.formulation
               ? `the working hypothesis · v${data.formulation.version}`
               : 'the working hypothesis'
+          }
+          action={
+            <ToolsLink
+              label="Edit"
+              hint="Revise the formulation — opens the formulation editor in Tools below. A revision creates a new version."
+            />
           }
         >
           {data.formulation ? (
@@ -277,7 +294,17 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
         </Section>
 
         {/* 3 · Diagnosis */}
-        <Section no={sectionNo()} title="Diagnosis" std="ICD-11">
+        <Section
+          no={sectionNo()}
+          title="Diagnosis"
+          std="ICD-11"
+          action={
+            <ToolsLink
+              label="History"
+              hint="See how the diagnosis has changed over time — opens diagnosis history in Tools below. Confirm a new diagnosis from the AI Copilot tab."
+            />
+          }
+        >
           {data.diagnoses.length > 0 ? (
             <p className="font-serif text-sm">
               {data.diagnoses.map((d, i) => (
@@ -301,14 +328,11 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
           title="Goals · objectives · interventions"
           std="SMART · each objective measured"
           action={
-            <a
+            <SectionLink
               href={`/app/sessions/${data.sessionId}?tab=copilot`}
-              className="whitespace-nowrap rounded-md border px-2 py-0.5 text-[10px] font-semibold no-underline transition-colors hover:bg-[#F0EADA]"
-              style={{ borderColor: P.line, color: P.gold }}
-              title="Change the goals, measures or interventions — opens the plan editor in AI Copilot. Edits create a new plan version; nothing is overwritten."
-            >
-              Edit plan →
-            </a>
+              label="Edit plan"
+              hint="Change the goals, measures or interventions — opens the plan editor in AI Copilot. Edits create a new plan version; nothing is overwritten."
+            />
           }
         >
           {data.goals.length > 0 ? (
@@ -363,6 +387,13 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
           no={sectionNo()}
           title="Outcome monitoring"
           std="reliable change per Jacobson–Truax"
+          action={
+            <SectionLink
+              href={`/app/sessions/${data.sessionId}?tab=copilot`}
+              label="Record scores"
+              hint="Administer or record PHQ-9 / GAD-7 — opens measures in AI Copilot. Verdicts recompute automatically."
+            />
+          }
         >
           {data.outcomes.length > 0 || data.allianceCourse ? (
             <div className="overflow-x-auto">
@@ -446,7 +477,17 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
 
         {/* 7 · Strengths */}
         {data.formulation && data.formulation.protective.length > 0 && (
-          <Section no={sectionNo()} title="Strengths & resources" std="what treatment leans on">
+          <Section
+            no={sectionNo()}
+            title="Strengths & resources"
+            std="what treatment leans on"
+            action={
+              <ToolsLink
+                label="Edit"
+                hint="Strengths come from the formulation's protective factors — edit them in the formulation editor in Tools below."
+              />
+            }
+          >
             <p className="font-serif text-[13.5px]">
               {data.formulation.protective.map((s, i) => (
                 <span key={i}>
@@ -482,6 +523,13 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
           no={sectionNo()}
           title="Review & discharge criteria"
           std="episode of care, not open-ended"
+          action={
+            <SectionLink
+              href={`/app/sessions/${data.sessionId}?tab=copilot`}
+              label="Review episode"
+              hint="Review progress or start discharge — opens the care board in AI Copilot."
+            />
+          }
         >
           {data.reviewItems.map((r, i) => (
             <div key={i} className="mt-1.5 flex items-baseline gap-2.5 text-[13.5px]">
@@ -528,10 +576,10 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
         </div>
 
         <p className="mt-3 text-[11px]" style={{ color: P.faint }}>
-          º — proposed by the copilot, accepted by you; hover to see the client&rsquo;s words. Click
-          a goal&rsquo;s status to cycle it (not started → in progress → met); use{' '}
-          <span className="font-semibold">Edit plan</span> in section 4 to change the goals
-          themselves. Edits version the plan — nothing here is ever overwritten.
+          º — proposed by the copilot, accepted by you; hover to see the client&rsquo;s words. Each
+          section&rsquo;s <span className="font-semibold">Edit</span> action opens wherever that
+          part of the record is kept; click a goal&rsquo;s status to cycle it (not started → in
+          progress → met). Edits create a new version — nothing here is ever overwritten.
         </p>
       </div>
 
@@ -614,6 +662,50 @@ function Td({ children }: { children: React.ReactNode }) {
     <td className="border-b py-1.5 pr-3 align-baseline" style={{ borderColor: P.lineSoft }}>
       {children}
     </td>
+  );
+}
+
+/** Shared look for every per-section action chip (screen-only). */
+const ACTION_CLASS =
+  'whitespace-nowrap rounded-md border px-2 py-0.5 text-[10px] font-semibold no-underline transition-colors hover:bg-[#F0EADA]';
+
+/** A section action that navigates elsewhere (copilot tab, client page). */
+function SectionLink({ href, label, hint }: { href: string; label: string; hint: string }) {
+  return (
+    <a
+      href={href}
+      className={ACTION_CLASS}
+      style={{ borderColor: P.line, color: P.gold }}
+      title={hint}
+    >
+      {label} →
+    </a>
+  );
+}
+
+/**
+ * A section action whose editor is the Tools drawer on THIS tab (formulation,
+ * diagnosis history). Opens the collapsed <details> and scrolls to it, so the
+ * therapist never has to know the tool was hiding down there.
+ */
+function ToolsLink({ label, hint }: { label: string; hint: string }) {
+  function openTools(): void {
+    const el = document.getElementById('poc-tools');
+    if (el instanceof HTMLDetailsElement) {
+      el.open = true;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={openTools}
+      className={`${ACTION_CLASS} cursor-pointer`}
+      style={{ borderColor: P.line, color: P.gold }}
+      title={hint}
+    >
+      {label} ↓
+    </button>
   );
 }
 
