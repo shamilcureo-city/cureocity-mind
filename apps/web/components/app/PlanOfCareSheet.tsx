@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { TreatmentGoalStatus } from '@cureocity/contracts';
+import { Icd11Picker } from './Icd11Picker';
 import { ShareModal } from './ShareModal';
 import { formatIstDate } from '../../lib/ist';
 
@@ -1129,13 +1130,20 @@ function DiagnosisRow({
             >
               ICD-11 code
             </span>
-            <input
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              disabled={busy}
-              className="mt-1 w-full rounded-lg border px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--color-accent)]"
-              style={{ borderColor: P.line, background: P.bg, color: P.ink }}
-            />
+            <div className="mt-1">
+              <Icd11Picker
+                code={code}
+                onPick={(entry) => {
+                  // Pick fills both fields together so code and title can't drift.
+                  setCode(entry.code);
+                  setLabel(entry.label);
+                }}
+                onCodeChange={setCode}
+                disabled={busy}
+                inputClassName={INPUT_CLASS}
+                inputStyle={{ borderColor: P.line, background: P.bg, color: P.ink }}
+              />
+            </div>
           </label>
           <label className="flex-[3] basis-[12rem]">
             <span
