@@ -93,17 +93,22 @@ export interface PlanOfCareData {
 
 // The paper's own palette — a document, not an app surface. Light-theme
 // app; these are deliberate print-safe inks.
+//
+// `faint` carries most of the small type (section standards, table headers,
+// labels) and at its old value (#988E6F on #FCFAF4) that fell below WCAG AA
+// for small text, which is a large part of why the sheet read as washed out.
+// Darkened to hold ~5:1 while staying clearly secondary to `ink2`.
 const P = {
   bg: '#FCFAF4',
-  line: '#E7DFCC',
+  line: '#E0D7C0',
   lineSoft: '#F0EADA',
-  ink: '#2A2418',
-  ink2: '#6B6248',
-  faint: '#988E6F',
-  gold: '#8A6D1F',
+  ink: '#241F14',
+  ink2: '#5C543C',
+  faint: '#7D7255',
+  gold: '#7A5F16',
   good: '#0E7A4A',
   goodSoft: '#E9F5EF',
-  warn: '#A16207',
+  warn: '#8A5309',
 };
 
 const GOAL_STATUS_CYCLE: Record<TreatmentGoalStatus, TreatmentGoalStatus> = {
@@ -152,7 +157,7 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
   return (
     <div>
       <div
-        className="rounded-md border px-8 py-9 shadow-[0_24px_60px_-38px_rgba(50,40,10,0.45)] max-sm:px-5 print:border-0 print:shadow-none"
+        className="rounded-lg border px-10 py-11 shadow-[0_24px_60px_-38px_rgba(50,40,10,0.45)] max-sm:px-5 max-sm:py-7 print:border-0 print:px-0 print:shadow-none"
         style={{ background: P.bg, borderColor: P.line, color: P.ink }}
       >
         {/* Letterhead */}
@@ -169,11 +174,11 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
             Cureocity Mind record
           </span>
         </div>
-        <h2 className="mt-2 font-serif text-3xl" style={{ color: P.ink }}>
+        <h2 className="mt-3 font-serif text-[2.1rem] leading-tight" style={{ color: P.ink }}>
           {data.clientName}
         </h2>
         <div
-          className="mt-1.5 flex flex-wrap gap-x-6 gap-y-1 border-b-2 pb-4 text-[11.5px]"
+          className="mt-2.5 flex flex-wrap gap-x-6 gap-y-1 border-b-2 pb-4 text-[11.5px]"
           style={{ borderColor: P.ink, color: P.ink2 }}
         >
           {data.clientSince && <span>Care began {formatIstDate(new Date(data.clientSince))}</span>}
@@ -255,19 +260,24 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
                 <Mark text={data.formulation.narrative} />
               </p>
               {data.formulation.cycle.length > 0 && (
-                <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[11.5px]">
+                <div className="mt-4 flex flex-wrap items-stretch gap-2 text-[12px]">
                   {data.formulation.cycle.map((n, i) => (
-                    <span key={i} className="flex items-center gap-1.5">
+                    <span key={i} className="flex items-stretch gap-2">
                       <span
-                        className="rounded-lg border px-2.5 py-1"
+                        className="flex max-w-[16rem] flex-col justify-start gap-1 rounded-xl border px-3 py-2 leading-snug"
                         style={
                           n.breaking
-                            ? { borderColor: P.gold, borderStyle: 'dashed', color: P.ink }
-                            : { borderColor: P.line, color: P.ink2 }
+                            ? {
+                                borderColor: P.gold,
+                                borderStyle: 'dashed',
+                                color: P.ink,
+                                background: '#FBF6E7',
+                              }
+                            : { borderColor: P.line, color: P.ink2, background: '#FFFDF8' }
                         }
                       >
                         <b
-                          className="block text-[9px] font-bold tracking-[0.12em]"
+                          className="block text-[9px] font-bold tracking-[0.14em]"
                           style={{ color: n.breaking ? P.gold : P.faint }}
                         >
                           {n.role}
@@ -276,7 +286,11 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
                         {n.text}
                       </span>
                       {i < data.formulation!.cycle.length - 1 && (
-                        <span aria-hidden style={{ color: P.faint }}>
+                        <span
+                          aria-hidden
+                          className="self-center text-[13px]"
+                          style={{ color: P.faint }}
+                        >
                           →
                         </span>
                       )}
@@ -636,38 +650,48 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mt-6">
-      <div className="mb-2 flex items-baseline gap-2.5">
+    <div className="mt-7 first:mt-6">
+      <div
+        className="mb-2.5 flex items-center gap-2.5 border-b pb-1.5"
+        style={{ borderColor: P.lineSoft }}
+      >
         <span
-          className="min-w-[16px] text-[10px] font-bold tracking-wide"
-          style={{ color: P.faint }}
+          className="grid h-[18px] min-w-[18px] place-items-center rounded-full text-[9.5px] font-bold"
+          style={{ background: P.lineSoft, color: P.gold }}
         >
           {no}
         </span>
-        <h6 className="text-[11px] font-bold uppercase tracking-[0.2em]" style={{ color: P.ink2 }}>
+        <h6
+          className="text-[11.5px] font-bold uppercase tracking-[0.16em]"
+          style={{ color: P.ink }}
+        >
           {title}
         </h6>
-        <span className="ml-auto text-[10px] italic" style={{ color: P.faint }}>
+        <span className="ml-auto hidden text-[10px] italic sm:inline" style={{ color: P.faint }}>
           {std}
         </span>
-        {action && <span className="print:hidden">{action}</span>}
+        {action && <span className="ml-auto shrink-0 sm:ml-2 print:hidden">{action}</span>}
       </div>
-      <div className="pl-[26px] max-sm:pl-0">{children}</div>
+      <div className="pl-[28px] max-sm:pl-0">{children}</div>
     </div>
   );
 }
 
 function Td({ children }: { children: React.ReactNode }) {
   return (
-    <td className="border-b py-1.5 pr-3 align-baseline" style={{ borderColor: P.lineSoft }}>
+    <td className="border-b py-2.5 pr-4 align-baseline" style={{ borderColor: P.lineSoft }}>
       {children}
     </td>
   );
 }
 
-/** Shared look for every per-section action chip (screen-only). */
+/**
+ * Shared look for every per-section action chip (screen-only). Deliberately
+ * quiet — the sheet is a clinical document, so the actions sit back until the
+ * pointer is near, rather than competing with the record itself.
+ */
 const ACTION_CLASS =
-  'whitespace-nowrap rounded-md border px-2 py-0.5 text-[10px] font-semibold no-underline transition-colors hover:bg-[#F0EADA]';
+  'whitespace-nowrap rounded-full border px-2.5 py-[3px] text-[10px] font-semibold no-underline opacity-70 transition-all hover:opacity-100 hover:bg-[#F3EDDC] focus-visible:opacity-100';
 
 /** A section action that navigates elsewhere (copilot tab, client page). */
 function SectionLink({ href, label, hint }: { href: string; label: string; hint: string }) {
