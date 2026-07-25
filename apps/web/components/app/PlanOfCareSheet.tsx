@@ -9,12 +9,16 @@ import { formatIstDate } from '../../lib/ist';
 /**
  * PC1 — the Plan of care sheet: the psychologist's clinical document.
  *
- * Deliberately NOT an app surface: one column, record typography (serif for
- * clinical prose, sans for data), numbered sections in the order case
- * records are taught — problem list (POMR), formulation, diagnosis, SMART
- * goals→objectives→interventions, outcome monitoring (reliable change),
- * risk, strengths, the client's words (shared decision-making), review &
- * discharge criteria. Prints as it renders.
+ * Structured as a case record, styled as part of the app. One column, record
+ * typography (serif for clinical prose, sans for data), numbered sections in
+ * the order case records are taught — problem list (POMR), formulation,
+ * diagnosis, SMART goals→objectives→interventions, outcome monitoring
+ * (reliable change), risk, strengths, the client's words (shared
+ * decision-making), review & discharge criteria. Prints as it renders.
+ *
+ * Its colours come from the app's design tokens (see `P` below) rather than
+ * the warm "paper" palette it originally shipped with, which made the one
+ * clinical surface look foreign to every screen around it.
  *
  * The copilot proposes; only what the psychologist added appears here.
  * Lines that arrived via the copilot carry a small º — its title shows the
@@ -91,24 +95,37 @@ export interface PlanOfCareData {
   provenance: { text: string; quote: string | null }[];
 }
 
-// The paper's own palette — a document, not an app surface. Light-theme
-// app; these are deliberate print-safe inks.
-//
-// `faint` carries most of the small type (section standards, table headers,
-// labels) and at its old value (#988E6F on #FCFAF4) that fell below WCAG AA
-// for small text, which is a large part of why the sheet read as washed out.
-// Darkened to hold ~5:1 while staying clearly secondary to `ink2`.
+/**
+ * The sheet's palette, mapped onto the app's design tokens (globals.css).
+ *
+ * This used to be a warm cream/sepia "paper" palette of its own, which made
+ * the one clinical surface in the product look like it came from a different
+ * app than everything around it — and its low-contrast greys fell below WCAG
+ * AA for the small type they carried. It now reads as app-native: white
+ * surface, the app's cool ink ramp, the app's blue accent.
+ *
+ * What stays document-like is the *structure*, not the colour: one column,
+ * numbered sections in case-record order, serif for clinical prose and sans
+ * for data. It still prints as it renders — white paper, ink-on-white.
+ *
+ * Kept as literal hex (not `var(--color-*)`) because these values are applied
+ * through inline `style`, where a token that fails to resolve renders as
+ * nothing rather than falling back. They mirror globals.css exactly.
+ */
 const P = {
-  bg: '#FCFAF4',
-  line: '#E0D7C0',
-  lineSoft: '#F0EADA',
-  ink: '#241F14',
-  ink2: '#5C543C',
-  faint: '#7D7255',
-  gold: '#7A5F16',
-  good: '#0E7A4A',
-  goodSoft: '#E9F5EF',
-  warn: '#8A5309',
+  bg: '#ffffff', // --color-surface
+  bgSoft: '#f7f9fd', // --color-bg
+  line: '#e2e7ed', // --color-line
+  lineSoft: '#eaeef5', // --color-line-soft
+  ink: '#0a101f', // --color-ink
+  ink2: '#404756', // --color-ink-2
+  faint: '#717886', // --color-ink-3
+  accent: '#2563eb', // --color-accent
+  accentSoft: '#e8effc', // --color-accent-soft
+  good: '#0f7a4a',
+  goodSoft: '#e7f5ee',
+  warn: '#b86a3c', // --color-warn
+  warnSoft: '#fbe9dc', // --color-warn-soft
 };
 
 const GOAL_STATUS_CYCLE: Record<TreatmentGoalStatus, TreatmentGoalStatus> = {
@@ -140,7 +157,7 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
     return (
       <span
         className="cursor-help font-bold"
-        style={{ color: P.gold }}
+        style={{ color: P.accent }}
         title={`Added from the copilot — her words: “${quote}”`}
       >
         {' '}
@@ -157,444 +174,468 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
   return (
     <div>
       <div
-        className="rounded-lg border px-10 py-11 shadow-[0_24px_60px_-38px_rgba(50,40,10,0.45)] max-sm:px-5 max-sm:py-7 print:border-0 print:px-0 print:shadow-none"
+        className="overflow-hidden rounded-2xl border shadow-[0_18px_44px_-32px_rgba(10,16,31,0.28)] print:rounded-none print:border-0 print:shadow-none"
         style={{ background: P.bg, borderColor: P.line, color: P.ink }}
       >
-        {/* Letterhead */}
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <span
-            className="text-[11px] font-bold uppercase tracking-[0.34em]"
-            style={{ color: P.faint }}
-          >
-            Plan of Care · Confidential
-          </span>
-          <span className="text-right text-[11px]" style={{ color: P.faint }}>
-            {data.therapistName}
-            <br />
-            Cureocity Mind record
-          </span>
-        </div>
-        <h2 className="mt-3 font-serif text-[2.1rem] leading-tight" style={{ color: P.ink }}>
-          {data.clientName}
-        </h2>
+        {/* Letterhead — a tinted masthead so the record has a clear front door */}
         <div
-          className="mt-2.5 flex flex-wrap gap-x-6 gap-y-1 border-b-2 pb-4 text-[11.5px]"
-          style={{ borderColor: P.ink, color: P.ink2 }}
+          className="border-b px-10 pb-6 pt-7 max-sm:px-5 max-sm:pt-6 print:px-0"
+          style={{ background: P.bgSoft, borderColor: P.line }}
         >
-          {data.clientSince && <span>Care began {formatIstDate(new Date(data.clientSince))}</span>}
-          <span>
-            Session {data.sessionCount}
-            {data.expectedDurationSessions ? ` of ~${data.expectedDurationSessions}` : ''}
-            {data.modality ? ` · ${data.modality}` : ''}
-          </span>
-          {data.planVersion !== null && (
-            <span>
-              Plan v{data.planVersion}
-              {data.planConfirmedAt
-                ? ` · confirmed ${formatIstDate(new Date(data.planConfirmedAt))}`
-                : ''}
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <span
+              className="inline-flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[0.24em]"
+              style={{ color: P.accent }}
+            >
+              Plan of care
+              <span
+                className="rounded-full px-2 py-[3px] text-[9.5px] tracking-[0.12em]"
+                style={{ background: P.accentSoft, color: P.accent }}
+              >
+                Confidential
+              </span>
             </span>
-          )}
+            <span className="text-right text-[11px] leading-snug" style={{ color: P.faint }}>
+              {data.therapistName}
+              <br />
+              Cureocity Mind record
+            </span>
+          </div>
+
+          <h2 className="mt-4 font-serif text-[2.15rem] leading-tight" style={{ color: P.ink }}>
+            {data.clientName}
+          </h2>
+
+          {/* Key facts as discrete chips — scannable, and they wrap cleanly */}
+          <div className="mt-3.5 flex flex-wrap gap-2 text-[11.5px]">
+            {data.clientSince && (
+              <Fact label="Care began" value={formatIstDate(new Date(data.clientSince))} />
+            )}
+            <Fact
+              label="Session"
+              value={`${data.sessionCount}${
+                data.expectedDurationSessions ? ` of ~${data.expectedDurationSessions}` : ''
+              }`}
+            />
+            {data.modality && <Fact label="Modality" value={data.modality} />}
+            {data.planVersion !== null && (
+              <Fact
+                label="Plan"
+                value={`v${data.planVersion}${
+                  data.planConfirmedAt
+                    ? ` · ${formatIstDate(new Date(data.planConfirmedAt))}`
+                    : ' · draft'
+                }`}
+              />
+            )}
+          </div>
         </div>
 
-        {/* 1 · Problem list */}
-        <Section
-          no={sectionNo()}
-          title="Problem list"
-          std="prioritised · with status"
-          action={
-            <SectionLink
-              href={`/app/clients/${data.clientId}`}
-              label="Edit"
-              hint="Add, re-prioritise or resolve problems — opens the client's problem list."
-            />
-          }
-        >
-          {data.problems.length > 0 ? (
-            data.problems.map((p, i) => (
-              <div key={i} className="mt-1.5 flex items-baseline gap-2.5 font-serif text-sm">
-                <span className="text-[11px] font-bold" style={{ color: P.faint }}>
-                  P{i + 1}
-                </span>
-                <span>{p.title}</span>
-                <span
-                  className="ml-auto shrink-0 rounded-full px-2.5 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide"
-                  style={
-                    p.status === 'ACTIVE'
-                      ? { background: P.goodSoft, color: P.good }
-                      : { border: `1px solid ${P.line}`, color: P.faint }
-                  }
-                >
-                  {p.status === 'ACTIVE' ? 'active' : 'resolved'}
-                </span>
-              </div>
-            ))
-          ) : (
-            <p className="font-serif text-sm" style={{ color: P.ink2 }}>
-              {data.presentingFallback ??
-                'No problems recorded yet — name them from the Client page as the picture settles.'}
-            </p>
-          )}
-        </Section>
-
-        {/* 2 · Formulation */}
-        <Section
-          no={sectionNo()}
-          title="Case formulation"
-          std={
-            data.formulation
-              ? `the working hypothesis · v${data.formulation.version}`
-              : 'the working hypothesis'
-          }
-          action={
-            <ToolsLink
-              label="Edit"
-              hint="Revise the formulation — opens the formulation editor in Tools below. A revision creates a new version."
-            />
-          }
-        >
-          {data.formulation ? (
-            <>
-              <p className="font-serif text-[14.5px] leading-[1.68]">
-                {data.formulation.narrative}
-                <Mark text={data.formulation.narrative} />
-              </p>
-              {data.formulation.cycle.length > 0 && (
-                <div className="mt-4 flex flex-wrap items-stretch gap-2 text-[12px]">
-                  {data.formulation.cycle.map((n, i) => (
-                    <span key={i} className="flex items-stretch gap-2">
-                      <span
-                        className="flex max-w-[16rem] flex-col justify-start gap-1 rounded-xl border px-3 py-2 leading-snug"
-                        style={
-                          n.breaking
-                            ? {
-                                borderColor: P.gold,
-                                borderStyle: 'dashed',
-                                color: P.ink,
-                                background: '#FBF6E7',
-                              }
-                            : { borderColor: P.line, color: P.ink2, background: '#FFFDF8' }
-                        }
-                      >
-                        <b
-                          className="block text-[9px] font-bold tracking-[0.14em]"
-                          style={{ color: n.breaking ? P.gold : P.faint }}
-                        >
-                          {n.role}
-                          {n.breaking ? ' · BREAKING HERE' : ''}
-                        </b>
-                        {n.text}
-                      </span>
-                      {i < data.formulation!.cycle.length - 1 && (
-                        <span
-                          aria-hidden
-                          className="self-center text-[13px]"
-                          style={{ color: P.faint }}
-                        >
-                          →
-                        </span>
-                      )}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="font-serif text-sm" style={{ color: P.ink2 }}>
-              Still forming — a valid state. Add it from the copilot&rsquo;s proposals, or author it
-              in Tools below.
-            </p>
-          )}
-        </Section>
-
-        {/* 3 · Diagnosis */}
-        <Section
-          no={sectionNo()}
-          title="Diagnosis"
-          std="ICD-11"
-          action={
-            <ToolsLink
-              label="History"
-              hint="See how the diagnosis has changed over time — opens diagnosis history in Tools below. Confirm a new diagnosis from the AI Copilot tab."
-            />
-          }
-        >
-          {data.diagnoses.length > 0 ? (
-            <p className="font-serif text-sm">
-              {data.diagnoses.map((d, i) => (
-                <span key={d.icd11Code}>
-                  {i > 0 && ' · '}
-                  {d.icd11Label} ({d.icd11Code}){d.isPrimary ? ' — primary' : ''}
-                </span>
-              ))}
-            </p>
-          ) : (
-            <p className="font-serif text-sm" style={{ color: P.ink2 }}>
-              No confirmed diagnosis yet — working hypotheses live in the copilot until you confirm
-              one.
-            </p>
-          )}
-        </Section>
-
-        {/* 4 · Goals */}
-        <Section
-          no={sectionNo()}
-          title="Goals · objectives · interventions"
-          std="SMART · each objective measured"
-          action={
-            <SectionLink
-              href={`/app/sessions/${data.sessionId}?tab=copilot`}
-              label="Edit plan"
-              hint="Change the goals, measures or interventions — opens the plan editor in AI Copilot. Edits create a new plan version; nothing is overwritten."
-            />
-          }
-        >
-          {data.goals.length > 0 ? (
-            data.goals.map((g) => (
-              <div
-                key={g.index}
-                className="mt-3.5 border-l-2 pl-4"
-                style={{ borderColor: g.status === 'ACHIEVED' ? P.good : P.line }}
-              >
-                <div className="flex flex-wrap items-baseline gap-2">
+        {/* Body */}
+        <div className="px-10 pb-10 pt-2 max-sm:px-5 max-sm:pb-7 print:px-0">
+          {/* 1 · Problem list */}
+          <Section
+            no={sectionNo()}
+            title="Problem list"
+            std="prioritised · with status"
+            action={
+              <SectionLink
+                href={`/app/clients/${data.clientId}`}
+                label="Edit"
+                hint="Add, re-prioritise or resolve problems — opens the client's problem list."
+              />
+            }
+          >
+            {data.problems.length > 0 ? (
+              data.problems.map((p, i) => (
+                <div key={i} className="mt-1.5 flex items-baseline gap-2.5 font-serif text-sm">
+                  <span className="text-[11px] font-bold" style={{ color: P.faint }}>
+                    P{i + 1}
+                  </span>
+                  <span>{p.title}</span>
                   <span
-                    className="text-[10.5px] font-extrabold tracking-wide"
-                    style={{ color: P.gold }}
+                    className="ml-auto shrink-0 rounded-full px-2.5 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide"
+                    style={
+                      p.status === 'ACTIVE'
+                        ? { background: P.goodSoft, color: P.good }
+                        : { border: `1px solid ${P.line}`, color: P.faint }
+                    }
                   >
-                    G{g.index + 1}
-                  </span>
-                  <span className="font-serif text-[15px]">
-                    {g.description}
-                    <Mark text={g.description} />
+                    {p.status === 'ACTIVE' ? 'active' : 'resolved'}
                   </span>
                 </div>
-                <GoalMeasureRow
-                  planId={data.planId}
-                  index={g.index}
-                  status={g.status}
-                  measure={g.measure}
-                />
-                {g.interventions.length > 0 && (
-                  <div className="ml-3.5 mt-2 flex flex-wrap gap-1.5">
-                    {g.interventions.map((iv) => (
-                      <span
-                        key={iv}
-                        className="rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold"
-                        style={{ borderColor: P.line, color: P.ink2 }}
-                      >
-                        {iv}
+              ))
+            ) : (
+              <p className="font-serif text-sm" style={{ color: P.ink2 }}>
+                {data.presentingFallback ??
+                  'No problems recorded yet — name them from the Client page as the picture settles.'}
+              </p>
+            )}
+          </Section>
+
+          {/* 2 · Formulation */}
+          <Section
+            no={sectionNo()}
+            title="Case formulation"
+            std={
+              data.formulation
+                ? `the working hypothesis · v${data.formulation.version}`
+                : 'the working hypothesis'
+            }
+            action={
+              <ToolsLink
+                label="Edit"
+                hint="Revise the formulation — opens the formulation editor in Tools below. A revision creates a new version."
+              />
+            }
+          >
+            {data.formulation ? (
+              <>
+                <p className="font-serif text-[14.5px] leading-[1.68]">
+                  {data.formulation.narrative}
+                  <Mark text={data.formulation.narrative} />
+                </p>
+                {data.formulation.cycle.length > 0 && (
+                  <div className="mt-4 flex flex-wrap items-stretch gap-2 text-[12px]">
+                    {data.formulation.cycle.map((n, i) => (
+                      <span key={i} className="flex items-stretch gap-2">
+                        <span
+                          className="flex max-w-[16rem] flex-col justify-start gap-1 rounded-xl border px-3 py-2 leading-snug"
+                          style={
+                            n.breaking
+                              ? {
+                                  borderColor: P.accent,
+                                  borderStyle: 'dashed',
+                                  color: P.ink,
+                                  background: P.accentSoft,
+                                }
+                              : { borderColor: P.line, color: P.ink2, background: P.bgSoft }
+                          }
+                        >
+                          <b
+                            className="block text-[9px] font-bold tracking-[0.14em]"
+                            style={{ color: n.breaking ? P.accent : P.faint }}
+                          >
+                            {n.role}
+                            {n.breaking ? ' · BREAKING HERE' : ''}
+                          </b>
+                          {n.text}
+                        </span>
+                        {i < data.formulation!.cycle.length - 1 && (
+                          <span
+                            aria-hidden
+                            className="self-center text-[13px]"
+                            style={{ color: P.faint }}
+                          >
+                            →
+                          </span>
+                        )}
                       </span>
                     ))}
                   </div>
                 )}
-              </div>
-            ))
-          ) : (
-            <p className="font-serif text-sm" style={{ color: P.ink2 }}>
-              No plan confirmed yet — accept one from the copilot&rsquo;s Review board to start v1.
-            </p>
-          )}
-        </Section>
-
-        {/* 5 · Outcome monitoring */}
-        <Section
-          no={sectionNo()}
-          title="Outcome monitoring"
-          std="reliable change per Jacobson–Truax"
-          action={
-            <SectionLink
-              href={`/app/sessions/${data.sessionId}?tab=copilot`}
-              label="Record scores"
-              hint="Administer or record PHQ-9 / GAD-7 — opens measures in AI Copilot. Verdicts recompute automatically."
-            />
-          }
-        >
-          {data.outcomes.length > 0 || data.allianceCourse ? (
-            <div className="overflow-x-auto">
-              <table className="mt-1 w-full border-collapse">
-                <thead>
-                  <tr>
-                    {['Measure', 'Baseline', 'Course', 'Now', 'Target', 'Verdict'].map((h) => (
-                      <th
-                        key={h}
-                        className="border-b pb-1 pr-3 text-left text-[9.5px] font-bold uppercase tracking-[0.14em]"
-                        style={{ borderColor: P.line, color: P.faint }}
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="text-[12.5px] tabular-nums">
-                  {data.outcomes.map((o) => (
-                    <tr key={o.label}>
-                      <Td>{o.label}</Td>
-                      <Td>{o.baseline}</Td>
-                      <Td>
-                        <span style={{ color: P.faint }}>{o.course}</span>
-                      </Td>
-                      <Td>
-                        <b>{o.now}</b>
-                      </Td>
-                      <Td>{o.target}</Td>
-                      <Td>
-                        <span
-                          className="text-[10px] font-bold uppercase tracking-wide"
-                          style={{ color: o.good ? P.good : P.ink2 }}
-                        >
-                          {o.verdict}
-                        </span>
-                      </Td>
-                    </tr>
-                  ))}
-                  {data.allianceCourse && (
-                    <tr>
-                      <Td>Alliance</Td>
-                      <Td>—</Td>
-                      <Td>
-                        <span style={{ color: P.faint }}>{data.allianceCourse}</span>
-                      </Td>
-                      <Td>—</Td>
-                      <Td>—</Td>
-                      <Td>
-                        <span className="text-[10px]" style={{ color: P.ink2 }}>
-                          your one-tap read, per session
-                        </span>
-                      </Td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="font-serif text-sm" style={{ color: P.ink2 }}>
-              No measures administered yet. Baselines anchor everything above — administer PHQ-9 /
-              GAD-7 from the copilot&rsquo;s Progress view.
-            </p>
-          )}
-        </Section>
-
-        {/* 6 · Risk & safety */}
-        <Section no={sectionNo()} title="Risk & safety" std="status, not drama">
-          <p className="text-[12.5px]" style={{ color: P.ink2 }}>
-            {data.riskLevel !== 'none' && (
-              <b
-                className="mr-2 text-[11px] font-extrabold uppercase tracking-wide"
-                style={{ color: data.riskLevel === 'low' ? P.good : P.warn }}
-              >
-                Current: {data.riskLevel}
-              </b>
+              </>
+            ) : (
+              <p className="font-serif text-sm" style={{ color: P.ink2 }}>
+                Still forming — a valid state. Add it from the copilot&rsquo;s proposals, or author
+                it in Tools below.
+              </p>
             )}
-            {data.riskLine}
-          </p>
-        </Section>
+          </Section>
 
-        {/* 7 · Strengths */}
-        {data.formulation && data.formulation.protective.length > 0 && (
+          {/* 3 · Diagnosis */}
           <Section
             no={sectionNo()}
-            title="Strengths & resources"
-            std="what treatment leans on"
+            title="Diagnosis"
+            std="ICD-11"
             action={
               <ToolsLink
-                label="Edit"
-                hint="Strengths come from the formulation's protective factors — edit them in the formulation editor in Tools below."
+                label="History"
+                hint="See how the diagnosis has changed over time — opens diagnosis history in Tools below. Confirm a new diagnosis from the AI Copilot tab."
               />
             }
           >
-            <p className="font-serif text-[13.5px]">
-              {data.formulation.protective.map((s, i) => (
-                <span key={i}>
-                  {i > 0 && ' · '}
-                  {s}
-                  <Mark text={s} />
-                </span>
-              ))}
-            </p>
+            {data.diagnoses.length > 0 ? (
+              <p className="font-serif text-sm">
+                {data.diagnoses.map((d, i) => (
+                  <span key={d.icd11Code}>
+                    {i > 0 && ' · '}
+                    {d.icd11Label} ({d.icd11Code}){d.isPrimary ? ' — primary' : ''}
+                  </span>
+                ))}
+              </p>
+            ) : (
+              <p className="font-serif text-sm" style={{ color: P.ink2 }}>
+                No confirmed diagnosis yet — working hypotheses live in the copilot until you
+                confirm one.
+              </p>
+            )}
           </Section>
-        )}
 
-        {/* 8 · Agreed with the client */}
-        {data.agreements.length > 0 && (
+          {/* 4 · Goals */}
           <Section
             no={sectionNo()}
-            title={`Agreed with ${data.clientName.split(' ')[0]}`}
-            std="shared decision-making · their words"
+            title="Goals · objectives · interventions"
+            std="SMART · each objective measured"
+            action={
+              <SectionLink
+                href={`/app/sessions/${data.sessionId}?tab=copilot`}
+                label="Edit plan"
+                hint="Change the goals, measures or interventions — opens the plan editor in AI Copilot. Edits create a new plan version; nothing is overwritten."
+              />
+            }
           >
-            {data.agreements.map((a, i) => (
-              <p key={i} className="mt-1.5 font-serif text-[14.5px]">
-                {a.speaker === 'CLIENT' ? <em>&ldquo;{a.text}&rdquo;</em> : a.text}{' '}
-                <span className="font-sans text-[11px]" style={{ color: P.faint }}>
-                  — {a.speaker === 'CLIENT' ? 'their commitment' : 'clinician'}
-                </span>
+            {data.goals.length > 0 ? (
+              data.goals.map((g) => (
+                <div
+                  key={g.index}
+                  className="mt-3.5 border-l-2 pl-4"
+                  style={{ borderColor: g.status === 'ACHIEVED' ? P.good : P.line }}
+                >
+                  <div className="flex flex-wrap items-baseline gap-2">
+                    <span
+                      className="text-[10.5px] font-extrabold tracking-wide"
+                      style={{ color: P.accent }}
+                    >
+                      G{g.index + 1}
+                    </span>
+                    <span className="font-serif text-[15px]">
+                      {g.description}
+                      <Mark text={g.description} />
+                    </span>
+                  </div>
+                  <GoalMeasureRow
+                    planId={data.planId}
+                    index={g.index}
+                    status={g.status}
+                    measure={g.measure}
+                  />
+                  {g.interventions.length > 0 && (
+                    <div className="ml-3.5 mt-2 flex flex-wrap gap-1.5">
+                      {g.interventions.map((iv) => (
+                        <span
+                          key={iv}
+                          className="rounded-full border px-2.5 py-0.5 text-[10.5px] font-semibold"
+                          style={{ borderColor: P.line, color: P.ink2 }}
+                        >
+                          {iv}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            ) : (
+              <p className="font-serif text-sm" style={{ color: P.ink2 }}>
+                No plan confirmed yet — accept one from the copilot&rsquo;s Review board to start
+                v1.
               </p>
-            ))}
-          </Section>
-        )}
-
-        {/* 9 · Review & discharge */}
-        <Section
-          no={sectionNo()}
-          title="Review & discharge criteria"
-          std="episode of care, not open-ended"
-          action={
-            <SectionLink
-              href={`/app/sessions/${data.sessionId}?tab=copilot`}
-              label="Review episode"
-              hint="Review progress or start discharge — opens the care board in AI Copilot."
-            />
-          }
-        >
-          {data.reviewItems.map((r, i) => (
-            <div key={i} className="mt-1.5 flex items-baseline gap-2.5 text-[13.5px]">
-              <span className="font-sans text-[11px]" style={{ color: P.faint }}>
-                Review
-              </span>
-              <span className="font-serif">{r}</span>
-            </div>
-          ))}
-          <div className="mt-1.5 flex items-baseline gap-2.5 text-[13.5px]">
-            <span className="shrink-0 font-sans text-[11px]" style={{ color: P.faint }}>
-              Discharge when
-            </span>
-            <span className="font-serif">{data.dischargeLine}</span>
-          </div>
-        </Section>
-
-        {/* Signature */}
-        <div
-          className="mt-7 flex flex-wrap items-end justify-between gap-4 border-t-2 pt-3.5"
-          style={{ borderColor: P.ink }}
-        >
-          <div>
-            <div
-              className="-rotate-2 font-serif text-xl italic opacity-85"
-              style={{ color: P.ink }}
-            >
-              {data.therapistName.replace(/^Dr\.?\s*/i, '')}
-            </div>
-            <div className="font-serif text-[15px]">{data.therapistName}</div>
-            <div className="text-[10.5px]" style={{ color: P.faint }}>
-              Clinical record · Cureocity Mind
-            </div>
-          </div>
-          <div className="text-right text-[11px]" style={{ color: P.ink2 }}>
-            {data.planVersionCount > 1 && (
-              <>
-                {data.planVersionCount} plan versions on record
-                <br />
-              </>
             )}
-            {data.lastSignedLine ?? 'No session signed yet'}
-          </div>
-        </div>
+          </Section>
 
-        <p className="mt-3 text-[11px]" style={{ color: P.faint }}>
-          º — proposed by the copilot, accepted by you; hover to see the client&rsquo;s words. Each
-          section&rsquo;s <span className="font-semibold">Edit</span> action opens wherever that
-          part of the record is kept; click a goal&rsquo;s status to cycle it (not started → in
-          progress → met). Edits create a new version — nothing here is ever overwritten.
-        </p>
+          {/* 5 · Outcome monitoring */}
+          <Section
+            no={sectionNo()}
+            title="Outcome monitoring"
+            std="reliable change per Jacobson–Truax"
+            action={
+              <SectionLink
+                href={`/app/sessions/${data.sessionId}?tab=copilot`}
+                label="Record scores"
+                hint="Administer or record PHQ-9 / GAD-7 — opens measures in AI Copilot. Verdicts recompute automatically."
+              />
+            }
+          >
+            {data.outcomes.length > 0 || data.allianceCourse ? (
+              <div className="overflow-x-auto">
+                <table className="mt-1 w-full border-collapse">
+                  <thead>
+                    <tr>
+                      {['Measure', 'Baseline', 'Course', 'Now', 'Target', 'Verdict'].map((h) => (
+                        <th
+                          key={h}
+                          className="border-b pb-1 pr-3 text-left text-[9.5px] font-bold uppercase tracking-[0.14em]"
+                          style={{ borderColor: P.line, color: P.faint }}
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="text-[12.5px] tabular-nums">
+                    {data.outcomes.map((o) => (
+                      <tr key={o.label}>
+                        <Td>{o.label}</Td>
+                        <Td>{o.baseline}</Td>
+                        <Td>
+                          <span style={{ color: P.faint }}>{o.course}</span>
+                        </Td>
+                        <Td>
+                          <b>{o.now}</b>
+                        </Td>
+                        <Td>{o.target}</Td>
+                        <Td>
+                          <span
+                            className="text-[10px] font-bold uppercase tracking-wide"
+                            style={{ color: o.good ? P.good : P.ink2 }}
+                          >
+                            {o.verdict}
+                          </span>
+                        </Td>
+                      </tr>
+                    ))}
+                    {data.allianceCourse && (
+                      <tr>
+                        <Td>Alliance</Td>
+                        <Td>—</Td>
+                        <Td>
+                          <span style={{ color: P.faint }}>{data.allianceCourse}</span>
+                        </Td>
+                        <Td>—</Td>
+                        <Td>—</Td>
+                        <Td>
+                          <span className="text-[10px]" style={{ color: P.ink2 }}>
+                            your one-tap read, per session
+                          </span>
+                        </Td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="font-serif text-sm" style={{ color: P.ink2 }}>
+                No measures administered yet. Baselines anchor everything above — administer PHQ-9 /
+                GAD-7 from the copilot&rsquo;s Progress view.
+              </p>
+            )}
+          </Section>
+
+          {/* 6 · Risk & safety */}
+          <Section no={sectionNo()} title="Risk & safety" std="status, not drama">
+            <p className="text-[12.5px]" style={{ color: P.ink2 }}>
+              {data.riskLevel !== 'none' && (
+                <b
+                  className="mr-2 text-[11px] font-extrabold uppercase tracking-wide"
+                  style={{ color: data.riskLevel === 'low' ? P.good : P.warn }}
+                >
+                  Current: {data.riskLevel}
+                </b>
+              )}
+              {data.riskLine}
+            </p>
+          </Section>
+
+          {/* 7 · Strengths */}
+          {data.formulation && data.formulation.protective.length > 0 && (
+            <Section
+              no={sectionNo()}
+              title="Strengths & resources"
+              std="what treatment leans on"
+              action={
+                <ToolsLink
+                  label="Edit"
+                  hint="Strengths come from the formulation's protective factors — edit them in the formulation editor in Tools below."
+                />
+              }
+            >
+              <p className="font-serif text-[13.5px]">
+                {data.formulation.protective.map((s, i) => (
+                  <span key={i}>
+                    {i > 0 && ' · '}
+                    {s}
+                    <Mark text={s} />
+                  </span>
+                ))}
+              </p>
+            </Section>
+          )}
+
+          {/* 8 · Agreed with the client */}
+          {data.agreements.length > 0 && (
+            <Section
+              no={sectionNo()}
+              title={`Agreed with ${data.clientName.split(' ')[0]}`}
+              std="shared decision-making · their words"
+            >
+              {data.agreements.map((a, i) => (
+                <p key={i} className="mt-1.5 font-serif text-[14.5px]">
+                  {a.speaker === 'CLIENT' ? <em>&ldquo;{a.text}&rdquo;</em> : a.text}{' '}
+                  <span className="font-sans text-[11px]" style={{ color: P.faint }}>
+                    — {a.speaker === 'CLIENT' ? 'their commitment' : 'clinician'}
+                  </span>
+                </p>
+              ))}
+            </Section>
+          )}
+
+          {/* 9 · Review & discharge */}
+          <Section
+            no={sectionNo()}
+            title="Review & discharge criteria"
+            std="episode of care, not open-ended"
+            action={
+              <SectionLink
+                href={`/app/sessions/${data.sessionId}?tab=copilot`}
+                label="Review episode"
+                hint="Review progress or start discharge — opens the care board in AI Copilot."
+              />
+            }
+          >
+            {data.reviewItems.map((r, i) => (
+              <div key={i} className="mt-1.5 flex items-baseline gap-2.5 text-[13.5px]">
+                <span className="font-sans text-[11px]" style={{ color: P.faint }}>
+                  Review
+                </span>
+                <span className="font-serif">{r}</span>
+              </div>
+            ))}
+            <div className="mt-1.5 flex items-baseline gap-2.5 text-[13.5px]">
+              <span className="shrink-0 font-sans text-[11px]" style={{ color: P.faint }}>
+                Discharge when
+              </span>
+              <span className="font-serif">{data.dischargeLine}</span>
+            </div>
+          </Section>
+
+          {/* Signature */}
+          <div
+            className="mt-9 flex flex-wrap items-end justify-between gap-4 border-t pt-5"
+            style={{ borderColor: P.line }}
+          >
+            <div>
+              <div className="-rotate-2 font-serif text-[1.35rem] italic" style={{ color: P.ink2 }}>
+                {data.therapistName.replace(/^Dr\.?\s*/i, '')}
+              </div>
+              <div className="mt-1 font-serif text-[15px]">{data.therapistName}</div>
+              <div className="text-[10.5px]" style={{ color: P.faint }}>
+                Clinical record · Cureocity Mind
+              </div>
+            </div>
+            <div className="text-right text-[11px] leading-relaxed" style={{ color: P.ink2 }}>
+              {data.planVersionCount > 1 && (
+                <>
+                  {data.planVersionCount} plan versions on record
+                  <br />
+                </>
+              )}
+              {data.lastSignedLine ?? 'No session signed yet'}
+            </div>
+          </div>
+
+          <p
+            className="mt-5 rounded-xl px-4 py-3 text-[11px] leading-relaxed"
+            style={{ background: P.bgSoft, color: P.faint }}
+          >
+            <span className="font-bold" style={{ color: P.accent }}>
+              º
+            </span>{' '}
+            — proposed by the copilot, accepted by you; hover to see the client&rsquo;s words. Each
+            section&rsquo;s <span className="font-semibold">Edit</span> action opens wherever that
+            part of the record is kept; click a goal&rsquo;s status to cycle it (not started → in
+            progress → met). Edits create a new version — nothing here is ever overwritten.
+          </p>
+        </div>
       </div>
 
       {/* actions — outside the paper, hidden in print */}
@@ -602,7 +643,7 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
         <button
           type="button"
           onClick={() => window.print()}
-          className="rounded-full border border-[var(--color-line)] bg-white px-5 py-2 text-sm font-medium text-[var(--color-ink)] hover:border-[var(--color-accent)]"
+          className="rounded-full border border-[var(--color-line)] bg-white px-5 py-2 text-sm font-medium text-[var(--color-ink)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
         >
           Print / PDF
         </button>
@@ -610,7 +651,7 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
           <button
             type="button"
             onClick={() => setShareOpen(true)}
-            className="rounded-full bg-[var(--color-ink)] px-5 py-2 text-sm font-medium text-white hover:opacity-90"
+            className="rounded-full bg-[var(--color-accent)] px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent-hover)]"
           >
             Share with {data.clientName.split(' ')[0]}
           </button>
@@ -635,6 +676,26 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
 
 // ----- pieces -----
 
+/** A key fact in the masthead: quiet label, ink value, on one chip. */
+function Fact({ label, value }: { label: string; value: string }) {
+  return (
+    <span
+      className="inline-flex items-baseline gap-1.5 rounded-lg border px-2.5 py-1"
+      style={{ background: P.bg, borderColor: P.line }}
+    >
+      <span
+        className="text-[9.5px] font-bold uppercase tracking-[0.1em]"
+        style={{ color: P.faint }}
+      >
+        {label}
+      </span>
+      <span className="font-medium" style={{ color: P.ink }}>
+        {value}
+      </span>
+    </span>
+  );
+}
+
 function Section({
   no,
   title,
@@ -650,27 +711,21 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="mt-7 first:mt-6">
-      <div
-        className="mb-2.5 flex items-center gap-2.5 border-b pb-1.5"
-        style={{ borderColor: P.lineSoft }}
-      >
+    <div className="mt-8 first:mt-7">
+      <div className="mb-3 flex items-center gap-2.5 border-b pb-2" style={{ borderColor: P.line }}>
         <span
-          className="grid h-[18px] min-w-[18px] place-items-center rounded-full text-[9.5px] font-bold"
-          style={{ background: P.lineSoft, color: P.gold }}
+          className="grid h-[20px] min-w-[20px] place-items-center rounded-md text-[10px] font-bold"
+          style={{ background: P.accentSoft, color: P.accent }}
         >
           {no}
         </span>
-        <h6
-          className="text-[11.5px] font-bold uppercase tracking-[0.16em]"
-          style={{ color: P.ink }}
-        >
+        <h6 className="text-[12px] font-bold uppercase tracking-[0.14em]" style={{ color: P.ink }}>
           {title}
         </h6>
-        <span className="ml-auto hidden text-[10px] italic sm:inline" style={{ color: P.faint }}>
+        <span className="ml-auto hidden text-[10.5px] sm:inline" style={{ color: P.faint }}>
           {std}
         </span>
-        {action && <span className="ml-auto shrink-0 sm:ml-2 print:hidden">{action}</span>}
+        {action && <span className="ml-auto shrink-0 sm:ml-3 print:hidden">{action}</span>}
       </div>
       <div className="pl-[28px] max-sm:pl-0">{children}</div>
     </div>
@@ -686,12 +741,12 @@ function Td({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Shared look for every per-section action chip (screen-only). Deliberately
- * quiet — the sheet is a clinical document, so the actions sit back until the
- * pointer is near, rather than competing with the record itself.
+ * Shared look for every per-section action chip (screen-only). Quiet by
+ * default so the record leads, but it lifts to the accent on hover/focus so
+ * it is unmistakably a control.
  */
 const ACTION_CLASS =
-  'whitespace-nowrap rounded-full border px-2.5 py-[3px] text-[10px] font-semibold no-underline opacity-70 transition-all hover:opacity-100 hover:bg-[#F3EDDC] focus-visible:opacity-100';
+  'whitespace-nowrap rounded-lg border px-2.5 py-[4px] text-[10.5px] font-semibold no-underline transition-colors hover:border-[#2563eb] hover:bg-[#e8effc] focus-visible:border-[#2563eb] focus-visible:bg-[#e8effc] focus-visible:outline-none';
 
 /** A section action that navigates elsewhere (copilot tab, client page). */
 function SectionLink({ href, label, hint }: { href: string; label: string; hint: string }) {
@@ -699,7 +754,7 @@ function SectionLink({ href, label, hint }: { href: string; label: string; hint:
     <a
       href={href}
       className={ACTION_CLASS}
-      style={{ borderColor: P.line, color: P.gold }}
+      style={{ borderColor: P.line, color: P.accent }}
       title={hint}
     >
       {label} →
@@ -725,7 +780,7 @@ function ToolsLink({ label, hint }: { label: string; hint: string }) {
       type="button"
       onClick={openTools}
       className={`${ACTION_CLASS} cursor-pointer`}
-      style={{ borderColor: P.line, color: P.gold }}
+      style={{ borderColor: P.line, color: P.accent }}
       title={hint}
     >
       {label} ↓
