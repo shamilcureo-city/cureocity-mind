@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { searchIcd11, type Icd11Entry } from '@cureocity/clinical';
+import { icd11Block, searchIcd11, type Icd11Entry } from '@cureocity/clinical';
 
 /**
  * ICD-11 code picker — PC5.
@@ -153,6 +153,12 @@ export function Icd11Picker({
                   {entry.code}
                 </span>{' '}
                 <span className="text-[var(--color-ink-2)]">{entry.label}</span>
+                {/* The block keeps a 418-entry catalogue orientable: with many
+                    near-identical substance labels, the heading is often the
+                    only thing distinguishing two rows at a glance. */}
+                <span className="block text-[10.5px] text-[var(--color-ink-3)]">
+                  {icd11Block(entry.code)}
+                </span>
               </li>
             ))
           )}
