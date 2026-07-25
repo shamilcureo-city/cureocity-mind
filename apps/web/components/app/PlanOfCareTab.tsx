@@ -287,6 +287,7 @@ export async function PlanOfCareTab({
 
   const data: PlanOfCareData = {
     clientId,
+    sessionId,
     clientName,
     // "Care began" = the first completed session, not the row-creation date
     // (backdated/imported clients would otherwise show the import day).
@@ -360,7 +361,6 @@ export async function PlanOfCareTab({
     : [];
   const langParse = ClinicalLocaleSchema.safeParse(preferredLanguage);
   const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';
-  void sessionId;
 
   return (
     <div className="space-y-6">

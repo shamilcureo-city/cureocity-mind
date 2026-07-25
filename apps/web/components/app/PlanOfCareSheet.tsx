@@ -53,6 +53,8 @@ export interface PocOutcome {
 
 export interface PlanOfCareData {
   clientId: string;
+  /** Used to link section 4 back to the copilot's plan editor (?tab=copilot). */
+  sessionId: string;
   clientName: string;
   clientSince: string | null;
   hasContactPhone: boolean;
@@ -298,6 +300,16 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
           no={sectionNo()}
           title="Goals · objectives · interventions"
           std="SMART · each objective measured"
+          action={
+            <a
+              href={`/app/sessions/${data.sessionId}?tab=copilot`}
+              className="whitespace-nowrap rounded-md border px-2 py-0.5 text-[10px] font-semibold no-underline transition-colors hover:bg-[#F0EADA]"
+              style={{ borderColor: P.line, color: P.gold }}
+              title="Change the goals, measures or interventions — opens the plan editor in AI Copilot. Edits create a new plan version; nothing is overwritten."
+            >
+              Edit plan →
+            </a>
+          }
         >
           {data.goals.length > 0 ? (
             data.goals.map((g) => (
@@ -318,29 +330,12 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
                     <Mark text={g.description} />
                   </span>
                 </div>
-                <div className="ml-3.5 mt-1.5 flex flex-wrap items-baseline gap-2 text-[13px]">
-                  <GoalDot planId={data.planId} index={g.index} status={g.status} />
-                  <span className="font-serif" style={{ color: P.ink2 }}>
-                    {g.measure}
-                  </span>
-                  <span
-                    className="text-[10px] font-bold uppercase tracking-wide"
-                    style={{
-                      color:
-                        g.status === 'ACHIEVED'
-                          ? P.good
-                          : g.status === 'IN_PROGRESS'
-                            ? P.warn
-                            : P.faint,
-                    }}
-                  >
-                    {g.status === 'ACHIEVED'
-                      ? 'met'
-                      : g.status === 'IN_PROGRESS'
-                        ? 'in progress'
-                        : 'not started'}
-                  </span>
-                </div>
+                <GoalMeasureRow
+                  planId={data.planId}
+                  index={g.index}
+                  status={g.status}
+                  measure={g.measure}
+                />
                 {g.interventions.length > 0 && (
                   <div className="ml-3.5 mt-2 flex flex-wrap gap-1.5">
                     {g.interventions.map((iv) => (
@@ -533,9 +528,10 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
         </div>
 
         <p className="mt-3 text-[11px]" style={{ color: P.faint }}>
-          º — proposed by the copilot, accepted by you; hover to see the client&rsquo;s words. Goal
-          dots cycle not started → in progress → met. Edits version the plan — nothing here is ever
-          overwritten.
+          º — proposed by the copilot, accepted by you; hover to see the client&rsquo;s words. Click
+          a goal&rsquo;s status to cycle it (not started → in progress → met); use{' '}
+          <span className="font-semibold">Edit plan</span> in section 4 to change the goals
+          themselves. Edits version the plan — nothing here is ever overwritten.
         </p>
       </div>
 
@@ -581,11 +577,14 @@ function Section({
   no,
   title,
   std,
+  action,
   children,
 }: {
   no: string;
   title: string;
   std: string;
+  /** Optional on-screen affordance (hidden in print — this is a document). */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -603,6 +602,7 @@ function Section({
         <span className="ml-auto text-[10px] italic" style={{ color: P.faint }}>
           {std}
         </span>
+        {action && <span className="print:hidden">{action}</span>}
       </div>
       <div className="pl-[26px] max-sm:pl-0">{children}</div>
     </div>
@@ -617,18 +617,34 @@ function Td({ children }: { children: React.ReactNode }) {
   );
 }
 
+const GOAL_STATUS_LABEL: Record<TreatmentGoalStatus, string> = {
+  ACHIEVED: 'met',
+  IN_PROGRESS: 'in progress',
+  NOT_STARTED: 'not started',
+};
+
 /**
- * Live goal-status dot — same cycle + route as PlanHero: PATCH persists to
- * the TreatmentGoalProgress side table; the plan itself is never rewritten.
+ * The measure line for one goal, with its live status control — same cycle +
+ * route as PlanHero: PATCH persists to the TreatmentGoalProgress side table;
+ * the plan itself is never rewritten.
+ *
+ * The status used to be a bare 10px dot whose only clue that it was
+ * interactive was an aria-label, so in practice nobody discovered that goal
+ * status was editable at all. The dot and the status WORD are now one shared
+ * control: both are click targets, the word carries a hover cue + tooltip, and
+ * the dot keeps its place as the measure's bullet so the printed document is
+ * unchanged.
  */
-function GoalDot({
+function GoalMeasureRow({
   planId,
   index,
   status: initial,
+  measure,
 }: {
   planId: string | null;
   index: number;
   status: TreatmentGoalStatus;
+  measure: string;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState<TreatmentGoalStatus>(initial);
@@ -657,21 +673,42 @@ function GoalDot({
     }
   }
 
-  const style =
+  const tone = status === 'ACHIEVED' ? P.good : status === 'IN_PROGRESS' ? P.warn : P.faint;
+  const dotStyle =
     status === 'ACHIEVED'
       ? { background: P.good }
       : status === 'IN_PROGRESS'
         ? { background: P.warn }
         : { border: `1.5px solid ${P.faint}` };
+  const hint = `Goal status: ${GOAL_STATUS_LABEL[status]} — click to change (not started → in progress → met)`;
+  const interactive = !busy && planId !== null;
 
   return (
-    <button
-      type="button"
-      onClick={() => void cycle()}
-      disabled={busy || !planId}
-      aria-label={`Goal status: ${status.toLowerCase().replace('_', ' ')} — tap to change`}
-      className="h-2.5 w-2.5 shrink-0 translate-y-[-1px] rounded-full print:pointer-events-none"
-      style={style}
-    />
+    <div className="ml-3.5 mt-1.5 flex flex-wrap items-baseline gap-2 text-[13px]">
+      <button
+        type="button"
+        onClick={() => void cycle()}
+        disabled={!interactive}
+        aria-label={hint}
+        title={hint}
+        className="h-2.5 w-2.5 shrink-0 translate-y-[-1px] rounded-full print:pointer-events-none"
+        style={dotStyle}
+      />
+      <span className="font-serif" style={{ color: P.ink2 }}>
+        {measure}
+      </span>
+      <button
+        type="button"
+        onClick={() => void cycle()}
+        disabled={!interactive}
+        title={hint}
+        className={`rounded text-[10px] font-bold uppercase tracking-wide underline decoration-dotted underline-offset-2 transition-opacity print:no-underline ${
+          interactive ? 'cursor-pointer hover:opacity-70' : ''
+        } ${busy ? 'opacity-50' : ''} print:pointer-events-none`}
+        style={{ color: tone }}
+      >
+        {GOAL_STATUS_LABEL[status]}
+      </button>
+    </div>
   );
 }
