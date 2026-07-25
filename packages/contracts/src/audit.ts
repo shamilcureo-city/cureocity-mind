@@ -91,6 +91,8 @@ export const AuditActionSchema = z.enum([
   'CLINICAL_REPORT_GENERATED',
   'CLINICAL_SECTION_CONFIRMED',
   'DIAGNOSIS_CONFIRMED',
+  'CLIENT_DIAGNOSIS_EDITED',
+  'CLIENT_DIAGNOSIS_RETIRED',
   'PLAN_CONFIRMED',
   'CRISIS_ACKNOWLEDGED',
   // Sprint TSC — the copilot decision board: questions the therapist ticked

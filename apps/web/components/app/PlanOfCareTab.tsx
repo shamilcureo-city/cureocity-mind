@@ -105,7 +105,14 @@ export async function PlanOfCareTab({
     prisma.clientDiagnosis.findMany({
       where: { clientId, supersededAt: null },
       orderBy: [{ isPrimary: 'desc' }, { confirmedAt: 'desc' }],
-      select: { icd11Code: true, icd11Label: true, isPrimary: true, confirmedAt: true },
+      select: {
+        id: true,
+        icd11Code: true,
+        icd11Label: true,
+        isPrimary: true,
+        notes: true,
+        confirmedAt: true,
+      },
     }),
     prisma.clientDiagnosis.findMany({
       where: { clientId },
@@ -316,9 +323,11 @@ export async function PlanOfCareTab({
         }
       : null,
     diagnoses: diagnoses.map((d) => ({
+      id: d.id,
       icd11Code: d.icd11Code,
       icd11Label: d.icd11Label,
       isPrimary: d.isPrimary,
+      notes: d.notes,
       confirmedAt: d.confirmedAt.toISOString(),
     })),
     goals: (planBody?.goals ?? []).map((g, i) => ({

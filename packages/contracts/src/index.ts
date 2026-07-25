@@ -61,6 +61,7 @@ export * from './abdm';
 // Sprint AC1+ — Cureocity Care, the standalone D2C AI-therapist product.
 export * from './care';
 export * from './letter';
+export * from './client-diagnosis';
 export * from './problem';
 export * from './note-review';
 // The Session Loop (SL1) — living formulation + agreements + feedback.

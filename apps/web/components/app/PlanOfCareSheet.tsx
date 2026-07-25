@@ -81,7 +81,14 @@ export interface PlanOfCareData {
     cycle: PocCycleNode[];
     protective: string[];
   } | null;
-  diagnoses: { icd11Code: string; icd11Label: string; isPrimary: boolean; confirmedAt: string }[];
+  diagnoses: {
+    id: string;
+    icd11Code: string;
+    icd11Label: string;
+    isPrimary: boolean;
+    notes: string | null;
+    confirmedAt: string;
+  }[];
   goals: PocGoal[];
   outcomes: PocOutcome[];
   allianceCourse: string | null;
@@ -356,14 +363,16 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
             }
           >
             {data.diagnoses.length > 0 ? (
-              <p className="font-serif text-sm">
-                {data.diagnoses.map((d, i) => (
-                  <span key={d.icd11Code}>
-                    {i > 0 && ' · '}
-                    {d.icd11Label} ({d.icd11Code}){d.isPrimary ? ' — primary' : ''}
-                  </span>
+              <div className="space-y-1.5">
+                {data.diagnoses.map((d) => (
+                  <DiagnosisRow
+                    key={d.id}
+                    clientId={data.clientId}
+                    diagnosis={d}
+                    canPromote={data.diagnoses.length > 1}
+                  />
                 ))}
-              </p>
+              </div>
             ) : (
               <p className="font-serif text-sm" style={{ color: P.ink2 }}>
                 No confirmed diagnosis yet — working hypotheses live in the copilot until you
@@ -806,6 +815,249 @@ const GOAL_STATUS_LABEL: Record<TreatmentGoalStatus, string> = {
  * the dot keeps its place as the measure's bullet so the printed document is
  * unchanged.
  */
+/**
+ * One confirmed diagnosis, editable in place — PC3.
+ *
+ * Until now a diagnosis could only be set by confirming a Pass-3 candidate,
+ * so correcting a mistyped code, re-wording a label, changing which one is
+ * primary, or retiring one that no longer holds all meant going back through
+ * the copilot. This edits the row directly.
+ *
+ * Retiring supersedes rather than deletes: the row stays in the Diagnosis
+ * History card, so the record shows the picture changing.
+ */
+function DiagnosisRow({
+  clientId,
+  diagnosis,
+  canPromote,
+}: {
+  clientId: string;
+  diagnosis: {
+    id: string;
+    icd11Code: string;
+    icd11Label: string;
+    isPrimary: boolean;
+    notes: string | null;
+  };
+  canPromote: boolean;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [code, setCode] = useState(diagnosis.icd11Code);
+  const [label, setLabel] = useState(diagnosis.icd11Label);
+  const [notes, setNotes] = useState(diagnosis.notes ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const base = `/api/v1/clients/${clientId}/diagnoses/${diagnosis.id}`;
+
+  async function send(method: 'PATCH' | 'DELETE', body: unknown): Promise<boolean> {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(base, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const j: unknown = await res.json().catch(() => null);
+        const msg =
+          j && typeof j === 'object' && 'error' in j && typeof j.error === 'string'
+            ? j.error
+            : 'Could not save that change.';
+        setError(msg);
+        return false;
+      }
+      router.refresh();
+      return true;
+    } catch {
+      setError('Could not reach the server.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save(): Promise<void> {
+    const trimmedCode = code.trim();
+    const trimmedLabel = label.trim();
+    if (trimmedCode === '' || trimmedLabel === '') {
+      setError('A diagnosis needs both a code and a label.');
+      return;
+    }
+    const ok = await send('PATCH', {
+      icd11Code: trimmedCode,
+      icd11Label: trimmedLabel,
+      notes: notes.trim() === '' ? null : notes.trim(),
+    });
+    if (ok) setEditing(false);
+  }
+
+  function cancel(): void {
+    setCode(diagnosis.icd11Code);
+    setLabel(diagnosis.icd11Label);
+    setNotes(diagnosis.notes ?? '');
+    setError(null);
+    setEditing(false);
+  }
+
+  if (editing) {
+    return (
+      <div
+        className="rounded-xl border p-3 print:hidden"
+        style={{ borderColor: P.accent, background: P.bgSoft }}
+      >
+        <div className="flex flex-wrap gap-2">
+          <label className="flex-1 basis-[7rem]">
+            <span
+              className="text-[9.5px] font-bold uppercase tracking-[0.1em]"
+              style={{ color: P.faint }}
+            >
+              ICD-11 code
+            </span>
+            <input
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              disabled={busy}
+              className="mt-1 w-full rounded-lg border px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--color-accent)]"
+              style={{ borderColor: P.line, background: P.bg, color: P.ink }}
+            />
+          </label>
+          <label className="flex-[3] basis-[12rem]">
+            <span
+              className="text-[9.5px] font-bold uppercase tracking-[0.1em]"
+              style={{ color: P.faint }}
+            >
+              Label
+            </span>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              disabled={busy}
+              className="mt-1 w-full rounded-lg border px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--color-accent)]"
+              style={{ borderColor: P.line, background: P.bg, color: P.ink }}
+            />
+          </label>
+        </div>
+        <label className="mt-2 block">
+          <span
+            className="text-[9.5px] font-bold uppercase tracking-[0.1em]"
+            style={{ color: P.faint }}
+          >
+            Note (optional)
+          </span>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            disabled={busy}
+            rows={2}
+            placeholder="Why this diagnosis, or what qualifies it."
+            className="mt-1 w-full resize-y rounded-lg border px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--color-accent)]"
+            style={{ borderColor: P.line, background: P.bg, color: P.ink }}
+          />
+        </label>
+
+        {error && (
+          <p className="mt-2 text-[11.5px]" style={{ color: P.warn }}>
+            {error}
+          </p>
+        )}
+
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={busy}
+            className="rounded-lg px-3 py-1.5 text-[11.5px] font-semibold text-white disabled:opacity-50"
+            style={{ background: P.accent }}
+          >
+            {busy ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            type="button"
+            onClick={cancel}
+            disabled={busy}
+            className="rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold disabled:opacity-50"
+            style={{ borderColor: P.line, color: P.ink2, background: P.bg }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Retire “${diagnosis.icd11Label}”? It stays in the diagnosis history — this records that it no longer holds.`,
+                )
+              ) {
+                void send('DELETE', {});
+              }
+            }}
+            disabled={busy}
+            className="ml-auto rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold disabled:opacity-50"
+            style={{ borderColor: P.warnSoft, color: P.warn, background: P.bg }}
+          >
+            Retire
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex flex-wrap items-baseline gap-x-2 gap-y-1 font-serif text-sm">
+      <span>
+        {diagnosis.icd11Label}{' '}
+        <span className="font-sans text-[11.5px]" style={{ color: P.faint }}>
+          ({diagnosis.icd11Code})
+        </span>
+      </span>
+      {diagnosis.isPrimary && (
+        <span
+          className="rounded-full px-2 py-[2px] font-sans text-[9.5px] font-bold uppercase tracking-[0.08em]"
+          style={{ background: P.accentSoft, color: P.accent }}
+        >
+          Primary
+        </span>
+      )}
+      {diagnosis.notes && (
+        <span className="w-full font-sans text-[11.5px]" style={{ color: P.faint }}>
+          {diagnosis.notes}
+        </span>
+      )}
+      <span className="ml-auto flex shrink-0 gap-1.5 print:hidden">
+        {!diagnosis.isPrimary && canPromote && (
+          <button
+            type="button"
+            onClick={() => void send('PATCH', { isPrimary: true })}
+            disabled={busy}
+            title="Make this the primary diagnosis. The current primary is demoted."
+            className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[#2563eb] hover:bg-[#e8effc] disabled:opacity-50"
+            style={{ borderColor: P.line, color: P.ink2 }}
+          >
+            Make primary
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          title="Correct the code, label or note — or retire this diagnosis."
+          className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[#2563eb] hover:bg-[#e8effc]"
+          style={{ borderColor: P.line, color: P.accent }}
+        >
+          Edit
+        </button>
+      </span>
+      {error && (
+        <span className="w-full font-sans text-[11px]" style={{ color: P.warn }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function GoalMeasureRow({
   planId,
   index,
