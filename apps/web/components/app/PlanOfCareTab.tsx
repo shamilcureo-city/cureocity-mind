@@ -95,8 +95,11 @@ export async function PlanOfCareTab({
     prisma.problemListItem.findMany({
       where: { clientId },
       orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
-      take: 6,
-      select: { title: true, detail: true, status: true },
+      // Was `take: 6` when this section was a read-only summary. The list is
+      // editable in place now, so a cap would silently swallow the 7th
+      // problem the therapist adds — show the list they are actually editing.
+      take: 100,
+      select: { id: true, title: true, detail: true, status: true },
     }),
     prisma.caseFormulation.findFirst({
       where: { clientId, supersededAt: null },
@@ -311,7 +314,12 @@ export async function PlanOfCareTab({
     planVersion: activePlan?.version ?? null,
     planConfirmedAt: activePlan?.confirmedAt.toISOString() ?? null,
     planVersionCount,
-    problems: problems.map((p) => ({ title: p.title, detail: p.detail, status: p.status })),
+    problems: problems.map((p) => ({
+      id: p.id,
+      title: p.title,
+      detail: p.detail,
+      status: p.status,
+    })),
     presentingFallback: client?.presentingConcerns ?? null,
     formulation: formulation
       ? {

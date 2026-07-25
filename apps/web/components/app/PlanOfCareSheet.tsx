@@ -26,6 +26,7 @@ import { formatIstDate } from '../../lib/ist';
  */
 
 export interface PocProblem {
+  id: string;
   title: string;
   detail: string | null;
   status: 'ACTIVE' | 'RESOLVED';
@@ -241,43 +242,20 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
         {/* Body */}
         <div className="px-10 pb-10 pt-2 max-sm:px-5 max-sm:pb-7 print:px-0">
           {/* 1 · Problem list */}
-          <Section
-            no={sectionNo()}
-            title="Problem list"
-            std="prioritised · with status"
-            action={
-              <SectionLink
-                href={`/app/clients/${data.clientId}`}
-                label="Edit"
-                hint="Add, re-prioritise or resolve problems — opens the client's problem list."
-              />
-            }
-          >
+          <Section no={sectionNo()} title="Problem list" std="prioritised · with status">
             {data.problems.length > 0 ? (
-              data.problems.map((p, i) => (
-                <div key={i} className="mt-1.5 flex items-baseline gap-2.5 font-serif text-sm">
-                  <span className="text-[11px] font-bold" style={{ color: P.faint }}>
-                    P{i + 1}
-                  </span>
-                  <span>{p.title}</span>
-                  <span
-                    className="ml-auto shrink-0 rounded-full px-2.5 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide"
-                    style={
-                      p.status === 'ACTIVE'
-                        ? { background: P.goodSoft, color: P.good }
-                        : { border: `1px solid ${P.line}`, color: P.faint }
-                    }
-                  >
-                    {p.status === 'ACTIVE' ? 'active' : 'resolved'}
-                  </span>
-                </div>
-              ))
+              <div className="space-y-1">
+                {data.problems.map((p, i) => (
+                  <ProblemRow key={p.id} clientId={data.clientId} problem={p} ordinal={i + 1} />
+                ))}
+              </div>
             ) : (
               <p className="font-serif text-sm" style={{ color: P.ink2 }}>
                 {data.presentingFallback ??
-                  'No problems recorded yet — name them from the Client page as the picture settles.'}
+                  'No problems recorded yet — name the main difficulties you are working on.'}
               </p>
             )}
+            <AddProblem clientId={data.clientId} />
           </Section>
 
           {/* 2 · Formulation */}
@@ -815,6 +793,241 @@ const GOAL_STATUS_LABEL: Record<TreatmentGoalStatus, string> = {
  * the dot keeps its place as the measure's bullet so the printed document is
  * unchanged.
  */
+/** Shared input styling for the sheet's inline editors. */
+const INPUT_CLASS =
+  'w-full rounded-lg border px-2.5 py-1.5 text-[13px] outline-none focus:border-[var(--color-accent)]';
+
+/**
+ * One problem list item, editable in place — PC4.
+ *
+ * This section's action used to be a link to `/app/clients/[id]`, which threw
+ * the therapist out of the Plan of care onto a different page to make a
+ * one-word edit and left them to navigate back. The problems API already had
+ * full CRUD, so the list is edited here instead.
+ */
+function ProblemRow({
+  clientId,
+  problem,
+  ordinal,
+}: {
+  clientId: string;
+  problem: PocProblem;
+  ordinal: number;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(problem.title);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const base = `/api/v1/clients/${clientId}/problems/${problem.id}`;
+
+  async function send(method: 'PATCH' | 'DELETE', body: unknown): Promise<boolean> {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(base, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        setError('Could not save that change.');
+        return false;
+      }
+      router.refresh();
+      return true;
+    } catch {
+      setError('Could not reach the server.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save(): Promise<void> {
+    const t = title.trim();
+    if (t === '') {
+      setError('A problem needs a name.');
+      return;
+    }
+    if (await send('PATCH', { title: t })) setEditing(false);
+  }
+
+  const resolved = problem.status === 'RESOLVED';
+
+  if (editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 py-1 print:hidden">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void save();
+            if (e.key === 'Escape') {
+              setTitle(problem.title);
+              setEditing(false);
+            }
+          }}
+          disabled={busy}
+          autoFocus
+          className={`${INPUT_CLASS} flex-1 basis-[14rem]`}
+          style={{ borderColor: P.accent, background: P.bg, color: P.ink }}
+        />
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={busy}
+          className="rounded-lg px-3 py-1.5 text-[11.5px] font-semibold text-white disabled:opacity-50"
+          style={{ background: P.accent }}
+        >
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setTitle(problem.title);
+            setError(null);
+            setEditing(false);
+          }}
+          disabled={busy}
+          className="rounded-lg border px-3 py-1.5 text-[11.5px] font-semibold disabled:opacity-50"
+          style={{ borderColor: P.line, color: P.ink2, background: P.bg }}
+        >
+          Cancel
+        </button>
+        {error && (
+          <span className="w-full text-[11px]" style={{ color: P.warn }}>
+            {error}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-2.5 font-serif text-sm">
+      <span className="font-sans text-[11px] font-bold" style={{ color: P.faint }}>
+        P{ordinal}
+      </span>
+      <span style={resolved ? { color: P.faint, textDecoration: 'line-through' } : undefined}>
+        {problem.title}
+      </span>
+
+      <span className="ml-auto flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => void send('PATCH', { status: resolved ? 'ACTIVE' : 'RESOLVED' })}
+          disabled={busy}
+          title={resolved ? 'Reopen this problem.' : 'Mark this problem resolved.'}
+          className="rounded-full px-2.5 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide transition-opacity hover:opacity-75 disabled:opacity-50 print:pointer-events-none"
+          style={
+            resolved
+              ? { border: `1px solid ${P.line}`, color: P.faint }
+              : { background: P.goodSoft, color: P.good }
+          }
+        >
+          {resolved ? 'resolved' : 'active'}
+        </button>
+        <span className="flex gap-1.5 print:hidden">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            title="Rename this problem."
+            className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[#2563eb] hover:bg-[#e8effc]"
+            style={{ borderColor: P.line, color: P.accent }}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm(`Remove “${problem.title}” from the problem list?`)) {
+                void send('DELETE', {});
+              }
+            }}
+            disabled={busy}
+            title="Remove this problem from the list."
+            className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[#b86a3c] disabled:opacity-50"
+            style={{ borderColor: P.line, color: P.faint }}
+          >
+            Remove
+          </button>
+        </span>
+      </span>
+      {error && (
+        <span className="w-full font-sans text-[11px]" style={{ color: P.warn }}>
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Append a problem without leaving the sheet — PC4. */
+function AddProblem({ clientId }: { clientId: string }) {
+  const router = useRouter();
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function add(): Promise<void> {
+    const t = title.trim();
+    if (t === '' || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/v1/clients/${clientId}/problems`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: t }),
+      });
+      if (!res.ok) {
+        setError('Could not add that problem.');
+        return;
+      }
+      setTitle('');
+      router.refresh();
+    } catch {
+      setError('Could not reach the server.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 print:hidden">
+      <div className="flex flex-wrap gap-2">
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void add();
+          }}
+          disabled={busy}
+          placeholder="Add a problem — e.g. “Sleep disturbance”, “Conflict at work”"
+          className={`${INPUT_CLASS} flex-1 basis-[16rem]`}
+          style={{ borderColor: P.line, background: P.bg, color: P.ink }}
+        />
+        <button
+          type="button"
+          onClick={() => void add()}
+          disabled={busy || title.trim() === ''}
+          className="rounded-lg px-3.5 py-1.5 text-[11.5px] font-semibold text-white disabled:opacity-40"
+          style={{ background: P.accent }}
+        >
+          {busy ? 'Adding…' : 'Add'}
+        </button>
+      </div>
+      {error && (
+        <p className="mt-1.5 text-[11px]" style={{ color: P.warn }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * One confirmed diagnosis, editable in place — PC3.
  *
