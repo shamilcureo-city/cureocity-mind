@@ -136,6 +136,9 @@ export type CreateAppointmentInput = z.infer<typeof CreateAppointmentInputSchema
 export const CreateAppointmentResponseSchema = z.object({
   appointmentId: CuidSchema,
   status: z.literal('REQUESTED'),
+  /** MK4 — signed self-service links for the patient's confirmation screen. */
+  cancelUrl: z.string(),
+  calendarUrl: z.string(),
 });
 export type CreateAppointmentResponse = z.infer<typeof CreateAppointmentResponseSchema>;
 

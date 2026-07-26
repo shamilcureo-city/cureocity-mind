@@ -8,6 +8,7 @@ import { encryptForTenant } from '@/lib/tenant-crypto';
 import { offeredSlotMinutes } from '@/lib/marketing';
 import { loadBusyIntervals, loadPublishedTherapist, loadWeeklyRules } from '@/lib/public-profile';
 import { sendAppointmentRequestEmail } from '@/lib/appointment-email';
+import { signAppointmentId } from '@/lib/appointment-links';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,7 +123,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Notify the therapist off the request path.
   after(() => sendAppointmentRequestEmail(therapist.id, startAt));
 
-  const res: CreateAppointmentResponse = { appointmentId, status: 'REQUESTED' };
+  const sig = signAppointmentId(appointmentId);
+  const res: CreateAppointmentResponse = {
+    appointmentId,
+    status: 'REQUESTED',
+    cancelUrl: `/p/appointments/${appointmentId}/cancel?sig=${sig}`,
+    calendarUrl: `/api/v1/public/appointments/${appointmentId}/calendar?sig=${sig}`,
+  };
   return NextResponse.json(res, { status: 201 });
 }
 

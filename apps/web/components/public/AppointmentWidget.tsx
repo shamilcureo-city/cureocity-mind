@@ -67,6 +67,7 @@ export function AppointmentWidget({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [links, setLinks] = useState<{ cancelUrl: string; calendarUrl: string } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -125,6 +126,13 @@ export function AppointmentWidget({
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? 'Something went wrong — please try again.');
       }
+      const created = (await res.json().catch(() => null)) as {
+        cancelUrl?: string;
+        calendarUrl?: string;
+      } | null;
+      if (created?.cancelUrl && created?.calendarUrl) {
+        setLinks({ cancelUrl: created.cancelUrl, calendarUrl: created.calendarUrl });
+      }
       setDone(true);
     } catch (e) {
       setError((e as Error).message);
@@ -153,6 +161,22 @@ export function AppointmentWidget({
           is with {therapistName}. The time is held for you — you&rsquo;ll hear back on the phone
           number you shared once it&rsquo;s confirmed.
         </p>
+        {links && (
+          <p className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <a
+              href={links.calendarUrl}
+              className="font-medium text-[var(--color-accent)] hover:underline"
+            >
+              Add to calendar (.ics)
+            </a>
+            <a
+              href={links.cancelUrl}
+              className="text-[var(--color-ink-3)] hover:text-[var(--color-warn)] hover:underline"
+            >
+              Can&rsquo;t make it? Cancel
+            </a>
+          </p>
+        )}
       </div>
     );
   }

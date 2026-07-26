@@ -33,6 +33,10 @@
     {
       "path": "/api/v1/cron/care-nudges",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/v1/cron/appointments",
+      "schedule": "45 * * * *"
     }
   ],
   "env": {

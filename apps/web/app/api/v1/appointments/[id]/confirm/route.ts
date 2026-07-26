@@ -4,6 +4,8 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { decryptForTenant, encryptForTenant } from '@/lib/tenant-crypto';
+import { after } from 'next/server';
+import { sendAppointmentConfirmedEmail } from '@/lib/appointment-email';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -139,6 +141,21 @@ export async function POST(
     );
     return { clientId: client.id, sessionId: session.id };
   });
+
+  if (email) {
+    const psyName = await prisma.psychologist.findUnique({
+      where: { id: psyId },
+      select: { fullName: true },
+    });
+    after(() =>
+      sendAppointmentConfirmedEmail(
+        email,
+        psyName?.fullName ?? 'your therapist',
+        appt.id,
+        appt.startAt,
+      ),
+    );
+  }
 
   const body: ConfirmAppointmentResponse = result;
   return NextResponse.json(body);
