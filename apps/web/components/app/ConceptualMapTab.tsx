@@ -10,6 +10,12 @@ import type {
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import {
+  EDGE_LABEL_LINE_HEIGHT,
+  EDGE_LABEL_PAD_Y,
+  edgeLabelBox,
+  wrapEdgeLabel,
+} from '../../lib/conceptual-map-label';
 
 interface Props {
   clientId: string;
@@ -288,26 +294,7 @@ function Graph({
                   strokeDasharray={isActive ? '5 6' : undefined}
                   className={isActive ? 'cmap-flow' : undefined}
                 />
-                {isActive && e.relationship && (
-                  <text
-                    x={mx}
-                    y={my - 5}
-                    textAnchor="middle"
-                    className="cmap-edge-label"
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      fill: 'var(--color-accent)',
-                      paintOrder: 'stroke',
-                      stroke: 'var(--color-surface-soft)',
-                      strokeWidth: 3.5,
-                      strokeLinejoin: 'round',
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    {e.relationship}
-                  </text>
-                )}
+                {isActive && e.relationship && <EdgeLabel x={mx} y={my} text={e.relationship} />}
               </g>
             );
           })}
@@ -697,6 +684,46 @@ function layoutGraph(map: ConceptualMapV1): Record<string, Position> {
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
+}
+
+/**
+ * The relationship chip drawn at an edge's midpoint. A filled rounded rect
+ * behind the text so it stays legible where it crosses a connector, and
+ * `pointerEvents: none` so it never steals the hover that produced it.
+ */
+function EdgeLabel({ x, y, text }: { x: number; y: number; text: string }) {
+  const lines = wrapEdgeLabel(text);
+  if (lines.length === 0) return null;
+
+  const { width: w, height: h } = edgeLabelBox(lines);
+
+  return (
+    <g className="cmap-edge-label" style={{ pointerEvents: 'none' }}>
+      <rect
+        x={x - w / 2}
+        y={y - h / 2}
+        width={w}
+        height={h}
+        rx={6}
+        fill="var(--color-surface)"
+        stroke="var(--color-accent)"
+        strokeWidth={1}
+        opacity={0.97}
+      />
+      <text
+        x={x}
+        y={y - h / 2 + EDGE_LABEL_PAD_Y + 9}
+        textAnchor="middle"
+        style={{ fontSize: 9, fontWeight: 600, fill: 'var(--color-accent)' }}
+      >
+        {lines.map((line, i) => (
+          <tspan key={i} x={x} dy={i === 0 ? 0 : EDGE_LABEL_LINE_HEIGHT}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
 }
 
 function labelRadius(label: string): number {
