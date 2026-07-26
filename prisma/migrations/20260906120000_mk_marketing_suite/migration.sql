@@ -2,9 +2,9 @@
 -- lifecycle stamps, posts, metrics, audit actions. Guarded DDL throughout.
 
 -- MK2 — Psychologist identity fields
-ALTER TABLE "Psychologist" ADD COLUMN IF NOT EXISTS "credentialsLine" TEXT;
-ALTER TABLE "Psychologist" ADD COLUMN IF NOT EXISTS "pronouns" TEXT;
-ALTER TABLE "Psychologist" ADD COLUMN IF NOT EXISTS "officeAddress" TEXT;
+ALTER TABLE "psychologists" ADD COLUMN IF NOT EXISTS "credentialsLine" TEXT;
+ALTER TABLE "psychologists" ADD COLUMN IF NOT EXISTS "pronouns" TEXT;
+ALTER TABLE "psychologists" ADD COLUMN IF NOT EXISTS "officeAddress" TEXT;
 
 -- MK2 — per-window session mode
 ALTER TABLE "AvailabilityRule" ADD COLUMN IF NOT EXISTS "mode" TEXT NOT NULL DEFAULT 'ONLINE';

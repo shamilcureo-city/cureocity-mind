@@ -2,10 +2,10 @@
 -- Guarded DDL throughout (P3009 self-heal replays migrations).
 
 -- Psychologist: slug + publish state + FAQs
-ALTER TABLE "Psychologist" ADD COLUMN IF NOT EXISTS "publicSlug" TEXT;
-ALTER TABLE "Psychologist" ADD COLUMN IF NOT EXISTS "profilePublishedAt" TIMESTAMP(3);
-ALTER TABLE "Psychologist" ADD COLUMN IF NOT EXISTS "profileFaqs" JSONB;
-CREATE UNIQUE INDEX IF NOT EXISTS "Psychologist_publicSlug_key" ON "Psychologist"("publicSlug");
+ALTER TABLE "psychologists" ADD COLUMN IF NOT EXISTS "publicSlug" TEXT;
+ALTER TABLE "psychologists" ADD COLUMN IF NOT EXISTS "profilePublishedAt" TIMESTAMP(3);
+ALTER TABLE "psychologists" ADD COLUMN IF NOT EXISTS "profileFaqs" JSONB;
+CREATE UNIQUE INDEX IF NOT EXISTS "psychologists_publicSlug_key" ON "psychologists"("publicSlug");
 
 -- AppointmentStatus enum
 DO $$ BEGIN CREATE TYPE "AppointmentStatus" AS ENUM ('REQUESTED', 'CONFIRMED', 'DECLINED', 'CANCELLED');
