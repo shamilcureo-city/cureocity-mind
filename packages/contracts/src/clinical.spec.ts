@@ -70,7 +70,6 @@ describe('ClinicalReportV1Schema', () => {
         whenInPlan: 'restructuring',
       },
     ],
-    planSuggestions: [],
     crisisFlags: [],
     planSuggestions: [],
     formulationSuggestions: [],

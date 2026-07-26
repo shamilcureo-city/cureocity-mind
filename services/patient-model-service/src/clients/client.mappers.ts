@@ -22,6 +22,8 @@ export function toClient(row: ClientRow): Client {
     preferredModality: row.preferredModality as Client['preferredModality'],
     preferredLanguage: row.preferredLanguage,
     spokenLanguages: row.spokenLanguages,
+    // Batch B — recorded drug allergies.
+    allergies: row.allergies,
     status: row.status,
     isDemo: row.isDemo,
     createdAt: row.createdAt.toISOString(),
