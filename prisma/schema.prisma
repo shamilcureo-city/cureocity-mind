@@ -111,9 +111,9 @@ model Psychologist {
   /// a doctor handed a patient went out with a blank letterhead. These are
   /// the fields that make it a real one. All optional — a doctor who fills in
   /// nothing gets exactly the previous output.
-  clinicName            String?
-  clinicAddress         String?  @db.Text
-  clinicPhone           String?
+  clinicName    String?
+  clinicAddress String? @db.Text
+  clinicPhone   String?
 
   /// Sprint 31 — set once the auto-provisioned placeholder fields
   /// (email/RCI/fullName from POST /api/v1/auth/session) have been
