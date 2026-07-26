@@ -279,6 +279,10 @@ export function toPsychologist(row: PsychologistRow): Psychologist {
     defaultOutputLanguage: row.defaultOutputLanguage,
     defaultModality: (row.defaultModality as SessionModality | null) ?? null,
     defaultCaptureMode: row.defaultCaptureMode ?? null,
+    // Batch F — the prescription letterhead.
+    clinicName: row.clinicName ?? null,
+    clinicAddress: row.clinicAddress ?? null,
+    clinicPhone: row.clinicPhone ?? null,
     backupEmail: row.backupEmail,
     onboardingCompletedAt: row.onboardingCompletedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),

@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { MedicalNoteView } from './MedicalNoteView';
 import { MedicalNoteEditor, type NoteFieldEdit } from './MedicalNoteEditor';
+import { VitalsEntryCard } from './VitalsEntryCard';
 import { PlanComposer } from './PlanComposer';
 import { EncounterDifferentialPanel } from './EncounterDifferentialPanel';
 import { EncounterOrdersPanel } from './EncounterOrdersPanel';
@@ -230,6 +231,8 @@ export function ReviewAndSign({
           )}
         </Card>
       )}
+      {/* Batch F — vitals measured at triage, typed in. */}
+      {!signed && <VitalsEntryCard sessionId={sessionId} />}
       {/* Sprint DS10-B — two plans, one sign-off. */}
       <PlanComposer
         sessionId={sessionId}

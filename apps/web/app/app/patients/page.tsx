@@ -19,9 +19,21 @@ export const dynamic = 'force-dynamic';
  * there's zero therapist-flow regression. See docs/DOCTOR_VERTICAL.md.
  */
 const PAGE_SIZE = 50;
+/**
+ * Batch F — how many patients a search may scan.
+ *
+ * Names and phone numbers are envelope-encrypted, so there is no `contains`
+ * query to run: the only way to search them is to decrypt and filter. The
+ * per-tenant DEK is unwrapped once and cached in-process, so this is local
+ * AES over N rows rather than N key-management calls — cheap at pilot scale,
+ * but bounded, and the UI says so when the bound is hit rather than quietly
+ * returning a partial answer.
+ */
+const SEARCH_SCAN_LIMIT = 2_000;
 
 interface SearchParams {
   cursor?: string;
+  q?: string;
 }
 
 export default async function PatientsPage({
@@ -31,12 +43,29 @@ export default async function PatientsPage({
 }) {
   const doctor = await requireOnboardedDoctor();
   const sp = await searchParams;
-  const cursor = sp.cursor;
+  const query = sp.q?.trim() ?? '';
+  // A search resets pagination — a cursor from the unfiltered list is
+  // meaningless against a filtered one.
+  const cursor = query ? undefined : sp.cursor;
 
   const where: Prisma.ClientWhereInput = {
     psychologistId: doctor.id,
     deletedAt: null,
   };
+
+  if (query) {
+    const result = await searchPatients(doctor.id, where, query);
+    return renderRoster({
+      doctorId: doctor.id,
+      rows: result.rows,
+      names: result.names,
+      total: result.total,
+      query,
+      cursor: undefined,
+      nextHref: null,
+      truncated: result.truncated,
+    });
+  }
 
   const [rows, total] = await Promise.all([
     prisma.client.findMany({
@@ -70,17 +99,159 @@ export default async function PatientsPage({
     pageRows.map((c) => decryptClientField(doctor.id, c.fullNameEncrypted)),
   );
 
+  return renderRoster({
+    doctorId: doctor.id,
+    rows: pageRows,
+    names,
+    total,
+    query: '',
+    cursor,
+    nextHref,
+    truncated: false,
+  });
+}
+
+/** The row shape both the paginated and searched paths produce. */
+type RosterRow = {
+  id: string;
+  status: string;
+  isDemo: boolean;
+  createdAt: Date;
+  _count: { sessions: number };
+  sessions: { scheduledAt: Date }[];
+};
+
+/**
+ * Batch F — patient SEARCH.
+ *
+ * A doctor's roster grew past the point where a 50-per-page reverse-chronological
+ * list is usable: finding a returning patient meant paging until you saw the
+ * name. There was no search at all, because names and phones are envelope-
+ * encrypted and there is nothing to run a `contains` against.
+ *
+ * So: scan a bounded window of the tenant's patients, decrypt with the cached
+ * per-tenant DEK (local AES, one unwrap), and match on name or phone. Bounded
+ * and honest — `truncated` tells the doctor when the scan hit its ceiling
+ * instead of implying the roster holds nothing more.
+ */
+async function searchPatients(
+  doctorId: string,
+  where: Prisma.ClientWhereInput,
+  query: string,
+): Promise<{ rows: RosterRow[]; names: string[]; total: number; truncated: boolean }> {
+  const candidates = await prisma.client.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take: SEARCH_SCAN_LIMIT + 1,
+    select: {
+      id: true,
+      fullNameEncrypted: true,
+      contactPhoneEncrypted: true,
+      status: true,
+      isDemo: true,
+      createdAt: true,
+      _count: { select: { sessions: true } },
+      sessions: { orderBy: { scheduledAt: 'desc' }, take: 1, select: { scheduledAt: true } },
+    },
+  });
+  const truncated = candidates.length > SEARCH_SCAN_LIMIT;
+  const scanned = truncated ? candidates.slice(0, SEARCH_SCAN_LIMIT) : candidates;
+
+  const needle = query.toLowerCase();
+  // Digits-only comparison so "98765 43210", "+919876543210" and "9876543210"
+  // all find the same patient.
+  const needleDigits = query.replace(/\D/g, '');
+
+  const rows: RosterRow[] = [];
+  const names: string[] = [];
+  for (const c of scanned) {
+    const name = await decryptClientField(doctorId, c.fullNameEncrypted);
+    let hit = name.toLowerCase().includes(needle);
+    if (!hit && needleDigits.length >= 4) {
+      const phone = await decryptClientField(doctorId, c.contactPhoneEncrypted);
+      hit = phone.replace(/\D/g, '').includes(needleDigits);
+    }
+    if (!hit) continue;
+    rows.push(c);
+    names.push(name);
+    if (rows.length >= PAGE_SIZE) break;
+  }
+  return { rows, names, total: rows.length, truncated };
+}
+
+function renderRoster({
+  rows,
+  names,
+  total,
+  query,
+  cursor,
+  nextHref,
+  truncated,
+}: {
+  doctorId: string;
+  rows: RosterRow[];
+  names: string[];
+  total: number;
+  query: string;
+  cursor: string | undefined;
+  nextHref: string | null;
+  truncated: boolean;
+}) {
   return (
     <Container className="py-10">
       <ClientsHeader vertical="DOCTOR" />
 
+      {/* Batch F — find a returning patient without paging the whole roster.
+          A plain GET form, so it works before hydration and the result is a
+          shareable/bookmarkable URL. */}
+      <form method="GET" action="/app/patients" className="mb-4 flex flex-wrap gap-2">
+        <input
+          type="search"
+          name="q"
+          defaultValue={query}
+          placeholder="Search by name or phone…"
+          aria-label="Search patients by name or phone"
+          className="min-w-0 flex-1 rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm text-[var(--color-ink)] focus:border-[var(--color-accent)] focus:outline-none sm:max-w-sm"
+        />
+        <button
+          type="submit"
+          className="rounded-full border border-[var(--color-line)] bg-white px-5 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+        >
+          Search
+        </button>
+        {query && (
+          <Link
+            href="/app/patients"
+            className="self-center text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+          >
+            Clear
+          </Link>
+        )}
+      </form>
+
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--color-line-soft)] px-5 py-2.5 text-xs text-[var(--color-ink-3)]">
           <span>
-            {total} patient{total === 1 ? '' : 's'}
-            {cursor ? ' · more pages' : ''}
+            {query ? (
+              <>
+                {total} match{total === 1 ? '' : 'es'} for “{query}”
+                {total >= PAGE_SIZE ? ` (showing the first ${PAGE_SIZE})` : ''}
+              </>
+            ) : (
+              <>
+                {total} patient{total === 1 ? '' : 's'}
+                {cursor ? ' · more pages' : ''}
+              </>
+            )}
           </span>
         </div>
+        {truncated && (
+          <p className="border-b border-[var(--color-line-soft)] bg-[var(--color-warn-soft)] px-5 py-2.5 text-xs text-[var(--color-warn)]">
+            Only the {SEARCH_SCAN_LIMIT.toLocaleString('en-IN')} most recent patients were searched.
+            If the patient you want is older than that, narrow the search or open them from their
+            encounter.
+          </p>
+        )}
         <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] gap-3 border-b border-[var(--color-line-soft)] px-5 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-3)]">
           <span>Name</span>
           <span>Status</span>
@@ -88,13 +259,15 @@ export default async function PatientsPage({
           <span className="text-right tabular-nums">Encounters</span>
           <span>Last encounter</span>
         </div>
-        {pageRows.length === 0 ? (
+        {rows.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-            No patients yet — add your first with “+ New patient”.
+            {query
+              ? `No patient matches “${query}”.`
+              : 'No patients yet — add your first with “+ New patient”.'}
           </p>
         ) : (
           <ul className="divide-y divide-[var(--color-line-soft)]">
-            {pageRows.map((c, i) => (
+            {rows.map((c, i) => (
               <li
                 key={c.id}
                 className="flex items-center transition-colors hover:bg-[var(--color-surface-soft)]"

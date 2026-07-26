@@ -40,6 +40,9 @@ export async function GET(
           specialty: true,
           rciNumber: true,
           vertical: true,
+          clinicName: true,
+          clinicAddress: true,
+          clinicPhone: true,
         },
       },
     },
@@ -87,7 +90,11 @@ export async function GET(
       medicalRegNumber: session.psychologist.medicalRegNumber,
       rciNumber: session.psychologist.rciNumber,
       specialty: session.psychologist.specialty,
-      clinicName: null,
+      // Batch F — the letterhead is real now (it was hardcoded null, so every
+      // prescription went out blank at the top).
+      clinicName: session.psychologist.clinicName,
+      clinicAddress: session.psychologist.clinicAddress,
+      clinicPhone: session.psychologist.clinicPhone,
       // Only stamp "Signed by …" when the rendered pad IS the signed pad.
       // On the draft fallback (signedRx null — e.g. a note signed before
       // DS5-fu, so TherapyNote.rxPad was never populated), the signature
