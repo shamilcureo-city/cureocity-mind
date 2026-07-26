@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Utterance } from '@cureocity/contracts';
-import { ReasoningScheduler } from './reasoning-loop';
+import {
+  DEFAULT_SCHEDULER_OPTIONS,
+  ReasoningScheduler,
+  schedulerOptionsFromEnv,
+} from './reasoning-loop';
 
 function utt(id: string): Utterance {
   return { id, speaker: 'patient', text: `text ${id}`, tStartMs: 0, tEndMs: 1000 };
@@ -77,5 +81,37 @@ describe('ReasoningScheduler', () => {
     s.enqueue(utt('u2'));
     expect(s.flush().map((u) => u.id)).toEqual(['u2']);
     expect(s.flush()).toEqual([]); // nothing left
+  });
+});
+
+describe('schedulerOptionsFromEnv (Batch D)', () => {
+  it('defaults to a gap that actually exceeds a VAD window', () => {
+    // The bug this fixes: minGapMs (4s) was shorter than the 6–12s window
+    // that triggers takeDue(), so the debounce never debounced anything.
+    const opts = schedulerOptionsFromEnv({});
+    expect(opts.minGapMs).toBeGreaterThan(12_000);
+    expect(opts.forceMs).toBeGreaterThanOrEqual(opts.minGapMs);
+  });
+
+  it('honours the env overrides', () => {
+    const opts = schedulerOptionsFromEnv({
+      LIVE_REASONING_MIN_GAP_MS: '8000',
+      LIVE_REASONING_FORCE_MS: '25000',
+    });
+    expect(opts).toEqual({ minGapMs: 8_000, forceMs: 25_000 });
+  });
+
+  it('clamps forceMs up so it can never undo the gap', () => {
+    const opts = schedulerOptionsFromEnv({
+      LIVE_REASONING_MIN_GAP_MS: '30000',
+      LIVE_REASONING_FORCE_MS: '5000',
+    });
+    expect(opts.forceMs).toBe(30_000);
+  });
+
+  it('ignores junk and falls back to the defaults', () => {
+    expect(schedulerOptionsFromEnv({ LIVE_REASONING_MIN_GAP_MS: 'soon' })).toEqual(
+      DEFAULT_SCHEDULER_OPTIONS,
+    );
   });
 });

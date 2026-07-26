@@ -33,7 +33,7 @@ import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
 import { reportError } from './sentry';
-import { ReasoningScheduler } from './reasoning-loop';
+import { ReasoningScheduler, schedulerOptionsFromEnv } from './reasoning-loop';
 import { TherapyReasoningStore } from './therapy-reasoning';
 import { assembleRxPad } from './rx-pad';
 import {
@@ -144,7 +144,7 @@ export class LiveSession {
   /** Sprint DS1 — the per-consult reasoning substrate (findings + citation gate). */
   private readonly caseStore: CaseStateStore;
   /** Sprint DS2 — debounces + coalesces reasoning passes. */
-  private readonly reasoningScheduler = new ReasoningScheduler();
+  private readonly reasoningScheduler = new ReasoningScheduler(schedulerOptionsFromEnv());
 
   /** Sprint TS5 — therapist live copilot state (null for doctors). */
   private readonly therapyStore: TherapyReasoningStore | null;
@@ -212,6 +212,8 @@ export class LiveSession {
 
   /** Transcript end (ms) when the interim note last ran — the debounce cursor. */
   private lastNoteTranscriptEndMs = -1;
+  /** Batch D — wall-clock of the last manual "Update now", for its throttle. */
+  private lastManualRefreshAtMs = 0;
   private readonly noteRefreshMs: number;
 
   /**
@@ -646,6 +648,16 @@ export class LiveSession {
    */
   requestNoteRefresh(): void {
     if (this.stopped) return;
+    // Batch D — "Update now" was unthrottled: every tap ran a full Pass-2
+    // note over the cumulative transcript, so a practitioner tapping it
+    // impatiently could run several Pro-class passes in a few seconds. One
+    // refresh per NOTE_REFRESH_MIN_GAP_MS; extra taps are no-ops rather than
+    // queued work.
+    const now = Date.now();
+    if (now - this.lastManualRefreshAtMs < numEnv('NOTE_REFRESH_MIN_GAP_MS', 10_000, 0, 300_000)) {
+      return;
+    }
+    this.lastManualRefreshAtMs = now;
     void (async () => {
       const deadline = Date.now() + 4_000;
       while (this.busy && Date.now() < deadline)
