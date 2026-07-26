@@ -23,6 +23,8 @@ export interface WeeklyRule {
   startMinute: number; // minutes since IST midnight
   endMinute: number;
   slotMinutes: number;
+  /** MK2 — 'ONLINE' | 'IN_PERSON'; defaults ONLINE when absent. */
+  mode?: string;
 }
 
 export interface BusyInterval {
@@ -81,7 +83,11 @@ export function computeSlots(
         if (startMs < earliest) continue;
         const endMs = startMs + rule.slotMinutes * MS_PER_MINUTE;
         if (busy.some((b) => overlaps(startMs, endMs, b))) continue;
-        out.push({ startAt: new Date(startMs).toISOString(), minutes: rule.slotMinutes });
+        out.push({
+          startAt: new Date(startMs).toISOString(),
+          minutes: rule.slotMinutes,
+          mode: rule.mode === 'IN_PERSON' ? 'IN_PERSON' : 'ONLINE',
+        });
       }
     }
   }

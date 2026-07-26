@@ -27,7 +27,38 @@ export function languageName(code: string): string {
   return LANGUAGE_NAMES[code] ?? code.toUpperCase();
 }
 
-export function TherapistCard({ therapist }: { therapist: DirectoryRow }) {
+const IST_NEXT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  weekday: 'short',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+});
+
+/** "today 5 pm" / "Tue 10 am" for the card's next-slot line. */
+function nextSlotLabel(iso: string): string {
+  const d = new Date(iso);
+  const sameIstDay =
+    new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' }).format(d) ===
+    new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric' }).format(
+      new Date(),
+    );
+  const time = new Intl.DateTimeFormat('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(d);
+  return sameIstDay ? `today ${time}` : IST_NEXT.format(d);
+}
+
+export function TherapistCard({
+  therapist,
+  nextSlotAt,
+}: {
+  therapist: DirectoryRow;
+  nextSlotAt?: string | null;
+}) {
   const location = [therapist.locationCity, therapist.locationProvince].filter(Boolean).join(', ');
 
   return (
@@ -71,12 +102,16 @@ export function TherapistCard({ therapist }: { therapist: DirectoryRow }) {
         )}
         <div className="flex items-center justify-between">
           <span>{formatFee(therapist.sessionFeeInr)}</span>
-          {therapist.isAcceptingNewClients ? (
+          {!therapist.isAcceptingNewClients ? (
+            <span className="text-xs text-[var(--color-ink-3)]">Waitlist only</span>
+          ) : nextSlotAt ? (
+            <span className="text-xs font-medium text-[var(--color-accent)]">
+              Next slot: {nextSlotLabel(nextSlotAt)}
+            </span>
+          ) : (
             <span className="text-xs font-medium text-[var(--color-accent)]">
               Accepting clients
             </span>
-          ) : (
-            <span className="text-xs text-[var(--color-ink-3)]">Waitlist only</span>
           )}
         </div>
       </dl>

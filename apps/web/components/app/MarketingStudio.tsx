@@ -19,9 +19,17 @@ import { Button } from '../ui/Button';
  * the appointment inbox (confirm → Client + INTAKE Session).
  */
 
+interface Identity {
+  credentialsLine: string | null;
+  pronouns: string | null;
+  officeAddress: string | null;
+  hasPhoto: boolean;
+}
+
 interface Props {
   initialState: MarketingState;
   initialRules: AvailabilityRuleInput[];
+  initialIdentity: Identity;
 }
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -47,9 +55,10 @@ function minuteLabel(m: number): string {
 /** 06:00–21:00 in 30-min steps — sane pick-list for a clinic day. */
 const MINUTE_OPTIONS = Array.from({ length: 31 }, (_, i) => 360 + i * 30);
 
-export function MarketingStudio({ initialState, initialRules }: Props) {
+export function MarketingStudio({ initialState, initialRules, initialIdentity }: Props) {
   const [state, setState] = useState<MarketingState>(initialState);
   const [rules, setRules] = useState<AvailabilityRuleInput[]>(initialRules);
+  const [identity, setIdentity] = useState<Identity>(initialIdentity);
   const [appointments, setAppointments] = useState<Appointment[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -135,6 +144,79 @@ export function MarketingStudio({ initialState, initialRules }: Props) {
     [act],
   );
 
+  const saveIdentity = useCallback(
+    () =>
+      act('identity', async () => {
+        const res = await fetch('/api/v1/psychologists/me/marketing', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            credentialsLine: identity.credentialsLine?.trim() || null,
+            pronouns: identity.pronouns?.trim() || null,
+            officeAddress: identity.officeAddress?.trim() || null,
+          }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? 'Could not save identity details.');
+        }
+        setNotice('Identity details saved.');
+      }),
+    [act, identity],
+  );
+
+  /**
+   * Client-side crop + downscale to a 512px square JPEG so the upload
+   * stays small enough for the inline (bytea) store.
+   */
+  const uploadPhoto = useCallback(
+    (file: File) =>
+      act('photo', async () => {
+        const dataUrl = await new Promise<string>((resolvePromise, reject) => {
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.onload = () => {
+            const side = Math.min(img.width, img.height);
+            const canvas = document.createElement('canvas');
+            canvas.width = 512;
+            canvas.height = 512;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return reject(new Error('Could not read the image.'));
+            ctx.drawImage(
+              img,
+              (img.width - side) / 2,
+              (img.height - side) / 2,
+              side,
+              side,
+              0,
+              0,
+              512,
+              512,
+            );
+            URL.revokeObjectURL(url);
+            resolvePromise(canvas.toDataURL('image/jpeg', 0.85));
+          };
+          img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('That file is not a readable image.'));
+          };
+          img.src = url;
+        });
+        const res = await fetch('/api/v1/psychologists/me/photo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataUrl }),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? 'Could not upload the photo.');
+        }
+        setIdentity((i) => ({ ...i, hasPhoto: true }));
+        setNotice('Photo uploaded — it appears on your page once published.');
+      }),
+    [act],
+  );
+
   const resolve = useCallback(
     (id: string, action: 'confirm' | 'decline') =>
       act(id, async () => {
@@ -185,7 +267,16 @@ export function MarketingStudio({ initialState, initialRules }: Props) {
                     mind.cureocity.in/therapists/{state.publicSlug} →
                   </Link>
                 ) : (
-                  <>Will publish at mind.cureocity.in/therapists/{state.publicSlug}</>
+                  <>
+                    Will publish at mind.cureocity.in/therapists/{state.publicSlug} ·{' '}
+                    <Link
+                      href={`/therapists/${state.publicSlug}`}
+                      target="_blank"
+                      className="font-medium text-[var(--color-accent)] hover:underline"
+                    >
+                      Preview as a patient →
+                    </Link>
+                  </>
                 )}
               </p>
             )}
@@ -214,13 +305,82 @@ export function MarketingStudio({ initialState, initialRules }: Props) {
             </li>
           ))}
         </ul>
+        {!identity.hasPhoto && (
+          <p className="mt-3 text-sm text-[var(--color-ink-2)]">
+            ○ Add a photo below — profiles with photos get roughly 3× the requests.
+          </p>
+        )}
         <p className="mt-4 text-xs text-[var(--color-ink-3)]">
-          Headline, bio, photo, city, specialties and fee are edited in{' '}
+          Headline, bio, city, specialties and fee are edited in{' '}
           <Link href="/app/settings/account" className="text-[var(--color-accent)] hover:underline">
             Settings → Account
           </Link>
           .
         </p>
+      </Card>
+
+      {/* Identity & photo */}
+      <Card className="p-7">
+        <h2 className="font-serif text-2xl">Identity</h2>
+        <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+          The line under your name, and the headshot patients see first.
+        </p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+              Credentials line
+            </span>
+            <input
+              value={identity.credentialsLine ?? ''}
+              onChange={(e) => setIdentity({ ...identity, credentialsLine: e.target.value })}
+              placeholder="RP, MA (Clinical Psychology)"
+              className="mt-1 w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+              Pronouns (optional)
+            </span>
+            <input
+              value={identity.pronouns ?? ''}
+              onChange={(e) => setIdentity({ ...identity, pronouns: e.target.value })}
+              placeholder="she/her"
+              className="mt-1 w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-sm sm:col-span-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+              Clinic address (shown when you offer in-person windows)
+            </span>
+            <input
+              value={identity.officeAddress ?? ''}
+              onChange={(e) => setIdentity({ ...identity, officeAddress: e.target.value })}
+              placeholder="2nd floor, Wellness Centre, Panampilly Nagar, Kochi"
+              className="mt-1 w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm"
+            />
+          </label>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <Button onClick={() => void saveIdentity()} disabled={busy === 'identity'}>
+            {busy === 'identity' ? 'Saving…' : 'Save identity'}
+          </Button>
+          <label className="cursor-pointer text-sm font-medium text-[var(--color-accent)] hover:underline">
+            {identity.hasPhoto ? 'Replace photo' : 'Upload photo'}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void uploadPhoto(f);
+                e.target.value = '';
+              }}
+            />
+          </label>
+          {identity.hasPhoto && (
+            <span className="text-xs text-[var(--color-ink-3)]">Photo on file ✓</span>
+          )}
+        </div>
       </Card>
 
       {/* Appointment inbox */}
@@ -362,6 +522,18 @@ export function MarketingStudio({ initialState, initialRules }: Props) {
                 ))}
               </select>
               <select
+                value={r.mode ?? 'ONLINE'}
+                onChange={(e) => {
+                  const next = [...rules];
+                  next[i] = { ...r, mode: e.target.value as AvailabilityRuleInput['mode'] };
+                  setRules(next);
+                }}
+                className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+              >
+                <option value="ONLINE">Online</option>
+                <option value="IN_PERSON">In person</option>
+              </select>
+              <select
                 value={r.slotMinutes}
                 onChange={(e) => {
                   const next = [...rules];
@@ -395,7 +567,7 @@ export function MarketingStudio({ initialState, initialRules }: Props) {
             onClick={() =>
               setRules([
                 ...rules,
-                { weekday: 1, startMinute: 600, endMinute: 780, slotMinutes: 60 },
+                { weekday: 1, startMinute: 600, endMinute: 780, slotMinutes: 60, mode: 'ONLINE' },
               ])
             }
           >

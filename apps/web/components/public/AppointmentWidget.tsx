@@ -17,6 +17,8 @@ interface Props {
   slug: string;
   therapistName: string;
   acceptingNewClients: boolean;
+  /// MK2 — shown when the chosen slot is an in-person window.
+  officeAddress?: string | null;
 }
 
 const IST_DAY = new Intl.DateTimeFormat('en-IN', {
@@ -31,6 +33,13 @@ const IST_TIME = new Intl.DateTimeFormat('en-IN', {
   minute: '2-digit',
   hour12: true,
 });
+const IST_SHORT = new Intl.DateTimeFormat('en-IN', {
+  timeZone: 'Asia/Kolkata',
+  weekday: 'short',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+});
 const IST_FULL = new Intl.DateTimeFormat('en-IN', {
   timeZone: 'Asia/Kolkata',
   weekday: 'long',
@@ -41,7 +50,12 @@ const IST_FULL = new Intl.DateTimeFormat('en-IN', {
   hour12: true,
 });
 
-export function AppointmentWidget({ slug, therapistName, acceptingNewClients }: Props) {
+export function AppointmentWidget({
+  slug,
+  therapistName,
+  acceptingNewClients,
+  officeAddress,
+}: Props) {
   const [slots, setSlots] = useState<PublicSlot[] | null>(null);
   const [hasAvailability, setHasAvailability] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
@@ -69,6 +83,11 @@ export function AppointmentWidget({ slug, therapistName, acceptingNewClients }: 
   useEffect(() => {
     void load();
   }, [load]);
+
+  const selectedSlot = useMemo(
+    () => (slots ?? []).find((s) => s.startAt === selected) ?? null,
+    [slots, selected],
+  );
 
   const byDay = useMemo(() => {
     const groups = new Map<string, PublicSlot[]>();
@@ -171,6 +190,11 @@ export function AppointmentWidget({ slug, therapistName, acceptingNewClients }: 
                   }`}
                 >
                   {IST_TIME.format(new Date(s.startAt))}
+                  {s.mode === 'IN_PERSON' && (
+                    <span className="ml-1 opacity-70" title="In person at the clinic">
+                      · clinic
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -188,6 +212,13 @@ export function AppointmentWidget({ slug, therapistName, acceptingNewClients }: 
         >
           <p className="text-sm text-[var(--color-ink-2)]">
             Requesting <strong>{IST_FULL.format(new Date(selected))}</strong> (IST)
+            {selectedSlot?.mode === 'IN_PERSON' ? (
+              <span className="mt-0.5 block text-xs text-[var(--color-ink-3)]">
+                In person{officeAddress ? ` · ${officeAddress}` : ' at the clinic'}
+              </span>
+            ) : (
+              <span className="mt-0.5 block text-xs text-[var(--color-ink-3)]">Online session</span>
+            )}
           </p>
           <input
             required
@@ -230,9 +261,17 @@ export function AppointmentWidget({ slug, therapistName, acceptingNewClients }: 
             privately and stored encrypted.
           </label>
           {error && <p className="text-sm text-[var(--color-warn)]">{error}</p>}
-          <Button type="submit" disabled={submitting || !consent || !name.trim() || !phone.trim()}>
-            {submitting ? 'Sending…' : 'Request this time'}
-          </Button>
+          {/* MK2 — the submit rides a sticky bar on phones so the chosen
+              slot + action stay in thumb reach while the form scrolls. */}
+          <div className="sticky bottom-0 -mx-5 -mb-5 border-t border-[var(--color-line-soft)] bg-[var(--color-surface)] px-5 py-3 sm:static sm:m-0 sm:border-0 sm:p-0">
+            <Button
+              type="submit"
+              disabled={submitting || !consent || !name.trim() || !phone.trim()}
+              className="w-full sm:w-auto"
+            >
+              {submitting ? 'Sending…' : `Request ${IST_SHORT.format(new Date(selected))}`}
+            </Button>
+          </div>
         </form>
       )}
     </div>

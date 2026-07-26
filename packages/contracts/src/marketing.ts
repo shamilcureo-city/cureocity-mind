@@ -35,6 +35,10 @@ export const UpdateMarketingInputSchema = z
   .object({
     publicSlug: PublicSlugSchema,
     faqs: z.array(ProfileFaqSchema).max(10),
+    /// MK2 — identity extras, owned by the marketing studio.
+    credentialsLine: z.string().trim().max(120).nullable(),
+    pronouns: z.string().trim().max(40).nullable(),
+    officeAddress: z.string().trim().max(300).nullable(),
   })
   .partial()
   .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be provided' });
@@ -81,6 +85,8 @@ export const AvailabilityRuleInputSchema = z
       .max(MINUTES_IN_DAY - 1),
     endMinute: z.number().int().min(1).max(MINUTES_IN_DAY),
     slotMinutes: z.union([z.literal(30), z.literal(45), z.literal(60), z.literal(90)]),
+    /// MK2 — where this window's sessions happen.
+    mode: z.enum(['ONLINE', 'IN_PERSON']).default('ONLINE'),
   })
   .refine((r) => r.endMinute - r.startMinute >= r.slotMinutes, {
     message: 'window must fit at least one slot',
@@ -101,6 +107,8 @@ export const PublicSlotSchema = z.object({
   startAt: IsoDateTimeSchema,
   /** Slot length in minutes (from the owning rule). */
   minutes: z.number().int().positive(),
+  /** MK2 — 'ONLINE' | 'IN_PERSON' from the owning window. */
+  mode: z.enum(['ONLINE', 'IN_PERSON']).default('ONLINE'),
 });
 export type PublicSlot = z.infer<typeof PublicSlotSchema>;
 
@@ -164,3 +172,79 @@ export const ConfirmAppointmentResponseSchema = z.object({
   sessionId: CuidSchema,
 });
 export type ConfirmAppointmentResponse = z.infer<typeof ConfirmAppointmentResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// MK3 — AI auto-fill (draft-only; grounded in aggregate practice facts)
+// ---------------------------------------------------------------------------
+
+export const DraftMarketingResponseSchema = z.object({
+  headline: z.string(),
+  bio: z.string(),
+  faqs: z.array(ProfileFaqSchema).max(6),
+  source: z.enum(['vertex', 'mock']),
+});
+export type DraftMarketingResponse = z.infer<typeof DraftMarketingResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// MK4 — appointment lifecycle
+// ---------------------------------------------------------------------------
+
+export const CancelAppointmentResponseSchema = z.object({
+  status: z.literal('CANCELLED'),
+});
+export type CancelAppointmentResponse = z.infer<typeof CancelAppointmentResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// MK5 — profile posts
+// ---------------------------------------------------------------------------
+
+export const ProfilePostStatusSchema = z.enum(['DRAFT', 'PUBLISHED']);
+
+export const ProfilePostSchema = z.object({
+  id: CuidSchema,
+  slug: z.string(),
+  title: z.string(),
+  body: z.string(),
+  topic: z.string().nullable(),
+  status: ProfilePostStatusSchema,
+  publishedAt: IsoDateTimeSchema.nullable(),
+  updatedAt: IsoDateTimeSchema,
+});
+export type ProfilePost = z.infer<typeof ProfilePostSchema>;
+
+export const UpsertProfilePostInputSchema = z.object({
+  id: CuidSchema.optional(),
+  title: z.string().trim().min(3).max(160),
+  body: z.string().trim().min(50).max(20_000),
+  topic: z.string().trim().max(80).optional(),
+});
+export type UpsertProfilePostInput = z.infer<typeof UpsertProfilePostInputSchema>;
+
+export const DraftPostInputSchema = z.object({
+  topic: z.string().trim().min(3).max(120),
+});
+export type DraftPostInput = z.infer<typeof DraftPostInputSchema>;
+
+export const DraftPostResponseSchema = z.object({
+  title: z.string(),
+  body: z.string(),
+  source: z.enum(['vertex', 'mock']),
+});
+export type DraftPostResponse = z.infer<typeof DraftPostResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// MK6 — stats funnel
+// ---------------------------------------------------------------------------
+
+export const MarketingStatsResponseSchema = z.object({
+  /** Rolling 7 IST days. */
+  week: z.object({
+    pageViews: z.number().int(),
+    slotViews: z.number().int(),
+    requests: z.number().int(),
+    confirms: z.number().int(),
+  }),
+  /** Median minutes from request to confirm (last 30 days); null = no data. */
+  medianTimeToConfirmMinutes: z.number().nullable(),
+});
+export type MarketingStatsResponse = z.infer<typeof MarketingStatsResponseSchema>;

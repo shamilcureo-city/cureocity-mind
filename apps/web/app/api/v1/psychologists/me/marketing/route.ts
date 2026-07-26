@@ -126,6 +126,11 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
     data: {
       ...(body.value.publicSlug && { publicSlug: body.value.publicSlug }),
       ...(body.value.faqs && { profileFaqs: body.value.faqs }),
+      ...(body.value.credentialsLine !== undefined && {
+        credentialsLine: body.value.credentialsLine,
+      }),
+      ...(body.value.pronouns !== undefined && { pronouns: body.value.pronouns }),
+      ...(body.value.officeAddress !== undefined && { officeAddress: body.value.officeAddress }),
     },
     select: MARKETING_SELECT,
   });

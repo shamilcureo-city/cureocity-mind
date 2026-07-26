@@ -105,6 +105,14 @@ model Psychologist {
   /// Marketing V1 — public FAQ entries [{ q, a }], rendered on the page
   /// and emitted as FAQPage JSON-LD. Validated by ProfileFaqSchema.
   profileFaqs        Json?
+  /// MK2 — the qualification line under the name ("RP, MA"). Free text,
+  /// shown verbatim on the public page.
+  credentialsLine    String?
+  /// MK2 — optional pronouns, shown next to the name when set.
+  pronouns           String?
+  /// MK2 — clinic address for IN_PERSON availability windows; rendered on
+  /// the public page only when at least one window is in-person.
+  officeAddress      String?
 
   // Sprint 18 — therapist preferences.
   /// ISO 639-1 default output language for new notes / briefs.
@@ -2929,6 +2937,11 @@ enum AuditAction {
   APPOINTMENT_REQUESTED // Marketing V1 — public appointment request landed (holds the slot)
   APPOINTMENT_CONFIRMED // Marketing V1 — therapist confirmed; Client + Session minted
   APPOINTMENT_DECLINED // Marketing V1 — therapist declined; slot freed
+  APPOINTMENT_CANCELLED // MK4 — patient cancelled via signed link; slot freed
+  APPOINTMENT_EXPIRED // MK4 — cron released a stale REQUESTED hold
+  APPOINTMENT_REMINDER_SENT // MK4 — 24h/2h reminder dispatched for a confirmed slot
+  PROFILE_AI_DRAFTED // MK3 — AI drafted profile copy from aggregate practice facts (draft-only)
+  PROFILE_POST_PUBLISHED // MK5 — a profile post went live
 }
 
 // ---------------------------------------------------------------------------
@@ -2950,7 +2963,10 @@ model AvailabilityRule {
   endMinute   Int
   /// Slot granularity within the window (a 09:00–12:00 window with
   /// slotMinutes 60 offers 09:00, 10:00, 11:00).
-  slotMinutes Int @default(60)
+  slotMinutes Int    @default(60)
+  /// MK2 — 'ONLINE' | 'IN_PERSON'. String (not enum) validated at the
+  /// contract layer; drives the mode chip on the public slot feed.
+  mode        String @default("ONLINE")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2992,11 +3008,64 @@ model Appointment {
   clientId  String?
   sessionId String?
 
+  /// MK4 — reminder stamps so the cron sends each window exactly once.
+  reminded24At DateTime?
+  reminded2At  DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([psychologistId, status, startAt])
   @@index([psychologistId, startAt])
+}
+
+/// MK2 — the profile headshot, stored inline (postgres bytea) like audio
+/// chunks: no external object-storage dependency. Served to anonymous
+/// traffic via GET /api/v1/public/therapists/[slug]/photo. Client-side
+/// crop/downscale keeps this small (≤512px square JPEG).
+model PsychologistPhoto {
+  psychologistId String   @id
+  bytes          Bytes
+  mimeType       String
+  updatedAt      DateTime @updatedAt
+}
+
+enum ProfilePostStatus {
+  DRAFT
+  PUBLISHED
+}
+
+/// MK5 — a public post on the therapist's profile. Drafted from the
+/// therapist's DECLARED expertise (specialties/modalities/FAQ themes),
+/// never from clinical records; approved word-by-word before publish.
+model ProfilePost {
+  id             String            @id @default(cuid())
+  psychologistId String
+  slug           String
+  title          String
+  body           String            @db.Text
+  topic          String?
+  status         ProfilePostStatus @default(DRAFT)
+  publishedAt    DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([psychologistId, slug])
+  @@index([psychologistId, status])
+}
+
+/// MK6 — privacy-light daily counters for the profile funnel
+/// (PAGE_VIEW | SLOT_VIEW). Requests/confirms come from Appointment
+/// itself. One row per (therapist, kind, IST day), incremented in place.
+model ProfileMetricDaily {
+  id             String   @id @default(cuid())
+  psychologistId String
+  kind           String
+  day            DateTime @db.Date
+  count          Int      @default(0)
+
+  @@unique([psychologistId, kind, day])
+  @@index([psychologistId, day])
 }
 
 enum AuditActorType {

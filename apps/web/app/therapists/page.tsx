@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
-import { TherapistCard } from '@/components/public/TherapistCard';
-import { fetchDirectory } from '@/lib/public-profile';
+import { TherapistCard, languageName } from '@/components/public/TherapistCard';
+import { fetchDirectory, nextSlotByTherapist } from '@/lib/public-profile';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,11 +29,13 @@ export default async function TherapistDirectoryPage({
     city: sp.city,
     q: sp.q,
   });
+  const nextSlots = await nextSlotByTherapist(therapists.map((t) => t.id));
 
   // Facet values from the live result set — no separate taxonomy to drift.
   const specialties = [...new Set(therapists.flatMap((t) => t.specialties))].sort();
   const cities = [...new Set(therapists.map((t) => t.locationCity).filter(Boolean))].sort();
-  const activeFilter = sp.specialty ?? sp.city ?? null;
+  const langs = [...new Set(therapists.flatMap((t) => t.languages))].sort();
+  const activeFilter = sp.specialty ?? sp.city ?? (sp.language ? languageName(sp.language) : null);
 
   return (
     <main className="min-h-screen bg-[var(--color-bg)]">
@@ -67,6 +69,16 @@ export default async function TherapistDirectoryPage({
                   {s}
                 </Link>
               ))}
+            {!sp.language &&
+              langs.slice(0, 6).map((l) => (
+                <Link
+                  key={l}
+                  href={`/therapists?language=${encodeURIComponent(l)}`}
+                  className="rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface)] px-4 py-1.5 text-sm text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                >
+                  {languageName(l)}
+                </Link>
+              ))}
             {!sp.city &&
               cities.slice(0, 6).map((c) => (
                 <Link
@@ -90,7 +102,7 @@ export default async function TherapistDirectoryPage({
         ) : (
           <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {therapists.map((t) => (
-              <TherapistCard key={t.publicSlug} therapist={t} />
+              <TherapistCard key={t.publicSlug} therapist={t} nextSlotAt={nextSlots.get(t.id)} />
             ))}
           </div>
         )}

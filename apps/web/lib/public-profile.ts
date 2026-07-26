@@ -1,6 +1,6 @@
 import { prisma } from '@/lib/prisma';
 import { ProfileFaqSchema, type ProfileFaq } from '@cureocity/contracts';
-import type { BusyInterval, WeeklyRule } from '@/lib/marketing';
+import { computeSlots, type BusyInterval, type WeeklyRule } from '@/lib/marketing';
 
 /**
  * Marketing V1 — server-side loaders for the PUBLIC therapist surface
@@ -13,6 +13,7 @@ import type { BusyInterval, WeeklyRule } from '@/lib/marketing';
  */
 
 export const DIRECTORY_SELECT = {
+  id: true,
   publicSlug: true,
   fullName: true,
   headline: true,
@@ -28,6 +29,7 @@ export const DIRECTORY_SELECT = {
 } as const;
 
 export interface DirectoryRow {
+  id: string;
   publicSlug: string | null;
   fullName: string;
   headline: string | null;
@@ -76,17 +78,89 @@ export interface PublicProfile extends DirectoryRow {
   id: string;
   bio: string | null;
   faqs: ProfileFaq[];
+  credentialsLine: string | null;
+  pronouns: string | null;
+  officeAddress: string | null;
 }
 
 /** One published profile by slug — null when unknown or unpublished. */
 export async function loadPublishedTherapist(slug: string): Promise<PublicProfile | null> {
   const row = await prisma.psychologist.findFirst({
     where: { ...PUBLISHED_WHERE, publicSlug: slug },
-    select: { ...DIRECTORY_SELECT, id: true, bio: true, profileFaqs: true },
+    select: {
+      ...DIRECTORY_SELECT,
+      id: true,
+      bio: true,
+      profileFaqs: true,
+      credentialsLine: true,
+      pronouns: true,
+      officeAddress: true,
+    },
   });
   if (!row) return null;
+  return withInlinePhoto(toPublicProfile(row));
+}
+
+function toPublicProfile(row: {
+  id: string;
+  bio: string | null;
+  profileFaqs: unknown;
+  credentialsLine: string | null;
+  pronouns: string | null;
+  officeAddress: string | null;
+  publicSlug: string | null;
+  fullName: string;
+  headline: string | null;
+  photoUrl: string | null;
+  specialties: string[];
+  languages: string[];
+  modalities: string[];
+  yearsOfExperience: number | null;
+  locationCity: string | null;
+  locationProvince: string | null;
+  sessionFeeInr: number | null;
+  isAcceptingNewClients: boolean;
+}): PublicProfile {
   const { profileFaqs, ...rest } = row;
   return { ...rest, faqs: parseFaqs(profileFaqs) };
+}
+
+/** An uploaded inline photo wins over any external photoUrl. */
+async function withInlinePhoto(profile: PublicProfile): Promise<PublicProfile> {
+  const photo = await prisma.psychologistPhoto.findUnique({
+    where: { psychologistId: profile.id },
+    select: { updatedAt: true },
+  });
+  if (!photo) return profile;
+  return {
+    ...profile,
+    photoUrl: `/api/v1/public/therapists/${profile.publicSlug}/photo?v=${photo.updatedAt.getTime()}`,
+  };
+}
+
+/**
+ * MK2 — the therapist's own page BEFORE publish. Only the owner ever
+ * receives this (the caller must pass the authenticated psychologist's
+ * own id); it renders with a preview banner.
+ */
+export async function loadOwnProfilePreview(
+  slug: string,
+  ownerId: string,
+): Promise<PublicProfile | null> {
+  const row = await prisma.psychologist.findFirst({
+    where: { id: ownerId, publicSlug: slug, deletedAt: null, vertical: 'THERAPIST' },
+    select: {
+      ...DIRECTORY_SELECT,
+      id: true,
+      bio: true,
+      profileFaqs: true,
+      credentialsLine: true,
+      pronouns: true,
+      officeAddress: true,
+    },
+  });
+  if (!row) return null;
+  return withInlinePhoto(toPublicProfile(row));
 }
 
 /** Defensive parse — malformed stored JSON renders as no FAQs, never a 500. */
@@ -102,10 +176,79 @@ export function parseFaqs(raw: unknown): ProfileFaq[] {
 export async function loadWeeklyRules(psychologistId: string): Promise<WeeklyRule[]> {
   const rows = await prisma.availabilityRule.findMany({
     where: { psychologistId },
-    select: { weekday: true, startMinute: true, endMinute: true, slotMinutes: true },
+    select: { weekday: true, startMinute: true, endMinute: true, slotMinutes: true, mode: true },
     orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }],
   });
   return rows;
+}
+
+/**
+ * MK2 — "Next slot: today 5 pm" for directory cards. Batch: three
+ * queries for the whole page, slots derived in-process. Returns a map
+ * psychologistId → next offered slot ISO (or nothing when none).
+ */
+export async function nextSlotByTherapist(ids: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (ids.length === 0) return out;
+  const now = new Date();
+  const to = new Date(now.getTime() + 7 * 24 * 60 * 60_000);
+  const [allRules, appts, sessions] = await Promise.all([
+    prisma.availabilityRule.findMany({
+      where: { psychologistId: { in: ids } },
+      select: {
+        psychologistId: true,
+        weekday: true,
+        startMinute: true,
+        endMinute: true,
+        slotMinutes: true,
+        mode: true,
+      },
+    }),
+    prisma.appointment.findMany({
+      where: {
+        psychologistId: { in: ids },
+        status: { in: ['REQUESTED', 'CONFIRMED'] },
+        startAt: { lt: to },
+        endAt: { gt: now },
+      },
+      select: { psychologistId: true, startAt: true, endAt: true },
+    }),
+    prisma.session.findMany({
+      where: {
+        psychologistId: { in: ids },
+        status: 'SCHEDULED',
+        scheduledAt: { gte: new Date(now.getTime() - SESSION_BLOCK_MINUTES * 60_000), lt: to },
+      },
+      select: { psychologistId: true, scheduledAt: true },
+    }),
+  ]);
+  const rulesBy = new Map<string, WeeklyRule[]>();
+  for (const r of allRules) {
+    rulesBy.set(r.psychologistId, [...(rulesBy.get(r.psychologistId) ?? []), r]);
+  }
+  const busyBy = new Map<string, BusyInterval[]>();
+  for (const a of appts) {
+    busyBy.set(a.psychologistId, [
+      ...(busyBy.get(a.psychologistId) ?? []),
+      { startAt: a.startAt, endAt: a.endAt },
+    ]);
+  }
+  for (const s of sessions) {
+    busyBy.set(s.psychologistId, [
+      ...(busyBy.get(s.psychologistId) ?? []),
+      {
+        startAt: s.scheduledAt,
+        endAt: new Date(s.scheduledAt.getTime() + SESSION_BLOCK_MINUTES * 60_000),
+      },
+    ]);
+  }
+  for (const id of ids) {
+    const rules = rulesBy.get(id);
+    if (!rules?.length) continue;
+    const slots = computeSlots(rules, busyBy.get(id) ?? [], now, 7);
+    if (slots[0]) out.set(id, slots[0].startAt);
+  }
+  return out;
 }
 
 /** How long a SCHEDULED session blocks the calendar (no duration column). */

@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/Badge';
 import { PublicAvatar } from '@/components/public/Avatar';
 import { AppointmentWidget } from '@/components/public/AppointmentWidget';
 import { languageName } from '@/components/public/TherapistCard';
-import { loadPublishedTherapist } from '@/lib/public-profile';
+import { loadOwnProfilePreview, loadPublishedTherapist } from '@/lib/public-profile';
+import { currentPsychologist } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +39,17 @@ export default async function TherapistProfilePage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const t = await loadPublishedTherapist(slug);
+  let t = await loadPublishedTherapist(slug);
+  let isPreview = false;
+  if (!t) {
+    // MK2 — owner preview: the signed-in owner sees their own
+    // unpublished page with a banner; everyone else 404s as before.
+    const me = await currentPsychologist();
+    if (me?.publicSlug === slug) {
+      t = await loadOwnProfilePreview(slug, me.id);
+      isPreview = t !== null;
+    }
+  }
   if (!t) notFound();
 
   const location = [t.locationCity, t.locationProvince].filter(Boolean).join(', ');
@@ -74,6 +85,11 @@ export default async function TherapistProfilePage({
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
       <Container className="py-14">
+        {isPreview && (
+          <p className="mb-6 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] px-5 py-3 text-sm text-[var(--color-warn)]">
+            Preview — only you can see this page. Publish it from the Marketing studio to go live.
+          </p>
+        )}
         <Link
           href="/therapists"
           className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-accent)]"
@@ -86,7 +102,17 @@ export default async function TherapistProfilePage({
             <header className="flex items-start gap-5">
               <PublicAvatar name={t.fullName} photoUrl={t.photoUrl} size={88} />
               <div>
-                <h1 className="font-serif text-3xl">{t.fullName}</h1>
+                <h1 className="font-serif text-3xl">
+                  {t.fullName}
+                  {t.pronouns && (
+                    <span className="ml-2 align-middle text-sm font-normal text-[var(--color-ink-3)]">
+                      {t.pronouns}
+                    </span>
+                  )}
+                </h1>
+                {t.credentialsLine && (
+                  <p className="mt-0.5 text-sm text-[var(--color-ink-2)]">{t.credentialsLine}</p>
+                )}
                 {t.headline && <p className="mt-1 text-[var(--color-ink-2)]">{t.headline}</p>}
                 <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--color-ink-2)]">
                   {location && <span>{location}</span>}
@@ -174,6 +200,7 @@ export default async function TherapistProfilePage({
                   slug={slug}
                   therapistName={t.fullName}
                   acceptingNewClients={t.isAcceptingNewClients}
+                  officeAddress={t.officeAddress}
                 />
               </div>
             </div>

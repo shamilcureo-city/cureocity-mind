@@ -280,6 +280,12 @@ export const AuditActionSchema = z.enum([
   'APPOINTMENT_REQUESTED',
   'APPOINTMENT_CONFIRMED',
   'APPOINTMENT_DECLINED',
+  // MK3–MK5 — lifecycle + AI draft + posts.
+  'APPOINTMENT_CANCELLED',
+  'APPOINTMENT_EXPIRED',
+  'APPOINTMENT_REMINDER_SENT',
+  'PROFILE_AI_DRAFTED',
+  'PROFILE_POST_PUBLISHED',
   // NEXT2 — the reclaim cron marks generations stranded IN_PROGRESS/PENDING
   // (function killed mid-run) as FAILED so the UI offers a re-run instead of
   // an infinite spinner. One row per reclaimed draft/report.
