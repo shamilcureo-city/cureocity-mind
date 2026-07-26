@@ -694,7 +694,7 @@ describe('LiveSession — finalize never duplicates the in-flight window (Batch 
   it('skips the tail when a pump window is STILL transcribing at the deadline', async () => {
     // waitIdle gives up quickly here; in prod its deadline is 15s.
     process.env['LIVE_WAIT_IDLE_MS'] = '150';
-    let release: (() => void) | null = null;
+    let release!: () => void;
     class HangingPass1 implements IPass1Backend {
       private readonly inner = new MockGeminiPass1Backend();
       calls = 0;
@@ -731,7 +731,7 @@ describe('LiveSession — finalize never duplicates the in-flight window (Batch 
     // the running window and re-reading them duplicates the transcript.
     const finalizing = session.finalize();
     await new Promise((r) => setTimeout(r, 400)); // outlast the waitIdle deadline
-    release?.();
+    release();
     await pumping;
     await finalizing;
     delete process.env['LIVE_WAIT_IDLE_MS'];

@@ -49,11 +49,13 @@ describe('assembleRxPad', () => {
     expect(pad.vitalsLine).toBe('BP 148/92 · HR 88');
   });
 
-  it('carries the patient active meds as continued + confirmed', () => {
+  it('carries the patient active meds as continued, PENDING a confirm tap', () => {
+    // Batch B — a repeat prescription is still a prescription. Continued rows
+    // used to land `confirmed`, reissuing standing meds nobody looked at.
     const pad = assembleRxPad(input({ patient: patient({ activeMeds: ['Amlodipine 5 mg'] }) }));
     const amlo = pad.meds.find((m) => m.drug.toLowerCase().startsWith('amlodipine'));
     expect(amlo?.continued).toBe(true);
-    expect(amlo?.status).toBe('confirmed');
+    expect(amlo?.status).toBe('pending');
   });
 
   it('lands drafted note meds as pending (confirm-first) with warnings', () => {
@@ -131,5 +133,62 @@ describe('assembleRxPad', () => {
   it('surfaces the patient allergies', () => {
     const pad = assembleRxPad(input({ patient: patient({ allergies: ['penicillin'] }) }));
     expect(pad.allergies).toEqual(['penicillin']);
+  });
+});
+
+describe('assembleRxPad — Batch B safety', () => {
+  it('lets a spoken dose change SUPERSEDE a continued med instead of vanishing', () => {
+    // The doctor says "make her metformin one gram". The old assembler saw a
+    // duplicate first-word key and dropped the new instruction on the floor,
+    // leaving the slip printing the old 500mg.
+    const voiceCommands: VoiceCommand[] = [
+      {
+        kind: 'ADD_MEDICATION',
+        raw: 'metformin 1 g BD',
+        drug: 'Metformin',
+        strength: '1 g',
+        frequency: 'BD',
+      },
+    ];
+    const pad = assembleRxPad(
+      input({ patient: patient({ activeMeds: ['Metformin 500 mg BD'] }), voiceCommands }),
+    );
+    const rows = pad.meds.filter((m) => m.drug.toLowerCase().includes('metformin'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.strength).toBe('1 g');
+    expect(rows[0]!.status).toBe('pending'); // the change needs a deliberate confirm
+    expect(rows[0]!.continued).toBe(true); // still a change to a standing med
+    expect(rows[0]!.previous).toBe('Metformin 500 mg BD');
+  });
+
+  it('keeps two multi-word generics that share a first word', () => {
+    const pad = assembleRxPad(
+      input({
+        patient: patient({ activeMeds: ['Insulin glargine 10 U HS', 'Insulin aspart 6 U TDS'] }),
+      }),
+    );
+    expect(pad.meds.filter((m) => m.drug.toLowerCase().startsWith('insulin'))).toHaveLength(2);
+  });
+
+  it('flags a prescribed drug against the recorded allergy, on the row itself', () => {
+    const pad = assembleRxPad(
+      input({
+        patient: patient({ allergies: ['Penicillin'] }),
+        medications: [med({ drug: 'Amoxicillin', strength: '500 mg' })],
+      }),
+    );
+    const amox = pad.meds.find((m) => m.drug === 'Amoxicillin');
+    expect(amox?.warnings.some((w) => w.includes('DO NOT PRESCRIBE'))).toBe(true);
+  });
+
+  it('stays quiet when the prescription and the allergies do not conflict', () => {
+    const pad = assembleRxPad(
+      input({
+        patient: patient({ allergies: ['Penicillin'] }),
+        medications: [med({ drug: 'Azithromycin', strength: '500 mg' })],
+      }),
+    );
+    const azi = pad.meds.find((m) => m.drug === 'Azithromycin');
+    expect(azi?.warnings).toEqual([]);
   });
 });

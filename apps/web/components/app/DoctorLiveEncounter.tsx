@@ -17,6 +17,7 @@ import {
   type Utterance,
   type VoiceCommand,
 } from '@cureocity/contracts';
+import { drugNameKey } from '@cureocity/clinical';
 import { useRouter } from 'next/navigation';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { GatewayMockBanner } from './GatewayMockBanner';
@@ -195,7 +196,7 @@ export function DoctorLiveEncounter({
   const noteRef = useRef<PartialStructuredNote>({});
   noteRef.current = note;
   /** The live token + server context, reused across reconnect attempts. */
-  const startArgsRef = useRef<{ token?: string; activeMeds?: string[] }>({});
+  const startArgsRef = useRef<{ token?: string; activeMeds?: string[]; allergies?: string[] }>({});
 
   const live = phase === 'listening' || phase === 'finalizing';
 
@@ -302,11 +303,7 @@ export function DoctorLiveEncounter({
   // Sprint DS5 — confirm a pending Rx row (confirm-first). The overlay
   // survives the gateway's idempotent re-emits + is audited.
   function confirmMed(drug: string): void {
-    const key =
-      drug
-        .replace(/^\s*\[mock\]\s*/i, '')
-        .toLowerCase()
-        .split(/\s+/)[0] ?? drug;
+    const key = medKey(drug);
     setConfirmedDrugs((prev) => {
       const next = new Set(prev).add(key);
       confirmedRef.current = next;
@@ -598,19 +595,24 @@ export function DoctorLiveEncounter({
       if (r.ok) {
         const body = (await r.json()) as {
           token?: string;
-          patientContext?: { activeMeds?: string[] };
+          patientContext?: { activeMeds?: string[]; allergies?: string[] };
         };
         startArgsRef.current = {
           ...(body.token ? { token: body.token } : {}),
           ...(body.patientContext?.activeMeds?.length
             ? { activeMeds: body.patientContext.activeMeds }
             : {}),
+          // Batch B — the recorded drug allergies the gateway checks the
+          // prescription against. Absent ⇒ nothing recorded (NOT "none").
+          ...(body.patientContext?.allergies?.length
+            ? { allergies: body.patientContext.allergies }
+            : {}),
         };
       }
     } catch {
       /* dev gateway runs open; on a reconnect we fall back to the last args */
     }
-    const { token, activeMeds } = startArgsRef.current;
+    const { token, activeMeds, allergies } = startArgsRef.current;
 
     let ws: WebSocket;
     try {
@@ -642,6 +644,7 @@ export function DoctorLiveEncounter({
           context: {
             ...(patient?.age != null ? { age: patient.age } : {}),
             ...(activeMeds?.length ? { activeMeds } : {}),
+            ...(allergies?.length ? { allergies } : {}),
           },
           ...(replay.length > 0 ? { resume: { utterances: replay } } : {}),
         }),
@@ -1813,11 +1816,23 @@ function RxPadPanel({
                           🗣
                         </button>
                       )}
-                      {m.continued ? (
+                      {/* Batch B — `continued` is now a BADGE, not a substitute
+                          for the confirm control: a repeat prescription still
+                          needs a deliberate tap before it prints. */}
+                      {m.continued && (
                         <span className="shrink-0 rounded-full bg-[var(--color-surface-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
                           continued
                         </span>
-                      ) : confirmed ? (
+                      )}
+                      {m.previous && (
+                        <span
+                          className="shrink-0 text-[11px] text-[var(--color-ink-3)] line-through"
+                          title="Replaced by the change you dictated"
+                        >
+                          {clean(m.previous) ?? m.previous}
+                        </span>
+                      )}
+                      {confirmed ? (
                         <span className="shrink-0 text-[11px] font-semibold text-[var(--color-accent)]">
                           ✓ confirmed
                         </span>
@@ -2571,9 +2586,12 @@ function clean(s?: string): string | undefined {
 
 // Sprint DS5 — dedup key for a drug (first significant word, lowercased).
 function medKey(drug: string): string {
-  // DS11.5 — key on the FULL normalised drug string, not the first word:
-  // "Amoxicillin 500" and "Amoxicillin-clavulanate" must not collide.
-  return drug.replace(MOCK_TAG, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  // Batch B — the ONE shared drug key (@cureocity/clinical). This used to be
+  // the full normalised string while `confirmMed` keyed on the first word, so
+  // the two never matched: tapping Confirm on "Amoxicillin 500mg TDS" stored
+  // "amoxicillin" and the row asked for "amoxicillin 500mg tds" — the confirm
+  // silently did nothing on every med that carried a dose.
+  return drugNameKey(drug);
 }
 
 // Sprint DS5 — fold the doctor's confirmations into the final pad so the

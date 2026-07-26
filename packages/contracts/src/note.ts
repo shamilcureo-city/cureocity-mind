@@ -451,6 +451,20 @@ export const SignNoteInputSchema = z.object({
    * persisted on the TherapyNote row.
    */
   assertion: WebAuthnAssertionSchema.optional(),
+  /**
+   * Batch B — the prescriber is signing PAST a hard prescription-safety
+   * blocker (a drug that conflicts with a recorded allergy). There are
+   * legitimate reasons — a mislabeled allergy, a desensitised patient, a
+   * deliberate risk/benefit call — so this is an override with a recorded
+   * reason, not a locked door. Present ⇒ the sign route writes an
+   * RX_SAFETY_OVERRIDE audit row alongside the signature.
+   */
+  safetyOverride: z
+    .object({
+      reason: z.string().min(3).max(2000),
+      blockers: z.array(z.string()).max(50).default([]),
+    })
+    .optional(),
 });
 export type SignNoteInput = z.infer<typeof SignNoteInputSchema>;
 

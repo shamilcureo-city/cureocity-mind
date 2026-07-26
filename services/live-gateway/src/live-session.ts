@@ -18,7 +18,9 @@ import type {
 } from '@cureocity/contracts';
 import type { SpeakerSegment } from '@cureocity/llm';
 import {
+  checkAllergies,
   checkInteractions,
+  formatAllergyAlert,
   formatInteraction,
   parseVoiceCommands,
   resolveSpecialtyTemplate,
@@ -917,6 +919,33 @@ export class LiveSession {
         gap: {
           kind: 'DRUG_INTERACTION',
           severity: interactionSeverity(interaction.severity),
+          message,
+        },
+      });
+    }
+    // Batch B — ALLERGY check. The pad has always printed the patient's
+    // allergy list; nothing ever compared it to what was being prescribed.
+    // Check everything about to be handed over — drafted meds AND meds the
+    // doctor spoke — against the recorded allergies, and raise it as a
+    // RED_FLAG so it reaches the before-you-close gate like any other.
+    const spokenMeds = this.voiceCommands.flatMap((c) =>
+      c.kind === 'ADD_MEDICATION' ? [c.drug] : [],
+    );
+    const allergyAlerts = checkAllergies(
+      [...draftedMeds, ...spokenMeds],
+      this.caseStore.snapshot.patient.allergies,
+    );
+    for (const alert of allergyAlerts) {
+      const message = formatAllergyAlert(alert);
+      if (this.seenGaps.has(message)) continue;
+      this.seenGaps.add(message);
+      this.emit({
+        type: 'gap',
+        gap: {
+          kind: 'RED_FLAG',
+          // A hard contraindication is critical (it gates the close); a
+          // graded cross-reactivity risk is a warning the doctor judges.
+          severity: alert.severity === 'contraindicated' ? 'critical' : 'warn',
           message,
         },
       });

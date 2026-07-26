@@ -3,7 +3,7 @@ import type { SessionConsentSnapshot } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { signLiveToken } from '@/lib/live-token';
-import { fetchActiveMedications } from '@/lib/patient-context';
+import { fetchActiveMedications, fetchAllergies } from '@/lib/patient-context';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -159,13 +159,17 @@ export async function POST(
   // seed the live CaseState. The gateway's drug-interaction engine then sees
   // the standing regimen (a prior warfarin) against anything prescribed today
   // (ibuprofen) — the cross-visit safety check the "{age}-only" context missed.
-  const activeMeds = await fetchActiveMedications(session.clientId, {
-    excludeSessionId: sessionId,
-  });
+  // Batch B — the allergy list rides along too. `PatientContext.allergies` has
+  // existed since DS1 and the Rx pad has always printed it, but nothing ever
+  // filled it: the live consult's allergy check had no data to check against.
+  const [activeMeds, allergies] = await Promise.all([
+    fetchActiveMedications(session.clientId, { excludeSessionId: sessionId }),
+    fetchAllergies(session.clientId),
+  ]);
 
   return NextResponse.json({
     token,
     expiresInSec,
-    patientContext: { activeMeds },
+    patientContext: { activeMeds, allergies },
   });
 }

@@ -59,6 +59,18 @@ export function ReviewAndSign({
   const [hasRx, setHasRx] = useState(false);
   const [rxShareUrl, setRxShareUrl] = useState<string | null>(null);
   const [rxSharing, setRxSharing] = useState(false);
+  // Batch B — prescription-safety gate. `hard` = a drug that conflicts with a
+  // recorded allergy (overridable with a recorded reason); `soft` = med rows
+  // still awaiting a confirm tap (cleared by confirming or removing them).
+  const [blockers, setBlockers] = useState<{ hard: string[]; soft: string[] }>({
+    hard: [],
+    soft: [],
+  });
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const overriding = blockers.hard.length > 0;
+  const blocked =
+    !signed && (blockers.soft.length > 0 || (overriding && overrideReason.trim().length < 3));
 
   // Sign-off. A doctor with a registered WebAuthn credential is required
   // to assert (same rule as the therapist sign route). The note is signed
@@ -77,6 +89,12 @@ export function ReviewAndSign({
         note,
         edits: [],
         signedAt: new Date().toISOString(),
+        // Batch B — signing past a drug-allergy contraindication is allowed,
+        // but never silent: the reason rides along and lands one
+        // RX_SAFETY_OVERRIDE audit row atomic with the signature.
+        ...(overriding && overrideReason.trim()
+          ? { safetyOverride: { reason: overrideReason.trim(), blockers: blockers.hard } }
+          : {}),
       });
       if (res.status === 409) {
         setSigned(true); // already signed in a previous visit
@@ -176,10 +194,77 @@ export function ReviewAndSign({
         </Card>
       )}
       {/* Sprint DS10-B — two plans, one sign-off. */}
-      <PlanComposer sessionId={sessionId} signed={signed} onPadChange={setHasRx} />
+      <PlanComposer
+        sessionId={sessionId}
+        signed={signed}
+        onPadChange={setHasRx}
+        onSignBlockers={setBlockers}
+      />
       <EncounterDifferentialPanel sessionId={sessionId} />
       <EncounterOrdersPanel sessionId={sessionId} />
       <EncounterInteropPanel sessionId={sessionId} />
+
+      {/* Batch B — the prescription-safety gate. A signature is a clinical
+          act; it must not be the step where an allergy conflict or an
+          unconfirmed drug slips through. */}
+      {!signed && (blockers.hard.length > 0 || blockers.soft.length > 0) && (
+        <Card className="border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-5 text-sm">
+          {blockers.hard.length > 0 && (
+            <div className="text-[var(--color-warn)]">
+              <strong className="block">
+                This prescription conflicts with a recorded allergy.
+              </strong>
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                {blockers.hard.map((b) => (
+                  <li key={b}>{b}</li>
+                ))}
+              </ul>
+              <p className="mt-2">
+                Remove or change the drug, or — if this is deliberate (a mislabeled allergy, a
+                desensitised patient, a considered risk/benefit call) — record why. Your reason is
+                stored with the signature.
+              </p>
+              {overrideOpen ? (
+                <label className="mt-3 block">
+                  <span className="text-xs font-medium uppercase tracking-wide">
+                    Reason for prescribing anyway
+                  </span>
+                  <textarea
+                    value={overrideReason}
+                    onChange={(e) => setOverrideReason(e.target.value)}
+                    rows={2}
+                    className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-white p-2 text-sm text-[var(--color-ink)]"
+                    placeholder="e.g. Allergy label is a childhood GI upset, not a true hypersensitivity — discussed with patient."
+                  />
+                </label>
+              ) : (
+                <Button
+                  variant="secondary"
+                  className="mt-3"
+                  onClick={() => setOverrideOpen(true)}
+                  type="button"
+                >
+                  Prescribe anyway — record my reason
+                </Button>
+              )}
+            </div>
+          )}
+          {blockers.soft.length > 0 && (
+            <div className={blockers.hard.length > 0 ? 'mt-4 text-[var(--color-ink-2)]' : ''}>
+              <strong className="block text-[var(--color-ink)]">
+                {blockers.soft.length === 1
+                  ? '1 prescription line is not confirmed yet.'
+                  : `${blockers.soft.length} prescription lines are not confirmed yet.`}
+              </strong>
+              <p className="mt-1">
+                Confirm or remove {blockers.soft.join(', ')} in the plan above. Nothing is
+                prescribed until you confirm it.
+              </p>
+            </div>
+          )}
+        </Card>
+      )}
+
       <div className="flex flex-wrap items-center justify-end gap-3">
         {signed ? (
           <>
@@ -232,8 +317,8 @@ export function ReviewAndSign({
             )}
           </>
         ) : (
-          <Button onClick={() => void sign()} disabled={signing}>
-            {signing ? 'Signing…' : 'Confirm & sign'}
+          <Button onClick={() => void sign()} disabled={signing || blocked}>
+            {signing ? 'Signing…' : overriding ? 'Sign with recorded reason' : 'Confirm & sign'}
           </Button>
         )}
       </div>

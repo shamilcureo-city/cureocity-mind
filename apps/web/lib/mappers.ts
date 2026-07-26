@@ -60,6 +60,7 @@ export async function toClient(row: ClientRow): Promise<Client> {
     preferredModality: row.preferredModality as Client['preferredModality'],
     preferredLanguage: row.preferredLanguage,
     spokenLanguages: row.spokenLanguages,
+    allergies: row.allergies,
     status: row.status,
     isDemo: row.isDemo,
     createdAt: row.createdAt.toISOString(),

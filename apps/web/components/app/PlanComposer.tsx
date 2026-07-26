@@ -38,6 +38,7 @@ export function PlanComposer({
   sessionId,
   signed,
   onPadChange,
+  onSignBlockers,
 }: {
   sessionId: string;
   signed: boolean;
@@ -46,6 +47,13 @@ export function PlanComposer({
    *  prescription sheet is also where investigations + advice go, so a
    *  meds-free "EEG, MRI, review with reports" pad is still a real Rx. */
   onPadChange?: (hasContent: boolean) => void;
+  /**
+   * Batch B — prescription-safety blockers on the current pad, recomputed
+   * whenever it changes. `hard` blocks the signature until it is confirmed
+   * or overridden with a reason; `soft` is a list the doctor must clear by
+   * confirming or removing the rows.
+   */
+  onSignBlockers?: (blockers: { hard: string[]; soft: string[] }) => void;
 }) {
   const [pad, setPad] = useState<RxPadDraft | null>(null);
   const [padLoaded, setPadLoaded] = useState(false);
@@ -55,6 +63,8 @@ export function PlanComposer({
   const [error, setError] = useState<string | null>(null);
   const onPadChangeRef = useRef(onPadChange);
   onPadChangeRef.current = onPadChange;
+  const onSignBlockersRef = useRef(onSignBlockers);
+  onSignBlockersRef.current = onSignBlockers;
 
   const setPadAndNotify = useCallback((next: RxPadDraft | null) => {
     setPad(next);
@@ -64,6 +74,7 @@ export function PlanComposer({
         (next?.adviceLines ?? []).length > 0 ||
         Boolean(next?.followUp?.when),
     );
+    onSignBlockersRef.current?.(signBlockersFor(next));
   }, []);
 
   // Load the draft pad once.
@@ -309,6 +320,13 @@ export function PlanComposer({
                     {m.source === 'ai' && <Badge tone="accent">AI · adopted</Badge>}
                     {m.source === 'manual' && <Badge tone="muted">added</Badge>}
                     {m.continued && <Badge tone="muted">continued</Badge>}
+                    {/* Batch B — a dictated dose change to a standing med shows
+                        what it replaced, so the change is visible not silent. */}
+                    {m.previous && (
+                      <span className="text-xs text-[var(--color-ink-3)] line-through">
+                        {m.previous}
+                      </span>
+                    )}
                     <span className="ml-auto flex items-center gap-2">
                       {m.status === 'confirmed' ? (
                         <Badge tone="accent">✓ confirmed</Badge>
@@ -834,4 +852,27 @@ function ManualAdd({
       </div>
     </form>
   );
+}
+
+/**
+ * Batch B — what on this pad should stop a signature.
+ *
+ *  • HARD — a med row carrying an allergy contraindication. The server
+ *    recomputes these warnings on every pad write (rx-pad route), so they
+ *    cannot be forged client-side. Crossing this needs a recorded reason.
+ *  • SOFT — a med row still `pending`. Confirm-first is the whole safety
+ *    model of the pad; signing with unconfirmed rows would print drugs
+ *    nobody agreed to. Cleared by a tap, so no override is offered.
+ */
+export function signBlockersFor(pad: RxPadDraft | null): { hard: string[]; soft: string[] } {
+  const meds = pad?.meds ?? [];
+  const hard: string[] = [];
+  const soft: string[] = [];
+  for (const m of meds) {
+    if (m.warnings.some((w) => w.includes('DO NOT PRESCRIBE'))) {
+      hard.push(`${m.drug} conflicts with a recorded allergy`);
+    }
+    if (m.status === 'pending') soft.push(m.drug);
+  }
+  return { hard, soft };
 }

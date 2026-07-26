@@ -67,6 +67,13 @@ export const CreateClientInputSchema = z.object({
     )
     .max(5)
     .optional(),
+  /**
+   * Batch B — recorded drug allergies, one free-text entry per allergen
+   * ("Penicillin", "Sulfa drugs", "Ibuprofen — rash"). Read by the Rx pad's
+   * allergy checker. An EMPTY array means "not recorded", which the UI must
+   * never present as "no known allergies".
+   */
+  allergies: z.array(z.string().min(1).max(120)).max(30).optional(),
   consents: z
     .array(ConsentInputSchema)
     .min(1, 'At least one consent (typically AUDIO_RECORDING) is required when creating a client')
@@ -98,6 +105,8 @@ export const UpdateClientInputSchema = z
           .regex(/^[a-z]{2}(-[A-Z]{2})?$/),
       )
       .max(5),
+    /// Batch B — recorded drug allergies (see CreateClientInputSchema).
+    allergies: z.array(z.string().min(1).max(120)).max(30),
     status: ClientStatusSchema,
   })
   .partial()
@@ -116,6 +125,8 @@ export const ClientSchema = z.object({
   preferredLanguage: z.string().default('en'),
   /** ISO 639-1 codes, may be empty. */
   spokenLanguages: z.array(z.string()).default([]),
+  /** Batch B — recorded drug allergies; empty = NOT RECORDED, not "none". */
+  allergies: z.array(z.string()).default([]),
   status: ClientStatusSchema,
   /**
    * Sprint 48 — true for the seeded "Example" showcase client. Badged

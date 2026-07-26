@@ -94,6 +94,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
         ...(dto.value.preferredLanguage !== undefined && {
           preferredLanguage: dto.value.preferredLanguage,
         }),
+        ...(dto.value.allergies !== undefined && { allergies: dto.value.allergies }),
         ...(dto.value.spokenLanguages !== undefined && {
           spokenLanguages: dto.value.spokenLanguages,
         }),

@@ -255,6 +255,12 @@ export const AuditActionSchema = z.enum([
   // the apply taps land RX_PAD_EDITED rows). Metadata: { sessionId,
   // editCount, clarificationCount, costInr }.
   'PLAN_DICTATION_PROPOSED',
+  // Doctor vertical — Batch B. The prescriber signed PAST a hard
+  // prescription-safety blocker (a drug that conflicts with a recorded
+  // allergy), with a recorded reason. Metadata: { sessionId, reason,
+  // blockers }. The one place the allergy gate can be crossed — and it
+  // leaves a trail.
+  'RX_SAFETY_OVERRIDE',
   // The Session Loop (SL1) — formulation versioning, session agreements,
   // one-tap alliance feedback.
   'FORMULATION_CONFIRMED',

@@ -26,6 +26,12 @@ export interface SignNoteBody {
   note: unknown;
   edits: unknown[];
   signedAt: string;
+  /**
+   * Batch B — set when the prescriber is signing PAST a drug-allergy
+   * contraindication. The route writes an RX_SAFETY_OVERRIDE audit row
+   * atomic with the signature.
+   */
+  safetyOverride?: { reason: string; blockers: string[] };
 }
 
 async function postOnce(sessionId: string, body: unknown): Promise<Response> {

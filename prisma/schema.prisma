@@ -413,6 +413,16 @@ model Client {
   presentingConcerns String?
   preferredModality  String?
 
+  /// Doctor vertical — Batch B. Recorded drug allergies, one free-text entry
+  /// per allergen ("Penicillin", "Sulfa drugs", "Ibuprofen — rash"). The Rx
+  /// pad has always PRINTED an allergy list and the interaction rail has
+  /// always had a slot for it, but nothing ever populated either: there was
+  /// no field to record an allergy in. This is that field, and it is what the
+  /// drug-allergy checker (packages/clinical/src/allergies.ts) reads.
+  /// Empty array = "not recorded", which is NOT the same as "no allergies" —
+  /// the UI says so explicitly rather than implying a clearance.
+  allergies String[] @default([])
+
   /// Sprint TSC — questions the therapist ticked on the copilot decision
   /// board to carry into the NEXT session. JSON array of
   /// { question, rationale, sourceSessionId, carriedAt }. Replaced wholesale
@@ -2841,6 +2851,9 @@ enum AuditAction {
   LIVE_SUGGESTION_AUTORESOLVED
   // Doctor vertical — Sprint DS10-B. Plan composer edited the draft Rx pad.
   RX_PAD_EDITED
+  // Doctor vertical — Batch B. Signed past a hard prescription-safety
+  // blocker (allergy contraindication) with a recorded reason.
+  RX_SAFETY_OVERRIDE
   // NEXT2 — reclaim cron flipped a stranded generation to FAILED.
   STUCK_GENERATION_RECLAIMED
   // NEXT3 — daily unsigned-note digest email sent to a therapist.

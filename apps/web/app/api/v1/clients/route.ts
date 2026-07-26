@@ -102,6 +102,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ...(body.value.preferredLanguage !== undefined && {
           preferredLanguage: body.value.preferredLanguage,
         }),
+        ...(body.value.allergies !== undefined && { allergies: body.value.allergies }),
         ...(body.value.spokenLanguages !== undefined && {
           spokenLanguages: body.value.spokenLanguages,
         }),
