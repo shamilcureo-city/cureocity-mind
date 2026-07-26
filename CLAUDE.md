@@ -357,6 +357,15 @@ cutoff. **Never edit an already-applied migration** to fix it — that changes
 its Prisma checksum and trips drift detection. Fix it forward in a new,
 guarded migration instead.
 
+**Migration SQL must use the MAPPED table name, not the model name.** Most
+core models carry `@@map` (`Psychologist` → `"psychologists"`, `Session` →
+`"sessions"`, `Client` → `"clients"`, …). `ALTER TABLE "Psychologist"` fails
+with 42P01 on prod and P3009-wedges every later deploy — this has now bitten
+TWO separate sessions (the doctor-scribe batches and Marketing V1, 2026-07).
+Check the model's `@@map` before writing DDL; index names follow the mapped
+name too (`psychologists_publicSlug_key`). Newer models without `@@map`
+(e.g. `Appointment`, `AvailabilityRule`) use the model name as-is.
+
 ### Mappers
 
 Prisma row → DTO conversion lives in `apps/web/lib/mappers.ts` (legacy
