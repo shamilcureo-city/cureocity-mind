@@ -295,6 +295,13 @@ Journey / reliable-change engine.
 - Any new live copilot suggestion needs its lifecycle audit written via the
   `live-suggestion` route (four literal `writeAudit` calls) or the
   audit-coverage chaos test breaks.
+- **DS13 streaming display rail is OFF by default** (`LIVE_STREAM_TRANSCRIPT=true`
+  enables; `services/live-gateway/src/stream-transcript.ts`). It is
+  DISPLAY-ONLY — `partialTranscript` events must never feed utterances,
+  reasoning, the Rx pad, or persistence. Before enabling anywhere, run
+  `scripts/doctor-live-transcript-probe.mjs` (region/model check) — the
+  probe-confirmed Vertex Live models run OUTSIDE India (us-central1), so
+  enabling is a DPDP/cross-border decision, not just an env var.
 
 ## 4. Conventions to follow
 

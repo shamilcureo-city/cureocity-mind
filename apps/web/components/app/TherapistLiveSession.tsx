@@ -40,6 +40,7 @@ import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { GatewayMockBanner } from './GatewayMockBanner';
 import { TherapyCopilotRail } from './TherapyCopilotRail';
 
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
@@ -640,6 +641,7 @@ export function TherapistLiveSession({
 
   return (
     <div className="space-y-4">
+      <GatewayMockBanner />
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-serif text-2xl">{clientName || 'Live session'}</h1>

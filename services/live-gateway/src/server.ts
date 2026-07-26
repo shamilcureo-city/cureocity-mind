@@ -11,6 +11,7 @@ import { buildBackends } from './llm';
 import { LiveSession } from './live-session';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
 import { initSentry } from './sentry';
+import { makeStreamTranscriber } from './stream-transcript';
 import { ledgerFromEnv } from './tenant-spend';
 import { windowOptionsFromEnv } from './vad';
 
@@ -210,6 +211,21 @@ wss.on('connection', (ws, req) => {
         cmd.modality ?? null,
         cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
       );
+      // Sprint DS13 — the flag-gated streaming display rail (doctor path
+      // only for now). Failures degrade to "provisional line stops
+      // updating"; the windowed pipeline is untouched.
+      if ((cmd.vertical ?? 'DOCTOR') === 'DOCTOR') {
+        const forSession = session;
+        const transcriber = makeStreamTranscriber({
+          sessionId: cmd.sessionId ?? 'live',
+          env: process.env,
+          onPartial: (fragment) => forSession.handleStreamPartial(fragment),
+        });
+        if (transcriber) {
+          forSession.attachStreamTranscriber(transcriber);
+          transcriber.start();
+        }
+      }
       session.start();
       started = true;
       armIdle(IDLE_TIMEOUT_MS);
