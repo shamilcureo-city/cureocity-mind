@@ -59,10 +59,34 @@ export async function POST(
       status: true,
       language: true,
       psychologist: { select: { vertical: true, specialty: true } },
+      // Batch C — the signed-note guard needs to know whether a signature
+      // already exists for this session.
+      therapyNote: { select: { signedAt: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  }
+
+  // Batch C — REFUSE to overwrite the draft behind a SIGNED note.
+  //
+  // This route upserts NoteDraft.content by sessionId with no regard for
+  // whether the encounter was already signed. A late `final` from a stale
+  // socket, a re-opened tab, a doctor pressing End twice, or the Batch A
+  // salvage path firing after a signature would each silently replace the
+  // clinical record a doctor had already attested to — and the signature's
+  // payload hash would no longer match the stored draft. A signed encounter
+  // is closed; corrections go through the post-sign revision path
+  // (/note/edit), which versions them and records who changed what.
+  if (session.therapyNote?.signedAt != null) {
+    return NextResponse.json(
+      {
+        error:
+          'This encounter is already signed — its note can no longer be replaced. ' +
+          'Open the encounter to record a correction instead.',
+      },
+      { status: 409 },
+    );
   }
 
   // Sprint TS1 — therapist live scribe: persist the TherapyNoteV1 / IntakeNoteV1

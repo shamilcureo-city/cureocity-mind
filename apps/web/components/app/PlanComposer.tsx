@@ -317,7 +317,12 @@ export function PlanComposer({
                       {[m.strength, m.dose, m.frequency, m.timing].filter(Boolean).join(' · ')}
                       {m.durationDays ? ` · ${m.durationDays} days` : ''}
                     </span>
-                    {m.source === 'ai' && <Badge tone="accent">AI · adopted</Badge>}
+                    {/* Batch C — provenance on every row. "AI" covers both an
+                        adopted suggestion and a Pass-2 draft: either way the
+                        model wrote it, not the doctor. "Heard" means it was
+                        spoken in the consult. */}
+                    {m.source === 'ai' && <Badge tone="accent">AI</Badge>}
+                    {m.source === 'dictated' && <Badge tone="muted">heard</Badge>}
                     {m.source === 'manual' && <Badge tone="muted">added</Badge>}
                     {m.continued && <Badge tone="muted">continued</Badge>}
                     {/* Batch B — a dictated dose change to a standing med shows

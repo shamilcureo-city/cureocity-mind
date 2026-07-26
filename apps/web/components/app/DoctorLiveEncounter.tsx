@@ -336,7 +336,11 @@ export function DoctorLiveEncounter({
           ...(transcript ? { transcript } : {}),
         }),
       });
-      setSaveState(res.ok ? 'saved' : 'error');
+      // Batch C — 409 means the encounter is already signed, so the route
+      // refused to replace the attested note. That is the correct outcome,
+      // not a failure: nothing was lost, and telling the doctor "couldn't
+      // save" would be wrong.
+      setSaveState(res.ok || res.status === 409 ? 'saved' : 'error');
     } catch {
       setSaveState('error');
     }

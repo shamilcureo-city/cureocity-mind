@@ -115,6 +115,10 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
       continued: false,
       status: 'pending',
       warnings: [],
+      // Batch C — provenance. A HEARD row is anchored to a real utterance;
+      // the badge + the 🗣 chip let the doctor tell it apart at a glance from
+      // one the model wrote unprompted.
+      source: 'dictated',
       ...(cmd.utteranceId ? { utteranceId: cmd.utteranceId } : {}),
     });
   }
@@ -132,6 +136,12 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
       continued: false,
       status: 'pending',
       warnings: m.interactionWarnings ?? [],
+      // Batch C — an AI-DRAFTED med has no spoken instruction behind it: the
+      // model inferred it from the consult. Gateway rows used to carry no
+      // provenance at all, so these were visually identical to something the
+      // doctor actually said. Badge them, so the rows that need scrutiny are
+      // the ones that look like they need scrutiny.
+      source: 'ai',
     });
   }
 
