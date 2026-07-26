@@ -43,6 +43,52 @@ const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localho
 
 type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'error';
 
+// ============================================================================
+// Batch A — "never lose a consult".
+//
+// The gateway holds the ONLY copy of a consult's audio pipeline state until it
+// emits `final`. Before this, a dropped socket mid-consult was silent and
+// total: the screen still said REC, the mic stayed hot, every frame went to
+// /dev/null, and nothing was ever persisted. These constants govern the
+// recovery path — buffer the mic, retry with backoff, replay the transcript
+// the browser already holds, and if recovery genuinely fails, SALVAGE what is
+// on screen into a draft rather than dropping the encounter on the floor.
+// ============================================================================
+
+/** 16 kHz × 16-bit mono = 32 kB/s. ~120s of audio held across an outage. */
+const MAX_AUDIO_QUEUE_BYTES = 32_000 * 120;
+/** Stop handing frames to a socket whose send buffer is already backed up. */
+const MAX_WS_BUFFERED_BYTES = 2_000_000;
+/** Backoff schedule for reconnect attempts (ms). Total ≈ 45s of trying. */
+const RECONNECT_DELAYS_MS = [400, 1_000, 2_000, 4_000, 6_000, 8_000, 8_000, 8_000, 8_000];
+/**
+ * How long "Finishing…" may last before we tell the doctor it failed. Must
+ * exceed the gateway's own finalize budget (LIVE_FINALIZE_BUDGET_MS, 55s) so
+ * the gateway's graceful fallback note wins the race instead of this bail.
+ */
+const FINALIZE_TIMEOUT_MS = 90_000;
+
+/** Live socket health, shown honestly on the capture bar. */
+type ConnState = 'ok' | 'reconnecting' | 'lost';
+
+/**
+ * Batch A — the empty note a salvaged consult is built on. The gateway's
+ * interim `note` events are PARTIALS; a draft has to be a whole
+ * MedicalEncounterNoteV1, and the guarded exam must stay "not examined".
+ */
+const NOTE_DEFAULTS: MedicalEncounterNoteV1 = {
+  version: 'V1',
+  encounterKind: 'NEW_OPD',
+  chiefComplaint: '',
+  hpi: '',
+  reviewOfSystems: [],
+  physicalExam: { examined: false, findings: '' },
+  vitals: {},
+  assessment: '',
+  plan: '',
+  linkedEvidence: [],
+};
+
 // Sprint DS6 — a critical item that gates the close: a red flag /
 // contraindicated interaction (`RED_FLAG`) or an urgent differential
 // (`DIFFERENTIAL`). Its `key` matches the acted-items + audit key.
@@ -133,6 +179,23 @@ export function DoctorLiveEncounter({
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  // Batch A — socket health, surfaced on the capture bar instead of a screen
+  // that keeps saying REC while nothing is being heard.
+  const [connState, setConnState] = useState<ConnState>('ok');
+  const reconnectAttemptRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Set whenever WE close the socket (stop / unmount / mic failure). */
+  const intentionalCloseRef = useRef(false);
+  /** Set once `final` lands — a close after that is expected, not a drop. */
+  const finalHandledRef = useRef(false);
+  /** Mirror of `phase` readable from the (stale) socket-handler closures. */
+  const phaseRef = useRef<Phase>('idle');
+  phaseRef.current = phase;
+  /** Mirror of the live partial note, so a salvage can build a draft from it. */
+  const noteRef = useRef<PartialStructuredNote>({});
+  noteRef.current = note;
+  /** The live token + server context, reused across reconnect attempts. */
+  const startArgsRef = useRef<{ token?: string; activeMeds?: string[] }>({});
 
   const live = phase === 'listening' || phase === 'finalizing';
 
@@ -142,6 +205,45 @@ export function DoctorLiveEncounter({
     const t = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => clearInterval(t);
   }, [phase]);
+
+  // Batch A — hold a screen wake lock for the length of the consult. A doctor
+  // puts the phone/tablet down between questions; when the screen sleeps the
+  // page is frozen or discarded, the socket dies, and the consult is gone.
+  // Best-effort: unsupported browsers (Safari < 16.4, Firefox) just skip it,
+  // and the lock is re-taken when the tab comes back to the foreground.
+  useEffect(() => {
+    if (!live) return;
+    type WakeLockSentinel = { released: boolean; release: () => Promise<void> };
+    const nav = navigator as Navigator & {
+      wakeLock?: { request: (t: 'screen') => Promise<WakeLockSentinel> };
+    };
+    if (!nav.wakeLock) return;
+    let sentinel: WakeLockSentinel | null = null;
+    let cancelled = false;
+    const acquire = async (): Promise<void> => {
+      try {
+        const s = await nav.wakeLock!.request('screen');
+        if (cancelled) {
+          void s.release();
+          return;
+        }
+        sentinel = s;
+      } catch {
+        /* denied (backgrounded tab, battery saver) — nothing else to do */
+      }
+    };
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible' && (!sentinel || sentinel.released))
+        void acquire();
+    };
+    void acquire();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+      if (sentinel && !sentinel.released) void sentinel.release();
+    };
+  }, [live]);
 
   // Sprint DS4 — scroll the first highlighted utterance into view; auto-clear
   // the highlight after a moment so the pane returns to normal.
@@ -352,10 +454,46 @@ export function DoctorLiveEncounter({
     }
   }
 
+  // Batch A — the mic keeps producing frames while the socket is down. Queue
+  // them (bounded, drop-oldest) and flush on reconnect, so a blip costs
+  // latency instead of the words spoken during it.
+  const audioQueueRef = useRef<Uint8Array[]>([]);
+  const audioQueueBytesRef = useRef(0);
+  const droppedFramesRef = useRef(0);
+
+  /** Drain the queued frames onto an open socket, respecting back-pressure. */
+  function flushAudioQueue(ws: WebSocket): void {
+    while (audioQueueRef.current.length > 0 && ws.bufferedAmount < MAX_WS_BUFFERED_BYTES) {
+      const frame = audioQueueRef.current.shift();
+      if (!frame) break;
+      audioQueueBytesRef.current -= frame.byteLength;
+      ws.send(frame);
+    }
+    if (audioQueueRef.current.length === 0) audioQueueBytesRef.current = 0;
+  }
+
   const stream = useLiveStream({
     onFrame: (pcm) => {
       const ws = wsRef.current;
-      if (ws && ws.readyState === ws.OPEN) ws.send(pcm);
+      const open = ws && ws.readyState === ws.OPEN;
+      // Fast path: socket up, nothing queued, and the send buffer isn't
+      // backed up — hand the frame straight over.
+      if (open && audioQueueRef.current.length === 0 && ws.bufferedAmount < MAX_WS_BUFFERED_BYTES) {
+        ws.send(pcm);
+        return;
+      }
+      // Otherwise queue it. Bounded: past the cap we drop the OLDEST frame,
+      // because on a long outage the recent audio is the audio still worth
+      // sending — and an unbounded queue would take the tab down with it.
+      audioQueueRef.current.push(pcm);
+      audioQueueBytesRef.current += pcm.byteLength;
+      while (audioQueueBytesRef.current > MAX_AUDIO_QUEUE_BYTES) {
+        const dropped = audioQueueRef.current.shift();
+        if (!dropped) break;
+        audioQueueBytesRef.current -= dropped.byteLength;
+        droppedFramesRef.current += 1;
+      }
+      if (open) flushAudioQueue(ws);
     },
   });
 
@@ -366,6 +504,10 @@ export function DoctorLiveEncounter({
   useEffect(() => {
     return () => {
       if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      // Batch A — an unmount is a deliberate close, not a drop: suppress the
+      // reconnect path so navigating away doesn't spin up a doomed retry loop.
+      intentionalCloseRef.current = true;
       wsRef.current?.close();
       void streamRef.current.stop();
     };
@@ -413,6 +555,15 @@ export function DoctorLiveEncounter({
     latestMeterRef.current = null;
     meteredRef.current = false;
     shownSuggestionsRef.current = new Set();
+    // Batch A — a fresh consult starts from a clean recovery state.
+    audioQueueRef.current = [];
+    audioQueueBytesRef.current = 0;
+    droppedFramesRef.current = 0;
+    reconnectAttemptRef.current = 0;
+    intentionalCloseRef.current = false;
+    finalHandledRef.current = false;
+    startArgsRef.current = {};
+    setConnState('ok');
     setPhase('connecting');
 
     // DS11.4 — a ws:// gateway can never connect from an https page
@@ -425,13 +576,23 @@ export function DoctorLiveEncounter({
       return;
     }
 
+    await connect({ resume: false });
+  }
+
+  /**
+   * Batch A — open (or RE-open) the gateway socket.
+   *
+   * `resume: true` is the reconnect path: the mic is already running, the
+   * screen already shows a transcript, and we replay that transcript to the
+   * gateway so it rebuilds its state instead of starting the consult over.
+   */
+  async function connect({ resume }: { resume: boolean }): Promise<void> {
     // Sprint DV8 hardening — mint a short-lived token so the gateway can
     // verify we own this session. In dev the gateway runs open, so a failed
-    // mint is non-fatal.
-    let token: string | undefined;
-    // DOC-3 — the token route also resolves the patient's confirmed active
-    // meds server-side (the browser can't) for the cross-visit interaction check.
-    let serverContext: { activeMeds?: string[] } | undefined;
+    // mint is non-fatal. Re-minted per attempt: the token is short-lived, so
+    // a reconnect several minutes in would otherwise present an expired one.
+    // DOC-3 — the route also resolves the patient's confirmed active meds
+    // server-side (the browser can't) for the cross-visit interaction check.
     try {
       const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, { method: 'POST' });
       if (r.ok) {
@@ -439,24 +600,36 @@ export function DoctorLiveEncounter({
           token?: string;
           patientContext?: { activeMeds?: string[] };
         };
-        token = body.token;
-        serverContext = body.patientContext;
+        startArgsRef.current = {
+          ...(body.token ? { token: body.token } : {}),
+          ...(body.patientContext?.activeMeds?.length
+            ? { activeMeds: body.patientContext.activeMeds }
+            : {}),
+        };
       }
     } catch {
-      /* dev gateway runs open */
+      /* dev gateway runs open; on a reconnect we fall back to the last args */
     }
+    const { token, activeMeds } = startArgsRef.current;
 
     let ws: WebSocket;
     try {
       ws = new WebSocket(GATEWAY_URL);
     } catch (e) {
-      setPhase('error');
-      setError((e as Error).message);
+      if (resume) scheduleReconnect();
+      else {
+        setPhase('error');
+        setError((e as Error).message);
+      }
       return;
     }
     wsRef.current = ws;
 
     ws.onopen = () => {
+      // Batch A — on a resume, hand back the transcript we already hold so the
+      // gateway's note + reasoning continue from the whole consult, not just
+      // what it hears after the drop. (`utterancesRef` is the live mirror.)
+      const replay = resume ? utterancesRef.current : [];
       ws.send(
         JSON.stringify({
           type: 'start',
@@ -468,26 +641,49 @@ export function DoctorLiveEncounter({
           // the gateway's interaction engine catches cross-visit risk.
           context: {
             ...(patient?.age != null ? { age: patient.age } : {}),
-            ...(serverContext?.activeMeds?.length ? { activeMeds: serverContext.activeMeds } : {}),
+            ...(activeMeds?.length ? { activeMeds } : {}),
           },
+          ...(replay.length > 0 ? { resume: { utterances: replay } } : {}),
         }),
       );
+      if (resume) {
+        // Recovered. Push the buffered audio and drop the warning banner.
+        reconnectAttemptRef.current = 0;
+        setConnState('ok');
+        setError(null);
+        flushAudioQueue(ws);
+        return;
+      }
       void stream.start().catch((e: Error) => {
         // DS11.4 — the StartPanel (with its Start button) is the recovery
         // path: the next tap is the browser gesture that unlocks the mic.
         setError(`Microphone unavailable: ${e.message}. Tap Start to try again.`);
         setPhase('idle');
+        intentionalCloseRef.current = true;
         ws.close();
       });
     };
     ws.onerror = () => {
-      setPhase('error');
-      setError(
-        `Couldn't reach the live gateway at ${GATEWAY_URL}. Start it with: pnpm --filter @cureocity/live-gateway dev`,
-      );
+      // Batch A — an error is always followed by a close; let onclose decide
+      // between "retry" and "give up" so we never contradict ourselves. Only
+      // the very first connect reports the dev-gateway hint.
+      if (!resume && phaseRef.current === 'connecting') {
+        setPhase('error');
+        setError(
+          `Couldn't reach the live gateway at ${GATEWAY_URL}. Start it with: pnpm --filter @cureocity/live-gateway dev`,
+        );
+      }
     };
     ws.onclose = () => {
       if (wsRef.current === ws) wsRef.current = null;
+      // Expected closes: we asked for it, or the consult already finished.
+      if (intentionalCloseRef.current || finalHandledRef.current) return;
+      const p = phaseRef.current;
+      if (p !== 'listening' && p !== 'finalizing') return;
+      // Batch A — an UNEXPECTED drop mid-consult. Previously this line was the
+      // whole handler: the UI kept saying REC, the mic kept running, and every
+      // word from here on was lost without a single signal. Now we retry.
+      scheduleReconnect();
     };
     ws.onmessage = (ev) => {
       let raw: unknown;
@@ -508,15 +704,36 @@ export function DoctorLiveEncounter({
             setPhase('done');
             // The final meter arrives just before `done`; relay it now.
             if (latestMeterRef.current) void persistMeter(latestMeterRef.current);
+            // Batch A — `done` WITHOUT a preceding `final` used to be a dead
+            // end: the doctor sat on a stopped screen with no note and no way
+            // forward. The gateway only does this when it had nothing to
+            // finalize, so salvage whatever the live rails captured.
+            if (!finalHandledRef.current) {
+              finalHandledRef.current = true;
+              intentionalCloseRef.current = true;
+              void salvageConsult('empty-final');
+            }
           } else if (event.state === 'unauthorized') {
+            intentionalCloseRef.current = true;
+            void stream.stop();
             setPhase('error');
             setError('The live session could not be authorised. Reload the page and try again.');
           } else if (event.state === 'busy') {
             // Sprint DS8 — the gateway node is at its session cap; shed cleanly.
-            setPhase('error');
-            setError(
-              'The live copilot is at capacity right now. Wait a moment and press Start again.',
-            );
+            // Batch A — mid-consult (a node draining for a deploy, say) this is
+            // a transient shed, not a dead end: keep the mic and retry, because
+            // another instance can take the consult over via the resume replay.
+            if (utterancesRef.current.length > 0 && phaseRef.current === 'listening') {
+              setConnState('reconnecting');
+              scheduleReconnect();
+            } else {
+              intentionalCloseRef.current = true;
+              void stream.stop();
+              setPhase('error');
+              setError(
+                'The live copilot is at capacity right now. Wait a moment and press Start again.',
+              );
+            }
           }
           break;
         case 'transcript':
@@ -593,6 +810,14 @@ export function DoctorLiveEncounter({
           if (event.command.kind === 'SHOW_DATA') void resolveShowData(event.command.measure);
           break;
         case 'final': {
+          // Batch A — the consult is closed: a socket close from here on is
+          // expected, so the reconnect loop must never arm.
+          finalHandledRef.current = true;
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
+          setConnState('ok');
           if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
           // Sprint DS4 — fold the doctor's "add to assessment" picks into the
           // note before it persists (read from a ref — this closure is stale).
@@ -650,23 +875,105 @@ export function DoctorLiveEncounter({
     }
   }
 
+  /**
+   * Batch A — schedule the next reconnect attempt, or give up and salvage.
+   * The mic deliberately keeps running throughout: `onFrame` buffers into the
+   * bounded queue, and a successful reconnect flushes it, so a short blip
+   * costs latency rather than the words spoken during it.
+   */
+  function scheduleReconnect(): void {
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    const attempt = reconnectAttemptRef.current;
+    const delay = RECONNECT_DELAYS_MS[attempt];
+    if (delay === undefined) {
+      void giveUpReconnect();
+      return;
+    }
+    reconnectAttemptRef.current = attempt + 1;
+    setConnState('reconnecting');
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      if (intentionalCloseRef.current || finalHandledRef.current) return;
+      void connect({ resume: true });
+    }, delay);
+  }
+
+  function giveUpReconnect(): Promise<void> {
+    return salvageConsult('dropped');
+  }
+
+  /**
+   * Batch A — the consult can't be closed the normal way. Stop the mic (it has
+   * nowhere to send audio), say what happened plainly, and SALVAGE: persist the
+   * transcript and the last live note as a draft so the encounter survives as
+   * something the doctor can review and correct. Losing minutes of a consult is
+   * bad; losing all of it silently is what this whole path exists to prevent.
+   */
+  async function salvageConsult(reason: 'dropped' | 'empty-final'): Promise<void> {
+    if (reason === 'dropped') setConnState('lost');
+    void stream.stop();
+    const salvaged: MedicalEncounterNoteV1 = {
+      ...NOTE_DEFAULTS,
+      ...noteRef.current,
+      assessment: [noteRef.current.assessment ?? '', ...assessmentRef.current.map((a) => `• ${a}`)]
+        .filter(Boolean)
+        .join('\n'),
+    };
+    const transcript = buildTranscript(utterancesRef.current);
+    const hasContent = transcript.length > 0 || Boolean(noteRef.current.chiefComplaint);
+    if (hasContent) {
+      setFinalNote(salvaged);
+      if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+      setPhase('done');
+      setError(
+        reason === 'dropped'
+          ? 'The live connection dropped and could not be restored. Everything captured up to that point is saved as the draft below — review it carefully before signing; the last part of the consult may be missing.'
+          : 'The consult ended without a finished note. The draft below is built from what the live rails captured — review every section before signing.',
+      );
+      await persistLiveNote(salvaged, [], [], rxFinalRef.current, transcript);
+      if (latestMeterRef.current) void persistMeter(latestMeterRef.current);
+    } else {
+      setPhase('error');
+      setError(
+        reason === 'dropped'
+          ? 'The live connection dropped before anything was transcribed. Nothing was recorded — press Start to try again, or dictate the consult instead.'
+          : 'Nothing was transcribed, so there is no note to review. Press Start to try again, or dictate the consult instead.',
+      );
+    }
+  }
+
   function stop(): void {
     void stream.stop();
-    wsRef.current?.send(JSON.stringify({ type: 'stop' }));
+    // Batch A — a manual End is an intentional close: don't let the socket's
+    // eventual `close` kick off the reconnect loop.
+    intentionalCloseRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    const ws = wsRef.current;
+    if (ws && ws.readyState === ws.OPEN) {
+      // Flush any queued audio BEFORE `stop`, so the gateway transcribes the
+      // tail it was owed rather than dropping it on the floor.
+      flushAudioQueue(ws);
+      ws.send(JSON.stringify({ type: 'stop' }));
+    } else {
+      // Batch A — the socket is already gone, so no `final` is ever coming.
+      // Salvage immediately instead of showing "Finishing…" for 90 seconds.
+      void giveUpReconnect();
+      return;
+    }
     // Instant feedback so the doctor isn't left staring at "REC" while the
     // gateway closes the note.
     setPhase('finalizing');
+    setConnState('ok');
     // Safety net: if the gateway never confirms `done` (e.g. the socket
     // dropped), surface an escape instead of an endless "Finishing…".
     if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
     finalizeTimerRef.current = setTimeout(() => {
-      setPhase((p) => (p === 'finalizing' ? 'error' : p));
-      setError(
-        (e) =>
-          e ??
-          'Finishing timed out — the connection may have dropped. Reload the page; if the note didn’t save, re-run the consult.',
-      );
-    }, 45_000);
+      if (finalHandledRef.current) return;
+      void giveUpReconnect();
+    }, FINALIZE_TIMEOUT_MS);
   }
 
   // Sprint DS6 — the items that gate the close: red flags, contraindicated
@@ -741,28 +1048,43 @@ export function DoctorLiveEncounter({
         </div>
 
         {live && (
+          // Batch A — the pill tells the truth about the SOCKET, not just the
+          // mic. While reconnecting it must never read "REC": the doctor has
+          // to know their words are being held, not heard.
           <div
             className={`ml-1 flex items-center gap-3 rounded-full px-3.5 py-1.5 ${
-              phase === 'finalizing'
-                ? 'bg-[var(--color-accent-soft)]'
-                : 'bg-[var(--color-warn-soft)]'
+              connState === 'reconnecting'
+                ? 'bg-[var(--color-warn-soft)]'
+                : phase === 'finalizing'
+                  ? 'bg-[var(--color-accent-soft)]'
+                  : 'bg-[var(--color-warn-soft)]'
             }`}
           >
             <span
               className={`h-2.5 w-2.5 rounded-full ${
-                phase === 'finalizing'
-                  ? 'bg-[var(--color-accent)]'
-                  : 'bg-[var(--color-warn)] animate-pulse'
+                connState === 'reconnecting'
+                  ? 'animate-pulse bg-[var(--color-ink-3)]'
+                  : phase === 'finalizing'
+                    ? 'bg-[var(--color-accent)]'
+                    : 'bg-[var(--color-warn)] animate-pulse'
               }`}
             />
             <span
               className={`text-[13px] font-semibold tracking-wide ${
-                phase === 'finalizing' ? 'text-[var(--color-accent)]' : 'text-[var(--color-warn)]'
+                connState === 'reconnecting'
+                  ? 'text-[var(--color-ink-2)]'
+                  : phase === 'finalizing'
+                    ? 'text-[var(--color-accent)]'
+                    : 'text-[var(--color-warn)]'
               }`}
             >
-              {phase === 'finalizing' ? 'Finishing…' : `REC ${fmtTime(elapsed)}`}
+              {connState === 'reconnecting'
+                ? 'Reconnecting…'
+                : phase === 'finalizing'
+                  ? 'Finishing…'
+                  : `REC ${fmtTime(elapsed)}`}
             </span>
-            {phase === 'listening' && <Waveform />}
+            {phase === 'listening' && connState === 'ok' && <Waveform />}
           </div>
         )}
 
@@ -784,6 +1106,24 @@ export function DoctorLiveEncounter({
           )}
         </div>
       </div>
+
+      {/* Batch A — the reconnect banner. The doctor keeps talking; we say
+          plainly that we're holding their audio rather than hearing it. */}
+      {connState === 'reconnecting' && (
+        <Card
+          role="status"
+          aria-live="polite"
+          className="border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4 text-sm text-[var(--color-warn)]"
+        >
+          <strong className="block">Reconnecting to the live copilot…</strong>
+          <p className="mt-1">
+            The connection dropped. Your microphone is still recording and the last couple of
+            minutes are being held — they&rsquo;ll be sent as soon as the link is back. The
+            transcript on screen is safe. Keep going, or press End to close the consult with what
+            has been captured.
+          </p>
+        </Card>
+      )}
 
       {error && (
         <Card className="border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-5 text-sm text-[var(--color-warn)]">

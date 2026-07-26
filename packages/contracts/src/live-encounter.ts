@@ -207,6 +207,19 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
      * gateway has no DB, so this must come over the wire. Absent ⇒ no seeding.
      */
     therapyContext: TherapyLiveContextSchema.optional(),
+    /**
+     * Batch A — RESUME after a dropped socket. A consult's transcript lives
+     * only in the gateway's memory, so a reconnect used to start a blank
+     * consult and silently lose everything said before the drop. The browser
+     * holds the authoritative utterance list (it renders it), so on reconnect
+     * it replays it here and the gateway re-seeds its transcript + CaseState
+     * before the first new window lands. Absent ⇒ a fresh consult.
+     */
+    resume: z
+      .object({
+        utterances: z.array(UtteranceSchema).max(4000),
+      })
+      .optional(),
   }),
   z.object({ type: z.literal('stop') }),
   // Sprint DS3 — the doctor dismissed an "ask next" question. The gateway

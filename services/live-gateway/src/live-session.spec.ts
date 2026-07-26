@@ -638,3 +638,129 @@ describe('LiveSession — streaming display rail (DS13)', () => {
     expect(events.filter((e) => e.type === 'partialTranscript')).toHaveLength(0);
   });
 });
+
+describe('LiveSession — resume after a dropped socket (Batch A)', () => {
+  it('continues the transcript, ids and timeline from the replayed tail', async () => {
+    // Consult A: two windows, then the socket "drops".
+    const eventsA: LiveGatewayEvent[] = [];
+    const a = new LiveSession('sess-drop', null, mockBackends(), (e) => eventsA.push(e), OPTS);
+    a.start();
+    a.pushAudio(BLOCK);
+    await a.pump();
+    a.pushAudio(BLOCK);
+    await a.pump();
+    const heard = eventsA.flatMap((e) => (e.type === 'utterance' ? [e.utterance] : []));
+    expect(heard.length).toBeGreaterThan(0);
+    a.dispose();
+
+    // Consult B: the browser reconnects and replays what it holds.
+    const eventsB: LiveGatewayEvent[] = [];
+    const b = new LiveSession('sess-drop', null, mockBackends(), (e) => eventsB.push(e), OPTS);
+    b.seedResume(heard);
+    b.start();
+    // The replay is state-only — nothing is echoed back to the browser.
+    expect(eventsB.filter((e) => e.type === 'utterance')).toHaveLength(0);
+
+    b.pushAudio(BLOCK);
+    await b.pump();
+    const fresh = eventsB.flatMap((e) => (e.type === 'utterance' ? [e.utterance] : []));
+    expect(fresh.length).toBeGreaterThan(0);
+
+    // Ids continue past the replayed ones — never reused.
+    const replayedIds = new Set(heard.map((u) => u.id));
+    for (const u of fresh) expect(replayedIds.has(u.id)).toBe(false);
+    // And the timeline is monotonic: the new window starts at/after the tail.
+    const lastReplayedEnd = Math.max(...heard.map((u) => u.tEndMs));
+    for (const u of fresh) expect(u.tStartMs).toBeGreaterThanOrEqual(lastReplayedEnd);
+
+    // The final note is built on the WHOLE consult, not just the post-drop part.
+    await b.finalize();
+    const final = eventsB.find((e) => e.type === 'final');
+    expect(final).toBeDefined();
+    b.dispose();
+  });
+
+  it('is a no-op when there is nothing to replay', () => {
+    const events: LiveGatewayEvent[] = [];
+    const s = new LiveSession('sess-empty', null, mockBackends(), (e) => events.push(e), OPTS);
+    s.seedResume([]);
+    s.start();
+    expect(events.map((e) => e.type)).toEqual(['status']);
+    s.dispose();
+  });
+});
+
+describe('LiveSession — finalize never duplicates the in-flight window (Batch A)', () => {
+  it('skips the tail when a pump window is STILL transcribing at the deadline', async () => {
+    // waitIdle gives up quickly here; in prod its deadline is 15s.
+    process.env['LIVE_WAIT_IDLE_MS'] = '150';
+    let release: (() => void) | null = null;
+    class HangingPass1 implements IPass1Backend {
+      private readonly inner = new MockGeminiPass1Backend();
+      calls = 0;
+      async run(input: Pass1Input) {
+        this.calls += 1;
+        if (this.calls === 2) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        }
+        return this.inner.run(input);
+      }
+    }
+    const pass1 = new HangingPass1();
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-race',
+      null,
+      { ...mockBackends(), pass1 },
+      (e) => events.push(e),
+      OPTS,
+    );
+    session.start();
+    // One clean window first, so there IS a note to fall back on.
+    session.pushAudio(BLOCK);
+    await session.pump();
+    session.pushAudio(BLOCK);
+    const pumping = session.pump(); // parks inside Pass 1, still OWNING `pending`
+    await new Promise((r) => setTimeout(r, 10));
+    session.pushAudio(BLOCK); // more audio queues up behind the in-flight window
+
+    // Finalize while that window is in flight. waitIdle times out, so
+    // finalizeWork must NOT also transcribe `pending` — those bytes belong to
+    // the running window and re-reading them duplicates the transcript.
+    const finalizing = session.finalize();
+    await new Promise((r) => setTimeout(r, 400)); // outlast the waitIdle deadline
+    release?.();
+    await pumping;
+    await finalizing;
+    delete process.env['LIVE_WAIT_IDLE_MS'];
+
+    // The tail was skipped, so Pass 1 ran once per real window (2) — it did
+    // NOT run a third time over audio the in-flight window already owned.
+    expect(pass1.calls).toBe(2);
+    const utterances = events.flatMap((e) => (e.type === 'utterance' ? [e.utterance] : []));
+    const texts = utterances.map((u) => `${u.tStartMs}:${u.text}`);
+    expect(new Set(texts).size).toBe(texts.length); // no duplicated window
+    expect(events.some((e) => e.type === 'final')).toBe(true);
+    // The consult always reaches a terminal `done` — the client must never be
+    // left on "Finishing…". (The released window's trailing meter can land
+    // after it, which is why this is a contains, not a last-event, check.)
+    expect(events.some((e) => e.type === 'status' && e.state === 'done')).toBe(true);
+    session.dispose();
+  }, 30_000);
+
+  it('DOES transcribe the tail when the pump goes idle in time', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession('sess-tail', null, mockBackends(), (e) => events.push(e), OPTS);
+    session.start();
+    session.pushAudio(BLOCK);
+    await session.pump();
+    const before = events.filter((e) => e.type === 'utterance').length;
+    session.pushAudio(pcm(2_000, SPEECH)); // a sub-window tail
+    await session.finalize();
+    const after = events.filter((e) => e.type === 'utterance').length;
+    expect(after).toBeGreaterThan(before);
+    session.dispose();
+  });
+});
