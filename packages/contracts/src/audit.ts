@@ -273,6 +273,13 @@ export const AuditActionSchema = z.enum([
   'FORMULATION_CONFIRMED',
   'AGREEMENT_RECORDED',
   'SESSION_FEEDBACK_RECORDED',
+  // Marketing V1 — public therapist pages + real-slot booking.
+  'THERAPIST_PROFILE_PUBLISHED',
+  'THERAPIST_PROFILE_UNPUBLISHED',
+  'AVAILABILITY_UPDATED',
+  'APPOINTMENT_REQUESTED',
+  'APPOINTMENT_CONFIRMED',
+  'APPOINTMENT_DECLINED',
   // NEXT2 — the reclaim cron marks generations stranded IN_PROGRESS/PENDING
   // (function killed mid-run) as FAILED so the UI offers a re-run instead of
   // an infinite spinner. One row per reclaimed draft/report.

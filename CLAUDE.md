@@ -522,6 +522,17 @@ The five existing passes are the template — pick the closest analogue.
   answer path). The `REFLECTION_QUESTIONS` share artefact type, snapshot
   schema, and portal render branch REMAIN so historical `PatientShare`
   rows keep rendering; nothing creates new ones.
+- **Marketing V1 (2026-07) — public pages + real-slot booking.**
+  `/therapists` + `/therapists/[slug]` are PUBLIC (anonymous) routes on the
+  mind host; only `profilePublishedAt != null` profiles resolve, through the
+  allow-list selects in `apps/web/lib/public-profile.ts` (never widen them —
+  no email/phone/RCI crosses that boundary). Appointment PII is
+  tenant-envelope-encrypted (no plaintext columns, same as Client). A
+  REQUESTED/CONFIRMED `Appointment` HOLDS its slot; therapist confirm mints
+  Client + SCHEDULED INTAKE Session (consent is captured at session start,
+  as always). NB: a DEAD pre-pivot `Booking` model + `BOOKING_*` audit
+  actions still exist — Marketing V1 deliberately uses `Appointment` /
+  `APPOINTMENT_*` to avoid them; don't "clean up" one into the other.
 - **Pass 4 cacheKey** is bumped to v2 in Sprint 16 because it now
   includes `spokenLanguage`. Clearing cache on a language change is
   automatic.
@@ -712,6 +723,9 @@ all run with deterministic mocks. No GCP creds needed for dev.
 | Change the Care landing / waitlist               | `apps/web/app/care/page.tsx` + `apps/web/components/care/CareWaitlistForm.tsx` + `apps/web/app/api/v1/care/waitlist/route.ts`      |
 | Enforce / change cross-border consent            | `apps/web/app/api/v1/sessions/[id]/start/route.ts` + `.../live-token/route.ts` + `apps/web/components/app/RecordConfirmStrip.tsx`  |
 | Check what's configured on prod                  | `GET /api/v1/health?token=…` + `docs/PRODUCTION_READINESS.md`                                                                      |
+| Work on public therapist pages / directory       | `apps/web/app/therapists/` (public, no auth) + `apps/web/lib/public-profile.ts` (allow-list selects) + `apps/web/lib/marketing.ts` |
+| Change the slot engine / booking rules           | `apps/web/lib/marketing.ts` (`computeSlots`, pure + unit-tested) — IST wall-clock rules, UTC slot instants                         |
+| Work on the marketing studio / appointment inbox | `apps/web/app/app/marketing/page.tsx` + `MarketingStudio.tsx` + `api/v1/appointments/**` (confirm mints Client + INTAKE Session)   |
 
 ## 11. What's NOT in scope (still on the backlog)
 

@@ -94,6 +94,18 @@ model Psychologist {
   sessionFeeInr         Int?
   isAcceptingNewClients Boolean  @default(true)
 
+  /// Marketing V1 — the public page URL slug (/therapists/<slug>).
+  /// Auto-generated from fullName on first marketing save; unique
+  /// platform-wide. Null until the therapist opens the marketing studio.
+  publicSlug         String?   @unique
+  /// Marketing V1 — non-null = the public profile page + directory row
+  /// are live. Publishing is checklist-gated server-side (headline, bio,
+  /// city, ≥1 specialty) — see lib/marketing.ts profilePublishChecklist.
+  profilePublishedAt DateTime?
+  /// Marketing V1 — public FAQ entries [{ q, a }], rendered on the page
+  /// and emitted as FAQPage JSON-LD. Validated by ProfileFaqSchema.
+  profileFaqs        Json?
+
   // Sprint 18 — therapist preferences.
   /// ISO 639-1 default output language for new notes / briefs.
   defaultOutputLanguage String       @default("en")
@@ -2911,6 +2923,80 @@ enum AuditAction {
   FORMULATION_CONFIRMED // SL1 — a new living-formulation version confirmed (accepted suggestion or authored)
   AGREEMENT_RECORDED // SL1 — a session agreement recorded / follow-up marked
   SESSION_FEEDBACK_RECORDED // SL1 — one-tap alliance rating captured at close
+  THERAPIST_PROFILE_PUBLISHED // Marketing V1 — public page went live
+  THERAPIST_PROFILE_UNPUBLISHED // Marketing V1 — public page taken down
+  AVAILABILITY_UPDATED // Marketing V1 — weekly bookable windows replaced
+  APPOINTMENT_REQUESTED // Marketing V1 — public appointment request landed (holds the slot)
+  APPOINTMENT_CONFIRMED // Marketing V1 — therapist confirmed; Client + Session minted
+  APPOINTMENT_DECLINED // Marketing V1 — therapist declined; slot freed
+}
+
+// ---------------------------------------------------------------------------
+// Marketing V1 — public profile pages, real-slot booking (mind.cureocity.in/
+// therapists). Scalar FKs (no relations), following the Letter pattern.
+// ---------------------------------------------------------------------------
+
+/// A weekly-recurring bookable window. All minutes are IST wall-clock
+/// (India is single-zone, no DST); slot instants are materialised to UTC
+/// by lib/marketing.ts computeSlots.
+model AvailabilityRule {
+  id             String @id @default(cuid())
+  psychologistId String
+
+  /// 0 = Sunday … 6 = Saturday, in IST.
+  weekday     Int
+  /// Window start/end as minutes since IST midnight (e.g. 540 = 09:00).
+  startMinute Int
+  endMinute   Int
+  /// Slot granularity within the window (a 09:00–12:00 window with
+  /// slotMinutes 60 offers 09:00, 10:00, 11:00).
+  slotMinutes Int @default(60)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([psychologistId, weekday])
+}
+
+/// NB: an unrelated dead `Booking`/`BookingStatus` pair from the archived
+/// pre-pivot marketplace still exists above (mapped to "bookings", no live
+/// code references) — hence the distinct Appointment naming here.
+enum AppointmentStatus {
+  REQUESTED
+  CONFIRMED
+  DECLINED
+  CANCELLED
+}
+
+/// A public appointment request against a concrete slot. A REQUESTED or
+/// CONFIRMED row HOLDS its slot (excluded from the public slot feed).
+/// Patient PII is tenant-envelope-encrypted at capture, same posture as
+/// Client — there is no plaintext column.
+model Appointment {
+  id             String            @id @default(cuid())
+  psychologistId String
+  status         AppointmentStatus @default(REQUESTED)
+
+  /// Slot instant (UTC). endAt = startAt + the rule's slotMinutes.
+  startAt DateTime
+  endAt   DateTime
+
+  patientNameEncrypted  String
+  patientPhoneEncrypted String
+  patientEmailEncrypted String?
+  /// What the patient wants help with — health information, encrypted.
+  concernEncrypted      String?
+
+  /// Set on confirm: the Client + SCHEDULED Session minted from this
+  /// appointment. Scalar FKs, no relations.
+  clientId  String?
+  sessionId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([psychologistId, status, startAt])
+  @@index([psychologistId, startAt])
 }
 
 enum AuditActorType {

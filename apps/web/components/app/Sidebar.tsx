@@ -23,7 +23,8 @@ interface NavItem {
     | 'me'
     | 'search'
     | 'clinic'
-    | 'insights';
+    | 'insights'
+    | 'marketing';
 }
 
 // Sprint TS3 — the primary nav is the daily work spine, trimmed to 6 (was 9).
@@ -51,6 +52,8 @@ const SECONDARY: NavItem[] = [
   { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
   { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
   { href: '/app/me', label: 'My practice', icon: 'me' },
+  // Marketing V1 — public page + appointment inbox.
+  { href: '/app/marketing', label: 'Marketing', icon: 'marketing' },
 ];
 
 // Sprint DV2 — doctor nav. The doctor's home is the patient roster
@@ -285,6 +288,7 @@ export function Glyph({
     | 'search'
     | 'clinic'
     | 'insights'
+    | 'marketing'
     | 'gift'
     | 'cog'
     | 'help'
@@ -305,6 +309,8 @@ export function Glyph({
     search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
     clinic: 'M4 6h16M4 12h16M4 18h9M4 6v12',
     insights: 'M4 20h16M7 20v-6M12 20V8M17 20v-10',
+    marketing:
+      'M3 11v2a1 1 0 0 0 1 1h2l5 4V6L6 10H4a1 1 0 0 0-1 1zM14 8a5 5 0 0 1 0 8M17 5a9 9 0 0 1 0 14',
     gift: 'M3 9h18v4H3zM12 9v13M5 13v8h14v-8M8 9c0-2 1-4 4-4s4 2 4 4',
     cog: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 0 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 0 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
     help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01',

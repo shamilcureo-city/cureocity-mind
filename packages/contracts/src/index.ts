@@ -66,3 +66,5 @@ export * from './problem';
 export * from './note-review';
 // The Session Loop (SL1) — living formulation + agreements + feedback.
 export * from './formulation';
+// Marketing V1 — public therapist pages + real-slot booking.
+export * from './marketing';
