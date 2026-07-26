@@ -8,6 +8,7 @@ import type {
   RxPadV1,
   VoiceCommand,
 } from '@cureocity/contracts';
+import { allergyWarningsByDrug, drugNameKey } from '@cureocity/clinical';
 
 /**
  * Sprint DS5 — deterministic Rx pad assembly.
@@ -17,9 +18,11 @@ import type {
  *   - CONTINUED  — the patient's active meds (from context) auto-carry.
  *   - DRAFTED    — the Pass-2 medical note's medications (AI-suggested).
  *   - SPOKEN     — voice-command meds (the DV6.4 parser, the fast path).
- * Drafted + spoken rows land `pending` (the doctor confirms each);
- * continued rows land `confirmed`. Investigations come from the clinical
- * orders + spoken "order X" commands. Nothing auto-prescribes.
+ * EVERY med row lands `pending` — drafted, spoken and continued alike — and
+ * needs an explicit confirm tap. (Batch B: continued rows used to land
+ * `confirmed`, which quietly reissued a repeat prescription nobody looked at.)
+ * Investigations come from the clinical orders + spoken "order X" commands.
+ * Nothing auto-prescribes.
  *
  * Pure + DB-free so it unit-tests directly. `clean` strips the dev [mock] tag.
  */
@@ -29,9 +32,13 @@ function clean(s: string | undefined): string {
   return (s ?? '').replace(MOCK_TAG, '').trim();
 }
 
-/** Normalised drug key for dedup (first significant word, lowercased). */
+/**
+ * Batch B — the shared drug-name key (see @cureocity/clinical/drug-key).
+ * This used to be `first word, lowercased`, which merged "Insulin glargine"
+ * with "Insulin aspart" and made the pad unable to hold both.
+ */
 function drugKey(drug: string): string {
-  return clean(drug).toLowerCase().split(/\s+/)[0] ?? '';
+  return drugNameKey(clean(drug));
 }
 
 export interface RxPadInput {
@@ -46,21 +53,58 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
   const { patient, note, medications, orders, voiceCommands } = input;
 
   const meds: RxMedRow[] = [];
-  const seenDrugs = new Set<string>();
+  const byDrug = new Map<string, number>(); // key → index in `meds`
+  /**
+   * Batch B — a same-drug row now SUPERSEDES rather than being dropped.
+   *
+   * The old rule was "first row for a drug wins". Continued meds are added
+   * first, so when the doctor said "increase her metformin to 1g" the spoken
+   * row was silently discarded and the pad kept printing the OLD 500mg —
+   * a dose change that vanished between the doctor's mouth and the slip.
+   * Now the later, more specific instruction replaces the standing row, keeps
+   * its `continued` badge (it IS a change to a standing med), and lands
+   * `pending` so the doctor confirms the new dose deliberately.
+   */
   const pushMed = (row: RxMedRow) => {
     const key = drugKey(row.drug);
-    if (!key || seenDrugs.has(key)) return;
-    seenDrugs.add(key);
-    meds.push(row);
+    if (!key) return;
+    const existing = byDrug.get(key);
+    if (existing === undefined) {
+      byDrug.set(key, meds.length);
+      meds.push(row);
+      return;
+    }
+    const prior = meds[existing]!;
+    // Supersede only when the new row speaks with MORE authority. Sources are
+    // pushed continued → spoken → drafted, so a plain "later wins" rule would
+    // let the model's inferred med overwrite what the doctor actually said —
+    // exactly backwards. What the doctor spoke always outranks what Pass 2
+    // inferred, which in turn outranks a standing repeat.
+    if (sourceRank(row) < sourceRank(prior)) return;
+    meds[existing] = {
+      ...row,
+      // A change to a standing med stays flagged as continued, so the pad
+      // shows "was 500mg BD" rather than reading as a brand-new drug.
+      continued: prior.continued || row.continued,
+      status: 'pending',
+      ...(prior.continued && !row.continued ? { previous: prior.drug } : {}),
+    };
   };
 
-  // 1. Continued meds from the patient's active list (confirmed).
+  // 1. Continued meds from the patient's active list.
+  //
+  // Batch B — these used to land `confirmed`, which quietly contradicted the
+  // "nothing auto-prescribes" rule this file opens with: a repeat prescription
+  // was reissued without the doctor looking at it. They now land `pending`
+  // like every other row — one tap to re-authorise, which is the point.
   for (const active of patient.activeMeds) {
     if (!active.trim()) continue;
     pushMed({
+      // The active-med string carries its own dosing ("Metformin 500 BD");
+      // keep it verbatim so nothing is lost between the chart and the slip.
       drug: active.trim(),
       continued: true,
-      status: 'confirmed',
+      status: 'pending',
       warnings: [],
     });
   }
@@ -77,6 +121,10 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
       continued: false,
       status: 'pending',
       warnings: [],
+      // Batch C — provenance. A HEARD row is anchored to a real utterance;
+      // the badge + the 🗣 chip let the doctor tell it apart at a glance from
+      // one the model wrote unprompted.
+      source: 'dictated',
       ...(cmd.utteranceId ? { utteranceId: cmd.utteranceId } : {}),
     });
   }
@@ -94,6 +142,12 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
       continued: false,
       status: 'pending',
       warnings: m.interactionWarnings ?? [],
+      // Batch C — an AI-DRAFTED med has no spoken instruction behind it: the
+      // model inferred it from the consult. Gateway rows used to carry no
+      // provenance at all, so these were visually identical to something the
+      // doctor actually said. Badge them, so the rows that need scrutiny are
+      // the ones that look like they need scrutiny.
+      source: 'ai',
     });
   }
 
@@ -126,16 +180,42 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
   }
   const followUp = parseFollowUp(clean(note?.plan));
 
+  // Batch B — stamp allergy warnings per row. The pad printed the patient's
+  // allergy list at the top and never compared it to what was on the slip;
+  // now the offending row carries the alert itself. Allergy lines go FIRST —
+  // they're the ones that stop a prescription rather than qualify it.
+  const allergyLines = allergyWarningsByDrug(
+    meds.map((m) => m.drug),
+    patient.allergies,
+  );
+  const guarded = meds.map((m, i) =>
+    (allergyLines[i] ?? []).length > 0
+      ? { ...m, warnings: [...allergyLines[i]!, ...m.warnings] }
+      : m,
+  );
+
   return {
     version: 'V1',
     dxLine: clean(note?.assessment),
-    meds,
+    meds: guarded,
     investigations,
     adviceLines: dedupe(adviceLines),
     ...(followUp ? { followUp } : {}),
     allergies: patient.allergies,
     ...(vitalsLine(note) ? { vitalsLine: vitalsLine(note) } : {}),
   };
+}
+
+/**
+ * Authority of a pad row's origin, highest wins a same-drug collision.
+ * SPOKEN (2) — the doctor said it out loud.
+ * DRAFTED (1) — Pass 2 inferred it from the consult.
+ * CONTINUED (0) — carried from the patient's standing regimen.
+ */
+function sourceRank(row: RxMedRow): number {
+  if (row.source === 'dictated') return 2;
+  if (row.continued) return 0;
+  return 1;
 }
 
 function splitPlan(plan: string): string[] {

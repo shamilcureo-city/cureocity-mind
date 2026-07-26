@@ -36,6 +36,40 @@ Then open a doctor encounter in the web app and click **Try the live
 copilot**. Point the web app at the gateway with
 `NEXT_PUBLIC_LIVE_GATEWAY_URL` (defaults to `ws://localhost:8787`).
 
+## Deploying (Cloud Run) — the settings that decide whether consults survive
+
+A consult's whole state (audio buffer, transcript, CaseState) lives in
+**this process's memory** until it emits `final`. The Cloud Run defaults
+are wrong for that, in ways that silently destroy encounters:
+
+```bash
+gcloud run deploy cureocity-live-gateway \
+  --region=asia-south1 \
+  --timeout=3600 \                  # default 300s = a consult is killed at 5 min
+  --min-instances=1 \               # a cold start drops the socket mid-consult
+  --max-instances=10 \
+  --cpu=2 --memory=2Gi \
+  --cpu-always-allocated \          # the pump ticks between requests
+  --concurrency=80 \
+  --set-env-vars=LLM_BACKEND=vertex,VERTEX_PROJECT_ID=...
+```
+
+Why each one matters:
+
+| Flag                     | Default | Why the default breaks consults                                                                                               |
+| ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--timeout`              | 300s    | A WebSocket **is** a request. At 5 minutes Cloud Run kills it mid-consult. 3600 covers the longest OPD encounter.             |
+| `--min-instances`        | 0       | Scale-to-zero means the next consult pays a cold start, and an idle instance is reclaimed **while a doctor is mid-sentence**. |
+| `--cpu-always-allocated` | off     | The 1s `pump()` tick is not request-driven work; throttled CPU stalls transcription between frames.                           |
+
+The service handles `SIGTERM` by **draining**: it stops accepting new
+consults and finalizes every live one (so each browser receives its `final`
+and persists a note) before exiting. Give it room —
+`LIVE_GATEWAY_DRAIN_TIMEOUT_MS` (default 25s) should be ≤ the revision's
+termination grace period. The browser also reconnects and **replays its
+transcript** (`start.resume`), so a consult that can't finish during the
+drain resumes on the new instance instead of starting over.
+
 ## Wire protocol
 
 Shared, validated schemas live in `@cureocity/contracts`

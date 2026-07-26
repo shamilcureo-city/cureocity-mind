@@ -42,6 +42,12 @@ export const RxMedRowSchema = z.object({
   route: z.string().optional(),
   /** A continued med carried from the patient's active list. */
   continued: z.boolean().default(false),
+  /**
+   * Batch B — when this row REPLACES a standing prescription (the doctor
+   * changed the dose of a continued med mid-consult), the previous text, so
+   * the pad can show "was Metformin 500 BD" instead of silently swapping it.
+   */
+  previous: z.string().optional(),
   /** `pending` rows (AI/voice-drafted) need an explicit confirm tap. */
   status: RxRowStatusSchema.default('pending'),
   /** Deterministic interaction warnings (server-owned). */

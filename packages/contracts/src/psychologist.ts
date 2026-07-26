@@ -68,6 +68,15 @@ export const UpdatePsychologistInputSchema = z
     /** Sprint DS11.7-fu — a doctor's preferred consult capture mode. NULL = LIVE. */
     defaultCaptureMode: CaptureModeSchema.nullable(),
     /**
+     * Batch F — the prescription letterhead. The Rx PDF has always rendered a
+     * clinic line and always passed null, so every prescription a doctor
+     * handed a patient went out with a blank header. All nullable — a doctor
+     * who fills in nothing gets exactly the previous output.
+     */
+    clinicName: z.string().min(1).max(160).nullable(),
+    clinicAddress: z.string().min(1).max(500).nullable(),
+    clinicPhone: z.string().min(1).max(40).nullable(),
+    /**
      * Backup email for account recovery if the phone-OTP path fails.
      * Verified separately by the recovery flow (Sprint 18 PR 2 — schema
      * only ships in V1).
@@ -115,6 +124,10 @@ export const PsychologistSchema = z.object({
   defaultModality: SessionModalitySchema.nullable(),
   // Sprint DS11.7-fu — a doctor's preferred consult capture mode. NULL = LIVE.
   defaultCaptureMode: CaptureModeSchema.nullable().default(null),
+  // Batch F — the prescription letterhead.
+  clinicName: z.string().nullable().default(null),
+  clinicAddress: z.string().nullable().default(null),
+  clinicPhone: z.string().nullable().default(null),
   backupEmail: z.string().nullable(),
 
   // Sprint 31 — null until POST /api/v1/onboarding/complete runs.

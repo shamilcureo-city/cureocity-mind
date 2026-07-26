@@ -67,6 +67,39 @@ export async function POST(
     select: { id: true },
   });
 
+  // Batch D — mirror the consult's spend into GeminiCallLog.
+  //
+  // The gateway's LLM spend was invisible to every cost surface in the app.
+  // The monthly cost circuit (lib/cost-guard.ts) and the console cost page
+  // both sum GeminiCallLog; live consults wrote only LiveConsultMetric. A
+  // doctor running a full OPD day generated real Vertex spend that never
+  // counted toward the ₹15,000/month cap, so the circuit could not trip and
+  // the dashboard under-reported by however much the live path cost.
+  //
+  // One rollup row per consult is the honest granularity available here — the
+  // gateway meters per call but relays an aggregate, and the aggregate is
+  // exactly what the circuit sums. `mock` consults cost nothing and are
+  // skipped so dev traffic can't poison the ledger.
+  if (summary.backend !== 'mock' && summary.costInr > 0) {
+    await prisma.geminiCallLog.create({
+      data: {
+        sessionId,
+        psychologistId: auth.value.psychologistId,
+        // The consult runs Pass 1 + Pass 2 + the reasoning pass; PASS_11 is
+        // the one unique to the live path, so it names the rollup.
+        pass: 'PASS_11_REASONING',
+        model: `live-gateway:${summary.backend}`,
+        region: 'asia-south1',
+        promptVersion: 'LIVE_CONSULT_ROLLUP_V1',
+        inputTokens: Math.round(summary.inputTokens),
+        outputTokens: Math.round(summary.outputTokens),
+        costInr: summary.costInr,
+        latencyMs: Math.round(summary.elapsedMs),
+        status: 'SUCCESS',
+      },
+    });
+  }
+
   await writeAudit({
     actorType: 'PSYCHOLOGIST',
     actorPsychologistId: auth.value.psychologistId,

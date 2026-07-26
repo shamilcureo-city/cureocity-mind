@@ -43,6 +43,13 @@ const PORT = Number(process.env['LIVE_GATEWAY_PORT'] ?? 8787);
 const MAX_CONNECTIONS = Number(process.env['LIVE_GATEWAY_MAX_CONNECTIONS'] ?? 200);
 const STARTUP_GRACE_MS = Number(process.env['LIVE_GATEWAY_STARTUP_GRACE_MS'] ?? 60_000);
 const IDLE_TIMEOUT_MS = Number(process.env['LIVE_GATEWAY_IDLE_TIMEOUT_MS'] ?? 300_000);
+// Batch A — how long a SIGTERM drain waits for live consults to finalize
+// before force-exiting. Cloud Run's default grace is 10s; set
+// `--timeout`/terminationGracePeriod ≥ this (see the deploy notes in README).
+const DRAIN_TIMEOUT_MS = Number(process.env['LIVE_GATEWAY_DRAIN_TIMEOUT_MS'] ?? 25_000);
+// Batch A — every LiveSession currently streaming, so a drain can finalize
+// them all. Registered on start, removed on dispose/close.
+const liveSessions = new Set<LiveSession>();
 
 const backends = buildBackends();
 // Sprint DS8 — concurrent-session cap (graceful shed above it).
@@ -158,6 +165,13 @@ wss.on('connection', (ws, req) => {
     if (!parsed.success) return;
     const cmd = parsed.data;
     if (cmd.type === 'start') {
+      // Batch A — the node is shutting down; shed the start so the browser
+      // retries against a healthy instance instead of streaming into a corpse.
+      if (draining) {
+        send(ws, { type: 'status', state: 'busy' });
+        ws.close();
+        return;
+      }
       // Sprint DV8 hardening — verify the practitioner token before
       // streaming (no-op in dev when LIVE_GATEWAY_SECRET is unset).
       if (!verifyStartToken(cmd.token, cmd.sessionId)) {
@@ -186,7 +200,10 @@ wss.on('connection', (ws, req) => {
         }
         acquired = true;
       }
-      session?.dispose();
+      if (session) {
+        liveSessions.delete(session);
+        session.dispose();
+      }
       // NEXT4 — feed the ledger from meter events. `summary.costInr` is
       // cumulative per consult, so only the delta since the last event is
       // added.
@@ -211,6 +228,14 @@ wss.on('connection', (ws, req) => {
         cmd.modality ?? null,
         cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
       );
+      // Batch A — a reconnect after a dropped socket replays the transcript the
+      // browser still holds, so the consult continues instead of starting blank.
+      if (cmd.resume?.utterances.length) {
+        session.seedResume(cmd.resume.utterances);
+        console.log(
+          `[gateway] resumed ${cmd.sessionId ?? '(anon)'} with ${cmd.resume.utterances.length} replayed utterances`,
+        );
+      }
       // Sprint DS13 — the flag-gated streaming display rail (doctor path
       // only for now). Failures degrade to "provisional line stops
       // updating"; the windowed pipeline is untouched.
@@ -227,6 +252,7 @@ wss.on('connection', (ws, req) => {
         }
       }
       session.start();
+      liveSessions.add(session);
       started = true;
       armIdle(IDLE_TIMEOUT_MS);
     } else if (cmd.type === 'stop') {
@@ -240,16 +266,16 @@ wss.on('connection', (ws, req) => {
     }
   });
 
-  ws.on('close', () => {
+  const teardown = (): void => {
     clearTimeout(idleTimer);
-    session?.dispose();
+    if (session) {
+      liveSessions.delete(session);
+      session.dispose();
+    }
     release();
-  });
-  ws.on('error', () => {
-    clearTimeout(idleTimer);
-    session?.dispose();
-    release();
-  });
+  };
+  ws.on('close', teardown);
+  ws.on('error', teardown);
 });
 
 httpServer.listen(PORT, () => {
@@ -257,6 +283,38 @@ httpServer.listen(PORT, () => {
     `[live-gateway] listening on :${PORT} (ws + GET /healthz) — LLM_BACKEND=${backends.backend}, auth=${authRequired() ? 'required' : 'open (dev)'}, maxSessions=${pool.max}`,
   );
 });
+
+// Batch A — GRACEFUL DRAIN. Cloud Run sends SIGTERM on a revision swap, a
+// scale-down, or an instance recycle. Without a handler the process died
+// instantly and every consult streaming through it lost its transcript (the
+// gateway holds the only copy until `final`). Now: stop accepting NEW sockets,
+// tell every live consult to finalize (which emits `final` → the browser
+// persists the note), and only then exit. The browser's reconnect covers the
+// window where a consult can't finish in time.
+let draining = false;
+function drain(signal: string): void {
+  if (draining) return;
+  draining = true;
+  console.log(`[live-gateway] ${signal} — draining ${liveSessions.size} live consult(s)`);
+  // Stop accepting new connections; existing sockets stay open to finish.
+  httpServer.close();
+  const finals = [...liveSessions].map((s) =>
+    s
+      .finalize()
+      .catch((err: unknown) => console.error('[live-gateway] drain finalize failed', err)),
+  );
+  const hardStop = setTimeout(() => {
+    console.error('[live-gateway] drain timed out — exiting');
+    process.exit(0);
+  }, DRAIN_TIMEOUT_MS);
+  void Promise.all(finals).then(() => {
+    clearTimeout(hardStop);
+    // Give the socket writes a beat to flush the `final` + `done` frames.
+    setTimeout(() => process.exit(0), 1_000);
+  });
+}
+process.on('SIGTERM', () => drain('SIGTERM'));
+process.on('SIGINT', () => drain('SIGINT'));
 
 // DOC-4 — fail-closed posture: a DEPLOYED node with no secret REFUSES every
 // consult (verifyStartToken returns false in prod) rather than running open to

@@ -16,6 +16,8 @@ export * from './crisis';
 export * from './icd11';
 // Cureocity Care — deterministic live crisis screen (docs/AI_COUNSELING.md §2).
 export * from './crisis-screen';
+export * from './allergies';
+export * from './drug-key';
 export * from './interactions';
 export * from './specialty-templates';
 export * from './chronic';

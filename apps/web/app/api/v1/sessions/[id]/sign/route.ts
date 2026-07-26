@@ -342,6 +342,25 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     } else {
       await writeAudit({ ...auditBase, action: 'NOTE_SIGNED' }, tx);
     }
+    // Batch B — the prescriber signed PAST a hard drug-allergy blocker. The
+    // gate is an override, not a locked door (a mislabeled allergy and a
+    // desensitised patient are both real), but it must leave a trail: one
+    // row, atomic with the signature, carrying what was overridden and why.
+    const override = input.value.safetyOverride;
+    if (override) {
+      await writeAudit(
+        {
+          ...auditBase,
+          action: 'RX_SAFETY_OVERRIDE',
+          metadata: {
+            ...auditBase.metadata,
+            reason: override.reason,
+            blockers: override.blockers,
+          },
+        },
+        tx,
+      );
+    }
     if (credentialBump !== null) {
       // Persist the authenticator's reported counter (not a blind +1) so
       // the next sign can detect a rollback / cloned authenticator.

@@ -22,10 +22,44 @@ export interface SchedulerOptions {
   forceMs: number;
 }
 
+/**
+ * Batch D — the debounce was a NO-OP.
+ *
+ * `takeDue()` is only called when a VAD window closes, and a window is 6–12s
+ * long. With `minGapMs: 4_000` the steady-cadence test had therefore always
+ * elapsed by the time it was asked, so the most expensive live pass ran on
+ * EVERY window — exactly what this scheduler exists to prevent.
+ *
+ * The gap now comfortably exceeds `maxWindowMs` (12s), so reasoning runs on
+ * roughly every second window instead. That halves the dominant live cost for
+ * at most ~10s of extra latency on a suggestion, and `forceMs` still
+ * guarantees nothing waits longer than 30s. Both are env-tunable — set
+ * LIVE_REASONING_MIN_GAP_MS=0 to restore reasoning-per-window.
+ */
 export const DEFAULT_SCHEDULER_OPTIONS: SchedulerOptions = {
-  minGapMs: 4_000,
-  forceMs: 20_000,
+  minGapMs: 15_000,
+  forceMs: 30_000,
 };
+
+/** Read the cadence from env, falling back to the defaults above. */
+export function schedulerOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): SchedulerOptions {
+  const num = (key: string, fallback: number, max: number): number => {
+    const raw = env[key];
+    if (!raw) return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 && n <= max ? n : fallback;
+  };
+  const minGapMs = num('LIVE_REASONING_MIN_GAP_MS', DEFAULT_SCHEDULER_OPTIONS.minGapMs, 120_000);
+  return {
+    minGapMs,
+    // forceMs below minGapMs would make the force path fire first and undo
+    // the gap entirely; clamp it up.
+    forceMs: Math.max(
+      minGapMs,
+      num('LIVE_REASONING_FORCE_MS', DEFAULT_SCHEDULER_OPTIONS.forceMs, 300_000),
+    ),
+  };
+}
 
 export class ReasoningScheduler {
   private pending: Utterance[] = [];

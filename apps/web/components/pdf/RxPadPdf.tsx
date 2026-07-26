@@ -23,6 +23,9 @@ export interface RxPadPdfProps {
   rciNumber: string | null;
   specialty: string | null;
   clinicName: string | null;
+  /** Batch F — the rest of the letterhead. Optional; omitted lines just vanish. */
+  clinicAddress?: string | null;
+  clinicPhone?: string | null;
   signedBy: string | null;
   signedAt: string | null;
 }
@@ -45,6 +48,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   clinicName: { fontSize: 15, fontFamily: 'Times-Roman' },
+  clinicContact: { fontSize: 9, color: '#5a5a60', marginTop: 2 },
   prescriber: { fontSize: 12, marginTop: 2 },
   credential: { fontSize: 9, color: '#5a5a60', marginTop: 2 },
   patientRow: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 8 },
@@ -146,6 +150,15 @@ export function RxPadPdf(props: RxPadPdfProps) {
           {props.clinicName ? <Text style={styles.clinicName}>{props.clinicName}</Text> : null}
           <Text style={styles.prescriber}>{props.prescriberName}</Text>
           {credential ? <Text style={styles.credential}>{credential}</Text> : null}
+          {/* Batch F — a prescription is a document a patient carries to a
+              pharmacy and sometimes back to the clinic; it needs to say where
+              it came from and how to reach them. */}
+          {props.clinicAddress ? (
+            <Text style={styles.clinicContact}>{props.clinicAddress}</Text>
+          ) : null}
+          {props.clinicPhone ? (
+            <Text style={styles.clinicContact}>Tel: {props.clinicPhone}</Text>
+          ) : null}
           <View style={styles.patientRow}>
             {metaItem('Patient', props.clientFullName)}
             {props.ageYears != null ? metaItem('Age', String(props.ageYears)) : null}

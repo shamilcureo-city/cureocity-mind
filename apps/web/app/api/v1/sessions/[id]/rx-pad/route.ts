@@ -7,7 +7,7 @@ import {
   type RxPadPatchOp,
   type RxPadResponse,
 } from '@cureocity/contracts';
-import { checkInteractions, formatInteraction } from '@cureocity/clinical';
+import { allergyWarningsByDrug, interactionWarningsByDrug } from '@cureocity/clinical';
 import type { Prisma } from '@prisma/client';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
@@ -91,7 +91,7 @@ export async function PATCH(
     pad = applyOp(pad, op);
   }
   // Server-owned warnings: recompute across the whole pad after the edits.
-  pad = withInteractionWarnings(pad);
+  pad = withSafetyWarnings(pad);
 
   await prisma.noteDraft.update({
     where: { id: session.noteDraft.id },
@@ -216,21 +216,32 @@ function applyOp(pad: RxPadDraft, op: RxPadPatchOp): RxPadDraft {
  * Recompute deterministic interaction warnings across the whole pad —
  * each interaction's message is attached to both participating rows.
  */
-function withInteractionWarnings(pad: RxPadDraft): RxPadDraft {
+/**
+ * Recompute every safety warning on the pad, server-side, from scratch. The
+ * client can never write its own warnings.
+ *
+ * Batch B — two changes here:
+ *
+ *  1. ALLERGIES are now checked. The pad has always carried the patient's
+ *     allergy list and printed it on the slip, but nothing compared it to
+ *     what was being prescribed — a penicillin-allergic patient could be
+ *     handed amoxicillin with "Penicillin" printed at the top of the page.
+ *  2. Interaction warnings are attributed by INDEX (`interactionWarningsByDrug`)
+ *     instead of substring-matching the canonical generic against the row
+ *     text. The old match missed every brand name — "Ecosprin" never matched
+ *     "Aspirin", so the row that caused the interaction carried no warning.
+ */
+function withSafetyWarnings(pad: RxPadDraft): RxPadDraft {
   const meds = pad.meds ?? [];
   if (meds.length === 0) return pad;
-  const cleared = meds.map((m) => ({ ...m, warnings: [] as string[] }));
-  for (const interaction of checkInteractions(cleared.map((m) => m.drug))) {
-    const message = formatInteraction(interaction);
-    for (const row of cleared) {
-      const drug = row.drug.trim().toLowerCase();
-      const a = interaction.drugA.toLowerCase();
-      const b = interaction.drugB.toLowerCase();
-      if (drug.includes(a) || a.includes(drug) || drug.includes(b) || b.includes(drug)) {
-        if (!row.warnings.includes(message)) row.warnings.push(message);
-      }
-    }
-  }
+  const drugs = meds.map((m) => m.drug);
+  const interactions = interactionWarningsByDrug(drugs);
+  const allergyLines = allergyWarningsByDrug(drugs, pad.allergies ?? []);
+  const cleared = meds.map((m, i) => ({
+    ...m,
+    // Allergy first — it is the one that stops a prescription.
+    warnings: [...(allergyLines[i] ?? []), ...(interactions[i] ?? [])],
+  }));
   return { ...pad, meds: cleared };
 }
 

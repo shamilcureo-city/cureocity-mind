@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/Badge';
 import { StartEncounterButton } from '@/components/app/StartEncounterButton';
 import { ArchivePatientButton } from '@/components/app/ArchivePatientButton';
 import { ChronicCarePanel } from '@/components/app/ChronicCarePanel';
+import { AllergyEditor } from '@/components/app/AllergyEditor';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
@@ -32,6 +33,7 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
       dateOfBirth: true,
       status: true,
       isDemo: true,
+      allergies: true,
       createdAt: true,
       psychologistId: true,
       deletedAt: true,
@@ -83,6 +85,8 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
           />
         </div>
       </header>
+
+      <AllergyEditor clientId={patient.id} initial={patient.allergies} />
 
       <section className="mt-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">

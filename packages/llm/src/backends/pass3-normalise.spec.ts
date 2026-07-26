@@ -88,7 +88,6 @@ const validReport: ClinicalReportV1 = {
       whenInPlan: 'restructuring',
     },
   ],
-  planSuggestions: [],
   crisisFlags: [],
   planSuggestions: [],
   formulationSuggestions: [],

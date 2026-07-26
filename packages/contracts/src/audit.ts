@@ -54,6 +54,13 @@ export const AuditActionSchema = z.enum([
   'JOURNAL_ENTRY_UPDATED',
   'CLIENT_FIREBASE_LINKED',
   'AUDIO_RETENTION_PURGED',
+  // Batch E (DPDP) — the verbatim consult transcript was purged past its
+  // retention window. Separate from the audio purge because a LIVE consult
+  // never writes an AudioChunk: its raw capture only ever exists as text, so
+  // the audio purge could never reach it. Metadata: { clientId, chars,
+  // retentionDays }. OFF unless TRANSCRIPT_RETENTION_DAYS is set — deleting
+  // the evidence behind a signed note is an operator decision.
+  'TRANSCRIPT_RETENTION_PURGED',
   'CLIENT_CLAIM_TOKEN_ISSUED',
   'CLIENT_CLAIM_TOKEN_REDEEMED',
   'PUSH_SUBSCRIPTION_REGISTERED',
@@ -255,6 +262,12 @@ export const AuditActionSchema = z.enum([
   // the apply taps land RX_PAD_EDITED rows). Metadata: { sessionId,
   // editCount, clarificationCount, costInr }.
   'PLAN_DICTATION_PROPOSED',
+  // Doctor vertical — Batch B. The prescriber signed PAST a hard
+  // prescription-safety blocker (a drug that conflicts with a recorded
+  // allergy), with a recorded reason. Metadata: { sessionId, reason,
+  // blockers }. The one place the allergy gate can be crossed — and it
+  // leaves a trail.
+  'RX_SAFETY_OVERRIDE',
   // The Session Loop (SL1) — formulation versioning, session agreements,
   // one-tap alliance feedback.
   'FORMULATION_CONFIRMED',

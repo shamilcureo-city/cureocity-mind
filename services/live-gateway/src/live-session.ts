@@ -18,7 +18,9 @@ import type {
 } from '@cureocity/contracts';
 import type { SpeakerSegment } from '@cureocity/llm';
 import {
+  checkAllergies,
   checkInteractions,
+  formatAllergyAlert,
   formatInteraction,
   parseVoiceCommands,
   resolveSpecialtyTemplate,
@@ -31,7 +33,7 @@ import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
 import { reportError } from './sentry';
-import { ReasoningScheduler } from './reasoning-loop';
+import { ReasoningScheduler, schedulerOptionsFromEnv } from './reasoning-loop';
 import { TherapyReasoningStore } from './therapy-reasoning';
 import { assembleRxPad } from './rx-pad';
 import {
@@ -97,6 +99,16 @@ function noteRefreshMsFromEnv(): number {
   return Number.isFinite(n) && n >= 0 && n <= 600_000 ? n : 40_000;
 }
 
+/**
+ * Batch A — how long finalize() may spend closing the note before it falls
+ * back to the last interim one. Must stay BELOW the browser's finalize safety
+ * timer (90s in DoctorLiveEncounter) so the gateway's own graceful fallback
+ * wins the race rather than the client's "connection may have dropped" bail.
+ */
+function finalizeBudgetMsFromEnv(): number {
+  return numEnv('LIVE_FINALIZE_BUDGET_MS', 55_000, 5_000, 300_000);
+}
+
 function numEnv(key: string, fallback: number, min: number, max: number): number {
   const raw = process.env[key];
   if (!raw) return fallback;
@@ -132,7 +144,7 @@ export class LiveSession {
   /** Sprint DS1 — the per-consult reasoning substrate (findings + citation gate). */
   private readonly caseStore: CaseStateStore;
   /** Sprint DS2 — debounces + coalesces reasoning passes. */
-  private readonly reasoningScheduler = new ReasoningScheduler();
+  private readonly reasoningScheduler = new ReasoningScheduler(schedulerOptionsFromEnv());
 
   /** Sprint TS5 — therapist live copilot state (null for doctors). */
   private readonly therapyStore: TherapyReasoningStore | null;
@@ -200,7 +212,16 @@ export class LiveSession {
 
   /** Transcript end (ms) when the interim note last ran — the debounce cursor. */
   private lastNoteTranscriptEndMs = -1;
+  /** Batch D — wall-clock of the last manual "Update now", for its throttle. */
+  private lastManualRefreshAtMs = 0;
   private readonly noteRefreshMs: number;
+
+  /**
+   * Batch A (resume) — ms added to every new utterance's timestamps so a
+   * resumed consult's timeline continues after the replayed tail instead of
+   * restarting at 0 (the byte clock restarts on a fresh socket).
+   */
+  private timeOffsetMs = 0;
 
   constructor(
     sessionId: string,
@@ -233,6 +254,43 @@ export class LiveSession {
       noteRefreshMs ?? (vertical === 'THERAPIST' ? 90_000 : noteRefreshMsFromEnv());
     this.caseStore = new CaseStateStore(patientContext);
     this.therapyStore = vertical === 'THERAPIST' ? new TherapyReasoningStore(therapyContext) : null;
+  }
+
+  /**
+   * Batch A (resume) — re-seed a reconnected consult from the transcript the
+   * browser already holds, BEFORE start(). Without this a dropped socket lost
+   * every word said before the drop: the gateway's utterance list is the only
+   * copy, and a new socket built a blank LiveSession.
+   *
+   * The replay is state-only — nothing is re-emitted (the client is already
+   * rendering these) and no LLM runs. It continues the `u<n>` id sequence past
+   * the highest replayed index so ids stay unique for the whole consult, and
+   * offsets new timestamps past the replayed tail so the timeline is monotonic.
+   */
+  seedResume(utterances: Utterance[]): void {
+    if (utterances.length === 0) return;
+    let maxIndex = this.windowIndex;
+    let maxEnd = this.timeOffsetMs;
+    for (const u of utterances) {
+      this.utterances.push(u);
+      // Register so a finding citing a pre-drop utterance still passes the gate.
+      this.caseStore.registerUtterance(u.id);
+      const n = Number(/^u(\d+)$/.exec(u.id)?.[1] ?? 0);
+      if (Number.isFinite(n) && n > maxIndex) maxIndex = n;
+      if (u.tEndMs > maxEnd) maxEnd = u.tEndMs;
+      if (u.text.trim().length > 0) {
+        this.segments.push({
+          speaker: unmapSpeaker(u.speaker),
+          text: u.text,
+          startMs: u.tStartMs,
+          // SpeakerSegment.endMs must be positive; a zero-length replayed
+          // window would otherwise fail Pass 2's input validation.
+          endMs: Math.max(u.tEndMs, u.tStartMs + 1),
+        });
+      }
+    }
+    this.windowIndex = maxIndex;
+    this.timeOffsetMs = maxEnd;
   }
 
   start(): void {
@@ -590,6 +648,16 @@ export class LiveSession {
    */
   requestNoteRefresh(): void {
     if (this.stopped) return;
+    // Batch D — "Update now" was unthrottled: every tap ran a full Pass-2
+    // note over the cumulative transcript, so a practitioner tapping it
+    // impatiently could run several Pro-class passes in a few seconds. One
+    // refresh per NOTE_REFRESH_MIN_GAP_MS; extra taps are no-ops rather than
+    // queued work.
+    const now = Date.now();
+    if (now - this.lastManualRefreshAtMs < numEnv('NOTE_REFRESH_MIN_GAP_MS', 10_000, 0, 300_000)) {
+      return;
+    }
+    this.lastManualRefreshAtMs = now;
     void (async () => {
       const deadline = Date.now() + 4_000;
       while (this.busy && Date.now() < deadline)
@@ -640,9 +708,13 @@ export class LiveSession {
   private commitUtterances(
     transcript: string,
     segments: SpeakerSegment[],
-    tStartMs: number,
-    tEndMs: number,
+    rawStartMs: number,
+    rawEndMs: number,
   ): Utterance[] {
+    // Batch A (resume) — on a resumed consult the byte clock restarts at 0, so
+    // shift this window past the replayed tail to keep the timeline monotonic.
+    const tStartMs = rawStartMs + this.timeOffsetMs;
+    const tEndMs = rawEndMs + this.timeOffsetMs;
     for (const seg of segments) {
       this.segments.push({ ...seg, startMs: seg.startMs + tStartMs, endMs: seg.endMs + tStartMs });
     }
@@ -863,6 +935,33 @@ export class LiveSession {
         },
       });
     }
+    // Batch B — ALLERGY check. The pad has always printed the patient's
+    // allergy list; nothing ever compared it to what was being prescribed.
+    // Check everything about to be handed over — drafted meds AND meds the
+    // doctor spoke — against the recorded allergies, and raise it as a
+    // RED_FLAG so it reaches the before-you-close gate like any other.
+    const spokenMeds = this.voiceCommands.flatMap((c) =>
+      c.kind === 'ADD_MEDICATION' ? [c.drug] : [],
+    );
+    const allergyAlerts = checkAllergies(
+      [...draftedMeds, ...spokenMeds],
+      this.caseStore.snapshot.patient.allergies,
+    );
+    for (const alert of allergyAlerts) {
+      const message = formatAllergyAlert(alert);
+      if (this.seenGaps.has(message)) continue;
+      this.seenGaps.add(message);
+      this.emit({
+        type: 'gap',
+        gap: {
+          kind: 'RED_FLAG',
+          // A hard contraindication is critical (it gates the close); a
+          // graded cross-reactivity risk is a warning the doctor judges.
+          severity: alert.severity === 'contraindicated' ? 'critical' : 'warn',
+          message,
+        },
+      });
+    }
   }
 
   /** Sprint DS5 — assemble the current Rx pad from the note + meds + context. */
@@ -911,31 +1010,50 @@ export class LiveSession {
     this.streamTranscriber?.stop();
     this.streamTranscriber = null;
     this.stopAudio(); // sets `stopped` → any in-flight pump loop exits after its window
-    await this.waitIdle();
+    const idle = await this.waitIdle();
     this.emit({ type: 'status', state: 'finalizing' });
+    let timer: NodeJS.Timeout | undefined;
     try {
       // A slow or hung final note (Pass 2 on Vertex) must never trap the
       // doctor on "Finishing…". Cap the finalize work; on overrun, fall back
       // to the last good live note so `final` + `done` ALWAYS fire.
+      //
+      // Batch A — the old 25s cap was TOO TIGHT: on a long consult the tail
+      // Pass 1 + reasoning + the Pro finalize note routinely exceed it, and
+      // the fallback silently ships the last INTERIM (Flash) note — the
+      // closing minutes of the consult missing from the signed record. The
+      // budget now sits just under the browser's finalize safety timer.
       await Promise.race([
-        this.finalizeWork(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('finalize budget exceeded')), 25_000),
-        ),
+        this.finalizeWork(idle),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('finalize budget exceeded')),
+            finalizeBudgetMsFromEnv(),
+          );
+        }),
       ]);
     } catch (err) {
       reportError('finalize failed', err);
       this.emitFinalFromLatest();
     } finally {
+      if (timer) clearTimeout(timer);
       this.emit({ type: 'meter', summary: this.meterSummary() });
       this.emit({ type: 'status', state: 'done' });
     }
   }
 
-  /** The bounded finalize body: last-window transcription → reasoning → note. */
-  private async finalizeWork(): Promise<void> {
+  /**
+   * The bounded finalize body: last-window transcription → reasoning → note.
+   *
+   * `idle` is false when waitIdle() gave up on a still-in-flight pump window.
+   * That window OWNS `pending` (it slices its prefix off and advances
+   * flushedBytes when its Pass-1 call returns), so transcribing the tail here
+   * would re-transcribe its bytes and DUPLICATE them in the record. Skip the
+   * tail in that case — a few unheard seconds beats a doubled transcript.
+   */
+  private async finalizeWork(idle: boolean): Promise<void> {
     // Transcribe whatever remains as the final window (may be short).
-    if (this.pending.length > 0) {
+    if (this.pending.length > 0 && idle) {
       const tail = this.pending;
       const durationMs = bytesToMs(tail.length);
       const consumed = tail.length;
@@ -1009,12 +1127,21 @@ export class LiveSession {
     this.meter.recordSpeechToTranscript(Date.now() - (this.captureStartMs + tStartMs));
   }
 
-  /** Wait for any in-flight `pump()` window to finish before finalizing. */
-  private async waitIdle(): Promise<void> {
-    // Bounded: a stuck in-flight window must never block finalize forever.
-    const deadline = Date.now() + 4_000;
+  /**
+   * Wait for any in-flight `pump()` window to finish before finalizing.
+   * Returns true when the pump actually went idle, false when we gave up on
+   * it (see finalizeWork — a still-running window owns `pending`).
+   *
+   * Batch A — the old 4s deadline was shorter than a normal Vertex Pass-1
+   * call, so a finalize pressed mid-window almost always raced it. 15s covers
+   * a slow window while still bounding a genuinely stuck one.
+   */
+  private async waitIdle(): Promise<boolean> {
+    const deadline = Date.now() + numEnv('LIVE_WAIT_IDLE_MS', 15_000, 100, 60_000);
     while (this.busy && Date.now() < deadline)
-      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    if (this.busy) reportError('waitIdle timed out', new Error('pump still in flight at finalize'));
+    return !this.busy;
   }
 
   private emitFinalFromLatest(): void {
@@ -1081,6 +1208,13 @@ function presentVitalIds(note: MedicalEncounterNoteV1 | null): string[] {
 function mapSpeaker(speaker: SpeakerSegment['speaker'] | undefined): Utterance['speaker'] {
   if (speaker === 'therapist') return 'doctor';
   if (speaker === 'client') return 'patient';
+  return 'unknown';
+}
+
+/** Inverse of mapSpeaker — used when replaying utterances back into segments. */
+function unmapSpeaker(speaker: Utterance['speaker']): SpeakerSegment['speaker'] {
+  if (speaker === 'doctor') return 'therapist';
+  if (speaker === 'patient') return 'client';
   return 'unknown';
 }
 
