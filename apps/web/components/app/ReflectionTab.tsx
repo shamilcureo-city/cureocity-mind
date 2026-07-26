@@ -122,8 +122,7 @@ export function ReflectionTab({
           <div>
             <h2 className="font-serif text-2xl">Reflection questions</h2>
             <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              {note.modality} session · derived from the signed note. Send to the client to hold
-              between sessions.
+              {note.modality} session · derived from the signed note.
             </p>
           </div>
           {data && (
