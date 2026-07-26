@@ -192,3 +192,41 @@ describe('assembleRxPad — Batch B safety', () => {
     expect(azi?.warnings).toEqual([]);
   });
 });
+
+describe('assembleRxPad — the doctor outranks the model', () => {
+  it('keeps the SPOKEN dose when Pass 2 also drafts the same drug', () => {
+    // Rows are pushed continued → spoken → drafted, so a naive "later wins"
+    // rule would let the model's inferred dose overwrite what the doctor
+    // actually said. It must not.
+    const voiceCommands: VoiceCommand[] = [
+      {
+        kind: 'ADD_MEDICATION',
+        raw: 'aspirin 150 od',
+        drug: 'Aspirin',
+        strength: '150 mg',
+        utteranceId: 'u4',
+      },
+    ];
+    const pad = assembleRxPad(
+      input({ medications: [med({ drug: 'Aspirin', strength: '75 mg' })], voiceCommands }),
+    );
+    const rows = pad.meds.filter((m) => m.drug.toLowerCase() === 'aspirin');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.strength).toBe('150 mg'); // the spoken dose, not the drafted one
+    expect(rows[0]!.source).toBe('dictated');
+    expect(rows[0]!.utteranceId).toBe('u4');
+  });
+
+  it('lets an AI-drafted med supersede a plain continued row', () => {
+    const pad = assembleRxPad(
+      input({
+        patient: patient({ activeMeds: ['Amlodipine 5 mg'] }),
+        medications: [med({ drug: 'Amlodipine', strength: '10 mg' })],
+      }),
+    );
+    const rows = pad.meds.filter((m) => m.drug.toLowerCase().startsWith('amlodipine'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.strength).toBe('10 mg');
+    expect(rows[0]!.previous).toBe('Amlodipine 5 mg');
+  });
+});

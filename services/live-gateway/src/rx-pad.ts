@@ -75,6 +75,12 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
       return;
     }
     const prior = meds[existing]!;
+    // Supersede only when the new row speaks with MORE authority. Sources are
+    // pushed continued → spoken → drafted, so a plain "later wins" rule would
+    // let the model's inferred med overwrite what the doctor actually said —
+    // exactly backwards. What the doctor spoke always outranks what Pass 2
+    // inferred, which in turn outranks a standing repeat.
+    if (sourceRank(row) < sourceRank(prior)) return;
     meds[existing] = {
       ...row,
       // A change to a standing med stays flagged as continued, so the pad
@@ -198,6 +204,18 @@ export function assembleRxPad(input: RxPadInput): RxPadV1 {
     allergies: patient.allergies,
     ...(vitalsLine(note) ? { vitalsLine: vitalsLine(note) } : {}),
   };
+}
+
+/**
+ * Authority of a pad row's origin, highest wins a same-drug collision.
+ * SPOKEN (2) — the doctor said it out loud.
+ * DRAFTED (1) — Pass 2 inferred it from the consult.
+ * CONTINUED (0) — carried from the patient's standing regimen.
+ */
+function sourceRank(row: RxMedRow): number {
+  if (row.source === 'dictated') return 2;
+  if (row.continued) return 0;
+  return 1;
 }
 
 function splitPlan(plan: string): string[] {

@@ -965,8 +965,12 @@ export function DoctorLiveEncounter({
       flushAudioQueue(ws);
       ws.send(JSON.stringify({ type: 'stop' }));
     } else {
-      // Batch A — the socket is already gone, so no `final` is ever coming.
-      // Salvage immediately instead of showing "Finishing…" for 90 seconds.
+      // Batch A — the socket is already gone (or still mid-reconnect), so no
+      // `final` is ever coming. Close the in-flight attempt first — otherwise
+      // its onopen still fires, starts a gateway session nobody will ever
+      // `stop`, and leaves it to idle-timeout minutes later. Then salvage,
+      // instead of showing "Finishing…" for 90 seconds.
+      ws?.close();
       void giveUpReconnect();
       return;
     }
