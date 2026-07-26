@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Psychologist } from '@prisma/client';
@@ -19,9 +20,16 @@ import { prisma } from './prisma';
  * POST /api/v1/auth/session. In bypass mode (dev/preview/explicit
  * demo) this resolves to the seeded fixture, same as the API guards —
  * so local dev and demo deployments keep working with zero setup.
+ *
+ * PERF: `currentPsychologist` is wrapped in React `cache()`, so the
+ * cookie verify + `psychologist.findUnique` run ONCE per request no
+ * matter how many callers ask. Every `/app` page render has at least
+ * two (the layout resolves the sidebar identity, then the page's own
+ * guard), and nested guards add more. The cache is per-request — it
+ * never leaks identity between requests or users.
  */
 
-export async function currentPsychologist(): Promise<Psychologist | null> {
+const resolvePsychologist = async (): Promise<Psychologist | null> => {
   let firebaseUid: string;
 
   if (isAuthBypassed()) {
@@ -65,7 +73,9 @@ export async function currentPsychologist(): Promise<Psychologist | null> {
     return null;
   }
   return psy;
-}
+};
+
+export const currentPsychologist: () => Promise<Psychologist | null> = cache(resolvePsychologist);
 
 /** Page guard: resolved Psychologist row, or a redirect to /login. */
 export async function requirePagePsychologist(): Promise<Psychologist> {

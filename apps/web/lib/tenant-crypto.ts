@@ -57,8 +57,69 @@ interface TenantCrypto {
    */
   localDev: IKmsProvider | null;
   encryptor: IFieldEncryptor;
-  cache: Map<string, CachedKey>;
+  /**
+   * The tenant's CURRENT DEK, for encrypt. Keyed by psychologistId.
+   */
+  activeCache: Map<string, CachedKey>;
+  /**
+   * Every unwrapped DEK by the keyId embedded in the envelope, keyed
+   * `psychologistId::kmsKeyId` — so a RETIRED key caches too.
+   *
+   * This used to be one entry per psychologist, matched on the active
+   * key's id. Every row written under a retired key therefore missed the
+   * cache and paid a `psychologistTenantKey` lookup + a KMS unwrap (a REST
+   * round-trip to asia-south1 under gcp-kms) on EVERY decrypt. The S32
+   * Phase 2 cutover retires the pre-cutover local-dev DEK, so on a
+   * migrated tenant that was every historical row: rendering a 40-client
+   * roster meant 40 KMS calls.
+   */
+  keyCache: Map<string, CachedKey>;
+  /**
+   * Single-flight. A cache alone doesn't help a `Promise.all` over N rows:
+   * all N miss before the first resolves and fire N concurrent unwraps.
+   * Callers awaiting the same key share one in-progress promise instead.
+   */
+  inflight: Map<string, Promise<UnwrappedDataKey | null>>;
   backend: KmsBackend;
+}
+
+/** Cache key for a specific DEK of a specific tenant. */
+function dekCacheKey(psychologistId: string, keyId: string): string {
+  return `${psychologistId}::${keyId}`;
+}
+
+/**
+ * Record an unwrapped DEK. Always cached by its own keyId; additionally
+ * recorded as the tenant's active key when it came from `getOrCreateDek`.
+ */
+function rememberDek(
+  tc: TenantCrypto,
+  psychologistId: string,
+  dek: UnwrappedDataKey,
+  active: boolean,
+): void {
+  const entry: CachedKey = { dek, expiresAt: Date.now() + CACHE_TTL_MS };
+  tc.keyCache.set(dekCacheKey(psychologistId, dek.keyId), entry);
+  if (active) tc.activeCache.set(psychologistId, entry);
+}
+
+/**
+ * Run `work` once per key even when called concurrently — later callers
+ * join the in-progress promise. The entry is always cleared, so a failed
+ * unwrap doesn't poison the next attempt.
+ */
+function singleFlight<T extends UnwrappedDataKey | null>(
+  tc: TenantCrypto,
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const pending = tc.inflight.get(key);
+  if (pending) return pending as Promise<T>;
+  const run = work().finally(() => {
+    tc.inflight.delete(key);
+  });
+  tc.inflight.set(key, run);
+  return run;
 }
 
 /**
@@ -127,7 +188,9 @@ function instance(): TenantCrypto {
     kms,
     localDev,
     encryptor: new AesGcmFieldEncryptor(),
-    cache: new Map(),
+    activeCache: new Map(),
+    keyCache: new Map(),
+    inflight: new Map(),
     backend,
   };
   globalThis.__cureocityTenantCrypto = cached;
@@ -180,40 +243,50 @@ export function kmsBackend(): TenantCrypto['backend'] {
 
 async function getOrCreateDek(psychologistId: string): Promise<UnwrappedDataKey> {
   const tc = instance();
-  const cached = tc.cache.get(psychologistId);
+  const cached = tc.activeCache.get(psychologistId);
   if (cached && cached.expiresAt > Date.now()) return cached.dek;
 
-  const active = await prisma.psychologistTenantKey.findFirst({
-    where: { psychologistId, retiredAt: null },
-    orderBy: { createdAt: 'desc' },
+  // Single-flight on the tenant: encrypting three PII fields of one client
+  // concurrently used to race three provisions for a tenant with no key yet.
+  const dek = await singleFlight(tc, `active::${psychologistId}`, async () => {
+    const fresh = tc.activeCache.get(psychologistId);
+    if (fresh && fresh.expiresAt > Date.now()) return fresh.dek;
+
+    const active = await prisma.psychologistTenantKey.findFirst({
+      where: { psychologistId, retiredAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    let resolved: UnwrappedDataKey;
+    if (!active) {
+      resolved = await provisionNewDek(psychologistId);
+    } else if (tc.backend === 'gcp-kms' && !active.kmsKeyId.startsWith('projects/')) {
+      // S32 Phase 2 cutover — the active DEK predates the gcp-kms switch (it was
+      // wrapped by local-dev). Retire it so new writes use a GCP-wrapped DEK;
+      // ciphertext already written under it stays readable via the retired row
+      // (getDekByEnvelope + the local-dev routing fallback). Lossless — the DEK
+      // keyId is embedded in every envelope, so we rotate rather than re-wrap.
+      await prisma.psychologistTenantKey.update({
+        where: { id: active.id },
+        data: { retiredAt: new Date() },
+      });
+      console.info(
+        `[tenant-crypto] cutover: retired local-dev DEK psy=${psychologistId} keyId=${active.kmsKeyId}; provisioning GCP DEK`,
+      );
+      resolved = await provisionNewDek(psychologistId);
+    } else {
+      resolved = await providerFor(tc, active.kmsKeyId).unwrapDataKey({
+        keyId: active.kmsKeyId,
+        wrappedKey: active.wrappedKey,
+      });
+    }
+
+    rememberDek(tc, psychologistId, resolved, true);
+    return resolved;
   });
-
-  let dek: UnwrappedDataKey;
-  if (!active) {
-    dek = await provisionNewDek(psychologistId);
-  } else if (tc.backend === 'gcp-kms' && !active.kmsKeyId.startsWith('projects/')) {
-    // S32 Phase 2 cutover — the active DEK predates the gcp-kms switch (it was
-    // wrapped by local-dev). Retire it so new writes use a GCP-wrapped DEK;
-    // ciphertext already written under it stays readable via the retired row
-    // (getDekByEnvelope + the local-dev routing fallback). Lossless — the DEK
-    // keyId is embedded in every envelope, so we rotate rather than re-wrap.
-    await prisma.psychologistTenantKey.update({
-      where: { id: active.id },
-      data: { retiredAt: new Date() },
-    });
-    console.info(
-      `[tenant-crypto] cutover: retired local-dev DEK psy=${psychologistId} keyId=${active.kmsKeyId}; provisioning GCP DEK`,
-    );
-    dek = await provisionNewDek(psychologistId);
-  } else {
-    dek = await providerFor(tc, active.kmsKeyId).unwrapDataKey({
-      keyId: active.kmsKeyId,
-      wrappedKey: active.wrappedKey,
-    });
-  }
-
-  tc.cache.set(psychologistId, { dek, expiresAt: Date.now() + CACHE_TTL_MS });
-  return dek;
+  // singleFlight is typed for the nullable decrypt path; the active DEK is
+  // always provisioned or unwrapped above, never null.
+  return dek as UnwrappedDataKey;
 }
 
 async function getDekByEnvelope(
@@ -221,18 +294,27 @@ async function getDekByEnvelope(
   envelopeKeyId: string,
 ): Promise<UnwrappedDataKey | null> {
   const tc = instance();
-  const cached = tc.cache.get(psychologistId);
-  if (cached && cached.dek.keyId === envelopeKeyId && cached.expiresAt > Date.now()) {
-    return cached.dek;
-  }
-  const row = await prisma.psychologistTenantKey.findFirst({
-    where: { psychologistId, kmsKeyId: envelopeKeyId },
-    orderBy: { createdAt: 'desc' },
-  });
-  if (!row) return null;
-  return providerFor(tc, row.kmsKeyId).unwrapDataKey({
-    keyId: row.kmsKeyId,
-    wrappedKey: row.wrappedKey,
+  const key = dekCacheKey(psychologistId, envelopeKeyId);
+  const cached = tc.keyCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.dek;
+
+  return singleFlight(tc, key, async () => {
+    const fresh = tc.keyCache.get(key);
+    if (fresh && fresh.expiresAt > Date.now()) return fresh.dek;
+
+    const row = await prisma.psychologistTenantKey.findFirst({
+      where: { psychologistId, kmsKeyId: envelopeKeyId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!row) return null;
+    const dek = await providerFor(tc, row.kmsKeyId).unwrapDataKey({
+      keyId: row.kmsKeyId,
+      wrappedKey: row.wrappedKey,
+    });
+    // Cache under the ENVELOPE's keyId (retired keys included) — this is
+    // what turns an N-row roster render into a single unwrap.
+    rememberDek(tc, psychologistId, dek, false);
+    return dek;
   });
 }
 
