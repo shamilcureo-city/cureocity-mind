@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import type {
   Appointment,
@@ -9,19 +9,33 @@ import type {
   ListAppointmentsResponse,
   MarketingState,
   MarketingStatsResponse,
-  ProfileFaq,
 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { MarketingPosts } from './MarketingPosts';
 
 /**
- * Marketing V1 — the studio's client surface: publish header +
- * checklist, public URL, weekly availability editor, FAQ editor, and
- * the appointment inbox (confirm → Client + INTAKE Session).
+ * MK7 — the marketing studio, restructured to mirror the public page.
+ *
+ * Four tabs: **My page** (numbered sections in the exact order visitors
+ * see them, each editable in place with its own done / required state),
+ * **My content** (the paid-plan blog), **Inquiries** (the appointment
+ * inbox), **Stats** (the funnel). One header owns publish state, the
+ * to-dos count, and Preview.
  */
 
-interface Identity {
+interface Profile {
+  headline: string | null;
+  bio: string | null;
+  locationCity: string | null;
+  locationProvince: string | null;
+  specialties: string[];
+  languages: string[];
+  modalities: string[];
+  yearsOfExperience: number | null;
+  sessionFeeInr: number | null;
+  isAcceptingNewClients: boolean;
   credentialsLine: string | null;
   pronouns: string | null;
   officeAddress: string | null;
@@ -31,8 +45,11 @@ interface Identity {
 interface Props {
   initialState: MarketingState;
   initialRules: AvailabilityRuleInput[];
-  initialIdentity: Identity;
+  initialProfile: Profile;
+  contentEntitled: boolean;
 }
+
+type Tab = 'page' | 'content' | 'inquiries' | 'stats';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -57,37 +74,126 @@ function minuteLabel(m: number): string {
 /** 06:00–21:00 in 30-min steps — sane pick-list for a clinic day. */
 const MINUTE_OPTIONS = Array.from({ length: 31 }, (_, i) => 360 + i * 30);
 
-export function MarketingStudio({ initialState, initialRules, initialIdentity }: Props) {
+const inputCls =
+  'w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3.5 py-2.5 text-sm';
+const labelCls = 'text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]';
+
+/** "a, b, c" ⇄ ["a","b","c"] for the list fields. */
+function toList(s: string): string[] {
+  return s
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+// ---------------------------------------------------------------------------
+// One numbered, collapsible section of the My-page editor
+// ---------------------------------------------------------------------------
+
+function Section({
+  n,
+  title,
+  desc,
+  done,
+  required,
+  open,
+  onToggle,
+  children,
+}: {
+  n: number;
+  title: string;
+  desc: string;
+  done: boolean;
+  required: boolean;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center gap-4 px-6 py-5 text-left"
+        aria-expanded={open}
+      >
+        <span
+          className={`grid h-8 w-8 flex-shrink-0 place-items-center rounded-full text-sm font-semibold ${
+            done
+              ? 'bg-[var(--color-accent)] text-white'
+              : 'bg-[var(--color-surface-soft)] text-[var(--color-ink-2)]'
+          }`}
+        >
+          {done ? '✓' : n}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-serif text-lg">{title}</span>
+            {!done && required && (
+              <span className="rounded-full border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--color-warn)]">
+                Required to publish
+              </span>
+            )}
+          </span>
+          <span className="mt-0.5 block text-sm text-[var(--color-ink-2)]">{desc}</span>
+        </span>
+        <span className="flex-shrink-0 text-sm font-medium text-[var(--color-accent)]">
+          {open ? 'Close' : 'Edit'}
+        </span>
+      </button>
+      {open && <div className="border-t border-[var(--color-line-soft)] px-6 py-5">{children}</div>}
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The studio
+// ---------------------------------------------------------------------------
+
+export function MarketingStudio({
+  initialState,
+  initialRules,
+  initialProfile,
+  contentEntitled,
+}: Props) {
+  const [tab, setTab] = useState<Tab>('page');
   const [state, setState] = useState<MarketingState>(initialState);
+  const [profile, setProfile] = useState<Profile>(initialProfile);
   const [rules, setRules] = useState<AvailabilityRuleInput[]>(initialRules);
-  const [identity, setIdentity] = useState<Identity>(initialIdentity);
-  const [draft, setDraft] = useState<DraftMarketingResponse | null>(null);
-  const [stats, setStats] = useState<MarketingStatsResponse | null>(null);
+  const [slugInput, setSlugInput] = useState(initialState.publicSlug ?? '');
+  const [openSection, setOpenSection] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<Appointment[] | null>(null);
+  const [stats, setStats] = useState<MarketingStatsResponse | null>(null);
+  const [draft, setDraft] = useState<DraftMarketingResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const refreshState = useCallback(async () => {
+    const res = await fetch('/api/v1/psychologists/me/marketing', { cache: 'no-store' });
+    if (res.ok) {
+      const s = (await res.json()) as MarketingState;
+      setState(s);
+      if (s.publicSlug) setSlugInput(s.publicSlug);
+    }
+  }, []);
 
   const loadAppointments = useCallback(async () => {
     try {
       const res = await fetch('/api/v1/appointments', { cache: 'no-store' });
       if (!res.ok) throw new Error();
-      const body = (await res.json()) as ListAppointmentsResponse;
-      setAppointments(body.items);
+      setAppointments(((await res.json()) as ListAppointmentsResponse).items);
     } catch {
       setAppointments([]);
     }
   }, []);
 
   useEffect(() => {
+    void refreshState();
     void loadAppointments();
     void fetch('/api/v1/psychologists/me/marketing/stats', { cache: 'no-store' })
       .then((r) => (r.ok ? (r.json() as Promise<MarketingStatsResponse>) : null))
       .then((sr) => sr && setStats(sr));
-    // Ensure the slug exists server-side (auto-generated on first GET).
-    void fetch('/api/v1/psychologists/me/marketing', { cache: 'no-store' })
-      .then((r) => (r.ok ? (r.json() as Promise<MarketingState>) : null))
-      .then((s) => s && setState(s));
-  }, [loadAppointments]);
+  }, [refreshState, loadAppointments]);
 
   const act = useCallback(async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
@@ -101,6 +207,44 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
     }
   }, []);
 
+  /** PATCH the account profile fields, then refresh the checklist. */
+  const saveProfile = useCallback(
+    (label: string, patch: Record<string, unknown>, done?: string) =>
+      act(label, async () => {
+        const res = await fetch('/api/v1/psychologists/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? 'Could not save.');
+        }
+        await refreshState();
+        setNotice(done ?? 'Saved.');
+      }),
+    [act, refreshState],
+  );
+
+  /** PATCH the marketing-owned fields (slug, FAQs, identity extras). */
+  const saveMarketing = useCallback(
+    (label: string, patch: Record<string, unknown>, done?: string) =>
+      act(label, async () => {
+        const res = await fetch('/api/v1/psychologists/me/marketing', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? 'Could not save.');
+        }
+        setState((await res.json()) as MarketingState);
+        setNotice(done ?? 'Saved.');
+      }),
+    [act],
+  );
+
   const publish = useCallback(
     (publishNow: boolean) =>
       act('publish', async () => {
@@ -111,123 +255,29 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
         });
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         if (!res.ok) throw new Error(body.error ?? 'Could not update publish state.');
-        const fresh = await fetch('/api/v1/psychologists/me/marketing', { cache: 'no-store' });
-        if (fresh.ok) setState((await fresh.json()) as MarketingState);
+        await refreshState();
+        setNotice(publishNow ? 'Your page is live.' : 'Page unpublished.');
       }),
-    [act],
+    [act, refreshState],
   );
 
   const saveRules = useCallback(
-    (next: AvailabilityRuleInput[]) =>
+    () =>
       act('rules', async () => {
         const res = await fetch('/api/v1/psychologists/me/availability', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ rules: next }),
+          body: JSON.stringify({ rules }),
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? 'Could not save availability.');
         }
-        setRules(next);
+        setNotice('Availability saved — these windows are now bookable.');
       }),
-    [act],
+    [act, rules],
   );
 
-  const saveFaqs = useCallback(
-    (faqs: ProfileFaq[]) =>
-      act('faqs', async () => {
-        const res = await fetch('/api/v1/psychologists/me/marketing', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ faqs }),
-        });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error ?? 'Could not save FAQs.');
-        }
-        setState((await res.json()) as MarketingState);
-      }),
-    [act],
-  );
-
-  const requestDraft = useCallback(
-    () =>
-      act('draft', async () => {
-        const res = await fetch('/api/v1/psychologists/me/marketing/draft', { method: 'POST' });
-        const body = (await res.json().catch(() => ({}))) as
-          | DraftMarketingResponse
-          | { error?: string };
-        if (!res.ok) {
-          throw new Error((body as { error?: string }).error ?? 'Could not draft — try again.');
-        }
-        setDraft(body as DraftMarketingResponse);
-      }),
-    [act],
-  );
-
-  /**
-   * Apply = the therapist approved the draft. Headline + bio persist via
-   * the account profile route; FAQs via the marketing route.
-   */
-  const applyDraft = useCallback(
-    () =>
-      act('apply-draft', async () => {
-        if (!draft) return;
-        const profileRes = await fetch('/api/v1/psychologists/me', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ headline: draft.headline.slice(0, 160), bio: draft.bio }),
-        });
-        if (!profileRes.ok) {
-          const body = (await profileRes.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error ?? 'Could not save the headline and bio.');
-        }
-        if (draft.faqs.length > 0) {
-          const faqRes = await fetch('/api/v1/psychologists/me/marketing', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ faqs: draft.faqs }),
-          });
-          if (!faqRes.ok) {
-            const body = (await faqRes.json().catch(() => ({}))) as { error?: string };
-            throw new Error(body.error ?? 'Could not save the FAQs.');
-          }
-          setState((await faqRes.json()) as MarketingState);
-        }
-        setDraft(null);
-        setNotice('Draft applied — review it on your page, then publish when ready.');
-        const fresh = await fetch('/api/v1/psychologists/me/marketing', { cache: 'no-store' });
-        if (fresh.ok) setState((await fresh.json()) as MarketingState);
-      }),
-    [act, draft],
-  );
-
-  const saveIdentity = useCallback(
-    () =>
-      act('identity', async () => {
-        const res = await fetch('/api/v1/psychologists/me/marketing', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            credentialsLine: identity.credentialsLine?.trim() || null,
-            pronouns: identity.pronouns?.trim() || null,
-            officeAddress: identity.officeAddress?.trim() || null,
-          }),
-        });
-        if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error ?? 'Could not save identity details.');
-        }
-        setNotice('Identity details saved.');
-      }),
-    [act, identity],
-  );
-
-  /**
-   * Client-side crop + downscale to a 512px square JPEG so the upload
-   * stays small enough for the inline (bytea) store.
-   */
   const uploadPhoto = useCallback(
     (file: File) =>
       act('photo', async () => {
@@ -270,13 +320,54 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? 'Could not upload the photo.');
         }
-        setIdentity((i) => ({ ...i, hasPhoto: true }));
-        setNotice('Photo uploaded — it appears on your page once published.');
+        setProfile((p) => ({ ...p, hasPhoto: true }));
+        setNotice('Photo uploaded.');
       }),
     [act],
   );
 
-  const resolve = useCallback(
+  const requestDraft = useCallback(
+    () =>
+      act('draft', async () => {
+        const res = await fetch('/api/v1/psychologists/me/marketing/draft', { method: 'POST' });
+        const body = (await res.json().catch(() => ({}))) as
+          | DraftMarketingResponse
+          | { error?: string };
+        if (!res.ok) {
+          throw new Error((body as { error?: string }).error ?? 'Could not draft — try again.');
+        }
+        setDraft(body as DraftMarketingResponse);
+      }),
+    [act],
+  );
+
+  const applyDraft = useCallback(
+    () =>
+      act('apply-draft', async () => {
+        if (!draft) return;
+        const res = await fetch('/api/v1/psychologists/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headline: draft.headline.slice(0, 160), bio: draft.bio }),
+        });
+        if (!res.ok) throw new Error('Could not save the headline and bio.');
+        setProfile((p) => ({ ...p, headline: draft.headline.slice(0, 160), bio: draft.bio }));
+        if (draft.faqs.length > 0) {
+          const faqRes = await fetch('/api/v1/psychologists/me/marketing', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ faqs: draft.faqs }),
+          });
+          if (faqRes.ok) setState((await faqRes.json()) as MarketingState);
+        }
+        setDraft(null);
+        await refreshState();
+        setNotice('Draft applied — review each section, then publish.');
+      }),
+    [act, draft, refreshState],
+  );
+
+  const resolveAppointment = useCallback(
     (id: string, action: 'confirm' | 'decline') =>
       act(id, async () => {
         const res = await fetch(`/api/v1/appointments/${id}/${action}`, { method: 'POST' });
@@ -291,23 +382,31 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
   );
 
   const published = state.publishedAt !== null;
-  const checklistDone = state.checklist.every((c) => c.done);
+  const todos = state.checklist.filter((c) => !c.done);
   const requested = (appointments ?? []).filter((a) => a.status === 'REQUESTED');
   const upcoming = (appointments ?? []).filter(
     (a) => a.status === 'CONFIRMED' && new Date(a.startAt) > new Date(),
   );
 
-  return (
-    <div className="space-y-6">
-      {notice && (
-        <p className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-5 py-3 text-sm">
-          {notice}
-        </p>
-      )}
+  const sectionDone = {
+    identity: !!profile.headline?.trim(),
+    about: !!profile.bio?.trim(),
+    where: !!profile.locationCity?.trim(),
+    url: !!state.publicSlug,
+    practice: profile.specialties.length > 0,
+    fees: profile.sessionFeeInr !== null,
+    clinic: !!profile.officeAddress?.trim(),
+    availability: rules.length > 0,
+    faqs: state.faqs.length > 0,
+  };
 
-      {/* Publish header */}
-      <Card className="p-7">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+  const toggle = (key: string) => setOpenSection((cur) => (cur === key ? null : key));
+
+  return (
+    <div className="space-y-5">
+      {/* ------------------------------------------------ header ------- */}
+      <Card className="p-6">
+        <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-3">
               <h2 className="font-serif text-2xl">Your public page</h2>
@@ -316,74 +415,781 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
               </Badge>
             </div>
             {state.publicSlug && (
-              <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-                {published && state.publicUrl ? (
-                  <Link
-                    href={state.publicUrl}
-                    target="_blank"
-                    className="font-medium text-[var(--color-accent)] hover:underline"
-                  >
-                    mind.cureocity.in/therapists/{state.publicSlug} →
-                  </Link>
-                ) : (
-                  <>
-                    Will publish at mind.cureocity.in/therapists/{state.publicSlug} ·{' '}
-                    <Link
-                      href={`/therapists/${state.publicSlug}`}
-                      target="_blank"
-                      className="font-medium text-[var(--color-accent)] hover:underline"
-                    >
-                      Preview as a patient →
-                    </Link>
-                  </>
-                )}
+              <p className="mt-1 text-sm">
+                <Link
+                  href={`/therapists/${state.publicSlug}`}
+                  target="_blank"
+                  className="font-medium text-[var(--color-accent)] hover:underline"
+                >
+                  mind.cureocity.in/therapists/{state.publicSlug} →
+                </Link>
+                <span className="ml-2 text-xs text-[var(--color-ink-3)]">
+                  {published ? '' : '(preview — only you can see it)'}
+                </span>
               </p>
             )}
           </div>
-          <Button
-            onClick={() => void publish(!published)}
-            disabled={busy === 'publish' || (!published && !checklistDone)}
-          >
-            {published ? 'Unpublish' : 'Publish page'}
-          </Button>
-        </div>
-
-        <ul className="mt-5 grid gap-2 sm:grid-cols-2">
-          {state.checklist.map((item) => (
-            <li key={item.key} className="flex items-center gap-2 text-sm">
-              <span
-                className={`grid h-5 w-5 place-items-center rounded-full text-[11px] ${
-                  item.done
-                    ? 'bg-[var(--color-accent)] text-white'
-                    : 'border border-[var(--color-line-soft)] text-[var(--color-ink-3)]'
-                }`}
+          <div className="text-right">
+            <div className="flex items-center justify-end gap-3">
+              {todos.length > 0 && (
+                <span className="text-sm text-[var(--color-ink-2)]">
+                  <span className="mr-1 inline-block h-2 w-2 rounded-full bg-[var(--color-warn)]" />
+                  {todos.length} to-do{todos.length > 1 ? 's' : ''}
+                </span>
+              )}
+              <Button
+                onClick={() => void publish(!published)}
+                disabled={busy === 'publish' || (!published && todos.length > 0)}
               >
-                {item.done ? '✓' : '·'}
-              </span>
-              <span className={item.done ? 'text-[var(--color-ink-2)]' : ''}>{item.label}</span>
-            </li>
-          ))}
-        </ul>
-        {!identity.hasPhoto && (
-          <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-            ○ Add a photo below — profiles with photos get roughly 3× the requests.
-          </p>
-        )}
-        <p className="mt-4 text-xs text-[var(--color-ink-3)]">
-          Headline, bio, city, specialties and fee are edited in{' '}
-          <Link href="/app/settings/account" className="text-[var(--color-accent)] hover:underline">
-            Settings → Account
-          </Link>
-          .
-        </p>
+                {published ? 'Unpublish' : 'Publish page'}
+              </Button>
+            </div>
+            {!published && todos.length > 0 && (
+              <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                Add {todos.map((t) => t.label.toLowerCase()).join(', ')} to publish.
+              </p>
+            )}
+          </div>
+        </div>
       </Card>
 
-      {/* MK6 — funnel stats */}
-      {stats && (
+      {notice && (
+        <p className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-5 py-3 text-sm">
+          {notice}
+        </p>
+      )}
+
+      {/* ------------------------------------------------ tab bar ------- */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <nav className="flex gap-1 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-1">
+          {(
+            [
+              ['page', 'My page'],
+              ['content', 'My content'],
+              ['inquiries', `Inquiries${requested.length ? ` (${requested.length})` : ''}`],
+              ['stats', 'Stats'],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                tab === key
+                  ? 'bg-[var(--color-accent)] text-white'
+                  : 'text-[var(--color-ink-2)] hover:text-[var(--color-accent)]'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+        {tab === 'page' && (
+          <Button
+            variant="secondary"
+            onClick={() => void requestDraft()}
+            disabled={busy === 'draft'}
+          >
+            {busy === 'draft' ? 'Drafting…' : '✦ Auto-fill with AI'}
+          </Button>
+        )}
+      </div>
+
+      {/* ------------------------------------------------ AI draft ------ */}
+      {draft && tab === 'page' && (
+        <Card className="border-[var(--color-accent)] p-6">
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="font-serif text-xl">Suggested copy</h3>
+            <Badge tone={draft.source === 'vertex' ? 'accent' : 'muted'}>
+              {draft.source === 'vertex' ? 'AI draft' : 'Mock draft'}
+            </Badge>
+          </div>
+          <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+            Drafted from your practice facts only — never client data. Nothing is saved until you
+            approve it.
+          </p>
+          <div className="mt-4 space-y-3 text-sm">
+            <p className="font-medium">{draft.headline}</p>
+            <p className="whitespace-pre-line text-[var(--color-ink-2)]">{draft.bio}</p>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <Button onClick={() => void applyDraft()} disabled={busy === 'apply-draft'}>
+              {busy === 'apply-draft' ? 'Applying…' : 'Use this draft'}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => void requestDraft()}
+              disabled={busy === 'draft'}
+            >
+              Redraft
+            </Button>
+            <Button variant="secondary" onClick={() => setDraft(null)}>
+              Discard
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {/* ================================================ MY PAGE ======= */}
+      {tab === 'page' && (
+        <div className="space-y-3">
+          <Section
+            n={1}
+            title="Identity"
+            desc="Your headshot, credentials, and the one-liner at the top of your profile."
+            done={sectionDone.identity}
+            required
+            open={openSection === 'identity'}
+            onToggle={() => toggle('identity')}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <span className={labelCls}>Headshot</span>
+                <div className="mt-2 flex items-center gap-3">
+                  <span
+                    className={`grid h-14 w-14 place-items-center rounded-full text-xs ${
+                      profile.hasPhoto
+                        ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                        : 'border border-dashed border-[var(--color-line)] text-[var(--color-ink-3)]'
+                    }`}
+                  >
+                    {profile.hasPhoto ? '✓' : 'No photo'}
+                  </span>
+                  <label className="cursor-pointer text-sm font-medium text-[var(--color-accent)] hover:underline">
+                    {profile.hasPhoto ? 'Replace photo' : 'Upload photo'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void uploadPhoto(f);
+                        e.target.value = '';
+                      }}
+                    />
+                  </label>
+                  <span className="text-xs text-[var(--color-ink-3)]">
+                    JPG/PNG/WebP · profiles with photos get ~3× the requests
+                  </span>
+                </div>
+              </div>
+              <label className="block sm:col-span-2">
+                <span className={labelCls}>Tagline (your headline)</span>
+                <input
+                  value={profile.headline ?? ''}
+                  onChange={(e) => setProfile({ ...profile, headline: e.target.value })}
+                  placeholder="Helping anxious adults reclaim their lives"
+                  maxLength={160}
+                  className={`mt-1 ${inputCls}`}
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Credentials</span>
+                <input
+                  value={profile.credentialsLine ?? ''}
+                  onChange={(e) => setProfile({ ...profile, credentialsLine: e.target.value })}
+                  placeholder="RP, MA (Clinical Psychology)"
+                  className={`mt-1 ${inputCls}`}
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Pronouns (optional)</span>
+                <input
+                  value={profile.pronouns ?? ''}
+                  onChange={(e) => setProfile({ ...profile, pronouns: e.target.value })}
+                  placeholder="she/her"
+                  className={`mt-1 ${inputCls}`}
+                />
+              </label>
+            </div>
+            <div className="mt-4">
+              <Button
+                onClick={() =>
+                  void (async () => {
+                    await saveProfile('identity', { headline: profile.headline?.trim() || null });
+                    await saveMarketing(
+                      'identity2',
+                      {
+                        credentialsLine: profile.credentialsLine?.trim() || null,
+                        pronouns: profile.pronouns?.trim() || null,
+                      },
+                      'Identity saved.',
+                    );
+                  })()
+                }
+                disabled={busy !== null}
+              >
+                Save identity
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            n={2}
+            title="About"
+            desc="Tell prospective clients about your approach, who you work with, and what to expect."
+            done={sectionDone.about}
+            required
+            open={openSection === 'about'}
+            onToggle={() => toggle('about')}
+          >
+            <textarea
+              value={profile.bio ?? ''}
+              onChange={(e) => setProfile({ ...profile, bio: e.target.value })}
+              rows={7}
+              maxLength={4000}
+              placeholder="I work with adults whose minds won't switch off…"
+              className={inputCls}
+            />
+            <div className="mt-3">
+              <Button
+                onClick={() => void saveProfile('about', { bio: profile.bio?.trim() || null })}
+                disabled={busy === 'about'}
+              >
+                Save about
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            n={3}
+            title="Where you work"
+            desc="The city clients search by, and how far your practice reaches."
+            done={sectionDone.where}
+            required
+            open={openSection === 'where'}
+            onToggle={() => toggle('where')}
+          >
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className={labelCls}>City</span>
+                <input
+                  value={profile.locationCity ?? ''}
+                  onChange={(e) => setProfile({ ...profile, locationCity: e.target.value })}
+                  placeholder="Kochi"
+                  className={`mt-1 ${inputCls}`}
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>State (optional)</span>
+                <input
+                  value={profile.locationProvince ?? ''}
+                  onChange={(e) => setProfile({ ...profile, locationProvince: e.target.value })}
+                  placeholder="Kerala"
+                  className={`mt-1 ${inputCls}`}
+                />
+              </label>
+            </div>
+            <div className="mt-4">
+              <Button
+                onClick={() =>
+                  void saveProfile('where', {
+                    locationCity: profile.locationCity?.trim() || null,
+                    locationProvince: profile.locationProvince?.trim() || null,
+                  })
+                }
+                disabled={busy === 'where'}
+              >
+                Save location
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            n={4}
+            title="URL"
+            desc={
+              state.publicSlug
+                ? `mind.cureocity.in/therapists/${state.publicSlug}`
+                : 'Your page address on the directory.'
+            }
+            done={sectionDone.url}
+            required={false}
+            open={openSection === 'url'}
+            onToggle={() => toggle('url')}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-[var(--color-ink-3)]">…/therapists/</span>
+              <input
+                value={slugInput}
+                onChange={(e) => setSlugInput(e.target.value.toLowerCase())}
+                className={`${inputCls} max-w-[240px]`}
+              />
+              <Button
+                onClick={() =>
+                  void saveMarketing('slug', { publicSlug: slugInput.trim() }, 'URL saved.')
+                }
+                disabled={busy === 'slug' || slugInput.trim().length < 3}
+              >
+                Save URL
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+              Lowercase words separated by hyphens. Changing it breaks links you&rsquo;ve already
+              shared.
+            </p>
+          </Section>
+
+          <Section
+            n={5}
+            title="Practice"
+            desc="What you specialize in, the approaches you use, and the languages you work in. Clients filter on these."
+            done={sectionDone.practice}
+            required
+            open={openSection === 'practice'}
+            onToggle={() => toggle('practice')}
+          >
+            <div className="grid gap-4">
+              <label className="block">
+                <span className={labelCls}>Specialties (comma-separated)</span>
+                <input
+                  defaultValue={profile.specialties.join(', ')}
+                  onBlur={(e) => setProfile({ ...profile, specialties: toList(e.target.value) })}
+                  placeholder="Anxiety, Panic, Workplace stress"
+                  className={`mt-1 ${inputCls}`}
+                />
+              </label>
+              <label className="block">
+                <span className={labelCls}>Approaches (comma-separated)</span>
+                <input
+                  defaultValue={profile.modalities.join(', ')}
+                  onBlur={(e) => setProfile({ ...profile, modalities: toList(e.target.value) })}
+                  placeholder="CBT, Mindfulness"
+                  className={`mt-1 ${inputCls}`}
+                />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className={labelCls}>Languages (comma-separated)</span>
+                  <input
+                    defaultValue={profile.languages.join(', ')}
+                    onBlur={(e) => setProfile({ ...profile, languages: toList(e.target.value) })}
+                    placeholder="ml, en"
+                    className={`mt-1 ${inputCls}`}
+                  />
+                </label>
+                <label className="block">
+                  <span className={labelCls}>Years of experience</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={80}
+                    value={profile.yearsOfExperience ?? ''}
+                    onChange={(e) =>
+                      setProfile({
+                        ...profile,
+                        yearsOfExperience: e.target.value === '' ? null : Number(e.target.value),
+                      })
+                    }
+                    className={`mt-1 ${inputCls}`}
+                  />
+                </label>
+              </div>
+            </div>
+            <div className="mt-4">
+              <Button
+                onClick={() =>
+                  void saveProfile('practice', {
+                    specialties: profile.specialties,
+                    modalities: profile.modalities,
+                    languages: profile.languages,
+                    yearsOfExperience: profile.yearsOfExperience,
+                  })
+                }
+                disabled={busy === 'practice'}
+              >
+                Save practice
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            n={6}
+            title="Fees"
+            desc="What you charge, and whether you're taking new clients. A clear fee helps clients self-qualify."
+            done={sectionDone.fees}
+            required={false}
+            open={openSection === 'fees'}
+            onToggle={() => toggle('fees')}
+          >
+            <div className="flex flex-wrap items-end gap-4">
+              <label className="block">
+                <span className={labelCls}>Fee per session (₹)</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100000}
+                  value={profile.sessionFeeInr ?? ''}
+                  onChange={(e) =>
+                    setProfile({
+                      ...profile,
+                      sessionFeeInr: e.target.value === '' ? null : Number(e.target.value),
+                    })
+                  }
+                  className={`mt-1 ${inputCls} max-w-[160px]`}
+                />
+              </label>
+              <label className="flex items-center gap-2 pb-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={profile.isAcceptingNewClients}
+                  onChange={(e) =>
+                    setProfile({ ...profile, isAcceptingNewClients: e.target.checked })
+                  }
+                />
+                Accepting new clients
+              </label>
+            </div>
+            <div className="mt-4">
+              <Button
+                onClick={() =>
+                  void saveProfile('fees', {
+                    sessionFeeInr: profile.sessionFeeInr,
+                    isAcceptingNewClients: profile.isAcceptingNewClients,
+                  })
+                }
+                disabled={busy === 'fees'}
+              >
+                Save fees
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            n={7}
+            title="Office location"
+            desc="Where clients can meet you in person. Shown when a booking window is in-person."
+            done={sectionDone.clinic}
+            required={false}
+            open={openSection === 'clinic'}
+            onToggle={() => toggle('clinic')}
+          >
+            <input
+              value={profile.officeAddress ?? ''}
+              onChange={(e) => setProfile({ ...profile, officeAddress: e.target.value })}
+              placeholder="2nd floor, Wellness Centre, Panampilly Nagar, Kochi"
+              className={inputCls}
+            />
+            <div className="mt-4">
+              <Button
+                onClick={() =>
+                  void saveMarketing('clinic', {
+                    officeAddress: profile.officeAddress?.trim() || null,
+                  })
+                }
+                disabled={busy === 'clinic'}
+              >
+                Save address
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            n={8}
+            title="Availability"
+            desc="Weekly windows that become bookable slots on your page. All times IST."
+            done={sectionDone.availability}
+            required={false}
+            open={openSection === 'availability'}
+            onToggle={() => toggle('availability')}
+          >
+            <div className="space-y-2">
+              {rules.map((r, i) => (
+                <div
+                  key={i}
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] px-4 py-2.5 text-sm"
+                >
+                  <select
+                    value={r.weekday}
+                    onChange={(e) => {
+                      const next = [...rules];
+                      next[i] = { ...r, weekday: Number(e.target.value) };
+                      setRules(next);
+                    }}
+                    className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                  >
+                    {WEEKDAYS.map((d, wi) => (
+                      <option key={d} value={wi}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={r.startMinute}
+                    onChange={(e) => {
+                      const next = [...rules];
+                      next[i] = { ...r, startMinute: Number(e.target.value) };
+                      setRules(next);
+                    }}
+                    className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                  >
+                    {MINUTE_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {minuteLabel(m)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[var(--color-ink-3)]">to</span>
+                  <select
+                    value={r.endMinute}
+                    onChange={(e) => {
+                      const next = [...rules];
+                      next[i] = { ...r, endMinute: Number(e.target.value) };
+                      setRules(next);
+                    }}
+                    className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                  >
+                    {MINUTE_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {minuteLabel(m)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={r.mode ?? 'ONLINE'}
+                    onChange={(e) => {
+                      const next = [...rules];
+                      next[i] = { ...r, mode: e.target.value as AvailabilityRuleInput['mode'] };
+                      setRules(next);
+                    }}
+                    className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                  >
+                    <option value="ONLINE">Online</option>
+                    <option value="IN_PERSON">In person</option>
+                  </select>
+                  <select
+                    value={r.slotMinutes}
+                    onChange={(e) => {
+                      const next = [...rules];
+                      next[i] = {
+                        ...r,
+                        slotMinutes: Number(e.target.value) as AvailabilityRuleInput['slotMinutes'],
+                      };
+                      setRules(next);
+                    }}
+                    className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                  >
+                    {[30, 45, 60, 90].map((m) => (
+                      <option key={m} value={m}>
+                        {m}-min
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setRules(rules.filter((_, ri) => ri !== i))}
+                    className="ml-auto text-xs text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  setRules([
+                    ...rules,
+                    {
+                      weekday: 1,
+                      startMinute: 600,
+                      endMinute: 780,
+                      slotMinutes: 60,
+                      mode: 'ONLINE',
+                    },
+                  ])
+                }
+              >
+                Add window
+              </Button>
+              <Button onClick={() => void saveRules()} disabled={busy === 'rules'}>
+                {busy === 'rules' ? 'Saving…' : 'Save availability'}
+              </Button>
+            </div>
+          </Section>
+
+          <Section
+            n={9}
+            title="Frequently asked questions"
+            desc="Q&As surfaced as structured data to ChatGPT, Claude, Google AI Overviews, and Perplexity."
+            done={sectionDone.faqs}
+            required={false}
+            open={openSection === 'faqs'}
+            onToggle={() => toggle('faqs')}
+          >
+            <div className="space-y-3">
+              {state.faqs.map((f, i) => (
+                <div
+                  key={i}
+                  className="space-y-2 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4"
+                >
+                  <input
+                    value={f.q}
+                    onChange={(e) => {
+                      const faqs = [...state.faqs];
+                      faqs[i] = { ...f, q: e.target.value };
+                      setState({ ...state, faqs });
+                    }}
+                    placeholder="Question — e.g. Do you offer online sessions?"
+                    className={`${inputCls} font-medium`}
+                  />
+                  <textarea
+                    value={f.a}
+                    onChange={(e) => {
+                      const faqs = [...state.faqs];
+                      faqs[i] = { ...f, a: e.target.value };
+                      setState({ ...state, faqs });
+                    }}
+                    rows={2}
+                    placeholder="Answer"
+                    className={inputCls}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setState({ ...state, faqs: state.faqs.filter((_, fi) => fi !== i) })
+                    }
+                    className="text-xs text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setState({ ...state, faqs: [...state.faqs, { q: '', a: '' }] })}
+                disabled={state.faqs.length >= 10}
+              >
+                Add question
+              </Button>
+              <Button
+                onClick={() =>
+                  void saveMarketing(
+                    'faqs',
+                    { faqs: state.faqs.filter((f) => f.q.trim() && f.a.trim()) },
+                    'FAQs saved.',
+                  )
+                }
+                disabled={busy === 'faqs'}
+              >
+                Save FAQs
+              </Button>
+            </div>
+          </Section>
+        </div>
+      )}
+
+      {/* ================================================ MY CONTENT ==== */}
+      {tab === 'content' &&
+        (contentEntitled ? (
+          <MarketingPosts profileSlug={state.publicSlug} />
+        ) : (
+          <Card className="p-8 text-center">
+            <h2 className="font-serif text-2xl">Your content lives here</h2>
+            <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-[var(--color-ink-2)]">
+              Publish short articles that give ChatGPT and Google more reasons to recommend you. AI
+              drafts them from your declared expertise — never your sessions — and you approve every
+              word. Writing is part of the paid plan.
+            </p>
+            <div className="mt-6">
+              <Link href="/app/settings/plan">
+                <Button>Upgrade to write</Button>
+              </Link>
+            </div>
+            <p className="mt-4 text-xs text-[var(--color-ink-3)]">
+              Your page, bookings, and inquiries stay free while you&rsquo;re on the trial.
+            </p>
+          </Card>
+        ))}
+
+      {/* ================================================ INQUIRIES ===== */}
+      {tab === 'inquiries' && (
+        <Card className="p-7">
+          <h2 className="font-serif text-2xl">Appointment requests</h2>
+          {appointments === null ? (
+            <p className="mt-4 text-sm text-[var(--color-ink-3)]">Loading…</p>
+          ) : requested.length === 0 && upcoming.length === 0 ? (
+            <p className="mt-4 text-sm text-[var(--color-ink-2)]">
+              No open requests. When someone books from your public page, it appears here — the slot
+              is held until you confirm or decline.
+            </p>
+          ) : (
+            <div className="mt-5 space-y-3">
+              {requested.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4"
+                >
+                  <div>
+                    <p className="font-medium">
+                      {a.patientName}{' '}
+                      <span className="text-sm font-normal text-[var(--color-ink-2)]">
+                        · {IST_FULL.format(new Date(a.startAt))} IST
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-sm text-[var(--color-ink-2)]">
+                      {a.patientPhone}
+                      {a.patientEmail ? ` · ${a.patientEmail}` : ''}
+                    </p>
+                    {a.concern && (
+                      <p className="mt-1 max-w-xl text-sm italic text-[var(--color-ink-2)]">
+                        &ldquo;{a.concern}&rdquo;
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={() => void resolveAppointment(a.id, 'confirm')}
+                      disabled={busy === a.id}
+                    >
+                      Confirm
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => void resolveAppointment(a.id, 'decline')}
+                      disabled={busy === a.id}
+                    >
+                      Decline
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {upcoming.length > 0 && (
+                <div className="pt-2">
+                  <h3 className={labelCls}>Confirmed &amp; upcoming</h3>
+                  <ul className="mt-2 space-y-1.5 text-sm text-[var(--color-ink-2)]">
+                    {upcoming.map((a) => (
+                      <li key={a.id} className="flex items-center gap-2">
+                        <span>
+                          {a.patientName} · {IST_FULL.format(new Date(a.startAt))} IST
+                        </span>
+                        {a.sessionId && (
+                          <Link
+                            href={`/app/sessions/${a.sessionId}`}
+                            className="text-[var(--color-accent)] hover:underline"
+                          >
+                            Open session →
+                          </Link>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* ================================================ STATS ========= */}
+      {tab === 'stats' && (
         <Card className="p-7">
           <div className="flex items-baseline justify-between gap-3">
             <h2 className="font-serif text-2xl">This week</h2>
-            {stats.medianTimeToConfirmMinutes !== null && (
+            {stats?.medianTimeToConfirmMinutes != null && (
               <span className="text-xs text-[var(--color-ink-3)]">
                 median time to confirm:{' '}
                 {stats.medianTimeToConfirmMinutes >= 60
@@ -392,420 +1198,38 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
               </span>
             )}
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {(
-              [
-                ['Page views', stats.week.pageViews],
-                ['Slot views', stats.week.slotViews],
-                ['Requests', stats.week.requests],
-                ['Confirmed', stats.week.confirms],
-              ] as const
-            ).map(([label, value]) => (
-              <div
-                key={label}
-                className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 text-center"
-              >
-                <div className="font-serif text-2xl">{value}</div>
-                <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-                  {label}
-                </div>
+          {stats === null ? (
+            <p className="mt-4 text-sm text-[var(--color-ink-3)]">Loading…</p>
+          ) : (
+            <>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {(
+                  [
+                    ['Page views', stats.week.pageViews],
+                    ['Slot views', stats.week.slotViews],
+                    ['Requests', stats.week.requests],
+                    ['Confirmed', stats.week.confirms],
+                  ] as const
+                ).map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 text-center"
+                  >
+                    <div className="font-serif text-2xl">{value}</div>
+                    <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                      {label}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+              <p className="mt-4 text-xs text-[var(--color-ink-3)]">
+                The funnel reads left to right: people who saw your page, opened the times, asked
+                for one, and got confirmed. No visitor tracking — just counters.
+              </p>
+            </>
+          )}
         </Card>
       )}
-
-      {/* Identity & photo */}
-      <Card className="p-7">
-        <h2 className="font-serif text-2xl">Identity</h2>
-        <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-          The line under your name, and the headshot patients see first.
-        </p>
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm">
-            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-              Credentials line
-            </span>
-            <input
-              value={identity.credentialsLine ?? ''}
-              onChange={(e) => setIdentity({ ...identity, credentialsLine: e.target.value })}
-              placeholder="RP, MA (Clinical Psychology)"
-              className="mt-1 w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-              Pronouns (optional)
-            </span>
-            <input
-              value={identity.pronouns ?? ''}
-              onChange={(e) => setIdentity({ ...identity, pronouns: e.target.value })}
-              placeholder="she/her"
-              className="mt-1 w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="block text-sm sm:col-span-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-              Clinic address (shown when you offer in-person windows)
-            </span>
-            <input
-              value={identity.officeAddress ?? ''}
-              onChange={(e) => setIdentity({ ...identity, officeAddress: e.target.value })}
-              placeholder="2nd floor, Wellness Centre, Panampilly Nagar, Kochi"
-              className="mt-1 w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm"
-            />
-          </label>
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button onClick={() => void saveIdentity()} disabled={busy === 'identity'}>
-            {busy === 'identity' ? 'Saving…' : 'Save identity'}
-          </Button>
-          <label className="cursor-pointer text-sm font-medium text-[var(--color-accent)] hover:underline">
-            {identity.hasPhoto ? 'Replace photo' : 'Upload photo'}
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void uploadPhoto(f);
-                e.target.value = '';
-              }}
-            />
-          </label>
-          {identity.hasPhoto && (
-            <span className="text-xs text-[var(--color-ink-3)]">Photo on file ✓</span>
-          )}
-        </div>
-      </Card>
-
-      {/* AI auto-fill */}
-      <Card className="p-7">
-        <div className="flex flex-wrap items-baseline justify-between gap-3">
-          <h2 className="font-serif text-2xl">Write it for me</h2>
-          {draft && (
-            <Badge tone={draft.source === 'vertex' ? 'accent' : 'muted'}>
-              {draft.source === 'vertex' ? 'AI draft' : 'Mock draft'}
-            </Badge>
-          )}
-        </div>
-        <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-          Drafts a headline, About section, and FAQs from what your practice data already shows —
-          your specialties, approaches, and languages. It never invents credentials or outcomes, and
-          nothing about your clients is used. You approve every word before it appears.
-        </p>
-        {draft ? (
-          <div className="mt-5 space-y-4 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-5">
-            <div>
-              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-                Headline
-              </span>
-              <p className="mt-1 font-medium">{draft.headline}</p>
-            </div>
-            <div>
-              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-                About
-              </span>
-              <p className="mt-1 whitespace-pre-line text-sm text-[var(--color-ink-2)]">
-                {draft.bio}
-              </p>
-            </div>
-            {draft.faqs.length > 0 && (
-              <div>
-                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-                  FAQs
-                </span>
-                <ul className="mt-1 space-y-2 text-sm">
-                  {draft.faqs.map((f, i) => (
-                    <li key={i}>
-                      <b>{f.q}</b>
-                      <span className="block text-[var(--color-ink-2)]">{f.a}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-            <div className="flex gap-2 pt-1">
-              <Button onClick={() => void applyDraft()} disabled={busy === 'apply-draft'}>
-                {busy === 'apply-draft' ? 'Applying…' : 'Use this draft'}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => void requestDraft()}
-                disabled={busy === 'draft'}
-              >
-                Redraft
-              </Button>
-              <Button variant="secondary" onClick={() => setDraft(null)}>
-                Discard
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4">
-            <Button onClick={() => void requestDraft()} disabled={busy === 'draft'}>
-              {busy === 'draft' ? 'Drafting…' : 'Draft my page'}
-            </Button>
-          </div>
-        )}
-      </Card>
-
-      {/* Appointment inbox */}
-      <Card className="p-7">
-        <h2 className="font-serif text-2xl">Appointment requests</h2>
-        {appointments === null ? (
-          <p className="mt-4 text-sm text-[var(--color-ink-3)]">Loading…</p>
-        ) : requested.length === 0 && upcoming.length === 0 ? (
-          <p className="mt-4 text-sm text-[var(--color-ink-2)]">
-            No open requests. When someone books from your public page, it appears here — the slot
-            is held until you confirm or decline.
-          </p>
-        ) : (
-          <div className="mt-5 space-y-3">
-            {requested.map((a) => (
-              <div
-                key={a.id}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4"
-              >
-                <div>
-                  <p className="font-medium">
-                    {a.patientName}{' '}
-                    <span className="text-sm font-normal text-[var(--color-ink-2)]">
-                      · {IST_FULL.format(new Date(a.startAt))} IST
-                    </span>
-                  </p>
-                  <p className="mt-0.5 text-sm text-[var(--color-ink-2)]">
-                    {a.patientPhone}
-                    {a.patientEmail ? ` · ${a.patientEmail}` : ''}
-                  </p>
-                  {a.concern && (
-                    <p className="mt-1 max-w-xl text-sm italic text-[var(--color-ink-2)]">
-                      &ldquo;{a.concern}&rdquo;
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={() => void resolve(a.id, 'confirm')} disabled={busy === a.id}>
-                    Confirm
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => void resolve(a.id, 'decline')}
-                    disabled={busy === a.id}
-                  >
-                    Decline
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {upcoming.length > 0 && (
-              <div className="pt-2">
-                <h3 className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-ink-3)]">
-                  Confirmed &amp; upcoming
-                </h3>
-                <ul className="mt-2 space-y-1.5 text-sm text-[var(--color-ink-2)]">
-                  {upcoming.map((a) => (
-                    <li key={a.id} className="flex items-center gap-2">
-                      <span>
-                        {a.patientName} · {IST_FULL.format(new Date(a.startAt))} IST
-                      </span>
-                      {a.sessionId && (
-                        <Link
-                          href={`/app/sessions/${a.sessionId}`}
-                          className="text-[var(--color-accent)] hover:underline"
-                        >
-                          Open session →
-                        </Link>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-
-      {/* Availability editor */}
-      <Card className="p-7">
-        <div className="flex items-baseline justify-between gap-3">
-          <h2 className="font-serif text-2xl">Weekly availability</h2>
-          <span className="text-xs text-[var(--color-ink-3)]">All times IST</span>
-        </div>
-        <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-          The windows below become bookable slots on your public page. Booked times disappear from
-          the page automatically — including sessions you schedule yourself.
-        </p>
-        <div className="mt-5 space-y-2">
-          {rules.map((r, i) => (
-            <div
-              key={i}
-              className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] px-4 py-2.5 text-sm"
-            >
-              <select
-                value={r.weekday}
-                onChange={(e) => {
-                  const next = [...rules];
-                  next[i] = { ...r, weekday: Number(e.target.value) };
-                  setRules(next);
-                }}
-                className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
-              >
-                {WEEKDAYS.map((d, wi) => (
-                  <option key={d} value={wi}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={r.startMinute}
-                onChange={(e) => {
-                  const next = [...rules];
-                  next[i] = { ...r, startMinute: Number(e.target.value) };
-                  setRules(next);
-                }}
-                className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
-              >
-                {MINUTE_OPTIONS.map((m) => (
-                  <option key={m} value={m}>
-                    {minuteLabel(m)}
-                  </option>
-                ))}
-              </select>
-              <span className="text-[var(--color-ink-3)]">to</span>
-              <select
-                value={r.endMinute}
-                onChange={(e) => {
-                  const next = [...rules];
-                  next[i] = { ...r, endMinute: Number(e.target.value) };
-                  setRules(next);
-                }}
-                className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
-              >
-                {MINUTE_OPTIONS.map((m) => (
-                  <option key={m} value={m}>
-                    {minuteLabel(m)}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={r.mode ?? 'ONLINE'}
-                onChange={(e) => {
-                  const next = [...rules];
-                  next[i] = { ...r, mode: e.target.value as AvailabilityRuleInput['mode'] };
-                  setRules(next);
-                }}
-                className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
-              >
-                <option value="ONLINE">Online</option>
-                <option value="IN_PERSON">In person</option>
-              </select>
-              <select
-                value={r.slotMinutes}
-                onChange={(e) => {
-                  const next = [...rules];
-                  next[i] = {
-                    ...r,
-                    slotMinutes: Number(e.target.value) as AvailabilityRuleInput['slotMinutes'],
-                  };
-                  setRules(next);
-                }}
-                className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
-              >
-                {[30, 45, 60, 90].map((m) => (
-                  <option key={m} value={m}>
-                    {m}-min sessions
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setRules(rules.filter((_, ri) => ri !== i))}
-                className="ml-auto text-xs text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() =>
-              setRules([
-                ...rules,
-                { weekday: 1, startMinute: 600, endMinute: 780, slotMinutes: 60, mode: 'ONLINE' },
-              ])
-            }
-          >
-            Add window
-          </Button>
-          <Button onClick={() => void saveRules(rules)} disabled={busy === 'rules'}>
-            {busy === 'rules' ? 'Saving…' : 'Save availability'}
-          </Button>
-        </div>
-      </Card>
-
-      {/* FAQ editor */}
-      <Card className="p-7">
-        <h2 className="font-serif text-2xl">Frequently asked questions</h2>
-        <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-          Shown on your page and served as structured data — the answers AI assistants and Google
-          cite when someone asks about you.
-        </p>
-        <div className="mt-5 space-y-3">
-          {state.faqs.map((f, i) => (
-            <div
-              key={i}
-              className="space-y-2 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4"
-            >
-              <input
-                value={f.q}
-                onChange={(e) => {
-                  const faqs = [...state.faqs];
-                  faqs[i] = { ...f, q: e.target.value };
-                  setState({ ...state, faqs });
-                }}
-                placeholder="Question — e.g. Do you offer online sessions?"
-                className="w-full rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm font-medium"
-              />
-              <textarea
-                value={f.a}
-                onChange={(e) => {
-                  const faqs = [...state.faqs];
-                  faqs[i] = { ...f, a: e.target.value };
-                  setState({ ...state, faqs });
-                }}
-                rows={2}
-                placeholder="Answer"
-                className="w-full rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3 py-2 text-sm"
-              />
-              <button
-                type="button"
-                onClick={() => setState({ ...state, faqs: state.faqs.filter((_, fi) => fi !== i) })}
-                className="text-xs text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
-              >
-                Remove
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="mt-4 flex gap-2">
-          <Button
-            variant="secondary"
-            onClick={() => setState({ ...state, faqs: [...state.faqs, { q: '', a: '' }] })}
-            disabled={state.faqs.length >= 10}
-          >
-            Add question
-          </Button>
-          <Button
-            onClick={() => void saveFaqs(state.faqs.filter((f) => f.q.trim() && f.a.trim()))}
-            disabled={busy === 'faqs'}
-          >
-            {busy === 'faqs' ? 'Saving…' : 'Save FAQs'}
-          </Button>
-        </div>
-      </Card>
     </div>
   );
 }

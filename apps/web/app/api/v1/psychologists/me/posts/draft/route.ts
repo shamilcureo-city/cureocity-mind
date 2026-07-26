@@ -6,6 +6,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
+import { getEntitlement } from '@/lib/billing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const body = await parseJson(req, DraftPostInputSchema);
   if (!body.ok) return body.response;
   const psyId = auth.value.psychologistId;
+  // MK7 — writing is a paid-plan feature; the page/bookings stay free.
+  if ((await getEntitlement(psyId)).plan === 'FREE_TRIAL') {
+    return NextResponse.json(
+      { error: 'Writing is part of the paid plan — upgrade to publish articles.' },
+      { status: 403 },
+    );
+  }
 
   const psy = await prisma.psychologist.findUnique({
     where: { id: psyId },

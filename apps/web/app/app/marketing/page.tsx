@@ -1,40 +1,40 @@
 import { requireOnboardedTherapist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
+import { getEntitlement } from '@/lib/billing';
 import { Container } from '@/components/ui/Container';
 import { MarketingStudio } from '@/components/app/MarketingStudio';
-import { MarketingPosts } from '@/components/app/MarketingPosts';
 import { profilePublishChecklist } from '@/lib/marketing';
 import { parseFaqs } from '@/lib/public-profile';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Marketing V1 — the therapist's marketing studio: publish state +
- * checklist, public URL, weekly availability, FAQs, and the
- * appointment inbox. Profile FIELDS (headline, bio, photo, fees…) are
- * edited on Settings → Account; the studio links there rather than
- * duplicating that form.
+ * Marketing studio (MK7 restructure) — one page, four tabs, Klarify-
+ * shaped: **My page** edits the public page section-by-section in the
+ * same order visitors see it; **My content** holds the paid-plan blog;
+ * **Inquiries** is the appointment inbox; **Stats** the funnel.
  */
 export default async function MarketingPage() {
   const therapist = await requireOnboardedTherapist();
 
-  const ruleRows = await prisma.availabilityRule.findMany({
-    where: { psychologistId: therapist.id },
-    select: { weekday: true, startMinute: true, endMinute: true, slotMinutes: true, mode: true },
-    orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }],
-  });
-  const photo = await prisma.psychologistPhoto.findUnique({
-    where: { psychologistId: therapist.id },
-    select: { updatedAt: true },
-  });
+  const [ruleRows, photo, entitlement] = await Promise.all([
+    prisma.availabilityRule.findMany({
+      where: { psychologistId: therapist.id },
+      select: { weekday: true, startMinute: true, endMinute: true, slotMinutes: true, mode: true },
+      orderBy: [{ weekday: 'asc' }, { startMinute: 'asc' }],
+    }),
+    prisma.psychologistPhoto.findUnique({
+      where: { psychologistId: therapist.id },
+      select: { updatedAt: true },
+    }),
+    getEntitlement(therapist.id),
+  ]);
   // The DB stores plain Int; the contract narrows to the offered lengths.
   const rules = ruleRows.map((r) => ({
     ...r,
     slotMinutes: r.slotMinutes as 30 | 45 | 60 | 90,
     mode: (r.mode === 'IN_PERSON' ? 'IN_PERSON' : 'ONLINE') as 'ONLINE' | 'IN_PERSON',
   }));
-
-  const checklist = profilePublishChecklist(therapist);
 
   return (
     <Container className="py-10">
@@ -51,23 +51,31 @@ export default async function MarketingPage() {
             publicSlug: therapist.publicSlug,
             publishedAt: therapist.profilePublishedAt?.toISOString() ?? null,
             faqs: parseFaqs(therapist.profileFaqs),
-            checklist,
+            checklist: profilePublishChecklist(therapist),
             publicUrl:
               therapist.profilePublishedAt && therapist.publicSlug
                 ? `/therapists/${therapist.publicSlug}`
                 : null,
           }}
           initialRules={rules}
-          initialIdentity={{
+          initialProfile={{
+            headline: therapist.headline,
+            bio: therapist.bio,
+            locationCity: therapist.locationCity,
+            locationProvince: therapist.locationProvince,
+            specialties: therapist.specialties,
+            languages: therapist.languages,
+            modalities: therapist.modalities,
+            yearsOfExperience: therapist.yearsOfExperience,
+            sessionFeeInr: therapist.sessionFeeInr,
+            isAcceptingNewClients: therapist.isAcceptingNewClients,
             credentialsLine: therapist.credentialsLine,
             pronouns: therapist.pronouns,
             officeAddress: therapist.officeAddress,
             hasPhoto: photo !== null,
           }}
+          contentEntitled={entitlement.plan !== 'FREE_TRIAL'}
         />
-        <div className="mt-6">
-          <MarketingPosts profileSlug={therapist.publicSlug} />
-        </div>
       </div>
     </Container>
   );
