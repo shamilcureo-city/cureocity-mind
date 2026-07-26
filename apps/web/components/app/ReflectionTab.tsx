@@ -28,9 +28,8 @@ interface Response {
 /**
  * Reflection Questions tab. Lists 5-7 client-facing questions derived
  * from the session's TherapyNoteV1 via a Vertex Gemini Pro call. The
- * therapist can copy a single question (to paste into a chat or handout
- * they already have open), copy the full set, or push the set through the
- * share flow with "Send to patient" (portal + WhatsApp / email).
+ * therapist can copy the full set, or push it through the share flow
+ * with "Send to patient" (portal + WhatsApp / email).
  *
  * Loads on first mount and caches the response in component state —
  * the therapist can hit "Regenerate" to spend on a fresh set if the
@@ -73,16 +72,11 @@ export function ReflectionTab({
   }, [load]);
 
   /**
-   * Which item last copied, so the click has visible confirmation.
-   *
-   * Copying used to be fire-and-forget (`void navigator.clipboard.writeText`),
-   * which meant clicking "copy" produced no feedback whatsoever — and because
-   * the rejected promise was swallowed, a genuine failure looked exactly like
-   * a success. `navigator.clipboard` rejects on an insecure context (plain
-   * http) and when the permission is denied, so that is a real case, not a
-   * theoretical one.
+   * Copy confirmation. Not fire-and-forget: `navigator.clipboard` rejects
+   * on an insecure context (plain http) and when the permission is denied,
+   * so a genuine failure must look different from a success.
    */
-  const [copied, setCopied] = useState<number | 'all' | null>(null);
+  const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -93,27 +87,23 @@ export function ReflectionTab({
     [],
   );
 
-  const copy = useCallback(async (text: string, key: number | 'all') => {
+  const copyAll = useCallback(async () => {
+    if (!data?.questions.length) return;
+    const text = data.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
     try {
       await navigator.clipboard.writeText(text);
       setCopyFailed(false);
-      setCopied(key);
+      setCopied(true);
     } catch {
-      setCopied(null);
+      setCopied(false);
       setCopyFailed(true);
     }
     if (copyTimer.current) clearTimeout(copyTimer.current);
     copyTimer.current = setTimeout(() => {
-      setCopied(null);
+      setCopied(false);
       setCopyFailed(false);
     }, 1800);
-  }, []);
-
-  const copyAll = useCallback(() => {
-    if (!data?.questions.length) return;
-    const text = data.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
-    void copy(text, 'all');
-  }, [data, copy]);
+  }, [data]);
 
   return (
     <div className="space-y-4">
@@ -157,17 +147,6 @@ export function ReflectionTab({
                   {i + 1}
                 </span>
                 <span className="flex-1 text-sm leading-relaxed text-[var(--color-ink)]">{q}</span>
-                <button
-                  type="button"
-                  onClick={() => void copy(q, i)}
-                  title="Copy this question to paste into a chat or handout"
-                  aria-label={`Copy question ${i + 1}`}
-                  className={`shrink-0 rounded-full px-3 py-1 text-xs transition-colors hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent)] ${
-                    copied === i ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-3)]'
-                  }`}
-                >
-                  {copied === i ? 'Copied ✓' : 'Copy'}
-                </button>
               </li>
             ))}
           </ol>
@@ -185,8 +164,8 @@ export function ReflectionTab({
           </Button>
           {data && data.questions.length > 0 && (
             <>
-              <Button variant="secondary" onClick={copyAll}>
-                {copied === 'all' ? 'Copied ✓' : 'Copy all'}
+              <Button variant="secondary" onClick={() => void copyAll()}>
+                {copied ? 'Copied ✓' : 'Copy all'}
               </Button>
               <Button onClick={() => setShareOpen(true)}>Send to patient</Button>
             </>
