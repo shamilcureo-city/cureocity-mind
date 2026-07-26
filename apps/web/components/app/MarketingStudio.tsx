@@ -8,6 +8,7 @@ import type {
   DraftMarketingResponse,
   ListAppointmentsResponse,
   MarketingState,
+  MarketingStatsResponse,
   ProfileFaq,
 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
@@ -61,6 +62,7 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
   const [rules, setRules] = useState<AvailabilityRuleInput[]>(initialRules);
   const [identity, setIdentity] = useState<Identity>(initialIdentity);
   const [draft, setDraft] = useState<DraftMarketingResponse | null>(null);
+  const [stats, setStats] = useState<MarketingStatsResponse | null>(null);
   const [appointments, setAppointments] = useState<Appointment[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -78,6 +80,9 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
 
   useEffect(() => {
     void loadAppointments();
+    void fetch('/api/v1/psychologists/me/marketing/stats', { cache: 'no-store' })
+      .then((r) => (r.ok ? (r.json() as Promise<MarketingStatsResponse>) : null))
+      .then((sr) => sr && setStats(sr));
     // Ensure the slug exists server-side (auto-generated on first GET).
     void fetch('/api/v1/psychologists/me/marketing', { cache: 'no-store' })
       .then((r) => (r.ok ? (r.json() as Promise<MarketingState>) : null))
@@ -372,6 +377,43 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
           .
         </p>
       </Card>
+
+      {/* MK6 — funnel stats */}
+      {stats && (
+        <Card className="p-7">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="font-serif text-2xl">This week</h2>
+            {stats.medianTimeToConfirmMinutes !== null && (
+              <span className="text-xs text-[var(--color-ink-3)]">
+                median time to confirm:{' '}
+                {stats.medianTimeToConfirmMinutes >= 60
+                  ? `${Math.round(stats.medianTimeToConfirmMinutes / 60)}h`
+                  : `${stats.medianTimeToConfirmMinutes}m`}
+              </span>
+            )}
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {(
+              [
+                ['Page views', stats.week.pageViews],
+                ['Slot views', stats.week.slotViews],
+                ['Requests', stats.week.requests],
+                ['Confirmed', stats.week.confirms],
+              ] as const
+            ).map(([label, value]) => (
+              <div
+                key={label}
+                className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 text-center"
+              >
+                <div className="font-serif text-2xl">{value}</div>
+                <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                  {label}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* Identity & photo */}
       <Card className="p-7">

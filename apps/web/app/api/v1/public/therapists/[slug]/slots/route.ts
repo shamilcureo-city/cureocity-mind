@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { after } from 'next/server';
+import { recordProfileMetric } from '@/lib/profile-metrics';
 import type { PublicSlotsResponse } from '@cureocity/contracts';
 import { computeSlots, SLOT_WINDOW_DAYS } from '@/lib/marketing';
 import { loadBusyIntervals, loadPublishedTherapist, loadWeeklyRules } from '@/lib/public-profile';
@@ -27,6 +29,8 @@ export async function GET(
   const now = new Date();
   const to = new Date(now.getTime() + SLOT_WINDOW_DAYS * 24 * 60 * 60_000);
   const busy = rules.length > 0 ? await loadBusyIntervals(therapist.id, now, to) : [];
+
+  after(() => recordProfileMetric(therapist.id, 'SLOT_VIEW'));
 
   const body: PublicSlotsResponse = {
     slots: computeSlots(rules, busy, now),

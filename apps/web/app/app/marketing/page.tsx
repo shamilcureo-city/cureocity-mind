@@ -2,6 +2,7 @@ import { requireOnboardedTherapist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 import { Container } from '@/components/ui/Container';
 import { MarketingStudio } from '@/components/app/MarketingStudio';
+import { MarketingPosts } from '@/components/app/MarketingPosts';
 import { profilePublishChecklist } from '@/lib/marketing';
 import { parseFaqs } from '@/lib/public-profile';
 
@@ -64,6 +65,9 @@ export default async function MarketingPage() {
             hasPhoto: photo !== null,
           }}
         />
+        <div className="mt-6">
+          <MarketingPosts profileSlug={therapist.publicSlug} />
+        </div>
       </div>
     </Container>
   );

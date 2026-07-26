@@ -6,7 +6,13 @@ import { Badge } from '@/components/ui/Badge';
 import { PublicAvatar } from '@/components/public/Avatar';
 import { AppointmentWidget } from '@/components/public/AppointmentWidget';
 import { languageName } from '@/components/public/TherapistCard';
-import { loadOwnProfilePreview, loadPublishedTherapist } from '@/lib/public-profile';
+import { after } from 'next/server';
+import {
+  loadOwnProfilePreview,
+  loadPublishedPosts,
+  loadPublishedTherapist,
+} from '@/lib/public-profile';
+import { recordProfileMetric } from '@/lib/profile-metrics';
 import { currentPsychologist } from '@/lib/auth-page';
 
 export const dynamic = 'force-dynamic';
@@ -52,6 +58,12 @@ export default async function TherapistProfilePage({
   }
   if (!t) notFound();
 
+  // MK6 — count the view off the render path; owner previews don't count.
+  if (!isPreview) {
+    const psyId = t.id;
+    after(() => recordProfileMetric(psyId, 'PAGE_VIEW'));
+  }
+  const posts = isPreview ? [] : await loadPublishedPosts(t.id);
   const location = [t.locationCity, t.locationProvince].filter(Boolean).join(', ');
 
   const jsonLd: Record<string, unknown>[] = [
@@ -167,6 +179,32 @@ export default async function TherapistProfilePage({
                     </div>
                   </div>
                 )}
+              </section>
+            )}
+
+            {posts.length > 0 && (
+              <section className="mt-10">
+                <h2 className="font-serif text-xl">Writing</h2>
+                <ul className="mt-3 space-y-2">
+                  {posts.map((p) => (
+                    <li key={p.slug}>
+                      <Link
+                        href={`/therapists/${slug}/posts/${p.slug}`}
+                        className="font-medium text-[var(--color-accent)] hover:underline"
+                      >
+                        {p.title}
+                      </Link>
+                      {p.publishedAt && (
+                        <span className="ml-2 text-xs text-[var(--color-ink-3)]">
+                          {p.publishedAt.toLocaleDateString('en-IN', {
+                            month: 'short',
+                            year: 'numeric',
+                          })}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </section>
             )}
 

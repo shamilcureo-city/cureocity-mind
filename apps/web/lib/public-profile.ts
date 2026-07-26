@@ -291,3 +291,34 @@ export async function loadBusyIntervals(
     })),
   ];
 }
+
+/** MK5 — published posts for a profile page (newest first). */
+export async function loadPublishedPosts(
+  psychologistId: string,
+  limit = 10,
+): Promise<{ slug: string; title: string; publishedAt: Date | null }[]> {
+  return prisma.profilePost.findMany({
+    where: { psychologistId, status: 'PUBLISHED' },
+    orderBy: { publishedAt: 'desc' },
+    take: limit,
+    select: { slug: true, title: true, publishedAt: true },
+  });
+}
+
+/** MK5 — one published post by profile slug + post slug. */
+export async function loadPublishedPost(
+  profileSlug: string,
+  postSlug: string,
+): Promise<{
+  therapist: PublicProfile;
+  post: { slug: string; title: string; body: string; publishedAt: Date | null };
+} | null> {
+  const therapist = await loadPublishedTherapist(profileSlug);
+  if (!therapist) return null;
+  const post = await prisma.profilePost.findFirst({
+    where: { psychologistId: therapist.id, slug: postSlug, status: 'PUBLISHED' },
+    select: { slug: true, title: true, body: true, publishedAt: true },
+  });
+  if (!post) return null;
+  return { therapist, post };
+}

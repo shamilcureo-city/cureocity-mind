@@ -533,6 +533,15 @@ The five existing passes are the template — pick the closest analogue.
   as always). NB: a DEAD pre-pivot `Booking` model + `BOOKING_*` audit
   actions still exist — Marketing V1 deliberately uses `Appointment` /
   `APPOINTMENT_*` to avoid them; don't "clean up" one into the other.
+  MK2–MK6 (2026-07) grew the suite: inline photo (`PsychologistPhoto`,
+  postgres-bytea like audio), per-window session mode, signed patient
+  cancel/.ics links (`lib/appointment-links.ts`), the hourly
+  `cron/appointments` (hold expiry + 24h/2h reminders), AI draft routes
+  (`marketing/draft`, `posts/draft` — aggregate practice facts only,
+  mock-refused on deploy), `ProfilePost` public posts + `app/sitemap.ts`
+  - `/therapists/in/[city]` + `/therapists/for/[specialty]` SEO pages,
+    and the `ProfileMetricDaily` funnel (page/slot views; requests and
+    confirms come from `Appointment`).
 - **Pass 4 cacheKey** is bumped to v2 in Sprint 16 because it now
   includes `spokenLanguage`. Clearing cache on a language change is
   automatic.
