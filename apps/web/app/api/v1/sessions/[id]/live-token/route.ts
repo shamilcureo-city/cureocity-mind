@@ -4,6 +4,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { signLiveToken } from '@/lib/live-token';
 import { fetchActiveMedications, fetchAllergies } from '@/lib/patient-context';
+import { withdrawalRefusalMessage, withdrawnScribeConsents } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
 
 export const runtime = 'nodejs';
@@ -47,6 +48,16 @@ export async function POST(
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  }
+
+  // Batch E (DPDP) — checked on EVERY mint, not just the first. The old code
+  // only validated consent when a SCHEDULED session lacked a snapshot, so a
+  // patient who withdrew recording consent could still be streamed live: the
+  // session was already IN_PROGRESS, or already carried a snapshot from
+  // before the withdrawal, and neither path looked at the standing rows.
+  const withdrawn = await withdrawnScribeConsents(session.clientId);
+  if (withdrawn.length > 0) {
+    return NextResponse.json({ error: withdrawalRefusalMessage(withdrawn) }, { status: 409 });
   }
 
   if (session.status === 'SCHEDULED') {

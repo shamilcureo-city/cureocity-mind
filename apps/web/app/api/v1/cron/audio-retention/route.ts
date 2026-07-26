@@ -9,6 +9,25 @@ export const maxDuration = 60;
 const RETENTION_DAYS = Number(process.env['AUDIO_RETENTION_DAYS'] ?? 30);
 
 /**
+ * Batch E (DPDP) — how long a VERBATIM TRANSCRIPT is kept, in days.
+ *
+ * The audio purge could never reach a live consult: the live path streams
+ * PCM straight to the gateway and never writes an AudioChunk, so its raw
+ * capture only ever exists as `NoteDraft.transcript`. Batch audio aged out at
+ * 30 days while live transcripts — the same personal data in text form — were
+ * kept forever.
+ *
+ * DELIBERATELY OFF BY DEFAULT. A transcript is the evidence behind a signed
+ * clinical note (the linked-evidence quotes resolve against it), so deleting
+ * it is an operator's decision with a legal and clinical dimension, not
+ * something a code change should switch on silently. Set
+ * TRANSCRIPT_RETENTION_DAYS to enable; the structured note is never touched.
+ */
+const TRANSCRIPT_RETENTION_DAYS = process.env['TRANSCRIPT_RETENTION_DAYS']
+  ? Number(process.env['TRANSCRIPT_RETENTION_DAYS'])
+  : null;
+
+/**
  * GET /api/v1/cron/audio-retention — daily audio purge per DPDP
  * 30-day retention. Deletes AudioChunk rows whose session ended
  * more than RETENTION_DAYS ago, UNLESS the session's client has a
@@ -103,10 +122,14 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     purgedSessions.push({ sessionId: s.id, clientId: s.clientId, bytes, chunks: chunkIds.length });
   }
 
+  const transcripts = await purgeTranscripts(extendedClientIds);
+
   const totalBytes = purgedSessions.reduce((a, p) => a + p.bytes, 0);
   const totalChunks = purgedSessions.reduce((a, p) => a + p.chunks, 0);
 
   return NextResponse.json({
+    transcriptRetentionDays: TRANSCRIPT_RETENTION_DAYS,
+    transcriptsPurged: transcripts,
     cutoff: cutoff.toISOString(),
     retentionDays: RETENTION_DAYS,
     extendedRetentionClients: extendedClientIds.size,
@@ -116,6 +139,64 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     bytesDeleted: totalBytes,
   });
 }
+
+/**
+ * Batch E — purge verbatim transcripts past TRANSCRIPT_RETENTION_DAYS. Clears
+ * both the plaintext and the encrypted copy and leaves a marker in their
+ * place, so the NoteDraft's presence check still holds and the UI can say
+ * "purged" rather than rendering a confusing blank. The structured note, the
+ * signature and the Rx are untouched — only the raw capture goes.
+ *
+ * Returns the number of drafts purged; 0 when the feature is off.
+ */
+async function purgeTranscripts(extendedClientIds: Set<string>): Promise<number> {
+  if (TRANSCRIPT_RETENTION_DAYS === null || !Number.isFinite(TRANSCRIPT_RETENTION_DAYS)) return 0;
+  const cutoff = new Date(Date.now() - TRANSCRIPT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const drafts = await prisma.noteDraft.findMany({
+    where: {
+      createdAt: { lt: cutoff },
+      OR: [{ transcript: { not: PURGED_MARKER } }, { transcriptEncrypted: { not: null } }],
+    },
+    select: {
+      id: true,
+      transcript: true,
+      session: { select: { id: true, clientId: true } },
+    },
+    take: 500,
+  });
+
+  let purged = 0;
+  for (const d of drafts) {
+    if (extendedClientIds.has(d.session.clientId)) continue;
+    const chars = d.transcript?.length ?? 0;
+    await prisma.$transaction(async (tx) => {
+      await tx.noteDraft.update({
+        where: { id: d.id },
+        data: { transcript: PURGED_MARKER, transcriptEncrypted: null },
+      });
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'TRANSCRIPT_RETENTION_PURGED',
+          targetType: 'NoteDraft',
+          targetId: d.id,
+          metadata: {
+            sessionId: d.session.id,
+            clientId: d.session.clientId,
+            chars,
+            retentionDays: TRANSCRIPT_RETENTION_DAYS,
+          },
+        },
+        tx,
+      );
+    });
+    purged += 1;
+  }
+  return purged;
+}
+
+/** What a purged transcript reads as. Not empty — a blank would look broken. */
+const PURGED_MARKER = '(transcript purged per data-retention policy)';
 
 function isAuthorized(req: NextRequest): boolean {
   // AUD1 — fail closed: CRON_SECRET must be set, and every invocation must

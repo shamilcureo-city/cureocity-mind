@@ -42,9 +42,7 @@ export const DEFAULT_SCHEDULER_OPTIONS: SchedulerOptions = {
 };
 
 /** Read the cadence from env, falling back to the defaults above. */
-export function schedulerOptionsFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
-): SchedulerOptions {
+export function schedulerOptionsFromEnv(env: NodeJS.ProcessEnv = process.env): SchedulerOptions {
   const num = (key: string, fallback: number, max: number): number => {
     const raw = env[key];
     if (!raw) return fallback;
@@ -56,7 +54,10 @@ export function schedulerOptionsFromEnv(
     minGapMs,
     // forceMs below minGapMs would make the force path fire first and undo
     // the gap entirely; clamp it up.
-    forceMs: Math.max(minGapMs, num('LIVE_REASONING_FORCE_MS', DEFAULT_SCHEDULER_OPTIONS.forceMs, 300_000)),
+    forceMs: Math.max(
+      minGapMs,
+      num('LIVE_REASONING_FORCE_MS', DEFAULT_SCHEDULER_OPTIONS.forceMs, 300_000),
+    ),
   };
 }
 

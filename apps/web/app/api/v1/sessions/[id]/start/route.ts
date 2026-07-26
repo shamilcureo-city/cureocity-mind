@@ -4,6 +4,7 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
+import { withdrawalRefusalMessage, withdrawnScribeConsents } from '@/lib/consent-gate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -53,6 +54,14 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       },
       { status: 409 },
     );
+  }
+
+  // Batch E (DPDP) — a snapshot proves consent was GIVEN; only the standing
+  // rows prove it still HOLDS. Consent is withdrawable at any time, and
+  // nothing read Consent.withdrawnAt at the moment it matters most.
+  const withdrawn = await withdrawnScribeConsents(existing.clientId);
+  if (withdrawn.length > 0) {
+    return NextResponse.json({ error: withdrawalRefusalMessage(withdrawn) }, { status: 409 });
   }
 
   // DS11.7 — the doctor capture surfaces declare their pipeline. Optional

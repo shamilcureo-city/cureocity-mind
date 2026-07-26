@@ -2651,6 +2651,8 @@ enum AuditAction {
   JOURNAL_ENTRY_UPDATED
   CLIENT_FIREBASE_LINKED
   AUDIO_RETENTION_PURGED
+  // Batch E (DPDP) — verbatim transcript purged past its retention window.
+  TRANSCRIPT_RETENTION_PURGED
 
   // Client claim flow (patient-model-service, Sprint 8)
   CLIENT_CLAIM_TOKEN_ISSUED
