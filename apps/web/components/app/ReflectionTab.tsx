@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TherapyNoteV1 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -28,8 +28,9 @@ interface Response {
 /**
  * Reflection Questions tab. Lists 5-7 client-facing questions derived
  * from the session's TherapyNoteV1 via a Vertex Gemini Pro call. The
- * therapist can copy individual questions or the full set to send to
- * the client (handout / WhatsApp / email).
+ * therapist can copy a single question (to paste into a chat or handout
+ * they already have open), copy the full set, or push the set through the
+ * share flow with "Send to patient" (portal + WhatsApp / email).
  *
  * Loads on first mount and caches the response in component state —
  * the therapist can hit "Regenerate" to spend on a fresh set if the
@@ -71,11 +72,48 @@ export function ReflectionTab({
     void load();
   }, [load]);
 
-  const copyAll = useCallback(async () => {
+  /**
+   * Which item last copied, so the click has visible confirmation.
+   *
+   * Copying used to be fire-and-forget (`void navigator.clipboard.writeText`),
+   * which meant clicking "copy" produced no feedback whatsoever — and because
+   * the rejected promise was swallowed, a genuine failure looked exactly like
+   * a success. `navigator.clipboard` rejects on an insecure context (plain
+   * http) and when the permission is denied, so that is a real case, not a
+   * theoretical one.
+   */
+  const [copied, setCopied] = useState<number | 'all' | null>(null);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
+  );
+
+  const copy = useCallback(async (text: string, key: number | 'all') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFailed(false);
+      setCopied(key);
+    } catch {
+      setCopied(null);
+      setCopyFailed(true);
+    }
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => {
+      setCopied(null);
+      setCopyFailed(false);
+    }, 1800);
+  }, []);
+
+  const copyAll = useCallback(() => {
     if (!data?.questions.length) return;
     const text = data.questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
-    await navigator.clipboard.writeText(text);
-  }, [data]);
+    void copy(text, 'all');
+  }, [data, copy]);
 
   return (
     <div className="space-y-4">
@@ -122,10 +160,14 @@ export function ReflectionTab({
                 <span className="flex-1 text-sm leading-relaxed text-[var(--color-ink)]">{q}</span>
                 <button
                   type="button"
-                  onClick={() => void navigator.clipboard.writeText(q)}
-                  className="rounded-full px-3 py-1 text-xs text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+                  onClick={() => void copy(q, i)}
+                  title="Copy this question to paste into a chat or handout"
+                  aria-label={`Copy question ${i + 1}`}
+                  className={`shrink-0 rounded-full px-3 py-1 text-xs transition-colors hover:bg-[var(--color-accent-soft)] hover:text-[var(--color-accent)] ${
+                    copied === i ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-3)]'
+                  }`}
                 >
-                  copy
+                  {copied === i ? 'Copied ✓' : 'Copy'}
                 </button>
               </li>
             ))}
@@ -145,10 +187,15 @@ export function ReflectionTab({
           {data && data.questions.length > 0 && (
             <>
               <Button variant="secondary" onClick={copyAll}>
-                Copy all
+                {copied === 'all' ? 'Copied ✓' : 'Copy all'}
               </Button>
               <Button onClick={() => setShareOpen(true)}>Send to patient</Button>
             </>
+          )}
+          {copyFailed && (
+            <span className="text-xs text-[var(--color-warn)]">
+              Couldn&rsquo;t reach the clipboard — select the text and copy manually.
+            </span>
           )}
         </div>
       </Card>
