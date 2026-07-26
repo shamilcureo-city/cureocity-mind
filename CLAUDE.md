@@ -502,16 +502,19 @@ The five existing passes are the template — pick the closest analogue.
   `packages/llm/src/backend-policy.ts` (`resolveLlmBackend`) is the single
   rule; `apps/web/lib/llm.ts` (via `vercelPolicyInput`) and
   `services/live-gateway/src/llm.ts` (via `containerPolicyInput`) both funnel
-  through it and **throw at boot** when mock would run on a deploy. The two
-  routes that serve mock without the ModelRouter (`reflection-questions`,
-  `practice-assistant/chat`) call `appMockRefusalReason()` → `503`. Mock is
+  through it and **throw at boot** when mock would run on a deploy. The one
+  route that serves mock without the ModelRouter (`practice-assistant/chat`)
+  calls `appMockRefusalReason()` → `503`. Mock is
   allowed only on a local machine; `ALLOW_MOCK_LLM=true` re-permits it on a
   non-production **preview** only (never production). Unit tests build the
   mock backends directly, so the guard never fires under test. When you add a
   new LLM-serving path, gate its mock branch through this policy (keep
   `services/scribe-service/src/llm/llm.module.ts` in sync).
-- **Reflection questions** are not persisted; they're regenerated on the
-  fly. The Share flow snapshots them inline into `PatientShare.snapshot`.
+- **Reflection questions were removed from the UI (2026-07)** — the
+  generator route + session-page panel are gone (one-way content with no
+  answer path). The `REFLECTION_QUESTIONS` share artefact type, snapshot
+  schema, and portal render branch REMAIN so historical `PatientShare`
+  rows keep rendering; nothing creates new ones.
 - **Pass 4 cacheKey** is bumped to v2 in Sprint 16 because it now
   includes `spokenLanguage`. Clearing cache on a language change is
   automatic.

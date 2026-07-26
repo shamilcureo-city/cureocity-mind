@@ -205,7 +205,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
                 <option value="bn">Bengali (বাংলা)</option>
               </Select>
               <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                Reflection questions + portal messages use this language.
+                Patient-facing content + portal messages use this language.
               </p>
             </div>
             <div>

@@ -561,9 +561,6 @@ function NodeDetailModal({
                 ))}
               </ul>
             )}
-            <p className="mt-4 text-xs text-[var(--color-ink-3)]">
-              Send these to the client via the patient portal from the Reflection Questions panel.
-            </p>
           </div>
         )}
       </div>

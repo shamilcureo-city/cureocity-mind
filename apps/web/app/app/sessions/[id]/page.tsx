@@ -16,7 +16,6 @@ import type { CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { ClientTab } from '@/components/app/ClientTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
-import { ReflectionTab } from '@/components/app/ReflectionTab';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs, type TabKey } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
@@ -306,8 +305,6 @@ async function NotesTabPanel({
       }
     : null;
 
-  const noteJson = (signedNote?.content ?? draft?.content ?? null) as TherapyNoteV1 | null;
-
   return (
     <div className="space-y-6">
       {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
@@ -338,22 +335,6 @@ async function NotesTabPanel({
         noteTemplateId={noteTemplateId}
         signerName={signerName}
       />
-      {/* Reflection questions live with the note now (R1 relocation from the
-          copilot Review sub — they're client-facing content, not a decision). */}
-      {sessionKind !== 'INTAKE' && noteJson && (
-        <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
-            Reflection questions
-          </h3>
-          <ReflectionTab
-            sessionId={sessionId}
-            clientId={clientId}
-            note={noteJson}
-            clientHasContactPhone={clientHasContactPhone}
-            clientHasContactEmail={clientHasContactEmail}
-          />
-        </section>
-      )}
     </div>
   );
 }

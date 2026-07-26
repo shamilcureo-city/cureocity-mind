@@ -51,8 +51,8 @@ interface Props {
  * three sub-tabs that each answer a plain question:
  *
  * - **Review** (`sub=review`, default) — what the copilot heard this
- *   session; you decide. The decision board. (Mindmap + reflection
- *   questions moved out — to Transcript and Notes respectively.)
+ *   session; you decide. The decision board. (Mindmap moved out — to
+ *   Transcript.)
  * - **Progress** (`sub=progress`) — the treatment arc, is it working, and
  *   what next session opens with (the Care Engine page).
  *
@@ -366,10 +366,9 @@ async function SessionSub({
         reviewedAt={reportRow?.reviewedAt?.toISOString() ?? null}
         record={record}
       />
-      {/* Mindmap + reflection questions moved out of the decision flow (R1):
-          the mindmap is a view of the note (→ Transcript), reflection
-          questions are client-facing (→ Notes). Left here as quiet links so
-          the Review board stays a pure decision surface. */}
+      {/* The mindmap moved out of the decision flow (R1): it's a view of the
+          note (→ Transcript). Left here as a quiet link so the Review board
+          stays a pure decision surface. */}
       {!isIntake && noteJson && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-[var(--color-ink-3)]">
           <span className="font-semibold uppercase tracking-[0.12em]">Also from this session</span>
@@ -378,13 +377,6 @@ async function SessionSub({
             className="font-medium text-[var(--color-accent)] hover:underline"
           >
             Session mindmap →
-          </a>
-          <span aria-hidden>·</span>
-          <a
-            href={`/app/sessions/${sessionId}?tab=notes`}
-            className="font-medium text-[var(--color-accent)] hover:underline"
-          >
-            Reflection questions →
           </a>
         </div>
       )}

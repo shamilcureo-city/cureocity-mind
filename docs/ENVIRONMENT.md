@@ -37,7 +37,7 @@ gateway: `pnpm gateway` (defaults to `ws://localhost:8787`, `LLM_BACKEND=mock`).
 The mock backends fabricate complete, plausible clinical output. `packages/llm/src/backend-policy.ts` (`resolveLlmBackend`) is the single rule both the batch pipeline (`apps/web/lib/llm.ts`) and the live gateway (`services/live-gateway/src/llm.ts`) funnel through:
 
 - **Local dev** (no `VERCEL_ENV`; gateway `NODE_ENV` ≠ `production` and no `K_SERVICE`) → mock allowed, so offline dev without GCP creds works.
-- **Any deployed env** — Vercel **preview or production**, or a Cloud Run / `NODE_ENV=production` container → mock is **refused**: `apps/web` `build()` and the gateway `buildBackends()` throw at boot (a misconfigured deploy fails loud instead of fabricating), and the two direct-mock routes (`reflection-questions`, `practice-assistant/chat`) return `503`.
+- **Any deployed env** — Vercel **preview or production**, or a Cloud Run / `NODE_ENV=production` container → mock is **refused**: `apps/web` `build()` and the gateway `buildBackends()` throw at boot (a misconfigured deploy fails loud instead of fabricating), and the direct-mock route (`practice-assistant/chat`) returns `503`.
 - **Production never permits mock**, even with `ALLOW_MOCK_LLM=true`. The opt-in only re-enables mock on a non-production preview for a deliberate demo.
 
 So a human only ever sees real Vertex output or a loud failure — never a silent fake. Unit tests construct the mock backends directly (bypassing these builders), so the guard never fires under test.

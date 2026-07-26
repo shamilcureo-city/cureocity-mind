@@ -41,8 +41,8 @@ export const CreateClientInputSchema = z.object({
   preferredModality: SessionModalitySchema.optional(),
   /**
    * Sprint 16 — patient-facing language (ISO 639-1). Used for
-   * reflection questions, therapy-script patient summaries, and the
-   * /p/<token> portal view. Defaults to "en" at the DB layer.
+   * therapy-script patient summaries and the /p/<token> portal view.
+   * Defaults to "en" at the DB layer.
    */
   preferredLanguage: z
     .string()

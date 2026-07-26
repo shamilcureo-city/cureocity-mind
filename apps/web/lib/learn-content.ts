@@ -414,7 +414,7 @@ export const LEARN_TOPICS: LearnTopic[] = [
       {
         heading: 'What you can share',
         body: [
-          'Homework, a plain-language progress update, or reflection questions. The client sees a clean, friendly version — never your clinical notes.',
+          'Homework or a plain-language progress update. The client sees a clean, friendly version — never your clinical notes.',
         ],
       },
       {
