@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type {
   Appointment,
   AvailabilityRuleInput,
+  DraftMarketingResponse,
   ListAppointmentsResponse,
   MarketingState,
   ProfileFaq,
@@ -59,6 +60,7 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
   const [state, setState] = useState<MarketingState>(initialState);
   const [rules, setRules] = useState<AvailabilityRuleInput[]>(initialRules);
   const [identity, setIdentity] = useState<Identity>(initialIdentity);
+  const [draft, setDraft] = useState<DraftMarketingResponse | null>(null);
   const [appointments, setAppointments] = useState<Appointment[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -142,6 +144,58 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
         setState((await res.json()) as MarketingState);
       }),
     [act],
+  );
+
+  const requestDraft = useCallback(
+    () =>
+      act('draft', async () => {
+        const res = await fetch('/api/v1/psychologists/me/marketing/draft', { method: 'POST' });
+        const body = (await res.json().catch(() => ({}))) as
+          | DraftMarketingResponse
+          | { error?: string };
+        if (!res.ok) {
+          throw new Error((body as { error?: string }).error ?? 'Could not draft — try again.');
+        }
+        setDraft(body as DraftMarketingResponse);
+      }),
+    [act],
+  );
+
+  /**
+   * Apply = the therapist approved the draft. Headline + bio persist via
+   * the account profile route; FAQs via the marketing route.
+   */
+  const applyDraft = useCallback(
+    () =>
+      act('apply-draft', async () => {
+        if (!draft) return;
+        const profileRes = await fetch('/api/v1/psychologists/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ headline: draft.headline.slice(0, 160), bio: draft.bio }),
+        });
+        if (!profileRes.ok) {
+          const body = (await profileRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? 'Could not save the headline and bio.');
+        }
+        if (draft.faqs.length > 0) {
+          const faqRes = await fetch('/api/v1/psychologists/me/marketing', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ faqs: draft.faqs }),
+          });
+          if (!faqRes.ok) {
+            const body = (await faqRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(body.error ?? 'Could not save the FAQs.');
+          }
+          setState((await faqRes.json()) as MarketingState);
+        }
+        setDraft(null);
+        setNotice('Draft applied — review it on your page, then publish when ready.');
+        const fresh = await fetch('/api/v1/psychologists/me/marketing', { cache: 'no-store' });
+        if (fresh.ok) setState((await fresh.json()) as MarketingState);
+      }),
+    [act, draft],
   );
 
   const saveIdentity = useCallback(
@@ -381,6 +435,77 @@ export function MarketingStudio({ initialState, initialRules, initialIdentity }:
             <span className="text-xs text-[var(--color-ink-3)]">Photo on file ✓</span>
           )}
         </div>
+      </Card>
+
+      {/* AI auto-fill */}
+      <Card className="p-7">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="font-serif text-2xl">Write it for me</h2>
+          {draft && (
+            <Badge tone={draft.source === 'vertex' ? 'accent' : 'muted'}>
+              {draft.source === 'vertex' ? 'AI draft' : 'Mock draft'}
+            </Badge>
+          )}
+        </div>
+        <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+          Drafts a headline, About section, and FAQs from what your practice data already shows —
+          your specialties, approaches, and languages. It never invents credentials or outcomes, and
+          nothing about your clients is used. You approve every word before it appears.
+        </p>
+        {draft ? (
+          <div className="mt-5 space-y-4 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-5">
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                Headline
+              </span>
+              <p className="mt-1 font-medium">{draft.headline}</p>
+            </div>
+            <div>
+              <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                About
+              </span>
+              <p className="mt-1 whitespace-pre-line text-sm text-[var(--color-ink-2)]">
+                {draft.bio}
+              </p>
+            </div>
+            {draft.faqs.length > 0 && (
+              <div>
+                <span className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                  FAQs
+                </span>
+                <ul className="mt-1 space-y-2 text-sm">
+                  {draft.faqs.map((f, i) => (
+                    <li key={i}>
+                      <b>{f.q}</b>
+                      <span className="block text-[var(--color-ink-2)]">{f.a}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="flex gap-2 pt-1">
+              <Button onClick={() => void applyDraft()} disabled={busy === 'apply-draft'}>
+                {busy === 'apply-draft' ? 'Applying…' : 'Use this draft'}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => void requestDraft()}
+                disabled={busy === 'draft'}
+              >
+                Redraft
+              </Button>
+              <Button variant="secondary" onClick={() => setDraft(null)}>
+                Discard
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4">
+            <Button onClick={() => void requestDraft()} disabled={busy === 'draft'}>
+              {busy === 'draft' ? 'Drafting…' : 'Draft my page'}
+            </Button>
+          </div>
+        )}
       </Card>
 
       {/* Appointment inbox */}
