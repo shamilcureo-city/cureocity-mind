@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
-import { sendAppointmentReminderEmails } from '@/lib/appointment-email';
+import { sendAppointmentClosedEmail, sendAppointmentReminderEmails } from '@/lib/appointment-email';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,6 +52,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         tx,
       );
     });
+    // MK8 — tell the patient the hold lapsed instead of going silent.
+    await sendAppointmentClosedEmail(appt.psychologistId, appt.id, appt.startAt);
   }
 
   // 2 — reminders. Also expire un-actioned REQUESTED holds whose slot

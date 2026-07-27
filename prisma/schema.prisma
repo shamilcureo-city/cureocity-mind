@@ -113,6 +113,10 @@ model Psychologist {
   /// MK2 — clinic address for IN_PERSON availability windows; rendered on
   /// the public page only when at least one window is in-person.
   officeAddress      String?
+  /// MK8 — the therapist's own meeting-room link (Google Meet / Zoom).
+  /// Sent to the patient automatically on confirm of an ONLINE booking
+  /// (confirmation email, reminders, .ics) — never shown publicly.
+  videoCallLink      String?
 
   // Sprint 18 — therapist preferences.
   /// ISO 639-1 default output language for new notes / briefs.
@@ -2996,6 +3000,10 @@ model Appointment {
   /// Slot instant (UTC). endAt = startAt + the rule's slotMinutes.
   startAt DateTime
   endAt   DateTime
+
+  /// MK8 — 'ONLINE' | 'IN_PERSON', captured from the slot's window at
+  /// booking; picks video link vs clinic address in patient messages.
+  mode String @default("ONLINE")
 
   patientNameEncrypted  String
   patientPhoneEncrypted String

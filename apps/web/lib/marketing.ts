@@ -101,15 +101,23 @@ export function computeSlots(
  * concurrent requests for the same slot cannot both pass.
  * Returns the slot's length in minutes, or null when not offered.
  */
+export function offeredSlot(
+  rules: WeeklyRule[],
+  busy: BusyInterval[],
+  now: Date,
+  startAt: Date,
+): PublicSlot | null {
+  const wanted = startAt.toISOString();
+  return computeSlots(rules, busy, now).find((s) => s.startAt === wanted) ?? null;
+}
+
 export function offeredSlotMinutes(
   rules: WeeklyRule[],
   busy: BusyInterval[],
   now: Date,
   startAt: Date,
 ): number | null {
-  const wanted = startAt.toISOString();
-  const slot = computeSlots(rules, busy, now).find((s) => s.startAt === wanted);
-  return slot ? slot.minutes : null;
+  return offeredSlot(rules, busy, now, startAt)?.minutes ?? null;
 }
 
 // ---------------------------------------------------------------------------

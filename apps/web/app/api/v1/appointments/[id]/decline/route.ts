@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { after } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
+import { sendAppointmentClosedEmail } from '@/lib/appointment-email';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,7 +22,7 @@ export async function POST(
 
   const appt = await prisma.appointment.findUnique({
     where: { id },
-    select: { psychologistId: true, status: true },
+    select: { psychologistId: true, status: true, startAt: true },
   });
   if (!appt || appt.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -43,5 +45,8 @@ export async function POST(
       tx,
     );
   });
+  // MK8 — the courtesy close, off the request path (email-only for now).
+  after(() => sendAppointmentClosedEmail(auth.value.psychologistId, id, appt.startAt));
+
   return NextResponse.json({ status: 'DECLINED' });
 }

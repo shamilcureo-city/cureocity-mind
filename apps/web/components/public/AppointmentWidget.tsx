@@ -160,6 +160,9 @@ export function AppointmentWidget({
           </strong>{' '}
           is with {therapistName}. The time is held for you — you&rsquo;ll hear back on the phone
           number you shared once it&rsquo;s confirmed.
+          {selectedSlot?.mode !== 'IN_PERSON' && email.trim() && (
+            <> The video-call link arrives with your confirmation email.</>
+          )}
         </p>
         {links && (
           <p className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm">

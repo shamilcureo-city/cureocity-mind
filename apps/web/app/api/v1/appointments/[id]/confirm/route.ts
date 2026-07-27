@@ -149,6 +149,7 @@ export async function POST(
     });
     after(() =>
       sendAppointmentConfirmedEmail(
+        psyId,
         email,
         psyName?.fullName ?? 'your therapist',
         appt.id,

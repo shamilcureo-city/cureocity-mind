@@ -67,10 +67,33 @@ ${process.env['NEXT_PUBLIC_APP_URL'] ?? 'https://mind.cureocity.in'}/app/marketi
 }
 
 /**
- * MK4 — patient confirmation on therapist-confirm. Includes the signed
- * calendar (.ics) and cancel links; no clinical content.
+ * MK8 — "where the session happens", by the appointment's mode: the
+ * therapist's own meeting-room link (Google Meet / Zoom) for ONLINE,
+ * the clinic address for IN_PERSON. Empty string when neither is set.
+ */
+async function locationBlock(psychologistId: string, appointmentId: string): Promise<string> {
+  const [psy, appt] = await Promise.all([
+    prisma.psychologist.findUnique({
+      where: { id: psychologistId },
+      select: { videoCallLink: true, officeAddress: true },
+    }),
+    prisma.appointment.findUnique({ where: { id: appointmentId }, select: { mode: true } }),
+  ]);
+  if (appt?.mode === 'IN_PERSON') {
+    return psy?.officeAddress ? `\nWhere: ${psy.officeAddress}\n` : '';
+  }
+  return psy?.videoCallLink
+    ? `\nThis is an online session. Join here at your time:\n${psy.videoCallLink}\n`
+    : '';
+}
+
+/**
+ * MK4 — patient confirmation on therapist-confirm. Includes where the
+ * session happens (MK8), the signed calendar (.ics) and cancel links;
+ * no clinical content.
  */
 export async function sendAppointmentConfirmedEmail(
+  psychologistId: string,
   patientEmail: string,
   therapistName: string,
   appointmentId: string,
@@ -80,11 +103,12 @@ export async function sendAppointmentConfirmedEmail(
     const sig = signAppointmentId(appointmentId);
     const base = publicBaseUrl();
     const when = IST_FORMAT.format(startAt);
+    const where = await locationBlock(psychologistId, appointmentId);
     await client().sendEmail({
       to: patientEmail,
       subject: `Confirmed — your session on ${when}`,
       textBody: `Your appointment with ${therapistName} is confirmed for ${when} (IST).
-
+${where}
 Add it to your calendar:
 ${base}/api/v1/public/appointments/${appointmentId}/calendar?sig=${sig}
 
@@ -95,6 +119,48 @@ ${base}/p/appointments/${appointmentId}/cancel?sig=${sig}
     });
   } catch (e) {
     console.warn(`[appointment-email] confirm send failed: ${(e as Error).message}`);
+  }
+}
+
+/**
+ * MK8 — the courtesy close: the therapist declined, or the hold
+ * expired unanswered. Instead of silence, the patient hears the time
+ * didn't work out and where every currently-open slot lives. Only
+ * possible when they left an email (phone-only reaches WhatsApp once
+ * WATI lands).
+ */
+export async function sendAppointmentClosedEmail(
+  psychologistId: string,
+  appointmentId: string,
+  startAt: Date,
+): Promise<void> {
+  try {
+    const [psy, appt] = await Promise.all([
+      prisma.psychologist.findUnique({
+        where: { id: psychologistId },
+        select: { fullName: true, publicSlug: true },
+      }),
+      prisma.appointment.findUnique({
+        where: { id: appointmentId },
+        select: { patientEmailEncrypted: true },
+      }),
+    ]);
+    if (!psy || !appt?.patientEmailEncrypted) return;
+    const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
+    if (!patientEmail) return;
+    const when = IST_FORMAT.format(startAt);
+    const pageUrl = psy.publicSlug ? `${publicBaseUrl()}/therapists/${psy.publicSlug}` : null;
+    await client().sendEmail({
+      to: patientEmail,
+      subject: `About your requested session on ${when}`,
+      textBody: `The ${when} (IST) slot you requested with ${psy.fullName} couldn't be confirmed, and the hold has been released.
+${pageUrl ? `\nEvery currently open time is here — pick another that works for you:\n${pageUrl}\n` : ''}
+Reaching out took courage. Please don't let a scheduling miss stop you.
+
+— Cureocity`,
+    });
+  } catch (e) {
+    console.warn(`[appointment-email] closed send failed: ${(e as Error).message}`);
   }
 }
 
@@ -139,12 +205,13 @@ Details: ${publicBaseUrl()}/app/marketing
       const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
       if (patientEmail) {
         const sig = signAppointmentId(appointmentId);
+        const where = await locationBlock(psychologistId, appointmentId);
         sends.push(
           client().sendEmail({
             to: patientEmail,
             subject: `Reminder — your session at ${when}`,
             textBody: `Your session with ${psy.fullName} is at ${when} (IST).
-
+${where}
 Can't make it? Cancel here so the time opens up for someone else:
 ${publicBaseUrl()}/p/appointments/${appointmentId}/cancel?sig=${sig}
 

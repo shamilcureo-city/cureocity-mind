@@ -43,6 +43,7 @@ interface Profile {
   credentialsLine: string | null;
   pronouns: string | null;
   officeAddress: string | null;
+  videoCallLink: string | null;
   hasPhoto: boolean;
 }
 
@@ -1054,6 +1055,35 @@ export function MarketingStudio({
                 open={openSection === 'availability'}
                 onToggle={() => toggle('availability')}
               >
+                <div className="mb-5 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4">
+                  <span className={labelCls}>Video call link — for online sessions</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      value={profile.videoCallLink ?? ''}
+                      onChange={(e) => setProfile({ ...profile, videoCallLink: e.target.value })}
+                      placeholder="https://meet.google.com/abc-defg-hij"
+                      className={`${inputCls} flex-1`}
+                      style={{ minWidth: '220px' }}
+                    />
+                    <Button
+                      onClick={() =>
+                        void saveMarketing(
+                          'video-link',
+                          { videoCallLink: profile.videoCallLink?.trim() || null },
+                          'Video link saved — it rides every online confirmation automatically.',
+                        )
+                      }
+                      disabled={busy === 'video-link'}
+                    >
+                      {busy === 'video-link' ? 'Saving…' : 'Save link'}
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+                    Your personal Google Meet or Zoom room. When you confirm an online booking, the
+                    patient gets this link automatically — confirmation email, reminders, and their
+                    calendar invite. Never shown on your public page.
+                  </p>
+                </div>
                 <div className="space-y-2">
                   {rules.map((r, i) => (
                     <div

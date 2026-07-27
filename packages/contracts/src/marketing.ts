@@ -39,6 +39,8 @@ export const UpdateMarketingInputSchema = z
     credentialsLine: z.string().trim().max(120).nullable(),
     pronouns: z.string().trim().max(40).nullable(),
     officeAddress: z.string().trim().max(300).nullable(),
+    /// MK8 — the therapist's meeting-room link for online sessions.
+    videoCallLink: z.string().trim().url().max(500).startsWith('https://').nullable(),
   })
   .partial()
   .refine((d) => Object.keys(d).length > 0, { message: 'At least one field must be provided' });

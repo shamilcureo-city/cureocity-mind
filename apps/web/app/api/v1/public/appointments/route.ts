@@ -5,7 +5,7 @@ import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { encryptForTenant } from '@/lib/tenant-crypto';
-import { offeredSlotMinutes } from '@/lib/marketing';
+import { offeredSlot } from '@/lib/marketing';
 import { loadBusyIntervals, loadPublishedTherapist, loadWeeklyRules } from '@/lib/public-profile';
 import { sendAppointmentRequestEmail } from '@/lib/appointment-email';
 import { signAppointmentId } from '@/lib/appointment-links';
@@ -84,14 +84,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       const now = new Date();
       const to = new Date(now.getTime() + 15 * 24 * 60 * 60_000);
       const busy = await loadBusyIntervals(therapist.id, now, to);
-      const minutes = offeredSlotMinutes(rules, busy, now, startAt);
-      if (minutes === null) throw new SlotTakenError();
+      const slot = offeredSlot(rules, busy, now, startAt);
+      if (slot === null) throw new SlotTakenError();
 
       const row = await tx.appointment.create({
         data: {
           psychologistId: therapist.id,
           startAt,
-          endAt: new Date(startAt.getTime() + minutes * 60_000),
+          endAt: new Date(startAt.getTime() + slot.minutes * 60_000),
+          mode: slot.mode ?? 'ONLINE',
           patientNameEncrypted,
           patientPhoneEncrypted,
           patientEmailEncrypted,

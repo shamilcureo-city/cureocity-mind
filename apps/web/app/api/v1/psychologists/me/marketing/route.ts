@@ -131,6 +131,7 @@ export async function PATCH(req: NextRequest): Promise<NextResponse> {
       }),
       ...(body.value.pronouns !== undefined && { pronouns: body.value.pronouns }),
       ...(body.value.officeAddress !== undefined && { officeAddress: body.value.officeAddress }),
+      ...(body.value.videoCallLink !== undefined && { videoCallLink: body.value.videoCallLink }),
     },
     select: MARKETING_SELECT,
   });

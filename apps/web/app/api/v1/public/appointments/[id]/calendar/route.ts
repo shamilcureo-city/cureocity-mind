@@ -24,15 +24,19 @@ export async function GET(
 
   const appt = await prisma.appointment.findUnique({
     where: { id },
-    select: { startAt: true, endAt: true, status: true, psychologistId: true },
+    select: { startAt: true, endAt: true, status: true, psychologistId: true, mode: true },
   });
   if (!appt || appt.status === 'CANCELLED' || appt.status === 'DECLINED') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   const psy = await prisma.psychologist.findUnique({
     where: { id: appt.psychologistId },
-    select: { fullName: true, publicSlug: true },
+    select: { fullName: true, publicSlug: true, videoCallLink: true, officeAddress: true },
   });
+  // MK8 — where the session happens: meeting link for online, clinic
+  // address for in-person. Commas/semicolons escaped per RFC 5545.
+  const location =
+    appt.mode === 'IN_PERSON' ? psy?.officeAddress?.replace(/([,;])/g, '\\$1') : psy?.videoCallLink;
 
   const stamp = (d: Date): string =>
     d
@@ -49,7 +53,12 @@ export async function GET(
     `DTSTART:${stamp(appt.startAt)}`,
     `DTEND:${stamp(appt.endAt)}`,
     `SUMMARY:Therapy session — ${psy?.fullName ?? 'Cureocity'}`,
-    ...(psy?.publicSlug ? [`URL:https://mind.cureocity.in/therapists/${psy.publicSlug}`] : []),
+    ...(location ? [`LOCATION:${location}`] : []),
+    ...(appt.mode !== 'IN_PERSON' && psy?.videoCallLink
+      ? [`URL:${psy.videoCallLink}`]
+      : psy?.publicSlug
+        ? [`URL:https://mind.cureocity.in/therapists/${psy.publicSlug}`]
+        : []),
     'END:VEVENT',
     'END:VCALENDAR',
   ].join('\r\n');

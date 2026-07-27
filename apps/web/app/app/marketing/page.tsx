@@ -72,6 +72,7 @@ export default async function MarketingPage() {
             credentialsLine: therapist.credentialsLine,
             pronouns: therapist.pronouns,
             officeAddress: therapist.officeAddress,
+            videoCallLink: therapist.videoCallLink,
             hasPhoto: photo !== null,
           }}
           contentEntitled={entitlement.plan !== 'FREE_TRIAL'}
