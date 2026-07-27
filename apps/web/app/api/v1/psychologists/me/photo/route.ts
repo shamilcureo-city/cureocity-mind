@@ -53,6 +53,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ ok: true });
 }
 
+/** The owner's own photo — shown in the studio even before publish. */
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const auth = await requirePsychologistId(req);
+  if (!auth.ok) return auth.response;
+  const photo = await prisma.psychologistPhoto.findUnique({
+    where: { psychologistId: auth.value.psychologistId },
+  });
+  if (!photo) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  return new NextResponse(new Uint8Array(photo.bytes), {
+    headers: { 'Content-Type': photo.mimeType, 'Cache-Control': 'private, max-age=60' },
+  });
+}
+
 export async function DELETE(req: NextRequest): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;

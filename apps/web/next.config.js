@@ -44,6 +44,19 @@ const nextConfig = {
           { key: 'Permissions-Policy', value: 'camera=(), geolocation=(), payment=(), usb=()' },
         ],
       },
+      // MK7 — the marketing studio previews the PUBLIC therapist pages in a
+      // same-origin iframe. These pages serve no PHI (allow-list selects in
+      // lib/public-profile.ts), so relaxing from 'none' to 'self' keeps the
+      // clickjacking defence (no third-party site can frame us) while
+      // letting the studio embed its own page. Later rules override earlier
+      // same-key headers in Next.
+      {
+        source: '/therapists/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
+        ],
+      },
       {
         source: '/p/:path*',
         headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' }],
