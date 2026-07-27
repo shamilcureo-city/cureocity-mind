@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { firebaseAuth } from '@/lib/firebase-admin';
 import { isAuthBypassed } from '@/lib/auth-server';
+import { livekitConfigured } from '@/lib/livekit';
 
 /**
  * Health + readiness endpoint.
@@ -36,6 +37,10 @@ function configReadout() {
     channels: {
       sendgrid: Boolean(process.env['SENDGRID_API_KEY'] && process.env['SENDGRID_FROM_EMAIL']),
       wati: Boolean(process.env['WATI_BEARER_TOKEN'] && process.env['WATI_API_BASE']),
+    },
+    video: {
+      // MK9 — in-app LiveKit rooms; false = Meet/Zoom-link fallback.
+      livekit: livekitConfigured(),
     },
     webauthn: {
       rpId: process.env['WEBAUTHN_RP_ID'] ?? '(request hostname)',
