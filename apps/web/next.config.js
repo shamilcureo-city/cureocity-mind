@@ -57,6 +57,28 @@ const nextConfig = {
           { key: 'Content-Security-Policy', value: "frame-ancestors 'self'" },
         ],
       },
+      // MK9 — the video-session rooms need the camera + mic, which the
+      // global policy denies. Allow them for THIS origin only, on exactly
+      // the two room pages (patient join + therapist room) — every other
+      // route keeps camera=().
+      {
+        source: '/p/appointments/:id/join',
+        headers: [
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
+          },
+        ],
+      },
+      {
+        source: '/app/video/:path*',
+        headers: [
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
+          },
+        ],
+      },
       {
         source: '/p/:path*',
         headers: [{ key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' }],
