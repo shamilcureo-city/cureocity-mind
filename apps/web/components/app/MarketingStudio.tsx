@@ -1409,10 +1409,23 @@ export function MarketingStudio({
                       <h3 className={labelCls}>Confirmed &amp; upcoming</h3>
                       <ul className="mt-2 space-y-1.5 text-sm text-[var(--color-ink-2)]">
                         {upcoming.map((a) => (
-                          <li key={a.id} className="flex items-center gap-2">
+                          <li key={a.id} className="flex flex-wrap items-center gap-2">
                             <span>
                               {a.patientName} · {IST_FULL.format(new Date(a.startAt))} IST
+                              {a.mode === 'IN_PERSON' && (
+                                <span className="ml-1 text-xs text-[var(--color-ink-3)]">
+                                  · in person
+                                </span>
+                              )}
                             </span>
+                            {a.mode !== 'IN_PERSON' && (
+                              <Link
+                                href={`/app/video/${a.id}`}
+                                className="font-medium text-[var(--color-accent)] hover:underline"
+                              >
+                                Join video →
+                              </Link>
+                            )}
                             {a.sessionId && (
                               <Link
                                 href={`/app/sessions/${a.sessionId}`}

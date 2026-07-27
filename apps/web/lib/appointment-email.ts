@@ -3,6 +3,7 @@ import type { IEmailPort } from '@cureocity/notifications';
 import { prisma } from '@/lib/prisma';
 import { decryptForTenant } from '@/lib/tenant-crypto';
 import { publicBaseUrl, signAppointmentId } from '@/lib/appointment-links';
+import { livekitConfigured } from '@/lib/livekit';
 
 /**
  * Marketing V1 — "new appointment request" nudge to the therapist.
@@ -81,6 +82,12 @@ async function locationBlock(psychologistId: string, appointmentId: string): Pro
   ]);
   if (appt?.mode === 'IN_PERSON') {
     return psy?.officeAddress ? `\nWhere: ${psy.officeAddress}\n` : '';
+  }
+  // MK9 — the in-app room wins when configured; the therapist's own
+  // Meet/Zoom link is the fallback.
+  if (livekitConfigured()) {
+    const sig = signAppointmentId(appointmentId);
+    return `\nThis is an online video session. Join from your phone or computer (the room opens 30 minutes before):\n${publicBaseUrl()}/p/appointments/${appointmentId}/join?sig=${sig}\n`;
   }
   return psy?.videoCallLink
     ? `\nThis is an online session. Join here at your time:\n${psy.videoCallLink}\n`

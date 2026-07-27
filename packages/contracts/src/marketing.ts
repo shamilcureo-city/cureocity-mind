@@ -156,6 +156,8 @@ export const AppointmentSchema = z.object({
   status: AppointmentStatusSchema,
   startAt: IsoDateTimeSchema,
   endAt: IsoDateTimeSchema,
+  /** MK9 — 'ONLINE' | 'IN_PERSON', from the booked window. */
+  mode: z.enum(['ONLINE', 'IN_PERSON']).default('ONLINE'),
   /** Decrypted server-side for the owning therapist only. */
   patientName: z.string(),
   patientPhone: z.string(),

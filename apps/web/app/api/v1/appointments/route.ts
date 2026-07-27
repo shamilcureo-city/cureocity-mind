@@ -32,6 +32,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       status: r.status,
       startAt: r.startAt.toISOString(),
       endAt: r.endAt.toISOString(),
+      mode: r.mode === 'IN_PERSON' ? ('IN_PERSON' as const) : ('ONLINE' as const),
       patientName: (await decryptForTenant(psyId, r.patientNameEncrypted)) ?? '(unreadable)',
       patientPhone: (await decryptForTenant(psyId, r.patientPhoneEncrypted)) ?? '(unreadable)',
       patientEmail: r.patientEmailEncrypted

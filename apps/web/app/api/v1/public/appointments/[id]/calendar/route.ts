@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { verifyAppointmentSig } from '@/lib/appointment-links';
+import { signAppointmentId, verifyAppointmentSig } from '@/lib/appointment-links';
+import { livekitConfigured } from '@/lib/livekit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,10 +34,14 @@ export async function GET(
     where: { id: appt.psychologistId },
     select: { fullName: true, publicSlug: true, videoCallLink: true, officeAddress: true },
   });
-  // MK8 — where the session happens: meeting link for online, clinic
+  // MK8/MK9 — where the session happens: the in-app room when LiveKit
+  // is configured, else the therapist's own meeting link; clinic
   // address for in-person. Commas/semicolons escaped per RFC 5545.
+  const joinUrl = livekitConfigured()
+    ? `https://mind.cureocity.in/p/appointments/${id}/join?sig=${signAppointmentId(id)}`
+    : (psy?.videoCallLink ?? null);
   const location =
-    appt.mode === 'IN_PERSON' ? psy?.officeAddress?.replace(/([,;])/g, '\\$1') : psy?.videoCallLink;
+    appt.mode === 'IN_PERSON' ? psy?.officeAddress?.replace(/([,;])/g, '\\$1') : joinUrl;
 
   const stamp = (d: Date): string =>
     d
@@ -54,8 +59,8 @@ export async function GET(
     `DTEND:${stamp(appt.endAt)}`,
     `SUMMARY:Therapy session — ${psy?.fullName ?? 'Cureocity'}`,
     ...(location ? [`LOCATION:${location}`] : []),
-    ...(appt.mode !== 'IN_PERSON' && psy?.videoCallLink
-      ? [`URL:${psy.videoCallLink}`]
+    ...(appt.mode !== 'IN_PERSON' && joinUrl
+      ? [`URL:${joinUrl}`]
       : psy?.publicSlug
         ? [`URL:https://mind.cureocity.in/therapists/${psy.publicSlug}`]
         : []),
