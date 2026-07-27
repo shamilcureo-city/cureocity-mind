@@ -11,18 +11,22 @@ import type {
   MarketingStatsResponse,
 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
-import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { MarketingPosts } from './MarketingPosts';
 
 /**
- * MK7 — the marketing studio, restructured to mirror the public page.
+ * MK7.2 — the marketing studio, visually reworked from a screenshot-
+ * driven design pass (scratchpad/studio-mock v3):
  *
- * Four tabs: **My page** (numbered sections in the exact order visitors
- * see them, each editable in place with its own done / required state),
- * **My content** (the paid-plan blog), **Inquiries** (the appointment
- * inbox), **Stats** (the funnel). One header owns publish state, the
- * to-dos count, and Preview.
+ * One calm 880px column. A hero card owns identity + Edit|Preview +
+ * Publish (locked style, not disabled-washed, while to-dos remain); an
+ * amber banner narrates exactly what's missing; underline tabs; the
+ * nine page sections live in ONE card as dividable rows — green check
+ * circles when done, amber "Required to publish" chips when not —
+ * each expanding to a soft inline panel with white inputs.
+ *
+ * Green success pair (#1d7a53 / #e2f3ea) is local to marketing, same
+ * precedent as PublicAvatar's palette.
  */
 
 interface Profile {
@@ -75,8 +79,13 @@ function minuteLabel(m: number): string {
 const MINUTE_OPTIONS = Array.from({ length: 31 }, (_, i) => 360 + i * 30);
 
 const inputCls =
-  'w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-3.5 py-2.5 text-sm';
-const labelCls = 'text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]';
+  'w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3.5 py-2.5 text-sm';
+const selectCls =
+  'rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5';
+const labelCls =
+  'mb-1.5 block text-[11px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]';
+const GOOD = '#1d7a53';
+const GOOD_SOFT = '#e2f3ea';
 
 /** "a, b, c" ⇄ ["a","b","c"] for the list fields. */
 function toList(s: string): string[] {
@@ -87,7 +96,7 @@ function toList(s: string): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// One numbered, collapsible section of the My-page editor
+// One numbered row of the My-page section list (lives inside one Card)
 // ---------------------------------------------------------------------------
 
 function Section({
@@ -110,39 +119,61 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <Card className="overflow-hidden">
+    <div>
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center gap-4 px-6 py-5 text-left"
+        className="flex w-full items-center gap-4 px-7 py-5 text-left"
         aria-expanded={open}
       >
         <span
-          className={`grid h-8 w-8 flex-shrink-0 place-items-center rounded-full text-sm font-semibold ${
+          className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full text-[15px] font-semibold"
+          style={
             done
-              ? 'bg-[var(--color-accent)] text-white'
-              : 'bg-[var(--color-surface-soft)] text-[var(--color-ink-2)]'
-          }`}
+              ? { background: GOOD_SOFT, color: GOOD }
+              : { background: 'var(--color-surface-soft)', color: 'var(--color-ink-2)' }
+          }
         >
           {done ? '✓' : n}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="font-serif text-lg">{title}</span>
-            {!done && required && (
-              <span className="rounded-full border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--color-warn)]">
-                Required to publish
-              </span>
-            )}
-          </span>
-          <span className="mt-0.5 block text-sm text-[var(--color-ink-2)]">{desc}</span>
+          <span className="block font-serif text-lg font-semibold leading-snug">{title}</span>
+          <span className="mt-0.5 block text-[13px] text-[var(--color-ink-3)]">{desc}</span>
         </span>
+        {!done && required && (
+          <span className="hidden whitespace-nowrap rounded-full border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--color-warn)] sm:inline">
+            Required to publish
+          </span>
+        )}
         <span className="flex-shrink-0 text-sm font-medium text-[var(--color-accent)]">
           {open ? 'Close' : 'Edit'}
         </span>
       </button>
-      {open && <div className="border-t border-[var(--color-line-soft)] px-6 py-5">{children}</div>}
-    </Card>
+      {open && (
+        <div className="px-7 pb-7 sm:pl-[84px]">
+          <div className="rounded-2xl bg-[var(--color-surface-soft)] p-5">{children}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Right-aligned save row inside a section panel. */
+function SaveRow({
+  label,
+  saving,
+  onClick,
+}: {
+  label: string;
+  saving: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <div className="mt-4 flex justify-end">
+      <Button onClick={onClick} disabled={saving}>
+        {saving ? 'Saving…' : label}
+      </Button>
+    </div>
   );
 }
 
@@ -416,94 +447,116 @@ export function MarketingStudio({
 
   const toggle = (key: string) => setOpenSection((cur) => (cur === key ? null : key));
 
+  const practiceSummary =
+    profile.specialties.length > 0
+      ? [
+          profile.specialties.slice(0, 3).join(', '),
+          profile.modalities.slice(0, 2).join(', '),
+          profile.languages.slice(0, 3).join(', '),
+        ]
+          .filter(Boolean)
+          .join(' · ')
+      : 'What you specialize in, the approaches you use, and the languages you work in.';
+
   return (
-    <div className="space-y-5">
-      {/* ------------------------------------------------ header ------- */}
-      <Card className="p-6">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <h2 className="font-serif text-2xl">Your public page</h2>
-              <Badge tone={published ? 'accent' : 'muted'}>
-                {published ? 'Live' : 'Not published'}
-              </Badge>
-            </div>
-            {state.publicSlug && (
-              <p className="mt-1 text-sm">
-                <Link
-                  href={`/therapists/${state.publicSlug}`}
-                  target="_blank"
-                  className="font-medium text-[var(--color-accent)] hover:underline"
-                >
-                  mind.cureocity.in/therapists/{state.publicSlug} →
-                </Link>
-                <span className="ml-2 text-xs text-[var(--color-ink-3)]">
-                  {published ? '' : '(preview — only you can see it)'}
-                </span>
-              </p>
-            )}
+    <div className="mx-auto max-w-[880px] space-y-4">
+      {/* ------------------------------------------------ hero ---------- */}
+      <Card className="flex flex-wrap items-center justify-between gap-5 p-6 sm:px-7">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="font-serif text-2xl font-semibold">Your public page</h2>
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold"
+              style={
+                published
+                  ? { background: GOOD_SOFT, color: GOOD }
+                  : { background: 'var(--color-surface-soft)', color: 'var(--color-ink-3)' }
+              }
+            >
+              <span className="h-[7px] w-[7px] rounded-full bg-current" />
+              {published ? 'Live' : 'Not published'}
+            </span>
           </div>
-          <div className="text-right">
-            <div className="flex items-center justify-end gap-3">
-              <div
-                className="flex rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-0.5"
-                role="tablist"
-                aria-label="Edit or preview"
+          {state.publicSlug && (
+            <Link
+              href={`/therapists/${state.publicSlug}`}
+              target="_blank"
+              className="mt-1 inline-block text-sm font-medium text-[var(--color-accent)] hover:underline"
+            >
+              mind.cureocity.in/therapists/{state.publicSlug} ↗
+            </Link>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <div
+            className="flex rounded-full bg-[var(--color-surface-soft)] p-[3px]"
+            role="tablist"
+            aria-label="Edit or preview"
+          >
+            {(['edit', 'preview'] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                disabled={m === 'preview' && !state.publicSlug}
+                className={`rounded-full px-[18px] py-[7px] text-sm font-medium capitalize transition-colors ${
+                  mode === m
+                    ? 'bg-[var(--color-surface)] text-[var(--color-ink)] shadow-sm'
+                    : 'text-[var(--color-ink-3)]'
+                }`}
               >
-                <button
-                  type="button"
-                  onClick={() => setMode('edit')}
-                  className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-                    mode === 'edit'
-                      ? 'bg-[var(--color-accent)] text-white'
-                      : 'text-[var(--color-ink-2)]'
-                  }`}
-                >
-                  Edit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMode('preview')}
-                  disabled={!state.publicSlug}
-                  className={`rounded-full px-4 py-1.5 text-sm font-medium ${
-                    mode === 'preview'
-                      ? 'bg-[var(--color-accent)] text-white'
-                      : 'text-[var(--color-ink-2)]'
-                  }`}
-                >
-                  Preview
-                </button>
-              </div>
-              {todos.length > 0 && (
-                <span className="text-sm text-[var(--color-ink-2)]">
-                  <span className="mr-1 inline-block h-2 w-2 rounded-full bg-[var(--color-warn)]" />
-                  {todos.length} to-do{todos.length > 1 ? 's' : ''}
-                </span>
-              )}
-              <Button
-                onClick={() => void publish(!published)}
-                disabled={busy === 'publish' || (!published && todos.length > 0)}
-              >
-                {published ? 'Unpublish' : 'Publish page'}
-              </Button>
-            </div>
-            {!published && todos.length > 0 && (
-              <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                Add {todos.map((t) => t.label.toLowerCase()).join(', ')} to publish.
-              </p>
-            )}
+                {m}
+              </button>
+            ))}
           </div>
+          {!published && todos.length > 0 ? (
+            <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-surface-soft)] px-5 py-2.5 text-sm font-semibold text-[var(--color-ink-3)]">
+              <svg
+                aria-hidden
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+              >
+                <rect x="4" y="11" width="16" height="10" rx="2" />
+                <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+              </svg>
+              Publish page
+            </span>
+          ) : (
+            <Button onClick={() => void publish(!published)} disabled={busy === 'publish'}>
+              {published ? 'Unpublish' : 'Publish page'}
+            </Button>
+          )}
         </div>
       </Card>
 
+      {/* ------------------------------------------------ to-dos -------- */}
+      {!published && todos.length > 0 && (
+        <div className="flex items-center gap-3 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] py-3 pl-4 pr-5 text-sm text-[var(--color-warn)]">
+          <span className="grid h-6 w-6 flex-shrink-0 place-items-center rounded-full bg-[var(--color-warn)] text-xs font-bold text-white">
+            {todos.length}
+          </span>
+          <span>
+            <b className="font-semibold">
+              {todos.length} step{todos.length > 1 ? 's' : ''} before you can publish
+            </b>{' '}
+            — add {todos.map((t) => t.label.toLowerCase()).join(' and ')}. Everything else can come
+            later.
+          </span>
+        </div>
+      )}
+
       {notice && (
-        <p className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-5 py-3 text-sm">
+        <p className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] px-5 py-3 text-sm">
           {notice}
         </p>
       )}
 
       {/* ------------------------------------------------ preview ------- */}
-      {mode === 'preview' && state.publicSlug && (
+      {mode === 'preview' && state.publicSlug ? (
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between border-b border-[var(--color-line-soft)] px-5 py-3">
             <p className="text-sm text-[var(--color-ink-2)]">
@@ -524,54 +577,61 @@ export function MarketingStudio({
             className="h-[80vh] w-full bg-[var(--color-bg)]"
           />
         </Card>
-      )}
-
-      {mode === 'edit' && (
+      ) : (
         <>
-          {/* ------------------------------------------------ tab bar ------- */}
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <nav className="flex gap-1 rounded-full border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-1">
+          {/* -------------------------------------------- tab bar ------- */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] px-1">
+            <nav className="flex gap-6">
               {(
                 [
-                  ['page', 'My page'],
-                  ['content', 'My content'],
-                  ['inquiries', `Inquiries${requested.length ? ` (${requested.length})` : ''}`],
-                  ['stats', 'Stats'],
+                  ['page', 'My page', 0],
+                  ['content', 'My content', 0],
+                  ['inquiries', 'Inquiries', requested.length],
+                  ['stats', 'Stats', 0],
                 ] as const
-              ).map(([key, label]) => (
+              ).map(([key, label, count]) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => setTab(key)}
-                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                  className={`relative pb-3 pt-2 text-[14.5px] transition-colors ${
                     tab === key
-                      ? 'bg-[var(--color-accent)] text-white'
-                      : 'text-[var(--color-ink-2)] hover:text-[var(--color-accent)]'
+                      ? 'font-semibold text-[var(--color-ink)]'
+                      : 'font-medium text-[var(--color-ink-3)] hover:text-[var(--color-ink-2)]'
                   }`}
                 >
                   {label}
+                  {count > 0 && (
+                    <span className="ml-1.5 rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-[11px] font-bold text-[var(--color-accent)]">
+                      {count}
+                    </span>
+                  )}
+                  {tab === key && (
+                    <span className="absolute inset-x-0 -bottom-px h-[2.5px] rounded-t bg-[var(--color-accent)]" />
+                  )}
                 </button>
               ))}
             </nav>
             {tab === 'page' && (
-              <Button
-                variant="secondary"
+              <button
+                type="button"
                 onClick={() => void requestDraft()}
                 disabled={busy === 'draft'}
+                className="pb-2 text-sm font-medium text-[var(--color-accent)] hover:underline disabled:opacity-50"
               >
                 {busy === 'draft' ? 'Drafting…' : '✦ Auto-fill with AI'}
-              </Button>
+              </button>
             )}
           </div>
 
-          {/* ------------------------------------------------ AI draft ------ */}
+          {/* -------------------------------------------- AI draft ------ */}
           {draft && tab === 'page' && (
             <Card className="border-[var(--color-accent)] p-6">
               <div className="flex items-baseline justify-between gap-3">
                 <h3 className="font-serif text-xl">Suggested copy</h3>
-                <Badge tone={draft.source === 'vertex' ? 'accent' : 'muted'}>
+                <span className="text-xs font-semibold text-[var(--color-ink-3)]">
                   {draft.source === 'vertex' ? 'AI draft' : 'Mock draft'}
-                </Badge>
+                </span>
               </div>
               <p className="mt-1 text-xs text-[var(--color-ink-3)]">
                 Drafted from your practice facts only — never client data. Nothing is saved until
@@ -599,9 +659,9 @@ export function MarketingStudio({
             </Card>
           )}
 
-          {/* ================================================ MY PAGE ======= */}
+          {/* ============================================ MY PAGE ======= */}
           {tab === 'page' && (
-            <div className="space-y-3">
+            <Card className="divide-y divide-[var(--color-line-soft)] overflow-hidden">
               <Section
                 n={1}
                 title="Identity"
@@ -611,138 +671,131 @@ export function MarketingStudio({
                 open={openSection === 'identity'}
                 onToggle={() => toggle('identity')}
               >
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="sm:col-span-2">
-                    <span className={labelCls}>Headshot</span>
-                    <div className="mt-2 flex flex-wrap items-center gap-5">
-                      <label
-                        className={`group relative grid h-28 w-28 flex-shrink-0 cursor-pointer place-items-center overflow-hidden rounded-2xl transition-colors ${
-                          profile.hasPhoto
-                            ? 'border border-[var(--color-line-soft)]'
-                            : 'border-2 border-dashed border-[var(--color-line)] bg-[var(--color-surface-soft)] hover:border-[var(--color-accent)]'
-                        }`}
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const f = e.dataTransfer.files?.[0];
-                          if (f) void uploadPhoto(f);
-                        }}
-                      >
-                        {profile.hasPhoto ? (
-                          <>
-                            {/* Plain <img>: same-origin API bytes; next/image adds nothing here. */}
-                            <img
-                              src={`/api/v1/psychologists/me/photo?v=${photoVersion}`}
-                              alt="Your headshot"
-                              className="h-full w-full object-cover"
-                            />
-                            <span className="absolute inset-0 grid place-items-center bg-black/50 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
-                              Replace
-                            </span>
-                          </>
-                        ) : (
-                          <span className="px-2 text-center text-xs text-[var(--color-ink-3)]">
-                            <svg
-                              aria-hidden
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              className="mx-auto mb-1.5 h-7 w-7"
-                            >
-                              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                              <circle cx="12" cy="13" r="4" />
-                            </svg>
-                            No photo yet
-                          </span>
-                        )}
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp"
-                          className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) void uploadPhoto(f);
-                            e.target.value = '';
-                          }}
+                <span className={labelCls}>Headshot</span>
+                <div className="flex flex-wrap items-center gap-5">
+                  <label
+                    className={`group relative grid h-[104px] w-[104px] flex-shrink-0 cursor-pointer place-items-center overflow-hidden rounded-[18px] transition-colors ${
+                      profile.hasPhoto
+                        ? 'border border-[var(--color-line-soft)]'
+                        : 'border-2 border-dashed border-[var(--color-line)] bg-[var(--color-surface)] hover:border-[var(--color-accent)]'
+                    }`}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const f = e.dataTransfer.files?.[0];
+                      if (f) void uploadPhoto(f);
+                    }}
+                  >
+                    {profile.hasPhoto ? (
+                      <>
+                        {/* Plain <img>: same-origin API bytes; next/image adds nothing here. */}
+                        <img
+                          src={`/api/v1/psychologists/me/photo?v=${photoVersion}`}
+                          alt="Your headshot"
+                          className="h-full w-full object-cover"
                         />
-                      </label>
-                      <div className="text-sm">
-                        <p className="font-medium">
-                          {busy === 'photo'
-                            ? 'Uploading…'
-                            : profile.hasPhoto
-                              ? 'Looking good.'
-                              : 'Click the box or drop a photo on it.'}
-                        </p>
-                        <p className="mt-1 max-w-xs text-xs leading-relaxed text-[var(--color-ink-3)]">
-                          PNG, JPG or WebP. We crop it to a square automatically. Profiles with
-                          photos get roughly 3× the appointment requests.
-                        </p>
-                        {profile.hasPhoto && (
-                          <button
-                            type="button"
-                            onClick={() => void removePhoto()}
-                            disabled={busy === 'photo'}
-                            className="mt-2 text-xs text-[var(--color-ink-3)] underline hover:text-[var(--color-warn)]"
-                          >
-                            Remove photo
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <label className="block sm:col-span-2">
-                    <span className={labelCls}>Tagline (your headline)</span>
+                        <span className="absolute inset-0 grid place-items-center bg-black/50 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                          Replace
+                        </span>
+                      </>
+                    ) : (
+                      <span className="px-2 text-center text-[11.5px] text-[var(--color-ink-3)]">
+                        <svg
+                          aria-hidden
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          className="mx-auto mb-1.5 h-6 w-6"
+                        >
+                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                          <circle cx="12" cy="13" r="4" />
+                        </svg>
+                        No photo yet
+                      </span>
+                    )}
                     <input
-                      value={profile.headline ?? ''}
-                      onChange={(e) => setProfile({ ...profile, headline: e.target.value })}
-                      placeholder="Helping anxious adults reclaim their lives"
-                      maxLength={160}
-                      className={`mt-1 ${inputCls}`}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) void uploadPhoto(f);
+                        e.target.value = '';
+                      }}
                     />
                   </label>
-                  <label className="block">
+                  <div className="text-sm">
+                    <p className="font-semibold">
+                      {busy === 'photo'
+                        ? 'Uploading…'
+                        : profile.hasPhoto
+                          ? 'Looking good.'
+                          : 'Click the box or drop a photo on it.'}
+                    </p>
+                    <p className="mt-1 max-w-[34ch] text-xs leading-relaxed text-[var(--color-ink-3)]">
+                      PNG, JPG or WebP. We crop it to a square automatically. Profiles with photos
+                      get roughly 3× the requests.
+                    </p>
+                    {profile.hasPhoto && (
+                      <button
+                        type="button"
+                        onClick={() => void removePhoto()}
+                        disabled={busy === 'photo'}
+                        className="mt-1.5 text-xs text-[var(--color-ink-3)] underline hover:text-[var(--color-warn)]"
+                      >
+                        Remove photo
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <span className={labelCls}>Tagline</span>
+                  <input
+                    value={profile.headline ?? ''}
+                    onChange={(e) => setProfile({ ...profile, headline: e.target.value })}
+                    placeholder="Helping anxious adults reclaim their lives"
+                    maxLength={160}
+                    className={inputCls}
+                  />
+                </div>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
                     <span className={labelCls}>Credentials</span>
                     <input
                       value={profile.credentialsLine ?? ''}
                       onChange={(e) => setProfile({ ...profile, credentialsLine: e.target.value })}
                       placeholder="RP, MA (Clinical Psychology)"
-                      className={`mt-1 ${inputCls}`}
+                      className={inputCls}
                     />
-                  </label>
-                  <label className="block">
+                  </div>
+                  <div>
                     <span className={labelCls}>Pronouns (optional)</span>
                     <input
                       value={profile.pronouns ?? ''}
                       onChange={(e) => setProfile({ ...profile, pronouns: e.target.value })}
                       placeholder="she/her"
-                      className={`mt-1 ${inputCls}`}
+                      className={inputCls}
                     />
-                  </label>
+                  </div>
                 </div>
-                <div className="mt-4">
-                  <Button
-                    onClick={() =>
-                      void (async () => {
-                        await saveProfile('identity', {
-                          headline: profile.headline?.trim() || null,
-                        });
-                        await saveMarketing(
-                          'identity2',
-                          {
-                            credentialsLine: profile.credentialsLine?.trim() || null,
-                            pronouns: profile.pronouns?.trim() || null,
-                          },
-                          'Identity saved.',
-                        );
-                      })()
-                    }
-                    disabled={busy !== null}
-                  >
-                    Save identity
-                  </Button>
-                </div>
+                <SaveRow
+                  label="Save identity"
+                  saving={busy === 'identity' || busy === 'identity2'}
+                  onClick={() =>
+                    void (async () => {
+                      await saveProfile('identity', { headline: profile.headline?.trim() || null });
+                      await saveMarketing(
+                        'identity2',
+                        {
+                          credentialsLine: profile.credentialsLine?.trim() || null,
+                          pronouns: profile.pronouns?.trim() || null,
+                        },
+                        'Identity saved.',
+                      );
+                    })()
+                  }
+                />
               </Section>
 
               <Section
@@ -762,58 +815,56 @@ export function MarketingStudio({
                   placeholder="I work with adults whose minds won't switch off…"
                   className={inputCls}
                 />
-                <div className="mt-3">
-                  <Button
-                    onClick={() => void saveProfile('about', { bio: profile.bio?.trim() || null })}
-                    disabled={busy === 'about'}
-                  >
-                    Save about
-                  </Button>
-                </div>
+                <SaveRow
+                  label="Save about"
+                  saving={busy === 'about'}
+                  onClick={() => void saveProfile('about', { bio: profile.bio?.trim() || null })}
+                />
               </Section>
 
               <Section
                 n={3}
                 title="Where you work"
-                desc="The city clients search by, and how far your practice reaches."
+                desc={
+                  sectionDone.where
+                    ? [profile.locationCity, profile.locationProvince].filter(Boolean).join(', ')
+                    : 'The city clients search by.'
+                }
                 done={sectionDone.where}
                 required
                 open={openSection === 'where'}
                 onToggle={() => toggle('where')}
               >
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="block">
+                  <div>
                     <span className={labelCls}>City</span>
                     <input
                       value={profile.locationCity ?? ''}
                       onChange={(e) => setProfile({ ...profile, locationCity: e.target.value })}
                       placeholder="Kochi"
-                      className={`mt-1 ${inputCls}`}
+                      className={inputCls}
                     />
-                  </label>
-                  <label className="block">
+                  </div>
+                  <div>
                     <span className={labelCls}>State (optional)</span>
                     <input
                       value={profile.locationProvince ?? ''}
                       onChange={(e) => setProfile({ ...profile, locationProvince: e.target.value })}
                       placeholder="Kerala"
-                      className={`mt-1 ${inputCls}`}
+                      className={inputCls}
                     />
-                  </label>
+                  </div>
                 </div>
-                <div className="mt-4">
-                  <Button
-                    onClick={() =>
-                      void saveProfile('where', {
-                        locationCity: profile.locationCity?.trim() || null,
-                        locationProvince: profile.locationProvince?.trim() || null,
-                      })
-                    }
-                    disabled={busy === 'where'}
-                  >
-                    Save location
-                  </Button>
-                </div>
+                <SaveRow
+                  label="Save location"
+                  saving={busy === 'where'}
+                  onClick={() =>
+                    void saveProfile('where', {
+                      locationCity: profile.locationCity?.trim() || null,
+                      locationProvince: profile.locationProvince?.trim() || null,
+                    })
+                  }
+                />
               </Section>
 
               <Section
@@ -854,92 +905,82 @@ export function MarketingStudio({
               <Section
                 n={5}
                 title="Practice"
-                desc="What you specialize in, the approaches you use, and the languages you work in. Clients filter on these."
+                desc={practiceSummary}
                 done={sectionDone.practice}
                 required
                 open={openSection === 'practice'}
                 onToggle={() => toggle('practice')}
               >
-                <div className="grid gap-4">
-                  <label className="block">
-                    <span className={labelCls}>Specialties (comma-separated)</span>
-                    <input
-                      defaultValue={profile.specialties.join(', ')}
-                      onBlur={(e) =>
-                        setProfile({ ...profile, specialties: toList(e.target.value) })
-                      }
-                      placeholder="Anxiety, Panic, Workplace stress"
-                      className={`mt-1 ${inputCls}`}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className={labelCls}>Approaches (comma-separated)</span>
-                    <input
-                      defaultValue={profile.modalities.join(', ')}
-                      onBlur={(e) => setProfile({ ...profile, modalities: toList(e.target.value) })}
-                      placeholder="CBT, Mindfulness"
-                      className={`mt-1 ${inputCls}`}
-                    />
-                  </label>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="block">
-                      <span className={labelCls}>Languages (comma-separated)</span>
-                      <input
-                        defaultValue={profile.languages.join(', ')}
-                        onBlur={(e) =>
-                          setProfile({ ...profile, languages: toList(e.target.value) })
-                        }
-                        placeholder="ml, en"
-                        className={`mt-1 ${inputCls}`}
-                      />
-                    </label>
-                    <label className="block">
-                      <span className={labelCls}>Years of experience</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={80}
-                        value={profile.yearsOfExperience ?? ''}
-                        onChange={(e) =>
-                          setProfile({
-                            ...profile,
-                            yearsOfExperience:
-                              e.target.value === '' ? null : Number(e.target.value),
-                          })
-                        }
-                        className={`mt-1 ${inputCls}`}
-                      />
-                    </label>
-                  </div>
+                <div>
+                  <span className={labelCls}>Specialties (comma-separated)</span>
+                  <input
+                    defaultValue={profile.specialties.join(', ')}
+                    onBlur={(e) => setProfile({ ...profile, specialties: toList(e.target.value) })}
+                    placeholder="Anxiety, Panic, Workplace stress"
+                    className={inputCls}
+                  />
                 </div>
                 <div className="mt-4">
-                  <Button
-                    onClick={() =>
-                      void saveProfile('practice', {
-                        specialties: profile.specialties,
-                        modalities: profile.modalities,
-                        languages: profile.languages,
-                        yearsOfExperience: profile.yearsOfExperience,
-                      })
-                    }
-                    disabled={busy === 'practice'}
-                  >
-                    Save practice
-                  </Button>
+                  <span className={labelCls}>Approaches (comma-separated)</span>
+                  <input
+                    defaultValue={profile.modalities.join(', ')}
+                    onBlur={(e) => setProfile({ ...profile, modalities: toList(e.target.value) })}
+                    placeholder="CBT, Mindfulness"
+                    className={inputCls}
+                  />
                 </div>
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <span className={labelCls}>Languages (comma-separated)</span>
+                    <input
+                      defaultValue={profile.languages.join(', ')}
+                      onBlur={(e) => setProfile({ ...profile, languages: toList(e.target.value) })}
+                      placeholder="ml, en"
+                      className={inputCls}
+                    />
+                  </div>
+                  <div>
+                    <span className={labelCls}>Years of experience</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={80}
+                      value={profile.yearsOfExperience ?? ''}
+                      onChange={(e) =>
+                        setProfile({
+                          ...profile,
+                          yearsOfExperience: e.target.value === '' ? null : Number(e.target.value),
+                        })
+                      }
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+                <SaveRow
+                  label="Save practice"
+                  saving={busy === 'practice'}
+                  onClick={() =>
+                    void saveProfile('practice', {
+                      specialties: profile.specialties,
+                      modalities: profile.modalities,
+                      languages: profile.languages,
+                      yearsOfExperience: profile.yearsOfExperience,
+                    })
+                  }
+                />
               </Section>
 
               <Section
                 n={6}
                 title="Fees"
-                desc="What you charge, and whether you're taking new clients. A clear fee helps clients self-qualify."
+                desc="What you charge, and whether you're taking new clients."
                 done={sectionDone.fees}
                 required={false}
                 open={openSection === 'fees'}
                 onToggle={() => toggle('fees')}
               >
-                <div className="flex flex-wrap items-end gap-4">
-                  <label className="block">
+                <div className="flex flex-wrap items-end gap-5">
+                  <div>
                     <span className={labelCls}>Fee per session (₹)</span>
                     <input
                       type="number"
@@ -952,9 +993,9 @@ export function MarketingStudio({
                           sessionFeeInr: e.target.value === '' ? null : Number(e.target.value),
                         })
                       }
-                      className={`mt-1 ${inputCls} max-w-[160px]`}
+                      className={`${inputCls} max-w-[160px]`}
                     />
-                  </label>
+                  </div>
                   <label className="flex items-center gap-2 pb-2.5 text-sm">
                     <input
                       type="checkbox"
@@ -966,19 +1007,16 @@ export function MarketingStudio({
                     Accepting new clients
                   </label>
                 </div>
-                <div className="mt-4">
-                  <Button
-                    onClick={() =>
-                      void saveProfile('fees', {
-                        sessionFeeInr: profile.sessionFeeInr,
-                        isAcceptingNewClients: profile.isAcceptingNewClients,
-                      })
-                    }
-                    disabled={busy === 'fees'}
-                  >
-                    Save fees
-                  </Button>
-                </div>
+                <SaveRow
+                  label="Save fees"
+                  saving={busy === 'fees'}
+                  onClick={() =>
+                    void saveProfile('fees', {
+                      sessionFeeInr: profile.sessionFeeInr,
+                      isAcceptingNewClients: profile.isAcceptingNewClients,
+                    })
+                  }
+                />
               </Section>
 
               <Section
@@ -996,18 +1034,15 @@ export function MarketingStudio({
                   placeholder="2nd floor, Wellness Centre, Panampilly Nagar, Kochi"
                   className={inputCls}
                 />
-                <div className="mt-4">
-                  <Button
-                    onClick={() =>
-                      void saveMarketing('clinic', {
-                        officeAddress: profile.officeAddress?.trim() || null,
-                      })
-                    }
-                    disabled={busy === 'clinic'}
-                  >
-                    Save address
-                  </Button>
-                </div>
+                <SaveRow
+                  label="Save address"
+                  saving={busy === 'clinic'}
+                  onClick={() =>
+                    void saveMarketing('clinic', {
+                      officeAddress: profile.officeAddress?.trim() || null,
+                    })
+                  }
+                />
               </Section>
 
               <Section
@@ -1032,7 +1067,7 @@ export function MarketingStudio({
                           next[i] = { ...r, weekday: Number(e.target.value) };
                           setRules(next);
                         }}
-                        className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                        className={selectCls}
                       >
                         {WEEKDAYS.map((d, wi) => (
                           <option key={d} value={wi}>
@@ -1047,7 +1082,7 @@ export function MarketingStudio({
                           next[i] = { ...r, startMinute: Number(e.target.value) };
                           setRules(next);
                         }}
-                        className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                        className={selectCls}
                       >
                         {MINUTE_OPTIONS.map((m) => (
                           <option key={m} value={m}>
@@ -1063,7 +1098,7 @@ export function MarketingStudio({
                           next[i] = { ...r, endMinute: Number(e.target.value) };
                           setRules(next);
                         }}
-                        className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                        className={selectCls}
                       >
                         {MINUTE_OPTIONS.map((m) => (
                           <option key={m} value={m}>
@@ -1078,7 +1113,7 @@ export function MarketingStudio({
                           next[i] = { ...r, mode: e.target.value as AvailabilityRuleInput['mode'] };
                           setRules(next);
                         }}
-                        className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                        className={selectCls}
                       >
                         <option value="ONLINE">Online</option>
                         <option value="IN_PERSON">In person</option>
@@ -1095,7 +1130,7 @@ export function MarketingStudio({
                           };
                           setRules(next);
                         }}
-                        className="rounded-lg border border-[var(--color-line-soft)] bg-[var(--color-bg)] px-2 py-1.5"
+                        className={selectCls}
                       >
                         {[30, 45, 60, 90].map((m) => (
                           <option key={m} value={m}>
@@ -1113,7 +1148,7 @@ export function MarketingStudio({
                     </div>
                   ))}
                 </div>
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 flex justify-between gap-2">
                   <Button
                     variant="secondary"
                     onClick={() =>
@@ -1140,7 +1175,7 @@ export function MarketingStudio({
               <Section
                 n={9}
                 title="Frequently asked questions"
-                desc="Q&As surfaced as structured data to ChatGPT, Claude, Google AI Overviews, and Perplexity."
+                desc="Served as structured data to ChatGPT, Claude, Google AI Overviews, and Perplexity."
                 done={sectionDone.faqs}
                 required={false}
                 open={openSection === 'faqs'}
@@ -1185,7 +1220,7 @@ export function MarketingStudio({
                     </div>
                   ))}
                 </div>
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 flex justify-between gap-2">
                   <Button
                     variant="secondary"
                     onClick={() => setState({ ...state, faqs: [...state.faqs, { q: '', a: '' }] })}
@@ -1203,20 +1238,74 @@ export function MarketingStudio({
                     }
                     disabled={busy === 'faqs'}
                   >
-                    Save FAQs
+                    {busy === 'faqs' ? 'Saving…' : 'Save FAQs'}
                   </Button>
                 </div>
               </Section>
-            </div>
+            </Card>
           )}
 
-          {/* ================================================ MY CONTENT ==== */}
+          {/* ============================================ MY CONTENT ==== */}
           {tab === 'content' &&
             (contentEntitled ? (
               <MarketingPosts profileSlug={state.publicSlug} />
             ) : (
-              <Card className="p-8 text-center">
-                <h2 className="font-serif text-2xl">Your content lives here</h2>
+              <Card className="p-10 text-center sm:p-12">
+                <svg
+                  aria-hidden
+                  width="120"
+                  height="88"
+                  viewBox="0 0 120 88"
+                  fill="none"
+                  className="mx-auto"
+                >
+                  <ellipse cx="60" cy="80" rx="44" ry="6" fill="var(--color-surface-soft)" />
+                  <rect
+                    x="34"
+                    y="26"
+                    width="52"
+                    height="40"
+                    rx="9"
+                    fill="var(--color-accent-soft)"
+                  />
+                  <rect
+                    x="42"
+                    y="36"
+                    width="36"
+                    height="4"
+                    rx="2"
+                    fill="var(--color-accent)"
+                    opacity=".55"
+                  />
+                  <rect
+                    x="42"
+                    y="45"
+                    width="28"
+                    height="4"
+                    rx="2"
+                    fill="var(--color-accent)"
+                    opacity=".35"
+                  />
+                  <rect
+                    x="42"
+                    y="54"
+                    width="32"
+                    height="4"
+                    rx="2"
+                    fill="var(--color-accent)"
+                    opacity=".35"
+                  />
+                  <g transform="rotate(38 78 30)">
+                    <rect x="72" y="8" width="11" height="34" rx="2.5" fill={GOOD} opacity=".8" />
+                    <rect x="72" y="8" width="11" height="7" rx="2.5" fill={GOOD_SOFT} />
+                    <path d="M72 42 L77.5 52 L83 42 Z" fill="#f0c987" />
+                    <path d="M75.5 48 L77.5 52 L79.5 48 Z" fill="var(--color-ink)" />
+                  </g>
+                  <circle cx="88" cy="22" r="3.5" fill="var(--color-accent)" opacity=".3" />
+                  <circle cx="28" cy="34" r="2.5" fill="var(--color-warn)" opacity=".35" />
+                  <circle cx="96" cy="52" r="2" fill={GOOD} opacity=".4" />
+                </svg>
+                <h2 className="mt-5 font-serif text-2xl">Your content lives here</h2>
                 <p className="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-[var(--color-ink-2)]">
                   Publish short articles that give ChatGPT and Google more reasons to recommend you.
                   AI drafts them from your declared expertise — never your sessions — and you
@@ -1233,7 +1322,7 @@ export function MarketingStudio({
               </Card>
             ))}
 
-          {/* ================================================ INQUIRIES ===== */}
+          {/* ============================================ INQUIRIES ===== */}
           {tab === 'inquiries' && (
             <Card className="p-7">
               <h2 className="font-serif text-2xl">Appointment requests</h2>
@@ -1312,47 +1401,63 @@ export function MarketingStudio({
             </Card>
           )}
 
-          {/* ================================================ STATS ========= */}
+          {/* ============================================ STATS ========= */}
           {tab === 'stats' && (
             <Card className="p-7">
-              <div className="flex items-baseline justify-between gap-3">
-                <h2 className="font-serif text-2xl">This week</h2>
-                {stats?.medianTimeToConfirmMinutes != null && (
-                  <span className="text-xs text-[var(--color-ink-3)]">
-                    median time to confirm:{' '}
-                    {stats.medianTimeToConfirmMinutes >= 60
-                      ? `${Math.round(stats.medianTimeToConfirmMinutes / 60)}h`
-                      : `${stats.medianTimeToConfirmMinutes}m`}
-                  </span>
-                )}
-              </div>
+              <h2 className="font-serif text-2xl">This week</h2>
               {stats === null ? (
                 <p className="mt-4 text-sm text-[var(--color-ink-3)]">Loading…</p>
               ) : (
                 <>
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="mt-5 flex items-stretch">
                     {(
                       [
-                        ['Page views', stats.week.pageViews],
-                        ['Slot views', stats.week.slotViews],
-                        ['Requests', stats.week.requests],
-                        ['Confirmed', stats.week.confirms],
+                        ['Page views', stats.week.pageViews, false],
+                        ['Slot views', stats.week.slotViews, false],
+                        ['Requests', stats.week.requests, false],
+                        ['Confirmed', stats.week.confirms, true],
                       ] as const
-                    ).map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 text-center"
-                      >
-                        <div className="font-serif text-2xl">{value}</div>
-                        <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
-                          {label}
+                    ).map(([label, value, hot], i) => (
+                      <div key={label} className="contents">
+                        {i > 0 && (
+                          <span className="grid place-items-center px-1.5 text-[var(--color-ink-3)] sm:px-2.5">
+                            →
+                          </span>
+                        )}
+                        <div
+                          className="flex-1 rounded-2xl px-1 py-4 text-center"
+                          style={
+                            hot
+                              ? { background: GOOD_SOFT }
+                              : { background: 'var(--color-surface-soft)' }
+                          }
+                        >
+                          <div
+                            className="font-serif text-3xl font-semibold"
+                            style={hot ? { color: GOOD } : undefined}
+                          >
+                            {value}
+                          </div>
+                          <div className="mt-0.5 text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
+                            {label}
+                          </div>
                         </div>
                       </div>
                     ))}
                   </div>
                   <p className="mt-4 text-xs text-[var(--color-ink-3)]">
                     The funnel reads left to right: people who saw your page, opened the times,
-                    asked for one, and got confirmed. No visitor tracking — just counters.
+                    asked for one, and got confirmed.
+                    {stats.medianTimeToConfirmMinutes != null && (
+                      <>
+                        {' '}
+                        Median time to confirm:{' '}
+                        {stats.medianTimeToConfirmMinutes >= 60
+                          ? `${Math.round(stats.medianTimeToConfirmMinutes / 60)}h`
+                          : `${stats.medianTimeToConfirmMinutes}m`}
+                        .
+                      </>
+                    )}
                   </p>
                 </>
               )}
