@@ -12,6 +12,7 @@ const LINKS = [
   { href: '#how', label: 'How it works' },
   { href: '#live', label: 'During the session' },
   { href: '#docs', label: 'The documents' },
+  { href: '#grow', label: 'Your page' },
   { href: '#outcomes', label: 'Outcomes' },
   { href: '#privacy', label: 'Your data' },
 ];
@@ -31,7 +32,7 @@ export function LandingWordmark() {
         </svg>
       </span>
       <span className="serif" style={{ fontSize: 18, fontWeight: 640 }}>
-        Cureocity <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>Mind</em>
+        Cureocity <em style={{ fontStyle: 'italic' }}>Mind</em>
       </span>
     </span>
   );

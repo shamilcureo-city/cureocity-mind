@@ -101,7 +101,7 @@ export function LiveRailDemo() {
             gap: 8,
             fontSize: 12,
             fontWeight: 600,
-            color: '#7DD3FC',
+            color: '#AAB4F5',
           }}
         >
           <span className="nlive-dot" />
@@ -141,7 +141,7 @@ export function LiveRailDemo() {
         <p className="nlab">THREAD NOT FOLLOWED · ×3</p>
         <p>
           Mentions of the manager conversation
-          <span style={{ float: 'right', fontSize: 10.5, color: '#7DD3FC', fontWeight: 600 }}>
+          <span style={{ float: 'right', fontSize: 10.5, color: '#AAB4F5', fontWeight: 600 }}>
             Explore →
           </span>
         </p>

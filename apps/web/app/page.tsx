@@ -1,36 +1,23 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import './landing.css';
-import { CollageDemo } from '@/components/landing/CollageDemo';
 import { DocsTabs } from '@/components/landing/DocsTabs';
-import { EvidencePairs } from '@/components/landing/EvidencePairs';
 import { Counter, LandingFx, LangWord } from '@/components/landing/LandingFx';
 import { LandingNav } from '@/components/landing/LandingNav';
 import { LiveRailDemo } from '@/components/landing/LiveRailDemo';
 import { WatchItWork } from '@/components/landing/WatchItWork';
-import {
-  BreathSigArt,
-  FcSparkArt,
-  HowPathArt,
-  LangArrowArt,
-  MeasuresSparkArt,
-  OutcomesChartArt,
-  ResidencyPinArt,
-  RoomArt,
-  TimelineArt,
-} from '@/components/landing/landing-art';
 
 /**
- * The marketing landing page — v9.3 "neon blue glass" redesign.
+ * The marketing landing page — v10 "glass aurora" redesign.
  *
- * Statically rendered; auth is never resolved here (the nav's CTAs go to
- * /login, whose guards handle the rest). All styling lives in ./landing.css,
- * scoped under `.lnd` so the shared lp-* layer (still used by /for-doctors)
- * and the app tokens are untouched. Client interactivity is confined to
- * islands in components/landing/: the nav burger, the typing hero demo, the
- * live-rail loop, the evidence pairing, the documents tabs, the counters,
- * the reveal observer, and the "Watch it work" cinematic player.
+ * One continuous aurora canvas (periwinkle → peach washes), frosted-glass
+ * cards, bevelled 3D icon tiles, black-led controls. Built from the approved
+ * screenshot-driven mock; all styling lives in ./landing.css, scoped under
+ * `.lnd` so the shared lp-* layer (still used by /for-doctors) and the app
+ * tokens are untouched. Client interactivity is confined to islands in
+ * components/landing/: the nav burger, the live-rail loop, the documents
+ * tabs, the counters, the reveal observer, and the "Watch it work" player.
  *
  * The honesty policy holds: every claim below is a shipped product fact —
  * no invented stats, no testimonials; the WhatsApp vignette is labelled an
@@ -40,10 +27,18 @@ import {
 export const metadata: Metadata = {
   title: 'Cureocity Mind — the clinical copilot for Indian therapists',
   description:
-    'Press record — a clinical copilot listens alongside you: flagging risk as it’s spoken, queueing the questions you haven’t asked, and turning the session into a SOAP note, ICD-11 clinical brief, therapy script, and next-session prep. In English, हिन्दी, മലയാളം, or the code-mix your clients actually speak.',
+    'You listen. Mind writes. A clinical copilot flags risk as it’s spoken, queues the questions you haven’t asked, and turns the session into a SOAP note, ICD-11 clinical brief, therapy script, and next-session prep. In English, हिन्दी, മലയാളം, or the code-mix your clients actually speak.',
 };
 
 const d = (ms: number) => ({ '--d': `${ms}ms` }) as CSSProperties;
+
+function Check() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+      <path d="M5 13l4 4 10-11" />
+    </svg>
+  );
+}
 
 export default function LandingPage() {
   return (
@@ -60,17 +55,16 @@ export default function LandingPage() {
 
       <LandingNav />
       <Hero />
-      <Lattice />
+      <Stage />
+      <Stats />
       <HowItWorks />
       <LiveSection />
-      <Evidence />
       <Documents />
-      <InsideTheApp />
       <CodeMix />
+      <Growth />
       <Outcomes />
       <Privacy />
       <BetweenSessions />
-      <TheRoom />
       <Pilot />
       <Faq />
       <FinalCta />
@@ -81,220 +75,170 @@ export default function LandingPage() {
 }
 
 /* ============================================================================
-   Hero + collage + counters
+   Hero — the hook + the product's core gesture
    ========================================================================== */
-
-function Check() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <path d="M5 13l4 4 10-11" />
-    </svg>
-  );
-}
 
 function Hero() {
   return (
-    <header className="hero grain">
-      <div className="hero-wash" aria-hidden>
-        <i />
-        <i />
-        <i />
+    <header className="hero wrap">
+      <span className="hero-badge rv in">
+        <span className="dot" /> The clinical copilot for Indian therapists
+      </span>
+      <h1 className="h1 serif rv in">
+        You listen.
+        <br />
+        <em>Mind writes.</em>
+      </h1>
+      <p className="hero-sub rv in" style={d(120)}>
+        Give the whole hour to the person in front of you. A copilot flags risk as it’s spoken,
+        queues what you haven’t asked, and turns every session into five signed-off documents — in
+        English, हिन्दी, മലയാളം, or the code-mix your clients actually speak.
+      </p>
+      <div className="hero-ctas rv in" style={d(220)}>
+        <Link href="/login" className="btn primary" style={{ textDecoration: 'none' }}>
+          Start free — no card
+        </Link>
+        <WatchItWork />
       </div>
-      <div className="wrap">
-        <span className="hero-badge rv in">
-          <span className="dot" /> Built by the Cureocity health-tech team · Kozhikode
+      <div className="hero-neg rv in" style={d(320)}>
+        <span>
+          <Check />
+          No bot joins anything
         </span>
-        <h1 className="h1 rv in">
-          Stay with your client.
-          <br />
-          The paperwork{' '}
-          <span className="hl-swipe go">
-            <em>writes itself.</em>
-          </span>
-        </h1>
-        <p className="hero-sub rv in" style={d(120)}>
-          Press record — and a clinical copilot listens alongside you: flagging risk the moment it’s
-          spoken, queueing the questions you haven’t asked, and turning the session into the SOAP
-          note, ICD-11 brief, therapy script, and tomorrow’s prep. In English, हिन्दी, മലയാളം, or
-          the code-mix your clients actually speak.
-        </p>
-        <div className="hero-ctas rv in" style={d(220)}>
-          <Link
-            href="/login"
-            className="btn primary"
-            style={{ padding: '15px 32px', fontSize: 16, textDecoration: 'none' }}
-          >
-            Start free — no card
-          </Link>
-          <WatchItWork />
-        </div>
-        <div className="hero-neg rv in" style={d(320)}>
-          <span>
-            <Check />
-            No bot joins anything
-          </span>
-          <span>
-            <Check />
-            No audio kept after the note
-          </span>
-          <span>
-            <Check />
-            Nothing final without your sign-off
-          </span>
-        </div>
-      </div>
-
-      {/* floating product collage */}
-      <div className="collage rv">
-        <span className="anno an-1 hand" aria-hidden>
-          the note writes itself, live
-          <svg viewBox="0 0 52 34">
-            <path d="M6 4 C14 20 30 28 46 26 M40 20 l7 6 -9 4" />
-          </svg>
+        <span>
+          <Check />
+          No audio kept after the note
         </span>
-        <span className="anno an-2 hand" style={{ '--rot': '2deg' } as CSSProperties} aria-hidden>
-          <svg viewBox="0 0 52 34" style={{ marginLeft: 'auto', transform: 'rotate(200deg)' }}>
-            <path d="M6 4 C14 20 30 28 46 26 M40 20 l7 6 -9 4" />
-          </svg>
-          it caught this — you decide
+        <span>
+          <Check />
+          Nothing final without your sign-off
         </span>
-
-        <CollageDemo />
-
-        <div className="fcard fc-live">
-          <h6>
-            <span
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: '#E25C4A',
-                display: 'inline-block',
-              }}
-            />
-            Live transcript · diarized
-          </h6>
-          <div className="wave" aria-hidden>
-            {[40, 75, 55, 90, 48, 80, 60, 38, 70, 52].map((h, i) => (
-              <i key={i} style={{ height: `${h}%`, animationDelay: `${i * 90}ms` }} />
-            ))}
-          </div>
-          <p>
-            <span className="lt">ml-en</span>“Sleep okay aanu, pakshe office il chennaal chest il
-            oru tightness…”
-          </p>
-        </div>
-
-        <div className="fcard fc-risk">
-          <h6>Risk watch · you decide</h6>
-          <p>“Sometimes I feel everyone would be better off without me.”</p>
-          <div className="acts">
-            <span>Assessed ✓</span>
-            <span>Not relevant</span>
-          </div>
-        </div>
-
-        <div className="fcard fc-chart">
-          <h6>PHQ-9 · reliable change</h6>
-          <div className="vd">
-            <b>18 → 7</b>
-            <span className="cap">−61% · improving</span>
-          </div>
-          <FcSparkArt />
-        </div>
-
-        <div className="fcard fc-wa">
-          <h6>Shared to WhatsApp · consented</h6>
-          <div className="bub">
-            This week’s practice: 4-7-8 breathing before bed. Full plan here —
-            <span className="link">🔗 private portal</span>
-          </div>
-        </div>
-      </div>
-
-      {/* counters */}
-      <div className="stats">
-        <div className="stat rv">
-          <b>
-            <Counter to={5} />
-          </b>
-          <span className="cap">
-            working documents
-            <br />
-            from one recording
-          </span>
-        </div>
-        <div className="stat rv" style={d(90)}>
-          <b>
-            <Counter to={12} />+
-          </b>
-          <span className="cap">
-            languages &amp; code-mixes —<br />
-            Manglish included
-          </span>
-        </div>
-        <div className="stat rv" style={d(180)}>
-          <b>
-            <Counter to={30} />
-            -day
-          </b>
-          <span className="cap">
-            audio auto-delete,
-            <br />
-            transcribed in Mumbai
-          </span>
-        </div>
-        <div className="stat rv" style={d(270)}>
-          <b>1 tap</b>
-          <span className="cap">
-            to share homework
-            <br />
-            on WhatsApp
-          </span>
-        </div>
       </div>
     </header>
   );
 }
 
-const LATTICE_CHIPS: ReactNode[] = [
-  <>
-    Speaks <b>ICD-11</b>
-  </>,
-  <>
-    Scores <b>PHQ-9</b> &amp; <b>GAD-7</b>
-  </>,
-  <>
-    <b>DPDP</b>-ready by design
-  </>,
-  <>
-    Knows <b>SOAP</b> from an <b>intake note</b>
-  </>,
-  <>
-    Shares over <b>WhatsApp</b>
-  </>,
-  <>
-    Signs with your <b>fingerprint</b>
-  </>,
-  <>
-    Audio stays in <b>India</b>
-  </>,
-  <>
-    Handles <b>Manglish</b> &amp; <b>Hinglish</b>
-  </>,
-];
-
-function Lattice() {
+function Stage() {
   return (
-    <div className="lattice">
-      <div className="lat-track">
-        {[0, 1].map((dup) =>
-          LATTICE_CHIPS.map((chip, i) => (
-            <span key={`${dup}-${i}`} className="lat-chip" aria-hidden={dup === 1}>
-              {chip}
+    <div className="stage">
+      <div className="session-card rv in">
+        <div className="sc-select">
+          <span className="av">A</span>
+          <span>
+            <b>Ananya R</b> &nbsp;·&nbsp; 4:30 PM · Treatment
+          </span>
+          <span className="chev">▾</span>
+        </div>
+        <div className="sc-chips">
+          <span className="sc-chip">
+            Note language · <b>English</b>
+          </span>
+          <span className="sc-chip">
+            Style · <b>CBT</b>
+          </span>
+          <span className="sc-chip">
+            <b>In-person</b>
+          </span>
+        </div>
+        <div className="mic-zone">
+          <div className="mic">
+            <span className="mic-in">
+              <svg
+                width="26"
+                height="26"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                aria-hidden
+              >
+                <path d="M12 4a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V7a3 3 0 0 1 3-3zM6 12a6 6 0 0 0 12 0M12 18v3" />
+              </svg>
             </span>
-          )),
-        )}
+          </div>
+          <p className="mic-cap">Start listening</p>
+          <p className="mic-sub">Recording begins the moment you tap · consent confirmed</p>
+        </div>
+      </div>
+
+      <div className="sat s1 rv in" style={d(150)}>
+        <h6>
+          <span className="reddot" /> Live transcript · diarized
+        </h6>
+        <div className="wave" aria-hidden>
+          {[40, 75, 55, 90, 48, 80, 60, 38, 70, 52].map((h, i) => (
+            <i key={i} style={{ height: `${h}%`, animationDelay: `${i * 90}ms` }} />
+          ))}
+        </div>
+        <p>
+          <span className="lt">ml-en</span>“Sleep okay aanu, pakshe office il chennaal chest il oru
+          tightness…”
+        </p>
+      </div>
+
+      <div className="sat s2 rv in" style={d(220)}>
+        <h6>Risk watch · you decide</h6>
+        <p>“Sometimes I feel everyone would be better off without me.”</p>
+        <div className="acts">
+          <span className="a1">Assessed ✓</span>
+          <span className="a2">Not relevant</span>
+        </div>
+      </div>
+
+      <div className="sat s3 rv in" style={d(290)}>
+        <h6>PHQ-9 · reliable change</h6>
+        <div className="vd">
+          <b>18 → 7</b>
+          <span>−61% · improving</span>
+        </div>
+        <svg width="205" height="34" viewBox="0 0 205 34" fill="none" aria-hidden>
+          <path
+            d="M2 6 C30 8 44 14 70 16 S130 24 200 29"
+            stroke="#5c6bd6"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+          />
+          <circle cx="200" cy="29" r="3.4" fill="#5c6bd6" />
+        </svg>
+      </div>
+
+      <div className="sat s4 rv in" style={d(360)}>
+        <h6>Shared to WhatsApp · consented</h6>
+        <div className="bub">
+          This week’s practice: 4-7-8 breathing before bed. Full plan here —
+          <span className="link">🔗 private portal</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Stats() {
+  return (
+    <div className="stats">
+      <div className="stat rv">
+        <b>
+          <Counter to={5} />
+        </b>
+        <span className="cap">working documents from one recording</span>
+      </div>
+      <div className="stat rv" style={d(90)}>
+        <b>
+          <Counter to={12} />+
+        </b>
+        <span className="cap">languages &amp; code-mixes — Manglish included</span>
+      </div>
+      <div className="stat rv" style={d(180)}>
+        <b>
+          <Counter to={30} />
+          -day
+        </b>
+        <span className="cap">audio auto-delete, transcribed in Mumbai</span>
+      </div>
+      <div className="stat rv" style={d(270)}>
+        <b>1 tap</b>
+        <span className="cap">to share homework on WhatsApp</span>
       </div>
     </div>
   );
@@ -307,29 +251,29 @@ function Lattice() {
 function HowItWorks() {
   return (
     <section className="sect" id="how">
-      <div className="wrap" style={{ textAlign: 'center' }}>
-        <span className="eyebrow rv" style={{ justifyContent: 'center' }}>
-          How it works
-        </span>
-        <h2 className="big rv" style={d(80)}>
-          Three moves. <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>Zero typing.</em>
+      <div className="wrap center">
+        <span className="eyebrow rv">How it works</span>
+        <h2 className="big rv serif" style={d(80)}>
+          Three taps. <em>That’s the whole workflow.</em>
         </h2>
       </div>
       <div className="wrap how-grid">
-        <HowPathArt />
         <div className="how-card rv">
-          <div className="how-gfx" aria-hidden>
-            <span className="mic-ring" />
-            <span className="mic-ring r2" />
-            <span className="how-ic">
-              <svg viewBox="0 0 24 24">
-                <rect x="9" y="3.5" width="6" height="11" rx="3" />
-                <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" />
-              </svg>
-            </span>
-          </div>
-          <span className="hand how-hand" style={{ '--rot': '-3deg' } as CSSProperties}>
-            the phone already in your room
+          <span className="how-step mono">STEP 01</span>
+          <span className="tile t-peri">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <rect x="9" y="3.5" width="6" height="11" rx="3" />
+              <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3" />
+            </svg>
           </span>
           <h3 className="serif">Record</h3>
           <p>
@@ -338,17 +282,20 @@ function HowItWorks() {
           </p>
         </div>
         <div className="how-card rv" style={d(140)}>
-          <div className="how-gfx" aria-hidden>
-            <span className="how-stack s1" />
-            <span className="how-stack s2" />
-            <span className="how-ic">
-              <svg viewBox="0 0 24 24">
-                <path d="M6 3.5h9l4 4v13H6zM14.5 3.5v4.5h4.5M9.5 13h6M9.5 16.5h4" />
-              </svg>
-            </span>
-          </div>
-          <span className="hand how-hand" style={{ '--rot': '2deg' } as CSSProperties}>
-            drafts arrive while you stretch
+          <span className="how-step mono">STEP 02</span>
+          <span className="tile t-peach">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M6 3.5h9l4 4v13H6zM14.5 3.5v4.5h4.5M9.5 13h6M9.5 16.5h4" />
+            </svg>
           </span>
           <h3 className="serif">Review</h3>
           <p>
@@ -357,18 +304,22 @@ function HowItWorks() {
           </p>
         </div>
         <div className="how-card rv" style={d(280)}>
-          <div className="how-gfx" aria-hidden>
-            <span className="how-send" />
-            <span className="how-ic">
-              <svg viewBox="0 0 24 24">
-                <path d="M21 3.5 3.5 10.5l6.5 3 3 6.5zM21 3.5 10 13.5" />
-              </svg>
-            </span>
-          </div>
-          <span className="hand how-hand" style={{ '--rot': '-2deg' } as CSSProperties}>
-            fingerprint, then WhatsApp
+          <span className="how-step mono">STEP 03</span>
+          <span className="tile t-mint">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M21 3.5 3.5 10.5l6.5 3 3 6.5zM21 3.5 10 13.5" />
+            </svg>
           </span>
-          <h3 className="serif">Share</h3>
+          <h3 className="serif">Sign &amp; share</h3>
           <p>
             Sign with your fingerprint, then send homework, the plan, or a progress report over
             WhatsApp, email, or a private portal link — consent-gated, audited.
@@ -380,31 +331,36 @@ function HowItWorks() {
 }
 
 /* ============================================================================
-   During the session (dark set piece)
+   During the session — the dark glass slab
    ========================================================================== */
 
 function LiveSection() {
   return (
-    <section className="night-sect grain" id="live">
-      <div className="wrap night-in">
-        <div className="night-copy">
-          <span className="eyebrow" style={{ color: '#7DD3FC' }}>
-            During the session
-          </span>
-          <h2 className="big" style={{ color: 'var(--night-ink)' }}>
-            A quiet second voice
-            <br />
-            that <em style={{ fontStyle: 'italic', color: '#7DD3FC' }}>never interrupts.</em>
+    <section className="slab" id="live">
+      <div className="wrap night-grid">
+        <div>
+          <span className="eyebrow">During the session</span>
+          <h2 className="big serif">
+            A copilot in the room, <em>silent by design.</em>
           </h2>
-          <p className="sub" style={{ color: 'var(--night-ink2)' }}>
-            Go live and a copilot listens alongside you. Risk phrases surface the moment they’re
-            spoken. Unexplored threads queue quietly. The note assembles itself in the margin —
-            while your eyes stay on the person in front of you.
+          <p className="sub">
+            Go live and it listens alongside you. Risk phrases surface the moment they’re spoken.
+            Unexplored threads queue quietly. The note assembles itself in the margin — while your
+            eyes stay on the person in front of you.
           </p>
-          <div className="night-feats">
+          <div className="nf">
             <div>
-              <span className="nf-ic" aria-hidden>
-                <svg viewBox="0 0 24 24">
+              <span className="tile t-peach">
+                <svg
+                  width="19"
+                  height="19"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  aria-hidden
+                >
                   <path d="M12 3l8 4v5c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V7z" />
                   <path d="M9 12l2 2 4-4.5" />
                 </svg>
@@ -418,8 +374,17 @@ function LiveSection() {
               </div>
             </div>
             <div>
-              <span className="nf-ic" aria-hidden>
-                <svg viewBox="0 0 24 24">
+              <span className="tile t-peri">
+                <svg
+                  width="19"
+                  height="19"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  aria-hidden
+                >
                   <path d="M12 4a8 8 0 0 1 8 8c0 1.8-.6 3.4-1.6 4.8L20 21l-4.4-1.4A8 8 0 1 1 12 4z" />
                   <path d="M8.5 10.5h7M8.5 14h4.5" />
                 </svg>
@@ -433,8 +398,17 @@ function LiveSection() {
               </div>
             </div>
             <div>
-              <span className="nf-ic" aria-hidden>
-                <svg viewBox="0 0 24 24">
+              <span className="tile t-lav">
+                <svg
+                  width="19"
+                  height="19"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  aria-hidden
+                >
                   <circle cx="12" cy="12" r="8.5" />
                   <path d="M12 7v5l3.5 2.5" />
                 </svg>
@@ -449,74 +423,8 @@ function LiveSection() {
             </div>
           </div>
         </div>
-        <div className="night-stage">
-          <LiveRailDemo />
-          <div className="fcard n-fc" style={{ '--rot': '2.5deg', '--dur': '7s' } as CSSProperties}>
-            <h6 style={{ color: 'var(--ink3)' }}>Talk balance</h6>
-            <div
-              style={{
-                display: 'flex',
-                height: 8,
-                borderRadius: 99,
-                overflow: 'hidden',
-                width: 180,
-              }}
-              aria-hidden
-            >
-              <i style={{ width: '68%', background: '#1F41A3' }} />
-              <i style={{ width: '32%', background: '#D9E1ED' }} />
-            </div>
-            <p style={{ fontSize: 10.5, color: 'var(--ink3)', marginTop: 6 }}>
-              Client 68% · You 32% — good listening
-            </p>
-          </div>
-        </div>
+        <LiveRailDemo />
       </div>
-    </section>
-  );
-}
-
-/* ============================================================================
-   Copilot evidence
-   ========================================================================== */
-
-function Evidence() {
-  return (
-    <section className="sect" id="evidence">
-      <div className="wrap" style={{ textAlign: 'center' }}>
-        <span className="eyebrow rv" style={{ justifyContent: 'center' }}>
-          Why you can trust the copilot
-        </span>
-        <h2 className="big rv" style={d(80)}>
-          Every suggestion
-          <br />
-          <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>shows its work.</em>
-        </h2>
-        <p
-          className="sub rv"
-          style={{ ...d(160), marginLeft: 'auto', marginRight: 'auto', textAlign: 'center' }}
-        >
-          Nothing reaches the record on vibes. Every diagnosis candidate, risk flag, and plan line
-          cites the exact moment in the session it came from —{' '}
-          <b>hover a claim to see its evidence.</b> A suggestion that can’t cite a real utterance is
-          discarded before you ever see it.
-        </p>
-      </div>
-      <div className="wrap">
-        <EvidencePairs />
-      </div>
-      <p
-        className="rv"
-        style={{
-          ...d(280),
-          textAlign: 'center',
-          fontSize: 13,
-          color: 'var(--ink3)',
-          marginTop: 22,
-        }}
-      >
-        This is enforced in the pipeline — the citation gate — not just promised on this page.
-      </p>
     </section>
   );
 }
@@ -527,26 +435,13 @@ function Evidence() {
 
 function Documents() {
   return (
-    <section
-      className="sect"
-      id="docs"
-      style={{ background: 'var(--paper)', borderBlock: '1px solid var(--line)' }}
-    >
-      <div className="wrap" style={{ textAlign: 'center' }}>
-        <span className="eyebrow rv" style={{ justifyContent: 'center' }}>
-          After each session
-        </span>
-        <h2 className="big rv" style={d(80)}>
-          One recording.
-          <br />
-          <span className="hl-swipe">
-            <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>Five working documents.</em>
-          </span>
+    <section className="sect" id="docs">
+      <div className="wrap center">
+        <span className="eyebrow rv">After each session</span>
+        <h2 className="big rv serif" style={d(80)}>
+          One hour of therapy. <em>Five finished documents.</em>
         </h2>
-        <p
-          className="sub rv"
-          style={{ ...d(160), marginLeft: 'auto', marginRight: 'auto', textAlign: 'center' }}
-        >
+        <p className="sub rv" style={d(160)}>
           Every artefact is a draft until you sign it. Confirmed diagnoses and plans accumulate on
           the client record — the AI sees the whole arc, not one session at a time.
         </p>
@@ -559,191 +454,43 @@ function Documents() {
 }
 
 /* ============================================================================
-   Inside the app — product bento
+   Code-mix
    ========================================================================== */
 
-function InsideTheApp() {
+function CodeMix() {
   return (
-    <section className="sect" id="inside">
-      <div className="wrap" style={{ textAlign: 'center' }}>
-        <span className="eyebrow rv" style={{ justifyContent: 'center' }}>
-          Inside the app
-        </span>
-        <h2 className="big rv" style={d(80)}>
-          The whole practice.
-          <br />
-          <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>One calm surface.</em>
+    <section className="sect" id="lang">
+      <div className="wrap center">
+        <span className="eyebrow rv">Code-mix first</span>
+        <h2 className="big rv serif" style={d(80)}>
+          Therapy here happens in <LangWord />
         </h2>
-        <p
-          className="sub rv"
-          style={{ ...d(160), marginLeft: 'auto', marginRight: 'auto', textAlign: 'center' }}
-        >
-          Not just notes — your day, every client’s arc, and every AI suggestion waiting for your
-          call. This is the actual product.
+        <p className="sub rv" style={d(160)}>
+          Not “English with errors” — a language of its own. Every segment is tagged, mid-sentence
+          switches included; your documents come out in your language, the client’s homework in
+          theirs.
         </p>
-      </div>
-      <div className="wrap ba-grid">
-        <div className="ba-cell ba-wide rv">
-          <div className="ba-head">
-            <span className="mono ba-tag">CLIENT JOURNEY</span>
-            <span className="chip acc">Reliable improvement</span>
+        <div className="lang-demo rv" style={d(240)}>
+          <div className="lang-chip">
+            <span className="lt">hi-en</span>“Raat ko neend nahi aati,{' '}
+            <mark>presentation se pehle</mark> heartbeat badh jaata hai”
           </div>
-          <TimelineArt />
-          <p className="ba-cap">
-            Every client gets an arc — sessions, scores, and your decisions on one line, intake to
-            discharge.
-          </p>
-        </div>
-
-        <div className="ba-cell rv" style={d(90)}>
-          <div className="ba-head">
-            <span className="mono ba-tag">TODAY</span>
-          </div>
-          <div className="ba-app">
-            <p className="serif" style={{ fontSize: 17, fontWeight: 620, letterSpacing: '-.01em' }}>
-              Good afternoon, Meera.
-            </p>
-            <p className="mono" style={{ fontSize: 9, color: 'var(--ink3)', marginTop: 2 }}>
-              TUE 15 JUL · 2 SESSIONS LEFT · 1 TO SIGN
-            </p>
-            <div className="ba-next">
-              <span className="ba-av serif">A</span>
-              <div style={{ flex: 1 }}>
-                <b style={{ fontSize: 12.5 }}>Arjun Rao</b>
-                <p style={{ fontSize: 9.5, color: 'var(--ink3)' }}>
-                  <span className="mono">4:30</span> · Treatment · CBT ·{' '}
-                  <span style={{ color: 'var(--brand)', fontWeight: 600 }}>in 25 min</span>
-                </p>
-              </div>
-              <span className="ba-start">● Start</span>
-            </div>
-            <div className="ba-row">
-              <span className="mono">2:00</span>
-              <b>Kavya Nair</b>
-              <span className="ba-ok">✓ signed</span>
-            </div>
-            <div className="ba-row">
-              <span className="mono">3:00</span>
-              <b>Rohit Menon</b>
-              <span className="ba-sign">Sign ▸</span>
-            </div>
-            <div className="ba-row dim">
-              <span className="mono">6:00</span>
-              <b>Sana Iqbal</b>
-              <span>intake</span>
-            </div>
-          </div>
-          <p className="ba-cap">Your day, triaged — one tap from prep to recording.</p>
-        </div>
-
-        <div className="ba-cell rv" style={d(60)}>
-          <div className="ba-head">
-            <span className="mono ba-tag">AI COPILOT · YOU DECIDE</span>
-          </div>
-          <div className="ba-app">
-            <p className="mono" style={{ fontSize: 8.5, color: '#2F416B', letterSpacing: '.1em' }}>
-              AI SUGGESTS
-            </p>
-            <div className="ba-dx">
-              <span className="mono ba-icd">6B00</span>
-              <div style={{ flex: 1 }}>
-                <b style={{ fontSize: 11.5 }}>Generalised anxiety disorder</b>
-                <div className="ba-conf">
-                  <i style={{ width: '72%' }} />
-                </div>
-                <p style={{ fontSize: 8.5, color: 'var(--ink3)' }}>
-                  cites 4 moments from the transcript
-                </p>
-              </div>
-            </div>
-            <div className="ba-acts">
-              <span className="pri">Accept</span>
-              <span>Edit &amp; accept</span>
-              <span>Dismiss</span>
-            </div>
-            <p
-              className="mono"
-              style={{ fontSize: 8.5, color: 'var(--ink3)', letterSpacing: '.1em', marginTop: 12 }}
+          <span className="lang-arrow" aria-hidden>
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
             >
-              YOUR RECORD — DECIDED
-            </p>
-            <div className="ba-rec">
-              <span>✓</span>Plan v2 · 3 goals · 2 achieved
-            </div>
-            <div className="ba-rec">
-              <span>✓</span>Safety reviewed · no flags
-            </div>
+              <path d="M4 12h15M13 6l6 6-6 6" />
+            </svg>
+          </span>
+          <div className="lang-chip">
+            <b>S —</b> Sleep-onset difficulty; anticipatory palpitations before presentations.
           </div>
-          <p className="ba-cap">
-            Suggestions wait in their own lane — nothing joins the record until you accept it.
-          </p>
-        </div>
-
-        <div className="ba-cell rv" style={d(120)}>
-          <div className="ba-head">
-            <span className="mono ba-tag">MEASURES</span>
-            <span className="chip warn" style={{ fontSize: 9, padding: '2px 8px' }}>
-              GAD-7 due
-            </span>
-          </div>
-          <div className="ba-app">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <b className="mono" style={{ fontSize: 19 }}>
-                18 → 7
-              </b>
-              <span style={{ fontSize: 9.5, color: 'var(--brand)', fontWeight: 600 }}>
-                moderately severe → mild
-              </span>
-            </div>
-            <MeasuresSparkArt />
-            <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-              <span className="ba-start" style={{ background: 'var(--brand)' }}>
-                Send check-in ▸
-              </span>
-              <span className="ba-ghost">In-session</span>
-            </div>
-          </div>
-          <p className="ba-cap">
-            PHQ-9 and GAD-7 in the flow of the session — verdicts from the literature.
-          </p>
-        </div>
-
-        <div className="ba-cell rv" style={d(150)}>
-          <div className="ba-head">
-            <span className="mono ba-tag">SIGN &amp; SEND</span>
-          </div>
-          <div className="ba-app">
-            <p
-              className="mono"
-              style={{ fontSize: 8.5, color: 'var(--brand)', letterSpacing: '.1em' }}
-            >
-              SUBJECTIVE
-            </p>
-            <p style={{ fontSize: 10.5, lineHeight: 1.6, color: 'var(--ink2)' }}>
-              Appraisal conversation happened Thursday — “went better than the dread deserved.”
-              Tightness twice, resolved with grounding…
-            </p>
-            <p
-              className="mono"
-              style={{ fontSize: 8.5, color: 'var(--brand)', letterSpacing: '.1em', marginTop: 8 }}
-            >
-              PLAN
-            </p>
-            <p style={{ fontSize: 10.5, lineHeight: 1.6, color: 'var(--ink2)' }}>
-              Continue grounding; thought-record for the perfectionism loop; re-measure GAD-7.
-            </p>
-            <div className="ba-signbar">
-              <span style={{ fontSize: 8.5, color: 'var(--ink2)' }}>
-                ✓ Risk reviewed &nbsp;✓ Review finished
-              </span>
-              <span className="ba-start" style={{ background: 'var(--brand)' }}>
-                Sign &amp; send ▸
-              </span>
-            </div>
-          </div>
-          <p className="ba-cap">
-            One bar answers “am I done?” — fingerprint-signed, shared in a tap.
-          </p>
         </div>
       </div>
     </section>
@@ -751,36 +498,116 @@ function InsideTheApp() {
 }
 
 /* ============================================================================
-   Code-mix
+   Practice growth — public page + booking + in-app video (Marketing V1 + MK9)
    ========================================================================== */
 
-function CodeMix() {
+function Growth() {
   return (
-    <section className="sect" id="lang">
-      <div className="wrap" style={{ textAlign: 'center' }}>
-        <span className="eyebrow rv" style={{ justifyContent: 'center' }}>
-          Code-mix first
-        </span>
-        <h2 className="big rv" style={d(80)}>
-          Therapy in India happens in
-          <br />
-          <LangWord />
+    <section className="sect" id="grow">
+      <div className="wrap center">
+        <span className="eyebrow rv">Beyond the session</span>
+        <h2 className="big rv serif" style={d(80)}>
+          Your name, <em>bookable.</em>
         </h2>
-        <p className="sub rv" style={{ ...d(160), margin: '22px auto 0', textAlign: 'center' }}>
-          Not “English with errors” — a language of its own. Pass 1 tags every segment, mid-sentence
-          switches included; your documents come out in your language, the client’s homework in
-          theirs.
+        <p className="sub rv" style={d(160)}>
+          Mind isn’t only the hour of therapy — it runs the practice around it. A public page that
+          fills your calendar, and video sessions that happen inside the product.
         </p>
-        <div className="lang-demo rv" style={d(240)}>
-          <div className="lang-chip">
-            <span className="mono lt2">hi-en</span>“Raat ko neend nahi aati,{' '}
-            <mark>presentation se pehle</mark> heartbeat badh jaata hai”
+      </div>
+      <div className="wrap grow-grid">
+        <div className="grow-card rv">
+          <span className="tile t-sky">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <circle cx="12" cy="8.5" r="3.5" />
+              <path d="M5 20c.8-3.8 3.6-6 7-6s6.2 2.2 7 6" />
+            </svg>
+          </span>
+          <h3 className="serif">Your public page</h3>
+          <p>
+            A profile clients actually find — your story, specialties, FAQs, and posts at{' '}
+            <b>mind.cureocity.in/therapists/you</b>. AI drafts the copy from your real practice.
+          </p>
+          <div className="mini">
+            <div className="row">
+              <span className="av">P</span>
+              <div>
+                <p className="nm">Dr. Priya Menon</p>
+                <p className="cp">Anxiety &amp; trauma · Kochi · ₹1,800</p>
+              </div>
+            </div>
           </div>
-          <div className="lang-arrow" aria-hidden>
-            <LangArrowArt />
+        </div>
+        <div className="grow-card rv" style={d(140)}>
+          <span className="tile t-peri">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <rect x="4" y="5.5" width="16" height="15" rx="3" />
+              <path d="M4 10.5h16M8.5 3.5v4M15.5 3.5v4" />
+            </svg>
+          </span>
+          <h3 className="serif">Real slot booking</h3>
+          <p>
+            Your weekly hours become live slots. A request holds the time; you confirm with one tap
+            — the client file and intake session are created for you.
+          </p>
+          <div className="mini">
+            <p className="cp mono" style={{ fontWeight: 700, letterSpacing: '.06em' }}>
+              THU 31 JUL
+            </p>
+            <div className="slot-row">
+              <span className="slot">10:00</span>
+              <span className="slot on">11:00</span>
+              <span className="slot">4:30</span>
+              <span className="slot">6:00</span>
+            </div>
           </div>
-          <div className="lang-chip out">
-            <b>S —</b> Sleep-onset difficulty; anticipatory palpitations before presentations.
+        </div>
+        <div className="grow-card rv" style={d(280)}>
+          <span className="tile t-lav">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <rect x="3" y="6" width="13" height="12" rx="3" />
+              <path d="M16 10.5 21 8v8l-5-2.5" />
+            </svg>
+          </span>
+          <h3 className="serif">Video, built in</h3>
+          <p>
+            Online clients join from the confirmation itself — no Meet links, no “can you see me?”.
+            One private room per appointment, open 30 minutes before.
+          </p>
+          <div className="vroom" aria-hidden>
+            <span className="who">Ananya · connected</span>
+            <span className="me" />
+            <span className="ctrls">
+              <i>🎙</i>
+              <i className="end">✕</i>
+              <i>📷</i>
+            </span>
           </div>
         </div>
       </div>
@@ -794,21 +621,12 @@ function CodeMix() {
 
 function Outcomes() {
   return (
-    <section
-      className="sect grain"
-      id="outcomes"
-      style={{ background: 'var(--paper)', borderBlock: '1px solid var(--line)' }}
-    >
+    <section className="sect" id="outcomes">
       <div className="wrap out-grid">
         <div>
           <span className="eyebrow rv">Measurement-based care</span>
-          <h2 className="big rv" style={d(80)}>
-            Therapy you can
-            <br />
-            <span className="hl-swipe">
-              <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>see</em>
-            </span>{' '}
-            working.
+          <h2 className="big rv serif" style={d(80)}>
+            Progress you can <em>prove.</em>
           </h2>
           <p className="sub rv" style={d(160)}>
             PHQ-9 and GAD-7 live in the flow of the session — and the verdict is deterministic.
@@ -830,49 +648,49 @@ function Outcomes() {
             </div>
           </div>
         </div>
-        <div className="out-stage rv" style={d(150)}>
-          <span
-            className="hand"
-            style={{
-              position: 'absolute',
-              right: '8%',
-              top: -34,
-              fontSize: 21,
-              color: 'var(--amber)',
-              transform: 'rotate(3deg)',
-              zIndex: 3,
-            }}
+        <div className="out-card rv" style={d(150)}>
+          <div className="out-head">
+            <div>
+              <b>PHQ-9 across treatment</b>
+              <span className="cap">Eight sessions · one client</span>
+            </div>
+            <span className="verdict">✓ Reliable improvement · remission</span>
+          </div>
+          <svg
+            width="100%"
+            height="150"
+            viewBox="0 0 460 150"
+            fill="none"
+            style={{ marginTop: 16 }}
             aria-hidden
           >
-            from the literature — not vibes ↓
-          </span>
-          <div className="out-card">
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                gap: 12,
-                flexWrap: 'wrap',
-              }}
-            >
-              <div>
-                <b style={{ fontSize: 15 }}>PHQ-9 across treatment</b>
-                <br />
-                <span style={{ fontSize: 12, color: 'var(--ink3)' }}>
-                  Eight sessions · one client
-                </span>
-              </div>
-              <span className="out-verdict">✓ Reliable improvement · remission</span>
-            </div>
-            <OutcomesChartArt />
-            <div className="out-stages">
-              <span className="done">Intake</span>
-              <span className="done">Assessment</span>
-              <span className="done">Treatment</span>
-              <span className="on">Review</span>
-              <span>Discharge</span>
-            </div>
+            <path d="M0 118 H460 M0 78 H460 M0 38 H460" stroke="rgba(11,12,16,.05)" />
+            <path
+              d="M20 24 C80 30 120 44 170 58 S300 96 440 122"
+              stroke="#5c6bd6"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+            <path
+              d="M20 24 C80 30 120 44 170 58 S300 96 440 122 L440 150 L20 150 Z"
+              fill="url(#lndg1)"
+            />
+            <defs>
+              <linearGradient id="lndg1" x1="0" y1="0" x2="0" y2="1">
+                <stop stopColor="rgba(92,107,214,.2)" />
+                <stop offset="1" stopColor="rgba(92,107,214,0)" />
+              </linearGradient>
+            </defs>
+            <circle cx="20" cy="24" r="4" fill="#5c6bd6" />
+            <circle cx="170" cy="58" r="4" fill="#5c6bd6" />
+            <circle cx="440" cy="122" r="5" fill="#5c6bd6" />
+          </svg>
+          <div className="stages">
+            <span className="done">Intake</span>
+            <span className="done">Assessment</span>
+            <span className="done">Treatment</span>
+            <span className="on">Review</span>
+            <span>Discharge</span>
           </div>
         </div>
       </div>
@@ -888,65 +706,77 @@ function Privacy() {
   return (
     <section className="sect" id="privacy">
       <div className="wrap priv-grid">
-        <div className="priv-map rv">
-          <div className="india-card">
-            <ResidencyPinArt />
-            <div className="india-note">
-              <p
-                className="mono"
-                style={{ fontSize: 10.5, color: 'var(--brand)', letterSpacing: '.1em' }}
-              >
-                AUDIO RESIDENCY
-              </p>
-              <p style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--ink2)', marginTop: 6 }}>
-                Session audio is transcribed on Vertex AI in Mumbai and{' '}
-                <b style={{ color: 'var(--ink)' }}>never stored beyond 30 days</b>. Structuring runs
-                on the transcript under your client’s recorded consent.
-              </p>
-            </div>
+        <div className="india-card rv">
+          <div className="pin3d">
+            <svg
+              width="34"
+              height="34"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              aria-hidden
+            >
+              <path d="M12 21s-6.5-5.2-6.5-10a6.5 6.5 0 0 1 13 0c0 4.8-6.5 10-6.5 10z" />
+              <circle cx="12" cy="10.6" r="2.4" />
+            </svg>
           </div>
+          <span className="mh">AUDIO RESIDENCY</span>
+          <p>
+            Session audio is transcribed on Vertex AI in <b>Mumbai</b> and never stored beyond 30
+            days. Structuring runs on the transcript under your client’s recorded consent.
+          </p>
         </div>
         <div>
           <span className="eyebrow rv">Your data · DPDP</span>
-          <h2 className="big rv" style={d(80)}>
-            Straight answers
-            <br />
-            about the recording.
+          <h2 className="big rv serif" style={d(80)}>
+            Health-data serious, <em>in writing.</em>
           </h2>
           <p className="sub rv" style={d(140)}>
             Built like it’s health data — because it is. No fine print contradicts any of this:
           </p>
           <div className="priv-list rv" style={d(220)}>
-            {[
-              [
-                '01',
-                'Audio is deleted on schedule.',
-                'Transcription happens in real time; a 30-day purge is enforced by a cron, not a policy PDF.',
-              ],
-              [
-                '02',
-                'Encrypted per practice.',
-                'Client PII is envelope-encrypted with a key unique to your practice — AES-256-GCM, never shared across tenants.',
-              ],
-              [
-                '03',
-                'Never used for training.',
-                'Your sessions produce your documents. They don’t train our models or anyone else’s.',
-              ],
-              [
-                '04',
-                'Everything audited, you sign everything.',
-                'Append-only audit log built for DPDP data-subject requests; notes sign with your fingerprint, cryptographically verified.',
-              ],
-            ].map(([n, title, body]) => (
-              <div key={n}>
-                <i>{n}</i>
-                <div>
-                  <b>{title}</b>
-                  <p>{body}</p>
-                </div>
+            <div>
+              <span className="tile t-peri">01</span>
+              <div>
+                <b>Audio is deleted on schedule.</b>
+                <p>
+                  Transcription happens in real time; a 30-day purge is enforced by a cron, not a
+                  policy PDF.
+                </p>
               </div>
-            ))}
+            </div>
+            <div>
+              <span className="tile t-peach">02</span>
+              <div>
+                <b>Encrypted per practice.</b>
+                <p>
+                  Client PII is envelope-encrypted with a key unique to your practice — AES-256-GCM,
+                  never shared across tenants.
+                </p>
+              </div>
+            </div>
+            <div>
+              <span className="tile t-mint">03</span>
+              <div>
+                <b>Never used for training.</b>
+                <p>
+                  Your sessions produce your documents. They don’t train our models or anyone
+                  else’s.
+                </p>
+              </div>
+            </div>
+            <div>
+              <span className="tile t-lav">04</span>
+              <div>
+                <b>Audited; you sign everything.</b>
+                <p>
+                  Append-only audit log built for DPDP data-subject requests; notes sign with your
+                  fingerprint, cryptographically verified.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -960,59 +790,26 @@ function Privacy() {
 
 function BetweenSessions() {
   return (
-    <section
-      className="sect grain"
-      id="between"
-      style={{
-        background: 'linear-gradient(180deg,#F2F5F9 0%,#fff 100%)',
-        borderTop: '1px solid var(--line)',
-      }}
-    >
+    <section className="sect" id="between">
       <div className="wrap wa-grid">
         <div>
           <span className="eyebrow rv">Between sessions</span>
-          <h2 className="big rv" style={d(80)}>
-            Therapy doesn’t end
-            <br />
-            <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>at the door.</em>
+          <h2 className="big rv serif" style={d(80)}>
+            Therapy doesn’t end <em>at the door.</em>
           </h2>
           <p className="sub rv" style={d(160)}>
-            Homework, plans, reflection prompts, and progress reports go out over WhatsApp, email,
-            or a private portal link — consent-gated, in your client’s preferred language, every
-            share audited.
+            Homework, plans, and progress reports go out over WhatsApp, email, or a private portal
+            link — consent-gated, in your client’s preferred language, every share audited.
           </p>
-          <p
-            className="rv"
-            style={{
-              ...d(220),
-              fontSize: 15,
-              color: 'var(--ink2)',
-              maxWidth: '48ch',
-              lineHeight: 1.7,
-            }}
-          >
+          <p className="sub rv" style={{ ...d(220), fontSize: 15 }}>
             The portal is a clean page, not an app to install. Your client opens the link, reads the
             plan, fills the two-minute check-in. You see it before the next session.
           </p>
         </div>
-        <div className="rv phone-wrap" style={d(140)}>
-          <span
-            className="hand"
-            style={{
-              position: 'absolute',
-              left: '-8%',
-              top: '-6%',
-              fontSize: 20,
-              color: 'var(--amber)',
-              transform: 'rotate(-4deg)',
-            }}
-          >
-            illustration — how a share lands
-          </span>
+        <div className="rv" style={d(140)}>
           <div className="phone">
-            <div className="phone-notch" aria-hidden />
             <div className="phone-head">
-              <span className="wa-av serif">A</span>
+              <span className="av">A</span>
               <div>
                 <b style={{ fontSize: 13.5 }}>Ananya</b>
                 <br />
@@ -1022,19 +819,19 @@ function BetweenSessions() {
             <div className="phone-body">
               <div className="wab out">
                 This week’s practice: 4-7-8 breathing, ten minutes before bed. Your full plan and
-                progress report are here —<span className="wab-link">🔗 Your private portal</span>
-                <i className="mono">6:12 PM ✓✓</i>
+                progress report are here —<span className="link">🔗 Your private portal</span>
+                <i>6:12 PM ✓✓</i>
               </div>
               <div className="wab in">
-                Did it before bed — slept till 6 for the first time this month 🙂
-                <i className="mono">10:04 PM</i>
+                Did it before bed — slept till 6 for the first time this month 🙂<i>10:04 PM</i>
               </div>
               <div className="wab out">
                 Lovely. Quick PHQ-9 check-in before Thursday? Two minutes, same link.
-                <i className="mono">10:12 PM ✓✓</i>
+                <i>10:12 PM ✓✓</i>
               </div>
             </div>
           </div>
+          <p className="illus">illustration — how a share lands</p>
         </div>
       </div>
     </section>
@@ -1042,66 +839,26 @@ function BetweenSessions() {
 }
 
 /* ============================================================================
-   The room + pilot + FAQ + final CTA + footer
+   Pilot + FAQ + final CTA + footer
    ========================================================================== */
-
-function TheRoom() {
-  return (
-    <section className="room-sect">
-      <div className="wrap" style={{ textAlign: 'center' }}>
-        <RoomArt />
-        <h2
-          className="serif rv"
-          style={{
-            ...d(100),
-            fontSize: 'clamp(26px,3.4vw,40px)',
-            lineHeight: 1.12,
-            letterSpacing: '-.015em',
-            fontWeight: 600,
-            maxWidth: '24ch',
-            margin: '26px auto 0',
-          }}
-        >
-          Built for the room where therapy{' '}
-          <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>actually happens.</em>
-        </h2>
-        <p
-          className="rv"
-          style={{
-            ...d(180),
-            fontSize: 15,
-            lineHeight: 1.7,
-            color: 'var(--ink2)',
-            maxWidth: '52ch',
-            margin: '14px auto 0',
-          }}
-        >
-          Two chairs, one conversation, and a copilot that stays out of it — no screens between you,
-          no bot on the call, nothing to operate mid-session.
-        </p>
-      </div>
-    </section>
-  );
-}
 
 function Pilot() {
   return (
     <section className="sect" id="pilot">
       <div className="wrap pilot-grid">
         <div className="pilot-note rv">
-          <p className="hand" style={{ fontSize: 26, color: 'var(--brand-deep)', lineHeight: 1.3 }}>
+          <p className="q">
             “We watched therapists spend their Sunday evenings on notes. So we built the copilot
             we’d want in the room — and we’re giving it to the first cohort free.”
           </p>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 22 }}>
+          <div className="pilot-team">
             <span
-              className="wa-av serif"
+              className="av"
               style={{
-                width: 42,
-                height: 42,
+                width: 44,
+                height: 44,
                 fontSize: 17,
-                background: 'var(--grad)',
-                color: '#fff',
+                background: 'linear-gradient(150deg,#3d404c,#0b0c10)',
               }}
             >
               C
@@ -1114,33 +871,78 @@ function Pilot() {
               </span>
             </div>
           </div>
-          <BreathSigArt />
         </div>
         <div>
           <span className="eyebrow rv">The honest part</span>
-          <h2 className="big rv" style={d(80)}>
-            No fake logos.
-            <br />A real pilot,{' '}
-            <em style={{ fontStyle: 'italic', color: 'var(--brand)' }}>open now.</em>
+          <h2 className="big rv serif" style={d(80)}>
+            No fake logos. A real pilot, <em>open now.</em>
           </h2>
-          <div className="pilot-perks rv" style={d(180)}>
+          <div className="perks rv" style={d(180)}>
             <div>
-              <b>Free through the pilot</b>
-              <p>
-                Every feature, no card, no lock-in. Pricing lands only after the cohort says it
-                earns its keep.
-              </p>
+              <span className="tile t-mint">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden
+                >
+                  <path d="M5 13l4 4 10-11" />
+                </svg>
+              </span>
+              <div>
+                <b>Free through the pilot</b>
+                <p>
+                  Every feature, no card, no lock-in. Pricing lands only after the cohort says it
+                  earns its keep.
+                </p>
+              </div>
             </div>
             <div>
-              <b>A direct line to the builders</b>
-              <p>WhatsApp the founding team — fixes land in days, not quarters.</p>
+              <span className="tile t-peri">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  aria-hidden
+                >
+                  <path d="M12 4a8 8 0 0 1 8 8c0 1.8-.6 3.4-1.6 4.8L20 21l-4.4-1.4A8 8 0 1 1 12 4z" />
+                </svg>
+              </span>
+              <div>
+                <b>A direct line to the builders</b>
+                <p>WhatsApp the founding team — fixes land in days, not quarters.</p>
+              </div>
             </div>
             <div>
-              <b>Shape the toolkit</b>
-              <p>
-                The therapy library, the templates, the languages. Pilot therapists decide what gets
-                built next.
-              </p>
+              <span className="tile t-peach">
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  aria-hidden
+                >
+                  <path d="M12 3v18M3 12h18" />
+                </svg>
+              </span>
+              <div>
+                <b>Shape the toolkit</b>
+                <p>
+                  The therapy library, the templates, the languages. Pilot therapists decide what
+                  gets built next.
+                </p>
+              </div>
             </div>
           </div>
           <Link
@@ -1175,7 +977,7 @@ const FAQS: [string, string][] = [
   ],
   [
     'Do I need new hardware or an app install?',
-    'No. The phone or laptop already in your room records the session in the browser. No bot joins calls, nothing to install, no setup call needed.',
+    'No. The phone or laptop already in your room records the session in the browser. No bot joins calls, nothing to install, no setup call needed. Online sessions get an in-app video room — clients join from a link in their confirmation.',
   ],
   [
     'Is this a medical device? Does it diagnose?',
@@ -1185,20 +987,12 @@ const FAQS: [string, string][] = [
 
 function Faq() {
   return (
-    <section
-      className="sect"
-      id="faq"
-      style={{ background: 'var(--paper)', borderTop: '1px solid var(--line)' }}
-    >
-      <div className="wrap" style={{ maxWidth: 820 }}>
-        <div style={{ textAlign: 'center' }}>
-          <span className="eyebrow rv" style={{ justifyContent: 'center' }}>
-            Questions therapists ask us
-          </span>
-          <h2 className="big rv" style={d(80)}>
-            Before you ask —
-          </h2>
-        </div>
+    <section className="sect" id="faq">
+      <div className="wrap center">
+        <span className="eyebrow rv">Questions therapists ask us</span>
+        <h2 className="big rv serif" style={d(80)}>
+          Before you ask —
+        </h2>
         <div className="faq rv" style={d(160)}>
           {FAQS.map(([q, a], i) => (
             <details key={q} open={i === 0}>
@@ -1214,81 +1008,31 @@ function Faq() {
 
 function FinalCta() {
   return (
-    <section className="final grain">
-      <div className="final-wash" aria-hidden>
-        <i />
-        <i />
+    <section className="final">
+      <h2 className="h1 serif" style={{ margin: '0 auto' }}>
+        Your next session <em>writes itself.</em>
+      </h2>
+      <p className="sub2">
+        Sign in with Google, set up your practice in under a minute, and record your first session —
+        a roleplay counts.
+      </p>
+      <div className="hero-ctas" style={{ marginTop: 36 }}>
+        <Link
+          href="/login"
+          className="btn inv"
+          style={{ padding: '16px 36px', fontSize: 16, textDecoration: 'none' }}
+        >
+          Start free — no card
+        </Link>
+        <a
+          href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot"
+          className="btn line"
+          style={{ padding: '16px 36px', fontSize: 16, textDecoration: 'none' }}
+        >
+          Talk to the team
+        </a>
       </div>
-      <div className="wrap" style={{ textAlign: 'center', position: 'relative' }}>
-        <h2
-          className="serif"
-          style={{
-            fontSize: 'clamp(38px,5.4vw,62px)',
-            lineHeight: 1.04,
-            color: '#fff',
-            letterSpacing: '-.018em',
-            fontWeight: 620,
-          }}
-        >
-          Your next session
-          <br />
-          <em style={{ fontStyle: 'italic', color: '#7DD3FC' }}>writes itself.</em>
-        </h2>
-        <p
-          style={{
-            color: 'rgba(255,255,255,.78)',
-            maxWidth: '46ch',
-            margin: '20px auto 0',
-            fontSize: 16.5,
-            lineHeight: 1.7,
-          }}
-        >
-          Sign in with Google, set up your practice in under a minute, and record your first session
-          — a roleplay counts.
-        </p>
-        <div
-          style={{
-            display: 'flex',
-            gap: 14,
-            justifyContent: 'center',
-            marginTop: 34,
-            flexWrap: 'wrap',
-          }}
-        >
-          <Link
-            href="/login"
-            className="btn"
-            style={{
-              background: '#fff',
-              color: 'var(--brand-deep)',
-              padding: '15px 34px',
-              fontSize: 16,
-              textDecoration: 'none',
-            }}
-          >
-            Start free — no card
-          </Link>
-          <a
-            href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot"
-            className="btn"
-            style={{
-              border: '1.5px solid rgba(255,255,255,.4)',
-              color: '#fff',
-              padding: '15px 34px',
-              fontSize: 16,
-              textDecoration: 'none',
-            }}
-          >
-            Talk to the team
-          </a>
-        </div>
-        <p
-          className="hand"
-          style={{ color: '#7DD3FC', fontSize: 21, marginTop: 26, transform: 'rotate(-1.5deg)' }}
-        >
-          first note in ~10 minutes. really.
-        </p>
-      </div>
+      <p className="tail">first note in ~10 minutes. really.</p>
     </section>
   );
 }
@@ -1299,8 +1043,8 @@ function Footer() {
       <div className="wrap foot-in">
         <div>
           <span className="brand">
-            <span className="brand-mark" style={{ width: 30, height: 30 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden>
+            <span className="brand-mark">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
                 <path
                   d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
                   stroke="#fff"
@@ -1310,19 +1054,11 @@ function Footer() {
                 />
               </svg>
             </span>
-            <span className="serif" style={{ fontSize: 16, fontWeight: 640 }}>
+            <span className="serif" style={{ fontSize: 16, fontWeight: 650 }}>
               Cureocity Mind
             </span>
           </span>
-          <p
-            style={{
-              fontSize: 13,
-              color: 'var(--ink3)',
-              maxWidth: '30ch',
-              marginTop: 12,
-              lineHeight: 1.6,
-            }}
-          >
+          <p className="desc">
             The clinical copilot for Indian psychotherapists — from first hello to discharge.
           </p>
           <p style={{ fontSize: 12, color: 'var(--ink3)', marginTop: 14 }}>
@@ -1340,6 +1076,9 @@ function Footer() {
             </p>
             <p className="fl">
               <a href="#docs">The documents</a>
+            </p>
+            <p className="fl">
+              <a href="#grow">Your page</a>
             </p>
             <p className="fl">
               <a href="#outcomes">Outcomes</a>
@@ -1376,25 +1115,9 @@ function Footer() {
           </div>
         </div>
       </div>
-      <div
-        className="wrap"
-        style={{
-          borderTop: '1px solid var(--line)',
-          marginTop: 36,
-          paddingTop: 20,
-          paddingBottom: 34,
-          display: 'flex',
-          justifyContent: 'space-between',
-          gap: 14,
-          flexWrap: 'wrap',
-        }}
-      >
-        <p style={{ fontSize: 12, color: 'var(--ink3)' }}>
-          © 2026 Cureocity · Made for Indian practice
-        </p>
-        <p style={{ fontSize: 12, color: 'var(--ink3)' }}>
-          Not a medical device. Clinical decisions remain with the treating professional.
-        </p>
+      <div className="wrap foot-base">
+        <p>© 2026 Cureocity · Made for Indian practice</p>
+        <p>Not a medical device. Clinical decisions remain with the treating professional.</p>
       </div>
     </footer>
   );
