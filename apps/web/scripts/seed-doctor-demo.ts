@@ -27,12 +27,18 @@
  *   --not-demo   leave Client.isDemo false, so the seeded patients count
  *                toward dashboard metrics and the trial cap (default: true,
  *                which keeps demo data out of billing and the competency rollups)
+ *   --as-bypass  hand the AUTH_BYPASS identity to the busiest seeded doctor,
+ *                so `AUTH_BYPASS=true pnpm dev` lands straight in their clinic.
+ *                Without this you log in as the seeded THERAPIST and — because
+ *                every row here is tenant-scoped — see none of this data. The
+ *                previous holder of that uid is parked, not deleted.
  *
  * Idempotent: doctors upsert on firebaseUid; encounters are rebuilt only when
  * --wipe is passed, so a bare re-run is a no-op on the roster.
  */
 
 import { PrismaClient, type Prisma } from '@prisma/client';
+import { DEV_BYPASS_FIREBASE_UID } from '../lib/auth-server';
 import { encryptForTenant } from '../lib/tenant-crypto';
 
 const prisma = new PrismaClient();
@@ -40,6 +46,9 @@ const prisma = new PrismaClient();
 const DEMO_EMAIL_DOMAIN = 'demo.cureocity.in';
 const WIPE = process.argv.includes('--wipe');
 const IS_DEMO = !process.argv.includes('--not-demo');
+const AS_BYPASS = process.argv.includes('--as-bypass');
+/** Where the previous holder of the bypass uid is moved to, so nothing is lost. */
+const PARKED_UID = `${DEV_BYPASS_FIREBASE_UID}--parked`;
 
 // ---------------------------------------------------------------------------
 // Deterministic RNG. A seeded PRNG (not Math.random) so two runs produce the
@@ -536,16 +545,15 @@ async function main(): Promise<void> {
   for (let d = 0; d < DOCTORS.length; d++) {
     const spec = DOCTORS[d]!;
     const encounters = ENCOUNTERS_PER_DOCTOR[d]!;
-    const slug = spec.fullName
-      .replace(/^Dr\.\s*/, '')
-      .toLowerCase()
-      .replace(/[^a-z]+/g, '.')
-      .replace(/^\.|\.$/g, '');
+    const slug = slugFor(spec.fullName);
     const firebaseUid = `demo-doctor-${slug}`;
     const email = `${slug}@${DEMO_EMAIL_DOMAIN}`;
 
     const doctor = await prisma.psychologist.upsert({
-      where: { firebaseUid },
+      // Keyed on EMAIL, not firebaseUid: --as-bypass swaps a doctor's uid, so
+      // a uid-keyed upsert would stop finding them on the next run and try to
+      // create a duplicate email instead.
+      where: { email },
       update: {
         specialty: spec.specialty,
         clinicName: spec.clinicName,
@@ -711,6 +719,8 @@ async function main(): Promise<void> {
     );
   }
 
+  if (AS_BYPASS) await handOverBypassIdentity();
+
   console.log(
     `\nSeeded ${DOCTORS.length} doctors, ${totalPatients} patients, ${totalSessions} encounters.`,
   );
@@ -719,6 +729,63 @@ async function main(): Promise<void> {
       `NOTE: ${totalSessions} encounters exist, not ${TOTAL_ENCOUNTERS} — some doctors already had history (re-run with --wipe for an exact rebuild).`,
     );
   }
+}
+
+/**
+ * Give the AUTH_BYPASS identity to the busiest seeded doctor.
+ *
+ * Every row this script writes is tenant-scoped to its doctor, and
+ * AUTH_BYPASS resolves to ONE hardcoded uid (the seeded therapist). So
+ * without this, a local bypass session logs in as a therapist and sees an
+ * empty app — the 386 encounters are all there, just owned by someone else.
+ * The previous holder is parked on an alternate uid rather than deleted, so
+ * the therapist fixture survives and this is reversible.
+ */
+async function handOverBypassIdentity(): Promise<void> {
+  const top = DOCTORS[0]!;
+  const target = await prisma.psychologist.findUnique({
+    // By email for the same reason the upsert is: this doctor's uid may
+    // already have been swapped by a previous --as-bypass run.
+    where: { email: `${slugFor(top.fullName)}@${DEMO_EMAIL_DOMAIN}` },
+    select: { id: true, fullName: true },
+  });
+  if (!target) {
+    console.warn('  --as-bypass: could not find the top seeded doctor; skipping.');
+    return;
+  }
+
+  const incumbent = await prisma.psychologist.findUnique({
+    where: { firebaseUid: DEV_BYPASS_FIREBASE_UID },
+    select: { id: true, fullName: true },
+  });
+  if (incumbent && incumbent.id !== target.id) {
+    // Free the uid without losing the row. If a parked row already exists
+    // from an earlier run, drop the stale parking slot first.
+    await prisma.psychologist.deleteMany({
+      where: { firebaseUid: PARKED_UID, id: { not: incumbent.id } },
+    });
+    await prisma.psychologist.update({
+      where: { id: incumbent.id },
+      data: { firebaseUid: PARKED_UID },
+    });
+    console.log(`  --as-bypass: parked ${incumbent.fullName} on ${PARKED_UID}`);
+  }
+
+  await prisma.psychologist.update({
+    where: { id: target.id },
+    data: { firebaseUid: DEV_BYPASS_FIREBASE_UID },
+  });
+  console.log(
+    `  --as-bypass: AUTH_BYPASS=true now signs you in as ${target.fullName} (${top.specialty}, ${top.city}).`,
+  );
+}
+
+function slugFor(fullName: string): string {
+  return fullName
+    .replace(/^Dr\.\s*/, '')
+    .toLowerCase()
+    .replace(/[^a-z]+/g, '.')
+    .replace(/^\.|\.$/g, '');
 }
 
 /** Rough display-language → ISO 639-1, for the Pass-1 transcription hint. */

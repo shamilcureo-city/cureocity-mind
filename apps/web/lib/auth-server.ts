@@ -31,7 +31,12 @@ import { prisma } from './prisma';
  * explicitly with AUTH_BYPASS=true.
  */
 
-const DEV_BYPASS_FIREBASE_UID = 'dev-firebase-uid-priya';
+/**
+ * The identity AUTH_BYPASS resolves to. Exported so the demo seed can hand
+ * this uid to a seeded doctor — the seeded data is tenant-scoped, so without
+ * holding this uid a local bypass session sees none of it.
+ */
+export const DEV_BYPASS_FIREBASE_UID = 'dev-firebase-uid-priya';
 const DEV_BYPASS_CLIENT_FIREBASE_UID = 'dev-client-firebase-uid-arjun';
 
 export const SESSION_COOKIE_NAME = '__session';
