@@ -96,12 +96,12 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
   // spine, so no secondary section for them.
   const secondary = vertical === 'DOCTOR' ? [] : SECONDARY;
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-white/65 backdrop-blur-xl md:flex print:!hidden">
+    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-white/70 bg-white/55 backdrop-blur-xl md:flex print:!hidden">
       <div className="px-6 py-6">
         <Link href="/app" className="inline-flex items-center gap-2.5">
           <span
             aria-hidden
-            className="grid h-8 w-8 place-items-center rounded-[10px] bg-[linear-gradient(135deg,var(--color-accent-bright),var(--color-accent))] shadow-[0_6px_14px_-6px_rgba(37,99,235,0.6)]"
+            className="u-tile u-tile-ink grid h-9 w-9 place-items-center rounded-xl"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
               <path
@@ -114,10 +114,7 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
             </svg>
           </span>
           <span className="font-serif text-lg tracking-tight">
-            Cureocity{' '}
-            <em className="italic text-[var(--color-accent)]">
-              {vertical === 'DOCTOR' ? 'Scribe' : 'Mind'}
-            </em>
+            Cureocity <em className="italic">{vertical === 'DOCTOR' ? 'Scribe' : 'Mind'}</em>
           </span>
         </Link>
       </div>
@@ -132,8 +129,8 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
                   href={item.href}
                   className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                     active
-                      ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
-                      : 'text-[var(--color-ink-2)] hover:bg-white/80 hover:text-[var(--color-ink)]'
+                      ? 'border border-white/90 bg-white font-medium text-[var(--color-ink)] shadow-[var(--sh-raise)]'
+                      : 'border border-transparent text-[var(--color-ink-2)] hover:bg-white/70 hover:text-[var(--color-ink)]'
                   }`}
                   aria-current={active ? 'page' : undefined}
                 >
@@ -159,8 +156,8 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
                       href={item.href}
                       className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                         active
-                          ? 'bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
-                          : 'text-[var(--color-ink-3)] hover:bg-white/80 hover:text-[var(--color-ink)]'
+                          ? 'border border-white/90 bg-white font-medium text-[var(--color-ink)] shadow-[var(--sh-raise)]'
+                          : 'border border-transparent text-[var(--color-ink-3)] hover:bg-white/70 hover:text-[var(--color-ink)]'
                       }`}
                       aria-current={active ? 'page' : undefined}
                     >
@@ -193,12 +190,12 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
       year: 'numeric',
     });
     return (
-      <div className="rounded-2xl border border-[var(--color-line)] bg-white p-4">
+      <div className="u-glass rounded-2xl p-4">
         <div className="flex items-center justify-between">
           <p className="text-sm font-semibold">{usage.plan ? planTierLabel(usage.plan) : 'Plan'}</p>
           <Link
             href="/app/settings/plan"
-            className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
+            className="rounded-full border border-white/90 bg-white px-2.5 py-0.5 text-xs font-medium text-[var(--color-ink-2)] shadow-[var(--sh-raise)] hover:bg-[linear-gradient(180deg,#31333d,#0b0c10_55%)] hover:text-white"
           >
             Plan
           </Link>
@@ -209,12 +206,12 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
   }
   const pct = Math.min(100, Math.round((usage.used / usage.cap) * 100));
   return (
-    <div className="rounded-2xl border border-[var(--color-line)] bg-white p-4">
+    <div className="u-glass rounded-2xl p-4">
       <div className="flex items-center justify-between">
         <p className="text-sm font-semibold">Free trial</p>
         <Link
           href="/app/settings/plan"
-          className="rounded-full bg-[var(--color-accent-soft)] px-2.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
+          className="rounded-full border border-white/90 bg-white px-2.5 py-0.5 text-xs font-medium text-[var(--color-ink-2)] shadow-[var(--sh-raise)] hover:bg-[linear-gradient(180deg,#31333d,#0b0c10_55%)] hover:text-white"
         >
           Plan
         </Link>
@@ -226,7 +223,10 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
         </span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
-        <div className="h-full bg-[var(--color-accent)]" style={{ width: `${pct}%` }} />
+        <div
+          className="h-full rounded-full bg-[linear-gradient(90deg,#8f9ae8,var(--color-data))]"
+          style={{ width: `${pct}%` }}
+        />
       </div>
     </div>
   );

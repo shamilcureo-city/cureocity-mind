@@ -85,7 +85,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
             role="dialog"
             aria-modal="true"
             aria-label="More"
-            className="absolute inset-x-0 bottom-14 rounded-t-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-3 pb-4 shadow-2xl"
+            className="u-glass absolute inset-x-0 bottom-14 rounded-t-2xl p-3 pb-4"
           >
             <ul className="grid grid-cols-3 gap-1.5">
               {MORE_ITEMS.map((item) => (
@@ -119,7 +119,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
 
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--color-line-soft)] bg-white/80 backdrop-blur-xl md:hidden print:!hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-white/80 bg-white/70 shadow-[0_-12px_30px_-22px_rgba(35,45,95,0.5)] backdrop-blur-xl md:hidden print:!hidden"
       >
         <ul className="grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {items.map((item) => {

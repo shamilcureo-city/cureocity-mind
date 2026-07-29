@@ -2,8 +2,10 @@
 
 import type { ComponentProps, ReactNode } from 'react';
 
+// v10 — inputs are white wells set into the glass: a hairline border, an
+// inset top shadow so they read as recessed, and an ink focus ring.
 const inputBase =
-  'block w-full rounded-xl border border-[var(--color-line)] bg-white px-4 py-3 text-[15px] text-[var(--color-ink)] placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]';
+  'block w-full rounded-xl border border-[var(--color-line)] bg-white px-4 py-3 text-[15px] text-[var(--color-ink)] shadow-[inset_0_2px_4px_rgba(35,45,95,0.06)] transition-shadow placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-accent)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-soft)]';
 
 export function Label({
   children,

@@ -340,7 +340,7 @@ function LoginPageInner() {
             <Link href="/" className="inline-flex items-center gap-2.5">
               <span
                 aria-hidden
-                className="grid h-9 w-9 place-items-center rounded-xl bg-[linear-gradient(135deg,var(--color-accent-bright),var(--color-accent))] shadow-[0_6px_14px_-6px_rgba(37,99,235,0.6)]"
+                className="u-tile u-tile-ink grid h-9 w-9 place-items-center rounded-xl"
               >
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
                   <path
@@ -409,7 +409,7 @@ function LoginPageInner() {
             <div className="mb-6 flex items-center gap-2 lg:hidden">
               <span
                 aria-hidden
-                className="grid h-8 w-8 place-items-center rounded-[10px] bg-[linear-gradient(135deg,var(--color-accent-bright),var(--color-accent))] shadow-[0_6px_14px_-6px_rgba(37,99,235,0.6)]"
+                className="u-tile u-tile-ink grid h-8 w-8 place-items-center rounded-[10px]"
               >
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
                   <path

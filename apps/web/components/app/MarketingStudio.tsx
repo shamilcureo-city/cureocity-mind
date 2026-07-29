@@ -1304,7 +1304,7 @@ export function MarketingStudio({
                     width="36"
                     height="4"
                     rx="2"
-                    fill="var(--color-accent)"
+                    fill="var(--color-data)"
                     opacity=".55"
                   />
                   <rect
@@ -1313,7 +1313,7 @@ export function MarketingStudio({
                     width="28"
                     height="4"
                     rx="2"
-                    fill="var(--color-accent)"
+                    fill="var(--color-data)"
                     opacity=".35"
                   />
                   <rect
@@ -1322,7 +1322,7 @@ export function MarketingStudio({
                     width="32"
                     height="4"
                     rx="2"
-                    fill="var(--color-accent)"
+                    fill="var(--color-data)"
                     opacity=".35"
                   />
                   <g transform="rotate(38 78 30)">
@@ -1331,7 +1331,7 @@ export function MarketingStudio({
                     <path d="M72 42 L77.5 52 L83 42 Z" fill="#f0c987" />
                     <path d="M75.5 48 L77.5 52 L79.5 48 Z" fill="var(--color-ink)" />
                   </g>
-                  <circle cx="88" cy="22" r="3.5" fill="var(--color-accent)" opacity=".3" />
+                  <circle cx="88" cy="22" r="3.5" fill="var(--color-data)" opacity=".3" />
                   <circle cx="28" cy="34" r="2.5" fill="var(--color-warn)" opacity=".35" />
                   <circle cx="96" cy="52" r="2" fill={GOOD} opacity=".4" />
                 </svg>

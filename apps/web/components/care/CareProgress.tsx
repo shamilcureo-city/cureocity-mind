@@ -116,7 +116,7 @@ export function CareProgress() {
               />
               <polyline
                 fill="none"
-                stroke="var(--color-accent)"
+                stroke="var(--color-data)"
                 strokeWidth="2.5"
                 strokeLinecap="round"
                 points={moods
