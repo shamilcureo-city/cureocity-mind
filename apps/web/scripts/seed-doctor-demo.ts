@@ -18,8 +18,13 @@
  * `@demo.cureocity.in` emails, `XX-DEMO-nnnnn` registration numbers, and
  * +9199000xxxxx phones. None can collide with a real practitioner.
  *
- * Run:
- *   DATABASE_URL=... pnpm --filter @cureocity/web exec tsx scripts/seed-doctor-demo.ts
+ * Run (from the repo root):
+ *   pnpm --filter @cureocity/web exec tsx scripts/seed-doctor-demo.ts --wipe --as-bypass
+ *
+ * Env is read from the repo-root `.env.local`, falling back to `.env` — the
+ * same files the Prisma CLI reads — so no --env-file juggling. Anything
+ * already exported wins. Needs DATABASE_URL and, for local dev,
+ * CRYPTO_DEV_MASTER_SECRET (patient names are envelope-encrypted).
  *
  * Flags:
  *   --wipe       remove a previous run of this script first (matched on the
@@ -37,11 +42,33 @@
  * --wipe is passed, so a bare re-run is a no-op on the roster.
  */
 
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { PrismaClient, type Prisma } from '@prisma/client';
 import { DEV_BYPASS_FIREBASE_UID } from '../lib/auth-server';
 import { encryptForTenant } from '../lib/tenant-crypto';
 
+// Load env BEFORE `new PrismaClient()` — the client captures DATABASE_URL at
+// construction. (The imports above only read env lazily, inside functions.)
+// The Prisma CLI does this for you; a bare tsx run does not, which is a sharp
+// edge worth removing rather than documenting.
+loadRootEnv();
+
 const prisma = new PrismaClient();
+
+/** Read the repo-root .env.local, then .env. Already-exported vars win. */
+function loadRootEnv(): void {
+  if (process.env['DATABASE_URL']) return; // caller supplied it explicitly
+  const root = resolve(import.meta.dirname, '../../..');
+  for (const name of ['.env.local', '.env']) {
+    const file = resolve(root, name);
+    if (!existsSync(file)) continue;
+    process.loadEnvFile(file);
+    console.log(`Loaded env from ${name}`);
+    if (process.env['DATABASE_URL']) return;
+  }
+}
 
 const DEMO_EMAIL_DOMAIN = 'demo.cureocity.in';
 const WIPE = process.argv.includes('--wipe');
