@@ -40,14 +40,19 @@ type ShellState =
  *
  * State machine:
  *   pick(live)        → confirm(live-capture)        → recording
- *                    OR new-client                    → recording
+ *                    OR new-client → confirm(live-capture) → recording
  *   pick(dictation)   → confirm(dictation)            → recording
  *   pick(upload)      → confirm(upload)               → uploading
  *
- * For new clients the entire flow collapses into `NewClientForm`,
- * which avoids the modality/language pickers entirely (intake is how
- * you decide modality — pre-filling a default would be clinically
- * wrong).
+ * `NewClientForm` creates ONLY the client and then joins the same confirm
+ * step as everyone else. It used to create the session, snapshot consent,
+ * start it and jump straight to the recorder — so submitting the form put
+ * a therapist instantly on air, and a new client could never use the live
+ * scribe (that choice lives in the confirm strip). Intake is where the
+ * live copilot matters most, so both paths now converge.
+ *
+ * Neither surface pre-fills a modality: intake is how you decide it, and
+ * the confirm strip only displays what the server-side cascade inferred.
  */
 export function RecordingShell({ clients, initialClientId = null, defaultCapture }: Props) {
   const router = useRouter();
@@ -122,7 +127,7 @@ export function RecordingShell({ clients, initialClientId = null, defaultCapture
     return (
       <NewClientForm
         onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
-        onReady={(ready) => setShell({ kind: 'recording', ready })}
+        onCreated={(client) => setShell({ kind: 'confirm', client, mode: 'live-capture' })}
       />
     );
   }

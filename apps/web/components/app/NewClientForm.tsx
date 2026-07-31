@@ -1,17 +1,15 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { BillingEntitlement, SessionKind, SessionModality } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckboxRow, Input, Label, FieldError } from '../ui/Field';
-import { readApiError, type RecordReady, SCRIPT_VERSION } from './record-types';
-import { UpgradeModal } from './UpgradeModal';
-import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
+import { readApiError, SCRIPT_VERSION } from './record-types';
 
 interface Props {
   onCancel: () => void;
-  onReady: (result: RecordReady) => void;
+  /** Hands the created client to the shared confirm step. */
+  onCreated: (client: { id: string; fullName: string }) => void;
 }
 
 /**
@@ -30,27 +28,28 @@ interface Props {
  * conversation surfaces most of these naturally and Pass 2 (IntakeNoteV1)
  * captures them into the note.
  *
- * On submit (one chained call):
- *   1. POST /clients     — name + phone + audio/ai-note consents
- *   2. POST /sessions    — kind: INTAKE (server-inferred), modality: null
- *   3. POST /sessions/:id/consent — re-ack the scopes for this session
- *   4. POST /sessions/:id/start
+ * On submit it creates ONLY the client (name + phone + consents) and hands
+ * off to `RecordConfirmStrip` — the same confirm step every existing client
+ * goes through. It used to also create the session, snapshot consent and
+ * call /start, which dropped the therapist straight into the recorder the
+ * instant they hit submit: no moment to check what they typed, and — because
+ * the live-scribe choice lives in the confirm strip — no way for a NEW client
+ * to ever use the live scribe. Intake is exactly where that matters most.
+ *
+ * Converging on the strip also removes three duplicated calls, the duplicated
+ * 402 trial-cap handling, and the second consent snapshot. The strip's own
+ * comment ("rare — new client flow handles the common case") shows this is
+ * how it was meant to fit together: consents granted here at client creation
+ * mean the strip asks for nothing further.
  */
-export function NewClientForm({ onCancel, onReady }: Props) {
+export function NewClientForm({ onCancel, onCreated }: Props) {
   const [fullName, setFullName] = useState('');
   const [contactPhone, setContactPhone] = useState('+91');
   const [audioOk, setAudioOk] = useState(true);
   const [noteOk, setNoteOk] = useState(true);
   const [crossBorder, setCrossBorder] = useState(false);
-  const [method, setMethod] = useState<CaptureSource>('mic');
-  const [displaySupported] = useState(() => isDisplayCaptureSupported());
 
   const [error, setError] = useState<string | null>(null);
-  // Sprint 53 — trial cap modal trigger; Sprint 56 — paid-cap variant too.
-  const [upgradePrompt, setUpgradePrompt] = useState<{
-    variant: 'TRIAL_CAP' | 'PLAN_CAP';
-    entitlement: BillingEntitlement;
-  } | null>(null);
   const [busy, setBusy] = useState(false);
 
   // The IndianPhoneSchema regex (`^\+91\d{10}$`) is strict on purpose
@@ -115,73 +114,10 @@ export function NewClientForm({ onCancel, onReady }: Props) {
       }
       const created = (await clientRes.json()) as { id: string; fullName: string };
 
-      // 2. Create the session. modality omitted so the cascade picks
-      // INTAKE (no plan, no prior session, no preferred modality →
-      // INTAKE fallback). kind is server-inferred as INTAKE.
-      const sessionRes = await fetch('/api/v1/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId: created.id,
-          scheduledAt: new Date().toISOString(),
-        }),
-      });
-      if (!sessionRes.ok) {
-        if (sessionRes.status === 402) {
-          // Sprint 53/56 — trial/plan cap. Show the upgrade modal and
-          // stop; the client row already exists, the therapist can
-          // record a session later after upgrading.
-          const body = (await sessionRes.json().catch(() => ({}))) as {
-            error?: string;
-            code?: string;
-            entitlement?: BillingEntitlement;
-          };
-          if (
-            (body.code === 'TRIAL_CAP_REACHED' || body.code === 'PLAN_CAP_REACHED') &&
-            body.entitlement
-          ) {
-            setUpgradePrompt({
-              variant: body.code === 'TRIAL_CAP_REACHED' ? 'TRIAL_CAP' : 'PLAN_CAP',
-              entitlement: body.entitlement,
-            });
-            return;
-          }
-        }
-        throw new Error(await readApiError(sessionRes, 'Create session failed'));
-      }
-      const sessionRow = (await sessionRes.json()) as {
-        id: string;
-        kind: SessionKind;
-        modality: SessionModality | null;
-      };
-
-      // 3. Per-session consent snapshot.
-      const consentRes = await fetch(`/api/v1/sessions/${sessionRow.id}/consent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scopes: ackedScopes,
-          scriptVersion: SCRIPT_VERSION,
-        }),
-      });
-      if (!consentRes.ok) {
-        throw new Error(await readApiError(consentRes, 'Record consent failed'));
-      }
-
-      // 4. Move session to IN_PROGRESS.
-      const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
-      if (!startRes.ok) {
-        throw new Error(await readApiError(startRes, 'Start session failed'));
-      }
-
-      onReady({
-        sessionId: sessionRow.id,
-        clientId: created.id,
-        clientName: created.fullName,
-        kind: sessionRow.kind,
-        modality: sessionRow.modality,
-        source: method,
-      });
+      // Hand off. Session create, per-session consent, capture choice and
+      // /start all belong to the confirm step, which every other client
+      // already uses — including the 402 trial-cap modal.
+      onCreated(created);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -262,93 +198,17 @@ export function NewClientForm({ onCancel, onReady }: Props) {
           </div>
         </div>
 
-        <div>
-          <Label>Recording method</Label>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <MethodOption
-              checked={method === 'mic'}
-              onSelect={() => setMethod('mic')}
-              title="In person"
-              description="This device's microphone."
-            />
-            <MethodOption
-              checked={method === 'display'}
-              onSelect={() => setMethod('display')}
-              title="Virtual"
-              description="Capture tab audio for an online session."
-              disabled={!displaySupported}
-            />
-          </div>
-        </div>
-
         <FieldError message={error} />
 
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs text-[var(--color-ink-3)]">
-            Add email, language, presenting concerns later from their client page.
+            Next you'll confirm how to capture this session. Email, language and presenting concerns can be added later from their client page.
           </p>
           <Button type="submit" disabled={!ready || busy}>
-            {busy ? 'Starting…' : 'Start intake'}
+            {busy ? 'Adding…' : 'Add client & continue'}
           </Button>
         </div>
       </form>
-      {upgradePrompt && (
-        <UpgradeModal
-          open={true}
-          onClose={() => setUpgradePrompt(null)}
-          variant={upgradePrompt.variant}
-          entitlement={upgradePrompt.entitlement}
-        />
-      )}
     </Card>
-  );
-}
-
-function MethodOption({
-  checked,
-  onSelect,
-  title,
-  description,
-  disabled,
-}: {
-  checked: boolean;
-  onSelect: () => void;
-  title: string;
-  description: string;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={disabled ? undefined : onSelect}
-      disabled={disabled}
-      className={`relative rounded-2xl border px-4 py-3 text-left transition-colors ${
-        disabled
-          ? 'cursor-not-allowed border-[var(--color-line)] opacity-60'
-          : checked
-            ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-            : 'border-[var(--color-line)] hover:border-[var(--color-ink)]'
-      }`}
-    >
-      <span className="flex items-center gap-2 text-sm font-medium text-[var(--color-ink)]">
-        <span
-          aria-hidden
-          className={`grid h-4 w-4 place-items-center rounded-full border ${
-            checked
-              ? 'border-[var(--color-accent)] bg-[var(--color-accent)]'
-              : 'border-[var(--color-line)]'
-          }`}
-        >
-          {checked && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-        </span>
-        {title}
-      </span>
-      <p className="mt-1 text-xs text-[var(--color-ink-3)]">{description}</p>
-      {disabled && (
-        <span className="absolute right-3 top-3 rounded-full bg-[var(--color-warn-soft)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-warn)]">
-          Browser n/a
-        </span>
-      )}
-    </button>
   );
 }
