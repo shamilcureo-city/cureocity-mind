@@ -6,6 +6,7 @@ import { Card } from '../ui/Card';
 import { CheckboxRow, Input, Label, FieldError } from '../ui/Field';
 import { readApiError, SCRIPT_VERSION } from './record-types';
 import { isValidIndianPhone, normaliseIndianPhone } from '@/lib/phone';
+import { PhoneField } from './PhoneField';
 
 interface Props {
   onCancel: () => void;
@@ -45,7 +46,7 @@ interface Props {
  */
 export function NewClientForm({ onCancel, onCreated }: Props) {
   const [fullName, setFullName] = useState('');
-  const [contactPhone, setContactPhone] = useState('+91');
+  const [contactPhone, setContactPhone] = useState('');
   const [audioOk, setAudioOk] = useState(true);
   const [noteOk, setNoteOk] = useState(true);
   const [crossBorder, setCrossBorder] = useState(false);
@@ -157,21 +158,12 @@ export function NewClientForm({ onCancel, onCreated }: Props) {
               autoComplete="off"
             />
           </div>
-          <div>
-            <Label htmlFor="nc-phone">Their phone</Label>
-            <Input
-              id="nc-phone"
-              type="tel"
-              required
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              placeholder="+91 98765 43210"
-              autoComplete="off"
-            />
-            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-              +91 and 10 digits. Spaces or a bare 10-digit number are fine.
-            </p>
-          </div>
+          <PhoneField
+            id="nc-phone"
+            value={contactPhone}
+            onChange={setContactPhone}
+            required
+          />
         </div>
 
         <div>

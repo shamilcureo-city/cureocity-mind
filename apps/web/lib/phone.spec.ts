@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { IndianPhoneSchema } from '@cureocity/contracts';
-import { isValidIndianPhone, normaliseIndianPhone } from './phone';
+import {
+  fromNationalDigits,
+  isValidIndianPhone,
+  normaliseIndianPhone,
+  toNationalDigits,
+} from './phone';
 
 describe('normaliseIndianPhone', () => {
   it('accepts the shapes a therapist actually types', () => {
@@ -45,5 +50,56 @@ describe('normaliseIndianPhone', () => {
     expect(normaliseIndianPhone('')).toBe('');
     expect(normaliseIndianPhone('   ')).toBe('');
     expect(isValidIndianPhone('')).toBe(false);
+  });
+});
+
+describe('national-digit helpers (the +91 prefix field)', () => {
+  it('extracts the national part from anything pasted in', () => {
+    for (const raw of [
+      '9876543210',
+      '98765 43210',
+      '+91 98765 43210',
+      '+919876543210',
+      '919876543210',
+      '09876543210',
+    ]) {
+      expect(toNationalDigits(raw), raw).toBe('9876543210');
+    }
+  });
+
+  it('caps at 10 digits so the field cannot hold something unsendable', () => {
+    expect(toNationalDigits('98765432109999')).toHaveLength(10);
+  });
+
+  it('round-trips to a value the API accepts', () => {
+    const canonical = fromNationalDigits(toNationalDigits('+91 98765 43210'));
+    expect(canonical).toBe('+919876543210');
+    expect(IndianPhoneSchema.safeParse(canonical).success).toBe(true);
+  });
+
+  it('treats an empty field as empty, not as a bare +91', () => {
+    expect(fromNationalDigits('')).toBe('');
+    expect(toNationalDigits('')).toBe('');
+  });
+});
+
+describe('typing round-trip (regression)', () => {
+  it('does not re-read the +91 prefix as national digits', () => {
+    // Typing "9" produces the canonical "+919"; rendering that back must show
+    // "9", not "919". A digit-count heuristic gets this wrong and the field
+    // visibly rewrites what you just typed.
+    expect(toNationalDigits('+919')).toBe('9');
+    expect(toNationalDigits('+9198')).toBe('98');
+    expect(toNationalDigits('+91987')).toBe('987');
+  });
+
+  it('stays stable digit by digit, exactly as the field drives it', () => {
+    let canonical = '';
+    for (const key of '9876543210') {
+      canonical = fromNationalDigits(toNationalDigits(canonical) + key);
+    }
+    expect(canonical).toBe('+919876543210');
+    expect(toNationalDigits(canonical)).toBe('9876543210');
+    expect(isValidIndianPhone(canonical)).toBe(true);
   });
 });

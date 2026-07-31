@@ -55,3 +55,33 @@ export function normaliseIndianPhone(raw: string): string {
 export function isValidIndianPhone(raw: string): boolean {
   return INDIAN_PHONE_RE.test(normaliseIndianPhone(raw));
 }
+
+/**
+ * The 10-digit national part, for a field that renders `+91` as a fixed
+ * prefix box. Tolerates a full number being pasted into it — "+91 98765
+ * 43210", "919876543210" and "09876543210" all yield "9876543210" — and
+ * caps at 10 digits so the field cannot hold something unsendable.
+ */
+export function toNationalDigits(raw: string): string {
+  const trimmed = raw.trim();
+  // An explicit +91 prefix is unambiguous — take everything after it. Doing
+  // this by digit-count instead breaks the moment the value is PARTIAL: the
+  // canonical form of a half-typed number is "+919", whose digits are "919",
+  // which a length heuristic happily reports as a 3-digit national number. The
+  // field then renders "919" after one keystroke.
+  if (trimmed.startsWith('+91')) {
+    return trimmed.slice(3).replace(/\D/g, '').slice(0, 10);
+  }
+  let d = trimmed.replace(/\D/g, '');
+  if (d.length > 10) {
+    if (d.startsWith('91')) d = d.slice(2);
+    else if (d.startsWith('0')) d = d.slice(1);
+  }
+  return d.slice(0, 10);
+}
+
+/** Compose the canonical value from the national digits a therapist typed. */
+export function fromNationalDigits(digits: string): string {
+  const d = digits.replace(/\D/g, '').slice(0, 10);
+  return d === '' ? '' : `+91${d}`;
+}

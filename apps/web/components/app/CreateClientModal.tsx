@@ -7,7 +7,8 @@ import { Button } from '../ui/Button';
 import { Input, Label, Select, Textarea } from '../ui/Field';
 import { SpokenLanguageChips } from './SpokenLanguageChips';
 import { readApiError } from './record-types';
-import { isValidIndianPhone, normaliseIndianPhone } from '@/lib/phone';
+import { normaliseIndianPhone } from '@/lib/phone';
+import { PhoneField } from './PhoneField';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { subjectNounFor } from '@/lib/vertical';
 
@@ -38,7 +39,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
   const isDoctor = vertical === 'DOCTOR';
   const noun = subjectNounFor(vertical).singular;
   const [fullName, setFullName] = useState('');
-  const [contactPhone, setContactPhone] = useState('+91');
+  const [contactPhone, setContactPhone] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [presentingConcerns, setPresentingConcerns] = useState('');
@@ -142,27 +143,13 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
             />
           </div>
           <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <Label htmlFor="cc-phone">Phone</Label>
-              <Input
-                id="cc-phone"
-                value={contactPhone}
-                onChange={(e) => setContactPhone(e.target.value)}
-                required
-                placeholder="+91 98765 43210"
-              />
-              <p
-                className={`mt-1 text-xs ${
-                  contactPhone.trim() !== '+91' &&
-                  contactPhone.trim() !== '' &&
-                  !isValidIndianPhone(contactPhone)
-                    ? 'text-[var(--color-warn)]'
-                    : 'text-[var(--color-ink-3)]'
-                }`}
-              >
-                +91 and 10 digits. Spaces, hyphens or a bare 10-digit number are fine.
-              </p>
-            </div>
+            <PhoneField
+              id="cc-phone"
+              label="Phone"
+              value={contactPhone}
+              onChange={setContactPhone}
+              required
+            />
             <div>
               <Label htmlFor="cc-email" hint="optional">
                 Email
