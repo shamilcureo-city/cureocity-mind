@@ -3,10 +3,15 @@
 import { useState, type FormEvent } from 'react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
-import { CheckboxRow, Input, Label, FieldError } from '../ui/Field';
-import { readApiError, SCRIPT_VERSION } from './record-types';
-import { isValidIndianPhone, normaliseIndianPhone } from '@/lib/phone';
-import { PhoneField } from './PhoneField';
+import { FieldError } from '../ui/Field';
+import { ClientFields } from './ClientFields';
+import { readApiError } from './record-types';
+import {
+  buildCreateClientBody,
+  EMPTY_CLIENT_DRAFT,
+  isClientDraftReady,
+  type ClientDraft,
+} from '@/lib/client-draft';
 
 interface Props {
   onCancel: () => void;
@@ -15,50 +20,30 @@ interface Props {
 }
 
 /**
- * Sprint 23 — minimal intake-first onboarding for a brand-new client.
+ * "+ New client" on the Record screen — the shell only.
  *
- * The previous flow (PreFlightPanel's inline new-client form) inherited
- * the parent panel's modality + language pickers and pre-filled CBT from
- * the therapist's default — clinically wrong: intake is *how* you decide
- * the modality. This form deliberately asks for only what's required to
- * legally start recording: name + phone + two required consents. Cross-
- * border is offered as an optional pre-tick. Capture method is the
- * therapist's choice of room vs. screen-share.
+ * The fields, the readiness rule and the request body are shared with the
+ * Clients page's modal (`ClientFields` + `lib/client-draft.ts`). The two entry
+ * points had drifted into different products: this one asked for six fewer
+ * things and disagreed about which consents were required, so which form you
+ * got depended on where you happened to click. Both now render the same set,
+ * quick fields first and the rest behind "More details".
  *
- * Email, language, presenting concerns, DOB, spoken-languages, etc. are
- * all editable from the client page after the intake — the intake
- * conversation surfaces most of these naturally and Pass 2 (IntakeNoteV1)
- * captures them into the note.
+ * It creates ONLY the client, then hands off to `RecordConfirmStrip` — the same
+ * confirm step every existing client goes through, which owns session
+ * create/reuse, the per-session consent snapshot, the capture choice (live
+ * scribe vs record-only) and /start. Submitting used to do all of that inline
+ * and drop the therapist straight into the recorder: no moment to check what
+ * you typed, and no way for a new client to use the live scribe.
  *
- * On submit it creates ONLY the client (name + phone + consents) and hands
- * off to `RecordConfirmStrip` — the same confirm step every existing client
- * goes through. It used to also create the session, snapshot consent and
- * call /start, which dropped the therapist straight into the recorder the
- * instant they hit submit: no moment to check what they typed, and — because
- * the live-scribe choice lives in the confirm strip — no way for a NEW client
- * to ever use the live scribe. Intake is exactly where that matters most.
- *
- * Converging on the strip also removes three duplicated calls, the duplicated
- * 402 trial-cap handling, and the second consent snapshot. The strip's own
- * comment ("rare — new client flow handles the common case") shows this is
- * how it was meant to fit together: consents granted here at client creation
- * mean the strip asks for nothing further.
+ * Modality still defaults to blank. Intake is *how* you decide it, and
+ * pre-filling the therapist's usual approach would be clinically wrong.
  */
 export function NewClientForm({ onCancel, onCreated }: Props) {
-  const [fullName, setFullName] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [audioOk, setAudioOk] = useState(true);
-  const [noteOk, setNoteOk] = useState(true);
-  const [crossBorder, setCrossBorder] = useState(false);
-
+  const [draft, setDraft] = useState<ClientDraft>(EMPTY_CLIENT_DRAFT);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  // The IndianPhoneSchema regex (`^\+91\d{10}$`) is strict on purpose
-  // (WhatsApp + SMS routing need the canonical form), so accept spaces
-  // / hyphens / parens in the input field and strip them on submit.
-  const normalisedPhone = normaliseIndianPhone(contactPhone);
-  const ready = !!fullName.trim() && isValidIndianPhone(contactPhone) && audioOk && noteOk;
+  const ready = isClientDraftReady(draft);
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -66,60 +51,13 @@ export function NewClientForm({ onCancel, onCreated }: Props) {
     setError(null);
     setBusy(true);
     try {
-      const ackedScopes: Array<
-        'AUDIO_RECORDING' | 'AI_NOTE_GENERATION' | 'CROSS_BORDER_PROCESSING'
-      > = [];
-      if (audioOk) ackedScopes.push('AUDIO_RECORDING');
-      if (noteOk) ackedScopes.push('AI_NOTE_GENERATION');
-      if (crossBorder) ackedScopes.push('CROSS_BORDER_PROCESSING');
-
-      // 1. Create the client with audio + AI note consents on file.
-      const clientRes = await fetch('/api/v1/clients', {
+      const res = await fetch('/api/v1/clients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fullName: fullName.trim(),
-          contactPhone: normalisedPhone,
-          consents: [
-            ...(audioOk
-              ? [
-                  {
-                    scope: 'AUDIO_RECORDING',
-                    scriptVersion: SCRIPT_VERSION,
-                    capturedVia: 'IN_PERSON',
-                  },
-                ]
-              : []),
-            ...(noteOk
-              ? [
-                  {
-                    scope: 'AI_NOTE_GENERATION',
-                    scriptVersion: SCRIPT_VERSION,
-                    capturedVia: 'IN_PERSON',
-                  },
-                ]
-              : []),
-            ...(crossBorder
-              ? [
-                  {
-                    scope: 'CROSS_BORDER_PROCESSING',
-                    scriptVersion: SCRIPT_VERSION,
-                    capturedVia: 'IN_PERSON',
-                  },
-                ]
-              : []),
-          ],
-        }),
+        body: JSON.stringify(buildCreateClientBody(draft)),
       });
-      if (!clientRes.ok) {
-        throw new Error(await readApiError(clientRes, 'Create client failed'));
-      }
-      const created = (await clientRes.json()) as { id: string; fullName: string };
-
-      // Hand off. Session create, per-session consent, capture choice and
-      // /start all belong to the confirm step, which every other client
-      // already uses — including the 402 trial-cap modal.
-      onCreated(created);
+      if (!res.ok) throw new Error(await readApiError(res, 'Create client failed'));
+      onCreated((await res.json()) as { id: string; fullName: string });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -137,7 +75,7 @@ export function NewClientForm({ onCancel, onCreated }: Props) {
         ← Back
       </button>
 
-      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
         New client
       </p>
       <h2 className="mt-1 font-serif text-2xl">First session with someone new</h2>
@@ -146,58 +84,13 @@ export function NewClientForm({ onCancel, onCreated }: Props) {
       </p>
 
       <form onSubmit={submit} className="mt-6 space-y-6">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <Label htmlFor="nc-name">Their name</Label>
-            <Input
-              id="nc-name"
-              required
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              autoFocus
-              autoComplete="off"
-            />
-          </div>
-          <PhoneField
-            id="nc-phone"
-            value={contactPhone}
-            onChange={setContactPhone}
-            required
-          />
-        </div>
-
-        <div>
-          <Label>Consent (confirm they&apos;ve agreed before you start)</Label>
-          <div className="mt-2 space-y-2">
-            <CheckboxRow
-              id="nc-audio"
-              checked={audioOk}
-              onChange={setAudioOk}
-              label="Audio recording — they've agreed"
-              description="We record this session so the AI can draft a note."
-            />
-            <CheckboxRow
-              id="nc-note"
-              checked={noteOk}
-              onChange={setNoteOk}
-              label="AI note generation — they've agreed"
-              description="An AI processes the recording into a draft you'll review."
-            />
-            <CheckboxRow
-              id="nc-cross-border"
-              checked={crossBorder}
-              onChange={setCrossBorder}
-              label="Today's note can be processed outside India"
-              description="Optional. We use a global model when our India region is constrained — tick only if they agreed."
-            />
-          </div>
-        </div>
+        <ClientFields value={draft} onChange={setDraft} idPrefix="nc" autoFocusName />
 
         <FieldError message={error} />
 
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-[var(--color-ink-3)]">
-            Next you'll confirm how to capture this session. Email, language and presenting concerns can be added later from their client page.
+            Next you&rsquo;ll confirm how to capture this session.
           </p>
           <Button type="submit" disabled={!ready || busy}>
             {busy ? 'Adding…' : 'Add client & continue'}

@@ -4,13 +4,17 @@ import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
-import { Input, Label, Select, Textarea } from '../ui/Field';
-import { SpokenLanguageChips } from './SpokenLanguageChips';
+import { FieldError } from '../ui/Field';
+import { ClientFields } from './ClientFields';
 import { readApiError } from './record-types';
-import { normaliseIndianPhone } from '@/lib/phone';
-import { PhoneField } from './PhoneField';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { subjectNounFor } from '@/lib/vertical';
+import {
+  buildCreateClientBody,
+  EMPTY_CLIENT_DRAFT,
+  isClientDraftReady,
+  type ClientDraft,
+} from '@/lib/client-draft';
 
 interface Props {
   open: boolean;
@@ -23,85 +27,46 @@ interface Props {
 }
 
 /**
- * Modal form to create a new client. Captures the minimum fields the
- * CreateClientInputSchema requires + records the four DPDP consent
- * scopes (AUDIO_RECORDING + AI_NOTE_GENERATION + CROSS_BORDER_
- * PROCESSING are all required for the scribe pipeline to run;
- * DATA_RETENTION_EXTENDED is opt-in). All consents are recorded as
- * captured IN_PERSON at script v1 — adjust when the consent script
- * versioning surface lands.
+ * Create a client from the roster page — the modal shell only.
  *
- * On success, navigates to the new client's detail page so the
- * therapist can immediately start a session or record a workflow.
+ * The fields, the readiness rule and the request body are shared with the
+ * Record screen's "+ New client" (`ClientFields` + `lib/client-draft.ts`). The
+ * two had drifted into different forms with different consent rules; a
+ * therapist met whichever one their route happened to reach.
+ *
+ * Consents (DPDP): AUDIO_RECORDING, AI_NOTE_GENERATION and
+ * CROSS_BORDER_PROCESSING are all required — /sessions/[id]/start refuses a
+ * session whose snapshot lacks the last one — and DATA_RETENTION_EXTENDED is
+ * opt-in. All are recorded as captured IN_PERSON at script v1.
+ *
+ * On success, navigates to the new client's detail page so the therapist can
+ * immediately start a session or record a workflow.
  */
 export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAPIST' }: Props) {
   const router = useRouter();
   const isDoctor = vertical === 'DOCTOR';
   const noun = subjectNounFor(vertical).singular;
-  const [fullName, setFullName] = useState('');
-  const [contactPhone, setContactPhone] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
-  const [dateOfBirth, setDateOfBirth] = useState('');
-  const [presentingConcerns, setPresentingConcerns] = useState('');
-  const [preferredModality, setPreferredModality] = useState<'CBT' | 'EMDR' | 'OTHER' | ''>('');
-  const [preferredLanguage, setPreferredLanguage] = useState('en');
-  const [spokenLanguages, setSpokenLanguages] = useState<string[]>([]);
-  const [retentionExtended, setRetentionExtended] = useState(false);
+  const [draft, setDraft] = useState<ClientDraft>(EMPTY_CLIENT_DRAFT);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalA11y(open, dialogRef, onClose);
+  const ready = isClientDraftReady(draft);
 
   if (!open) return null;
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!ready) return;
     setError(null);
     setSubmitting(true);
     try {
-      const consents: Array<{
-        scope: string;
-        scriptVersion: string;
-        capturedVia: string;
-      }> = [
-        { scope: 'AUDIO_RECORDING', scriptVersion: 'v1.0', capturedVia: 'IN_PERSON' },
-        { scope: 'AI_NOTE_GENERATION', scriptVersion: 'v1.0', capturedVia: 'IN_PERSON' },
-        { scope: 'CROSS_BORDER_PROCESSING', scriptVersion: 'v1.0', capturedVia: 'IN_PERSON' },
-      ];
-      if (retentionExtended) {
-        consents.push({
-          scope: 'DATA_RETENTION_EXTENDED',
-          scriptVersion: 'v1.0',
-          capturedVia: 'IN_PERSON',
-        });
-      }
-      // The canonical stored form is +91 followed by exactly 10 digits (WhatsApp
-      // / SMS routing depends on it), but people type spaces, hyphens and
-      // parens. Strip them on submit rather than rejecting the therapist —
-      // NewClientForm has always done this; this modal did not, so a perfectly
-      // ordinary "+91 98765 43210" failed validation with no clue why.
-      const body: Record<string, unknown> = {
-        fullName: fullName.trim(),
-        contactPhone: normaliseIndianPhone(contactPhone),
-        consents,
-      };
-      if (contactEmail.trim()) body['contactEmail'] = contactEmail.trim();
-      if (dateOfBirth) body['dateOfBirth'] = dateOfBirth;
-      if (presentingConcerns.trim()) body['presentingConcerns'] = presentingConcerns.trim();
-      if (preferredModality) body['preferredModality'] = preferredModality;
-      if (preferredLanguage && preferredLanguage !== 'en') {
-        body['preferredLanguage'] = preferredLanguage;
-      }
-      if (spokenLanguages.length > 0) body['spokenLanguages'] = spokenLanguages;
-
       const res = await fetch('/api/v1/clients', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(buildCreateClientBody(draft)),
       });
-      if (!res.ok) {
-        throw new Error(await readApiError(res, 'Create client failed'));
-      }
+      if (!res.ok) throw new Error(await readApiError(res, `Create ${noun} failed`));
       const created = (await res.json()) as { id: string };
       onCreated?.(created.id);
       router.push(`/app/${isDoctor ? 'patients' : 'clients'}/${created.id}`);
@@ -119,7 +84,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
       role="dialog"
       aria-modal="true"
     >
-      <Card className="w-full max-w-xl max-h-[90vh] overflow-y-auto p-7">
+      <Card className="max-h-[90vh] w-full max-w-xl overflow-y-auto p-7">
         <header className="flex items-baseline justify-between gap-3">
           <h2 className="font-serif text-2xl">{isDoctor ? 'New patient' : 'New client'}</h2>
           <button
@@ -131,142 +96,19 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
           </button>
         </header>
 
-        <form onSubmit={onSubmit} className="mt-4 space-y-4">
-          <div>
-            <Label htmlFor="cc-name">Full name</Label>
-            <Input
-              id="cc-name"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-              maxLength={200}
-            />
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <PhoneField
-              id="cc-phone"
-              label="Phone"
-              value={contactPhone}
-              onChange={setContactPhone}
-              required
-            />
-            <div>
-              <Label htmlFor="cc-email" hint="optional">
-                Email
-              </Label>
-              <Input
-                id="cc-email"
-                type="email"
-                value={contactEmail}
-                onChange={(e) => setContactEmail(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="cc-dob" hint="optional">
-                Date of birth
-              </Label>
-              <Input
-                id="cc-dob"
-                type="date"
-                value={dateOfBirth}
-                onChange={(e) => setDateOfBirth(e.target.value)}
-              />
-            </div>
-            {!isDoctor && (
-              <div>
-                <Label htmlFor="cc-modality" hint="optional">
-                  Preferred modality
-                </Label>
-                <Select
-                  id="cc-modality"
-                  value={preferredModality}
-                  onChange={(e) =>
-                    setPreferredModality(e.target.value as 'CBT' | 'EMDR' | 'OTHER' | '')
-                  }
-                >
-                  <option value="">—</option>
-                  <option value="CBT">CBT</option>
-                  <option value="EMDR">EMDR</option>
-                  <option value="OTHER">Other</option>
-                </Select>
-              </div>
-            )}
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <Label htmlFor="cc-pref-lang" hint="patient-facing">
-                Preferred language
-              </Label>
-              <Select
-                id="cc-pref-lang"
-                value={preferredLanguage}
-                onChange={(e) => setPreferredLanguage(e.target.value)}
-              >
-                <option value="en">English</option>
-                <option value="ml">Malayalam (മലയാളം)</option>
-                <option value="hi">Hindi (हिन्दी)</option>
-                <option value="ta">Tamil (தமிழ்)</option>
-                <option value="bn">Bengali (বাংলা)</option>
-              </Select>
-              <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                Patient-facing content + portal messages use this language.
-              </p>
-            </div>
-            <div>
-              <Label htmlFor="cc-spoken-langs" hint="optional · multi-select">
-                Typical spoken languages
-              </Label>
-              <SpokenLanguageChips value={spokenLanguages} onChange={setSpokenLanguages} />
-              <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                Used as a transcription hint. Pick more than one for code-mixed speakers (Manglish:
-                ml + en).
-              </p>
-            </div>
-          </div>
+        <form onSubmit={onSubmit} className="mt-5 space-y-6">
+          <ClientFields
+            value={draft}
+            onChange={setDraft}
+            isDoctor={isDoctor}
+            idPrefix="cc"
+            autoFocusName
+          />
 
-          <div>
-            <Label htmlFor="cc-concerns" hint="optional · 0–2000 chars">
-              Presenting concerns
-            </Label>
-            <Textarea
-              id="cc-concerns"
-              rows={3}
-              value={presentingConcerns}
-              onChange={(e) => setPresentingConcerns(e.target.value)}
-            />
-          </div>
+          <FieldError message={error} />
 
-          <fieldset className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4">
-            <legend className="px-2 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Consents
-            </legend>
-            <p className="text-xs text-[var(--color-ink-2)]">
-              Audio recording, AI note generation, and cross-border processing are all required for
-              the scribe pipeline to run. Confirm the {noun} has granted each in person.
-            </p>
-            <ul className="mt-2 space-y-1 text-xs text-[var(--color-ink)]">
-              <li>✓ AUDIO_RECORDING</li>
-              <li>✓ AI_NOTE_GENERATION</li>
-              <li>✓ CROSS_BORDER_PROCESSING</li>
-            </ul>
-            <label className="mt-3 flex cursor-pointer items-start gap-2 text-xs text-[var(--color-ink)]">
-              <input
-                type="checkbox"
-                checked={retentionExtended}
-                onChange={(e) => setRetentionExtended(e.target.checked)}
-                className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
-              />
-              <span>
-                Client also consented to extended data retention beyond 30 days
-                (DATA_RETENTION_EXTENDED — optional).
-              </span>
-            </label>
-          </fieldset>
-
-          {error && <p className="text-sm text-[var(--color-warn)]">{error}</p>}
-
-          <div className="flex justify-end gap-2">
-            <Button type="submit" disabled={submitting}>
+          <div className="flex justify-end">
+            <Button type="submit" disabled={!ready || submitting}>
               {submitting ? 'Creating…' : isDoctor ? 'Create patient' : 'Create client'}
             </Button>
           </div>
