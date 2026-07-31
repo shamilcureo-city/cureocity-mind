@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { CheckboxRow, Input, Label, FieldError } from '../ui/Field';
 import { readApiError, SCRIPT_VERSION } from './record-types';
+import { isValidIndianPhone, normaliseIndianPhone } from '@/lib/phone';
 
 interface Props {
   onCancel: () => void;
@@ -55,8 +56,8 @@ export function NewClientForm({ onCancel, onCreated }: Props) {
   // The IndianPhoneSchema regex (`^\+91\d{10}$`) is strict on purpose
   // (WhatsApp + SMS routing need the canonical form), so accept spaces
   // / hyphens / parens in the input field and strip them on submit.
-  const normalisedPhone = contactPhone.replace(/[\s\-()]/g, '');
-  const ready = !!fullName.trim() && /^\+91\d{10}$/.test(normalisedPhone) && audioOk && noteOk;
+  const normalisedPhone = normaliseIndianPhone(contactPhone);
+  const ready = !!fullName.trim() && isValidIndianPhone(contactPhone) && audioOk && noteOk;
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -167,7 +168,9 @@ export function NewClientForm({ onCancel, onCreated }: Props) {
               placeholder="+91 98765 43210"
               autoComplete="off"
             />
-            <p className="mt-1 text-xs text-[var(--color-ink-3)]">+91 + 10 digits.</p>
+            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+              +91 and 10 digits. Spaces or a bare 10-digit number are fine.
+            </p>
           </div>
         </div>
 

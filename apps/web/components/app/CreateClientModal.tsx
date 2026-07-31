@@ -6,6 +6,8 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, Textarea } from '../ui/Field';
 import { SpokenLanguageChips } from './SpokenLanguageChips';
+import { readApiError } from './record-types';
+import { isValidIndianPhone, normaliseIndianPhone } from '@/lib/phone';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { subjectNounFor } from '@/lib/vertical';
 
@@ -72,9 +74,14 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
           capturedVia: 'IN_PERSON',
         });
       }
+      // The canonical stored form is +91 followed by exactly 10 digits (WhatsApp
+      // / SMS routing depends on it), but people type spaces, hyphens and
+      // parens. Strip them on submit rather than rejecting the therapist —
+      // NewClientForm has always done this; this modal did not, so a perfectly
+      // ordinary "+91 98765 43210" failed validation with no clue why.
       const body: Record<string, unknown> = {
-        fullName,
-        contactPhone,
+        fullName: fullName.trim(),
+        contactPhone: normaliseIndianPhone(contactPhone),
         consents,
       };
       if (contactEmail.trim()) body['contactEmail'] = contactEmail.trim();
@@ -92,8 +99,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const errBody = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(errBody.error ?? `HTTP ${res.status}`);
+        throw new Error(await readApiError(res, 'Create client failed'));
       }
       const created = (await res.json()) as { id: string };
       onCreated?.(created.id);
@@ -143,8 +149,19 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
                 value={contactPhone}
                 onChange={(e) => setContactPhone(e.target.value)}
                 required
-                placeholder="+919876543210"
+                placeholder="+91 98765 43210"
               />
+              <p
+                className={`mt-1 text-xs ${
+                  contactPhone.trim() !== '+91' &&
+                  contactPhone.trim() !== '' &&
+                  !isValidIndianPhone(contactPhone)
+                    ? 'text-[var(--color-warn)]'
+                    : 'text-[var(--color-ink-3)]'
+                }`}
+              >
+                +91 and 10 digits. Spaces, hyphens or a bare 10-digit number are fine.
+              </p>
             </div>
             <div>
               <Label htmlFor="cc-email" hint="optional">
