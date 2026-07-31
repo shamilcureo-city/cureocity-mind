@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema } from './common';
 import { PreSessionBriefV1Schema } from './brief';
+import { CarriedQuestionSchema } from './clinical';
 import { SessionAgreementDtoSchema } from './formulation';
 import { JourneyActivePlanSchema, JourneyStageSchema, NextBestActionSchema } from './journey';
 import { InstrumentChangeSchema } from './instrument';
@@ -108,5 +109,27 @@ export const PrepareSummaryV1Schema = z.object({
     })
     .nullable()
     .default(null),
+  /**
+   * TE2 — the questions the therapist ticked to carry at the end of the last
+   * review (`Client.carriedQuestions`). Already fed the pre-session brief and
+   * the live copilot; surfaced here so the Record screen can show them as an
+   * in-room checklist without a second round-trip. Optional + defaulted.
+   */
+  carriedQuestions: z.array(CarriedQuestionSchema).max(8).default([]),
+  /**
+   * TE2 — the client's active (non-superseded) confirmed diagnoses, primary
+   * first. Read-only echo of `ClientDiagnosis` so the Record screen can answer
+   * "what did we decide this was?" at a glance. Optional + defaulted.
+   */
+  confirmedDiagnoses: z
+    .array(
+      z.object({
+        icd11Code: z.string().min(1),
+        icd11Label: z.string().min(1),
+        isPrimary: z.boolean(),
+      }),
+    )
+    .max(6)
+    .default([]),
 });
 export type PrepareSummaryV1 = z.infer<typeof PrepareSummaryV1Schema>;

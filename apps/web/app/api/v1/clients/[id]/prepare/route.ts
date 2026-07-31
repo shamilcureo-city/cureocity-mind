@@ -1,16 +1,21 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import {
+  CarriedQuestionSchema,
   CaseFormulationV1Schema,
   PreSessionBriefV1Schema,
   type PrepareHomeworkEntry,
   type PrepareSummaryV1,
   type SessionAgreementDto,
 } from '@cureocity/contracts';
+import { z } from 'zod';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { fetchOpenCrises } from '@/lib/crisis-flags';
 import { computeClientJourney, JourneyError } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
+
+/** TE2 — stored `Client.carriedQuestions` JSON, parsed defensively. */
+const CarriedQuestionsArraySchema = z.array(CarriedQuestionSchema).max(8);
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,7 +55,12 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
 
   const client = await prisma.client.findUnique({
     where: { id: clientId },
-    select: { psychologistId: true, deletedAt: true, preferredLanguage: true },
+    select: {
+      psychologistId: true,
+      deletedAt: true,
+      preferredLanguage: true,
+      carriedQuestions: true,
+    },
   });
   if (!client || client.deletedAt !== null) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
@@ -97,7 +107,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const briefIsStale =
     cachedBrief !== null && cachedBriefRow?.lastSessionId !== (lastCompleted?.id ?? null);
 
-  const [assignments, openCrises, agreementRows, formulationRow] = await Promise.all([
+  const [assignments, openCrises, agreementRows, formulationRow, diagnosisRows] = await Promise.all([
     prisma.exerciseAssignment.findMany({
       where: { clientId },
       orderBy: { assignedAt: 'desc' },
@@ -127,6 +137,14 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
       where: { clientId, supersededAt: null },
       orderBy: { version: 'desc' },
       select: { version: true, body: true },
+    }),
+    // TE2 — active confirmed diagnoses, primary first, for the Record
+    // screen's "where the case stands" glance.
+    prisma.clientDiagnosis.findMany({
+      where: { clientId, supersededAt: null },
+      orderBy: [{ isPrimary: 'desc' }, { confidence: 'desc' }],
+      take: 6,
+      select: { icd11Code: true, icd11Label: true, isPrimary: true },
     }),
   ]);
 
@@ -185,6 +203,16 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     lastCompletedSessionId: lastCompleted?.id ?? null,
     lastAgreements,
     formulationSnapshot,
+    // TE2 — the Record screen's in-room checklist + case glance. Both are
+    // read-only echoes of state the therapist already confirmed; a parse
+    // failure on the stored carried-questions JSON degrades to an empty
+    // list rather than failing the whole prepare read.
+    carriedQuestions: CarriedQuestionsArraySchema.safeParse(client.carriedQuestions).data ?? [],
+    confirmedDiagnoses: diagnosisRows.map((d) => ({
+      icd11Code: d.icd11Code,
+      icd11Label: d.icd11Label,
+      isPrimary: d.isPrimary,
+    })),
   };
 
   await writeAudit({

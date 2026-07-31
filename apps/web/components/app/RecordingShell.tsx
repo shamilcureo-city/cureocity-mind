@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ClientPicker, type ClientTileEntry } from './ClientPicker';
 import { NewClientForm } from './NewClientForm';
 import { RecordConfirmStrip } from './RecordConfirmStrip';
+import { SessionPlanCard } from './SessionPlanCard';
 import { LiveRecorder } from './LiveRecorder';
 import { FileUploadPanel } from './FileUploadPanel';
 import type { RecordReady } from './record-types';
@@ -130,14 +131,22 @@ export function RecordingShell({ clients, initialClientId = null, defaultCapture
   if (shell.kind === 'confirm') {
     const mode = shell.mode;
     return (
-      <RecordConfirmStrip
-        clientId={shell.client.id}
-        clientName={shell.client.fullName}
-        mode={mode}
-        defaultCapture={defaultCapture ?? 'LIVE'}
-        onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
-        onReady={(ready) => handleReady(ready, mode)}
-      />
+      <>
+        <RecordConfirmStrip
+          clientId={shell.client.id}
+          clientName={shell.client.fullName}
+          mode={mode}
+          defaultCapture={defaultCapture ?? 'LIVE'}
+          onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
+          onReady={(ready) => handleReady(ready, mode)}
+        />
+        {/* TE2 — everything the product already knows about this client, at
+            the one moment it is useful: just before pressing record. Read-only;
+            a failure here never blocks capture. */}
+        <div className="mt-5">
+          <SessionPlanCard clientId={shell.client.id} />
+        </div>
+      </>
     );
   }
 
