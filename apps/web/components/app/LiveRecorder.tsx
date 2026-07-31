@@ -8,6 +8,7 @@ import { Badge } from '../ui/Badge';
 import { flushPendingWithRetries } from '@cureocity/audio';
 import { useSessionRecorder, type CaptureSource } from '@/lib/audio/use-session-recorder';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
+import { InRoomDirection } from './InRoomDirection';
 
 const MODE_LABEL: Record<CaptureSource, string> = {
   mic: 'In-person',
@@ -18,6 +19,12 @@ const MODE_LABEL: Record<CaptureSource, string> = {
 interface Props {
   sessionId: string;
   clientName: string;
+  /**
+   * TE2 — when set, the in-room direction rail is available during a batch
+   * recording (the plan + carried questions). Omitted by the doctor
+   * encounter, which has its own live consult surface.
+   */
+  clientId?: string;
   /// Sprint 19 — nullable: INTAKE sessions can defer the choice.
   modality: string | null;
   source: CaptureSource;
@@ -30,6 +37,7 @@ interface Props {
 export function LiveRecorder({
   sessionId,
   clientName,
+  clientId,
   modality,
   source,
   onFinished,
@@ -222,6 +230,11 @@ export function LiveRecorder({
           </div>
         </div>
       )}
+
+      {/* Only while a session is actually happening. `dictation` is a
+          post-hoc summary — the session is over, so a forward-looking plan
+          would be as wrong there as it was on the confirm screen. */}
+      {clientId && source !== 'dictation' && <InRoomDirection clientId={clientId} />}
 
       <div className="flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] bg-white px-6 py-4">
         <p className="text-xs text-[var(--color-ink-3)]">

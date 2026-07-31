@@ -8,6 +8,7 @@ import type {
   SessionAgreementDto,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { DiagnosisChips, QuestionsChecklist } from './SessionDirection';
 
 /**
  * Sprint 50 — Prepare panel on the Today screen.
@@ -154,6 +155,10 @@ function PrepareBody({
         </section>
       )}
 
+      {/* TE2 — what we decided this is. Previously the prepare view showed the
+          plan and the scores but never the diagnoses behind them. */}
+      <DiagnosisChips diagnoses={data.confirmedDiagnoses} />
+
       <section className="flex flex-wrap items-baseline gap-2">
         <Badge tone="muted">{journey.stage.replace(/_/g, ' ').toLowerCase()}</Badge>
         {journey.activePlan && (
@@ -232,6 +237,11 @@ function PrepareBody({
           </p>
         )}
       </section>
+
+      {/* TE2 — the questions carried from the last review. They already fed
+          the brief's digest and seed the live copilot; this is the first
+          surface that lets the therapist actually tick them off. */}
+      <QuestionsChecklist questions={data.carriedQuestions} />
 
       {homework.length > 0 && (
         <section>

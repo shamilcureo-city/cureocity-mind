@@ -145,6 +145,7 @@ export function RecordingShell({ clients, initialClientId = null, defaultCapture
     return (
       <LiveRecorder
         sessionId={shell.ready.sessionId}
+        clientId={shell.ready.clientId}
         clientName={shell.ready.clientName}
         modality={shell.ready.modality}
         source={shell.ready.source}
