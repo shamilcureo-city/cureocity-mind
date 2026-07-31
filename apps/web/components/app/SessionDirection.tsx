@@ -34,7 +34,7 @@ const STEP_TONE: Record<SessionPlanStep['kind'], string> = {
 export function PlanSpine({ steps }: { steps: SessionPlanStep[] }) {
   if (steps.length === 0) return null;
   return (
-    <ol className="grid gap-3.5">
+    <ol className="grid max-w-[46rem] gap-3.5">
       {steps.map((step, i) => (
         <li key={step.kind} className="flex items-start gap-3">
           <span className={`u-tile ${STEP_TONE[step.kind]} h-8 w-8 text-xs font-semibold`}>
@@ -91,7 +91,7 @@ export function QuestionsChecklist({ questions }: { questions: CarriedQuestion[]
   if (questions.length === 0) return null;
 
   return (
-    <div>
+    <div className="max-w-[46rem]">
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
           Carried questions
