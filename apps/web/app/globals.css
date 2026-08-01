@@ -14,7 +14,7 @@
      existing `linear-gradient(135deg, accent-bright, accent)` in the app
      (primary buttons, the sidebar mark) therefore becomes the 3D black
      gradient for free. /for-doctors and /care keep their page-scoped accents. */
-  --color-bg: #f4f5fc;
+  --color-bg: #f6f6fa;
   --color-surface: #ffffff;
   --color-surface-soft: #eef0f7;
   --color-ink: #0b0c10;
@@ -99,12 +99,16 @@ body {
    2026-07 blue wash was never actually visible on screen. `fixed` attachment
    keeps the aurora anchored to the viewport while the page scrolls.
    ========================================================================== */
+/* Matches the landing canvas, and desaturated for the same reason: this wash
+   was invisible until the z-index fix, so the first time anyone actually SAW
+   it, the app looked like it had gone blue. Colour belongs to data and status,
+   not to the paper the clinical copy sits on. */
 .app-wash {
   background:
-    radial-gradient(58vw 56vh at 10% 2%, rgba(172, 179, 240, 0.55), transparent 66%),
-    radial-gradient(56vw 54vh at 92% 8%, rgba(246, 186, 152, 0.48), transparent 66%),
-    radial-gradient(54vw 50vh at 86% 88%, rgba(186, 192, 245, 0.38), transparent 66%),
-    radial-gradient(52vw 48vh at 8% 92%, rgba(246, 198, 170, 0.34), transparent 66%),
+    radial-gradient(58vw 56vh at 10% 2%, rgba(202, 205, 230, 0.5), transparent 66%),
+    radial-gradient(56vw 54vh at 92% 8%, rgba(243, 211, 191, 0.4), transparent 66%),
+    radial-gradient(54vw 50vh at 86% 88%, rgba(208, 211, 232, 0.26), transparent 66%),
+    radial-gradient(52vw 48vh at 8% 92%, rgba(243, 216, 199, 0.24), transparent 66%),
     var(--color-bg);
   background-attachment: fixed;
 }

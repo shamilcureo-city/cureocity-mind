@@ -66,8 +66,8 @@ const styles = StyleSheet.create({
   primaryTag: {
     fontSize: 7,
     fontFamily: 'Helvetica-Bold',
-    color: '#2563eb',
-    backgroundColor: '#e8effc',
+    color: '#0b0c10',
+    backgroundColor: '#eceef4',
     paddingHorizontal: 4,
     paddingVertical: 1,
     borderRadius: 2,

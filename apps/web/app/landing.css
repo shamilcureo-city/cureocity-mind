@@ -52,15 +52,20 @@
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   line-height: 1.6;
-  /* ONE continuous aurora canvas — sections float on it, no hard bands. */
+  /* ONE continuous aurora canvas — sections float on it, no hard bands.
+
+     Deliberately DESATURATED. The aurora exists to give the glass something to
+     sit on; at the original strength the cool lobes stopped reading as light
+     and started reading as a blue page, which is the one thing this palette is
+     not. Roughly half the saturation, same geometry — depth without a hue. */
   background:
-    radial-gradient(1200px 700px at 8% 0%, rgba(183, 188, 241, 0.55), transparent 60%),
-    radial-gradient(1300px 800px at 98% 6%, rgba(246, 197, 170, 0.5), transparent 58%),
-    radial-gradient(1000px 700px at 90% 26%, rgba(196, 201, 245, 0.28), transparent 60%),
-    radial-gradient(1100px 800px at 4% 42%, rgba(246, 205, 182, 0.3), transparent 60%),
-    radial-gradient(1000px 760px at 96% 62%, rgba(183, 188, 241, 0.3), transparent 60%),
-    radial-gradient(1100px 800px at 6% 84%, rgba(246, 203, 178, 0.32), transparent 60%),
-    linear-gradient(180deg, #f4f5fc 0%, #faf7f4 30%, #f5f5fb 60%, #faf6f3 85%, #f4f5fc 100%);
+    radial-gradient(1200px 700px at 8% 0%, rgba(204, 207, 231, 0.5), transparent 60%),
+    radial-gradient(1300px 800px at 98% 6%, rgba(243, 214, 197, 0.42), transparent 58%),
+    radial-gradient(1000px 700px at 90% 26%, rgba(210, 213, 233, 0.24), transparent 60%),
+    radial-gradient(1100px 800px at 4% 42%, rgba(243, 219, 204, 0.26), transparent 60%),
+    radial-gradient(1000px 760px at 96% 62%, rgba(204, 207, 231, 0.26), transparent 60%),
+    radial-gradient(1100px 800px at 6% 84%, rgba(243, 218, 202, 0.28), transparent 60%),
+    linear-gradient(180deg, #f6f6fa 0%, #faf8f6 30%, #f6f6fa 60%, #faf8f5 85%, #f6f6fa 100%);
   /* clip, not hidden: hidden makes .lnd the sticky containment box and the
      glass nav stops sticking. clip clips without creating a scroll container. */
   overflow-x: hidden;
@@ -136,7 +141,9 @@
   border: 1px solid var(--glass-brd);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
-  box-shadow: 0 14px 30px -16px rgba(35, 45, 95, 0.35), inset 0 1px 0 #fff;
+  box-shadow:
+    0 14px 30px -16px rgba(35, 45, 95, 0.35),
+    inset 0 1px 0 #fff;
 }
 .lnd .btn.secondary:hover {
   transform: translateY(-2px);
@@ -289,7 +296,9 @@
   border: 1px solid var(--glass-brd);
   border-radius: 999px;
   padding: 10px 12px 10px 20px;
-  box-shadow: 0 18px 44px -24px rgba(35, 45, 95, 0.45), inset 0 1px 0 #fff;
+  box-shadow:
+    0 18px 44px -24px rgba(35, 45, 95, 0.45),
+    inset 0 1px 0 #fff;
 }
 .lnd .brand {
   display: inline-flex;
@@ -470,7 +479,9 @@
   border: 1.5px solid rgba(255, 255, 255, 1);
   -webkit-backdrop-filter: blur(18px);
   backdrop-filter: blur(18px);
-  box-shadow: 0 44px 90px -40px rgba(35, 45, 95, 0.5), inset 0 1px 0 #fff;
+  box-shadow:
+    0 44px 90px -40px rgba(35, 45, 95, 0.5),
+    inset 0 1px 0 #fff;
 }
 .lnd .sc-select {
   display: flex;
@@ -482,7 +493,9 @@
   padding: 13px 22px;
   font-size: 15.5px;
   text-align: left;
-  box-shadow: 0 12px 28px -20px rgba(35, 45, 95, 0.5), inset 0 1px 0 #fff;
+  box-shadow:
+    0 12px 28px -20px rgba(35, 45, 95, 0.5),
+    inset 0 1px 0 #fff;
 }
 .lnd .av {
   width: 34px;
@@ -520,7 +533,9 @@
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 8px 16px;
-  box-shadow: 0 6px 14px -10px rgba(35, 45, 95, 0.35), inset 0 1px 0 #fff;
+  box-shadow:
+    0 6px 14px -10px rgba(35, 45, 95, 0.35),
+    inset 0 1px 0 #fff;
 }
 .lnd .sc-chip b {
   color: var(--ink);
@@ -578,7 +593,9 @@
   border: 1px solid rgba(255, 255, 255, 0.98);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
-  box-shadow: 0 28px 60px -30px rgba(35, 45, 95, 0.5), inset 0 1px 0 #fff;
+  box-shadow:
+    0 28px 60px -30px rgba(35, 45, 95, 0.5),
+    inset 0 1px 0 #fff;
 }
 .lnd .sat h6 {
   font-size: 9.5px;
@@ -716,7 +733,9 @@
   border: 1px solid var(--glass-brd);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
-  box-shadow: 0 20px 44px -26px rgba(35, 45, 95, 0.4), inset 0 1px 0 #fff;
+  box-shadow:
+    0 20px 44px -26px rgba(35, 45, 95, 0.4),
+    inset 0 1px 0 #fff;
 }
 .lnd .stat b {
   font-size: 27px;
@@ -1282,7 +1301,9 @@
   border: 1px solid rgba(255, 255, 255, 0.98);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
-  box-shadow: 0 24px 54px -28px rgba(35, 45, 95, 0.45), inset 0 1px 0 #fff;
+  box-shadow:
+    0 24px 54px -28px rgba(35, 45, 95, 0.45),
+    inset 0 1px 0 #fff;
 }
 .lnd .lang-chip mark {
   background: rgba(243, 191, 166, 0.5);
@@ -1338,7 +1359,9 @@
   border-radius: 18px;
   background: #fff;
   border: 1px solid var(--line);
-  box-shadow: 0 14px 30px -20px rgba(35, 45, 95, 0.4), inset 0 1px 0 #fff;
+  box-shadow:
+    0 14px 30px -20px rgba(35, 45, 95, 0.4),
+    inset 0 1px 0 #fff;
   padding: 14px 16px;
 }
 .lnd .mini .row {
@@ -1574,7 +1597,9 @@
   padding: 16px 18px;
   background: linear-gradient(168deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.5));
   border: 1px solid var(--glass-brd);
-  box-shadow: 0 16px 36px -24px rgba(35, 45, 95, 0.4), inset 0 1px 0 #fff;
+  box-shadow:
+    0 16px 36px -24px rgba(35, 45, 95, 0.4),
+    inset 0 1px 0 #fff;
 }
 .lnd .priv-list .tile {
   width: 40px;
@@ -1608,7 +1633,9 @@
   overflow: hidden;
   background: linear-gradient(168deg, rgba(255, 255, 255, 0.97), rgba(255, 255, 255, 0.8));
   border: 1.5px solid rgba(255, 255, 255, 1);
-  box-shadow: 0 50px 100px -44px rgba(35, 45, 95, 0.55), inset 0 1px 0 #fff;
+  box-shadow:
+    0 50px 100px -44px rgba(35, 45, 95, 0.55),
+    inset 0 1px 0 #fff;
 }
 .lnd .phone-head {
   display: flex;
@@ -1717,7 +1744,9 @@
   padding: 14px 16px;
   background: linear-gradient(168deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.5));
   border: 1px solid var(--glass-brd);
-  box-shadow: 0 14px 32px -22px rgba(35, 45, 95, 0.4), inset 0 1px 0 #fff;
+  box-shadow:
+    0 14px 32px -22px rgba(35, 45, 95, 0.4),
+    inset 0 1px 0 #fff;
 }
 .lnd .perks .tile {
   width: 40px;
@@ -1747,7 +1776,9 @@
   padding: 20px 26px;
   background: linear-gradient(168deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6));
   border: 1px solid var(--glass-brd);
-  box-shadow: 0 16px 36px -24px rgba(35, 45, 95, 0.4), inset 0 1px 0 #fff;
+  box-shadow:
+    0 16px 36px -24px rgba(35, 45, 95, 0.4),
+    inset 0 1px 0 #fff;
 }
 .lnd .faq summary {
   font-size: 15.5px;
@@ -1976,8 +2007,12 @@
 }
 
 /* ============================================================================
-   The 'Watch it work' cinematic player (cx-*) — carried over from v9.3
-   unchanged; it is a self-contained dark modal.
+   The 'Watch it work' cinematic player (cx-*).
+
+   Dressed in the v10 night palette (--night / --night-ink / --bright), NOT
+   the v9.3 neon-blue it was born in: it is the landing's flagship demo, so a
+   leftover sky/royal-blue slab here reads as "the site is still blue" no
+   matter how black the page around it is.
    ========================================================================== */
 .lnd .cx-backdrop {
   position: fixed;
@@ -1985,7 +2020,7 @@
   z-index: 200;
   display: none;
   place-items: center;
-  background: rgba(4, 10, 24, 0.78);
+  background: rgba(9, 11, 22, 0.8);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
   padding: 20px;
@@ -2015,13 +2050,13 @@
   aspect-ratio: 16/9;
   border-radius: 20px;
   overflow: hidden;
-  border: 1px solid rgba(125, 211, 252, 0.25);
+  border: 1px solid rgba(170, 180, 245, 0.25);
   background:
-    radial-gradient(700px 420px at 78% -10%, rgba(37, 99, 235, 0.25), transparent 60%),
-    linear-gradient(155deg, #070c18, #0c1b33);
+    radial-gradient(700px 420px at 78% -10%, rgba(122, 134, 235, 0.28), transparent 60%),
+    linear-gradient(155deg, var(--night-2), var(--night) 60%);
   box-shadow:
     0 50px 120px -40px rgba(0, 0, 0, 0.7),
-    0 0 40px -10px rgba(56, 189, 248, 0.18);
+    0 0 40px -10px rgba(122, 134, 235, 0.22);
 }
 .lnd .cs {
   position: absolute;
@@ -2074,7 +2109,7 @@
 }
 .lnd .cx-big {
   font-size: clamp(30px, 4.6vw, 52px);
-  color: #e9f0fa;
+  color: var(--night-ink);
   font-weight: 620;
   letter-spacing: -0.015em;
   line-height: 1.05;
@@ -2082,7 +2117,7 @@
 }
 .lnd .cx-time {
   font-size: 12px;
-  color: #93a8c6;
+  color: var(--night-ink2);
   letter-spacing: 0.06em;
 }
 .lnd .cx-rec {
@@ -2104,7 +2139,7 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  border: 2px solid rgba(125, 211, 252, 0.55);
+  border: 2px solid rgba(170, 180, 245, 0.55);
   animation: lnd-pulse-ring 2s ease-out infinite;
 }
 .lnd .cx-ring.r2 {
@@ -2112,10 +2147,10 @@
 }
 .lnd .cx-bub {
   background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(125, 211, 252, 0.25);
+  border: 1px solid rgba(170, 180, 245, 0.25);
   border-radius: 16px 16px 16px 4px;
   padding: 14px 18px;
-  color: #e9f0fa;
+  color: var(--night-ink);
   font-size: 15.5px;
   line-height: 1.6;
   max-width: 92%;
@@ -2123,16 +2158,16 @@
 .lnd .cx-bub.th {
   border-radius: 16px 16px 4px 16px;
   margin-left: auto;
-  background: rgba(56, 189, 248, 0.12);
+  background: rgba(122, 134, 235, 0.16);
 }
 .lnd .cx-bub.wa {
-  background: rgba(56, 189, 248, 0.12);
+  background: rgba(122, 134, 235, 0.16);
   border-radius: 16px 16px 4px 16px;
   margin-left: auto;
   font-size: 13.5px;
 }
 .lnd .cx-bub mark {
-  background: rgba(125, 211, 252, 0.25);
+  background: rgba(170, 180, 245, 0.25);
   color: inherit;
   border-radius: 3px;
   padding: 0 3px;
@@ -2141,7 +2176,7 @@
   display: block;
   font-size: 9px;
   letter-spacing: 0.12em;
-  color: #7dd3fc;
+  color: var(--bright);
   margin-bottom: 7px;
 }
 .lnd .cx-wave {
@@ -2154,7 +2189,7 @@
 }
 .lnd .cx-wave i {
   flex: 1;
-  background: #7dd3fc;
+  background: var(--bright);
   border-radius: 99px;
   transform-origin: center;
   animation: lnd-wavebar 0.8s ease-in-out infinite alternate;
@@ -2162,10 +2197,10 @@
 }
 .lnd .cx-card {
   background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(125, 211, 252, 0.28);
+  border: 1px solid rgba(170, 180, 245, 0.28);
   border-radius: 14px;
   padding: 16px 18px;
-  color: #e9f0fa;
+  color: var(--night-ink);
   font-size: 14.5px;
   line-height: 1.55;
 }
@@ -2179,7 +2214,7 @@
 .lnd .cx-lab {
   font-size: 9.5px;
   letter-spacing: 0.13em;
-  color: #93a8c6;
+  color: var(--night-ink2);
   margin-bottom: 8px;
 }
 .lnd .cx-acts {
@@ -2193,13 +2228,15 @@
   padding: 7px 16px;
   border-radius: 99px;
   border: 1px solid rgba(147, 168, 198, 0.4);
-  color: #93a8c6;
+  color: var(--night-ink2);
 }
 .lnd .cx-acts span.pri {
-  background: linear-gradient(135deg, #38bdf8, #2563eb);
-  color: #fff;
+  background: linear-gradient(180deg, #ffffff, #e8eaf2);
+  color: var(--night);
   border-color: transparent;
-  box-shadow: 0 6px 18px -6px rgba(56, 189, 248, 0.6);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 8px 20px -8px rgba(0, 0, 0, 0.55);
 }
 .lnd .cx-acts span.pri.flash {
   animation: lnd-tapflash 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -2210,7 +2247,7 @@
 }
 .lnd .cx-note {
   font-size: 10.5px;
-  color: #93a8c6;
+  color: var(--night-ink2);
   text-align: center;
   letter-spacing: 0.04em;
 }
@@ -2222,10 +2259,10 @@
 .lnd .cx-doc {
   flex: 1;
   background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(125, 211, 252, 0.3);
+  border: 1px solid rgba(170, 180, 245, 0.3);
   border-radius: 14px;
   padding: 18px 14px;
-  color: #e9f0fa;
+  color: var(--night-ink);
   font-size: 13.5px;
   font-weight: 600;
   text-align: center;
@@ -2233,33 +2270,33 @@
 .lnd .cx-doc b {
   display: block;
   font-size: 10px;
-  color: #7dd3fc;
+  color: var(--bright);
   margin-bottom: 8px;
   font-weight: 500;
 }
 .lnd .cx-doc span {
   display: block;
   font-size: 10px;
-  color: #93a8c6;
+  color: var(--night-ink2);
   font-weight: 400;
   margin-top: 5px;
 }
 .lnd .cx-icd {
   font-size: 11px;
-  background: rgba(125, 211, 252, 0.15);
-  color: #7dd3fc;
+  background: rgba(170, 180, 245, 0.15);
+  color: var(--bright);
   border-radius: 5px;
   padding: 2px 7px;
 }
 .lnd .cx-ev {
   margin-top: 10px;
-  background: rgba(125, 211, 252, 0.1);
-  border-left: 2px solid #7dd3fc;
+  background: rgba(170, 180, 245, 0.1);
+  border-left: 2px solid var(--bright);
   border-radius: 6px;
   padding: 8px 11px;
   font-size: 12.5px;
   font-style: italic;
-  color: #c9d8ee;
+  color: var(--night-ink);
 }
 .lnd .cx-spark {
   width: min(340px, 70%);
@@ -2278,8 +2315,8 @@
   align-items: center;
   font-size: 14px;
   font-weight: 600;
-  color: #7dd3fc;
-  border: 1px solid rgba(125, 211, 252, 0.4);
+  color: var(--bright);
+  border: 1px solid rgba(170, 180, 245, 0.4);
   border-radius: 99px;
   padding: 13px 24px;
   cursor: pointer;
@@ -2287,7 +2324,7 @@
 .lnd .cx-cap {
   min-height: 26px;
   text-align: center;
-  color: #c9d8ee;
+  color: var(--night-ink);
   font-size: 14.5px;
   margin-top: 16px;
   transition: opacity 0.4s;
@@ -2326,11 +2363,11 @@
   display: block;
   height: 100%;
   width: 0%;
-  background: linear-gradient(90deg, #38bdf8, #2563eb);
+  background: linear-gradient(90deg, var(--bright), var(--data));
 }
 .lnd .cx-count {
   font-size: 11px;
-  color: #93a8c6;
+  color: var(--night-ink2);
   width: 34px;
   text-align: right;
 }
@@ -2346,4 +2383,3 @@
     top: -40px;
   }
 }
-

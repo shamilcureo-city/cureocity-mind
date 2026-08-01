@@ -57,7 +57,7 @@ export default function GlobalError({
               fontWeight: 600,
               textTransform: 'uppercase',
               letterSpacing: '0.18em',
-              color: '#2563eb',
+              color: '#525965',
             }}
           >
             Something went wrong
@@ -82,7 +82,7 @@ export default function GlobalError({
               padding: '0 24px',
               borderRadius: 9999,
               border: 'none',
-              background: '#2563eb',
+              background: '#0b0c10',
               color: 'white',
               fontSize: 15,
               fontWeight: 500,

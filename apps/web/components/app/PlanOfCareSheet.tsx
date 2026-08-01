@@ -111,7 +111,7 @@ export interface PlanOfCareData {
  * the one clinical surface in the product look like it came from a different
  * app than everything around it — and its low-contrast greys fell below WCAG
  * AA for the small type they carried. It now reads as app-native: white
- * surface, the app's cool ink ramp, the app's blue accent.
+ * surface, the app's cool ink ramp, the app's ink accent.
  *
  * What stays document-like is the *structure*, not the colour: one column,
  * numbered sections in case-record order, serif for clinical prose and sans
@@ -123,14 +123,14 @@ export interface PlanOfCareData {
  */
 const P = {
   bg: '#ffffff', // --color-surface
-  bgSoft: '#f7f9fd', // --color-bg
-  line: '#e2e7ed', // --color-line
-  lineSoft: '#eaeef5', // --color-line-soft
-  ink: '#0a101f', // --color-ink
-  ink2: '#404756', // --color-ink-2
-  faint: '#717886', // --color-ink-3
-  accent: '#2563eb', // --color-accent
-  accentSoft: '#e8effc', // --color-accent-soft
+  bgSoft: '#f4f5fc', // --color-bg
+  line: '#e3e5ee', // --color-line
+  lineSoft: '#edeef5', // --color-line-soft
+  ink: '#0b0c10', // --color-ink
+  ink2: '#525965', // --color-ink-2
+  faint: '#8b91a0', // --color-ink-3
+  accent: '#0b0c10', // --color-accent  (v10: controls are ink, not blue)
+  accentSoft: '#eceef4', // --color-accent-soft
   good: '#0f7a4a',
   goodSoft: '#e7f5ee',
   warn: '#b86a3c', // --color-warn
@@ -734,7 +734,7 @@ function Td({ children }: { children: React.ReactNode }) {
  * it is unmistakably a control.
  */
 const ACTION_CLASS =
-  'whitespace-nowrap rounded-lg border px-2.5 py-[4px] text-[10.5px] font-semibold no-underline transition-colors hover:border-[#2563eb] hover:bg-[#e8effc] focus-visible:border-[#2563eb] focus-visible:bg-[#e8effc] focus-visible:outline-none';
+  'whitespace-nowrap rounded-lg border px-2.5 py-[4px] text-[10.5px] font-semibold no-underline transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] focus-visible:border-[var(--color-accent)] focus-visible:bg-[var(--color-accent-soft)] focus-visible:outline-none';
 
 /** A section action that navigates elsewhere (copilot tab, client page). */
 function SectionLink({ href, label, hint }: { href: string; label: string; hint: string }) {
@@ -935,7 +935,7 @@ function ProblemRow({
             type="button"
             onClick={() => setEditing(true)}
             title="Rename this problem."
-            className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[#2563eb] hover:bg-[#e8effc]"
+            className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
             style={{ borderColor: P.line, color: P.accent }}
           >
             Edit
@@ -1254,7 +1254,7 @@ function DiagnosisRow({
             onClick={() => void send('PATCH', { isPrimary: true })}
             disabled={busy}
             title="Make this the primary diagnosis. The current primary is demoted."
-            className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[#2563eb] hover:bg-[#e8effc] disabled:opacity-50"
+            className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)] disabled:opacity-50"
             style={{ borderColor: P.line, color: P.ink2 }}
           >
             Make primary
@@ -1264,7 +1264,7 @@ function DiagnosisRow({
           type="button"
           onClick={() => setEditing(true)}
           title="Correct the code, label or note — or retire this diagnosis."
-          className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[#2563eb] hover:bg-[#e8effc]"
+          className="rounded-lg border px-2 py-[3px] font-sans text-[10.5px] font-semibold transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
           style={{ borderColor: P.line, color: P.accent }}
         >
           Edit

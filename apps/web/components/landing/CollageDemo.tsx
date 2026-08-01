@@ -125,7 +125,7 @@ export function CollageDemo() {
             <b>Session arc</b>Working phase · 23 min · homework unset
           </div>
           <div className="cm-item" style={{ borderColor: '#CBD6E5', background: '#F1F5F9' }}>
-            <b style={{ color: '#2F416B' }}>Carried from S5</b>Manager conversation follow-up
+            <b style={{ color: '#454d78' }}>Carried from S5</b>Manager conversation follow-up
           </div>
         </div>
       </div>

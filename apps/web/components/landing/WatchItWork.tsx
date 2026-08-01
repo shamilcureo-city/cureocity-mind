@@ -22,6 +22,11 @@ const CAPTIONS = [
   '',
 ];
 
+/** The player's on-dark accent. Periwinkle (--bright), not the v9.3 sky-blue:
+ * the stage is styled by `.cx-*` in landing.css and these inline values have
+ * to move with it or the scene text stays blue on a black slab. */
+const SKY = '#aab4f5';
+
 const DURATIONS = [5000, 8000, 8500, 7000, 8500, 8500, 9000];
 const SCENES = CAPTIONS.length;
 
@@ -254,10 +259,7 @@ export function WatchItWork() {
                       Weekend pattern — does the tightness lift away from work?
                     </span>
                     {subFx.covered && (
-                      <span
-                        className="mono"
-                        style={{ fontSize: 10, color: '#7DD3FC', marginLeft: 8 }}
-                      >
+                      <span className="mono" style={{ fontSize: 10, color: SKY, marginLeft: 8 }}>
                         retired ✓
                       </span>
                     )}
@@ -297,15 +299,12 @@ export function WatchItWork() {
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                     <span className="mono cx-icd">6B00</span>
                     <b>Generalised anxiety disorder</b>
-                    <span
-                      className="mono"
-                      style={{ fontSize: 10, color: '#7DD3FC', marginLeft: 'auto' }}
-                    >
+                    <span className="mono" style={{ fontSize: 10, color: SKY, marginLeft: 'auto' }}>
                       AI 72%
                     </span>
                   </div>
                   <p className="cx-ev" data-i="2">
-                    <span className="mono" style={{ fontSize: 9.5, color: '#7DD3FC' }}>
+                    <span className="mono" style={{ fontSize: 9.5, color: SKY }}>
                       EVIDENCE · 14:22
                     </span>{' '}
                     “chest il oru tightness… two weeks aayi”
@@ -339,7 +338,7 @@ export function WatchItWork() {
                 </div>
                 <div className="cx-bub wa" data-i="2">
                   This week’s practice: 4-7-8 breathing before bed. Your plan —{' '}
-                  <b style={{ color: '#7DD3FC' }}>private portal →</b>
+                  <b style={{ color: SKY }}>private portal →</b>
                 </div>
                 <svg viewBox="0 0 300 60" className="cx-spark" data-i="3" aria-hidden>
                   <line
@@ -347,7 +346,7 @@ export function WatchItWork() {
                     y1="46"
                     x2="300"
                     y2="46"
-                    stroke="#7DD3FC"
+                    stroke={SKY}
                     strokeDasharray="3 5"
                     strokeWidth="1"
                     opacity=".5"
@@ -356,11 +355,11 @@ export function WatchItWork() {
                     className="cx-sparkpath"
                     d="M12 10 L60 16 L108 22 L156 31 L204 38 L252 42 L288 44"
                     fill="none"
-                    stroke="#7DD3FC"
+                    stroke={SKY}
                     strokeWidth="2.2"
                     strokeLinecap="round"
                   />
-                  <circle cx="288" cy="44" r="3.6" fill="#7DD3FC" />
+                  <circle cx="288" cy="44" r="3.6" fill={SKY} />
                   <text
                     x="8"
                     y="9"
@@ -374,7 +373,7 @@ export function WatchItWork() {
                     x="262"
                     y="58"
                     fontSize="9"
-                    fill="#7DD3FC"
+                    fill={SKY}
                     style={{ fontFamily: 'var(--font-mono)' }}
                   >
                     → 7
@@ -389,9 +388,7 @@ export function WatchItWork() {
                 <p className="cx-big serif" data-i="1" style={{ fontSize: 'clamp(26px,4vw,44px)' }}>
                   Stay with your client.
                   <br />
-                  <em style={{ fontStyle: 'italic', color: '#7DD3FC' }}>
-                    The paperwork writes itself.
-                  </em>
+                  <em style={{ fontStyle: 'italic', color: SKY }}>The paperwork writes itself.</em>
                 </p>
                 <div
                   data-i="2"
