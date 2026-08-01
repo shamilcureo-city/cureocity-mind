@@ -659,27 +659,55 @@ async function main(): Promise<void> {
       totalPatients += 1;
     }
 
-    // Spread encounters over the last ~5 months of clinic days, newest last.
+    // Carve out TODAY'S CLINIC from the doctor's total.
+    //
+    // /app/clinic is an OPD DAY queue — loadClinicQueue filters scheduledAt to
+    // the current IST day. History alone leaves it permanently empty, which is
+    // exactly how this first shipped: the newest encounter landed ~4 days back
+    // and every row was COMPLETED, so the doctor's home screen showed nothing.
+    // Each doctor now gets a slice of today with a believable mid-morning
+    // shape — some already seen, one in the room, the rest waiting.
+    const todayCount = Math.max(1, Math.min(12, Math.round(encounters * 0.22)));
+    const seenToday = Math.floor(todayCount * 0.45);
+    // The busiest doctors are mid-consult; a 1-token clinic just has someone waiting.
+    const inRoomIndex = todayCount > 2 ? seenToday : -1;
+
     // Tokens are per-clinic-day, like the real queue assigns them.
     const tokensByDay = new Map<string, number>();
     for (let e = 0; e < encounters; e++) {
-      const daysAgo = Math.floor(((encounters - e) / encounters) * int(120, 150)) + int(0, 3);
+      const isToday = e >= encounters - todayCount;
+      const todayIndex = isToday ? e - (encounters - todayCount) : -1;
+
+      // History spans ~5 months and stops 2 days before today, so it can never
+      // bleed into the day queue.
+      const daysAgo = isToday
+        ? 0
+        : Math.floor(((encounters - todayCount - e) / Math.max(1, encounters - todayCount)) * 150) +
+          2;
       const scheduledAt = new Date(today.getTime() - daysAgo * DAY_MS);
-      // OPD hours: 09:00–13:00 or 17:00–20:00 IST.
-      const morning = rnd() < 0.65;
-      scheduledAt.setUTCHours(
-        morning ? int(3, 7) : int(11, 14), // IST 09:00–13:00 / 17:00–20:00
-        int(0, 59),
-        0,
-        0,
-      );
+      if (isToday) {
+        // Walk the OPD morning in order: 09:00 IST onward, ~12 min apart, so
+        // tokens and clock agree the way a real queue does.
+        const startUtcMin = 3 * 60 + 30; // IST 09:00
+        const mins = startUtcMin + todayIndex * 12;
+        scheduledAt.setUTCHours(Math.floor(mins / 60), mins % 60, 0, 0);
+      } else {
+        // OPD hours: 09:00–13:00 or 17:00–20:00 IST.
+        const morning = rnd() < 0.65;
+        scheduledAt.setUTCHours(morning ? int(3, 7) : int(11, 14), int(0, 59), 0, 0);
+      }
       const dayKey = scheduledAt.toISOString().slice(0, 10);
       const token = (tokensByDay.get(dayKey) ?? 0) + 1;
       tokensByDay.set(dayKey, token);
 
       const clientId = patientIds[int(0, patientIds.length - 1)]!;
-      const isToday = daysAgo === 0;
-      const status = isToday ? (rnd() < 0.5 ? 'SCHEDULED' : 'COMPLETED') : 'COMPLETED';
+      const status: 'COMPLETED' | 'IN_PROGRESS' | 'SCHEDULED' = !isToday
+        ? 'COMPLETED'
+        : todayIndex < seenToday
+          ? 'COMPLETED'
+          : todayIndex === inRoomIndex
+            ? 'IN_PROGRESS'
+            : 'SCHEDULED';
 
       const session = await prisma.session.create({
         data: {
@@ -696,7 +724,9 @@ async function main(): Promise<void> {
                 startedAt: scheduledAt,
                 endedAt: new Date(scheduledAt.getTime() + int(6, 22) * 60_000),
               }
-            : {}),
+            : status === 'IN_PROGRESS'
+              ? { startedAt: scheduledAt }
+              : {}),
         },
         select: { id: true },
       });
