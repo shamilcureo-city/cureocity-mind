@@ -24,6 +24,7 @@
     "db:migrate:deploy": "prisma migrate deploy",
     "db:reset": "prisma migrate reset --force",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-doctors": "pnpm --filter \"./packages/*\" build && pnpm --filter @cureocity/web exec tsx scripts/seed-doctor-demo.ts",
     "db:studio": "prisma studio",
     "db:validate": "prisma validate && prisma format --check",
     "db:check-migrations": "node scripts/check-migration-idempotency.mjs",

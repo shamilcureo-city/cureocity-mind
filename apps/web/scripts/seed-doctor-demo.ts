@@ -19,7 +19,12 @@
  * +9199000xxxxx phones. None can collide with a real practitioner.
  *
  * Run (from the repo root):
- *   pnpm --filter @cureocity/web exec tsx scripts/seed-doctor-demo.ts --wipe --as-bypass
+ *   pnpm db:seed-doctors --wipe --as-bypass
+ *
+ * That wrapper builds the workspace packages first. This file imports
+ * `../lib/tenant-crypto`, which pulls in @cureocity/crypto — a workspace
+ * package whose `main` points at `dist/`. On a fresh clone that dist does not
+ * exist yet, so invoking tsx directly dies with a bare MODULE_NOT_FOUND.
  *
  * Env is read from the repo-root `.env.local`, falling back to `.env` — the
  * same files the Prisma CLI reads — so no --env-file juggling. Anything
