@@ -60,6 +60,8 @@ export * from './chronic';
 export * from './abdm';
 // Sprint AC1+ — Cureocity Care, the standalone D2C AI-therapist product.
 export * from './care';
+// CP2 — the Care live structure engine's tool + event contracts.
+export * from './care-live-tools';
 export * from './letter';
 export * from './client-diagnosis';
 export * from './problem';

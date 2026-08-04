@@ -333,6 +333,11 @@ export const AuditActionSchema = z.enum([
   'CARE_NUDGE_SENT',
   'CARE_NUDGE_SUPPRESSED',
   'CARE_HOMEWORK_TICKED',
+  // CP2 — the live structure engine's persisted work record.
+  'CARE_LIVE_AGENDA_SET',
+  'CARE_LIVE_MOMENT_LOGGED',
+  'CARE_LIVE_HOMEWORK_AGREED',
+  'CARE_LIVE_EVENT_RECORDED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

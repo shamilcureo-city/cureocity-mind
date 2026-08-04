@@ -124,19 +124,52 @@ function stanceBlock(): string {
 }
 
 /**
- * CP2 (flagged: CARE_LIVE_STRUCTURE) — the silent phase rail. Lists this
- * kind's ordered phases and tells the model to call mark_phase on each
- * transition; the client renders the same CARE_SESSION_PHASES list on-screen.
- * Included only when structureEnabled, so the default prompt is unchanged.
+ * CP2 (flagged: CARE_LIVE_STRUCTURE) — per-track worksheet: which sheet
+ * TREATMENT sessions work onto, and the field names the model should fill.
+ * ONE source of truth with the worksheet_update tool's key enum.
  */
-function phasesBlock(kind: 'INTAKE' | 'TREATMENT' | 'REVIEW'): string {
+const CARE_TRACK_WORKSHEETS: Record<string, { key: string; fields: string }> = {
+  CBT: {
+    key: 'THOUGHT_RECORD',
+    fields:
+      'situation, hot_thought, feeling_0_10, evidence_for, evidence_against, balanced_thought, feeling_after_0_10',
+  },
+  BEHAVIOURAL_ACTIVATION: {
+    key: 'ACTIVITY_PLAN',
+    fields: 'mood_pattern, chosen_activity, when_and_where, first_step, obstacle_plan',
+  },
+  GROUNDING: {
+    key: 'GROUNDING_KIT',
+    fields: 'best_anchor, breathing_pattern, if_then_plans, deploy_cue',
+  },
+  SLEEP: {
+    key: 'SLEEP_PLAN',
+    fields: 'wake_time, wind_down, one_change_this_week, two_am_plan',
+  },
+};
+
+/**
+ * CP2 (flagged: CARE_LIVE_STRUCTURE) — the silent structure engine block.
+ * Lists this kind's ordered phases (mark_phase drives the on-screen rail),
+ * key-moment capture (log_moment, verbatim quotes), and — for TREATMENT —
+ * the shared worksheet + structured homework. Included only when
+ * structureEnabled, so the default prompt is unchanged.
+ */
+function phasesBlock(kind: 'INTAKE' | 'TREATMENT' | 'REVIEW', modalityTrack?: string): string {
   const phases = CARE_SESSION_PHASES[kind];
-  return [
-    'SESSION PHASES (silent structure — the user sees a small progress rail):',
-    `- The session moves through these phases in order: ${phases.map((p) => p.key).join(' → ')}.`,
-    '- The MOMENT you move into a phase, silently call mark_phase with that phase key (for every phase, including the first).',
-    '- NEVER say a phase name aloud and never mention the rail — it only updates the on-screen progress. Keep following the session content above; the phases just track where you are.',
-  ].join('\n');
+  const lines = [
+    'SESSION STRUCTURE (silent tools — the user sees them as on-screen progress, never hears them):',
+    `- PHASES, in order: ${phases.map((p) => p.key).join(' → ')}. The MOMENT you move into a phase, silently call mark_phase with that key (every phase, including the first). Never say a phase name aloud.`,
+    '- KEY MOMENTS: when something clinically important lands — an insight they reached, a striking thing they said, a skill they used — silently call log_moment, putting their VERBATIM words in quote. 3-6 per session; never announce it.',
+  ];
+  if (kind === 'TREATMENT') {
+    const ws = CARE_TRACK_WORKSHEETS[modalityTrack ?? 'CBT'] ?? CARE_TRACK_WORKSHEETS['CBT']!;
+    lines.push(
+      `- THE WORKSHEET: today's work fills a shared on-screen sheet the user watches. As each piece of TODAY'S METHOD lands in the conversation, silently call worksheet_update with worksheetKey ${ws.key} and the piece you just worked out, using these field names: ${ws.fields}. Update a field again if it sharpens. The sheet IS the work — a session that fills no fields did no work.`,
+      '- HOMEWORK: when the week\'s practice is AGREED (they said yes), call assign_homework once with title / steps / whyItHelps in their words.',
+    );
+  }
+  return lines.join('\n');
 }
 
 export interface CareTherapistPromptInput {
@@ -166,8 +199,11 @@ export interface CareTherapistPromptInput {
   /// — TREATMENT baseline read when there is not yet a change verdict.
   measuresLine?: string;
   moodBefore?: number;
-  /// CP2 (flagged) — emit the SESSION PHASES block + mark_phase instructions.
+  /// CP2 (flagged) — emit the SESSION STRUCTURE block (phases + moments +
+  /// worksheet + homework tools).
   structureEnabled?: boolean;
+  /// The plan's modality track — picks the TREATMENT worksheet + fields.
+  modalityTrack?: string;
 }
 
 /** The live system prompt, kind-branched. Target ≤ ~4 KB on the wire. */
@@ -243,7 +279,7 @@ export function buildCareTherapistPrompt(input: CareTherapistPromptInput): strin
     'Balance listening with doing the work — reflect, but also guide. When the talk drifts from the agenda, name it kindly and steer back; if the drift is avoidance, gently say so.',
     style,
     stanceBlock(),
-    input.structureEnabled ? phasesBlock(input.kind) : '',
+    input.structureEnabled ? phasesBlock(input.kind, input.modalityTrack) : '',
     timingBlock(),
     safetyBlock(),
   ]

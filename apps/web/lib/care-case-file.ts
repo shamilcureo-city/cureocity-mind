@@ -376,6 +376,7 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
     verdictsLine,
     measuresLine,
     structureEnabled: input.structureEnabled,
+    modalityTrack: track,
   });
   return { prompt, sessionCapMin: capMin };
 }
@@ -393,9 +394,24 @@ export function caseFileJsonForReport(
   cf: CareCaseFile,
   moodBefore?: number | null,
   moodAfter?: number | null,
+  /// CP2 — the session's persisted live tool signals (moments / worksheet /
+  /// homework-as-agreed), stitched in so the report reflects the actual work.
+  liveEvents?: Array<{ type: string; payload: unknown; atMs: number }>,
 ): string {
+  const liveWork =
+    liveEvents && liveEvents.length > 0
+      ? {
+          note: 'The work that ACTUALLY happened live — ground the report in it. homework must match HOMEWORK_ASSIGNED exactly if present; prefer MOMENT_LOGGED verbatim quotes as evidence; the worksheet fields are the session\'s real output.',
+          events: liveEvents.map((e) => ({
+            type: e.type,
+            atMs: e.atMs,
+            payload: e.payload,
+          })),
+        }
+      : null;
   return JSON.stringify(
     {
+      liveWorkRecord: liveWork,
       plan: cf.plan
         ? {
             version: cf.plan.version,
