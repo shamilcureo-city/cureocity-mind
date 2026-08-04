@@ -48,6 +48,17 @@ export const CareAssignHomeworkArgsSchema = z.object({
 });
 export type CareAssignHomeworkArgs = z.infer<typeof CareAssignHomeworkArgsSchema>;
 
+/// note_risk — the graded risk ladder (CP3). A SILENT, NON-TERMINATING risk
+/// signal: the session keeps going with warmth; the client quietly reveals
+/// the help resources on screen and the on-call alert fires server-side.
+/// This deliberately replaces the removed automatic crisis takeover — support
+/// arrives WITHOUT ending the session or locking the account.
+export const CareNoteRiskArgsSchema = z.object({
+  severity: z.enum(['LOW', 'MODERATE', 'HIGH']),
+  reason: z.string().max(240).catch(''),
+});
+export type CareNoteRiskArgs = z.infer<typeof CareNoteRiskArgsSchema>;
+
 /// The persisted live-event envelope — one row per tool signal, idempotent by
 /// (careSessionId, seq). AGENDA_SET is reserved for the set_agenda tool
 /// (next CP2 slice); the schema accepts it so the wire is forward-compatible.
@@ -57,6 +68,7 @@ export const CareLiveEventTypeSchema = z.enum([
   'MOMENT_LOGGED',
   'WORKSHEET_UPDATED',
   'HOMEWORK_ASSIGNED',
+  'RISK_NOTED',
 ]);
 export type CareLiveEventType = z.infer<typeof CareLiveEventTypeSchema>;
 
