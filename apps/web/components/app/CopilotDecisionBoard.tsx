@@ -20,6 +20,8 @@ import type {
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { PassErrorDetail } from './PassErrorDetail';
+import { describePassError } from '@/lib/pass-error';
 import { Card } from '../ui/Card';
 import { PlanEditor } from './ClinicalBriefTab';
 
@@ -357,6 +359,10 @@ export function CopilotDecisionBoard({
   }
 
   if (status === 'PENDING' || !data) {
+    const failure = describePassError(
+      report?.errorMessage,
+      `Couldn't generate the ${readingNoun} — try again.`,
+    );
     return (
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">
@@ -367,8 +373,9 @@ export function CopilotDecisionBoard({
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
           {status === 'PENDING'
             ? 'Usually about a minute after the note is ready. If it takes longer, it may have stopped early — just re-run it.'
-            : (report?.errorMessage ?? `Couldn't generate the ${readingNoun} — try again.`)}
+            : failure.summary}
         </p>
+        {status !== 'PENDING' && <PassErrorDetail detail={failure.detail} />}
         <div className="mt-6">
           <Button onClick={() => void generate()} disabled={generating}>
             {generating ? 'Re-running…' : status === 'PENDING' ? 'Re-run now' : 'Retry'}

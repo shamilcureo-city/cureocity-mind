@@ -316,3 +316,111 @@ describe('normalisePass3Output', () => {
     }
   });
 });
+
+describe('normalisePass3Output — speaker drift on supporting quotes', () => {
+  const QUOTE = 'I just feel my heart racing out of nowhere.';
+  const hints = [
+    { speaker: 'client' as const, text: 'I just feel my heart racing out of nowhere.' },
+    { speaker: 'therapist' as const, text: 'When did you first notice that happening?' },
+  ];
+  const withSpeaker = (speaker: unknown, quote = QUOTE): InitialAssessmentBriefV1 =>
+    ({
+      ...validBrief,
+      differential: [
+        {
+          ...validBrief.differential[0]!,
+          supportingEvidence: [{ quote, speaker, startMs: 1200 }],
+        },
+      ],
+    }) as unknown as InitialAssessmentBriefV1;
+
+  const speakerOf = (out: unknown): unknown =>
+    (out as InitialAssessmentBriefV1).differential[0]?.supportingEvidence[0]?.speaker;
+
+  it("is the regression guard for the client's NAME as the speaker", () => {
+    // Production: Gemini answered speaker: "Sajina" (the client's own name), the
+    // strict parse rejected the ENTIRE brief, and the therapist got a wall of
+    // Zod errors behind a Retry button that could only reproduce it.
+    const result = InitialAssessmentBriefV1Schema.safeParse(
+      normalisePass3Output(withSpeaker('Sajina')),
+    );
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.differential[0]?.supportingEvidence[0]?.speaker).toBe(
+      'unknown',
+    );
+  });
+
+  it('recovers the REAL speaker from the diarized timeline when it has one', () => {
+    expect(speakerOf(normalisePass3Output(withSpeaker('Sajina'), hints))).toBe('client');
+  });
+
+  it('refuses to attribute a quote both speakers said', () => {
+    const shared = [
+      { speaker: 'client' as const, text: 'the weekend pattern is the same every time' },
+      { speaker: 'therapist' as const, text: 'the weekend pattern is the same every time' },
+    ];
+    const out = normalisePass3Output(
+      withSpeaker('Sajina', 'the weekend pattern is the same every time'),
+      shared,
+    );
+    expect(speakerOf(out)).toBe('unknown');
+  });
+
+  it('maps role synonyms', () => {
+    expect(speakerOf(normalisePass3Output(withSpeaker('Patient')))).toBe('client');
+    expect(speakerOf(normalisePass3Output(withSpeaker('counsellor')))).toBe('therapist');
+    expect(speakerOf(normalisePass3Output(withSpeaker('Dr')))).toBe('therapist');
+  });
+
+  it('leaves canonical values alone and lowercases a shouted one', () => {
+    expect(speakerOf(normalisePass3Output(withSpeaker('client')))).toBe('client');
+    expect(speakerOf(normalisePass3Output(withSpeaker('THERAPIST')))).toBe('therapist');
+  });
+
+  it('never drops the quote itself — only the attribution degrades', () => {
+    const out = normalisePass3Output(withSpeaker('Speaker 1'));
+    expect((out as InitialAssessmentBriefV1).differential[0]?.supportingEvidence[0]?.quote).toBe(
+      QUOTE,
+    );
+  });
+
+  it('normalises crisis-flag indicators too, alongside kind/severity drift', () => {
+    const drifty = {
+      ...validReport,
+      crisisFlags: [
+        {
+          kind: 'suicidal-ideation-risk',
+          severity: 'moderate',
+          indicators: [
+            { quote: 'everyone would be better off without me', speaker: 'Sajina', startMs: 40 },
+          ],
+          recommendedAction: 'Complete a safety plan before the session ends.',
+        },
+      ],
+    };
+    const result = ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.crisisFlags[0]?.kind).toBe('suicidal_ideation');
+      expect(result.data.crisisFlags[0]?.severity).toBe('medium');
+      expect(result.data.crisisFlags[0]?.indicators[0]?.speaker).toBe('unknown');
+    }
+  });
+
+  it('handles the treatment report path (diagnosisCandidates) as well as intake', () => {
+    const drifty = {
+      ...validReport,
+      diagnosisCandidates: [
+        {
+          ...validReport.diagnosisCandidates[0]!,
+          supportingEvidence: [{ quote: QUOTE, speaker: 'Sajina', startMs: 0 }],
+        },
+      ],
+    };
+    const result = ClinicalReportV1Schema.safeParse(normalisePass3Output(drifty));
+    expect(result.success).toBe(true);
+    expect(
+      result.success && result.data.diagnosisCandidates[0]?.supportingEvidence[0]?.speaker,
+    ).toBe('unknown');
+  });
+});

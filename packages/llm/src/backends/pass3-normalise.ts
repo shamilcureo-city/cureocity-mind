@@ -266,11 +266,125 @@ function normaliseFormulationSuggestion(s: unknown): unknown | null {
  * `planSuggestions[]` / `formulationSuggestions[]` (dropping unappliable
  * ones). Idempotent. Returns a new object — the input is not mutated.
  */
-export function normalisePass3Output(raw: unknown): unknown {
+// ============================================================================
+// Speaker normalisation on supporting quotes.
+//
+// `supportingEvidence[].speaker` / `crisisFlags[].indicators[].speaker` are a
+// three-value enum: client | therapist | unknown. Gemini drifts off it in two
+// ways seen in production:
+//
+//   - role synonyms — "patient", "counsellor", "Dr", "clinician"
+//   - THE PERSON'S ACTUAL NAME — speaker: "Sajina"
+//
+// The name case is the one that bit us: the model reads the client's name in
+// the note and answers with it, and the strict parse then rejects the entire
+// brief. The therapist saw a wall of Zod errors and a Retry button that could
+// only ever produce the same wall.
+//
+// Two steps, in order:
+//
+//   1. If we hold the diarized timeline, RECOVER the real speaker by finding
+//      which segment the quote came from. Deterministic — no guessing.
+//   2. Otherwise map role synonyms, and fall back to 'unknown' for anything
+//      left (a name, a nickname, "Speaker 1").
+//
+// 'unknown' is a legal value in the schema, so an unrecoverable attribution
+// degrades to "we can't say who said this" — which is the honest answer, and
+// far safer than crediting the therapist's own prompt to the client. The
+// quote itself is never dropped: it still goes through the evidence gate,
+// which verifies it verbatim against the transcript.
+// ============================================================================
+
+/** One diarized utterance, used to recover a drifted speaker label. */
+export interface SpeakerHint {
+  speaker: 'client' | 'therapist' | 'unknown';
+  text: string;
+}
+
+const SPEAKER_CANONICAL = new Set(['client', 'therapist', 'unknown']);
+
+const SPEAKER_SYNONYMS: Record<string, string> = {
+  patient: 'client',
+  service_user: 'client',
+  'service-user': 'client',
+  caller: 'client',
+
+  clinician: 'therapist',
+  counsellor: 'therapist',
+  counselor: 'therapist',
+  psychologist: 'therapist',
+  doctor: 'therapist',
+  dr: 'therapist',
+  practitioner: 'therapist',
+  provider: 'therapist',
+};
+
+/** Loose containment match — enough to locate which utterance a quote came from. */
+function normaliseForMatch(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function recoverSpeaker(quote: unknown, hints: SpeakerHint[] | undefined): string | undefined {
+  if (!hints || hints.length === 0 || typeof quote !== 'string') return undefined;
+  const needle = normaliseForMatch(quote);
+  // Too short to attribute safely — "yes" appears in everyone's speech.
+  if (needle.length < 12) return undefined;
+  const found = hints.filter((h) => normaliseForMatch(h.text).includes(needle));
+  // Ambiguous (both speakers said it) means we genuinely can't attribute it.
+  if (found.length === 0) return undefined;
+  const speakers = new Set(found.map((h) => h.speaker));
+  return speakers.size === 1 ? [...speakers][0] : undefined;
+}
+
+function normaliseSpeaker(q: unknown, hints: SpeakerHint[] | undefined): unknown {
+  if (!q || typeof q !== 'object') return q;
+  const o = q as Record<string, unknown>;
+  if (o['speaker'] === undefined) return q;
+
+  const recovered = recoverSpeaker(o['quote'], hints);
+  if (recovered) return { ...o, speaker: recovered };
+
+  const raw = o['speaker'];
+  if (typeof raw !== 'string') return { ...o, speaker: 'unknown' };
+  const key = raw.trim().toLowerCase();
+  if (SPEAKER_CANONICAL.has(key)) return { ...o, speaker: key };
+  return { ...o, speaker: SPEAKER_SYNONYMS[key] ?? 'unknown' };
+}
+
+/** Apply speaker normalisation to a named array of quotes on a parent object. */
+function normaliseQuoteArray(
+  parent: unknown,
+  key: 'supportingEvidence' | 'indicators',
+  hints: SpeakerHint[] | undefined,
+): unknown {
+  if (!parent || typeof parent !== 'object') return parent;
+  const p = parent as Record<string, unknown>;
+  if (!Array.isArray(p[key])) return parent;
+  return { ...p, [key]: (p[key] as unknown[]).map((q) => normaliseSpeaker(q, hints)) };
+}
+
+export function normalisePass3Output(raw: unknown, speakerHints?: SpeakerHint[]): unknown {
   if (!raw || typeof raw !== 'object') return raw;
   const r = raw as Record<string, unknown>;
   const out: Record<string, unknown> = { ...r };
-  if (Array.isArray(r['crisisFlags'])) out['crisisFlags'] = r['crisisFlags'].map(normaliseFlag);
+  if (Array.isArray(r['crisisFlags'])) {
+    out['crisisFlags'] = r['crisisFlags'].map((f) =>
+      normaliseQuoteArray(normaliseFlag(f), 'indicators', speakerHints),
+    );
+  }
+  // Diagnosis candidates live under `diagnosisCandidates` on a treatment
+  // report and `differential` on an intake brief.
+  for (const key of ['diagnosisCandidates', 'differential'] as const) {
+    if (Array.isArray(r[key])) {
+      out[key] = (r[key] as unknown[]).map((c) =>
+        normaliseQuoteArray(c, 'supportingEvidence', speakerHints),
+      );
+    }
+  }
   if (Array.isArray(r['assessmentGaps'])) {
     out['assessmentGaps'] = r['assessmentGaps'].map(normaliseGap);
   }

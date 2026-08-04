@@ -15,6 +15,8 @@ import type {
 import { ClinicalTreatmentPlanSchema } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
+import { PassErrorDetail } from './PassErrorDetail';
+import { describePassError } from '@/lib/pass-error';
 import { Card } from '../ui/Card';
 import { InlineExplainer } from './EduHeading';
 import { glossary, type GlossaryKey } from '../../lib/clinical-glossary';
@@ -136,12 +138,15 @@ export function ClinicalBriefTab({ sessionId, initialReport }: Props) {
   }
 
   if (report.status === 'FAILED' || !report.body) {
+    const failure = describePassError(
+      report.errorMessage,
+      "Couldn't generate the clinical brief — try Regenerate.",
+    );
     return (
       <Card className="p-10 text-center">
         <p className="font-serif text-2xl">Clinical brief generation failed</p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-warn)]">
-          {report.errorMessage ?? "Couldn't generate the clinical brief — try Regenerate."}
-        </p>
+        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-warn)]">{failure.summary}</p>
+        <PassErrorDetail detail={failure.detail} />
         <div className="mt-6">
           <Button onClick={() => void generate()} disabled={generating}>
             {generating ? 'Retrying…' : 'Retry'}

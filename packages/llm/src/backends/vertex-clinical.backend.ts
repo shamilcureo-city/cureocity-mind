@@ -110,7 +110,10 @@ export class VertexGeminiProClinicalBackend implements IPass3Backend {
       // canonical crisis-flag enums ("suicidal-ideation-risk" vs
       // "suicidal_ideation", "moderate" vs "medium"). Map known synonyms
       // before the strict Zod parse so the whole brief isn't rejected.
-      const normalised: unknown = normalisePass3Output(parsed);
+      // Hand the diarized timeline to the normaliser so a drifted speaker label
+      // ("Sajina", "patient") is RECOVERED from the utterance the quote came
+      // from rather than guessed — and falls back to 'unknown' when it can't be.
+      const normalised: unknown = normalisePass3Output(parsed, input.speakerSegments);
       // TS0 — evidence gate: drop supporting quotes not found in the
       // transcript (the therapist analogue of the doctor citation gate,
       // services/live-gateway/src/case-state.ts). A fabricated quote must
