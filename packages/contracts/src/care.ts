@@ -309,6 +309,11 @@ export const CareSessionReportBodySchema = z.object({
     .nullable()
     .catch(null),
   reflectionPrompt: z.string().max(500).catch(''),
+  /// CP4 — 0-2 sentences of genuinely NEW understanding this session added to
+  /// the working formulation (not a session summary). Accumulates into the
+  /// case file so the picture deepens instead of freezing at intake.
+  /// Additive + .catch-defaulted: pre-CP4 reports still parse.
+  formulationUpdate: z.string().max(600).catch(''),
   riskScreen: CareRiskScreenSchema,
 });
 export type CareSessionReportBody = z.infer<typeof CareSessionReportBodySchema>;

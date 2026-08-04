@@ -85,6 +85,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     plan: caseFile.plan,
     planHistory: plans,
     arc,
+    // CP4 — the deepening picture, shown under the formulation on /care/plan.
+    formulationUpdates: caseFile.formulationUpdates,
     verdicts,
     instrumentSeries: instrumentRows,
     moodSeries: [
