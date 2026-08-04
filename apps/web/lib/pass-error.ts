@@ -29,6 +29,46 @@ export interface PassErrorView {
   detail: string | null;
 }
 
+/**
+ * What a pass failure is allowed to look like AT REST (S-hardening, 2026-08).
+ *
+ * `describePassError` below decides how a stored message is DISPLAYED; this
+ * decides what gets STORED. A serialised ZodError repeats the `received`
+ * value per issue — and in the incident that prompted this, the received
+ * value was the client's name, persisted a dozen times into a plaintext
+ * `errorMessage` column. Issue codes and paths diagnose the failure just as
+ * well; received values never survive to the database.
+ */
+export function compactPassError(raw: string): string {
+  const MAX = 500;
+  const t = raw.trim();
+  // Broader test than the display-side one: `looksLikeZodDump` requires
+  // length > 200 (a short message is fine to SHOW), but at rest even a
+  // truncated dump fragment can carry a received value — so any
+  // issue-list-shaped string is compacted regardless of length.
+  const dumpShaped =
+    t.startsWith('[') && (t.includes('"code":') || t.includes('invalid_enum_value'));
+  if (!dumpShaped) return t.length <= MAX ? t : `${t.slice(0, MAX - 1)}…`;
+  try {
+    const issues = JSON.parse(t) as Array<{ code?: string; path?: (string | number)[] }>;
+    if (Array.isArray(issues) && issues.length > 0) {
+      const paths = [
+        ...new Set(
+          issues.slice(0, 3).map((i) => (Array.isArray(i.path) ? i.path.join('.') : 'unknown')),
+        ),
+      ];
+      const code = issues[0]?.code ?? 'invalid';
+      return `AI output failed validation: ${issues.length} issue(s), e.g. ${code} at ${paths.join(', ')}`.slice(
+        0,
+        MAX,
+      );
+    }
+  } catch {
+    // Fall through — shaped like a dump but not parseable.
+  }
+  return 'AI output failed validation (unparseable issue list).';
+}
+
 export function describePassError(
   message: string | null | undefined,
   fallback: string,

@@ -9,6 +9,7 @@ import type { Differential } from '@prisma/client';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { runDifferential } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
+import { hasTranscript, resolveNoteTranscript } from '@/lib/note-transcript';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,7 +38,13 @@ export async function POST(
       language: true,
       psychologist: { select: { specialty: true } },
       noteDraft: {
-        select: { status: true, transcript: true, speakerSegments: true, content: true },
+        select: {
+          status: true,
+          transcript: true,
+          transcriptEncrypted: true,
+          speakerSegments: true,
+          content: true,
+        },
       },
     },
   });
@@ -46,7 +53,7 @@ export async function POST(
   }
 
   const draft = session.noteDraft;
-  if (!draft || draft.status !== 'COMPLETED' || !draft.transcript || !draft.content) {
+  if (!draft || draft.status !== 'COMPLETED' || !hasTranscript(draft) || !draft.content) {
     return NextResponse.json(
       {
         error: 'The encounter note is not ready yet. Generate the note first.',
@@ -72,12 +79,14 @@ export async function POST(
         }[]
       | null) ?? [];
 
+  const transcript = (await resolveNoteTranscript(session.psychologistId, draft)) ?? '';
+
   await runDifferential({
     sessionId: session.id,
     psychologistId: session.psychologistId,
     language: (session.language as ClinicalLocale | undefined) ?? 'en',
     specialty: session.psychologist.specialty,
-    transcript: draft.transcript,
+    transcript,
     speakerSegments: segments,
     encounterNote: note.data,
   });

@@ -37,6 +37,8 @@ import {
   transcribeChunkInline,
   type AssemblyInput,
 } from './transcribe-segment';
+import { compactPassError } from './pass-error';
+import { hasTranscript } from './note-transcript';
 
 /**
  * Synchronous orchestrator port — runs Pass 1 → Pass 2 inline on the
@@ -77,7 +79,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
   // safety filters were on or audio decode failed). Re-running gets
   // a fresh shot at the actual audio.
   const existing = await prisma.noteDraft.findUnique({ where: { sessionId } });
-  if (existing?.status === 'COMPLETED' && (existing.transcript?.length ?? 0) > 0) {
+  if (existing?.status === 'COMPLETED' && hasTranscript(existing)) {
     return { draftId: existing.id, status: 'COMPLETED' };
   }
 
@@ -118,10 +120,14 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       );
     }
 
+    // S-hardening: ciphertext-only when KMS succeeded. Plaintext is stored
+    // ONLY as the logged KMS-failure fallback — losing a transcript is worse
+    // than briefly holding it plaintext, but the healthy path leaves nothing
+    // readable at rest.
     await prisma.noteDraft.update({
       where: { id: draft.id },
       data: {
-        transcript: pass1.transcript,
+        transcript: transcriptEncrypted !== null ? null : pass1.transcript,
         transcriptEncrypted,
         speakerSegments: pass1.speakerSegments as unknown as Prisma.InputJsonValue,
         affectFeatures: pass1.affectFeatures as unknown as Prisma.InputJsonValue,
@@ -157,7 +163,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         `Re-record, or hit Retry to run transcription again on the same audio.`;
       await prisma.noteDraft.update({
         where: { id: draft.id },
-        data: { status: 'FAILED', errorMessage: message },
+        data: { status: 'FAILED', errorMessage: compactPassError(message) },
       });
       return { draftId: draft.id, status: 'FAILED', errorMessage: message };
     }
@@ -387,7 +393,9 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     const message = (e as Error).message;
     await prisma.noteDraft.update({
       where: { id: draft.id },
-      data: { status: 'FAILED', errorMessage: message },
+      // compact: a Zod dump embeds `received` values — clinical content —
+      // and errorMessage is a plaintext column. Codes + paths only at rest.
+      data: { status: 'FAILED', errorMessage: compactPassError(message) },
     });
     if (e instanceof CostCircuitOpenError) {
       recordCostCircuitTrip(e.meta.scope);
@@ -939,7 +947,9 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     await prisma.clinicalReport
       .update({
         where: { id: report.id },
-        data: { status: 'FAILED', errorMessage: message },
+        // compact: the Sajina incident persisted the client's name a dozen
+        // times inside a raw ZodError dump. Codes + paths only at rest.
+        data: { status: 'FAILED', errorMessage: compactPassError(message) },
       })
       .catch(() => {
         // Swallow — primary failure already logged below.

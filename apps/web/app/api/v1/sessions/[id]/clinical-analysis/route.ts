@@ -5,6 +5,7 @@ import { runClinicalAnalysis } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
 import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
+import { hasTranscript, resolveNoteTranscript } from '@/lib/note-transcript';
 
 type SpeakerSegmentRow = {
   speaker: 'therapist' | 'client' | 'unknown';
@@ -55,6 +56,7 @@ export async function POST(
         select: {
           status: true,
           transcript: true,
+          transcriptEncrypted: true,
           speakerSegments: true,
           content: true,
           errorMessage: true,
@@ -67,7 +69,7 @@ export async function POST(
   }
 
   const draft = session.noteDraft;
-  if (!draft || draft.status !== 'COMPLETED' || !draft.transcript || !draft.content) {
+  if (!draft || draft.status !== 'COMPLETED' || !hasTranscript(draft) || !draft.content) {
     // Sprint 56 hotfix — when Pass 1 returned an empty transcript the
     // draft is FAILED with an actionable errorMessage. Surface that
     // instead of the generic "must be COMPLETED first" so the UI can
@@ -91,6 +93,8 @@ export async function POST(
     );
   }
 
+  const transcript = (await resolveNoteTranscript(session.psychologistId, draft)) ?? '';
+
   // A draft can hold a full transcript and an EMPTY speaker timeline when Pass 1
   // transcribed a window but didn't diarize it. That used to hard-409 here, which
   // left the therapist with a finished note and a permanently dead AI copilot —
@@ -105,7 +109,7 @@ export async function POST(
       _sum: { durationMs: true },
     });
     segments = coverTranscriptWithSegments({
-      transcript: draft.transcript,
+      transcript,
       segments: [],
       startMs: 0,
       endMs: chunks._sum.durationMs ?? 0,
@@ -130,7 +134,7 @@ export async function POST(
     kind: session.kind,
     modality: session.modality,
     presentingConcerns: session.client.presentingConcerns,
-    transcript: draft.transcript,
+    transcript,
     speakerSegments: segments,
     note: draft.content as Parameters<typeof runClinicalAnalysis>[0]['note'],
   });

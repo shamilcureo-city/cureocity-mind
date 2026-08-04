@@ -209,8 +209,16 @@ export async function POST(
   // Only overwrite a stored transcript when this request actually carried one,
   // so a re-POST without a transcript can't clobber a good record with the
   // marker.
+  // S-hardening: ciphertext-only when KMS succeeded; plaintext survives only
+  // as the logged KMS-failure fallback (and the non-sensitive presence marker
+  // when the consult streamed no transcript at all).
   const transcriptWrite =
-    transcript.length > 0 ? { transcript: transcriptText, transcriptEncrypted } : {};
+    transcript.length > 0
+      ? {
+          transcript: transcriptEncrypted !== null ? null : transcriptText,
+          transcriptEncrypted,
+        }
+      : {};
 
   // Persist the note as a COMPLETED draft. The doctor signs it from the
   // encounter workspace — that signature is the attestation.
@@ -229,7 +237,9 @@ export async function POST(
       status: 'COMPLETED',
       content: note as unknown as Prisma.InputJsonValue,
       riskSeverity: 'NONE',
-      transcript: transcriptText,
+      // Same ciphertext-only rule as the update arm; the plaintext marker
+      // (transcript-less consult) is not sensitive and stays readable.
+      transcript: transcriptEncrypted !== null ? null : transcriptText,
       transcriptEncrypted,
       ...(rxPad !== undefined && { rxPad }),
     },

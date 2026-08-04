@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describePassError } from './pass-error';
+import { compactPassError, describePassError } from './pass-error';
 
 // The real thing, trimmed: one drifted enum repeated across every quote.
 const ZOD_DUMP = JSON.stringify(
@@ -40,5 +40,36 @@ describe('describePassError', () => {
     // looks like serialised issues.
     const long = `Couldn't reach the model. ${'This is a plain sentence. '.repeat(20)}`;
     expect(describePassError(long, 'fallback').detail).toBeNull();
+  });
+});
+
+describe('compactPassError — what a failure may look like AT REST', () => {
+  it('never persists received values (the client-name incident)', () => {
+    const out = compactPassError(ZOD_DUMP);
+    expect(out).not.toContain('Sajina');
+    expect(out).toContain('invalid_enum_value');
+    expect(out).toContain('speaker');
+    expect(out.length).toBeLessThanOrEqual(500);
+  });
+
+  it('keeps a hand-written message intact', () => {
+    const msg = 'Transcription came back empty. Check your microphone.';
+    expect(compactPassError(msg)).toBe(msg);
+  });
+
+  it('truncates an over-long plain message instead of storing megabytes', () => {
+    const long = 'x'.repeat(5_000);
+    expect(compactPassError(long).length).toBeLessThanOrEqual(500);
+  });
+
+  it('summarises distinct issue paths, not one per repetition', () => {
+    const out = compactPassError(ZOD_DUMP);
+    // 12 issues share one field shape — the summary names the count, not 12 paths.
+    expect(out).toContain('12 issue(s)');
+  });
+
+  it('degrades safely on a dump-shaped but unparseable message', () => {
+    const almost = '[{"code": "invalid_enum_value", "received": "Sajina", broken';
+    expect(compactPassError(almost)).not.toContain('Sajina');
   });
 });

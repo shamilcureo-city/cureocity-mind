@@ -92,6 +92,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     bytes: number;
     chunks: number;
   }> = [];
+  let segmentsDeleted = 0;
   for (const s of sessions) {
     if (extendedClientIds.has(s.clientId)) continue;
     const chunkIds = s.audioChunks.map((c) => c.id).filter(Boolean);
@@ -100,6 +101,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     await prisma.$transaction(async (tx) => {
       await tx.audioChunk.deleteMany({ where: { id: { in: chunkIds } } });
+      // S-hardening (2026-08) — the per-window TranscriptSegment rows are the
+      // same raw capture as the audio, in plaintext text form, and were never
+      // purged: they accumulated forever. They exist only to assemble the
+      // final transcript (which NoteDraft holds, encrypted), so they age out
+      // on exactly the audio's clock and consent rules.
+      const segs = await tx.transcriptSegment.deleteMany({ where: { sessionId: s.id } });
+      segmentsDeleted += segs.count;
       await writeAudit(
         {
           actorType: 'SYSTEM',
@@ -109,6 +117,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           metadata: {
             clientId: s.clientId,
             chunksDeleted: chunkIds.length,
+            segmentsDeleted: segs.count,
             bytesDeleted: bytes,
             sessionStatus: s.status,
             sessionEndedAt: s.endedAt?.toISOString() ?? null,
@@ -136,6 +145,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     sessionsConsidered: sessions.length,
     sessionsPurged: purgedSessions.length,
     chunksDeleted: totalChunks,
+    segmentsDeleted,
     bytesDeleted: totalBytes,
   });
 }

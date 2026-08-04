@@ -30,6 +30,7 @@ import { formatIstDateTime } from '@/lib/ist';
 import { languageNames } from '@/lib/language-names';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
+import { resolveNoteTranscript } from '@/lib/note-transcript';
 
 export const dynamic = 'force-dynamic';
 
@@ -194,6 +195,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         {tab === 'notes' && (
           <NotesTabPanel
             sessionId={id}
+            psychologistId={session.psychologistId}
             sessionStatus={session.status}
             sessionKind={sessionKind}
             clientId={session.clientId}
@@ -233,7 +235,9 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
           />
         )}
         {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
-        {tab === 'transcript' && <TranscriptTabPanel sessionId={id} />}
+        {tab === 'transcript' && (
+          <TranscriptTabPanel sessionId={id} psychologistId={therapist.id} />
+        )}
         {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
       </div>
     </Container>
@@ -242,6 +246,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
 async function NotesTabPanel({
   sessionId,
+  psychologistId,
   sessionStatus,
   sessionKind,
   clientId,
@@ -255,6 +260,7 @@ async function NotesTabPanel({
   signerName,
 }: {
   sessionId: string;
+  psychologistId: string;
   sessionStatus: SessionStatus;
   sessionKind: SessionKind;
   clientId: string;
@@ -275,7 +281,9 @@ async function NotesTabPanel({
     }),
   ]);
 
-  const draft: NoteDraft | null = draftRow ? toNoteDraft(draftRow) : null;
+  const draft: NoteDraft | null = draftRow
+    ? toNoteDraft(draftRow, await resolveNoteTranscript(psychologistId, draftRow))
+    : null;
   const signedNote: TherapyNote | null = signedRow
     ? {
         id: signedRow.id,
@@ -387,13 +395,20 @@ async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessi
   );
 }
 
-async function TranscriptTabPanel({ sessionId }: { sessionId: string }) {
+async function TranscriptTabPanel({
+  sessionId,
+  psychologistId,
+}: {
+  sessionId: string;
+  psychologistId: string;
+}) {
   const [draftRow, signedRow, lastCall] = await Promise.all([
     prisma.noteDraft.findUnique({
       where: { sessionId },
       select: {
         status: true,
         transcript: true,
+        transcriptEncrypted: true,
         speakerSegments: true,
         totalCostInr: true,
         errorMessage: true,
@@ -428,7 +443,7 @@ async function TranscriptTabPanel({ sessionId }: { sessionId: string }) {
         data={{
           status: draftRow.status,
           segments,
-          transcript: draftRow.transcript,
+          transcript: await resolveNoteTranscript(psychologistId, draftRow),
           totalCostInr: draftRow.totalCostInr.toString(),
           backend: lastCall ? `${lastCall.model} (${lastCall.region})` : null,
           errorMessage: draftRow.errorMessage,

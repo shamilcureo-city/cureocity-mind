@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requireAdmin } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
-import { encryptForTenant } from '@/lib/tenant-crypto';
+import { decryptForTenant, encryptForTenant } from '@/lib/tenant-crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -101,6 +101,82 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (dryRun) break;
   }
 
+  // ---------------------------------------------------------------------
+  // S-hardening (2026-08) — phase 3: VERIFIED plaintext scrub.
+  //
+  // For every draft still holding a plaintext transcript, confirm its
+  // ciphertext actually DECRYPTS under the live KMS key before nulling the
+  // plaintext. The verification is the whole point: early ciphertext may
+  // have been minted under the local-dev key (the client-pii lesson) and a
+  // blind SQL scrub would have destroyed the only readable copy of a
+  // clinical transcript. Rows that fail verification are left untouched and
+  // counted, so the operator can see exactly what remains. Cursor-paginated
+  // (not shrink-the-set) because unverifiable rows stay in the set.
+  //
+  // The retention purge marker is skipped — it's a non-sensitive tombstone.
+  // ---------------------------------------------------------------------
+  const PURGED_MARKER = '(transcript purged per data-retention policy)';
+  let scrubScanned = 0;
+  let transcriptScrubbed = 0;
+  let transcriptUnverifiable = 0;
+  let cursor: string | null = null;
+  let sIter = 0;
+  while (sIter++ < maxIterations) {
+    const drafts: Array<{
+      id: string;
+      transcript: string | null;
+      transcriptEncrypted: string | null;
+      session: { psychologistId: string };
+    }> = await prisma.noteDraft.findMany({
+      where: {
+        transcript: { not: null },
+        NOT: { transcript: PURGED_MARKER },
+      },
+      orderBy: { id: 'asc' },
+      take: batchSize,
+      ...(cursor !== null && { cursor: { id: cursor }, skip: 1 }),
+      select: {
+        id: true,
+        transcript: true,
+        transcriptEncrypted: true,
+        session: { select: { psychologistId: true } },
+      },
+    });
+    if (drafts.length === 0) break;
+    cursor = drafts[drafts.length - 1]!.id;
+    for (const d of drafts) {
+      if (!d.transcript) continue;
+      scrubScanned++;
+      if (dryRun) continue;
+      try {
+        // Ensure ciphertext exists (phase 2 normally has), then round-trip it.
+        let ct = d.transcriptEncrypted;
+        if (!ct) {
+          ct = await encryptForTenant(d.session.psychologistId, d.transcript);
+          await prisma.noteDraft.update({
+            where: { id: d.id },
+            data: { transcriptEncrypted: ct },
+          });
+        }
+        const roundTrip = await decryptForTenant(d.session.psychologistId, ct);
+        if (roundTrip !== d.transcript) {
+          transcriptUnverifiable++;
+          continue;
+        }
+        await prisma.noteDraft.update({ where: { id: d.id }, data: { transcript: null } });
+        transcriptScrubbed++;
+      } catch (e) {
+        transcriptUnverifiable++;
+        errors.push({ clientId: d.id, field: 'transcript-scrub', message: (e as Error).message });
+      }
+    }
+  }
+  // What still holds plaintext after this run — the number that must hit 0
+  // before the column-drop migration ships.
+  const plaintextRemaining = await prisma.noteDraft.count({
+    where: { transcript: { not: null }, NOT: { transcript: PURGED_MARKER } },
+  });
+
   await writeAudit({
     actorType: 'PSYCHOLOGIST',
     actorPsychologistId: auth.value.psychologistId,
@@ -119,6 +195,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       fullNameEncrypted,
       transcriptScanned,
       transcriptEncrypted: transcriptEncryptedCount,
+      scrubScanned,
+      transcriptScrubbed,
+      transcriptUnverifiable,
+      plaintextRemaining,
       errorCount: errors.length,
     },
   });
@@ -133,6 +213,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     fullNameEncrypted,
     transcriptScanned,
     transcriptEncrypted: transcriptEncryptedCount,
+    scrubScanned,
+    transcriptScrubbed,
+    transcriptUnverifiable,
+    plaintextRemaining,
     errors,
   });
 }

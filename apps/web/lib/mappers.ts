@@ -68,12 +68,18 @@ export async function toClient(row: ClientRow): Promise<Client> {
   };
 }
 
-export function toNoteDraft(row: NoteDraftRow): NoteDraft {
+/**
+ * S-hardening: the transcript is passed in RESOLVED (via
+ * `resolveNoteTranscript`) rather than read off the row — the plaintext
+ * column is being retired, so a caller that hasn't decrypted has nothing
+ * valid to map.
+ */
+export function toNoteDraft(row: NoteDraftRow, transcript: string | null): NoteDraft {
   return {
     id: row.id,
     sessionId: row.sessionId,
     status: row.status,
-    transcript: row.transcript,
+    transcript,
     speakerSegments:
       row.speakerSegments === null ? null : (row.speakerSegments as unknown as SpeakerSegment[]),
     affectFeatures:
