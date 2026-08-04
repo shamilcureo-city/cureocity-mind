@@ -60,6 +60,13 @@ export interface CareCaseFile {
   lastReportSummary?: string;
   homeworkLine?: string;
   recentThemes: string[];
+  /// CP4 — accumulated formulationUpdate lines from recent treatment reports
+  /// (oldest → newest): the working picture deepens instead of freezing at
+  /// intake.
+  formulationUpdates: string[];
+  /// CP5-lite — the last treatment report showed goal regression (BACK, no
+  /// FORWARD): revisit the current protocol step instead of advancing.
+  lastSessionRegressed: boolean;
   verdicts: CareInstrumentVerdict[];
   measures: CareMeasure[];
   worseningVerdict: boolean;
@@ -170,10 +177,19 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
   let lastReportSummary: string | undefined;
   let homeworkLine: string | undefined;
   const recentThemes: string[] = [];
+  const formulationUpdates: string[] = [];
+  let lastSessionRegressed = false;
   const bodyOf = (b: unknown): Record<string, unknown> =>
     b && typeof b === 'object' ? (b as Record<string, unknown>) : {};
   if (lastTreatmentReport) {
     const sr = bodyOf(bodyOf(lastTreatmentReport.body)['sessionReport']);
+    // CP5-lite — regression-aware arc: goals moved BACK and none FORWARD
+    // means the skill did not land; the next session revisits the step.
+    const gp = Array.isArray(sr['goalProgress']) ? (sr['goalProgress'] as unknown[]) : [];
+    const movements = gp
+      .map((g) => (g && typeof g === 'object' ? (g as Record<string, unknown>)['movement'] : null))
+      .filter((m): m is string => typeof m === 'string');
+    lastSessionRegressed = movements.includes('BACK') && !movements.includes('FORWARD');
     // Lead the continuity line with the warm headline (the emotional
     // through-line) then the detail, so the persona can "start from where we
     // left off" grounded in the last report rather than a cold recap.
@@ -191,6 +207,10 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
   }
   for (const r of recentReports) {
     const sr = bodyOf(bodyOf(r.body)['sessionReport']);
+    // CP4 — accumulate the deepening picture (recentReports are newest-first;
+    // unshift restores chronological reading order).
+    const fu = typeof sr['formulationUpdate'] === 'string' ? sr['formulationUpdate'].trim() : '';
+    if (fu) formulationUpdates.unshift(fu);
     const insights = Array.isArray(sr['insights']) ? sr['insights'] : [];
     for (const ins of insights as Array<Record<string, unknown>>) {
       if (typeof ins['observation'] !== 'string') continue;
@@ -241,6 +261,8 @@ export async function getCareCaseFile(careUserId: string): Promise<CareCaseFile>
     lastReportSummary,
     homeworkLine,
     recentThemes: recentThemes.slice(0, 5),
+    formulationUpdates: formulationUpdates.slice(0, 3),
+    lastSessionRegressed,
     verdicts,
     measures,
     worseningVerdict,
@@ -330,10 +352,15 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
   // back to step 1 (which made session 7 replay session 1 — the no-progression
   // property of a chat thread). Index by completed count, capped at the arc's
   // length; past the arc, switch to a maintenance / generalisation framing.
-  const stepIdx = cf.treatmentSessionsCompleted;
+  // CP5-lite — regression-aware: when the last report showed goals moving
+  // BACK (and none FORWARD), revisit the step instead of marching on. Bounded
+  // to one step back; the arc still ends in maintenance.
+  const rawIdx = cf.treatmentSessionsCompleted;
+  const stepIdx = cf.lastSessionRegressed ? Math.max(0, rawIdx - 1) : rawIdx;
+  const revisit = cf.lastSessionRegressed && stepIdx < steps.length;
   const protocolStep =
     stepIdx < steps.length
-      ? `Step ${stepIdx + 1} of ${steps.length} in the ${track} arc — ${steps[stepIdx]!}`
+      ? `${revisit ? 'REVISIT — last time this skill did not land (goals slipped); go slower and smaller, do not introduce anything new: ' : ''}Step ${stepIdx + 1} of ${steps.length} in the ${track} arc — ${steps[stepIdx]!}`
       : `The ${steps.length}-step ${track} arc is complete — this is MAINTENANCE & generalisation. Do NOT restart from step 1: consolidate the tools that have helped, apply them to whatever they bring today, rehearse independent use, and watch for relapse signs.`;
   const label = (k: string) => (k === 'PHQ9' ? 'PHQ-9' : k === 'GAD7' ? 'GAD-7' : k);
   const verdictsLine =
@@ -365,8 +392,16 @@ export function buildSessionPrompt(input: BuildSessionPromptInput): {
     caseFile: {
       sessionNumber: cf.completedCount + 1,
       // CP-A (V6) — pass the FULL working formulation, not a truncated first
-      // line, so Meera holds the whole case, not a headline.
-      formulation: cf.plan?.formulation ?? '',
+      // line, so Meera holds the whole case, not a headline. CP4 appends the
+      // accumulated per-session updates so the picture keeps deepening.
+      formulation: [
+        cf.plan?.formulation ?? '',
+        cf.formulationUpdates.length > 0
+          ? `What we have learned since: ${cf.formulationUpdates.join(' ')}`
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
       goalsLine,
       lastSummary: cf.lastReportSummary,
       homeworkLine: cf.homeworkLine,

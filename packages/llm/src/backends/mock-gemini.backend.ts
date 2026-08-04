@@ -1761,6 +1761,8 @@ export class MockGeminiCareReportBackend implements IPassCareReportBackend {
             whyItHelps: 'catching the thought early shrinks it before it snowballs',
           },
           reflectionPrompt: '[mock] What would you tell a friend who "made it a thing"?',
+          formulationUpdate:
+            '[mock] The "should" voice looks learned from the family rule that rest must be earned — softening it may matter as much as challenging the thoughts.',
           riskScreen,
         },
       };

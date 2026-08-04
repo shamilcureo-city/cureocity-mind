@@ -39,6 +39,7 @@ interface PlanPayload {
   }>;
   instrumentSeries: Array<{ instrumentKey: string; totalScore: number }>;
   arc: { track: string; total: number; done: number; complete: boolean } | null;
+  formulationUpdates?: string[];
 }
 
 const STATUS_STYLE: Record<string, { label: string; cls: string }> = {
@@ -117,6 +118,20 @@ export function CarePlanView() {
             Why we think this is happening
           </span>
           <p className="mt-2 whitespace-pre-line text-sm leading-relaxed">{plan.formulation}</p>
+          {(data.formulationUpdates ?? []).length > 0 ? (
+            <div className="mt-3 border-t border-[var(--color-line-soft)] pt-3">
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[var(--color-ink-3)]">
+                What we&apos;ve learned since
+              </span>
+              <ul className="mt-1.5 space-y-1">
+                {(data.formulationUpdates ?? []).map((u, i) => (
+                  <li key={i} className="text-[13px] leading-relaxed text-[var(--color-ink-2)]">
+                    · {u}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <p className="mt-3 text-[12px] text-[var(--color-ink-3)]">
             A working picture, in plain words — not a diagnosis. It can change as we learn more.
           </p>
