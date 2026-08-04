@@ -56,8 +56,11 @@ export async function POST(
 
   const { careUser } = auth.value;
   const caseFile = await getCareCaseFile(auth.value.careUserId);
-  // CP2 — the live structure engine (phase rail) is a server flag, default off.
-  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] === 'true';
+  // CP2 — the live structure engine (phase rail + worksheet + moments +
+  // homework). ON by default — the unstructured session is the product's
+  // named failure mode ("voice ChatGPT with a timer"); opt OUT with
+  // CARE_LIVE_STRUCTURE=false if a live model misbehaves with the tools.
+  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] !== 'false';
   const { prompt, sessionCapMin } = buildSessionPrompt({
     displayName: careUser.displayName,
     personaName: careUser.personaName,

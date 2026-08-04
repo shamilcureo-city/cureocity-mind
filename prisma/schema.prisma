@@ -2931,6 +2931,10 @@ enum AuditAction {
   CARE_NUDGE_SENT
   CARE_NUDGE_SUPPRESSED
   CARE_HOMEWORK_TICKED
+  CARE_LIVE_AGENDA_SET // CP2 — live agenda recorded from a set_agenda tool call
+  CARE_LIVE_MOMENT_LOGGED // CP2 — a key clinical moment captured live (log_moment)
+  CARE_LIVE_HOMEWORK_AGREED // CP2 — homework agreed live in-session (assign_homework)
+  CARE_LIVE_EVENT_RECORDED // CP2 — a batch of live structure events persisted
   PLAN_DICTATION_PROPOSED // Sprint DS12 — voice plan-edit proposal produced (apply lands RX_PAD_EDITED)
   FORMULATION_CONFIRMED // SL1 — a new living-formulation version confirmed (accepted suggestion or authored)
   AGREEMENT_RECORDED // SL1 — a session agreement recorded / follow-up marked
@@ -3442,13 +3446,42 @@ model CareSession {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  careUser CareUser    @relation(fields: [careUserId], references: [id], onDelete: Cascade)
-  report   CareReport?
+  careUser   CareUser        @relation(fields: [careUserId], references: [id], onDelete: Cascade)
+  report     CareReport?
+  liveEvents CareLiveEvent[]
 
   @@index([careUserId, createdAt])
   @@index([status, createdAt])
   @@index([startTokenHash])
   @@map("care_sessions")
+}
+
+/// CP2 — the live structure engine's persisted work record: one row per
+/// silent tool signal from the session (phase marks, key moments, worksheet
+/// fields, homework-as-agreed). Mirrored browser → server on the 3s flush
+/// cadence, idempotent by (careSessionId, seq). Pass 13 stitches these into
+/// the report input so the report is grounded in the work actually done.
+model CareLiveEvent {
+  id            String @id @default(cuid())
+  careSessionId String
+
+  /// Monotonic per-session sequence number — dedupe key.
+  seq     Int
+  /// CareLiveEventType (contracts/care-live-tools.ts): AGENDA_SET |
+  /// PHASE_MARKED | MOMENT_LOGGED | WORKSHEET_UPDATED | HOMEWORK_ASSIGNED.
+  type    String
+  /// The tool call's validated args, stored as-is.
+  payload Json
+  /// Milliseconds since session start.
+  atMs    Int
+
+  createdAt DateTime @default(now())
+
+  careSession CareSession @relation(fields: [careSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([careSessionId, seq])
+  @@index([careSessionId, createdAt])
+  @@map("care_live_events")
 }
 
 model CareReport {

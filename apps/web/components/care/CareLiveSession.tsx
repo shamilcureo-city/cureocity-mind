@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import type { CareTurn, RedeemLiveTokenResponse } from '@cureocity/contracts';
+import type { CareLiveEvent, CareTurn, RedeemLiveTokenResponse } from '@cureocity/contracts';
 import { CARE_SESSION_PHASES } from '@cureocity/llm';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { LivePlayback } from '@/lib/audio/live-playback';
@@ -70,10 +70,23 @@ export function CareLiveSession({
   const [muted, setMuted] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [remainingSec, setRemainingSec] = useState(capMin * 60);
-  // CP2 (flagged: CARE_LIVE_STRUCTURE) — the live phase rail. structureOn is
-  // echoed by the mint; livePhase is advanced by the model's mark_phase calls.
+  // CP2 (flagged: CARE_LIVE_STRUCTURE) — the live structure engine. structureOn
+  // is echoed by the mint; livePhase is advanced by the model's mark_phase
+  // calls; the worksheet fills from worksheet_update; moments flash a quiet
+  // "noted"; homework renders once agreed. Every signal also queues as a
+  // CareLiveEvent, mirrored to the server on the 3s flush cadence.
   const [structureOn, setStructureOn] = useState(false);
   const [livePhase, setLivePhase] = useState<string | null>(null);
+  const [worksheet, setWorksheet] = useState<Record<string, string>>({});
+  const [momentNoted, setMomentNoted] = useState(false);
+  const [homeworkTitle, setHomeworkTitle] = useState<string | null>(null);
+  const structureOnRef = useRef(false);
+  const pendingEventsRef = useRef<CareLiveEvent[]>([]);
+  const eventSeqRef = useRef(0);
+  const phasesSeenRef = useRef<Set<string>>(new Set());
+  const coverageDeclinedRef = useRef(false);
+  const momentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  structureOnRef.current = structureOn;
 
   const wsRef = useRef<WebSocket | null>(null);
   const playbackRef = useRef<LivePlayback | null>(null);
@@ -181,11 +194,37 @@ export function CareLiveSession({
     }
   }, [sessionId]);
 
+  // CP2 — queue a live structure event (tool signal) for the server mirror.
+  const queueEvent = useCallback((type: CareLiveEvent['type'], payload: Record<string, unknown>) => {
+    pendingEventsRef.current.push({
+      seq: eventSeqRef.current++,
+      type,
+      payload,
+      atMs: Math.max(0, Date.now() - startedAtRef.current),
+    });
+  }, []);
+
+  // CP2 — mirror queued events on the same 3s cadence as the transcript.
+  const flushEvents = useCallback(async () => {
+    const batch = pendingEventsRef.current.splice(0, 50);
+    if (batch.length === 0) return;
+    try {
+      await fetch(`/api/v1/care/sessions/${sessionId}/live-events`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ events: batch }),
+      });
+    } catch {
+      pendingEventsRef.current.unshift(...batch); // retry on the next tick
+    }
+  }, [sessionId]);
+
   const endSession = useCallback(async () => {
     if (phaseRef.current === 'ending' || phaseRef.current === 'ended') return;
     setPhase('ending');
     void micStopRef.current();
     await flushTurns();
+    await flushEvents();
     wsRef.current?.close();
     await playbackRef.current?.close();
     try {
@@ -202,7 +241,7 @@ export function CareLiveSession({
     }
     setPhase('ended');
     router.push(`/care/session/${sessionId}/report`);
-  }, [flushTurns, router, sessionId]);
+  }, [flushTurns, flushEvents, router, sessionId]);
   const endSessionRef = useRef(endSession);
   endSessionRef.current = endSession;
 
@@ -297,25 +336,90 @@ export function CareLiveSession({
       const toolCall = msg['toolCall'] as
         | { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> }
         | undefined;
+      // CP2 — one silent ack shape for every structure tool, so the model is
+      // never left waiting on a function response.
+      const ackTool = (id: string | undefined, name: string): void => {
+        const ws = wsRef.current;
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              tool_response: {
+                function_responses: [{ id, name, response: { acknowledged: true } }],
+              },
+            }),
+          );
+        }
+      };
       for (const call of toolCall?.functionCalls ?? []) {
         if (call.name === 'mark_phase') {
-          // CP2 — silent phase signal; advance the rail and ack so the model
-          // is not left waiting on a function response.
-          const p =
-            typeof call.args?.['phase'] === 'string' ? (call.args['phase'] as string) : null;
-          if (p) setLivePhase(p);
-          const ws = wsRef.current;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(
-              JSON.stringify({
-                tool_response: {
-                  function_responses: [
-                    { id: call.id, name: 'mark_phase', response: { acknowledged: true } },
-                  ],
-                },
-              }),
-            );
+          // CP2 — silent phase signal; advance the rail, remember coverage,
+          // persist the mark.
+          const p = typeof call.args?.['phase'] === 'string' ? (call.args['phase'] as string) : null;
+          if (p) {
+            setLivePhase(p);
+            phasesSeenRef.current.add(p);
+            queueEvent('PHASE_MARKED', { phase: p });
           }
+          ackTool(call.id, 'mark_phase');
+        } else if (call.name === 'log_moment') {
+          // CP2 — a key clinical moment, with the user's verbatim words.
+          const text = typeof call.args?.['text'] === 'string' ? (call.args['text'] as string) : '';
+          if (text) {
+            queueEvent('MOMENT_LOGGED', {
+              type: typeof call.args?.['type'] === 'string' ? call.args['type'] : 'INSIGHT',
+              text: text.slice(0, 300),
+              quote:
+                typeof call.args?.['quote'] === 'string'
+                  ? (call.args['quote'] as string).slice(0, 500)
+                  : undefined,
+            });
+            setMomentNoted(true);
+            if (momentTimerRef.current) clearTimeout(momentTimerRef.current);
+            momentTimerRef.current = setTimeout(() => setMomentNoted(false), 2200);
+          }
+          ackTool(call.id, 'log_moment');
+        } else if (call.name === 'worksheet_update') {
+          // CP2 — today's work fills the shared sheet the user watches.
+          const fields =
+            call.args?.['fields'] && typeof call.args['fields'] === 'object'
+              ? (call.args['fields'] as Record<string, unknown>)
+              : {};
+          const clean: Record<string, string> = {};
+          for (const [k, v] of Object.entries(fields)) {
+            if (typeof v === 'string' && v.trim()) clean[k.slice(0, 60)] = v.slice(0, 400);
+          }
+          if (Object.keys(clean).length > 0) {
+            setWorksheet((prev) => ({ ...prev, ...clean }));
+            queueEvent('WORKSHEET_UPDATED', {
+              worksheetKey:
+                typeof call.args?.['worksheetKey'] === 'string'
+                  ? call.args['worksheetKey']
+                  : 'THOUGHT_RECORD',
+              fields: clean,
+            });
+          }
+          ackTool(call.id, 'worksheet_update');
+        } else if (call.name === 'assign_homework') {
+          // CP2 — homework-as-agreed, structured; renders + persists.
+          const title =
+            typeof call.args?.['title'] === 'string' ? (call.args['title'] as string) : '';
+          if (title) {
+            const steps = Array.isArray(call.args?.['steps'])
+              ? (call.args['steps'] as unknown[])
+                  .filter((s): s is string => typeof s === 'string')
+                  .slice(0, 5)
+              : [];
+            setHomeworkTitle(title.slice(0, 160));
+            queueEvent('HOMEWORK_ASSIGNED', {
+              title: title.slice(0, 160),
+              steps,
+              whyItHelps:
+                typeof call.args?.['whyItHelps'] === 'string'
+                  ? (call.args['whyItHelps'] as string).slice(0, 300)
+                  : '',
+            });
+          }
+          ackTool(call.id, 'assign_homework');
         } else if (call.name === 'end_session') {
           // CP1 — the model has no reliable clock. DECLINE a close it proposes
           // while there is still real time left (the honest close is driven by
@@ -345,13 +449,44 @@ export function CareLiveSession({
                 },
               }),
             );
+          } else if (
+            // CP2 coverage gate — an INTAKE must not close without the safety
+            // check. Decline ONCE, naming the gap; if the model still can't
+            // cover it (or time truly runs out), the close proceeds and the
+            // report discloses the gap. The hard cap is never extended.
+            structureOnRef.current &&
+            kind === 'INTAKE' &&
+            !phasesSeenRef.current.has('RISK') &&
+            remainingSecRef.current > 120 &&
+            !coverageDeclinedRef.current &&
+            ws &&
+            ws.readyState === WebSocket.OPEN
+          ) {
+            coverageDeclinedRef.current = true;
+            ws.send(
+              JSON.stringify({
+                tool_response: {
+                  function_responses: [
+                    {
+                      id: call.id,
+                      name: 'end_session',
+                      response: {
+                        accepted: false,
+                        instruction:
+                          'Do not close yet — you have not gently asked about thoughts of self-harm or not wanting to be alive. Ask that now, with care, then close.',
+                      },
+                    },
+                  ],
+                },
+              }),
+            );
           } else {
             void endSessionRef.current();
           }
         }
       }
     },
-    [pushTurn],
+    [pushTurn, queueEvent, kind],
   );
 
   // CP1 — open (or re-open) the live socket, wire the shared handlers, send the
@@ -539,7 +674,10 @@ export function CareLiveSession({
 
     cancelledRef.current = false;
     void connect();
-    flushTimerRef.current = setInterval(() => void flushTurns(), 3000);
+    flushTimerRef.current = setInterval(() => {
+      void flushTurns();
+      void flushEvents();
+    }, 3000);
     const countdown = setInterval(() => {
       // CP1 — the clock runs while the session is live OR reconnecting (a drop
       // must not stop the clock), but not before it has ever gone live.
@@ -658,6 +796,37 @@ export function CareLiveSession({
           </button>
         ) : null}
       </div>
+
+      {momentNoted ? (
+        <div className="pointer-events-none flex justify-center pb-1">
+          <span className="rounded-full bg-[#1c352c] px-3 py-1 text-[11px] text-[#9fd3bd]">
+            ✦ noted
+          </span>
+        </div>
+      ) : null}
+
+      {structureOn && Object.keys(worksheet).length > 0 ? (
+        <div className="mx-auto mb-2 w-full max-w-md px-5">
+          <div className="rounded-xl border border-[#24423a] bg-[#152622] px-4 py-3">
+            <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#5f8a79]">
+              Today’s sheet — filled as you work
+            </div>
+            <dl className="mt-1.5 space-y-1">
+              {Object.entries(worksheet).map(([k, v]) => (
+                <div key={k} className="text-[12px] leading-snug">
+                  <dt className="inline font-semibold text-[#8fb3a4]">{k.replace(/_/g, ' ')}: </dt>
+                  <dd className="inline text-[#cfe4d8]">{v}</dd>
+                </div>
+              ))}
+            </dl>
+            {homeworkTitle ? (
+              <div className="mt-2 border-t border-[#24423a] pt-2 text-[12px] text-[#e9d8a6]">
+                ◻ This week: {homeworkTitle}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex justify-center gap-3 pb-4">
         <button

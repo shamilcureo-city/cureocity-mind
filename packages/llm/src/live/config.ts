@@ -141,14 +141,59 @@ export interface CareLiveSetupInput {
  */
 export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, unknown> {
   const functionDeclarations: Record<string, unknown>[] = [];
-  // CP2 (flagged) — the silent phase signal that advances the on-screen rail.
+  // CP2 (flagged) — the silent structure tools: the phase rail, the shared
+  // worksheet, key moments, and homework-as-agreed. All silent: the model
+  // never announces a tool call; the UI renders them.
   if (input.phaseTool) {
-    functionDeclarations.push({
-      name: 'mark_phase',
-      description:
-        'Silently signal that you have moved the session into a new phase. Call it the MOMENT you move into a phase, passing the phase key from the list in your instructions. NEVER say the phase name aloud — it only updates the on-screen progress rail for the user.',
-      parameters: { type: 'OBJECT', properties: { phase: { type: 'STRING' } } },
-    });
+    functionDeclarations.push(
+      {
+        name: 'mark_phase',
+        description:
+          'Silently signal that you have moved the session into a new phase. Call it the MOMENT you move into a phase, passing the phase key from the list in your instructions. NEVER say the phase name aloud — it only updates the on-screen progress rail for the user.',
+        parameters: { type: 'OBJECT', properties: { phase: { type: 'STRING' } } },
+      },
+      {
+        name: 'log_moment',
+        description:
+          'Silently record a clinically important moment. type: INSIGHT (they connected something), QUOTE (their own words worth keeping), or SKILL (they used or learned a skill). text = why it mattered, one short sentence. quote = their VERBATIM words when you have them — never a paraphrase. Never announce that you noted it.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            type: { type: 'STRING', enum: ['INSIGHT', 'QUOTE', 'SKILL'] },
+            text: { type: 'STRING' },
+            quote: { type: 'STRING' },
+          },
+        },
+      },
+      {
+        name: 'worksheet_update',
+        description:
+          "Silently write today's work onto the shared on-screen worksheet AS YOU GO — the user watches it fill in. worksheetKey: THOUGHT_RECORD | ACTIVITY_PLAN | GROUNDING_KIT | SLEEP_PLAN (your instructions name today's sheet). fields: an object of short plain-language strings using the field names from your instructions. Call it each time a piece of the work lands (you can update a field you set before). Never read the sheet aloud.",
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            worksheetKey: {
+              type: 'STRING',
+              enum: ['THOUGHT_RECORD', 'ACTIVITY_PLAN', 'GROUNDING_KIT', 'SLEEP_PLAN'],
+            },
+            fields: { type: 'OBJECT' },
+          },
+        },
+      },
+      {
+        name: 'assign_homework',
+        description:
+          "Call ONCE, when you and the user have AGREED the week's practice (after they say yes to it): title = the tiny if-then habit in their words, steps = 1-5 very small steps, whyItHelps = one sentence linking it to their goal.",
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            title: { type: 'STRING' },
+            steps: { type: 'ARRAY', items: { type: 'STRING' } },
+            whyItHelps: { type: 'STRING' },
+          },
+        },
+      },
+    );
   }
   functionDeclarations.push({
     name: 'end_session',

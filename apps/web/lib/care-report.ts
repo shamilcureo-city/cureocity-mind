@@ -52,13 +52,29 @@ export async function runCareReport(careSessionId: string): Promise<RunCareRepor
       ? JSON.stringify(caseFile.verdicts)
       : undefined;
 
+  // CP2 — the live work record: the session's persisted tool signals (key
+  // moments with verbatim quotes, worksheet fields, homework-as-agreed).
+  // Folded into the case-file JSON so the report is grounded in the work
+  // that actually happened — homework MUST match what was agreed live, and
+  // insights should quote the logged moments, not invent new ones.
+  const liveEvents = await prisma.careLiveEvent.findMany({
+    where: { careSessionId },
+    orderBy: { seq: 'asc' },
+    select: { type: true, payload: true, atMs: true },
+  });
+
   let report: CareReportV1;
   try {
     const result = await modelRouter().passCareReport({
       careSessionId,
       kind: session.kind,
       transcriptText,
-      caseFileJson: caseFileJsonForReport(caseFile, session.moodBefore, session.moodAfter),
+      caseFileJson: caseFileJsonForReport(
+        caseFile,
+        session.moodBefore,
+        session.moodAfter,
+        liveEvents,
+      ),
       verdictsJson,
       language: session.careUser.preferredLanguage,
     });
