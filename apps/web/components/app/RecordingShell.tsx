@@ -82,7 +82,9 @@ export function RecordingShell({ clients, initialClientId = null, defaultCapture
       shell.kind === 'recording' || shell.kind === 'uploading' ? shell.ready.sessionId : null;
     setShell({ kind: 'pick', intent: 'live' });
     if (sessionId) {
-      router.push(`/app/sessions/${sessionId}`);
+      // Land on the copilot board, not Notes — the review work lives there and
+      // the flat tab bar gives no sequencing cue that it is waiting.
+      router.push(`/app/sessions/${sessionId}?tab=copilot`);
     } else {
       router.refresh();
     }

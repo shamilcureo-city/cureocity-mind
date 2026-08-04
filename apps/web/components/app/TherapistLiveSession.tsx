@@ -408,9 +408,9 @@ export function TherapistLiveSession({
         }),
       });
       if (meterRef.current) void persistMeter(meterRef.current);
-      // The note is a COMPLETED NoteDraft now — the workspace shows it ready to
-      // review + sign, with no generation wait.
-      router.push(`/app/sessions/${sessionId}`);
+      // The note is a COMPLETED NoteDraft now. Land on the copilot board —
+      // review + sign live there, and no generation wait stands in the way.
+      router.push(`/app/sessions/${sessionId}?tab=copilot`);
       router.refresh();
     } catch (e) {
       setError(`Couldn't save the note: ${(e as Error).message}`);
@@ -695,7 +695,10 @@ export function TherapistLiveSession({
                 Continue as recording
               </Button>
             )}
-            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
+            <Button
+              variant="secondary"
+              onClick={() => router.push(`/app/sessions/${sessionId}?tab=copilot`)}
+            >
               Open session
             </Button>
           </div>
@@ -712,7 +715,10 @@ export function TherapistLiveSession({
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={() => void start()}>Try again</Button>
-            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
+            <Button
+              variant="secondary"
+              onClick={() => router.push(`/app/sessions/${sessionId}?tab=copilot`)}
+            >
               Open session
             </Button>
           </div>

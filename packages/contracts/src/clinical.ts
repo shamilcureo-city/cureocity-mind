@@ -489,10 +489,21 @@ export type ConfirmClinicalSectionInput = z.infer<typeof ConfirmClinicalSectionI
 /// Apply ONE plan suggestion (a diff from a follow-up report) to the client's
 /// active plan, producing a new plan version.
 /// POST /api/v1/clinical-reports/[id]/plan-suggestion
-export const AcceptPlanSuggestionInputSchema = z.object({
-  /** Index into the report's `planSuggestions` array. */
-  suggestionIndex: z.number().int().nonnegative(),
-});
+export const AcceptPlanSuggestionInputSchema = z
+  .object({
+    /** Index into the report's `planSuggestions` array. */
+    suggestionIndex: z.number().int().nonnegative().optional(),
+    /**
+     * Apply several suggestions in ONE new plan version (the board's
+     * "Apply all"). Indexes reference the report's original array; the route
+     * orders the operations so goalIndex references stay meaningful. Atomic:
+     * if any suggestion cannot apply, nothing is versioned.
+     */
+    suggestionIndexes: z.array(z.number().int().nonnegative()).min(1).max(12).optional(),
+  })
+  .refine((v) => (v.suggestionIndex !== undefined) !== (v.suggestionIndexes !== undefined), {
+    message: 'Provide exactly one of suggestionIndex or suggestionIndexes.',
+  });
 export type AcceptPlanSuggestionInput = z.infer<typeof AcceptPlanSuggestionInputSchema>;
 
 export const AcceptIntakeDiagnosisInputSchema = z.object({

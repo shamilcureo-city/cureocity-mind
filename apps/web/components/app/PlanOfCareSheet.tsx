@@ -783,9 +783,8 @@ const GOAL_STATUS_LABEL: Record<TreatmentGoalStatus, string> = {
 };
 
 /**
- * The measure line for one goal, with its live status control — same cycle +
- * route as PlanHero: PATCH persists to the TreatmentGoalProgress side table;
- * the plan itself is never rewritten.
+ * The measure line for one goal, with its live status control: PATCH persists
+ * to the TreatmentGoalProgress side table; the plan itself is never rewritten.
  *
  * The status used to be a bare 10px dot whose only clue that it was
  * interactive was an aria-label, so in practice nobody discovered that goal

@@ -47,14 +47,16 @@ const VALID_TABS: ReadonlySet<TabKey> = new Set([
   'client',
 ]);
 
-const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['close', 'review', 'progress']);
+const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['session', 'progress']);
 
-// Copilot IA redesign (R1) renamed the sub keys: session→review,
-// journey→progress. PC1 moved the plan out of the copilot entirely — the
-// old 'plan'/'formulation' subs now land on the Plan of care tab (handled
-// in SessionPage below, since they cross a tab boundary).
+// Sub-key history: R1 renamed session→review + journey→progress, SL1 added
+// 'close', and the CP merge collapsed close+review into ONE 'session' board.
+// PC1 moved the plan out of the copilot entirely — the old
+// 'plan'/'formulation' subs land on the Plan of care tab (handled in
+// SessionPage below, since they cross a tab boundary).
 const LEGACY_SUB_MAP: Record<string, CopilotSubKey> = {
-  session: 'review',
+  close: 'session',
+  review: 'session',
   journey: 'progress',
   measures: 'progress',
   briefing: 'progress',
@@ -76,7 +78,7 @@ function parseTab(raw: string | undefined): { tab: TabKey; subOverride: CopilotS
   // Mindmap now lives on Transcript, reflection on Notes (R1 relocation),
   // but old bookmarks for the clinical brief still land on the Review board.
   if (raw === 'clinical-brief') {
-    return { tab: 'copilot', subOverride: 'review' };
+    return { tab: 'copilot', subOverride: 'session' };
   }
   if (raw === 'mindmap') {
     return { tab: 'transcript', subOverride: null };
@@ -87,14 +89,12 @@ function parseTab(raw: string | undefined): { tab: TabKey; subOverride: CopilotS
   return { tab: 'notes', subOverride: null };
 }
 
-// Null means "no explicit sub" — the page picks the default from session
-// state (SL1: a completed-but-unsigned session lands on Close the loop).
 function parseSub(raw: string | undefined): CopilotSubKey | null {
   if (raw && (VALID_SUBS as ReadonlySet<string>).has(raw)) {
     return raw as CopilotSubKey;
   }
   if (raw && raw in LEGACY_SUB_MAP) return LEGACY_SUB_MAP[raw]!;
-  return raw ? 'review' : null;
+  return raw ? 'session' : null;
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
@@ -136,17 +136,10 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   const sessionKind: SessionKind = session.kind;
   const isIntake = sessionKind === 'INTAKE';
 
-  // SL1 — with no explicit sub, a completed session that hasn't been signed
-  // lands on "Close the loop" (the end-of-session ritual); everything else
-  // keeps the Review default.
-  let sub: CopilotSubKey = explicitSub ?? 'review';
-  if (explicitSub === null && tab === 'copilot' && session.status === 'COMPLETED') {
-    const signedExists = await prisma.therapyNote.findUnique({
-      where: { sessionId: id },
-      select: { id: true },
-    });
-    if (!signedExists) sub = 'close';
-  }
+  // CP merge: ONE Session board serves review + close-out + sign, so there is
+  // nothing to pick between — the default is simply 'session'. (SL1's
+  // signed-state query to choose between two sub-tabs went with the merge.)
+  const sub: CopilotSubKey = explicitSub ?? 'session';
 
   // Sprint 73 — case thread: where this document sits in the client's
   // arc + what carried over. Defensive: a compose failure must never

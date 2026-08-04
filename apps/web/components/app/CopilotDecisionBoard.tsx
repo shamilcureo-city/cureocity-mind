@@ -4,8 +4,11 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type {
+  AgreementSpeaker,
+  AllianceRating,
   AssessmentGapPurpose,
   CarriedQuestion,
+  CaseFormulationV1,
   ClinicalAssessmentGap,
   ClinicalCrisisFlag,
   ClinicalCrisisSeverity,
@@ -15,15 +18,20 @@ import type {
   ClinicalReport,
   ClinicalSectionConfirmation,
   ClinicalTreatmentPlan,
+  FormulationSuggestion,
   InitialAssessmentBriefV1,
+  SessionAgreementDto,
   SessionKind,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { PassErrorDetail } from './PassErrorDetail';
 import { describePassError } from '@/lib/pass-error';
+import { isSuggestionApplied } from '@/lib/formulation-applied';
+import { postSignNote } from '@/lib/sign-note';
 import { Card } from '../ui/Card';
-import { PlanEditor } from './ClinicalBriefTab';
+import { PlanEditor } from './PlanEditor';
+import { ShareModal } from './ShareModal';
 
 // ============================================================================
 // Sprint TSC — the copilot decision board.
@@ -80,6 +88,26 @@ export interface CaseRecordSnapshot {
   carriedQuestions: CarriedQuestion[];
 }
 
+/**
+ * The end-of-session facts the wrap card needs — what used to be the separate
+ * "Close the loop" sub-tab. One board, one pass, one signature.
+ */
+export interface CloseoutData {
+  clientName: string;
+  hasContactPhone: boolean;
+  hasContactEmail: boolean;
+  preferredLanguage: string;
+  noteReady: boolean;
+  noteContent: unknown | null;
+  signed: { signedAt: string; signerName: string } | null;
+  agreements: SessionAgreementDto[];
+  alliance: AllianceRating | null;
+  /** Pass 3's evidence-anchored formulation diffs (treatment reports only). */
+  formulationSuggestions: FormulationSuggestion[];
+  /** The active formulation body, used to hide already-applied suggestions. */
+  formulationBody: CaseFormulationV1 | null;
+}
+
 interface Props {
   sessionId: string;
   clientId: string;
@@ -93,6 +121,7 @@ interface Props {
   /// separately from the report DTO (which doesn't carry it).
   reviewedAt: string | null;
   record: CaseRecordSnapshot;
+  closeout: CloseoutData;
 }
 
 /** The kind-normalised AI reading the five steps render from. */
@@ -124,6 +153,7 @@ export function CopilotDecisionBoard({
   initialBrief,
   reviewedAt,
   record,
+  closeout,
 }: Props) {
   const router = useRouter();
   const isIntake = sessionKind === 'INTAKE';
@@ -300,19 +330,38 @@ export function CopilotDecisionBoard({
     [report, router],
   );
 
-  const acceptPlanSuggestion = useCallback(
-    async (suggestionIndex: number): Promise<void> => {
+  // One route call whether it's one diff or "Apply all" — a batch mints ONE
+  // new plan version instead of a version per click.
+  const applyPlanSuggestions = useCallback(
+    async (indexes: number[]): Promise<void> => {
       if (!report) throw new Error('No report to apply against.');
+      const body =
+        indexes.length === 1 ? { suggestionIndex: indexes[0] } : { suggestionIndexes: indexes };
       const res = await fetch(`/api/v1/clinical-reports/${report.id}/plan-suggestion`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ suggestionIndex }),
+        body: JSON.stringify(body),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
       router.refresh();
     },
     [report, router],
+  );
+
+  const acceptFormulationSuggestion = useCallback(
+    async (suggestionIndex: number): Promise<void> => {
+      if (!report) throw new Error('No report to accept against.');
+      const res = await fetch(`/api/v1/clients/${clientId}/formulation`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'accept', reportId: report.id, suggestionIndex }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      router.refresh();
+    },
+    [report, clientId, router],
   );
 
   const acceptIntakeCrisis = useCallback(async (): Promise<void> => {
@@ -401,10 +450,30 @@ export function CopilotDecisionBoard({
     data.crisisFlags.length > 0 &&
     (highest === 'high' || highest === 'critical');
 
+  const safetyStep = (
+    <SafetyStep
+      flags={data.crisisFlags}
+      isIntake={isIntake}
+      confirmation={confirmations?.crisis ?? null}
+      safetyPlanConfirmedAt={record.safetyPlanConfirmedAt}
+      onAcknowledge={
+        isIntake ? acceptIntakeCrisis : () => patchSection('crisis', { action: 'accept' })
+      }
+    />
+  );
+
+  // Tolerant wrapper: signing stamps the review as finished, but a session can
+  // be signed from the Notes tab with no report row at all — never let the
+  // stamp turn a successful signature into an error.
+  const finishReviewQuietly = async (): Promise<void> => {
+    if (!report) return;
+    await finishReview().catch(() => {});
+  };
+
   return (
     <div className="space-y-5">
       <header className="flex flex-wrap items-center gap-3">
-        <h2 className="font-serif text-2xl">Review this session</h2>
+        <h2 className="font-serif text-2xl">This session</h2>
         <span className="inline-flex items-center gap-2 rounded-full border border-[var(--color-line)] bg-[var(--color-surface)] px-3.5 py-1.5 text-xs text-[var(--color-ink-2)]">
           <AiChip inline />
           Suggestions only — nothing joins the record until you accept it.
@@ -425,25 +494,60 @@ export function CopilotDecisionBoard({
       </header>
       {genError && <p className="text-sm text-[var(--color-warn)]">{genError}</p>}
 
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-        {/* ================= AI lane ================= */}
+      {crisisBlocking ? (
+        /* The gate, redone: the flag is the ONLY content on screen — no wall of
+           greyed-out cards with the explanation hiding underneath them. The
+           gate's strength is unchanged; the crisis just got louder. */
         <div className="space-y-4">
-          <LaneLabel>AI suggests — in the order you'd work</LaneLabel>
+          <LaneLabel>AI suggests — safety comes before everything</LaneLabel>
+          {safetyStep}
+          <Card className="border-dashed p-8 text-center">
+            <p className="text-sm font-semibold text-[var(--color-ink-2)]">
+              Remaining steps unlock after the safety review above
+            </p>
+            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+              Impression · Ask next · Plan · Wrap up &amp; sign — nothing is lost, it&rsquo;s
+              waiting.
+            </p>
+          </Card>
+        </div>
+      ) : (
+        <>
+          {/* Phones can't hold a sidebar: the record lane collapses to an
+              expandable "On record" strip pinned above the steps. */}
+          <details className="lg:hidden">
+            <summary className="flex cursor-pointer list-none items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-[var(--color-line-soft)] bg-white/70 px-4 py-2.5 text-xs font-semibold [&::-webkit-details-marker]:hidden">
+              <span className="h-2 w-2 flex-none rounded-full bg-[#2fae76]" aria-hidden />
+              On record
+              <span className="font-normal text-[var(--color-ink-3)]">
+                {record.diagnoses.length > 0
+                  ? `Dx ${record.diagnoses.find((d) => d.isPrimary)?.icd11Code ?? record.diagnoses[0]!.icd11Code}`
+                  : 'no Dx yet'}
+                {' · '}
+                {record.plan ? `Plan v${record.plan.version}` : 'no plan'}
+                {record.safetyPlanConfirmedAt ? ' · ✓ safety' : ''}
+                {` · ${record.carriedQuestions.length} carried`}
+              </span>
+              <span aria-hidden className="ml-auto text-[var(--color-ink-3)]">
+                ▾
+              </span>
+            </summary>
+            <div className="mt-2">
+              <RecordLane
+                record={record}
+                crisisFlags={data.crisisFlags}
+                measuresHref={measuresHref}
+              />
+            </div>
+          </details>
 
-          <SafetyStep
-            flags={data.crisisFlags}
-            isIntake={isIntake}
-            confirmation={confirmations?.crisis ?? null}
-            safetyPlanConfirmedAt={record.safetyPlanConfirmedAt}
-            onAcknowledge={
-              isIntake ? acceptIntakeCrisis : () => patchSection('crisis', { action: 'accept' })
-            }
-          />
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+            {/* ================= AI lane ================= */}
+            <div className="space-y-4">
+              <LaneLabel>AI suggests — in the order you&rsquo;d work</LaneLabel>
 
-          <div className={crisisBlocking ? 'space-y-4 opacity-40' : 'space-y-4'}>
-            <div
-              className={crisisBlocking ? 'pointer-events-none select-none space-y-4' : 'space-y-4'}
-            >
+              {safetyStep}
+
               <ImpressionStep
                 sessionId={sessionId}
                 isIntake={isIntake}
@@ -452,6 +556,9 @@ export function CopilotDecisionBoard({
                 candidates={data.candidates}
                 confirmation={confirmations?.diagnosis ?? null}
                 recordDiagnoses={record.diagnoses}
+                formulationSuggestions={closeout.formulationSuggestions}
+                formulationBody={closeout.formulationBody}
+                onAcceptFormulation={acceptFormulationSuggestion}
                 onAcceptTreatment={(selected, primaryInSelected, reason, keepCodes) =>
                   patchSection('diagnosis', {
                     action: 'modify',
@@ -487,53 +594,42 @@ export function CopilotDecisionBoard({
                 therapies={data.therapies}
                 confirmation={confirmations?.plan ?? null}
                 recordPlan={record.plan}
-                planHref={`/app/sessions/${sessionId}?tab=copilot&sub=plan`}
+                planHref={`/app/sessions/${sessionId}?tab=plan-of-care`}
                 onAccept={() => patchSection('plan', { action: 'accept' })}
                 onModify={(edits, reason) =>
                   patchSection('plan', { action: 'modify', reason, edits })
                 }
-                onAcceptSuggestion={acceptPlanSuggestion}
+                onApplySuggestions={applyPlanSuggestions}
                 onDraftPlan={acceptIntakePlan}
               />
 
-              <BaselineStep
-                recommendedInstruments={data.recommendedInstruments}
-                instruments={record.instruments}
-                measuresHref={measuresHref}
-              />
-
-              <WrapUpStep
+              <WrapUpSignStep
+                sessionId={sessionId}
+                clientId={clientId}
                 isIntake={isIntake}
                 hasCrisis={data.crisisFlags.length > 0}
                 crisisAcknowledged={crisisAcknowledged}
                 record={record}
                 reviewedAt={reviewedAt}
                 measuresHref={measuresHref}
-                onFinish={finishReview}
+                recommendedInstruments={data.recommendedInstruments}
+                closeout={closeout}
+                onFinishReview={finishReviewQuietly}
               />
             </div>
-            {crisisBlocking && (
-              <p className="text-center text-xs font-medium text-[var(--color-warn)]">
-                Acknowledge the safety review above to continue with the rest of the reading.
-              </p>
-            )}
-          </div>
-        </div>
 
-        {/* ================= Your record lane ================= */}
-        {/* Dimmed under an unacknowledged high/critical flag so the therapist
-            can't skip ahead to the record's other decisions. (R0 · D·18) */}
-        <div
-          className={
-            crisisBlocking
-              ? 'pointer-events-none select-none space-y-2 opacity-40 lg:sticky lg:top-4'
-              : 'space-y-2 lg:sticky lg:top-4'
-          }
-        >
-          <LaneLabel>Your case record — what you've decided</LaneLabel>
-          <RecordLane record={record} crisisFlags={data.crisisFlags} measuresHref={measuresHref} />
-        </div>
-      </div>
+            {/* ================= Your record lane ================= */}
+            <div className="hidden space-y-2 lg:sticky lg:top-4 lg:block">
+              <LaneLabel>Your case record — what you&rsquo;ve decided</LaneLabel>
+              <RecordLane
+                record={record}
+                crisisFlags={data.crisisFlags}
+                measuresHref={measuresHref}
+              />
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -785,6 +881,9 @@ function ImpressionStep({
   candidates,
   confirmation,
   recordDiagnoses,
+  formulationSuggestions,
+  formulationBody,
+  onAcceptFormulation,
   onAcceptTreatment,
   onAcceptIntake,
 }: {
@@ -795,6 +894,12 @@ function ImpressionStep({
   candidates: ClinicalDiagnosisCandidate[];
   confirmation: ClinicalSectionConfirmation | null;
   recordDiagnoses: RecordDiagnosis[];
+  /// Formulation-as-diff updates (ex "Close the loop" moment 2): the AI's
+  /// evidence-anchored proposed edits to the living case formulation. They
+  /// belong with the impression — same question, "what does this session mean".
+  formulationSuggestions: FormulationSuggestion[];
+  formulationBody: CaseFormulationV1 | null;
+  onAcceptFormulation: (index: number) => Promise<void>;
   onAcceptTreatment: (
     selected: ClinicalDiagnosisCandidate[],
     primaryInSelected: number | null,
@@ -828,6 +933,27 @@ function ImpressionStep({
   const [error, setError] = useState<string | null>(null);
   // "Change decision" reopens the accepted view for a fresh accept.
   const [reopened, setReopened] = useState(false);
+  // Formulation updates — accepted per suggestion, saved immediately.
+  const [fAccepted, setFAccepted] = useState<Set<number>>(new Set());
+  const [fBusy, setFBusy] = useState<number | null>(null);
+  const [fError, setFError] = useState<string | null>(null);
+
+  const acceptFormulation = async (i: number) => {
+    setFBusy(i);
+    setFError(null);
+    try {
+      await onAcceptFormulation(i);
+      setFAccepted((prev) => new Set(prev).add(i));
+    } catch (e) {
+      setFError((e as Error).message);
+    } finally {
+      setFBusy(null);
+    }
+  };
+
+  const visibleFormulation = formulationSuggestions
+    .map((sug, i) => ({ sug, i }))
+    .filter(({ sug, i }) => !fAccepted.has(i) && !isSuggestionApplied(formulationBody, sug));
 
   const confirmed = confirmation !== null && confirmation.status !== 'PENDING';
   const intakeAccepted = isIntake && recordDiagnoses.some((d) => d.sessionId === sessionId);
@@ -1025,14 +1151,9 @@ function ImpressionStep({
                       AI {Math.round(c.confidence * 100)}%
                     </span>
                   </span>
-                  <button
-                    type="button"
-                    onClick={() => toggleExpand(i)}
-                    aria-label={isOpen ? 'Collapse' : 'Expand'}
-                    className="flex-none text-xs text-[var(--color-ink-3)]"
-                  >
+                  <span aria-hidden className="flex-none text-xs text-[var(--color-ink-3)]">
                     {isOpen ? '▴' : '▾'}
-                  </button>
+                  </span>
                 </div>
                 {isOpen && (
                   <div className="mt-1.5 rounded-xl bg-[var(--color-surface-soft)] p-3.5 text-[12.5px]">
@@ -1142,6 +1263,51 @@ function ImpressionStep({
         </div>
       )}
 
+      {(visibleFormulation.length > 0 || fAccepted.size > 0) && (
+        <div className="mt-3 border-t border-[var(--color-line-soft)] pt-3">
+          <p className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
+            Formulation updates from this session
+          </p>
+          <div className="space-y-2">
+            {visibleFormulation.map(({ sug, i }) => (
+              <div
+                key={i}
+                className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone="accent">{FORMULATION_TARGET_LABEL[sug.target]}</Badge>
+                  <Badge tone="muted">{sug.action === 'ADD' ? 'add' : 'revise'}</Badge>
+                </div>
+                <p className="mt-2 text-sm">{sug.text}</p>
+                {sug.evidenceQuote && (
+                  <p className="mt-1.5 border-l-2 border-[var(--color-line)] pl-2 text-xs italic text-[var(--color-ink-3)]">
+                    &ldquo;{sug.evidenceQuote}&rdquo;
+                  </p>
+                )}
+                <div className="mt-2">
+                  <Act onClick={() => void acceptFormulation(i)} disabled={fBusy !== null}>
+                    {fBusy === i ? 'Accepting…' : 'Accept'}
+                  </Act>
+                </div>
+              </div>
+            ))}
+          </div>
+          {fAccepted.size > 0 && (
+            <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+              ✓ {fAccepted.size} accepted — the formulation versioned on the{' '}
+              <Link
+                href={`/app/sessions/${sessionId}?tab=plan-of-care`}
+                className="font-medium text-[var(--color-accent)] hover:underline"
+              >
+                Plan of care tab
+              </Link>
+              .
+            </p>
+          )}
+          {fError && <p className="mt-2 text-xs text-[var(--color-warn)]">{fError}</p>}
+        </div>
+      )}
+
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         {done ? (
           <>
@@ -1178,6 +1344,16 @@ function ImpressionStep({
     </Step>
   );
 }
+
+const FORMULATION_TARGET_LABEL: Record<FormulationSuggestion['target'], string> = {
+  NARRATIVE: 'Narrative',
+  CYCLE: 'Maintaining cycle',
+  PREDISPOSING: 'Predisposing',
+  PRECIPITATING: 'Precipitating',
+  PERPETUATING: 'Perpetuating',
+  PROTECTIVE: 'Protective',
+  PREDICTION: 'Prediction',
+};
 
 // ============================================================================
 // Step 3 — Ask next session (the assessment ENGINE, as a carry-able checklist).
@@ -1238,7 +1414,7 @@ function AskNextStep({
   const [selected, setSelected] = useState<Set<string>>(initialSelected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [savedOnce, setSavedOnce] = useState(false);
 
   // Carried questions this board doesn't manage (from other sessions, or
   // wording that no longer matches a current gap) are preserved on save.
@@ -1248,20 +1424,12 @@ function AskNextStep({
   );
   const atCap = untouched.length + selected.size >= MAX_CARRIED;
 
-  const dirty =
-    selected.size !== initialSelected.size || [...selected].some((q) => !initialSelected.has(q));
-
-  const toggle = (q: string) => {
-    setSaved(false);
-    setSelected((s) => {
-      const next = new Set(s);
-      if (next.has(q)) next.delete(q);
-      else if (untouched.length + next.size < MAX_CARRIED) next.add(q);
-      return next;
-    });
-  };
-
-  const save = async () => {
+  // One save model for the whole board: a tap IS the save. This step used to
+  // be the only one with a batch "Carry N" button — the one place a decision
+  // could silently evaporate because a therapist between clients never pressed
+  // it. Controls disable while the POST is in flight so rapid ticks can't race
+  // the wholesale-replace endpoint; on failure the tick visibly reverts.
+  const persist = async (next: Set<string>, prev: Set<string>) => {
     setBusy(true);
     setError(null);
     try {
@@ -1269,7 +1437,7 @@ function AskNextStep({
       const questions: CarriedQuestion[] = [
         ...untouched,
         ...gaps
-          .filter((g) => selected.has(g.question))
+          .filter((g) => next.has(g.question))
           .map((g) => ({
             question: g.question.slice(0, 500),
             rationale: g.rationale ? g.rationale.slice(0, 1000) : null,
@@ -1284,13 +1452,25 @@ function AskNextStep({
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
-      setSaved(true);
+      setSavedOnce(true);
       onSaved();
     } catch (e) {
+      setSelected(prev);
       setError((e as Error).message);
     } finally {
       setBusy(false);
     }
+  };
+
+  const toggle = (q: string) => {
+    if (busy) return;
+    const prev = selected;
+    const next = new Set(prev);
+    if (next.has(q)) next.delete(q);
+    else if (untouched.length + next.size < MAX_CARRIED) next.add(q);
+    else return;
+    setSelected(next);
+    void persist(next, prev);
   };
 
   // Group gaps by the job they do, in engine order. Empty groups are skipped.
@@ -1303,6 +1483,8 @@ function AskNextStep({
     [gaps],
   );
 
+  const effectiveCount = untouched.length + selected.size;
+
   return (
     <Step
       no={3}
@@ -1310,7 +1492,7 @@ function AskNextStep({
       sub={
         gaps.length === 0
           ? 'The AI found nothing material still open.'
-          : `${gaps.length} still open · tick the ones to seed next session's AI opening brief. Regenerated each session — shrinks as your assessment completes.`
+          : `${gaps.length} still open · saves as you tick — nothing else to press. Regenerated each session; shrinks as your assessment completes.`
       }
     >
       {gaps.length === 0 ? (
@@ -1350,13 +1532,15 @@ function AskNextStep({
                   return (
                     <label
                       key={g.question}
-                      className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-[var(--color-line-soft)] p-3"
+                      className={`flex items-start gap-2.5 rounded-xl border border-[var(--color-line-soft)] p-3 ${
+                        busy ? 'cursor-wait opacity-70' : 'cursor-pointer'
+                      }`}
                     >
                       <input
                         type="checkbox"
                         checked={checked}
                         onChange={() => toggle(g.question)}
-                        disabled={!checked && atCap}
+                        disabled={busy || (!checked && atCap)}
                         className="mt-1 accent-[var(--color-accent)]"
                       />
                       <span className="min-w-0">
@@ -1383,24 +1567,19 @@ function AskNextStep({
 
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
         {gaps.length > 0 && (
-          <Act primary onClick={() => void save()} disabled={busy || !dirty}>
+          <span className="text-[11px] text-[var(--color-ink-3)]">
             {busy
               ? 'Saving…'
-              : selected.size > 0
-                ? `Carry ${selected.size} to next session`
-                : 'Clear carried questions'}
-          </Act>
-        )}
-        {saved && <DoneChip>Will open the next pre-session brief</DoneChip>}
-        {atCap && (
-          <span className="text-[11px] text-[var(--color-ink-3)]">
-            Carry limit reached ({MAX_CARRIED}).
+              : `Carrying ${effectiveCount} of ${MAX_CARRIED}${
+                  untouched.length > 0
+                    ? ` · includes ${untouched.length} carried earlier — they count toward the cap`
+                    : ''
+                }`}
           </span>
         )}
-        {untouched.length > 0 && (
-          <span className="text-[11px] text-[var(--color-ink-3)]">
-            +{untouched.length} carried earlier (kept).
-          </span>
+        {savedOnce && !busy && <DoneChip>Will open the next pre-session brief</DoneChip>}
+        {atCap && !busy && (
+          <span className="text-[11px] text-[var(--color-ink-3)]">Carry limit reached.</span>
         )}
         {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
       </div>
@@ -1437,7 +1616,7 @@ function PlanStep({
   planHref,
   onAccept,
   onModify,
-  onAcceptSuggestion,
+  onApplySuggestions,
   onDraftPlan,
 }: {
   isIntake: boolean;
@@ -1454,8 +1633,9 @@ function PlanStep({
   planHref: string;
   onAccept: () => Promise<void>;
   onModify: (edits: unknown, reason: string) => Promise<void>;
-  /// Apply one plan suggestion (by index) → a new plan version.
-  onAcceptSuggestion: (suggestionIndex: number) => Promise<void>;
+  /// Apply plan suggestions (by index). One call = one new plan version,
+  /// whether it's a single diff or the whole batch.
+  onApplySuggestions: (indexes: number[]) => Promise<void>;
   /// Intake only — create/replace treatment-plan v1 from the drafted plan.
   onDraftPlan: (plan: ClinicalTreatmentPlan) => Promise<void>;
 }) {
@@ -1556,8 +1736,8 @@ function PlanStep({
     return (
       <Step
         no={4}
-        title="Plan update"
-        sub="This session's plan decision is in your record — the plan itself lives on the Plan tab."
+        title="Plan"
+        sub="This session's plan decision is in your record — the plan itself lives on the Plan of care tab."
       >
         <div className="rounded-xl border border-[var(--color-line)] bg-[var(--color-accent-soft)] p-3.5">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1606,7 +1786,7 @@ function PlanStep({
         recordPlan={recordPlan}
         planHref={planHref}
         aiPlanDetail={aiPlanDetail}
-        onAcceptSuggestion={onAcceptSuggestion}
+        onApplySuggestions={onApplySuggestions}
       />
     );
   }
@@ -1614,8 +1794,8 @@ function PlanStep({
   return (
     <Step
       no={4}
-      title="Suggested plan"
-      sub="Accepting versions this client's treatment plan — yours to edit, and every future session builds on it."
+      title="Plan"
+      sub="No plan on record yet — accepting versions this suggestion as plan v1, yours to edit, and every future session builds on it."
     >
       {aiPlanDetail}
 
@@ -1681,24 +1861,39 @@ function PlanDiffStep({
   recordPlan,
   planHref,
   aiPlanDetail,
-  onAcceptSuggestion,
+  onApplySuggestions,
 }: {
   suggestions: ClinicalPlanSuggestion[];
   recordPlan: RecordPlan;
   planHref: string;
   aiPlanDetail: ReactNode;
-  onAcceptSuggestion: (index: number) => Promise<void>;
+  onApplySuggestions: (indexes: number[]) => Promise<void>;
 }) {
   const [applied, setApplied] = useState<Set<number>>(new Set());
-  const [busy, setBusy] = useState<number | null>(null);
+  const [busy, setBusy] = useState<'all' | number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const apply = async (i: number) => {
     setBusy(i);
     setError(null);
     try {
-      await onAcceptSuggestion(i);
+      await onApplySuggestions([i]);
       setApplied((s) => new Set(s).add(i));
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remaining = suggestions.map((_, i) => i).filter((i) => !applied.has(i));
+
+  const applyAll = async () => {
+    setBusy('all');
+    setError(null);
+    try {
+      await onApplySuggestions(remaining);
+      setApplied(new Set(suggestions.map((_, i) => i)));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -1749,8 +1944,8 @@ function PlanDiffStep({
   return (
     <Step
       no={4}
-      title="Plan update"
-      sub="Suggested edits to your existing plan — accept each one you agree with; each makes a new plan version. Your plan is never replaced wholesale."
+      title="Plan"
+      sub="Suggested edits to your existing plan — apply the ones you agree with. Your plan is never replaced wholesale."
     >
       {planSummary}
       <div className="mt-3 space-y-2">
@@ -1777,16 +1972,26 @@ function PlanDiffStep({
                 ) : null}
               </div>
               {isApplied ? (
-                <DoneChip>On the plan of care</DoneChip>
+                <DoneChip>Applied</DoneChip>
               ) : (
                 <Act primary onClick={() => void apply(i)} disabled={busy !== null}>
-                  {busy === i ? 'Adding…' : '＋ Add to plan of care'}
+                  {busy === i ? 'Applying…' : 'Apply'}
                 </Act>
               )}
             </div>
           );
         })}
       </div>
+      {remaining.length > 1 && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
+          <Act onClick={() => void applyAll()} disabled={busy !== null}>
+            {busy === 'all' ? 'Applying…' : `Apply all ${remaining.length}`}
+          </Act>
+          <span className="text-[11px] text-[var(--color-ink-3)]">
+            One tap, one new plan version — not one per change.
+          </span>
+        </div>
+      )}
       {error && <p className="mt-2 text-xs text-[var(--color-warn)]">{error}</p>}
       <details className="mt-3">
         <summary className="cursor-pointer text-xs font-medium text-[var(--color-accent)]">
@@ -1897,8 +2102,8 @@ function IntakePlanStep({
   return (
     <Step
       no={4}
-      title="Suggested approaches"
-      sub="Tick what you'd start with — drafting opens the plan editor pre-filled, and saving creates treatment plan v1."
+      title="Plan"
+      sub="Tick the approaches you'd start with — drafting opens the plan editor pre-filled, and saving creates treatment plan v1."
     >
       {therapies.length === 0 ? (
         <p className="text-sm text-[var(--color-ink-2)]">
@@ -1920,10 +2125,15 @@ function IntakePlanStep({
 
       {editing ? (
         <div className="mt-3.5">
+          {/* requireReason=false: the intake-plan route never reads the reason,
+              so forcing a typed sentence on every single intake was pure
+              friction. The treatment modify path (above) keeps it required —
+              there it persists into the plan's version history. */}
           <PlanEditor
             initialPlan={seed}
             busy={busy}
             error={error}
+            requireReason={false}
             onCancel={() => {
               setEditing(false);
               setError(null);
@@ -2009,7 +2219,10 @@ function seedIntakePlan(approaches: ClinicalRecommendedTherapy[]): ClinicalTreat
 }
 
 // ============================================================================
-// Step 5 — Lock in a baseline.
+// The in-app administerable instruments. The old Step 5 ("Lock in a baseline")
+// was deleted: it carried zero on-board actions — three links to the same
+// measures page that the wrap checklist and the record lane already link to.
+// The measures decision lives on the wrap checklist row now.
 // ============================================================================
 
 const ADMINISTERABLE: { key: string; label: string }[] = [
@@ -2017,105 +2230,163 @@ const ADMINISTERABLE: { key: string; label: string }[] = [
   { key: 'GAD7', label: 'GAD-7' },
 ];
 
-function BaselineStep({
-  recommendedInstruments,
-  instruments,
-  measuresHref,
-}: {
-  recommendedInstruments: string[];
-  instruments: RecordInstrument[];
-  measuresHref: string;
-}) {
-  const latestByKey = useMemo(() => {
-    const m = new Map<string, RecordInstrument>();
-    for (const r of instruments) if (!m.has(r.instrumentKey)) m.set(r.instrumentKey, r);
-    return m;
-  }, [instruments]);
-
-  const otherRecommendations = recommendedInstruments.filter(
-    (k) => !ADMINISTERABLE.some((a) => a.key === normaliseInstrumentKey(k)),
-  );
-
-  // UI truth pass — once a first score exists this step is a RE-measure, not
-  // a baseline. Calling a session-6 remission score a "baseline" was
-  // clinically wrong copy.
-  const hasAnyScore = instruments.length > 0;
-
-  return (
-    <Step
-      no={5}
-      title={hasAnyScore ? 'Track the measures' : 'Lock in a baseline'}
-      sub={
-        hasAnyScore
-          ? 'Change is read against the earlier scores on file.'
-          : 'Two minutes now — every later session measures change against it.'
-      }
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        {ADMINISTERABLE.map((a) => {
-          const latest = latestByKey.get(a.key);
-          return latest ? (
-            <span key={a.key} className="inline-flex items-center gap-2">
-              <DoneChip>
-                {a.label} — {latest.score} ({latest.severity.toLowerCase()}) ·{' '}
-                {formatDate(latest.administeredAt)}
-              </DoneChip>
-              <Link
-                href={measuresHref}
-                className="text-xs font-medium text-[var(--color-accent)] underline"
-              >
-                re-administer
-              </Link>
-            </span>
-          ) : (
-            <Link
-              key={a.key}
-              href={measuresHref}
-              className="rounded-full border border-[var(--color-accent)] bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[var(--color-accent-hover)]"
-            >
-              Administer {a.label}
-            </Link>
-          );
-        })}
-      </div>
-      {otherRecommendations.length > 0 && (
-        <p className="mt-2 text-xs text-[var(--color-ink-3)]">
-          Also suggested: {otherRecommendations.join(', ')} (not yet administerable in-app).
-        </p>
-      )}
-    </Step>
-  );
-}
-
 // ============================================================================
-// Step 6 — Wrap up. A deterministic checklist of the five decisions with
-// anything outstanding linked, plus "Finish review" — the board's "save"
-// moment. It's a CHECKPOINT (persists reviewedAt + audits), not a lock:
-// every decision above stays revisable afterwards.
+// Step 5 — Wrap up & sign. The board's terminal card and the session's ONE
+// ceremony: the deterministic checklist of the five decisions, the session's
+// agreements (in the client's words), the one-tap alliance read, then "Sign
+// and close" — the same note signature the Notes tab offers (WebAuthn-stepped
+// via postSignNote), which also stamps the review as finished. It is a
+// checkpoint, not a lock: every decision above stays revisable after.
+//
+// This card absorbed the old "Close the loop" sub-tab. Its unique moments
+// (agreements, alliance, the signature) live here; its duplicated ones (note
+// excerpt, measure rows, crisis restatement) were deleted — each of those
+// facts already has exactly one home on this board.
 // ============================================================================
 
-function WrapUpStep({
+const ALLIANCE_OPTIONS: { key: AllianceRating; label: string; hint: string }[] = [
+  { key: 'ROUGH', label: 'Rough', hint: 'strained today' },
+  { key: 'FLAT', label: 'Flat', hint: 'went through the motions' },
+  { key: 'GOOD', label: 'Good', hint: 'connected' },
+  { key: 'STRONG', label: 'Strong', hint: 'real work happened' },
+];
+
+function WrapUpSignStep({
+  sessionId,
+  clientId,
   isIntake,
   hasCrisis,
   crisisAcknowledged,
   record,
   reviewedAt,
   measuresHref,
-  onFinish,
+  recommendedInstruments,
+  closeout,
+  onFinishReview,
 }: {
+  sessionId: string;
+  clientId: string;
   isIntake: boolean;
   hasCrisis: boolean;
   crisisAcknowledged: boolean;
   record: CaseRecordSnapshot;
   reviewedAt: string | null;
   measuresHref: string;
-  onFinish: () => Promise<void>;
+  recommendedInstruments: string[];
+  closeout: CloseoutData;
+  onFinishReview: () => Promise<void>;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  // ----- agreements (in the client's words; next session's Prepare reads these)
+  const [agreements, setAgreements] = useState<SessionAgreementDto[]>(closeout.agreements);
+  const [agreementText, setAgreementText] = useState('');
+  const [agreementSpeaker, setAgreementSpeaker] = useState<AgreementSpeaker>('CLIENT');
+  const [agreementBusy, setAgreementBusy] = useState(false);
+  const [agreementError, setAgreementError] = useState<string | null>(null);
+
+  const addAgreement = async (): Promise<void> => {
+    const text = agreementText.trim();
+    if (!text) return;
+    setAgreementBusy(true);
+    setAgreementError(null);
+    try {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/agreements`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, speaker: agreementSpeaker }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Could not record the agreement (${res.status})`);
+      }
+      const body = (await res.json()) as { agreement: SessionAgreementDto };
+      setAgreements((prev) => [...prev, body.agreement]);
+      setAgreementText('');
+    } catch (e) {
+      setAgreementError((e as Error).message);
+    } finally {
+      setAgreementBusy(false);
+    }
+  };
+
+  const removeAgreement = async (agreementId: string): Promise<void> => {
+    setAgreementError(null);
+    const prev = agreements;
+    setAgreements((cur) => cur.filter((a) => a.id !== agreementId));
+    const res = await fetch(`/api/v1/sessions/${sessionId}/agreements/${agreementId}`, {
+      method: 'DELETE',
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      setAgreements(prev);
+      setAgreementError('Could not remove the agreement — try again.');
+    }
+  };
+
+  // ----- alliance (one tap; drift shows here before it shows in scores)
+  const [alliance, setAlliance] = useState<AllianceRating | null>(closeout.alliance);
+  const [allianceError, setAllianceError] = useState<string | null>(null);
+
+  const rateAlliance = async (rating: AllianceRating): Promise<void> => {
+    setAllianceError(null);
+    const prev = alliance;
+    setAlliance(rating);
+    const res = await fetch(`/api/v1/sessions/${sessionId}/feedback`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ alliance: rating }),
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      setAlliance(prev);
+      setAllianceError('Could not save — try again.');
+    }
+  };
+
+  // ----- the signature
+  const [signed, setSigned] = useState(closeout.signed);
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+
+  const triggerSign = async (): Promise<void> => {
+    if (!closeout.noteContent) return;
+    setSigning(true);
+    setSignError(null);
+    try {
+      const note = closeout.noteContent;
+      const signedAt = new Date().toISOString();
+      const payload = JSON.stringify({ note, signedAt });
+      const payloadHashHex = await sha256Hex(payload);
+      const res = await postSignNote(sessionId, {
+        payload,
+        payloadHashHex,
+        note,
+        edits: [],
+        signedAt,
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `Sign failed (${res.status})`);
+      }
+      const signedNote = (await res.json()) as { signedAt: string };
+      setSigned({ signedAt: signedNote.signedAt, signerName: '' });
+      // One ceremony: the signature also stamps the review as finished
+      // (reviewedAt + COPILOT_REVIEW_FINISHED). Best-effort by design — a
+      // failed stamp must never read as a failed signature.
+      await onFinishReview();
+      router.refresh();
+    } catch (e) {
+      setSignError((e as Error).message);
+    } finally {
+      setSigning(false);
+    }
+  };
 
   const hasBaseline = record.instruments.some((i) =>
     ADMINISTERABLE.some((a) => a.key === i.instrumentKey),
+  );
+  const otherRecommendations = recommendedInstruments.filter(
+    (k) => !ADMINISTERABLE.some((a) => a.key === normaliseInstrumentKey(k)),
   );
 
   const rows: { label: string; done: boolean; detail: string; href?: string }[] = [
@@ -2152,35 +2423,27 @@ function WrapUpStep({
     {
       label: 'Measures',
       done: hasBaseline,
-      detail: hasBaseline ? 'on file' : 'administer now',
+      detail: hasBaseline
+        ? 'on file'
+        : `administer now${otherRecommendations.length > 0 ? ` · also suggested: ${otherRecommendations.join(', ')}` : ''}`,
       href: hasBaseline ? undefined : measuresHref,
     },
   ];
 
-  const finish = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await onFinish();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
+  const firstName = closeout.clientName.split(' ')[0] ?? closeout.clientName;
 
   return (
     <Card className="relative border-t-[3px] border-t-[var(--color-accent)]">
       <div className="flex gap-3 p-5">
         <span className="mt-0.5 grid h-7 w-7 flex-none place-items-center rounded-full bg-[var(--color-accent-soft)] text-[13px] font-bold text-[var(--color-accent)]">
-          6
+          5
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[15.5px] font-semibold">Wrap up</p>
+          <p className="text-[15.5px] font-semibold">Wrap up &amp; sign</p>
           <p className="mb-3 mt-0.5 text-xs text-[var(--color-ink-3)]">
-            Everything this review decided — finish when it reflects your judgement. You can still
-            change any decision after.
+            One signature finishes the session — decisions stay revisable after.
           </p>
+
           <div className="space-y-1.5">
             {rows.map((r) => (
               <div
@@ -2193,7 +2456,9 @@ function WrapUpStep({
                   {r.done ? '✓' : '○'}
                 </span>
                 <span className="font-medium">{r.label}</span>
-                <span className="ml-auto text-xs text-[var(--color-ink-3)]">{r.detail}</span>
+                <span className="ml-auto text-right text-xs text-[var(--color-ink-3)]">
+                  {r.detail}
+                </span>
                 {r.href && (
                   <Link
                     href={r.href}
@@ -2205,20 +2470,222 @@ function WrapUpStep({
               </div>
             ))}
           </div>
-          <div className="mt-3.5 flex flex-wrap items-center gap-2">
-            <Act primary onClick={() => void finish()} disabled={busy}>
-              {busy ? 'Saving…' : reviewedAt ? 'Re-finish review' : 'Finish review'}
-            </Act>
-            {reviewedAt && <DoneChip>Reviewed {formatDate(reviewedAt)}</DoneChip>}
-            <span className="text-[11px] text-[var(--color-ink-3)]">
-              Marks this session&rsquo;s review done — decisions stay editable.
-            </span>
-            {error && <p className="text-xs text-[var(--color-warn)]">{error}</p>}
+
+          {/* What we agreed — the client's words where possible. */}
+          <div className="mt-4">
+            <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
+              What we agreed
+            </p>
+            {agreements.length > 0 && (
+              <ul className="mt-2 flex flex-wrap gap-1.5">
+                {agreements.map((a) => (
+                  <li
+                    key={a.id}
+                    className="inline-flex items-center gap-2 rounded-full bg-[var(--color-accent-soft)] px-3 py-1.5 text-xs"
+                  >
+                    <span>{a.speaker === 'CLIENT' ? `\u201c${a.text}\u201d` : a.text}</span>
+                    {!signed && (
+                      <button
+                        type="button"
+                        onClick={() => void removeAgreement(a.id)}
+                        className="text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+                        aria-label="Remove agreement"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!signed && (
+              <div className="mt-2 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <SpeakerChip
+                    active={agreementSpeaker === 'CLIENT'}
+                    onClick={() => setAgreementSpeaker('CLIENT')}
+                    label="Client's words"
+                  />
+                  <SpeakerChip
+                    active={agreementSpeaker === 'THERAPIST'}
+                    onClick={() => setAgreementSpeaker('THERAPIST')}
+                    label="Mine"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="text"
+                    value={agreementText}
+                    onChange={(e) => setAgreementText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        void addAgreement();
+                      }
+                    }}
+                    maxLength={500}
+                    placeholder={
+                      agreementSpeaker === 'CLIENT'
+                        ? 'e.g. "I\u2019ll text Priya before Saturday, even if I don\u2019t feel like it"'
+                        : 'e.g. Bring the sleep diary next session'
+                    }
+                    className="min-w-0 flex-1 rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+                  />
+                  <Act
+                    onClick={() => void addAgreement()}
+                    disabled={agreementBusy || agreementText.trim() === ''}
+                  >
+                    {agreementBusy ? 'Adding…' : 'Add'}
+                  </Act>
+                </div>
+              </div>
+            )}
+            {agreementError && (
+              <p className="mt-2 text-xs text-[var(--color-warn)]">{agreementError}</p>
+            )}
+          </div>
+
+          {/* One-tap alliance read. */}
+          <div className="mt-4">
+            <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
+              How did it feel
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {ALLIANCE_OPTIONS.map((o) => {
+                const active = alliance === o.key;
+                return (
+                  <button
+                    key={o.key}
+                    type="button"
+                    onClick={() => void rateAlliance(o.key)}
+                    className={`rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
+                      active
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent)] font-medium text-white'
+                        : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-accent)]'
+                    }`}
+                    aria-pressed={active}
+                    title={o.hint}
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1.5 text-[11px] text-[var(--color-ink-3)]">
+              Your read, one tap — alliance drift shows here before it shows in the scores.
+            </p>
+            {allianceError && (
+              <p className="mt-1 text-xs text-[var(--color-warn)]">{allianceError}</p>
+            )}
+          </div>
+
+          {/* The signature. */}
+          <div className="mt-5 border-t border-[var(--color-line-soft)] pt-4">
+            {signed ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <DoneChip>
+                  Session closed
+                  {signed.signerName ? ` — signed by ${signed.signerName}` : ''} ·{' '}
+                  {formatDate(signed.signedAt)}
+                </DoneChip>
+                <Act onClick={() => setShareOpen(true)}>Share with {firstName}…</Act>
+                <span className="text-[11px] text-[var(--color-ink-3)]">
+                  Decisions above stay revisable — a change after signing is versioned.
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  onClick={() => void triggerSign()}
+                  disabled={!closeout.noteReady || signing}
+                >
+                  {signing ? 'Signing…' : 'Sign and close'}
+                </Button>
+                <span className="max-w-md text-[11px] text-[var(--color-ink-3)]">
+                  {closeout.noteReady ? (
+                    <>
+                      Signing covers the note; everything above saved as you went.{' '}
+                      <Link
+                        href={`/app/sessions/${sessionId}`}
+                        className="font-medium text-[var(--color-accent)] hover:underline"
+                      >
+                        Read or edit the full note →
+                      </Link>
+                    </>
+                  ) : (
+                    <>
+                      Signing needs the note — generate it on the{' '}
+                      <Link
+                        href={`/app/sessions/${sessionId}`}
+                        className="font-medium text-[var(--color-accent)] hover:underline"
+                      >
+                        Notes tab
+                      </Link>{' '}
+                      first.
+                    </>
+                  )}
+                </span>
+              </div>
+            )}
+            {reviewedAt && !signed && (
+              <p className="mt-2 text-[11px] text-[var(--color-ink-3)]">
+                Review finished {formatDate(reviewedAt)} — signing closes the session itself.
+              </p>
+            )}
+            {signError && <p className="mt-2 text-xs text-[var(--color-warn)]">{signError}</p>}
           </div>
         </div>
       </div>
+
+      <ShareModal
+        open={shareOpen}
+        onClose={() => setShareOpen(false)}
+        clientId={clientId}
+        hasContactPhone={closeout.hasContactPhone}
+        hasContactEmail={closeout.hasContactEmail}
+        artefact={
+          isIntake
+            ? { artefactType: 'SIGNED_INTAKE_NOTE', sessionId }
+            : { artefactType: 'SIGNED_NOTE', sessionId }
+        }
+        artefactLabel={isIntake ? 'Signed intake summary' : 'Session summary'}
+        defaultLanguage={closeout.preferredLanguage}
+      />
     </Card>
   );
+}
+
+function SpeakerChip({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+        active
+          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
+          : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)]'
+      }`}
+      aria-pressed={active}
+    >
+      {label}
+    </button>
+  );
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 // ============================================================================

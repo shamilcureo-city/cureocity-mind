@@ -4,18 +4,12 @@ import {
   CaseFormulationV1Schema,
   ClinicalReportV1Schema,
   ClinicalTreatmentPlanSchema,
-  IntakeNoteV1Schema,
-  type SessionAgreementDto,
+  type FormulationSuggestion,
   type SessionKind,
   type TherapyNoteV1,
 } from '@cureocity/contracts';
 import { Card } from '@/components/ui/Card';
 import { CareBoard } from '@/components/app/CareBoard';
-import {
-  CloseLoopBoard,
-  type CloseLoopCrisisFlag,
-  type CloseLoopData,
-} from '@/components/app/CloseLoopBoard';
 import { CareMeasurePanel } from '@/components/app/CareMeasurePanel';
 import { CareNextSessionPanel } from '@/components/app/CareNextSessionPanel';
 import { CareStoryPanel } from '@/components/app/CareStoryPanel';
@@ -23,6 +17,7 @@ import { CaseConsultPanel } from '@/components/app/CaseConsultPanel';
 import {
   CopilotDecisionBoard,
   type CaseRecordSnapshot,
+  type CloseoutData,
 } from '@/components/app/CopilotDecisionBoard';
 import { AICopilotSubTabs, type CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { computeCareEngineForClient } from '@/lib/care-engine-compose';
@@ -47,12 +42,12 @@ interface Props {
  * Sprint 28 → Copilot IA redesign (R1) — the session AI Copilot.
  *
  * The session page is the therapist's primary workspace, so the whole
- * decision-support layer lives here behind one opt-in tab, grouped into
- * three sub-tabs that each answer a plain question:
+ * decision-support layer lives here behind one opt-in tab, in two sub-tabs:
  *
- * - **Review** (`sub=review`, default) — what the copilot heard this
- *   session; you decide. The decision board. (Mindmap moved out — to
- *   Transcript.)
+ * - **Session** (`sub=session`, default) — ONE board worked top-to-bottom:
+ *   safety → impression → ask-next → plan → wrap up & sign. The CP merge
+ *   folded the old "Close the loop" sub in; the note signature is the one
+ *   ceremony that ends a session. (Mindmap moved out — to Transcript.)
  * - **Progress** (`sub=progress`) — the treatment arc, is it working, and
  *   what next session opens with (the Care Engine page).
  *
@@ -78,8 +73,8 @@ export async function AICopilotTab({
   return (
     <div className="space-y-6">
       <AICopilotSubTabs sessionId={sessionId} active={sub} />
-      {sub === 'close' && (
-        <CloseSub
+      {sub === 'session' && (
+        <SessionSub
           sessionId={sessionId}
           clientId={clientId}
           psychologistId={psychologistId}
@@ -89,9 +84,6 @@ export async function AICopilotTab({
           preferredLanguage={preferredLanguage}
           sessionKind={sessionKind}
         />
-      )}
-      {sub === 'review' && (
-        <SessionSub sessionId={sessionId} clientId={clientId} sessionKind={sessionKind} />
       )}
       {sub === 'progress' && (
         <JourneySub
@@ -110,12 +102,14 @@ export async function AICopilotTab({
 // ----- sub-tab bodies -----
 
 /**
- * The Session Loop (SL1) — "Close the loop": the five-moment end-of-session
- * surface (what happened / what it means / what we agreed / is it working /
- * anything to watch), closed by the ONE note signature. Default sub when a
- * completed session hasn't been signed yet.
+ * The Session board — the CP merge of the old "Close the loop" + "Review"
+ * subs. One query pass gathers BOTH what the board decides on (the report /
+ * brief + the client's confirmed record) and what the wrap card closes with
+ * (note readiness, signature state, agreements, alliance, formulation
+ * suggestions). The right lane is server truth, refreshed via
+ * router.refresh() after each accept.
  */
-async function CloseSub({
+async function SessionSub({
   sessionId,
   clientId,
   psychologistId,
@@ -136,196 +130,64 @@ async function CloseSub({
 }) {
   const isIntake = sessionKind === 'INTAKE';
   const [
-    sessionRow,
+    reportRow,
     draft,
     signedRow,
-    reportRow,
+    client,
+    diagnoses,
+    activePlan,
+    instruments,
+    safetyPlan,
+    sessionRow,
     formulationRow,
     agreementRows,
-    instruments,
-    openItems,
     signer,
   ] = await Promise.all([
-    prisma.session.findUnique({
-      where: { id: sessionId },
-      select: { status: true, allianceRating: true },
-    }),
+    prisma.clinicalReport.findUnique({ where: { sessionId } }),
     prisma.noteDraft.findUnique({ where: { sessionId }, select: { status: true, content: true } }),
     prisma.therapyNote.findUnique({
       where: { sessionId },
       select: { signedAt: true, content: true },
     }),
-    prisma.clinicalReport.findUnique({ where: { sessionId } }),
+    prisma.client.findUnique({ where: { id: clientId }, select: { carriedQuestions: true } }),
+    prisma.clientDiagnosis.findMany({
+      where: { clientId, supersededAt: null },
+      orderBy: [{ isPrimary: 'desc' }, { confirmedAt: 'desc' }],
+      select: {
+        icd11Code: true,
+        icd11Label: true,
+        isPrimary: true,
+        confirmedAt: true,
+        sessionId: true,
+      },
+    }),
+    prisma.treatmentPlan.findFirst({
+      where: { clientId, supersededAt: null },
+      orderBy: { version: 'desc' },
+      select: { version: true, body: true, confirmedAt: true },
+    }),
+    prisma.instrumentResponse.findMany({
+      where: { clientId },
+      orderBy: { administeredAt: 'desc' },
+      take: 6,
+      select: { instrumentKey: true, score: true, severity: true, administeredAt: true },
+    }),
+    prisma.safetyPlan.findFirst({
+      where: { clientId, supersededAt: null },
+      select: { confirmedAt: true },
+    }),
+    prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { allianceRating: true },
+    }),
     prisma.caseFormulation.findFirst({
       where: { clientId, supersededAt: null },
       orderBy: { version: 'desc' },
     }),
     prisma.sessionAgreement.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' } }),
-    prisma.instrumentResponse.findMany({
-      where: { clientId },
-      orderBy: { administeredAt: 'desc' },
-      take: 8,
-      select: { instrumentKey: true, score: true, severity: true, administeredAt: true },
-    }),
-    prisma.assessmentItem.findMany({
-      where: { clientId, status: 'OPEN' },
-      orderBy: { createdAt: 'asc' },
-      take: 5,
-      select: { question: true },
-    }),
     prisma.psychologist.findUnique({ where: { id: psychologistId }, select: { fullName: true } }),
   ]);
-
-  // The note to display + sign: the signed content when it exists, else the
-  // completed draft. Summary line narrows by session kind (Sprint 19 union).
-  const noteContent = signedRow?.content ?? (draft?.status === 'COMPLETED' ? draft.content : null);
-  let noteSummary: string | null = null;
-  if (noteContent) {
-    if (isIntake) {
-      const parsed = IntakeNoteV1Schema.safeParse(noteContent);
-      noteSummary = parsed.success ? excerpt(parsed.data.presentingConcerns) : null;
-    } else {
-      const note = noteContent as unknown as TherapyNoteV1;
-      noteSummary = excerpt(note.summary ?? note.subjective ?? '');
-    }
-  }
-
-  // Formulation suggestions + crisis flags come from the session's Pass 3
-  // output — the report shape for treatment sessions, the intake brief for
-  // intakes (which carries crisis flags but no formulation suggestions).
-  let suggestions: CloseLoopData['suggestions'] = [];
-  let crisisFlags: CloseLoopCrisisFlag[] = [];
-  let reportId: string | null = null;
-  if (reportRow && reportRow.status === 'COMPLETED' && reportRow.body) {
-    if (isIntake) {
-      const brief = readInitialAssessmentBrief(reportRow);
-      crisisFlags = (brief?.crisisFlags ?? []).map((f) => ({
-        kind: f.kind,
-        severity: f.severity,
-        recommendedAction: f.recommendedAction,
-      }));
-    } else {
-      const parsed = ClinicalReportV1Schema.safeParse(reportRow.body);
-      if (parsed.success) {
-        reportId = reportRow.id;
-        suggestions = parsed.data.formulationSuggestions;
-        crisisFlags = parsed.data.crisisFlags.map((f) => ({
-          kind: f.kind,
-          severity: f.severity,
-          recommendedAction: f.recommendedAction,
-        }));
-      }
-    }
-  }
-
-  const formulationParse = formulationRow
-    ? CaseFormulationV1Schema.safeParse(formulationRow.body)
-    : null;
-
-  const agreements: SessionAgreementDto[] = agreementRows.map((r) => ({
-    id: r.id,
-    sessionId: r.sessionId,
-    text: r.text,
-    speaker: r.speaker,
-    followUp: r.followUp,
-    createdAt: r.createdAt.toISOString(),
-  }));
-
-  const data: CloseLoopData = {
-    sessionId,
-    clientId,
-    clientName,
-    sessionKind,
-    sessionCompleted: sessionRow?.status === 'COMPLETED',
-    hasContactPhone: clientHasContactPhone,
-    hasContactEmail: clientHasContactEmail,
-    preferredLanguage,
-    noteReady: noteContent !== null,
-    noteContent,
-    noteSummary,
-    signed: signedRow
-      ? { signedAt: signedRow.signedAt.toISOString(), signerName: signer?.fullName ?? '' }
-      : null,
-    reportId,
-    suggestions,
-    formulation:
-      formulationRow && formulationParse?.success
-        ? {
-            version: formulationRow.version,
-            confirmedAt: formulationRow.confirmedAt.toISOString(),
-            body: formulationParse.data,
-          }
-        : null,
-    agreements,
-    measures: instruments.map((i) => ({
-      instrumentKey: i.instrumentKey,
-      score: i.score,
-      severity: i.severity,
-      administeredAt: i.administeredAt.toISOString(),
-    })),
-    alliance: sessionRow?.allianceRating ?? null,
-    crisisFlags,
-    openQuestions: openItems.map((i) => i.question),
-  };
-
-  return <CloseLoopBoard data={data} />;
-}
-
-/** First ~360 chars of a note section, cut at a word boundary. */
-function excerpt(text: string): string | null {
-  const t = text.trim();
-  if (t === '') return null;
-  if (t.length <= 360) return t;
-  const cut = t.slice(0, 360);
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), 300))}…`;
-}
-
-async function SessionSub({
-  sessionId,
-  clientId,
-  sessionKind,
-}: {
-  sessionId: string;
-  clientId: string;
-  sessionKind: SessionKind;
-}) {
-  const isIntake = sessionKind === 'INTAKE';
-  // The board's right lane is the client's confirmed record — loaded here
-  // (server truth) and refreshed via router.refresh() after each accept.
-  const [reportRow, draft, signed, client, diagnoses, activePlan, instruments, safetyPlan] =
-    await Promise.all([
-      prisma.clinicalReport.findUnique({ where: { sessionId } }),
-      prisma.noteDraft.findUnique({ where: { sessionId }, select: { content: true } }),
-      prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
-      prisma.client.findUnique({ where: { id: clientId }, select: { carriedQuestions: true } }),
-      prisma.clientDiagnosis.findMany({
-        where: { clientId, supersededAt: null },
-        orderBy: [{ isPrimary: 'desc' }, { confirmedAt: 'desc' }],
-        select: {
-          icd11Code: true,
-          icd11Label: true,
-          isPrimary: true,
-          confirmedAt: true,
-          sessionId: true,
-        },
-      }),
-      prisma.treatmentPlan.findFirst({
-        where: { clientId, supersededAt: null },
-        orderBy: { version: 'desc' },
-        select: { version: true, body: true, confirmedAt: true },
-      }),
-      prisma.instrumentResponse.findMany({
-        where: { clientId },
-        orderBy: { administeredAt: 'desc' },
-        take: 6,
-        select: { instrumentKey: true, score: true, severity: true, administeredAt: true },
-      }),
-      prisma.safetyPlan.findFirst({
-        where: { clientId, supersededAt: null },
-        select: { confirmedAt: true },
-      }),
-    ]);
-  const noteJson = (signed?.content ?? draft?.content) as TherapyNoteV1 | null;
+  const noteJson = (signedRow?.content ?? draft?.content) as TherapyNoteV1 | null;
 
   const planBody = activePlan ? ClinicalTreatmentPlanSchema.safeParse(activePlan.body) : null;
   const carriedParse = z.array(CarriedQuestionSchema).safeParse(client?.carriedQuestions);
@@ -355,6 +217,43 @@ async function SessionSub({
     carriedQuestions: carriedParse.success ? carriedParse.data : [],
   };
 
+  // Formulation suggestions ride the treatment report only (the intake brief
+  // has no formulation-as-diff section).
+  let formulationSuggestions: FormulationSuggestion[] = [];
+  if (!isIntake && reportRow?.status === 'COMPLETED' && reportRow.body) {
+    const parsed = ClinicalReportV1Schema.safeParse(reportRow.body);
+    if (parsed.success) formulationSuggestions = parsed.data.formulationSuggestions;
+  }
+  const formulationParse = formulationRow
+    ? CaseFormulationV1Schema.safeParse(formulationRow.body)
+    : null;
+
+  // The note to sign: the signed content when it exists, else the completed draft.
+  const noteContent = signedRow?.content ?? (draft?.status === 'COMPLETED' ? draft.content : null);
+
+  const closeout: CloseoutData = {
+    clientName,
+    hasContactPhone: clientHasContactPhone,
+    hasContactEmail: clientHasContactEmail,
+    preferredLanguage,
+    noteReady: noteContent !== null,
+    noteContent,
+    signed: signedRow
+      ? { signedAt: signedRow.signedAt.toISOString(), signerName: signer?.fullName ?? '' }
+      : null,
+    agreements: agreementRows.map((r) => ({
+      id: r.id,
+      sessionId: r.sessionId,
+      text: r.text,
+      speaker: r.speaker,
+      followUp: r.followUp,
+      createdAt: r.createdAt.toISOString(),
+    })),
+    alliance: sessionRow?.allianceRating ?? null,
+    formulationSuggestions,
+    formulationBody: formulationParse?.success ? formulationParse.data : null,
+  };
+
   return (
     <div className="space-y-8">
       <CopilotDecisionBoard
@@ -365,9 +264,10 @@ async function SessionSub({
         initialBrief={isIntake && reportRow ? readInitialAssessmentBrief(reportRow) : null}
         reviewedAt={reportRow?.reviewedAt?.toISOString() ?? null}
         record={record}
+        closeout={closeout}
       />
       {/* The mindmap moved out of the decision flow (R1): it's a view of the
-          note (→ Transcript). Left here as a quiet link so the Review board
+          note (→ Transcript). Left here as a quiet link so the Session board
           stays a pure decision surface. */}
       {!isIntake && noteJson && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-[var(--color-ink-3)]">
@@ -438,7 +338,7 @@ async function JourneySub({
   ]);
 
   const carried = z.array(CarriedQuestionSchema).safeParse(clientRow?.carriedQuestions);
-  const reviewHref = `/app/sessions/${sessionId}?tab=copilot&sub=review`;
+  const reviewHref = `/app/sessions/${sessionId}?tab=copilot&sub=session`;
 
   if (!care) {
     return (

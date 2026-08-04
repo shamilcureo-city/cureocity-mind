@@ -1,6 +1,6 @@
 import Link from 'next/link';
 
-export type CopilotSubKey = 'close' | 'review' | 'progress';
+export type CopilotSubKey = 'session' | 'progress';
 
 interface Props {
   sessionId: string;
@@ -8,38 +8,33 @@ interface Props {
 }
 
 const TABS: { key: CopilotSubKey; label: string; hint: string }[] = [
-  { key: 'close', label: 'Close the loop', hint: 'Five moments · one signature' },
-  { key: 'review', label: 'Review', hint: 'What the copilot heard — you decide' },
+  { key: 'session', label: 'Session', hint: 'Review, decide & sign — one pass' },
   { key: 'progress', label: 'Progress', hint: 'The arc · is it working · next session' },
 ];
 
 /**
- * Sprint 28 → TSC-V2 → Copilot IA redesign (R1) — secondary tab bar inside
- * the AI Copilot tab.
+ * Sprint 28 → TSC-V2 → R1 → the CP merge — secondary tab bar inside the AI
+ * Copilot tab. Two plain questions:
  *
- * Three plain questions that match how a psychologist thinks (PC1 moved the
- * plan out to its own top-level "Plan of care" tab — the copilot proposes,
- * the paper holds what was accepted):
- * - **Close the loop** (SL1) — the five-moment end-of-session ritual, closed
- *   by the one note signature. Default sub for a completed, unsigned session.
- * - **Review** (was "This session") — what the copilot heard this session;
- *   you decide. The decision board.
- * - **Progress** (was "Journey") — the arc, is it working, what next session
- *   opens with. "Care journey" was dropped: it collided with the Care product.
- * - **Plan** (was "Plan & toolkit") — the client's own treatment plan, with
- *   the scripts + formulation tools around it.
+ * - **Session** — everything this session asks of you, one board worked
+ *   top-to-bottom: safety → impression → ask-next → plan → wrap up & sign.
+ *   The old "Close the loop" sub-tab was merged in: its unique moments
+ *   (formulation updates, agreements, alliance, the signature) now live on
+ *   the board, and the session ends with ONE ceremony — the note signature.
+ * - **Progress** — the longitudinal arc, is it working, what next session
+ *   opens with.
  *
- * URL: `?tab=copilot&sub=…`, defaulting to `review`; old sub keys
- * (session/journey/measures/briefing/formulation) redirect in the page parser.
+ * URL: `?tab=copilot&sub=…`, defaulting to `session`; old sub keys
+ * (close/review/session/journey/measures/briefing/formulation) redirect in
+ * the page parser.
  */
-export function AICopilotSubTabs({ sessionId, active = 'review' }: Props) {
+export function AICopilotSubTabs({ sessionId, active = 'session' }: Props) {
   return (
     <nav
       className="flex items-center gap-1 overflow-x-auto border-b border-[var(--color-line-soft)]"
       aria-label="AI Copilot sections"
     >
-      {/* Mobile: the bar scrolls horizontally instead of wrapping (wrapping
-          orphaned "Plan" onto its own row); hints hide below sm. */}
+      {/* Mobile: the bar scrolls horizontally instead of wrapping; hints hide below sm. */}
       {TABS.map((t) => {
         const isActive = t.key === active;
         const href = `/app/sessions/${sessionId}?tab=copilot&sub=${t.key}`;

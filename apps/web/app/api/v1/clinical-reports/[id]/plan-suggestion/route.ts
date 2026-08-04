@@ -18,12 +18,16 @@ export const dynamic = 'force-dynamic';
 /**
  * POST /api/v1/clinical-reports/[id]/plan-suggestion
  *
- * Plan-as-diff (copilot IA redesign R3). Applies ONE of the report's
- * `planSuggestions` — a typed edit (add / revise / remove a goal, adjust
- * duration, change modality) — to the client's ACTIVE treatment plan,
- * producing a new plan version. The therapist's plan is never replaced
- * wholesale: each accepted suggestion is one precise change, versioned like
- * any other plan confirmation (audited `PLAN_CONFIRMED`). Tenant-checked,
+ * Plan-as-diff (copilot IA redesign R3). Applies one — or, with
+ * `suggestionIndexes`, several at once — of the report's `planSuggestions`
+ * (typed edits: add / revise / remove a goal, adjust duration, change
+ * modality) to the client's ACTIVE treatment plan, producing ONE new plan
+ * version. The therapist's plan is never replaced wholesale, and a batch is
+ * atomic: if any suggestion cannot apply, nothing is versioned. goalIndex
+ * references are interpreted against the plan as it stood BEFORE the batch
+ * (revise first, then remove in descending index order, then add), so
+ * "apply all" means what the therapist read on screen. Versioned like any
+ * other plan confirmation (audited `PLAN_CONFIRMED`). Tenant-checked,
  * POST-only.
  */
 export async function POST(
@@ -61,10 +65,15 @@ export async function POST(
       { status: 409 },
     );
   }
-  const suggestion = parsedReport.data.planSuggestions[body.value.suggestionIndex];
-  if (!suggestion) {
+  const indexes =
+    body.value.suggestionIndexes ??
+    (body.value.suggestionIndex !== undefined ? [body.value.suggestionIndex] : []);
+  const unique = [...new Set(indexes)];
+  const suggestions = unique.map((i) => parsedReport.data.planSuggestions[i]);
+  if (suggestions.length === 0 || suggestions.some((s) => s === undefined)) {
     return NextResponse.json({ error: 'Suggestion index out of range.' }, { status: 422 });
   }
+  const chosen = suggestions as ClinicalPlanSuggestion[];
 
   const activePlan = await prisma.treatmentPlan.findFirst({
     where: { clientId: report.clientId, supersededAt: null },
@@ -82,7 +91,7 @@ export async function POST(
     return NextResponse.json({ error: 'Active plan failed validation.' }, { status: 422 });
   }
 
-  const applied = applySuggestion(parsedPlan.data, suggestion);
+  const applied = applySuggestions(parsedPlan.data, chosen);
   if (!applied.ok) {
     return NextResponse.json({ error: applied.error }, { status: 422 });
   }
@@ -132,7 +141,8 @@ export async function POST(
           clientId: report.clientId,
           version: nextVersion,
           source: 'PLAN_SUGGESTION',
-          suggestionType: suggestion.type,
+          suggestionTypes: chosen.map((c) => c.type),
+          suggestionCount: chosen.length,
         },
       },
       tx,
@@ -144,6 +154,29 @@ export async function POST(
 }
 
 type ApplyResult = { ok: true; plan: ClinicalTreatmentPlan } | { ok: false; error: string };
+
+/**
+ * Apply a batch against the plan the therapist was LOOKING at: revisions
+ * first (indexes untouched), removals in descending index order (so earlier
+ * removals don't shift later ones), additions after, scalar changes last.
+ */
+function applySuggestions(
+  plan: ClinicalTreatmentPlan,
+  batch: ClinicalPlanSuggestion[],
+): ApplyResult {
+  const revises = batch.filter((s) => s.type === 'REVISE_GOAL');
+  const removes = batch
+    .filter((s) => s.type === 'REMOVE_GOAL')
+    .sort((a, b) => (b.goalIndex ?? 0) - (a.goalIndex ?? 0));
+  const rest = batch.filter((s) => s.type !== 'REVISE_GOAL' && s.type !== 'REMOVE_GOAL');
+  let current = plan;
+  for (const s of [...revises, ...removes, ...rest]) {
+    const step = applySuggestion(current, s);
+    if (!step.ok) return step;
+    current = step.plan;
+  }
+  return { ok: true, plan: current };
+}
 
 function applySuggestion(plan: ClinicalTreatmentPlan, s: ClinicalPlanSuggestion): ApplyResult {
   const goals = [...plan.goals];
