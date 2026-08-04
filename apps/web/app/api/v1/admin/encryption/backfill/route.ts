@@ -145,20 +145,32 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (drafts.length === 0) break;
     cursor = drafts[drafts.length - 1]!.id;
     for (const d of drafts) {
-      if (!d.transcript) continue;
       scrubScanned++;
       if (dryRun) continue;
       try {
-        // Ensure ciphertext exists (phase 2 normally has), then round-trip it.
+        // An EMPTY transcript ('' — the failed-recording rows) holds nothing
+        // sensitive and needs no ciphertext: null it directly. Without this
+        // branch the loop skipped them and they inflated plaintextRemaining.
+        if (!d.transcript) {
+          await prisma.noteDraft.update({ where: { id: d.id }, data: { transcript: null } });
+          transcriptScrubbed++;
+          continue;
+        }
+        // Round-trip the stored ciphertext. When it's MISSING or STALE (the
+        // first prod run found rows minted under the local-dev key that the
+        // live GCP key can't open), the plaintext in hand is the source of
+        // truth — re-encrypt it under the LIVE key and verify THAT. Only a
+        // failure after re-encryption counts as unverifiable.
         let ct = d.transcriptEncrypted;
-        if (!ct) {
+        let roundTrip = ct ? await decryptForTenant(d.session.psychologistId, ct) : null;
+        if (roundTrip !== d.transcript) {
           ct = await encryptForTenant(d.session.psychologistId, d.transcript);
           await prisma.noteDraft.update({
             where: { id: d.id },
             data: { transcriptEncrypted: ct },
           });
+          roundTrip = await decryptForTenant(d.session.psychologistId, ct);
         }
-        const roundTrip = await decryptForTenant(d.session.psychologistId, ct);
         if (roundTrip !== d.transcript) {
           transcriptUnverifiable++;
           continue;
