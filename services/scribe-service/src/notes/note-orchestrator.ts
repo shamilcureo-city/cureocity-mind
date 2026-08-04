@@ -93,10 +93,13 @@ export class NoteOrchestrator {
       const pass1Cost = new Prisma.Decimal(pass1.callLog.costInr);
 
       // 4. Persist Pass 1
+      // NB: the plaintext transcript column was dropped (S-hardening 2026-08);
+      // the prod path (apps/web note-orchestrator) encrypts via tenant-crypto.
+      // This scaffold serves no traffic and has no KMS wiring, so it persists
+      // only the structured outputs.
       await this.prisma.noteDraft.update({
         where: { id: draft.id },
         data: {
-          transcript: pass1.output.transcript,
           speakerSegments: pass1.output.speakerSegments as unknown as Prisma.InputJsonValue,
           affectFeatures: pass1.output.affectFeatures as unknown as Prisma.InputJsonValue,
           totalCostInr: pass1Cost,

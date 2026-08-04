@@ -3,37 +3,28 @@ import { decryptForTenant } from './tenant-crypto';
 /**
  * The single read path for a session transcript (S-hardening, 2026-08).
  *
- * `NoteDraft.transcript` (plaintext) is being retired the same way the Client
- * PII columns were: every reader goes through this resolver, writers store
- * ciphertext-only when KMS is healthy, the backfill route scrubs plaintext
- * after VERIFYING the ciphertext decrypts, and the column drops once the
- * scrub reports zero rows remaining.
- *
- * Decrypt-first with a plaintext fallback — the fallback exists for rows the
- * scrub hasn't verified yet, and for the client-pii lesson: early ciphertext
- * may have been minted under the local-dev KMS key and be unopenable under
- * the GCP key. A transcript is the evidence behind a signed clinical note,
- * so unlike client PII this path never silently renders '' while a readable
- * copy exists.
+ * DECRYPT-ONLY: the plaintext `NoteDraft.transcript` column was dropped after
+ * the backfill's verified scrub reported zero rows remaining on production
+ * (every surviving ciphertext round-trips under the live KMS — stale
+ * local-dev ciphertext was re-keyed from plaintext before the drop, so
+ * nothing here can be unreadable by construction). An undecryptable value now
+ * means live KMS trouble: logged loudly, rendered as absent.
  */
 export async function resolveNoteTranscript(
   psychologistId: string,
-  row: { transcript: string | null; transcriptEncrypted: string | null },
+  row: { transcriptEncrypted: string | null },
 ): Promise<string | null> {
-  if (row.transcriptEncrypted) {
-    const plaintext = await decryptForTenant(psychologistId, row.transcriptEncrypted);
-    if (plaintext !== null) return plaintext;
-    console.warn(
-      `[note-transcript] ciphertext present but undecryptable for psy=${psychologistId} — falling back to the plaintext column`,
+  if (!row.transcriptEncrypted) return null;
+  const plaintext = await decryptForTenant(psychologistId, row.transcriptEncrypted);
+  if (plaintext === null) {
+    console.error(
+      `[note-transcript] UNDECRYPTABLE transcript for psy=${psychologistId} — check KMS health/key`,
     );
   }
-  return row.transcript;
+  return plaintext;
 }
 
-/** Presence check that doesn't care which column holds the transcript. */
-export function hasTranscript(row: {
-  transcript: string | null;
-  transcriptEncrypted: string | null;
-}): boolean {
-  return Boolean(row.transcript) || Boolean(row.transcriptEncrypted);
+/** Presence check — ciphertext is the only copy. */
+export function hasTranscript(row: { transcriptEncrypted: string | null }): boolean {
+  return Boolean(row.transcriptEncrypted);
 }

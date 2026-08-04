@@ -407,7 +407,6 @@ async function TranscriptTabPanel({
       where: { sessionId },
       select: {
         status: true,
-        transcript: true,
         transcriptEncrypted: true,
         speakerSegments: true,
         totalCostInr: true,

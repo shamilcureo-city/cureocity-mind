@@ -105,20 +105,25 @@ export async function POST(
     );
     const tTranscript = parsedT.value.transcript?.trim() ?? '';
     const tTranscriptText = tTranscript.length > 0 ? tTranscript : '(captured via live scribe)';
-    let tTranscriptEncrypted: string | null = null;
-    if (tTranscript.length > 0) {
-      try {
-        tTranscriptEncrypted = await encryptForTenant(auth.value.psychologistId, tTranscriptText);
-      } catch (e) {
-        console.warn(
-          `[live-note] therapist transcript encryption failed for session=${sessionId}; storing plaintext only: ${(e as Error).message}`,
-        );
-      }
+    // S-hardening: same fail-closed rule as the doctor branch — the plaintext
+    // column is gone, the payload is still in the browser, so a KMS outage
+    // 503s retryably instead of dropping the transcript.
+    let tTranscriptEncrypted: string;
+    try {
+      tTranscriptEncrypted = await encryptForTenant(auth.value.psychologistId, tTranscriptText);
+    } catch (e) {
+      console.error(
+        `[live-note] therapist transcript encryption failed for session=${sessionId}: ${(e as Error).message}`,
+      );
+      return NextResponse.json(
+        {
+          error:
+            'Could not encrypt the transcript (encryption service unavailable). Nothing was saved — retry in a moment.',
+        },
+        { status: 503 },
+      );
     }
-    const tWrite =
-      tTranscript.length > 0
-        ? { transcript: tTranscriptText, transcriptEncrypted: tTranscriptEncrypted }
-        : {};
+    const tWrite = tTranscript.length > 0 ? { transcriptEncrypted: tTranscriptEncrypted } : {};
     const tDraft = await prisma.noteDraft.upsert({
       where: { sessionId },
       update: {
@@ -133,7 +138,8 @@ export async function POST(
         status: 'COMPLETED',
         content: tnote as unknown as Prisma.InputJsonValue,
         riskSeverity: 'NONE',
-        transcript: tTranscriptText,
+        // The presence marker is encrypted too — ciphertext presence is what
+        // the NoteDraft presence checks read.
         transcriptEncrypted: tTranscriptEncrypted,
       },
     });
@@ -195,30 +201,32 @@ export async function POST(
   // same per-tenant DEK path as the batch note-orchestrator; a KMS hiccup must
   // never fail an otherwise-complete note, so we log + store plaintext only.
   const transcriptText = transcript.length > 0 ? transcript : '(captured via live copilot)';
-  let transcriptEncrypted: string | null = null;
-  if (transcript.length > 0) {
-    try {
-      transcriptEncrypted = await encryptForTenant(auth.value.psychologistId, transcriptText);
-    } catch (e) {
-      console.warn(
-        `[live-note] transcript encryption failed for session=${sessionId}; storing plaintext only: ${(e as Error).message}`,
-      );
-    }
+  // S-hardening: the plaintext column is GONE, so encryption is REQUIRED. A
+  // KMS outage 503s BEFORE anything persists — the note + transcript are
+  // still in the browser (this route is a relay), so the doctor retries once
+  // the encryption service recovers. The live path has no audio to fall back
+  // on, which is exactly why an unencryptable transcript must not be dropped
+  // silently.
+  let transcriptEncrypted: string;
+  try {
+    transcriptEncrypted = await encryptForTenant(auth.value.psychologistId, transcriptText);
+  } catch (e) {
+    console.error(
+      `[live-note] transcript encryption failed for session=${sessionId}: ${(e as Error).message}`,
+    );
+    return NextResponse.json(
+      {
+        error:
+          'Could not encrypt the transcript (encryption service unavailable). Nothing was saved — retry in a moment.',
+      },
+      { status: 503 },
+    );
   }
 
   // Only overwrite a stored transcript when this request actually carried one,
   // so a re-POST without a transcript can't clobber a good record with the
   // marker.
-  // S-hardening: ciphertext-only when KMS succeeded; plaintext survives only
-  // as the logged KMS-failure fallback (and the non-sensitive presence marker
-  // when the consult streamed no transcript at all).
-  const transcriptWrite =
-    transcript.length > 0
-      ? {
-          transcript: transcriptEncrypted !== null ? null : transcriptText,
-          transcriptEncrypted,
-        }
-      : {};
+  const transcriptWrite = transcript.length > 0 ? { transcriptEncrypted } : {};
 
   // Persist the note as a COMPLETED draft. The doctor signs it from the
   // encounter workspace — that signature is the attestation.
@@ -237,9 +245,8 @@ export async function POST(
       status: 'COMPLETED',
       content: note as unknown as Prisma.InputJsonValue,
       riskSeverity: 'NONE',
-      // Same ciphertext-only rule as the update arm; the plaintext marker
-      // (transcript-less consult) is not sensitive and stays readable.
-      transcript: transcriptEncrypted !== null ? null : transcriptText,
+      // The presence marker for a transcript-less consult is encrypted too —
+      // ciphertext presence is what the NoteDraft presence checks read.
       transcriptEncrypted,
       ...(rxPad !== undefined && { rxPad }),
     },

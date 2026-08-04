@@ -104,30 +104,23 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
 
     const pass1Cost = new Prisma.Decimal(pass1.totalCostInr);
 
-    // Sprint 54 — dual-write the envelope-encrypted transcript. The
-    // verbatim session transcript is the most sensitive clinical
-    // content we store, so it joins the at-rest encryption rollout via
-    // the same per-tenant DEK path as Client PII. Best-effort: a KMS
-    // hiccup must NOT fail an otherwise-complete note generation — we
-    // log + leave `transcriptEncrypted` null (the backfill route can
-    // catch it up later), exactly as the plaintext column behaves today.
-    let transcriptEncrypted: string | null = null;
+    // S-hardening: the plaintext column is GONE, so encryption is REQUIRED.
+    // A KMS outage fails the run RETRYABLY — the audio is retained (30-day
+    // window), so nothing is lost and Retry re-runs Pass 1. Failing closed
+    // beats minting a transcript nobody can ever read.
+    let transcriptEncrypted: string;
     try {
       transcriptEncrypted = await encryptForTenant(session.psychologistId, pass1.transcript);
     } catch (e) {
-      console.warn(
-        `[note-orchestrator] transcript encryption failed for session=${sessionId}; storing plaintext only: ${(e as Error).message}`,
+      throw new Error(
+        `Could not encrypt the transcript (KMS unavailable: ${(e as Error).message}). ` +
+          `Nothing was lost — the audio is retained. Hit Retry once the encryption service recovers.`,
       );
     }
 
-    // S-hardening: ciphertext-only when KMS succeeded. Plaintext is stored
-    // ONLY as the logged KMS-failure fallback — losing a transcript is worse
-    // than briefly holding it plaintext, but the healthy path leaves nothing
-    // readable at rest.
     await prisma.noteDraft.update({
       where: { id: draft.id },
       data: {
-        transcript: transcriptEncrypted !== null ? null : pass1.transcript,
         transcriptEncrypted,
         speakerSegments: pass1.speakerSegments as unknown as Prisma.InputJsonValue,
         affectFeatures: pass1.affectFeatures as unknown as Prisma.InputJsonValue,

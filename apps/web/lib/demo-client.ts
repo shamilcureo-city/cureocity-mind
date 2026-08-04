@@ -188,6 +188,11 @@ export async function createDemoClient(
   // out WhatsApp + Email, leaving PORTAL_LINK as the demoable channel.
   const fullNameEncrypted = await encryptForTenant(psychologistId, DEMO_NAME);
   const contactPhoneEncrypted = await encryptForTenant(psychologistId, '');
+  // Transcripts encrypt at rest like everything else (the plaintext column is
+  // gone, S-hardening 2026-08) — encrypted up front, outside the tx.
+  const transcriptsEncrypted = await Promise.all(
+    transcripts.map((t) => encryptForTenant(psychologistId, t.transcript)),
+  );
 
   const clientId = await prisma.$transaction(async (tx) => {
     const client = await tx.client.create({
@@ -291,7 +296,7 @@ export async function createDemoClient(
         status: 'COMPLETED',
         content: intakeBody as unknown as Prisma.InputJsonValue,
         riskSeverity: 'LOW',
-        transcript: transcripts[0]!.transcript,
+        transcriptEncrypted: transcriptsEncrypted[0]!,
         speakerSegments: transcripts[0]!.segments as unknown as Prisma.InputJsonValue,
       },
       select: { id: true },
@@ -362,7 +367,7 @@ export async function createDemoClient(
           status: 'COMPLETED',
           content: noteBody as unknown as Prisma.InputJsonValue,
           riskSeverity: riskArc[i],
-          transcript: transcript.transcript,
+          transcriptEncrypted: transcriptsEncrypted[i + 1]!,
           speakerSegments: transcript.segments as unknown as Prisma.InputJsonValue,
         },
         select: { id: true },

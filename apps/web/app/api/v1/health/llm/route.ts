@@ -84,7 +84,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           select: {
             status: true,
             errorMessage: true,
-            transcript: true,
             transcriptEncrypted: true,
             totalCostInr: true,
             updatedAt: true,
@@ -102,10 +101,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           ? {
               status: draft.status,
               errorMessage: draft.errorMessage,
-              // Post-scrub the plaintext column is null on healthy rows; report
-              // presence + whichever length is knowable without a KMS call.
-              transcriptChars: draft.transcript?.length ?? (draft.transcriptEncrypted ? -1 : 0),
-              hasTranscript: Boolean(draft.transcript || draft.transcriptEncrypted),
+              // Plaintext column dropped (S-hardening 2026-08): only presence is
+              // knowable without a KMS call.
+              hasTranscript: Boolean(draft.transcriptEncrypted),
               totalCostInr: draft.totalCostInr.toString(),
               updatedAt: draft.updatedAt,
             }

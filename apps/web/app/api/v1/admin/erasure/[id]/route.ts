@@ -144,7 +144,6 @@ export async function PATCH(
         await tx.noteDraft.updateMany({
           where: { sessionId: { in: sessionIds } },
           data: {
-            transcript: null,
             transcriptEncrypted: null,
             speakerSegments: Prisma.DbNull,
             affectFeatures: Prisma.DbNull,

@@ -1,4 +1,5 @@
 import { prisma } from './prisma';
+import { resolveNoteTranscript } from './note-transcript';
 import { decryptClientField } from './client-pii';
 
 /**
@@ -39,7 +40,7 @@ export async function buildConceptualMapContext(
       id: true,
       endedAt: true,
       kind: true,
-      noteDraft: { select: { transcript: true } },
+      noteDraft: { select: { transcriptEncrypted: true } },
       therapyNote: { select: { content: true } },
     },
   });
@@ -69,7 +70,9 @@ export async function buildConceptualMapContext(
   const orderedSessions = [...sessions].reverse();
 
   for (const s of orderedSessions) {
-    const transcript = s.noteDraft?.transcript ?? null;
+    const transcript = s.noteDraft
+      ? await resolveNoteTranscript(psychologistId, s.noteDraft)
+      : null;
     if (!transcript || typeof transcript !== 'string') continue;
     sessionIds.push(s.id);
     lines.push(

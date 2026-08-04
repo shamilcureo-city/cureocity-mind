@@ -13,7 +13,7 @@ const RETENTION_DAYS = Number(process.env['AUDIO_RETENTION_DAYS'] ?? 30);
  *
  * The audio purge could never reach a live consult: the live path streams
  * PCM straight to the gateway and never writes an AudioChunk, so its raw
- * capture only ever exists as `NoteDraft.transcript`. Batch audio aged out at
+ * capture only ever exists as `NoteDraft.transcriptEncrypted`. Batch audio aged out at
  * 30 days while live transcripts — the same personal data in text form — were
  * kept forever.
  *
@@ -162,14 +162,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 async function purgeTranscripts(extendedClientIds: Set<string>): Promise<number> {
   if (TRANSCRIPT_RETENTION_DAYS === null || !Number.isFinite(TRANSCRIPT_RETENTION_DAYS)) return 0;
   const cutoff = new Date(Date.now() - TRANSCRIPT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  // S-hardening (2026-08): the plaintext column is gone, so the purge is a
+  // single null — and already-purged rows (ciphertext null) fall out of the
+  // filter naturally, no marker sentinel needed. The audit row is the proof
+  // the purge ran; the UI reads an absent transcript as "no transcript".
   const drafts = await prisma.noteDraft.findMany({
     where: {
       createdAt: { lt: cutoff },
-      OR: [{ transcript: { not: PURGED_MARKER } }, { transcriptEncrypted: { not: null } }],
+      transcriptEncrypted: { not: null },
     },
     select: {
       id: true,
-      transcript: true,
       session: { select: { id: true, clientId: true } },
     },
     take: 500,
@@ -178,11 +181,10 @@ async function purgeTranscripts(extendedClientIds: Set<string>): Promise<number>
   let purged = 0;
   for (const d of drafts) {
     if (extendedClientIds.has(d.session.clientId)) continue;
-    const chars = d.transcript?.length ?? 0;
     await prisma.$transaction(async (tx) => {
       await tx.noteDraft.update({
         where: { id: d.id },
-        data: { transcript: PURGED_MARKER, transcriptEncrypted: null },
+        data: { transcriptEncrypted: null },
       });
       await writeAudit(
         {
@@ -193,7 +195,6 @@ async function purgeTranscripts(extendedClientIds: Set<string>): Promise<number>
           metadata: {
             sessionId: d.session.id,
             clientId: d.session.clientId,
-            chars,
             retentionDays: TRANSCRIPT_RETENTION_DAYS,
           },
         },
@@ -204,9 +205,6 @@ async function purgeTranscripts(extendedClientIds: Set<string>): Promise<number>
   }
   return purged;
 }
-
-/** What a purged transcript reads as. Not empty — a blank would look broken. */
-const PURGED_MARKER = '(transcript purged per data-retention policy)';
 
 function isAuthorized(req: NextRequest): boolean {
   // AUD1 — fail closed: CRON_SECRET must be set, and every invocation must

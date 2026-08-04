@@ -55,7 +55,6 @@ export async function POST(
       noteDraft: {
         select: {
           status: true,
-          transcript: true,
           transcriptEncrypted: true,
           speakerSegments: true,
           content: true,

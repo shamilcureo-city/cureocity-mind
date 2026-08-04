@@ -1210,10 +1210,9 @@ model NoteDraft {
   status    NoteDraftStatus @default(PENDING)
 
   // Pass 1 outputs
-  /// V1 plaintext column — retained during the encryption rollout window.
-  /// Sprint 10 hardens cutover. Gap G10.
-  transcript          String? @db.Text
-  /// Envelope-encrypted transcript per @cureocity/crypto.
+  /// Envelope-encrypted transcript per @cureocity/crypto — the ONLY copy at
+  /// rest (the plaintext column was scrub-verified and dropped, S-hardening
+  /// 2026-08). Read via lib/note-transcript.ts.
   transcriptEncrypted String? @db.Text
   speakerSegments     Json?
   affectFeatures      Json?
