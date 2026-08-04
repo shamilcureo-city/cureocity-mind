@@ -26,6 +26,9 @@ interface SessionPayload {
   personaName: string;
   whatsappOptedIn: boolean;
   sessionDays: number[];
+  endedAt: string | null;
+  /// CP6 — key moments logged live in the session (the user's own words).
+  moments: Array<{ atMs: number; type: string; text: string; quote: string }>;
   report: { id: string; kind: string; body: CareReportV1 } | null;
 }
 
@@ -174,6 +177,24 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="mx-auto w-full max-w-md px-5 py-6 pb-28 md:max-w-2xl md:px-8 md:py-10">
+      {/* CP6 — document masthead: this is a dated clinical record, not chat. */}
+      <div className="mb-4 flex items-baseline justify-between border-b border-[var(--color-line-soft)] pb-2">
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--color-ink-3)]">
+          {session.kind === 'INTAKE'
+            ? 'Assessment & plan'
+            : session.kind === 'REVIEW'
+              ? 'Progress review'
+              : `Session ${session.completedCount}`}{' '}
+          · with {session.personaName}
+        </span>
+        <span className="text-[12px] tabular-nums text-[var(--color-ink-3)]">
+          {(session.endedAt ? new Date(session.endedAt) : new Date()).toLocaleDateString('en-IN', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          })}
+        </span>
+      </div>
       {session.moodAfter === null ? (
         <Card className="mb-4 p-4">
           <MoodDial value={moodAfter} onChange={(v) => void submitMoodAfter(v)} label="And now?" />
@@ -226,6 +247,30 @@ export function CareReportView({ sessionId }: { sessionId: string }) {
             personaName={session.personaName}
             onAccepted={(version) => setCeremony({ version })}
           />
+          {session.report.body.kind !== 'INTAKE' && session.moments.length > 0 ? (
+            // CP6 — the moments captured live, timestamped, in their words.
+            // (The intake report quotes concernAreas instead — no double-up.)
+            <Section label="Moments from the session">
+              <div className="space-y-2.5">
+                {session.moments.map((m, i) => (
+                  <div key={i} className="text-sm">
+                    <span className="mr-2 text-[11px] tabular-nums text-[var(--color-ink-3)]">
+                      {Math.floor(m.atMs / 60000)}:
+                      {String(Math.floor((m.atMs % 60000) / 1000)).padStart(2, '0')}
+                    </span>
+                    {m.quote ? (
+                      <blockquote className="mt-0.5 border-l-2 border-[var(--color-accent)] pl-2 italic">
+                        “{m.quote}”
+                      </blockquote>
+                    ) : null}
+                    {m.text ? (
+                      <p className="mt-0.5 text-[13px] text-[var(--color-ink-2)]">{m.text}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </Section>
+          ) : null}
           {session.report.body.kind === 'TREATMENT' ? (
             <NextWeekPicker
               personaName={session.personaName}

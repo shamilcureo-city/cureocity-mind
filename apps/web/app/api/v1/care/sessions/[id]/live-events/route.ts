@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { MirrorLiveEventsInputSchema } from '@cureocity/contracts';
 import { requireCareUserId } from '@/lib/care-auth';
+import { notifyCareCrisisOnCall } from '@/lib/care-crisis-alert';
 import { writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -70,6 +71,16 @@ export async function POST(
         targetId: careSessionId,
         metadata: { seq: e.seq },
       });
+    }
+    if (e.type === 'RISK_NOTED') {
+      // CP3 graded risk ladder — the session KEEPS GOING; this alerts the
+      // on-call human (Sentry + email) in parallel. Non-blocking: an alert
+      // failure must never fail the mirror write.
+      void notifyCareCrisisOnCall({
+        careSessionId,
+        careUserId: auth.value.careUserId,
+        source: `live_risk_noted_${String((e.payload as Record<string, unknown>)['severity'] ?? 'MODERATE')}`,
+      }).catch(() => undefined);
     }
     if (e.type === 'HOMEWORK_ASSIGNED') {
       await writeAudit({

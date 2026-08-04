@@ -80,6 +80,9 @@ export function CareLiveSession({
   const [worksheet, setWorksheet] = useState<Record<string, string>>({});
   const [momentNoted, setMomentNoted] = useState(false);
   const [homeworkTitle, setHomeworkTitle] = useState<string | null>(null);
+  // CP3 — the graded risk ladder: a note_risk signal quietly reveals the help
+  // resources IN the session. Never ends the session, never locks the account.
+  const [riskNoticed, setRiskNoticed] = useState(false);
   const structureOnRef = useRef(false);
   const pendingEventsRef = useRef<CareLiveEvent[]>([]);
   const eventSeqRef = useRef(0);
@@ -420,6 +423,21 @@ export function CareLiveSession({
             });
           }
           ackTool(call.id, 'assign_homework');
+        } else if (call.name === 'note_risk') {
+          // CP3 — graded, non-terminating: reveal resources quietly, persist
+          // the signal (the server fires the on-call alert). The session
+          // continues; only the user's own SOS tap escalates further.
+          queueEvent('RISK_NOTED', {
+            severity:
+              typeof call.args?.['severity'] === 'string' ? call.args['severity'] : 'MODERATE',
+            reason:
+              typeof call.args?.['reason'] === 'string'
+                ? (call.args['reason'] as string).slice(0, 240)
+                : '',
+          });
+          setRiskNoticed(true);
+          void flushEvents(); // deliver the signal promptly, not on the next tick
+          ackTool(call.id, 'note_risk');
         } else if (call.name === 'end_session') {
           // CP1 — the model has no reliable clock. DECLINE a close it proposes
           // while there is still real time left (the honest close is driven by
@@ -486,7 +504,7 @@ export function CareLiveSession({
         }
       }
     },
-    [pushTurn, queueEvent, kind],
+    [pushTurn, queueEvent, flushEvents, kind],
   );
 
   // CP1 — open (or re-open) the live socket, wire the shared handlers, send the
@@ -802,6 +820,27 @@ export function CareLiveSession({
           <span className="rounded-full bg-[#1c352c] px-3 py-1 text-[11px] text-[#9fd3bd]">
             ✦ noted
           </span>
+        </div>
+      ) : null}
+
+      {riskNoticed ? (
+        <div className="mx-auto mb-2 w-full max-w-md px-5">
+          <div className="rounded-xl border border-[#4a3a2a] bg-[#2a2118] px-4 py-3">
+            <div className="text-[12px] font-semibold text-[#eec3a8]">
+              Real people you can reach right now — the session continues, this is just here for
+              you:
+            </div>
+            <ul className="mt-1.5 space-y-1">
+              {resources.slice(0, 3).map((r) => (
+                <li key={r.number} className="text-[12px] text-[#e6d4c4]">
+                  <a href={`tel:${r.number}`} className="font-semibold underline underline-offset-2">
+                    {r.name} — {r.number}
+                  </a>{' '}
+                  <span className="text-[#a98f7a]">({r.hours})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       ) : null}
 

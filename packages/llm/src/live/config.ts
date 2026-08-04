@@ -181,6 +181,18 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
         },
       },
       {
+        name: 'note_risk',
+        description:
+          'SILENT risk signal — it never ends the session and the user is not interrupted. Call it when the user genuinely discloses CURRENT thoughts of self-harm or suicide, intent to harm others, abuse, or a medical emergency (a "no" to your routine risk question is NOT a disclosure — never call it for denials). severity: LOW (passive, no plan), MODERATE (active thoughts, no immediate intent), HIGH (intent, plan, or immediate danger). Keep talking with warmth and care; help resources appear quietly on their screen.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            severity: { type: 'STRING', enum: ['LOW', 'MODERATE', 'HIGH'] },
+            reason: { type: 'STRING' },
+          },
+        },
+      },
+      {
         name: 'assign_homework',
         description:
           "Call ONCE, when you and the user have AGREED the week's practice (after they say yes to it): title = the tiny if-then habit in their words, steps = 1-5 very small steps, whyItHelps = one sentence linking it to their goal.",
