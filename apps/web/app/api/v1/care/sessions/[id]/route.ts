@@ -40,7 +40,7 @@ export async function GET(
   // REVIEW revision carries them forward (a hardcoded 'CBT' default was
   // silently resetting SLEEP/GROUNDING users' tracks on plan v2), and (b)
   // whether a baseline instrument exists (drives the "starting line" ask).
-  const [currentPlan, baselineCount, completedCount] = await Promise.all([
+  const [currentPlan, baselineCount, completedCount, momentRows] = await Promise.all([
     prisma.carePlan.findFirst({
       where: { careUserId: auth.value.careUserId },
       orderBy: { version: 'desc' },
@@ -50,7 +50,26 @@ export async function GET(
     prisma.careSession.count({
       where: { careUserId: auth.value.careUserId, status: 'COMPLETED' },
     }),
+    // CP6 — the session's logged key moments (the user's own words, captured
+    // live) render as timestamped cards on the report.
+    prisma.careLiveEvent.findMany({
+      where: { careSessionId, type: 'MOMENT_LOGGED' },
+      orderBy: { seq: 'asc' },
+      take: 8,
+      select: { atMs: true, payload: true },
+    }),
   ]);
+  const moments = momentRows
+    .map((m) => {
+      const p = (m.payload ?? {}) as Record<string, unknown>;
+      return {
+        atMs: m.atMs,
+        type: typeof p['type'] === 'string' ? p['type'] : 'INSIGHT',
+        text: typeof p['text'] === 'string' ? p['text'] : '',
+        quote: typeof p['quote'] === 'string' ? p['quote'] : '',
+      };
+    })
+    .filter((m) => m.text || m.quote);
 
   return NextResponse.json({
     id: session.id,
@@ -79,6 +98,7 @@ export async function GET(
         sessionDays: prefs.sessionDays ?? [],
       };
     })()),
+    moments,
     report: session.report
       ? { id: session.report.id, kind: session.report.kind, body: session.report.body }
       : null,

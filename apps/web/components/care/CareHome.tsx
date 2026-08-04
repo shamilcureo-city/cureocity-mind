@@ -66,6 +66,10 @@ export function CareHome() {
   /// Pre-review check-in (CG1): a REVIEW without a fresh score runs blind.
   /// Soft gate — the UI asks first; "skip" still allows the session.
   const [reviewCheckinDone, setReviewCheckinDone] = useState(false);
+  /// CP3-B — measure BEFORE you formulate: the FIRST session asks for the
+  /// PHQ-9/GAD-7 starting line up front, so the intake's impression and plan
+  /// are grounded in scores. Same soft gate: skipping still allows the session.
+  const [intakeCheckinDone, setIntakeCheckinDone] = useState(false);
   const [baselineDismissed, setBaselineDismissed] = useState(true);
 
   useEffect(() => {
@@ -206,7 +210,20 @@ export function CareHome() {
           onSkip={() => setReviewCheckinDone(true)}
         />
       ) : null}
-      {data.gate.allowed && !(n.kind === 'REVIEW' && data.needsCheckin && !reviewCheckinDone) ? (
+      {data.gate.allowed && n.kind === 'INTAKE' && !data.hasBaseline && !intakeCheckinDone ? (
+        // CP3-B — the starting line BEFORE the first session: a real intake
+        // measures before it formulates, so the assessment and plan carry
+        // scores from minute one. Soft gate: skipping still allows the session.
+        <CareInstrumentSequence
+          instrumentKeys={careBaselineInstruments(n.modalityTrack)}
+          framing="baseline"
+          onDone={() => setIntakeCheckinDone(true)}
+          onSkip={() => setIntakeCheckinDone(true)}
+        />
+      ) : null}
+      {data.gate.allowed &&
+      !(n.kind === 'REVIEW' && data.needsCheckin && !reviewCheckinDone) &&
+      !(n.kind === 'INTAKE' && !data.hasBaseline && !intakeCheckinDone) ? (
         <>
           {n.kind === 'TREATMENT' ? (
             <div className="mt-3 flex flex-wrap gap-1.5">
