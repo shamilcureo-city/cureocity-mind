@@ -31,7 +31,12 @@ import { encryptForTenant } from './tenant-crypto';
 import { ensureEnglishNote } from './ensure-english-note';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
-import { assembleSegments, transcribeChunkInline, type AssemblyInput } from './transcribe-segment';
+import {
+  assembleSegments,
+  coverTranscriptWithSegments,
+  transcribeChunkInline,
+  type AssemblyInput,
+} from './transcribe-segment';
 
 /**
  * Synchronous orchestrator port — runs Pass 1 → Pass 2 inline on the
@@ -665,7 +670,15 @@ async function runLegacyWholeSessionPass1(args: {
     kind: 'ready',
     source: 'legacy',
     transcript: pass1.output.transcript,
-    speakerSegments: pass1.output.speakerSegments,
+    // Same guarantee the chunked path makes: text never exists outside the
+    // speaker timeline, or Pass 3 has nothing to read (see
+    // coverTranscriptWithSegments).
+    speakerSegments: coverTranscriptWithSegments({
+      transcript: pass1.output.transcript,
+      segments: pass1.output.speakerSegments,
+      startMs: 0,
+      endMs: durationMs,
+    }),
     affectFeatures: pass1.output.affectFeatures,
     detectedLanguages: pass1.output.detectedLanguages,
     totalCostInr: pass1.callLog.costInr,

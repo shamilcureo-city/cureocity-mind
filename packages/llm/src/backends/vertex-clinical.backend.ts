@@ -176,6 +176,35 @@ export class Pass3BackendError extends Error {
   }
 }
 
+/**
+ * Render the transcript Pass 3 reasons over.
+ *
+ * Normally that is the diarized timeline. The fallback matters more than it
+ * looks: this prompt asks for `supportingEvidence` quotes and forbids invention,
+ * but if `speakerSegments` is empty it used to emit an EMPTY transcript section
+ * under a heading promising one — leaving the model to produce a whole clinical
+ * brief with nothing to read. Upstream now guarantees coverage
+ * (`coverTranscriptWithSegments`), and this is the belt to that pair of braces:
+ * fall back to the plain transcript, labelled `unknown` so no quote gets
+ * attributed to a speaker we cannot identify, and say plainly that diarization
+ * is missing so the model doesn't guess who spoke.
+ */
+export function renderTranscriptBlock(input: Pass3Input): string {
+  if (input.speakerSegments.length > 0) {
+    return input.speakerSegments
+      .map((s) => `[${s.speaker} ${s.startMs}-${s.endMs}ms] ${s.text}`)
+      .join('\n');
+  }
+  const transcript = input.transcript.trim();
+  if (transcript.length === 0) return '(no transcript available)';
+  return [
+    'NOTE: speaker diarization is unavailable for this session. Treat every',
+    'quote as speaker "unknown" — do NOT guess whether the therapist or the',
+    'client said something.',
+    `[unknown 0-0ms] ${transcript}`,
+  ].join('\n');
+}
+
 function buildUserMessage(input: Pass3Input): string {
   const priorDx =
     input.clientContext.priorDiagnoses && input.clientContext.priorDiagnoses.length > 0
@@ -201,6 +230,7 @@ function buildUserMessage(input: Pass3Input): string {
   // Sprint 75 — the longitudinal digest sits BEFORE the per-session content
   // (transcript/note) so the stable prefix maximises implicit prompt caching
   // and the model reads the arc before the day's material.
+  // (transcript rendering: see renderTranscriptBlock below)
   const digestBlock = input.caseDigest
     ? ['Cumulative case digest (deterministic, from the chart):', input.caseDigest, '']
     : [];
@@ -218,9 +248,7 @@ function buildUserMessage(input: Pass3Input): string {
     priorPlan,
     '',
     'Transcript (with speaker tags and timestamps in ms):',
-    input.speakerSegments
-      .map((s) => `[${s.speaker} ${s.startMs}-${s.endMs}ms] ${s.text}`)
-      .join('\n'),
+    renderTranscriptBlock(input),
     '',
     'TherapyNoteV1 produced for this session:',
     JSON.stringify(input.note, null, 2),

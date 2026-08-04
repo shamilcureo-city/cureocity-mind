@@ -318,6 +318,48 @@ export interface AssemblyInput {
   latencyMs: number;
 }
 
+/**
+ * Guarantee that transcript text is never stranded outside the speaker timeline.
+ *
+ * Diarization is best-effort; the transcript is not. Pass 1 can return text for
+ * a window and still hand back an EMPTY speakerSegments array — a quiet window,
+ * a single voice, or a model that simply didn't diarize. Assembly used to keep
+ * the text and drop that window from the timeline, which produced a NoteDraft
+ * holding a full transcript and zero segments.
+ *
+ * That looked survivable and wasn't. Pass 2 reads `transcript`, so the note came
+ * out fine — but Pass 3 builds its ENTIRE transcript block from speakerSegments
+ * (see vertex-clinical.backend.ts), so the clinical brief had nothing to read.
+ * The therapist got a note and a dead AI copilot: "No speaker segments
+ * available — Pass 1 output is incomplete."
+ *
+ * So an undiarized window becomes ONE `unknown` segment carrying its text.
+ * `unknown` is a first-class speaker in both SpeakerSegmentSchema and Pass 3's
+ * supporting-quote schema, so a quote pulled from it is honestly unattributed
+ * rather than falsely credited to the client — which is the failure mode that
+ * would actually matter clinically.
+ */
+export function coverTranscriptWithSegments(args: {
+  transcript: string;
+  segments: SpeakerSegment[];
+  startMs: number;
+  endMs: number;
+}): SpeakerSegment[] {
+  if (args.segments.length > 0) return args.segments;
+  const text = args.transcript.trim();
+  if (text.length === 0) return [];
+  return [
+    {
+      speaker: 'unknown',
+      startMs: args.startMs,
+      // endMs is a positive int in the schema, and a chunk with an unknown or
+      // zero duration would otherwise fail validation downstream.
+      endMs: Math.max(args.endMs, args.startMs + 1),
+      text,
+    },
+  ];
+}
+
 export function assembleSegments(segments: AssemblyInput[]): AssembledTranscript {
   const ordered = [...segments].sort((a, b) => a.chunkIndex - b.chunkIndex);
   const transcriptParts: string[] = [];
@@ -333,7 +375,15 @@ export function assembleSegments(segments: AssemblyInput[]): AssembledTranscript
     if (seg.transcript.length > 0) {
       transcriptParts.push(seg.transcript);
     }
-    for (const speaker of seg.speakerSegments) {
+    // Window-relative first, then offset — so a synthesised cover segment
+    // spans exactly this window rather than the whole session.
+    const covered = coverTranscriptWithSegments({
+      transcript: seg.transcript,
+      segments: seg.speakerSegments,
+      startMs: 0,
+      endMs: seg.durationMs,
+    });
+    for (const speaker of covered) {
       speakerSegments.push({
         ...speaker,
         startMs: speaker.startMs + cumulativeOffsetMs,

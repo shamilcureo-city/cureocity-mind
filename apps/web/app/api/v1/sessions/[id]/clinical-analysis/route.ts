@@ -4,6 +4,14 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { runClinicalAnalysis } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
 import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
+import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
+
+type SpeakerSegmentRow = {
+  speaker: 'therapist' | 'client' | 'unknown';
+  startMs: number;
+  endMs: number;
+  text: string;
+};
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -83,17 +91,33 @@ export async function POST(
     );
   }
 
-  const segments = draft.speakerSegments as
-    | {
-        speaker: 'therapist' | 'client' | 'unknown';
-        startMs: number;
-        endMs: number;
-        text: string;
-      }[]
-    | null;
-  if (!segments || segments.length === 0) {
+  // A draft can hold a full transcript and an EMPTY speaker timeline when Pass 1
+  // transcribed a window but didn't diarize it. That used to hard-409 here, which
+  // left the therapist with a finished note and a permanently dead AI copilot —
+  // and no way out, because re-running hit the same wall. runOrAssemblePass1 now
+  // guarantees coverage for new sessions; this heals the ones already stored,
+  // labelling the text `unknown` rather than guessing who spoke.
+  const stored = draft.speakerSegments as SpeakerSegmentRow[] | null;
+  let segments = stored ?? [];
+  if (segments.length === 0) {
+    const chunks = await prisma.audioChunk.aggregate({
+      where: { sessionId },
+      _sum: { durationMs: true },
+    });
+    segments = coverTranscriptWithSegments({
+      transcript: draft.transcript,
+      segments: [],
+      startMs: 0,
+      endMs: chunks._sum.durationMs ?? 0,
+    }) as SpeakerSegmentRow[];
+  }
+  if (segments.length === 0) {
     return NextResponse.json(
-      { error: 'No speaker segments available — Pass 1 output is incomplete.' },
+      {
+        error:
+          'This session has no transcript to analyse. Re-run the note from the Note tab first.',
+        code: 'NOTE_NOT_USABLE',
+      },
       { status: 409 },
     );
   }
