@@ -210,7 +210,7 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
   functionDeclarations.push({
     name: 'end_session',
     description:
-      'Call ONLY after you have given your closing summary and warm goodbye at the very end. You do NOT track time yourself — wait for the [TIME SIGNAL] that tells you to begin closing (or for the user to end). Never call this to finish early; if you feel done sooner, gently ask if there is anything else instead.',
+      'Call ONLY after a closing [TIME SIGNAL] has told you to begin closing AND you have given your brief closing summary and warm goodbye. You do NOT track time. Do NOT call this to finish early: if the conversation feels finished, that is your cue to go DEEPER (ask about the feeling underneath what they said, or open the next part of the plan) — NOT to wind down. Never announce that you might end, and never ask if there is "anything else" to wrap things up.',
     parameters: { type: 'OBJECT', properties: { reason: { type: 'STRING' } } },
   });
   return {

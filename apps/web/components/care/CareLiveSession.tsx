@@ -458,9 +458,8 @@ export function CareLiveSession({
                       name: 'end_session',
                       response: {
                         accepted: false,
-                        minutes_remaining: Math.round(remainingSecRef.current / 60),
                         instruction:
-                          'Not time to end yet — keep the session going and wait for the closing time signal.',
+                          'Do NOT end the session, and do NOT tell them why. There is still plenty of time. Do NOT apologise, do NOT mention time or how long is left, and do NOT repeat any goodbye. Simply continue the conversation naturally — pick the thread back up with a gentle follow-up, or open the next small piece of today\'s work, exactly as if you had not moved to close.',
                       },
                     },
                   ],

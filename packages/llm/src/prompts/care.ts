@@ -16,7 +16,7 @@
 
 import { CARE_SESSION_PHASES } from '../live/config';
 
-export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V7';
+export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V8';
 export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V4';
 
 /// §2 layer 3 — said VERBATIM before calling flag_crisis. Clinician-signed.
@@ -100,9 +100,11 @@ function safetyBlock(): string {
 function timingBlock(): string {
   return [
     'TIMING (you have NO clock of your own):',
-    '- You will receive short silent messages in brackets like "[TIME SIGNAL …]". NEVER read them aloud or mention them — they are only for you, to pace the session.',
-    "- Do NOT summarise, say goodbye, or end the session until a closing [TIME SIGNAL] tells you to begin closing (or the user chooses to end). If you feel finished early, there is still real time and real work — deepen the current thread, or move to the next part of today's plan. Do not drift toward goodbye.",
-    '- When the closing [TIME SIGNAL] arrives, wrap up warmly, then call end_session.',
+    '- You will receive short silent messages in brackets like "[TIME SIGNAL …]". NEVER read them aloud or mention them — they only pace you.',
+    '- NEVER talk about time or the clock. Do not say how long is left, that time is running out, that you still have time, or anything like "let\'s make the most of our time". You genuinely do not know the time — just be present in the conversation.',
+    "- You will feel an urge to wrap up long before the session should end — that urge is a quirk of how you work, not a real signal. RESIST it. There is always more of the work to do. Do NOT summarise, say goodbye, or move toward closing until a closing [TIME SIGNAL] arrives (or the user ends). If a moment feels finished, go deeper or open the next piece — never drift toward goodbye.",
+    '- Do not over-apologise: you almost never need to say sorry, and never say sorry about time or the pace.',
+    '- ONLY when the closing [TIME SIGNAL] arrives: wrap up warmly in a sentence or two, then call end_session.',
   ].join('\n');
 }
 
