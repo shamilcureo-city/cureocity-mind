@@ -140,7 +140,12 @@ export function RecordConfirmStrip({
 
   const [modality, setModality] = useState<SessionModality | null>(null);
   const [language, setLanguage] = useState<string>('en');
-  const [method, setMethod] = useState<CaptureSource>(mode === 'dictation' ? 'dictation' : 'mic');
+  // VS1 — 'room' routes to the virtual surface (LiveKit room + client link +
+  // the scribe fed by the call audio). 'display' remains the own-Meet/Zoom
+  // tab-audio escape hatch.
+  const [method, setMethod] = useState<CaptureSource | 'room'>(
+    mode === 'dictation' ? 'dictation' : 'mic',
+  );
   // TS6 — for in-person (mic) capture the therapist chooses: live scribe
   // (transcript + note build as you talk) or record-only (batch note after).
   const [capture, setCapture] = useState<'live' | 'batch'>(
@@ -298,6 +303,23 @@ export function RecordConfirmStrip({
         return;
       }
 
+      // VS1 — Virtual: start the session (consent snapshot + IN_PROGRESS, so
+      // the client's signed join link is live), then hand over to the video
+      // surface — room, share link and the call-audio scribe live there.
+      if (method === 'room') {
+        if (!alreadyStarted) {
+          const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, {
+            method: 'POST',
+          });
+          if (!startRes.ok) {
+            const body = (await startRes.json().catch(() => ({}))) as { error?: string };
+            throw new Error(body.error ?? `Start session failed (${startRes.status})`);
+          }
+        }
+        router.push(`/app/video/session/${sessionRow.id}`);
+        return;
+      }
+
       if (!alreadyStarted) {
         const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
         if (!startRes.ok) {
@@ -312,7 +334,7 @@ export function RecordConfirmStrip({
         clientName,
         kind: sessionRow.kind,
         modality: sessionRow.modality,
-        source: method,
+        source: method as CaptureSource,
       });
     } catch (err) {
       setSubmitError((err as Error).message);
@@ -358,18 +380,24 @@ export function RecordConfirmStrip({
           {mode === 'live-capture' && (
             <div className="mt-6">
               <Label>Recording method</Label>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
                 <MethodOption
                   checked={method === 'mic'}
                   onSelect={() => setMethod('mic')}
-                  title="In person"
-                  description="This device's microphone."
+                  title="Walk-in"
+                  description="Client in the room — this device's microphone."
+                />
+                <MethodOption
+                  checked={method === 'room'}
+                  onSelect={() => setMethod('room')}
+                  title="Virtual"
+                  description="Video room in Cureocity — the client joins by a link you share."
                 />
                 <MethodOption
                   checked={method === 'display'}
                   onSelect={() => setMethod('display')}
-                  title="Virtual"
-                  description="Capture tab audio for an online session."
+                  title="Own Meet/Zoom"
+                  description="Your own video app — captures the tab's audio."
                   disabled={!displaySupported}
                 />
               </div>

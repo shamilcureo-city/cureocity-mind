@@ -30,6 +30,17 @@ interface Props {
   counterpartLabel: string;
   /** Where Leave goes. */
   leaveHref: string;
+  /**
+   * VS1 — the virtual-session surface embeds the room beside the recorder,
+   * so 'embedded' fills the parent instead of claiming the viewport.
+   */
+  chrome?: 'full' | 'embedded';
+  /**
+   * VS1 — hands the connected Room to the parent (null on disconnect/error)
+   * so the recorder can mix local mic + remote audio into the scribe
+   * pipeline. Display stays this component's job.
+   */
+  onRoom?: (room: Room | null) => void;
 }
 
 type Phase =
@@ -41,7 +52,15 @@ type Phase =
   | 'ended'
   | 'error';
 
-export function VideoSessionRoom({ tokenEndpoint, counterpartLabel, leaveHref }: Props) {
+export function VideoSessionRoom({
+  tokenEndpoint,
+  counterpartLabel,
+  leaveHref,
+  chrome = 'full',
+  onRoom,
+}: Props) {
+  const heightCls =
+    chrome === 'embedded' ? 'h-full min-h-[420px] overflow-hidden rounded-3xl' : 'min-h-screen';
   const [phase, setPhase] = useState<Phase>('idle');
   const [message, setMessage] = useState<string | null>(null);
   const [micOn, setMicOn] = useState(true);
@@ -111,17 +130,26 @@ export function VideoSessionRoom({ tokenEndpoint, counterpartLabel, leaveHref }:
       }
       setRemotePresent(room.remoteParticipants.size > 0);
       setPhase('live');
+      onRoom?.(room);
     } catch (e) {
       setMessage((e as Error).message);
       setPhase('error');
       roomRef.current?.disconnect();
       roomRef.current = null;
+      onRoom?.(null);
     }
-  }, [tokenEndpoint, attachRemote]);
+  }, [tokenEndpoint, attachRemote, onRoom]);
 
+  // Unmount cleanup reads the latest onRoom through a ref, so the effect can
+  // stay mount-only without a lint suppression.
+  const onRoomRef = useRef(onRoom);
+  useEffect(() => {
+    onRoomRef.current = onRoom;
+  }, [onRoom]);
   useEffect(() => {
     return () => {
       roomRef.current?.disconnect();
+      onRoomRef.current?.(null);
     };
   }, []);
 
@@ -144,13 +172,14 @@ export function VideoSessionRoom({ tokenEndpoint, counterpartLabel, leaveHref }:
   const leave = useCallback(() => {
     roomRef.current?.disconnect();
     roomRef.current = null;
+    onRoom?.(null);
     window.location.href = leaveHref;
-  }, [leaveHref]);
+  }, [leaveHref, onRoom]);
 
   // ---------------------------------------------------------- pre-join --
   if (phase === 'idle' || phase === 'error' || phase === 'requesting-devices') {
     return (
-      <div className="grid min-h-screen place-items-center bg-[#0a101f] p-6">
+      <div className={`grid ${heightCls} place-items-center bg-[#0a101f] p-6`}>
         <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center">
           <h1 className="font-serif text-2xl">Your video session</h1>
           <p className="mt-2 text-sm leading-relaxed text-[var(--color-ink-2)]">
@@ -178,7 +207,7 @@ export function VideoSessionRoom({ tokenEndpoint, counterpartLabel, leaveHref }:
   // ---------------------------------------------------------- ended -----
   if (phase === 'ended') {
     return (
-      <div className="grid min-h-screen place-items-center bg-[#0a101f] p-6">
+      <div className={`grid ${heightCls} place-items-center bg-[#0a101f] p-6`}>
         <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center">
           <h1 className="font-serif text-2xl">Session ended</h1>
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
@@ -206,7 +235,7 @@ export function VideoSessionRoom({ tokenEndpoint, counterpartLabel, leaveHref }:
 
   // ---------------------------------------------------------- in-call ---
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#0a101f]">
+    <div className={`relative flex ${heightCls} flex-col bg-[#0a101f]`}>
       {phase === 'reconnecting' && (
         <div className="absolute inset-x-0 top-0 z-20 bg-[var(--color-warn)] py-2 text-center text-sm font-medium text-white">
           Connection dropped — reconnecting…

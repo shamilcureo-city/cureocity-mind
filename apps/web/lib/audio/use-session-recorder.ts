@@ -14,14 +14,19 @@ import { requestPersistentStorage } from './storage-buckets';
 
 export type RecorderState = 'idle' | 'preparing' | 'recording' | 'finishing' | 'error';
 
-export type CaptureSource = 'mic' | 'display' | 'dictation';
+export type CaptureSource = 'mic' | 'display' | 'dictation' | 'external';
 
 export interface RecorderOptions {
   sessionId: string;
   /** Endpoint base, defaults to '/api/v1' (same-origin). */
   scribeBase?: string;
-  /** Live-stream source. 'mic' / 'dictation' use getUserMedia (mic); 'display' uses getDisplayMedia (tab/system audio for virtual sessions). */
+  /** Live-stream source. 'mic' / 'dictation' use getUserMedia (mic); 'display'
+   *  uses getDisplayMedia (tab audio); 'external' records an injected stream —
+   *  VS1's virtual room passes a WebAudio mix of the therapist's mic and the
+   *  client's incoming call audio, so BOTH voices reach the note cleanly. */
   source: CaptureSource;
+  /** Required when source is 'external'; ignored otherwise. */
+  externalStream?: MediaStream;
   /** Returns a Firebase ID token, or null to use the dev-bypass header. */
   getAuthToken?: () => Promise<string | null>;
 }
@@ -116,7 +121,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     try {
       await requestPersistentStorage();
 
-      const stream = await acquireStream(opts.source);
+      const stream = await acquireStream(opts.source, opts.externalStream);
       streamRef.current = stream;
 
       const ctx = new AudioContext({ sampleRate: 48_000 });
@@ -302,7 +307,16 @@ export function isDisplayCaptureSupported(): boolean {
   return SUPPORTS_DISPLAY_MEDIA;
 }
 
-async function acquireStream(source: CaptureSource): Promise<MediaStream> {
+async function acquireStream(
+  source: CaptureSource,
+  externalStream?: MediaStream,
+): Promise<MediaStream> {
+  if (source === 'external') {
+    if (!externalStream || externalStream.getAudioTracks().length === 0) {
+      throw new Error('The call audio is not ready yet — wait for the room to connect.');
+    }
+    return externalStream;
+  }
   if (source === 'display') {
     if (!SUPPORTS_DISPLAY_MEDIA) {
       throw new Error('Tab-audio capture is not supported in this browser.');

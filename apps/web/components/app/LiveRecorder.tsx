@@ -14,6 +14,7 @@ const MODE_LABEL: Record<CaptureSource, string> = {
   mic: 'In-person',
   display: 'Virtual session',
   dictation: 'Dictation',
+  external: 'Virtual · Cureocity room',
 };
 
 interface Props {
@@ -28,6 +29,8 @@ interface Props {
   /// Sprint 19 — nullable: INTAKE sessions can defer the choice.
   modality: string | null;
   source: CaptureSource;
+  /** VS1 — the virtual room's mixed call audio (source 'external'). */
+  externalStream?: MediaStream;
   onFinished: () => void;
   /// Sprint DV3 — where to navigate after the session ends. Defaults to
   /// the therapy session workspace; the doctor encounter passes its own.
@@ -40,11 +43,16 @@ export function LiveRecorder({
   clientId,
   modality,
   source,
+  externalStream,
   onFinished,
   reviewHref,
 }: Props) {
   const router = useRouter();
-  const recorder = useSessionRecorder({ sessionId, source });
+  const recorder = useSessionRecorder({
+    sessionId,
+    source,
+    ...(externalStream && { externalStream }),
+  });
   useWakeLock(recorder.state === 'recording');
 
   const [elapsedMs, setElapsedMs] = useState(0);

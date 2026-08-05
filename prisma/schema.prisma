@@ -2934,6 +2934,7 @@ enum AuditAction {
   CARE_LIVE_MOMENT_LOGGED // CP2 — a key clinical moment captured live (log_moment)
   CARE_LIVE_HOMEWORK_AGREED // CP2 — homework agreed live in-session (assign_homework)
   CARE_LIVE_EVENT_RECORDED // CP2 — a batch of live structure events persisted
+  VIDEO_SESSION_CLIENT_JOINED // VS1 — client joined a session video room via the signed link
   PLAN_DICTATION_PROPOSED // Sprint DS12 — voice plan-edit proposal produced (apply lands RX_PAD_EDITED)
   FORMULATION_CONFIRMED // SL1 — a new living-formulation version confirmed (accepted suggestion or authored)
   AGREEMENT_RECORDED // SL1 — a session agreement recorded / follow-up marked

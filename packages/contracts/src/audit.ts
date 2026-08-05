@@ -338,6 +338,8 @@ export const AuditActionSchema = z.enum([
   'CARE_LIVE_MOMENT_LOGGED',
   'CARE_LIVE_HOMEWORK_AGREED',
   'CARE_LIVE_EVENT_RECORDED',
+  // VS1 — a client joined a session video room via the signed link.
+  'VIDEO_SESSION_CLIENT_JOINED',
 ]);
 
 export const AuditActorTypeSchema = z.enum(['PSYCHOLOGIST', 'SYSTEM', 'CLIENT']);

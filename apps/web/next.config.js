@@ -70,6 +70,16 @@ const nextConfig = {
           },
         ],
       },
+      // VS1 — the ad-hoc session join page (Record screen's Virtual option).
+      {
+        source: '/p/sessions/:id/join',
+        headers: [
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
+          },
+        ],
+      },
       {
         source: '/app/video/:path*',
         headers: [
