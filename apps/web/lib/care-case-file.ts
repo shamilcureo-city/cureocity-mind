@@ -316,7 +316,7 @@ export function languageGuidance(preferred: string, spoken: string[]): string {
   const primary = nonEnglish[0]!;
   const primaryName = LANGUAGE_NAMES[primary] ?? primary;
   const mixName = CODE_MIX_NAMES[primary] ?? `a natural ${primaryName}–English mix`;
-  return `Speak with them in ${mixName} — the everyday, code-mixed way people actually talk, NOT pure formal ${primaryName} and NOT pure English. Keep the common English words and phrases people naturally use in speech (things like stress, feeling, okay, work, sleep, relax); keep sentences short and simple; pronounce carefully and unhurriedly. Mirror the user — if they lean more English or more ${primaryName}, follow them.`;
+  return `Speak with them in ${mixName} — the everyday, code-mixed way people actually talk, NOT pure formal ${primaryName} and NOT pure English. Code-mixing means blending WITHIN one sentence; say every thought exactly ONCE. NEVER say something in English and then repeat it in ${primaryName} (or the reverse) — you are not a translator, and saying the same thing twice in two languages sounds robotic and wastes the session. Pick the register that fits the moment, say it once, and move on. Keep the common English words and phrases people naturally use in speech (things like stress, feeling, okay, work, sleep, relax); keep sentences short and simple; pronounce carefully and unhurriedly. Mirror the user — if they lean more English or more ${primaryName}, follow them.`;
 }
 
 export interface BuildSessionPromptInput {
