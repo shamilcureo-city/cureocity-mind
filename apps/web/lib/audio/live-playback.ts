@@ -68,6 +68,19 @@ export class LivePlayback {
     );
   }
 
+  /**
+   * True while the model's audio is (or has just been) playing. The mic is
+   * gated on this to run HALF-DUPLEX: on a phone speaker the browser's echo
+   * canceller cannot reference Web Audio API playback, so the model's own
+   * voice leaks into the mic, Gemini transcribes it as the user, and the
+   * model answers itself — an "AI talking to an AI" loop. Not sending mic
+   * audio while it speaks breaks that loop. The 150 ms tail covers the
+   * acoustic + AEC latency after the last sample.
+   */
+  isSpeaking(): boolean {
+    return performance.now() < this.speakingUntil + 150;
+  }
+
   /** Barge-in: drop everything queued (Gemini sent `interrupted`). */
   flush(): void {
     for (const s of this.sources) {
