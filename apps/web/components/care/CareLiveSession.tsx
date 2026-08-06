@@ -124,7 +124,17 @@ export function CareLiveSession({
   const mic = useLiveStream({
     onFrame: (pcm) => {
       const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN || mutedRef.current) return;
+      // Half-duplex — do NOT send mic audio while the model is speaking, or on
+      // a speaker it hears its own voice and replies to itself (an AI-talking-
+      // to-an-AI loop that browser echo cancellation can't stop for Web Audio
+      // playback). Gating here also keeps the model's echo out of the transcript.
+      if (
+        !ws ||
+        ws.readyState !== WebSocket.OPEN ||
+        mutedRef.current ||
+        playbackRef.current?.isSpeaking()
+      )
+        return;
       // Base64 realtime frames, ~128 ms each from the worklet cadence.
       // NOTE for the ai-studio backend: the AC0 probe pins the exact
       // envelope key (media_chunks vs media) against the live API; the
