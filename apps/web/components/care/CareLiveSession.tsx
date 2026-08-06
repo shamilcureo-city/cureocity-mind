@@ -349,15 +349,20 @@ export function CareLiveSession({
       const toolCall = msg['toolCall'] as
         | { functionCalls?: Array<{ id?: string; name?: string; args?: Record<string, unknown> }> }
         | undefined;
-      // CP2 — one silent ack shape for every structure tool, so the model is
-      // never left waiting on a function response.
+      // CP2 — one silent ack shape for every structure tool. The tools are
+      // declared behavior: NON_BLOCKING and the ack is scheduled SILENT: the
+      // result lands in context WITHOUT triggering a new spoken generation.
+      // (An unscheduled ack makes the model speak after EVERY tool call —
+      // heard live as "two AIs talking one after another".)
       const ackTool = (id: string | undefined, name: string): void => {
         const ws = wsRef.current;
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(
             JSON.stringify({
               tool_response: {
-                function_responses: [{ id, name, response: { acknowledged: true } }],
+                function_responses: [
+                  { id, name, response: { acknowledged: true, scheduling: 'SILENT' } },
+                ],
               },
             }),
           );
@@ -541,6 +546,18 @@ export function CareLiveSession({
           }
         })();
 
+        // Defense in depth — never let two live sockets stream at once (two
+        // model instances both talking). Any lingering previous socket is
+        // closed before the new one takes the ref.
+        const prev = wsRef.current;
+        if (prev && prev.readyState !== WebSocket.CLOSED) {
+          try {
+            prev.onmessage = null;
+            prev.close();
+          } catch {
+            /* already closing */
+          }
+        }
         const ws = new WebSocket(credential.wsUrl);
         wsRef.current = ws;
         ws.onopen = () => {

@@ -16,7 +16,7 @@
 
 import { CARE_SESSION_PHASES } from '../live/config';
 
-export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V8';
+export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V9';
 export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V4';
 
 /// §2 layer 3 — said VERBATIM before calling flag_crisis. Clinician-signed.
@@ -161,6 +161,7 @@ function phasesBlock(kind: 'INTAKE' | 'TREATMENT' | 'REVIEW', modalityTrack?: st
   const phases = CARE_SESSION_PHASES[kind];
   const lines = [
     'SESSION STRUCTURE (silent tools — the user sees them as on-screen progress, never hears them):',
+    '- Tool calls are invisible plumbing. NEVER speak because of a tool call or its result — no narrating, no acknowledging, no pausing, no starting a new remark. Your speech flows on exactly as if the tool did not exist.',
     `- PHASES, in order: ${phases.map((p) => p.key).join(' → ')}. The MOMENT you move into a phase, silently call mark_phase with that key (every phase, including the first). Never say a phase name aloud.`,
     '- KEY MOMENTS: when something clinically important lands — an insight they reached, a striking thing they said, a skill they used — silently call log_moment, putting their VERBATIM words in quote. 3-6 per session; never announce it.',
   ];
