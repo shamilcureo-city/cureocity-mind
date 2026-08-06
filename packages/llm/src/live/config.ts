@@ -148,12 +148,19 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
     functionDeclarations.push(
       {
         name: 'mark_phase',
+        // NON_BLOCKING + a SILENT-scheduled ack: without this every tool
+        // response triggers a fresh spoken generation — heard live as "two
+        // AIs talking one after another" (each tool call spliced in an extra
+        // utterance). Applies to every silent tool below; end_session stays
+        // blocking because its decline MUST redirect the model's speech.
+        behavior: 'NON_BLOCKING',
         description:
           'Silently signal that you have moved the session into a new phase. Call it the MOMENT you move into a phase, passing the phase key from the list in your instructions. NEVER say the phase name aloud — it only updates the on-screen progress rail for the user.',
         parameters: { type: 'OBJECT', properties: { phase: { type: 'STRING' } } },
       },
       {
         name: 'log_moment',
+        behavior: 'NON_BLOCKING',
         description:
           'Silently record a clinically important moment. type: INSIGHT (they connected something), QUOTE (their own words worth keeping), or SKILL (they used or learned a skill). text = why it mattered, one short sentence. quote = their VERBATIM words when you have them — never a paraphrase. Never announce that you noted it.',
         parameters: {
@@ -167,6 +174,7 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
       },
       {
         name: 'worksheet_update',
+        behavior: 'NON_BLOCKING',
         description:
           "Silently write today's work onto the shared on-screen worksheet AS YOU GO — the user watches it fill in. worksheetKey: THOUGHT_RECORD | ACTIVITY_PLAN | GROUNDING_KIT | SLEEP_PLAN (your instructions name today's sheet). fields: an object of short plain-language strings using the field names from your instructions. Call it each time a piece of the work lands (you can update a field you set before). Never read the sheet aloud.",
         parameters: {
@@ -182,6 +190,7 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
       },
       {
         name: 'note_risk',
+        behavior: 'NON_BLOCKING',
         description:
           'SILENT risk signal — it never ends the session and the user is not interrupted. Call it when the user genuinely discloses CURRENT thoughts of self-harm or suicide, intent to harm others, abuse, or a medical emergency (a "no" to your routine risk question is NOT a disclosure — never call it for denials). severity: LOW (passive, no plan), MODERATE (active thoughts, no immediate intent), HIGH (intent, plan, or immediate danger). Keep talking with warmth and care; help resources appear quietly on their screen.',
         parameters: {
@@ -194,6 +203,7 @@ export function buildCareLiveSetup(input: CareLiveSetupInput): Record<string, un
       },
       {
         name: 'assign_homework',
+        behavior: 'NON_BLOCKING',
         description:
           "Call ONCE, when you and the user have AGREED the week's practice (after they say yes to it): title = the tiny if-then habit in their words, steps = 1-5 very small steps, whyItHelps = one sentence linking it to their goal.",
         parameters: {
