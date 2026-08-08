@@ -55,9 +55,10 @@ export async function POST(
 
   const { careUser } = auth.value;
   const caseFile = await getCareCaseFile(auth.value.careUserId);
-  // CP2 — ON by default; opt out with CARE_LIVE_STRUCTURE=false (must match
-  // the token route so a reconnected session keeps the same tool set).
-  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] !== 'false';
+  // CP2 — opt-in, default OFF (Vertex live has no async function-calling;
+  // silent tool acks double the speech — see the token route). Must match
+  // the token route so a reconnected session keeps the same tool set.
+  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] === 'true';
   const { prompt, sessionCapMin } = buildSessionPrompt({
     displayName: careUser.displayName,
     personaName: careUser.personaName,

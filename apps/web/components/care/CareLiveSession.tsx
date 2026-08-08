@@ -89,6 +89,8 @@ export function CareLiveSession({
   const phasesSeenRef = useRef<Set<string>>(new Set());
   const coverageDeclinedRef = useRef(false);
   const momentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Half-duplex gate: audio_stream_end is sent once per open→closed transition.
+  const streamEndSentRef = useRef(false);
   structureOnRef.current = structureOn;
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -124,17 +126,23 @@ export function CareLiveSession({
   const mic = useLiveStream({
     onFrame: (pcm) => {
       const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
       // Half-duplex — do NOT send mic audio while the model is speaking, or on
       // a speaker it hears its own voice and replies to itself (an AI-talking-
       // to-an-AI loop that browser echo cancellation can't stop for Web Audio
       // playback). Gating here also keeps the model's echo out of the transcript.
-      if (
-        !ws ||
-        ws.readyState !== WebSocket.OPEN ||
-        mutedRef.current ||
-        playbackRef.current?.isSpeaking()
-      )
+      // On the open→closed transition, send audio_stream_end ONCE so the
+      // server flushes its buffered audio and closes any half-open VAD
+      // activity — otherwise the silent gap can commit a phantom user turn
+      // the model then answers (nobody spoke).
+      if (mutedRef.current || playbackRef.current?.isSpeaking()) {
+        if (!streamEndSentRef.current) {
+          streamEndSentRef.current = true;
+          ws.send(JSON.stringify({ realtime_input: { audio_stream_end: true } }));
+        }
         return;
+      }
+      streamEndSentRef.current = false;
       // Base64 realtime frames, ~128 ms each from the worklet cadence.
       // NOTE for the ai-studio backend: the AC0 probe pins the exact
       // envelope key (media_chunks vs media) against the live API; the
@@ -357,11 +365,15 @@ export function CareLiveSession({
       const ackTool = (id: string | undefined, name: string): void => {
         const ws = wsRef.current;
         if (ws && ws.readyState === WebSocket.OPEN) {
+          // scheduling is a SIBLING of response on FunctionResponse — inside
+          // the response Struct the model reads it as tool-result CONTENT.
+          // (On Vertex v1beta1 scheduling is ignored either way — which is
+          // why the silent tools ship disabled there; see the token route.)
           ws.send(
             JSON.stringify({
               tool_response: {
                 function_responses: [
-                  { id, name, response: { acknowledged: true, scheduling: 'SILENT' } },
+                  { id, name, response: { acknowledged: true }, scheduling: 'SILENT' },
                 ],
               },
             }),
