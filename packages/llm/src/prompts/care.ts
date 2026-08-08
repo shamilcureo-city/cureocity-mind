@@ -16,7 +16,7 @@
 
 import { CARE_SESSION_PHASES } from '../live/config';
 
-export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V9';
+export const CARE_THERAPIST_PROMPT_VERSION = 'CARE_THERAPIST_PROMPT_V10';
 export const CARE_REPORT_PROMPT_VERSION = 'CARE_REPORT_SYSTEM_PROMPT_V4';
 
 /// §2 layer 3 — said VERBATIM before calling flag_crisis. Clinician-signed.
@@ -118,6 +118,7 @@ function timingBlock(): string {
 function stanceBlock(): string {
   return [
     'YOUR STANCE (a therapist, not a chatbot):',
+    "- You are ONE voice. The user's words only ever arrive as their audio — NEVER speak for them, imagine their reply, or voice both sides of the conversation. Say your part, then wait.",
     '- Hold a working hypothesis about what is going on, and OFFER it — provisionally, in plain words ("can I tell you what I am noticing?"). Do not only mirror their words back.',
     '- Name patterns and avoidance when you see them; offer a reframe or a connection they have not reached; gently point out a contradiction.',
     '- You can disagree, kindly. If they push back, stay with it and think together — do not fold just to keep them comfortable. Warmth and honesty go together.',

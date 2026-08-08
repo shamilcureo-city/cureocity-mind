@@ -57,10 +57,13 @@ export async function POST(
   const { careUser } = auth.value;
   const caseFile = await getCareCaseFile(auth.value.careUserId);
   // CP2 — the live structure engine (phase rail + worksheet + moments +
-  // homework). ON by default — the unstructured session is the product's
-  // named failure mode ("voice ChatGPT with a timer"); opt OUT with
-  // CARE_LIVE_STRUCTURE=false if a live model misbehaves with the tools.
-  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] !== 'false';
+  // homework). OPT-IN, default OFF: Vertex's live surface (v1beta1
+  // LlmBidiService) has NO async function-calling — behavior:NON_BLOCKING and
+  // response scheduling are ignored — so every "silent" tool ack forces a
+  // fresh spoken generation, heard as two AIs talking in turn (the 2026-08
+  // incident; googleapis/js-genai#1210). Enable ONLY on a backend where the
+  // probe confirms async tool support (AI Studio Live).
+  const structureEnabled = process.env['CARE_LIVE_STRUCTURE'] === 'true';
   const { prompt, sessionCapMin } = buildSessionPrompt({
     displayName: careUser.displayName,
     personaName: careUser.personaName,

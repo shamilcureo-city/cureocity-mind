@@ -78,7 +78,12 @@ export class LivePlayback {
    * acoustic + AEC latency after the last sample.
    */
   isSpeaking(): boolean {
-    return performance.now() < this.speakingUntil + 150;
+    // The tail must cover the OUTPUT pipeline latency (Web Audio →
+    // speaker) plus room reverb — 150ms let the last words of every
+    // utterance leak into the mic on speakerphone, which the browser AEC
+    // cannot cancel for Web Audio playback.
+    const outputLatencyMs = ((this.ctx?.outputLatency ?? 0) + (this.ctx?.baseLatency ?? 0)) * 1000;
+    return performance.now() < this.speakingUntil + outputLatencyMs + 450;
   }
 
   /** Barge-in: drop everything queued (Gemini sent `interrupted`). */
