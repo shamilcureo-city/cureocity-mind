@@ -147,7 +147,7 @@ async function SessionSub({
     prisma.noteDraft.findUnique({ where: { sessionId }, select: { status: true, content: true } }),
     prisma.therapyNote.findUnique({
       where: { sessionId },
-      select: { signedAt: true, content: true },
+      select: { signedAt: true, content: true, locked: true },
     }),
     prisma.client.findUnique({ where: { id: clientId }, select: { carriedQuestions: true } }),
     prisma.clientDiagnosis.findMany({
@@ -241,6 +241,10 @@ async function SessionSub({
     signed: signedRow
       ? { signedAt: signedRow.signedAt.toISOString(), signerName: signer?.fullName ?? '' }
       : null,
+    // A signed note that was re-opened for editing (locked=false) is NOT a
+    // closed session — the wrap card must say "awaiting re-sign", not offer
+    // Share of the superseded signed content.
+    noteUnlocked: signedRow ? !signedRow.locked : false,
     agreements: agreementRows.map((r) => ({
       id: r.id,
       sessionId: r.sessionId,

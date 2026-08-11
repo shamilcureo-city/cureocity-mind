@@ -37,10 +37,28 @@ export async function POST(
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
 
+  // The Pass-5 brief is cached per (clientId, lastSessionId, language) — and
+  // the brief for the NEXT visit may already be cached under the CURRENT
+  // lastSessionId (Prepare opened early, or picks changed via "Change on
+  // Review"). Changing the carried set must invalidate that cache, or the
+  // next brief silently omits the questions the UI says are carried.
+  const lastCompleted = await prisma.session.findFirst({
+    where: { clientId, status: 'COMPLETED' },
+    orderBy: { endedAt: 'desc' },
+    select: { id: true },
+  });
+
   await prisma.$transaction(async (tx) => {
     await tx.client.update({
       where: { id: clientId },
       data: { carriedQuestions: body.value.questions as unknown as Prisma.InputJsonValue },
+    });
+    await tx.preSessionBrief.deleteMany({
+      where: {
+        clientId,
+        psychologistId: auth.value.psychologistId,
+        lastSessionId: lastCompleted?.id ?? null,
+      },
     });
     await writeAudit(
       {

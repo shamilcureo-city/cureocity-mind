@@ -194,612 +194,630 @@ export async function createDemoClient(
     transcripts.map((t) => encryptForTenant(psychologistId, t.transcript)),
   );
 
-  const clientId = await prisma.$transaction(async (tx) => {
-    const client = await tx.client.create({
-      data: {
-        psychologistId,
-        fullNameEncrypted,
-        contactPhoneEncrypted,
-        contactEmailEncrypted: null,
-        dateOfBirth: null,
-        presentingConcerns:
-          'Persistent low mood and loss of interest with constant work-related worry, sleep disruption, and a recent sharp dip after a layoff round at work.',
-        preferredModality: 'CBT',
-        preferredLanguage: DEMO_PRIMARY_LANGUAGE,
-        spokenLanguages: ['en', 'hi'],
-        status: 'ACTIVE',
-        isDemo: true,
-      },
-      select: { id: true },
-    });
+  let clientId: string;
+  try {
+    clientId = await runSeedTransaction();
+  } catch (e) {
+    // The partial unique index (one demo client per psychologist) turns the
+    // onboarding-after() vs "Seed it"-button race into a P2002 here instead
+    // of a second full demo arc. The loser simply adopts the winner's row.
+    if ((e as { code?: string }).code === 'P2002') {
+      const winner = await findDemoClient(psychologistId);
+      if (winner) return { clientId: winner.id, created: false };
+    }
+    throw e;
+  }
 
-    // PROD5 — grant the three scribe consents so the therapist's dry run
-    // starts without extra ticks (the demo client is a fixture, not a
-    // person; /start now refuses sessions missing CROSS_BORDER_PROCESSING).
-    await tx.consent.createMany({
-      data: (['AUDIO_RECORDING', 'AI_NOTE_GENERATION', 'CROSS_BORDER_PROCESSING'] as const).map(
-        (scope) => ({
-          clientId: client.id,
-          psychologistId,
-          scope,
-          status: 'GRANTED' as const,
-          scriptVersion: 'v1.0',
-          capturedVia: 'IN_PERSON' as const,
-          grantedAt: intakeAt,
-          notes: 'Demo fixture — synthetic client, seeded at onboarding',
-        }),
-      ),
-    });
-
-    const episode = await tx.treatmentEpisode.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        status: 'OPEN',
-        openedAt: intakeAt,
-      },
-      select: { id: true },
-    });
-
-    // Problem list (POMR) — the Plan of care's first section: named
-    // problems with status, one resolved mid-arc.
-    await tx.problemListItem.createMany({
-      data: [
-        {
-          clientId: client.id,
-          psychologistId,
-          title: 'Depressed mood with withdrawal from valued activity',
-          detail: 'Four months of low mood and anhedonia; activity re-engagement is the lever.',
-          status: 'ACTIVE' as const,
-          createdAt: intakeAt,
-        },
-        {
-          clientId: client.id,
-          psychologistId,
-          title: 'Generalised worry across work, family and health domains',
-          detail: 'Cross-domain worry persisting at lower intensity as mood lifts; GAD-7 tracked.',
-          status: 'ACTIVE' as const,
-          createdAt: intakeAt,
-        },
-        {
-          clientId: client.id,
-          psychologistId,
-          title: 'Sleep-onset disruption maintaining next-day appraisal',
-          detail: 'Resolved with the fixed sleep window after the layoff-week collapse.',
-          status: 'RESOLVED' as const,
-          resolvedAt: sessionDates[4]!,
-          createdAt: intakeAt,
-        },
-      ],
-    });
-
-    // ---------- INTAKE SESSION ----------
-    const intakeSession = await tx.session.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        modality: 'INTAKE',
-        kind: 'INTAKE',
-        status: 'COMPLETED',
-        scheduledAt: intakeAt,
-        startedAt: intakeAt,
-        endedAt: new Date(intakeAt.getTime() + 50 * 60 * 1000),
-        language: DEMO_PRIMARY_LANGUAGE,
-        spokenLanguages: transcripts[0]!.spokenLanguages,
-      },
-      select: { id: true },
-    });
-
-    const intakeDraft = await tx.noteDraft.create({
-      data: {
-        sessionId: intakeSession.id,
-        status: 'COMPLETED',
-        content: intakeBody as unknown as Prisma.InputJsonValue,
-        riskSeverity: 'LOW',
-        transcriptEncrypted: transcriptsEncrypted[0]!,
-        speakerSegments: transcripts[0]!.segments as unknown as Prisma.InputJsonValue,
-      },
-      select: { id: true },
-    });
-
-    await tx.therapyNote.create({
-      data: {
-        sessionId: intakeSession.id,
-        draftId: intakeDraft.id,
-        version: 'V1',
-        content: intakeBody as unknown as Prisma.InputJsonValue,
-        signedAt: new Date(intakeAt.getTime() + 60 * 60 * 1000),
-        signedBy: psychologistId,
-      },
-    });
-
-    // Initial Assessment Brief on the intake — Pass 3 output for INTAKE
-    // sessions stores InitialAssessmentBriefV1 in `body`.
-    await tx.clinicalReport.create({
-      data: {
-        sessionId: intakeSession.id,
-        clientId: client.id,
-        psychologistId,
-        status: 'COMPLETED',
-        body: initialBrief as unknown as Prisma.InputJsonValue,
-        confirmations: PENDING_SECTION_CONFIRMATIONS as unknown as Prisma.InputJsonValue,
-        createdAt: new Date(intakeAt.getTime() + 55 * 60 * 1000),
-      },
-    });
-
-    // ---------- TREATMENT SESSIONS ----------
-    // Each session carries ITS OWN note, report, transcript, alliance read
-    // and agreements — the six-week arc reads as an evolving case, not a
-    // copy-pasted one: setup → layoff setback (medium crisis + safety plan)
-    // → stabilisation (plan v2 + formulation v2) → traction → remission.
-    const firstTreatmentDate = treatmentDates[0]!;
-    // The alliance dips exactly when the case does (T2, the layoff week).
-    const allianceArc = ['FLAT', 'ROUGH', 'GOOD', 'STRONG', 'STRONG'] as const;
-    const riskArc = ['NONE', 'MEDIUM', 'NONE', 'NONE', 'NONE'] as const;
-    const treatmentSessionIds: string[] = [];
-    const treatmentReportIds: string[] = [];
-
-    for (let i = 0; i < treatmentDates.length; i++) {
-      const date = treatmentDates[i]!;
-      const transcript = transcripts[i + 1]!;
-      const noteBody = treatmentBodies[i]!;
-      const session = await tx.session.create({
+  async function runSeedTransaction(): Promise<string> {
+    return prisma.$transaction(async (tx) => {
+      const client = await tx.client.create({
         data: {
-          clientId: client.id,
           psychologistId,
-          modality: 'CBT',
-          kind: 'TREATMENT',
-          status: 'COMPLETED',
-          scheduledAt: date,
-          startedAt: date,
-          endedAt: new Date(date.getTime() + 50 * 60 * 1000),
-          language: DEMO_PRIMARY_LANGUAGE,
-          spokenLanguages: transcript.spokenLanguages,
-          allianceRating: allianceArc[i],
+          fullNameEncrypted,
+          contactPhoneEncrypted,
+          contactEmailEncrypted: null,
+          dateOfBirth: null,
+          presentingConcerns:
+            'Persistent low mood and loss of interest with constant work-related worry, sleep disruption, and a recent sharp dip after a layoff round at work.',
+          preferredModality: 'CBT',
+          preferredLanguage: DEMO_PRIMARY_LANGUAGE,
+          spokenLanguages: ['en', 'hi'],
+          status: 'ACTIVE',
+          isDemo: true,
         },
         select: { id: true },
       });
-      treatmentSessionIds.push(session.id);
 
-      const draft = await tx.noteDraft.create({
+      // PROD5 — grant the three scribe consents so the therapist's dry run
+      // starts without extra ticks (the demo client is a fixture, not a
+      // person; /start now refuses sessions missing CROSS_BORDER_PROCESSING).
+      await tx.consent.createMany({
+        data: (['AUDIO_RECORDING', 'AI_NOTE_GENERATION', 'CROSS_BORDER_PROCESSING'] as const).map(
+          (scope) => ({
+            clientId: client.id,
+            psychologistId,
+            scope,
+            status: 'GRANTED' as const,
+            scriptVersion: 'v1.0',
+            capturedVia: 'IN_PERSON' as const,
+            grantedAt: intakeAt,
+            notes: 'Demo fixture — synthetic client, seeded at onboarding',
+          }),
+        ),
+      });
+
+      const episode = await tx.treatmentEpisode.create({
         data: {
-          sessionId: session.id,
+          clientId: client.id,
+          psychologistId,
+          status: 'OPEN',
+          openedAt: intakeAt,
+        },
+        select: { id: true },
+      });
+
+      // Problem list (POMR) — the Plan of care's first section: named
+      // problems with status, one resolved mid-arc.
+      await tx.problemListItem.createMany({
+        data: [
+          {
+            clientId: client.id,
+            psychologistId,
+            title: 'Depressed mood with withdrawal from valued activity',
+            detail: 'Four months of low mood and anhedonia; activity re-engagement is the lever.',
+            status: 'ACTIVE' as const,
+            createdAt: intakeAt,
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            title: 'Generalised worry across work, family and health domains',
+            detail:
+              'Cross-domain worry persisting at lower intensity as mood lifts; GAD-7 tracked.',
+            status: 'ACTIVE' as const,
+            createdAt: intakeAt,
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            title: 'Sleep-onset disruption maintaining next-day appraisal',
+            detail: 'Resolved with the fixed sleep window after the layoff-week collapse.',
+            status: 'RESOLVED' as const,
+            resolvedAt: sessionDates[4]!,
+            createdAt: intakeAt,
+          },
+        ],
+      });
+
+      // ---------- INTAKE SESSION ----------
+      const intakeSession = await tx.session.create({
+        data: {
+          clientId: client.id,
+          psychologistId,
+          modality: 'INTAKE',
+          kind: 'INTAKE',
           status: 'COMPLETED',
-          content: noteBody as unknown as Prisma.InputJsonValue,
-          riskSeverity: riskArc[i],
-          transcriptEncrypted: transcriptsEncrypted[i + 1]!,
-          speakerSegments: transcript.segments as unknown as Prisma.InputJsonValue,
+          scheduledAt: intakeAt,
+          startedAt: intakeAt,
+          endedAt: new Date(intakeAt.getTime() + 50 * 60 * 1000),
+          language: DEMO_PRIMARY_LANGUAGE,
+          spokenLanguages: transcripts[0]!.spokenLanguages,
+        },
+        select: { id: true },
+      });
+
+      const intakeDraft = await tx.noteDraft.create({
+        data: {
+          sessionId: intakeSession.id,
+          status: 'COMPLETED',
+          content: intakeBody as unknown as Prisma.InputJsonValue,
+          riskSeverity: 'LOW',
+          transcriptEncrypted: transcriptsEncrypted[0]!,
+          speakerSegments: transcripts[0]!.segments as unknown as Prisma.InputJsonValue,
         },
         select: { id: true },
       });
 
       await tx.therapyNote.create({
         data: {
-          sessionId: session.id,
-          draftId: draft.id,
+          sessionId: intakeSession.id,
+          draftId: intakeDraft.id,
           version: 'V1',
-          content: noteBody as unknown as Prisma.InputJsonValue,
-          signedAt: new Date(date.getTime() + 60 * 60 * 1000),
+          content: intakeBody as unknown as Prisma.InputJsonValue,
+          signedAt: new Date(intakeAt.getTime() + 60 * 60 * 1000),
           signedBy: psychologistId,
         },
       });
 
-      // Clinical report per session; only the first carries the ACCEPTED
-      // confirmations (where diagnosis + plan were locked in).
-      const confirmations: ClinicalSectionConfirmations =
-        i === 0
-          ? buildAcceptedConfirmations(firstTreatmentDate, psychologistId)
-          : PENDING_SECTION_CONFIRMATIONS;
-
-      const report = await tx.clinicalReport.create({
+      // Initial Assessment Brief on the intake — Pass 3 output for INTAKE
+      // sessions stores InitialAssessmentBriefV1 in `body`.
+      await tx.clinicalReport.create({
         data: {
-          sessionId: session.id,
+          sessionId: intakeSession.id,
           clientId: client.id,
           psychologistId,
           status: 'COMPLETED',
-          body: reportBodies[i]! as unknown as Prisma.InputJsonValue,
-          confirmations: confirmations as unknown as Prisma.InputJsonValue,
-          createdAt: new Date(date.getTime() + 55 * 60 * 1000),
+          body: initialBrief as unknown as Prisma.InputJsonValue,
+          confirmations: PENDING_SECTION_CONFIRMATIONS as unknown as Prisma.InputJsonValue,
+          createdAt: new Date(intakeAt.getTime() + 55 * 60 * 1000),
+        },
+      });
+
+      // ---------- TREATMENT SESSIONS ----------
+      // Each session carries ITS OWN note, report, transcript, alliance read
+      // and agreements — the six-week arc reads as an evolving case, not a
+      // copy-pasted one: setup → layoff setback (medium crisis + safety plan)
+      // → stabilisation (plan v2 + formulation v2) → traction → remission.
+      const firstTreatmentDate = treatmentDates[0]!;
+      // The alliance dips exactly when the case does (T2, the layoff week).
+      const allianceArc = ['FLAT', 'ROUGH', 'GOOD', 'STRONG', 'STRONG'] as const;
+      const riskArc = ['NONE', 'MEDIUM', 'NONE', 'NONE', 'NONE'] as const;
+      const treatmentSessionIds: string[] = [];
+      const treatmentReportIds: string[] = [];
+
+      for (let i = 0; i < treatmentDates.length; i++) {
+        const date = treatmentDates[i]!;
+        const transcript = transcripts[i + 1]!;
+        const noteBody = treatmentBodies[i]!;
+        const session = await tx.session.create({
+          data: {
+            clientId: client.id,
+            psychologistId,
+            modality: 'CBT',
+            kind: 'TREATMENT',
+            status: 'COMPLETED',
+            scheduledAt: date,
+            startedAt: date,
+            endedAt: new Date(date.getTime() + 50 * 60 * 1000),
+            language: DEMO_PRIMARY_LANGUAGE,
+            spokenLanguages: transcript.spokenLanguages,
+            allianceRating: allianceArc[i],
+          },
+          select: { id: true },
+        });
+        treatmentSessionIds.push(session.id);
+
+        const draft = await tx.noteDraft.create({
+          data: {
+            sessionId: session.id,
+            status: 'COMPLETED',
+            content: noteBody as unknown as Prisma.InputJsonValue,
+            riskSeverity: riskArc[i],
+            transcriptEncrypted: transcriptsEncrypted[i + 1]!,
+            speakerSegments: transcript.segments as unknown as Prisma.InputJsonValue,
+          },
+          select: { id: true },
+        });
+
+        await tx.therapyNote.create({
+          data: {
+            sessionId: session.id,
+            draftId: draft.id,
+            version: 'V1',
+            content: noteBody as unknown as Prisma.InputJsonValue,
+            signedAt: new Date(date.getTime() + 60 * 60 * 1000),
+            signedBy: psychologistId,
+          },
+        });
+
+        // Clinical report per session; only the first carries the ACCEPTED
+        // confirmations (where diagnosis + plan were locked in).
+        const confirmations: ClinicalSectionConfirmations =
+          i === 0
+            ? buildAcceptedConfirmations(firstTreatmentDate, psychologistId)
+            : PENDING_SECTION_CONFIRMATIONS;
+
+        const report = await tx.clinicalReport.create({
+          data: {
+            sessionId: session.id,
+            clientId: client.id,
+            psychologistId,
+            status: 'COMPLETED',
+            body: reportBodies[i]! as unknown as Prisma.InputJsonValue,
+            confirmations: confirmations as unknown as Prisma.InputJsonValue,
+            createdAt: new Date(date.getTime() + 55 * 60 * 1000),
+          },
+          select: { id: true },
+        });
+        treatmentReportIds.push(report.id);
+      }
+
+      const firstTreatmentSessionId = treatmentSessionIds[0]!;
+      const firstTreatmentReportId = treatmentReportIds[0]!;
+
+      // Confirmed diagnoses — the comorbid pair, both active: moderate
+      // depression (primary) + generalised anxiety disorder (secondary),
+      // locked in from the first treatment report.
+      const confirmedAtT1 = new Date(firstTreatmentDate.getTime() + 30 * 60 * 1000);
+      const diagnosis = await tx.clientDiagnosis.create({
+        data: {
+          clientId: client.id,
+          psychologistId,
+          sessionId: firstTreatmentSessionId,
+          clinicalReportId: firstTreatmentReportId,
+          icd11Code: '6A70.1',
+          icd11Label: 'Single episode depressive disorder, moderate, without psychotic symptoms',
+          confidence: 0.78,
+          supportingEvidence: reportBodies[0]!.diagnosisCandidates[0]!
+            .supportingEvidence as unknown as Prisma.InputJsonValue,
+          isPrimary: true,
+          confirmedAt: confirmedAtT1,
+          confirmedByPsychologistId: psychologistId,
         },
         select: { id: true },
       });
-      treatmentReportIds.push(report.id);
-    }
-
-    const firstTreatmentSessionId = treatmentSessionIds[0]!;
-    const firstTreatmentReportId = treatmentReportIds[0]!;
-
-    // Confirmed diagnoses — the comorbid pair, both active: moderate
-    // depression (primary) + generalised anxiety disorder (secondary),
-    // locked in from the first treatment report.
-    const confirmedAtT1 = new Date(firstTreatmentDate.getTime() + 30 * 60 * 1000);
-    const diagnosis = await tx.clientDiagnosis.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        sessionId: firstTreatmentSessionId,
-        clinicalReportId: firstTreatmentReportId,
-        icd11Code: '6A70.1',
-        icd11Label: 'Single episode depressive disorder, moderate, without psychotic symptoms',
-        confidence: 0.78,
-        supportingEvidence: reportBodies[0]!.diagnosisCandidates[0]!
-          .supportingEvidence as unknown as Prisma.InputJsonValue,
-        isPrimary: true,
-        confirmedAt: confirmedAtT1,
-        confirmedByPsychologistId: psychologistId,
-      },
-      select: { id: true },
-    });
-    await tx.clientDiagnosis.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        sessionId: firstTreatmentSessionId,
-        clinicalReportId: firstTreatmentReportId,
-        icd11Code: '6B00',
-        icd11Label: 'Generalised anxiety disorder',
-        confidence: 0.61,
-        supportingEvidence: reportBodies[0]!.diagnosisCandidates[1]!
-          .supportingEvidence as unknown as Prisma.InputJsonValue,
-        isPrimary: false,
-        confirmedAt: confirmedAtT1,
-        confirmedByPsychologistId: psychologistId,
-      },
-    });
-
-    // Treatment plan v1 (confirmed T1) → superseded by v2 at T3, which
-    // added the sleep + worry goals after the layoff-week collapse. The
-    // version history is the point: plans that never change are plans
-    // nobody is using.
-    const planV2ConfirmedAt = new Date(treatmentDates[2]!.getTime() + 40 * 60 * 1000);
-    await tx.treatmentPlan.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        sourceSessionId: firstTreatmentSessionId,
-        sourceClinicalReportId: firstTreatmentReportId,
-        version: 1,
-        body: planV1Body as unknown as Prisma.InputJsonValue,
-        confirmedAt: confirmedAtT1,
-        confirmedByPsychologistId: psychologistId,
-        supersededAt: planV2ConfirmedAt,
-      },
-    });
-    const plan = await tx.treatmentPlan.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        sourceSessionId: treatmentSessionIds[2]!,
-        sourceClinicalReportId: treatmentReportIds[2]!,
-        version: 2,
-        body: planV2Body as unknown as Prisma.InputJsonValue,
-        confirmedAt: planV2ConfirmedAt,
-        confirmedByPsychologistId: psychologistId,
-      },
-      select: { id: true },
-    });
-
-    // Per-goal progress on the ACTIVE plan (v2): activities + sleep
-    // achieved; the score goal and the worry window still in progress.
-    const goalStatuses = ['ACHIEVED', 'IN_PROGRESS', 'ACHIEVED', 'IN_PROGRESS'] as const;
-    for (let g = 0; g < goalStatuses.length; g++) {
-      await tx.treatmentGoalProgress.create({
-        data: {
-          treatmentPlanId: plan.id,
-          goalIndex: g,
-          status: goalStatuses[g]!,
-          updatedByPsychologistId: psychologistId,
-        },
-      });
-    }
-
-    // The living formulation — v1 (T1, breakup-centric) superseded by v2
-    // (T3): the layoff week disproved v1's "workload eases → mood lifts"
-    // prediction, so the formulation was revised. That supersession IS the
-    // demo: the record thinks in versions, not overwrites.
-    const formulationV2At = new Date(treatmentDates[2]!.getTime() + 45 * 60 * 1000);
-    await tx.caseFormulation.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        sourceSessionId: firstTreatmentSessionId,
-        version: 1,
-        body: formulationV1Body as unknown as Prisma.InputJsonValue,
-        confirmedAt: new Date(firstTreatmentDate.getTime() + 35 * 60 * 1000),
-        supersededAt: formulationV2At,
-      },
-    });
-    await tx.caseFormulation.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        sourceSessionId: treatmentSessionIds[2]!,
-        version: 2,
-        body: formulationV2Body as unknown as Prisma.InputJsonValue,
-        confirmedAt: formulationV2At,
-      },
-    });
-
-    // Safety plan — built collaboratively in the layoff-week session (T2)
-    // when passive ideation surfaced. Still active; the crisis resolved but
-    // the plan stays on the record.
-    await tx.safetyPlan.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        sourceSessionId: treatmentSessionIds[1]!,
-        language: 'en',
-        body: safetyPlanBody as unknown as Prisma.InputJsonValue,
-        confirmedAt: new Date(treatmentDates[1]!.getTime() + 45 * 60 * 1000),
-        confirmedByPsychologistId: psychologistId,
-      },
-    });
-
-    // ---------- Instrument trends ----------
-    // PHQ-9 at intake, T1, T2 (the 19 spike), T4, T5; GAD-7 at intake,
-    // T3, T5. Final scores 4 + 4 hit both remission bands so the Journey
-    // hub flips to DISCHARGE_READY — but the trend the therapist scrolls
-    // is honest: it went UP before it came down.
-    const phq9SessionIds: (string | null)[] = [
-      intakeSession.id,
-      treatmentSessionIds[0]!,
-      treatmentSessionIds[1]!,
-      treatmentSessionIds[3]!,
-      treatmentSessionIds[4]!,
-    ];
-    const phq9Dates = [
-      intakeAt,
-      treatmentDates[0]!,
-      treatmentDates[1]!,
-      treatmentDates[3]!,
-      treatmentDates[4]!,
-    ];
-    for (let i = 0; i < scoredPhq9.length; i++) {
-      const { responses, result } = scoredPhq9[i]!;
-      await tx.instrumentResponse.create({
+      await tx.clientDiagnosis.create({
         data: {
           clientId: client.id,
           psychologistId,
-          sessionId: phq9SessionIds[i] ?? null,
-          instrumentKey: 'PHQ9',
-          language: 'en',
-          responses: responses as unknown as Prisma.InputJsonValue,
-          score: result.score,
-          severity: result.severityKey,
-          administeredAt: phq9Dates[i]!,
-          administeredByPsychologistId: psychologistId,
-          administrationMode: 'CLINICIAN',
-        },
-      });
-    }
-    const gad7SessionIds = [intakeSession.id, treatmentSessionIds[2]!, treatmentSessionIds[4]!];
-    const gad7Dates = [intakeAt, treatmentDates[2]!, treatmentDates[4]!];
-    for (let i = 0; i < scoredGad7.length; i++) {
-      const { responses, result } = scoredGad7[i]!;
-      await tx.instrumentResponse.create({
-        data: {
-          clientId: client.id,
-          psychologistId,
-          sessionId: gad7SessionIds[i]!,
-          instrumentKey: 'GAD7',
-          language: 'en',
-          responses: responses as unknown as Prisma.InputJsonValue,
-          score: result.score,
-          severity: result.severityKey,
-          administeredAt: gad7Dates[i]!,
-          administeredByPsychologistId: psychologistId,
-          administrationMode: 'CLINICIAN',
-        },
-      });
-    }
-
-    // ---------- Therapy script cache row ----------
-    await tx.therapyScript.create({
-      data: {
-        clientId: client.id,
-        psychologistId,
-        therapyName: scriptBody.therapyName,
-        language: scriptBody.language,
-        // Deterministic cache key derived from the demo identity.
-        cacheKey: deterministicScriptCacheKey(client.id, scriptBody.therapyName),
-        body: scriptBody as unknown as Prisma.InputJsonValue,
-        sourceTreatmentPlanId: plan.id,
-        sourcePrimaryDiagnosisId: diagnosis.id,
-      },
-    });
-
-    // ---------- Assessment items (the running differential ledger) ----------
-    // Three questions asked and CLOSED with findings across the arc, one
-    // still OPEN — the ledger shows its lifecycle, not just its end state.
-    await tx.assessmentItem.createMany({
-      data: [
-        {
-          clientId: client.id,
-          psychologistId,
-          episodeId: episode.id,
-          kind: 'ASSESSMENT_GAP',
-          question: 'Confirm no episodes of elevated mood lasting >= 4 days.',
-          rationale:
-            'Rule out bipolar spectrum before committing to single-episode depressive disorder.',
-          icd11Code: '6A70.1',
-          status: 'CLOSED',
-          sourceSessionId: intakeSession.id,
-          addressedSessionId: firstTreatmentSessionId,
-          resolutionNote: 'No history of hypomanic / manic episodes by detailed timeline.',
-          closedAt: new Date(firstTreatmentDate.getTime() + 60 * 60 * 1000),
-        },
-        {
-          clientId: client.id,
-          psychologistId,
-          episodeId: episode.id,
-          kind: 'ASSESSMENT_GAP',
-          question: 'Screen alcohol use — any change alongside the low mood?',
-          rationale:
-            'Substance use both mimics and maintains depressive presentations; cheap to rule out early.',
-          status: 'CLOSED',
-          sourceSessionId: firstTreatmentSessionId,
-          addressedSessionId: treatmentSessionIds[1]!,
-          resolutionNote:
-            'AUDIT-C-style screen negative: 1-2 drinks socially about once a month, no increase during the episode.',
-          closedAt: new Date(treatmentDates[1]!.getTime() + 60 * 60 * 1000),
-        },
-        {
-          clientId: client.id,
-          psychologistId,
-          episodeId: episode.id,
-          kind: 'ASSESSMENT_GAP',
-          question: 'Does the worry persist across domains once mood lifts, or is it work-bound?',
-          rationale:
-            'Differentiates comorbid GAD from anxious distress within the depressive episode — changes the maintenance-phase target.',
+          sessionId: firstTreatmentSessionId,
+          clinicalReportId: firstTreatmentReportId,
           icd11Code: '6B00',
-          status: 'CLOSED',
-          sourceSessionId: firstTreatmentSessionId,
-          addressedSessionId: treatmentSessionIds[2]!,
-          resolutionNote:
-            'Worry narrows with mood improvement but persists across domains (job, sister’s visa, father’s health) at lower intensity. Keep 6B00 active; GAD-7 tracked.',
-          closedAt: new Date(treatmentDates[2]!.getTime() + 60 * 60 * 1000),
-        },
-        {
-          clientId: client.id,
-          psychologistId,
-          episodeId: episode.id,
-          kind: 'INSTRUMENT',
-          question: 'Re-administer PHQ-9 and GAD-7 at session 8 to confirm sustained remission.',
-          rationale:
-            'Both instruments in remission range at the latest administration. Confirm durability over a further 2 weeks before discharge.',
-          status: 'OPEN',
-          sourceSessionId: treatmentSessionIds.at(-1)!,
-        },
-      ],
-    });
-
-    // ---------- Session agreements (the loop, visible across the arc) ----------
-    // Every session leaves agreements in the client's words; the NEXT
-    // session marks the follow-up. The last session's pair stays unmarked —
-    // that's what the therapist's Prepare card will read back.
-    const agreementRows: {
-      sessionIndex: number;
-      speaker: 'CLIENT' | 'THERAPIST';
-      text: string;
-      followUp?: 'DONE' | 'PARTLY' | 'NOT_YET';
-    }[] = [
-      {
-        sessionIndex: 0,
-        speaker: 'CLIENT',
-        text: 'Three activities this week: Tuesday walk after standup, call Meera on Thursday, Saturday walk with Rahul.',
-        followUp: 'PARTLY',
-      },
-      {
-        sessionIndex: 0,
-        speaker: 'THERAPIST',
-        text: 'Write down the Sunday-evening thought once, as it happens — exact words.',
-        followUp: 'DONE',
-      },
-      {
-        sessionIndex: 1,
-        speaker: 'CLIENT',
-        text: 'One ten-minute walk every day, even on the worst day. That is the whole plan this week.',
-        followUp: 'DONE',
-      },
-      {
-        sessionIndex: 1,
-        speaker: 'THERAPIST',
-        text: 'One-line message midweek — just how sleep went.',
-        followUp: 'DONE',
-      },
-      {
-        sessionIndex: 2,
-        speaker: 'CLIENT',
-        text: 'Worries go on the list, and the list waits till 6pm.',
-        followUp: 'PARTLY',
-      },
-      {
-        sessionIndex: 2,
-        speaker: 'THERAPIST',
-        text: 'Keep the sleep window: screens away by 11, lights out by 11:30.',
-        followUp: 'DONE',
-      },
-      {
-        sessionIndex: 3,
-        speaker: 'CLIENT',
-        text: 'Badminton on Saturday — and I tell the group I am coming, so it is harder to cancel.',
-        followUp: 'DONE',
-      },
-      {
-        sessionIndex: 4,
-        speaker: 'CLIENT',
-        text: "I'll go to badminton on Saturday even if I don't feel like it — mood follows action.",
-      },
-      {
-        sessionIndex: 4,
-        speaker: 'THERAPIST',
-        text: 'Bring the thought record for the Sunday-evening dread; we review it first thing.',
-      },
-    ];
-    for (const a of agreementRows) {
-      const madeAt = treatmentDates[a.sessionIndex]!;
-      const nextDate = treatmentDates[a.sessionIndex + 1] ?? null;
-      await tx.sessionAgreement.create({
-        data: {
-          sessionId: treatmentSessionIds[a.sessionIndex]!,
-          clientId: client.id,
-          psychologistId,
-          speaker: a.speaker,
-          text: a.text,
-          followUp: a.followUp ?? null,
-          followUpAt: a.followUp && nextDate ? new Date(nextDate.getTime() + 20 * 60 * 1000) : null,
-          createdAt: new Date(madeAt.getTime() + 45 * 60 * 1000),
+          icd11Label: 'Generalised anxiety disorder',
+          confidence: 0.61,
+          supportingEvidence: reportBodies[0]!.diagnosisCandidates[1]!
+            .supportingEvidence as unknown as Prisma.InputJsonValue,
+          isPrimary: false,
+          confirmedAt: confirmedAtT1,
+          confirmedByPsychologistId: psychologistId,
         },
       });
-    }
 
-    // ---------- Homework (real assignment rows, mixed statuses) ----------
-    await tx.exerciseAssignment.createMany({
-      data: [
-        {
+      // Treatment plan v1 (confirmed T1) → superseded by v2 at T3, which
+      // added the sleep + worry goals after the layoff-week collapse. The
+      // version history is the point: plans that never change are plans
+      // nobody is using.
+      const planV2ConfirmedAt = new Date(treatmentDates[2]!.getTime() + 40 * 60 * 1000);
+      await tx.treatmentPlan.create({
+        data: {
           clientId: client.id,
           psychologistId,
-          source: 'THERAPY_SCRIPT' as const,
-          customDescription:
-            'Three planned activities this week, with mood (0-10) noted just before and after each.',
-          assignedAt: new Date(firstTreatmentDate.getTime() + 50 * 60 * 1000),
-          status: 'COMPLETED' as const,
-          completedAt: treatmentDates[1]!,
+          sourceSessionId: firstTreatmentSessionId,
+          sourceClinicalReportId: firstTreatmentReportId,
+          version: 1,
+          body: planV1Body as unknown as Prisma.InputJsonValue,
+          confirmedAt: confirmedAtT1,
+          confirmedByPsychologistId: psychologistId,
+          supersededAt: planV2ConfirmedAt,
         },
-        {
+      });
+      const plan = await tx.treatmentPlan.create({
+        data: {
           clientId: client.id,
           psychologistId,
-          source: 'THERAPY_SCRIPT' as const,
-          customDescription:
-            'Worry-postponement window: 20 minutes at 6pm; worries parked to the list until then.',
-          assignedAt: new Date(treatmentDates[2]!.getTime() + 50 * 60 * 1000),
-          status: 'COMPLETED' as const,
-          completedAt: treatmentDates[3]!,
+          sourceSessionId: treatmentSessionIds[2]!,
+          sourceClinicalReportId: treatmentReportIds[2]!,
+          version: 2,
+          body: planV2Body as unknown as Prisma.InputJsonValue,
+          confirmedAt: planV2ConfirmedAt,
+          confirmedByPsychologistId: psychologistId,
         },
-        {
+        select: { id: true },
+      });
+
+      // Per-goal progress on the ACTIVE plan (v2): activities + sleep
+      // achieved; the score goal and the worry window still in progress.
+      const goalStatuses = ['ACHIEVED', 'IN_PROGRESS', 'ACHIEVED', 'IN_PROGRESS'] as const;
+      for (let g = 0; g < goalStatuses.length; g++) {
+        await tx.treatmentGoalProgress.create({
+          data: {
+            treatmentPlanId: plan.id,
+            goalIndex: g,
+            status: goalStatuses[g]!,
+            updatedByPsychologistId: psychologistId,
+          },
+        });
+      }
+
+      // The living formulation — v1 (T1, breakup-centric) superseded by v2
+      // (T3): the layoff week disproved v1's "workload eases → mood lifts"
+      // prediction, so the formulation was revised. That supersession IS the
+      // demo: the record thinks in versions, not overwrites.
+      const formulationV2At = new Date(treatmentDates[2]!.getTime() + 45 * 60 * 1000);
+      await tx.caseFormulation.create({
+        data: {
           clientId: client.id,
           psychologistId,
-          source: 'CATALOG' as const,
-          exerciseId: 'cbt_thought_record_5col',
-          therapistNote: 'One five-column record on the Sunday-evening dread.',
-          assignedAt: new Date(treatmentDates[3]!.getTime() + 50 * 60 * 1000),
-          status: 'IN_PROGRESS' as const,
+          sourceSessionId: firstTreatmentSessionId,
+          version: 1,
+          body: formulationV1Body as unknown as Prisma.InputJsonValue,
+          confirmedAt: new Date(firstTreatmentDate.getTime() + 35 * 60 * 1000),
+          supersededAt: formulationV2At,
         },
-        {
+      });
+      await tx.caseFormulation.create({
+        data: {
           clientId: client.id,
           psychologistId,
-          source: 'THERAPY_SCRIPT' as const,
-          customDescription:
-            'Draft your relapse-prevention card: the three earliest warning signs and the first two moves.',
-          assignedAt: new Date(treatmentDates[4]!.getTime() + 50 * 60 * 1000),
-          dueAt: new Date(treatmentDates[4]!.getTime() + 7 * 24 * 60 * 60 * 1000),
-          status: 'PENDING' as const,
+          sourceSessionId: treatmentSessionIds[2]!,
+          version: 2,
+          body: formulationV2Body as unknown as Prisma.InputJsonValue,
+          confirmedAt: formulationV2At,
         },
-      ],
+      });
+
+      // Safety plan — built collaboratively in the layoff-week session (T2)
+      // when passive ideation surfaced. Still active; the crisis resolved but
+      // the plan stays on the record.
+      await tx.safetyPlan.create({
+        data: {
+          clientId: client.id,
+          psychologistId,
+          sourceSessionId: treatmentSessionIds[1]!,
+          language: 'en',
+          body: safetyPlanBody as unknown as Prisma.InputJsonValue,
+          confirmedAt: new Date(treatmentDates[1]!.getTime() + 45 * 60 * 1000),
+          confirmedByPsychologistId: psychologistId,
+        },
+      });
+
+      // ---------- Instrument trends ----------
+      // PHQ-9 at intake, T1, T2 (the 19 spike), T4, T5; GAD-7 at intake,
+      // T3, T5. Final scores 4 + 4 hit both remission bands so the Journey
+      // hub flips to DISCHARGE_READY — but the trend the therapist scrolls
+      // is honest: it went UP before it came down.
+      const phq9SessionIds: (string | null)[] = [
+        intakeSession.id,
+        treatmentSessionIds[0]!,
+        treatmentSessionIds[1]!,
+        treatmentSessionIds[3]!,
+        treatmentSessionIds[4]!,
+      ];
+      const phq9Dates = [
+        intakeAt,
+        treatmentDates[0]!,
+        treatmentDates[1]!,
+        treatmentDates[3]!,
+        treatmentDates[4]!,
+      ];
+      for (let i = 0; i < scoredPhq9.length; i++) {
+        const { responses, result } = scoredPhq9[i]!;
+        await tx.instrumentResponse.create({
+          data: {
+            clientId: client.id,
+            psychologistId,
+            sessionId: phq9SessionIds[i] ?? null,
+            instrumentKey: 'PHQ9',
+            language: 'en',
+            responses: responses as unknown as Prisma.InputJsonValue,
+            score: result.score,
+            severity: result.severityKey,
+            administeredAt: phq9Dates[i]!,
+            administeredByPsychologistId: psychologistId,
+            administrationMode: 'CLINICIAN',
+          },
+        });
+      }
+      const gad7SessionIds = [intakeSession.id, treatmentSessionIds[2]!, treatmentSessionIds[4]!];
+      const gad7Dates = [intakeAt, treatmentDates[2]!, treatmentDates[4]!];
+      for (let i = 0; i < scoredGad7.length; i++) {
+        const { responses, result } = scoredGad7[i]!;
+        await tx.instrumentResponse.create({
+          data: {
+            clientId: client.id,
+            psychologistId,
+            sessionId: gad7SessionIds[i]!,
+            instrumentKey: 'GAD7',
+            language: 'en',
+            responses: responses as unknown as Prisma.InputJsonValue,
+            score: result.score,
+            severity: result.severityKey,
+            administeredAt: gad7Dates[i]!,
+            administeredByPsychologistId: psychologistId,
+            administrationMode: 'CLINICIAN',
+          },
+        });
+      }
+
+      // ---------- Therapy script cache row ----------
+      await tx.therapyScript.create({
+        data: {
+          clientId: client.id,
+          psychologistId,
+          therapyName: scriptBody.therapyName,
+          language: scriptBody.language,
+          // Deterministic cache key derived from the demo identity.
+          cacheKey: deterministicScriptCacheKey(client.id, scriptBody.therapyName),
+          body: scriptBody as unknown as Prisma.InputJsonValue,
+          sourceTreatmentPlanId: plan.id,
+          sourcePrimaryDiagnosisId: diagnosis.id,
+        },
+      });
+
+      // ---------- Assessment items (the running differential ledger) ----------
+      // Three questions asked and CLOSED with findings across the arc, one
+      // still OPEN — the ledger shows its lifecycle, not just its end state.
+      await tx.assessmentItem.createMany({
+        data: [
+          {
+            clientId: client.id,
+            psychologistId,
+            episodeId: episode.id,
+            kind: 'ASSESSMENT_GAP',
+            question: 'Confirm no episodes of elevated mood lasting >= 4 days.',
+            rationale:
+              'Rule out bipolar spectrum before committing to single-episode depressive disorder.',
+            icd11Code: '6A70.1',
+            status: 'CLOSED',
+            sourceSessionId: intakeSession.id,
+            addressedSessionId: firstTreatmentSessionId,
+            resolutionNote: 'No history of hypomanic / manic episodes by detailed timeline.',
+            closedAt: new Date(firstTreatmentDate.getTime() + 60 * 60 * 1000),
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            episodeId: episode.id,
+            kind: 'ASSESSMENT_GAP',
+            question: 'Screen alcohol use — any change alongside the low mood?',
+            rationale:
+              'Substance use both mimics and maintains depressive presentations; cheap to rule out early.',
+            status: 'CLOSED',
+            sourceSessionId: firstTreatmentSessionId,
+            addressedSessionId: treatmentSessionIds[1]!,
+            resolutionNote:
+              'AUDIT-C-style screen negative: 1-2 drinks socially about once a month, no increase during the episode.',
+            closedAt: new Date(treatmentDates[1]!.getTime() + 60 * 60 * 1000),
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            episodeId: episode.id,
+            kind: 'ASSESSMENT_GAP',
+            question: 'Does the worry persist across domains once mood lifts, or is it work-bound?',
+            rationale:
+              'Differentiates comorbid GAD from anxious distress within the depressive episode — changes the maintenance-phase target.',
+            icd11Code: '6B00',
+            status: 'CLOSED',
+            sourceSessionId: firstTreatmentSessionId,
+            addressedSessionId: treatmentSessionIds[2]!,
+            resolutionNote:
+              'Worry narrows with mood improvement but persists across domains (job, sister’s visa, father’s health) at lower intensity. Keep 6B00 active; GAD-7 tracked.',
+            closedAt: new Date(treatmentDates[2]!.getTime() + 60 * 60 * 1000),
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            episodeId: episode.id,
+            kind: 'INSTRUMENT',
+            question: 'Re-administer PHQ-9 and GAD-7 at session 8 to confirm sustained remission.',
+            rationale:
+              'Both instruments in remission range at the latest administration. Confirm durability over a further 2 weeks before discharge.',
+            status: 'OPEN',
+            sourceSessionId: treatmentSessionIds.at(-1)!,
+          },
+        ],
+      });
+
+      // ---------- Session agreements (the loop, visible across the arc) ----------
+      // Every session leaves agreements in the client's words; the NEXT
+      // session marks the follow-up. The last session's pair stays unmarked —
+      // that's what the therapist's Prepare card will read back.
+      const agreementRows: {
+        sessionIndex: number;
+        speaker: 'CLIENT' | 'THERAPIST';
+        text: string;
+        followUp?: 'DONE' | 'PARTLY' | 'NOT_YET';
+      }[] = [
+        {
+          sessionIndex: 0,
+          speaker: 'CLIENT',
+          text: 'Three activities this week: Tuesday walk after standup, call Meera on Thursday, Saturday walk with Rahul.',
+          followUp: 'PARTLY',
+        },
+        {
+          sessionIndex: 0,
+          speaker: 'THERAPIST',
+          text: 'Write down the Sunday-evening thought once, as it happens — exact words.',
+          followUp: 'DONE',
+        },
+        {
+          sessionIndex: 1,
+          speaker: 'CLIENT',
+          text: 'One ten-minute walk every day, even on the worst day. That is the whole plan this week.',
+          followUp: 'DONE',
+        },
+        {
+          sessionIndex: 1,
+          speaker: 'THERAPIST',
+          text: 'One-line message midweek — just how sleep went.',
+          followUp: 'DONE',
+        },
+        {
+          sessionIndex: 2,
+          speaker: 'CLIENT',
+          text: 'Worries go on the list, and the list waits till 6pm.',
+          followUp: 'PARTLY',
+        },
+        {
+          sessionIndex: 2,
+          speaker: 'THERAPIST',
+          text: 'Keep the sleep window: screens away by 11, lights out by 11:30.',
+          followUp: 'DONE',
+        },
+        {
+          sessionIndex: 3,
+          speaker: 'CLIENT',
+          text: 'Badminton on Saturday — and I tell the group I am coming, so it is harder to cancel.',
+          followUp: 'DONE',
+        },
+        {
+          sessionIndex: 4,
+          speaker: 'CLIENT',
+          text: "I'll go to badminton on Saturday even if I don't feel like it — mood follows action.",
+        },
+        {
+          sessionIndex: 4,
+          speaker: 'THERAPIST',
+          text: 'Bring the thought record for the Sunday-evening dread; we review it first thing.',
+        },
+      ];
+      for (const a of agreementRows) {
+        const madeAt = treatmentDates[a.sessionIndex]!;
+        const nextDate = treatmentDates[a.sessionIndex + 1] ?? null;
+        await tx.sessionAgreement.create({
+          data: {
+            sessionId: treatmentSessionIds[a.sessionIndex]!,
+            clientId: client.id,
+            psychologistId,
+            speaker: a.speaker,
+            text: a.text,
+            followUp: a.followUp ?? null,
+            followUpAt:
+              a.followUp && nextDate ? new Date(nextDate.getTime() + 20 * 60 * 1000) : null,
+            createdAt: new Date(madeAt.getTime() + 45 * 60 * 1000),
+          },
+        });
+      }
+
+      // ---------- Homework (real assignment rows, mixed statuses) ----------
+      await tx.exerciseAssignment.createMany({
+        data: [
+          {
+            clientId: client.id,
+            psychologistId,
+            source: 'THERAPY_SCRIPT' as const,
+            customDescription:
+              'Three planned activities this week, with mood (0-10) noted just before and after each.',
+            assignedAt: new Date(firstTreatmentDate.getTime() + 50 * 60 * 1000),
+            status: 'COMPLETED' as const,
+            completedAt: treatmentDates[1]!,
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            source: 'THERAPY_SCRIPT' as const,
+            customDescription:
+              'Worry-postponement window: 20 minutes at 6pm; worries parked to the list until then.',
+            assignedAt: new Date(treatmentDates[2]!.getTime() + 50 * 60 * 1000),
+            status: 'COMPLETED' as const,
+            completedAt: treatmentDates[3]!,
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            source: 'CATALOG' as const,
+            exerciseId: 'cbt_thought_record_5col',
+            therapistNote: 'One five-column record on the Sunday-evening dread.',
+            assignedAt: new Date(treatmentDates[3]!.getTime() + 50 * 60 * 1000),
+            status: 'IN_PROGRESS' as const,
+          },
+          {
+            clientId: client.id,
+            psychologistId,
+            source: 'THERAPY_SCRIPT' as const,
+            customDescription:
+              'Draft your relapse-prevention card: the three earliest warning signs and the first two moves.',
+            assignedAt: new Date(treatmentDates[4]!.getTime() + 50 * 60 * 1000),
+            dueAt: new Date(treatmentDates[4]!.getTime() + 7 * 24 * 60 * 60 * 1000),
+            status: 'PENDING' as const,
+          },
+        ],
+      });
+
+      return client.id;
     });
-
-    return client.id;
-  });
+  }
 
   // ---------- Patient-share row carrying the Progress Report ----------
   // buildProgressReport reads from the DB, so it has to run AFTER the

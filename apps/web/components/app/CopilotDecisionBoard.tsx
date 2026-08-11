@@ -100,6 +100,8 @@ export interface CloseoutData {
   noteReady: boolean;
   noteContent: unknown | null;
   signed: { signedAt: string; signerName: string } | null;
+  /** The signed note was re-opened for editing (locked=false) — awaiting re-sign. */
+  noteUnlocked: boolean;
   agreements: SessionAgreementDto[];
   alliance: AllianceRating | null;
   /** Pass 3's evidence-anchored formulation diffs (treatment reports only). */
@@ -1513,27 +1515,38 @@ function AskNextStep({
   const [savedOnce, setSavedOnce] = useState(false);
 
   // Carried questions this board doesn't manage (from other sessions, or
-  // wording that no longer matches a current gap) are preserved on save.
+  // wording that no longer matches a current gap) are preserved on save —
+  // but they are REMOVABLE below: without a remove path they permanently
+  // consume the cap of 8 and eventually freeze this step solid.
   const untouched = useMemo(
     () => carried.filter((c) => !gaps.some((g) => g.question === c.question)),
     [carried, gaps],
   );
-  const atCap = untouched.length + selected.size >= MAX_CARRIED;
+  const [removedEarlier, setRemovedEarlier] = useState<Set<string>>(() => new Set());
+  const effectiveUntouched = useMemo(
+    () => untouched.filter((c) => !removedEarlier.has(c.question)),
+    [untouched, removedEarlier],
+  );
+  const atCap = effectiveUntouched.length + selected.size >= MAX_CARRIED;
 
   // One save model for the whole board: a tap IS the save. This step used to
   // be the only one with a batch "Carry N" button — the one place a decision
   // could silently evaporate because a therapist between clients never pressed
   // it. Controls disable while the POST is in flight so rapid ticks can't race
   // the wholesale-replace endpoint; on failure the tick visibly reverts.
-  const persist = async (next: Set<string>, prev: Set<string>) => {
+  const persist = async (
+    nextSelected: Set<string>,
+    keepEarlier: CarriedQuestion[],
+    rollback: () => void,
+  ) => {
     setBusy(true);
     setError(null);
     try {
       const now = new Date().toISOString();
       const questions: CarriedQuestion[] = [
-        ...untouched,
+        ...keepEarlier,
         ...gaps
-          .filter((g) => next.has(g.question))
+          .filter((g) => nextSelected.has(g.question))
           .map((g) => ({
             question: g.question.slice(0, 500),
             rationale: g.rationale ? g.rationale.slice(0, 1000) : null,
@@ -1551,7 +1564,7 @@ function AskNextStep({
       setSavedOnce(true);
       onSaved();
     } catch (e) {
-      setSelected(prev);
+      rollback();
       setError((e as Error).message);
     } finally {
       setBusy(false);
@@ -1563,10 +1576,25 @@ function AskNextStep({
     const prev = selected;
     const next = new Set(prev);
     if (next.has(q)) next.delete(q);
-    else if (untouched.length + next.size < MAX_CARRIED) next.add(q);
+    else if (effectiveUntouched.length + next.size < MAX_CARRIED) next.add(q);
     else return;
     setSelected(next);
-    void persist(next, prev);
+    void persist(next, effectiveUntouched, () => setSelected(prev));
+  };
+
+  // Un-carry an earlier question (already asked, or wording that no longer
+  // matches a gap). Same wholesale-replace save, minus this one.
+  const removeEarlier = (q: string) => {
+    if (busy) return;
+    const prevRemoved = removedEarlier;
+    const nextRemoved = new Set(prevRemoved);
+    nextRemoved.add(q);
+    setRemovedEarlier(nextRemoved);
+    void persist(
+      selected,
+      untouched.filter((c) => c.question !== q && !prevRemoved.has(c.question)),
+      () => setRemovedEarlier(prevRemoved),
+    );
   };
 
   // Group gaps by the job they do, in engine order. Empty groups are skipped.
@@ -1579,7 +1607,7 @@ function AskNextStep({
     [gaps],
   );
 
-  const effectiveCount = untouched.length + selected.size;
+  const effectiveCount = effectiveUntouched.length + selected.size;
 
   return (
     <Step
@@ -1661,14 +1689,50 @@ function AskNextStep({
         </div>
       )}
 
+      {/* The earlier-carried ledger — removable, so an already-asked question
+          can stop consuming the cap (the freeze at "8 of 8" was permanent). */}
+      {effectiveUntouched.length > 0 && (
+        <div className="mt-3.5">
+          <p className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
+            Carried earlier
+          </p>
+          <div className="space-y-1.5">
+            {effectiveUntouched.map((c) => (
+              <div
+                key={c.question}
+                className="flex items-start justify-between gap-2.5 rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3"
+              >
+                <span className="min-w-0">
+                  <b className="block text-[13.5px] font-semibold">{c.question}</b>
+                  {c.rationale && (
+                    <span className="mt-0.5 block text-xs text-[var(--color-ink-3)]">
+                      {c.rationale}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeEarlier(c.question)}
+                  disabled={busy}
+                  title="Remove — stops it opening the next pre-session brief and frees the carry slot"
+                  className="flex-none text-xs font-semibold text-[var(--color-ink-3)] hover:text-[var(--color-warn)] disabled:opacity-50"
+                >
+                  ✕ Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="mt-3.5 flex flex-wrap items-center gap-2">
-        {gaps.length > 0 && (
+        {(gaps.length > 0 || effectiveUntouched.length > 0) && (
           <span className="text-[11px] text-[var(--color-ink-3)]">
             {busy
               ? 'Saving…'
               : `Carrying ${effectiveCount} of ${MAX_CARRIED}${
-                  untouched.length > 0
-                    ? ` · includes ${untouched.length} carried earlier — they count toward the cap`
+                  effectiveUntouched.length > 0
+                    ? ` · ${effectiveUntouched.length} carried earlier (removable above)`
                     : ''
                 }`}
           </span>
@@ -2442,12 +2506,16 @@ function WrapUpSignStep({
   const [signed, setSigned] = useState(closeout.signed);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  // REQUIRE_WEBAUTHN_SIGNING refused the sign because no passkey is
+  // enrolled — rendered with the enrolment path, not as a plain error wall.
+  const [needsPasskey, setNeedsPasskey] = useState<string | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
 
   const triggerSign = async (): Promise<void> => {
     if (!closeout.noteContent) return;
     setSigning(true);
     setSignError(null);
+    setNeedsPasskey(null);
     try {
       const note = closeout.noteContent;
       const signedAt = new Date().toISOString();
@@ -2462,6 +2530,12 @@ function WrapUpSignStep({
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
+        if (res.status === 403) {
+          setNeedsPasskey(
+            body.error ?? 'Signing requires a registered passkey on this account.',
+          );
+          return;
+        }
         throw new Error(body.error ?? `Sign failed (${res.status})`);
       }
       const signedNote = (await res.json()) as { signedAt: string };
@@ -2677,7 +2751,21 @@ function WrapUpSignStep({
 
           {/* The signature. */}
           <div className="mt-5 border-t border-[var(--color-line-soft)] pt-4">
-            {signed ? (
+            {signed && closeout.noteUnlocked ? (
+              // The signed note was re-opened for editing — the session is
+              // NOT closed right now, and sharing the superseded signed
+              // content would be wrong.
+              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+                <b>Note re-opened for editing.</b> The earlier signature is superseded until you
+                re-sign — finish the edit and sign again on the{' '}
+                <Link
+                  href={`/app/sessions/${sessionId}`}
+                  className="font-semibold underline underline-offset-2"
+                >
+                  Notes tab →
+                </Link>
+              </div>
+            ) : signed ? (
               <div className="flex flex-wrap items-center gap-3">
                 <DoneChip>
                   Session closed
@@ -2727,6 +2815,18 @@ function WrapUpSignStep({
               <p className="mt-2 text-[11px] text-[var(--color-ink-3)]">
                 Review finished {formatDate(reviewedAt)} — signing closes the session itself.
               </p>
+            )}
+            {needsPasskey && (
+              <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+                {needsPasskey}{' '}
+                <Link
+                  href="/app/settings/security"
+                  className="font-semibold underline underline-offset-2"
+                >
+                  Set up a passkey →
+                </Link>{' '}
+                then come back here and sign — everything above is already saved.
+              </div>
             )}
             {signError && <p className="mt-2 text-xs text-[var(--color-warn)]">{signError}</p>}
           </div>
