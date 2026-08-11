@@ -8,6 +8,7 @@ import { RecordingShell } from '@/components/app/RecordingShell';
 import type { ClientTileEntry } from '@/components/app/ClientPicker';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
+import { livekitConfigured } from '@/lib/livekit';
 import { prisma } from '@/lib/prisma';
 import type { Session as SessionPrismaRow } from '@prisma/client';
 
@@ -39,7 +40,15 @@ export default async function RecordPage({
         // session's `endedAt` to render "last 2d ago" copy. Inline
         // include (take: 1) keeps the query a single round-trip.
         prisma.client.findMany({
-          where: { psychologistId: therapist.id, deletedAt: null, status: 'ACTIVE' },
+          // Discharged (and paused) clients stay pickable: the closed-episode
+          // card promises "recording a new session reopens care as a fresh
+          // episode", and the session-create route does exactly that. Only
+          // transferred-out and archived clients leave the picker.
+          where: {
+            psychologistId: therapist.id,
+            deletedAt: null,
+            status: { in: ['ACTIVE', 'PAUSED', 'DISCHARGED'] },
+          },
           // The name is envelope-encrypted, so alphabetical ordering can't run
           // in SQL — fetch by a stable key and sort by decrypted name below.
           orderBy: { createdAt: 'asc' },
@@ -95,6 +104,7 @@ export default async function RecordPage({
               ? 'BATCH'
               : 'LIVE'
           }
+          videoEnabled={livekitConfigured()}
         />
 
         <FirstRunChecklist psychologistId={therapist.id} />

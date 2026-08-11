@@ -18,14 +18,24 @@ interface Props {
   initialClientId?: string | null;
   /** TS6 — the therapist's preferred in-person capture (live vs batch). */
   defaultCapture?: 'LIVE' | 'BATCH';
+  /** VS1 — server-computed livekitConfigured(); gates the Virtual option. */
+  videoEnabled?: boolean;
 }
 
+type Intent = 'live' | 'dictation' | 'upload';
+
 type ShellState =
-  | { kind: 'pick'; intent: 'live' | 'dictation' | 'upload' }
-  | { kind: 'new-client' }
+  | { kind: 'pick'; intent: Intent }
+  | { kind: 'new-client'; intent: Intent }
   | { kind: 'confirm'; client: { id: string; fullName: string }; mode: ConfirmMode }
   | { kind: 'recording'; ready: RecordReady }
   | { kind: 'uploading'; ready: RecordReady };
+
+const INTENT_MODE: Record<Intent, ConfirmMode> = {
+  live: 'live-capture',
+  dictation: 'dictation',
+  upload: 'upload',
+};
 
 /**
  * Sprint 23 — Record entry surface, rebuilt client-first.
@@ -54,7 +64,12 @@ type ShellState =
  * Neither surface pre-fills a modality: intake is how you decide it, and
  * the confirm strip only displays what the server-side cascade inferred.
  */
-export function RecordingShell({ clients, initialClientId = null, defaultCapture }: Props) {
+export function RecordingShell({
+  clients,
+  initialClientId = null,
+  defaultCapture,
+  videoEnabled = true,
+}: Props) {
   const router = useRouter();
   const [shell, setShell] = useState<ShellState>(() => {
     // TS6 — arriving via /app?record=<clientId> lands straight on the confirm
@@ -109,15 +124,9 @@ export function RecordingShell({ clients, initialClientId = null, defaultCapture
         <ClientPicker
           clients={clients}
           onPickClient={(c) => {
-            const mode: ConfirmMode =
-              shell.intent === 'dictation'
-                ? 'dictation'
-                : shell.intent === 'upload'
-                  ? 'upload'
-                  : 'live-capture';
-            setShell({ kind: 'confirm', client: c, mode });
+            setShell({ kind: 'confirm', client: c, mode: INTENT_MODE[shell.intent] });
           }}
-          onNewClient={() => setShell({ kind: 'new-client' })}
+          onNewClient={() => setShell({ kind: 'new-client', intent: shell.intent })}
           onDictation={() => setShell({ kind: 'pick', intent: 'dictation' })}
           onUpload={() => setShell({ kind: 'pick', intent: 'upload' })}
         />
@@ -126,10 +135,19 @@ export function RecordingShell({ clients, initialClientId = null, defaultCapture
   }
 
   if (shell.kind === 'new-client') {
+    // The therapist's intent (dictation / upload / live) survives the detour
+    // through the new-client form — it used to be silently reset to live.
+    const intent = shell.intent;
     return (
       <NewClientForm
-        onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
-        onCreated={(client) => setShell({ kind: 'confirm', client, mode: 'live-capture' })}
+        onCancel={() => setShell({ kind: 'pick', intent })}
+        onCreated={(client) => {
+          // The picker's client list is server-rendered; without a refresh a
+          // "← Back" after this create shows a list WITHOUT the new client,
+          // which reads as "the create failed" and invites a duplicate.
+          router.refresh();
+          setShell({ kind: 'confirm', client, mode: INTENT_MODE[intent] });
+        }}
       />
     );
   }
@@ -142,6 +160,7 @@ export function RecordingShell({ clients, initialClientId = null, defaultCapture
         clientName={shell.client.fullName}
         mode={mode}
         defaultCapture={defaultCapture ?? 'LIVE'}
+        videoEnabled={videoEnabled}
         onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
         onReady={(ready) => handleReady(ready, mode)}
       />

@@ -268,7 +268,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
                 tracking progress.
               </p>
               <Link
-                href="/app"
+                href={`/app?record=${client.id}`}
                 className="mt-3 inline-flex items-center rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
               >
                 Record a session

@@ -36,6 +36,12 @@ interface Props {
    * path. From Psychologist.defaultCaptureMode (non-LIVE ⇒ BATCH).
    */
   defaultCapture?: 'LIVE' | 'BATCH';
+  /**
+   * VS1 — server-computed livekitConfigured(). When false the Virtual
+   * option is disabled up front, BEFORE a session is created, consented and
+   * started toward a dead video surface.
+   */
+  videoEnabled?: boolean;
   onCancel: () => void;
   onReady: (result: RecordReady) => void;
 }
@@ -130,6 +136,7 @@ export function RecordConfirmStrip({
   clientName,
   mode = 'live-capture',
   defaultCapture = 'LIVE',
+  videoEnabled = true,
   onCancel,
   onReady,
 }: Props) {
@@ -391,7 +398,12 @@ export function RecordConfirmStrip({
                   checked={method === 'room'}
                   onSelect={() => setMethod('room')}
                   title="Virtual"
-                  description="Video room in Cureocity — the client joins by a link you share."
+                  description={
+                    videoEnabled
+                      ? 'Video room in Cureocity — the client joins by a link you share.'
+                      : 'In-app video is not configured on this deployment.'
+                  }
+                  disabled={!videoEnabled}
                 />
                 <MethodOption
                   checked={method === 'display'}

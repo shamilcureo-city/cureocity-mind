@@ -64,7 +64,13 @@ export default async function TodayPage() {
       select: sessionSelect,
     }),
     prisma.client.findMany({
-      where: { psychologistId: therapist.id, deletedAt: null, status: 'ACTIVE' },
+      // Same rule as the record picker: a discharged client can walk back in
+      // (a new session reopens care as a fresh episode).
+      where: {
+        psychologistId: therapist.id,
+        deletedAt: null,
+        status: { in: ['ACTIVE', 'PAUSED', 'DISCHARGED'] },
+      },
       // The name is envelope-encrypted, so alphabetical ordering can't run in
       // SQL — fetch by a stable key and sort by the decrypted name below.
       orderBy: { createdAt: 'asc' },

@@ -76,6 +76,14 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   const [draining, setDraining] = useState(false);
   const [startedAt, setStartedAt] = useState<number | null>(null);
 
+  // Live mirror for long-lived listeners (the track-'ended' handler below is
+  // registered once at start; reading `state` there captured 'preparing'
+  // forever, so a dying mic never stopped the recorder).
+  const stateRef = useRef<RecorderState>('idle');
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const workletRef = useRef<AudioWorkletNode | null>(null);
@@ -183,10 +191,16 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
         for (const chunk of completed) await onCompletedChunk(chunk);
       };
 
-      // If the user revokes the screen-share at the OS level, stop cleanly.
+      // If the audio source dies mid-session (mic unplugged, Bluetooth headset
+      // off, screen-share revoked), stop cleanly AND say so — the worst
+      // failure mode is a pulsing "Recording" badge capturing silence.
       stream.getTracks().forEach((t) => {
         t.addEventListener('ended', () => {
-          if (state === 'recording') void stopInternal();
+          if (stateRef.current !== 'recording') return;
+          setError(
+            'The audio source stopped (microphone disconnected or sharing ended) — recording has been stopped. Everything captured so far is saved; start again to continue.',
+          );
+          void stopInternal();
         });
       });
 

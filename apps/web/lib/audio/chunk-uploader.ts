@@ -33,7 +33,8 @@ export type UploadOutcome =
 export class ChunkUploader {
   private readonly opts: Required<Omit<UploaderOptions, 'getAuthToken'>> &
     Pick<UploaderOptions, 'getAuthToken'>;
-  private draining = false;
+  /** The in-flight drain, so concurrent callers AWAIT it (see drainSession). */
+  private drainInFlight: Promise<void> | null = null;
 
   constructor(opts: UploaderOptions) {
     this.opts = {
@@ -84,14 +85,20 @@ export class ChunkUploader {
    * Drains all pending chunks for a session from IDB, oldest-first.
    * Chunks past maxAttempts are left in IDB for a future drain or UI
    * recovery action.
+   *
+   * Re-entrant callers AWAIT the drain already in flight instead of
+   * no-oping — the End-session flush must genuinely wait for the queue,
+   * otherwise it counts chunks a background drain is mid-way through
+   * uploading and falsely warns "N parts of the recording didn't upload".
+   * (One uploader instance serves one session, so sharing the promise is
+   * safe; a fresh call after it settles starts a fresh pass.)
    */
-  async drainSession(
+  drainSession(
     sessionId: string,
     onProgress?: (done: number, total: number) => void,
   ): Promise<void> {
-    if (this.draining) return;
-    this.draining = true;
-    try {
+    if (this.drainInFlight) return this.drainInFlight;
+    const run = (async (): Promise<void> => {
       const pending = (await ChunkStore.listForSession(sessionId)).sort(
         (a, b) => a.chunkIndex - b.chunkIndex,
       );
@@ -110,9 +117,11 @@ export class ChunkUploader {
         done += 1;
         onProgress?.(done, pending.length);
       }
-    } finally {
-      this.draining = false;
-    }
+    })();
+    this.drainInFlight = run.finally(() => {
+      this.drainInFlight = null;
+    });
+    return this.drainInFlight;
   }
 }
 
