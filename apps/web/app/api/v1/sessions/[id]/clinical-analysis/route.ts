@@ -153,8 +153,11 @@ export async function POST(
 }
 
 /**
- * GET /api/v1/sessions/[id]/clinical-analysis — read the current
- * report (or 404 if none exists yet).
+ * GET /api/v1/sessions/[id]/clinical-analysis — read the current report,
+ * plus where the pipeline stands (`sessionStatus` + `noteStatus`). The
+ * copilot board polls this from the moment the therapist lands after a
+ * recording; before the report row exists it needs "not yet" (keep
+ * waiting, here's what's running) rather than a bare 404.
  */
 export async function GET(
   req: NextRequest,
@@ -166,20 +169,27 @@ export async function GET(
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { id: true, psychologistId: true },
+    select: {
+      id: true,
+      psychologistId: true,
+      status: true,
+      noteDraft: { select: { status: true } },
+    },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+  const progress = {
+    sessionStatus: session.status,
+    noteStatus: session.noteDraft?.status ?? null,
+  };
   const row = await prisma.clinicalReport.findUnique({ where: { sessionId } });
   if (!row) {
-    return NextResponse.json(
-      { error: 'No clinical report for this session yet.' },
-      { status: 404 },
-    );
+    return NextResponse.json({ report: null, initialAssessmentBrief: null, ...progress });
   }
   return NextResponse.json({
     report: toClinicalReport(row),
     initialAssessmentBrief: readInitialAssessmentBrief(row),
+    ...progress,
   });
 }

@@ -1,7 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { CreateCheckoutInputSchema, type CreateCheckoutResponse } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
-import { ensureBillingAccount, planAmountInr, publicRazorpayKeyId, razorpay } from '@/lib/billing';
+import {
+  checkoutUnavailableReason,
+  ensureBillingAccount,
+  planAmountInr,
+  publicRazorpayKeyId,
+  razorpay,
+} from '@/lib/billing';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -23,6 +29,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const body = await parseJson(req, CreateCheckoutInputSchema);
   if (!body.ok) return body.response;
+
+  // Fail OPEN to a human path: when online payment can't run (Razorpay not
+  // yet configured on this deployment), tell the UI so it renders the
+  // contact-us fallback instead of a dead 500 under the Choose button.
+  const unavailable = checkoutUnavailableReason();
+  if (unavailable) {
+    console.warn(`[billing] checkout unavailable: ${unavailable}`);
+    return NextResponse.json(
+      {
+        error:
+          'Online payment isn’t live yet. Message us and we’ll activate your plan the same day.',
+        code: 'CHECKOUT_UNAVAILABLE',
+      },
+      { status: 503 },
+    );
+  }
 
   const amountInr = planAmountInr(body.value.plan);
   if (amountInr <= 0) {

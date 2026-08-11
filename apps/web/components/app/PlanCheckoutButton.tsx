@@ -62,10 +62,17 @@ async function ensureRazorpay(): Promise<NonNullable<Window['Razorpay']>> {
   return window.Razorpay;
 }
 
+/** Where a therapist reaches a human when online checkout can't run. */
+const BILLING_CONTACT_EMAIL =
+  process.env['NEXT_PUBLIC_BILLING_CONTACT_EMAIL'] ?? 'shamil@cureo.city';
+
 export function PlanCheckoutButton({ plan, label, variant = 'primary' }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Online payment isn't configured — offer the human path instead of a
+  // dead error under the button (the capped screen must never be a dead end).
+  const [contactFallback, setContactFallback] = useState<string | null>(null);
 
   const launch = useCallback(async () => {
     setBusy(true);
@@ -78,7 +85,14 @@ export function PlanCheckoutButton({ plan, label, variant = 'primary' }: Props) 
       });
       const body = (await res.json().catch(() => ({}))) as CreateCheckoutResponse & {
         error?: string;
+        code?: string;
       };
+      if (body.code === 'CHECKOUT_UNAVAILABLE') {
+        setContactFallback(
+          body.error ?? 'Online payment isn’t live yet — message us and we’ll set you up.',
+        );
+        return;
+      }
       if (!res.ok) {
         setError(body.error ?? `Could not start checkout (HTTP ${res.status}).`);
         return;
@@ -121,6 +135,19 @@ export function PlanCheckoutButton({ plan, label, variant = 'primary' }: Props) 
         {busy ? 'Opening checkout…' : (label ?? 'Upgrade')}
       </button>
       {error && <p className="mt-2 text-xs text-[var(--color-warn)]">{error}</p>}
+      {contactFallback && (
+        <div className="mt-2 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-3 text-xs text-[var(--color-ink-2)]">
+          <p>{contactFallback}</p>
+          <a
+            href={`mailto:${BILLING_CONTACT_EMAIL}?subject=${encodeURIComponent(
+              `Activate my ${planLabel(plan)} plan`,
+            )}`}
+            className="mt-1.5 inline-block font-semibold text-[var(--color-accent)] hover:underline"
+          >
+            Email {BILLING_CONTACT_EMAIL} →
+          </a>
+        </div>
+      )}
     </div>
   );
 }

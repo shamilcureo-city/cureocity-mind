@@ -73,6 +73,32 @@ export function publicRazorpayKeyId(): string | null {
 }
 
 /**
+ * Why online checkout can't run right now, or null when it can. Checked
+ * BEFORE minting anything so the capped-therapist screen can fail OPEN to a
+ * human path (contact us → manual activation) instead of an HTTP 500 —
+ * a paywall that errors is a locked door with no keyhole.
+ */
+export function checkoutUnavailableReason(): string | null {
+  const backend = process.env['BILLING_BACKEND'] ?? 'mock';
+  const isProduction = process.env['VERCEL_ENV'] === 'production';
+  if (backend === 'razorpay') {
+    if (
+      !process.env['RAZORPAY_KEY_ID'] ||
+      !process.env['RAZORPAY_KEY_SECRET'] ||
+      !process.env['RAZORPAY_WEBHOOK_SECRET']
+    ) {
+      return 'Razorpay credentials are not fully configured.';
+    }
+  } else if (isProduction && process.env['BILLING_ALLOW_MOCK'] !== 'true') {
+    return 'Online payment is not switched on for this deployment yet.';
+  }
+  if (!publicRazorpayKeyId()) {
+    return 'The Razorpay public key is not configured.';
+  }
+  return null;
+}
+
+/**
  * List price in rupees for a plan, read from PLAN_CATALOG and
  * overridable per the catalog's envKey (so we can A/B a price without a
  * deploy). Returns 0 for FREE_TRIAL / unpriced — the checkout route
@@ -108,21 +134,39 @@ export async function ensureBillingAccount(psychologistId: string): Promise<{ id
 }
 
 /**
+ * Session statuses that actually CONSUMED the product. A SCHEDULED row is
+ * only a booking; CANCELLED / NO_SHOW / RESCHEDULED sessions never happened.
+ * Counting every row ever created burned trial credits on reschedules and
+ * cancellations — the real pilot user hit "11 of 10 used" with ~9 recorded.
+ */
+const CONSUMED_STATUSES = ['IN_PROGRESS', 'COMPLETED'] as const;
+
+/**
  * Compute the entitlement summary the session-create gate + the sidebar
  * widget + the Plan page all read. `trialUsed` deliberately excludes
  * demo "Example" client sessions (Sprint 48 isDemo filter) — demo
- * sessions must never burn trial allowance.
+ * sessions must never burn trial allowance — and counts only sessions
+ * that actually ran (see CONSUMED_STATUSES).
  */
 export async function getEntitlement(psychologistId: string): Promise<BillingEntitlement> {
   const since = new Date(Date.now() - THIRTY_DAYS_MS);
   const [account, trialUsed, monthlyUsed] = await Promise.all([
     prisma.billingAccount.findUnique({ where: { psychologistId } }),
     prisma.session.count({
-      where: { psychologistId, client: { isDemo: false } },
+      where: {
+        psychologistId,
+        client: { isDemo: false },
+        status: { in: [...CONSUMED_STATUSES] },
+      },
     }),
     // Sprint 56 — rolling-30-day count drives the paid-tier monthly cap.
     prisma.session.count({
-      where: { psychologistId, client: { isDemo: false }, createdAt: { gte: since } },
+      where: {
+        psychologistId,
+        client: { isDemo: false },
+        status: { in: [...CONSUMED_STATUSES] },
+        createdAt: { gte: since },
+      },
     }),
   ]);
   if (!account) {

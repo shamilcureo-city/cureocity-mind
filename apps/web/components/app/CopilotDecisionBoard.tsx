@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type {
@@ -141,6 +141,9 @@ interface BoardData {
 interface AnalysisResponse {
   report?: ClinicalReport | null;
   initialAssessmentBrief?: InitialAssessmentBriefV1 | null;
+  /** Where the pipeline stands, for the pre-reading states (JA-C). */
+  noteStatus?: string | null;
+  sessionStatus?: string | null;
   error?: string;
   code?: string;
 }
@@ -164,14 +167,46 @@ export function CopilotDecisionBoard({
   // Set after a NOTE_NOT_USABLE kick re-ran generate-note: the report row may
   // not even exist yet, but Pass 3 is on its way — poll until it lands.
   const [kickedPending, setKickedPending] = useState(false);
+  // JA-C — what the poll last saw of the pipeline, for the pre-reading
+  // states: the landing card must say what is actually happening (note
+  // writing → reading preparing) instead of a static promise.
+  const [pipeline, setPipeline] = useState<{
+    noteStatus: string | null;
+    sessionStatus: string | null;
+  }>({ noteStatus: null, sessionStatus: null });
 
-  const applyResponse = useCallback((payload: AnalysisResponse) => {
-    if (payload.report !== undefined) setReport(payload.report ?? null);
-    if (payload.initialAssessmentBrief !== undefined) {
-      setBrief(payload.initialAssessmentBrief ?? null);
-    }
-    if (payload.report && payload.report.status !== 'PENDING') setKickedPending(false);
-  }, []);
+  // The decisions + wrap card render from SERVER props; when the reading
+  // lands via the poll (not via a click), those must catch up too — without
+  // this, a healed note left "Sign and close" greyed out until a manual
+  // reload (JA-C·heal).
+  const lastReportStatusRef = useRef<string | null>(initialReport?.status ?? null);
+
+  const applyResponse = useCallback(
+    (payload: AnalysisResponse) => {
+      if (payload.noteStatus !== undefined || payload.sessionStatus !== undefined) {
+        setPipeline({
+          noteStatus: payload.noteStatus ?? null,
+          sessionStatus: payload.sessionStatus ?? null,
+        });
+      }
+      if (payload.report !== undefined) setReport(payload.report ?? null);
+      if (payload.initialAssessmentBrief !== undefined) {
+        setBrief(payload.initialAssessmentBrief ?? null);
+      }
+      if (payload.report && payload.report.status !== 'PENDING') setKickedPending(false);
+      if (payload.report !== undefined) {
+        const next = payload.report?.status ?? null;
+        const was = lastReportStatusRef.current;
+        if (next !== was) {
+          lastReportStatusRef.current = next;
+          if (next !== null && next !== 'PENDING' && (was === null || was === 'PENDING')) {
+            router.refresh();
+          }
+        }
+      }
+    },
+    [router],
+  );
 
   const generate = useCallback(async () => {
     setGenerating(true);
@@ -182,6 +217,12 @@ export function CopilotDecisionBoard({
       });
       const body = (await res.json().catch(() => ({}))) as AnalysisResponse;
       if (!res.ok) {
+        // The note is still being written — not an error. Flip to the
+        // "being prepared" state and let the poll bring the reading in.
+        if (res.status === 409 && body.code === 'NOTE_NOT_READY') {
+          setKickedPending(true);
+          return;
+        }
         // Pass 3 can't run when Pass 1 produced an unusable transcript —
         // kick generate-note (which retries Pass 1) so one Retry click
         // moves the therapist forward instead of looping on the same 409.
@@ -214,10 +255,15 @@ export function CopilotDecisionBoard({
     ? 'PENDING'
     : (report?.status ?? null);
 
-  // Poll while Pass 3 runs in the background (generate-note schedules it via
-  // after(), so the therapist can land here in PENDING).
+  // Poll while the pipeline is (or may be) running: PENDING means Pass 3 is
+  // in flight; the null landing state means the note is still writing or
+  // Pass 3 hasn't been scheduled yet. The therapist lands here seconds
+  // after ending a recording — the board must advance ON ITS OWN, without a
+  // reload or a manual click (the old poll only ran in PENDING, so the
+  // landing card never transitioned).
+  const autoKickTicksRef = useRef(0);
   useEffect(() => {
-    if (status !== 'PENDING') return;
+    if (status !== 'PENDING' && status !== null) return;
     let cancelled = false;
     const poll = async (): Promise<void> => {
       try {
@@ -228,16 +274,26 @@ export function CopilotDecisionBoard({
         const body = (await res.json().catch(() => ({}))) as AnalysisResponse;
         if (cancelled) return;
         applyResponse(body);
+        // Note COMPLETED but still no report after a few ticks → Pass 3 was
+        // never scheduled for this session (e.g. recorded before the live
+        // path learned to schedule it). Kick it once, automatically.
+        if (body.report == null && body.noteStatus === 'COMPLETED') {
+          autoKickTicksRef.current += 1;
+          if (autoKickTicksRef.current === 3) void generate();
+        } else {
+          autoKickTicksRef.current = 0;
+        }
       } catch {
         // Swallow — next tick retries.
       }
     };
+    void poll();
     const id = setInterval(() => void poll(), 3_000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [status, sessionId, applyResponse]);
+  }, [status, sessionId, applyResponse, generate]);
 
   const data: BoardData | null = useMemo(() => {
     if (isIntake) {
@@ -390,16 +446,56 @@ export function CopilotDecisionBoard({
   const readingNoun = isIntake ? 'initial assessment' : 'clinical brief';
 
   if (status === null || (status === 'COMPLETED' && !data)) {
+    // Say what is ACTUALLY happening (from the poll), not a static promise —
+    // the old card claimed "generated automatically" and never updated.
+    const reportBroken = status === 'COMPLETED' && !data;
+    const noteState = pipeline.noteStatus ?? (closeout.noteReady ? 'COMPLETED' : null);
+    const sessionKnownNotDone =
+      pipeline.sessionStatus !== null && pipeline.sessionStatus !== 'COMPLETED';
+
+    let title = 'No AI reading yet';
+    let bodyText: string;
+    let waiting = false;
+    if (reportBroken) {
+      bodyText = `The stored ${readingNoun} could not be read — regenerate it below.`;
+    } else if (noteState === 'COMPLETED') {
+      title = 'Preparing the AI reading…';
+      bodyText = `The note is ready. The ${readingNoun} is being prepared and appears here on its own — usually under a minute.`;
+      waiting = true;
+    } else if (noteState === 'PENDING' || noteState === 'IN_PROGRESS') {
+      title = 'The note is being written…';
+      bodyText = `Usually 1–2 minutes. The ${readingNoun} follows automatically once the note is done — you can stay right here.`;
+      waiting = true;
+    } else if (noteState === 'FAILED') {
+      title = 'The note needs attention';
+      bodyText = `Note generation failed, so no ${readingNoun} can run yet. Open the Notes tab to retry the note — the reading follows automatically once it succeeds.`;
+    } else if (sessionKnownNotDone) {
+      bodyText = `Record the session first — the note and the ${readingNoun} are generated automatically after you finish.`;
+    } else {
+      bodyText = `Waiting for the note… if nothing moves in a couple of minutes, generate the ${readingNoun} below.`;
+      waiting = true;
+    }
+
     return (
       <Card className="p-10 text-center">
-        <p className="font-serif text-2xl">No AI reading yet</p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          The {readingNoun} is generated automatically after the note finishes. If you don't see
-          one, the note may not have completed — generate the note first, then come back here.
-        </p>
+        {waiting && (
+          <span className="mx-auto mb-4 flex w-fit gap-1.5">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]" />
+            <span
+              className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]"
+              style={{ animationDelay: '0.2s' }}
+            />
+            <span
+              className="h-2 w-2 animate-pulse rounded-full bg-[var(--color-accent)]"
+              style={{ animationDelay: '0.4s' }}
+            />
+          </span>
+        )}
+        <p className="font-serif text-2xl">{title}</p>
+        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">{bodyText}</p>
         <div className="mt-6">
           <Button onClick={() => void generate()} disabled={generating}>
-            {generating ? 'Generating…' : `Generate ${readingNoun}`}
+            {generating ? 'Generating…' : `Generate ${readingNoun} now`}
           </Button>
         </div>
         {genError && <p className="mt-4 text-sm text-[var(--color-warn)]">{genError}</p>}

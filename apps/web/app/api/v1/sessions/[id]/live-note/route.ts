@@ -15,8 +15,10 @@ import { ensureEnglishNote } from '@/lib/ensure-english-note';
 import {
   persistDraftedOrders,
   persistVitalReadings,
+  runClinicalAnalysis,
   runDifferential,
 } from '@/lib/note-orchestrator';
+import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -58,6 +60,9 @@ export async function POST(
       scheduledAt: true,
       status: true,
       language: true,
+      kind: true,
+      modality: true,
+      client: { select: { presentingConcerns: true } },
       psychologist: { select: { vertical: true, specialty: true } },
       // Batch C — the signed-note guard needs to know whether a signature
       // already exists for this session.
@@ -175,6 +180,40 @@ export async function POST(
         );
       });
     }
+    // The batch path schedules Pass 3 (the copilot reading) in generate-note's
+    // after(); this branch never did, so every live session landed on a board
+    // whose "generated automatically" promise was false — the therapist had to
+    // discover the Generate button. Schedule it the same way: fire-and-forget,
+    // the board polls it in. The live transcript has no diarized timeline, so
+    // it is covered with a single `unknown` segment (same as the batch heal;
+    // the Pass 3 prompt is told not to guess speakers).
+    const p3Transcript = tTranscriptText;
+    const p3Kind = session.kind;
+    after(async () => {
+      try {
+        await runClinicalAnalysis({
+          sessionId,
+          clientId: session.clientId,
+          psychologistId: session.psychologistId,
+          language: (session.language as ClinicalLocale | undefined) ?? 'en',
+          kind: p3Kind,
+          modality: session.modality,
+          presentingConcerns: session.client.presentingConcerns,
+          transcript: p3Transcript,
+          speakerSegments: coverTranscriptWithSegments({
+            transcript: p3Transcript,
+            segments: [],
+            startMs: 0,
+            endMs: 0,
+          }),
+          note: tnote as Parameters<typeof runClinicalAnalysis>[0]['note'],
+        });
+      } catch (e) {
+        console.error(
+          `[live-note] clinical analysis failed for session=${sessionId}: ${(e as Error).message}`,
+        );
+      }
+    });
     return NextResponse.json({ draftId: tDraft.id, status: 'COMPLETED' }, { status: 201 });
   }
 

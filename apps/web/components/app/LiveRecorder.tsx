@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -35,6 +35,12 @@ interface Props {
   /// Sprint DV3 — where to navigate after the session ends. Defaults to
   /// the therapy session workspace; the doctor encounter passes its own.
   reviewHref?: string;
+  /**
+   * VS1 — tells the parent whether a recording is in flight (recording /
+   * draining / ending), so surfaces that embed the recorder (the virtual
+   * room) can guard navigation that would silently abandon it.
+   */
+  onActiveChange?: (active: boolean) => void;
 }
 
 export function LiveRecorder({
@@ -46,6 +52,7 @@ export function LiveRecorder({
   externalStream,
   onFinished,
   reviewHref,
+  onActiveChange,
 }: Props) {
   const router = useRouter();
   const recorder = useSessionRecorder({
@@ -69,6 +76,25 @@ export function LiveRecorder({
   // immediately.
   useEffect(() => {
     if (recorder.state === 'idle') void recorder.start();
+  }, []);
+
+  // VS1 — report whether a recording is in flight (anything between start and
+  // a clean end), so the embedding surface can guard navigation. The unmount
+  // cleanup reads the latest callback through a ref (mount-only effect).
+  const onActiveChangeRef = useRef(onActiveChange);
+  useEffect(() => {
+    onActiveChangeRef.current = onActiveChange;
+  }, [onActiveChange]);
+  useEffect(() => {
+    const active =
+      recorder.state === 'recording' ||
+      recorder.state === 'preparing' ||
+      recorder.state === 'finishing' ||
+      ending;
+    onActiveChangeRef.current?.(active);
+  }, [recorder.state, ending]);
+  useEffect(() => {
+    return () => onActiveChangeRef.current?.(false);
   }, []);
 
   // Live elapsed timer.

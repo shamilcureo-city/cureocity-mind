@@ -41,6 +41,12 @@ interface Props {
    * pipeline. Display stays this component's job.
    */
   onRoom?: (room: Room | null) => void;
+  /**
+   * VS1 — when set, the hang-up button and the ended panel's Done do NOT
+   * navigate to leaveHref; the parent decides (the therapist shell keeps the
+   * recorder alive and guides the therapist to End session instead).
+   */
+  onLeave?: () => void;
 }
 
 type Phase =
@@ -50,6 +56,7 @@ type Phase =
   | 'live'
   | 'reconnecting'
   | 'ended'
+  | 'over'
   | 'error';
 
 export function VideoSessionRoom({
@@ -58,6 +65,7 @@ export function VideoSessionRoom({
   leaveHref,
   chrome = 'full',
   onRoom,
+  onLeave,
 }: Props) {
   const heightCls =
     chrome === 'embedded' ? 'h-full min-h-[420px] overflow-hidden rounded-3xl' : 'min-h-screen';
@@ -91,6 +99,13 @@ export function VideoSessionRoom({
         error?: string;
         startAt?: string;
       };
+      if (res.status === 409) {
+        // The session is over (or not open) — a Rejoin can only fail, so say
+        // so plainly instead of an error + retry loop.
+        setMessage(body.error ?? null);
+        setPhase('over');
+        return;
+      }
       if (!res.ok || !body.token || !body.url) {
         throw new Error(body.error ?? 'Could not open the room — try again.');
       }
@@ -118,7 +133,12 @@ export function VideoSessionRoom({
         .on(RoomEvent.ConnectionStateChanged, (s) => {
           if (s === ConnectionState.Reconnecting) setPhase('reconnecting');
           if (s === ConnectionState.Connected) setPhase('live');
-          if (s === ConnectionState.Disconnected) setPhase('ended');
+          if (s === ConnectionState.Disconnected) {
+            setPhase('ended');
+            // The parent's audio mix must not keep consuming a dead room —
+            // on rejoin a fresh Room arrives via onRoom(room) below.
+            onRoom?.(null);
+          }
         });
 
       await room.connect(body.url, body.token);
@@ -173,8 +193,15 @@ export function VideoSessionRoom({
     roomRef.current?.disconnect();
     roomRef.current = null;
     onRoom?.(null);
+    if (onLeave) {
+      // The parent owns what happens next (e.g. the therapist shell keeps
+      // the recorder running and points at End session).
+      setPhase('ended');
+      onLeave();
+      return;
+    }
     window.location.href = leaveHref;
-  }, [leaveHref, onRoom]);
+  }, [leaveHref, onRoom, onLeave]);
 
   // ---------------------------------------------------------- pre-join --
   if (phase === 'idle' || phase === 'error' || phase === 'requesting-devices') {
@@ -204,12 +231,28 @@ export function VideoSessionRoom({
     );
   }
 
+  // ---------------------------------------------------------- over ------
+  // The session itself has ended (token route 409) — rejoining can only
+  // fail, so don't offer it.
+  if (phase === 'over') {
+    return (
+      <div className={`grid ${heightCls} place-items-center bg-[#0a101f] p-6`}>
+        <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center">
+          <h1 className="font-serif text-2xl">Your session has ended</h1>
+          <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+            {message ?? 'This room is closed now.'} You can close this page.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // ---------------------------------------------------------- ended -----
   if (phase === 'ended') {
     return (
       <div className={`grid ${heightCls} place-items-center bg-[#0a101f] p-6`}>
         <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center">
-          <h1 className="font-serif text-2xl">Session ended</h1>
+          <h1 className="font-serif text-2xl">Call ended</h1>
           <p className="mt-2 text-sm text-[var(--color-ink-2)]">
             You&rsquo;ve left the room. If that wasn&rsquo;t intentional, you can rejoin.
           </p>
@@ -221,12 +264,22 @@ export function VideoSessionRoom({
             >
               Rejoin
             </button>
-            <a
-              href={leaveHref}
-              className="rounded-full border border-[var(--color-line)] px-6 py-2.5 text-sm font-semibold text-[var(--color-ink-2)]"
-            >
-              Done
-            </a>
+            {onLeave ? (
+              <button
+                type="button"
+                onClick={onLeave}
+                className="rounded-full border border-[var(--color-line)] px-6 py-2.5 text-sm font-semibold text-[var(--color-ink-2)]"
+              >
+                Done
+              </button>
+            ) : (
+              <a
+                href={leaveHref}
+                className="rounded-full border border-[var(--color-line)] px-6 py-2.5 text-sm font-semibold text-[var(--color-ink-2)]"
+              >
+                Done
+              </a>
+            )}
           </div>
         </div>
       </div>

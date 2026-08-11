@@ -232,6 +232,14 @@ export function TherapistLiveSession({
   // AUD2 — the gateway socket closed mid-session without a final note:
   // surface a recovery card instead of hanging on "listening" forever.
   const [connectionLost, setConnectionLost] = useState(false);
+  // The finished note failed to persist (encryption outage / network). The
+  // browser is the ONLY holder of the live note + transcript, so this state
+  // must never silently redirect — it renders a retry card instead.
+  const [saveFailed, setSaveFailed] = useState<string | null>(null);
+  // The live-token 409: the client's consents on record don't cover the live
+  // scribe. Rendered with the real reason + the path to capture consent,
+  // instead of the gateway's generic "could not be authorized".
+  const [consentBlocked, setConsentBlocked] = useState<string | null>(null);
 
   // AUD2 — keep the phone screen awake while listening. The batch recorder
   // always did this; the live scribe losing the screen ~30s in put the mic
@@ -293,6 +301,18 @@ export function TherapistLiveSession({
   const finalHandledRef = useRef(false);
   const convoRef = useRef<HTMLDivElement | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Live mirror of the utterance list — long-lived closures (ws.onmessage,
+  // the reconnect path) must read the CURRENT transcript, not a stale capture.
+  const utterancesRef = useRef<Utterance[]>([]);
+  useEffect(() => {
+    utterancesRef.current = utterances;
+  }, [utterances]);
+  // The final payload, kept so a failed save can be retried verbatim.
+  const finalPayloadRef = useRef<{
+    kind: SessionKind;
+    note: TherapyNoteV1 | IntakeNoteV1;
+    transcript: string;
+  } | null>(null);
 
   const stream = useLiveStream({
     onFrame: (pcm) => {
@@ -396,9 +416,11 @@ export function TherapistLiveSession({
   ): Promise<void> {
     if (finalHandledRef.current) return;
     finalHandledRef.current = true;
+    finalPayloadRef.current = { kind: finalKind, note: finalNote, transcript };
+    setSaveFailed(null);
     setSaving(true);
     try {
-      await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
+      const res = await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -407,28 +429,51 @@ export function TherapistLiveSession({
           ...(transcript ? { transcript } : {}),
         }),
       });
+      if (!res.ok) {
+        // The live path records no audio — this browser is the only holder of
+        // the note + transcript. A 503 (encryption outage) or any refusal must
+        // surface a retry, never redirect and drop it.
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `The server refused the note (HTTP ${res.status}).`);
+      }
       if (meterRef.current) void persistMeter(meterRef.current);
       // The note is a COMPLETED NoteDraft now. Land on the copilot board —
       // review + sign live there, and no generation wait stands in the way.
       router.push(`/app/sessions/${sessionId}?tab=copilot`);
       router.refresh();
     } catch (e) {
-      setError(`Couldn't save the note: ${(e as Error).message}`);
+      finalHandledRef.current = false; // retry stays possible
       setSaving(false);
+      setSaveFailed((e as Error).message);
     }
   }
 
-  async function start(): Promise<void> {
+  /** Re-POST the finished note after a failed save (same payload, verbatim). */
+  function retrySave(): void {
+    const p = finalPayloadRef.current;
+    if (!p) return;
+    void persistAndFinish(p.kind, p.note, p.transcript);
+  }
+
+  async function start(opts: { resume?: boolean } = {}): Promise<void> {
+    // Reconnect path: the browser still holds the transcript — keep it on
+    // screen and replay it to the gateway (`resume`) so the consult continues
+    // from the whole session, not just what it hears after the drop.
+    const resume = opts.resume === true && utterancesRef.current.length > 0;
     setError(null);
     setNoteFailed(false);
     setConnectionLost(false);
-    setUtterances([]);
-    setNote({});
-    setNoteUpdatedAt(null);
+    setConsentBlocked(null);
+    setSaveFailed(null);
+    if (!resume) {
+      setUtterances([]);
+      setNote({});
+      setNoteUpdatedAt(null);
+      setElapsed(0);
+      meteredRef.current = false;
+      meterRef.current = null;
+    }
     setRefreshingNote(false);
-    setElapsed(0);
-    meteredRef.current = false;
-    meterRef.current = null;
     finalHandledRef.current = false;
     setPhase('connecting');
 
@@ -443,7 +488,22 @@ export function TherapistLiveSession({
     let token: string | undefined;
     try {
       const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, { method: 'POST' });
-      if (r.ok) token = ((await r.json()) as { token?: string }).token;
+      if (r.ok) {
+        token = ((await r.json()) as { token?: string }).token;
+      } else if (r.status === 409) {
+        // The one refusal the therapist can actually fix here: the client's
+        // consents on record don't cover the live scribe (or were withdrawn).
+        // Surface the server's real reason + the capture path, instead of
+        // proceeding tokenless into the gateway's generic "unauthorized".
+        const body = (await r.json().catch(() => ({}))) as { error?: string };
+        setPhase('error');
+        setConsentBlocked(
+          body.error ?? "The client's consents on record don't cover the live scribe.",
+        );
+        return;
+      }
+      // Other non-OK responses: proceed tokenless — the dev gateway runs
+      // open, and a secured gateway will refuse below with `unauthorized`.
     } catch {
       /* dev gateway runs open */
     }
@@ -459,6 +519,7 @@ export function TherapistLiveSession({
     wsRef.current = ws;
 
     ws.onopen = () => {
+      const replay = resume ? utterancesRef.current : [];
       ws.send(
         JSON.stringify({
           type: 'start',
@@ -472,6 +533,9 @@ export function TherapistLiveSession({
             priorRisk,
             plannedMinutes: plannedMinutes ?? null,
           },
+          // The gateway re-seeds its transcript + reasoning state from the
+          // replayed tail, so the final note covers the WHOLE session.
+          ...(replay.length > 0 ? { resume: { utterances: replay } } : {}),
         }),
       );
       // Replay plan items the therapist resolved before the connection existed,
@@ -487,6 +551,10 @@ export function TherapistLiveSession({
     };
 
     ws.onerror = () => {
+      // Mid-session an error event is always followed by close — the
+      // recovery card (onclose) owns that path. Only a failed initial
+      // connect reports the connect-time message.
+      if (phaseRef.current !== 'connecting') return;
       setPhase('error');
       setError(
         `Couldn't reach the live gateway at ${GATEWAY_URL}. Start it with: pnpm --filter @cureocity/live-gateway dev`,
@@ -556,7 +624,7 @@ export function TherapistLiveSession({
           void persistAndFinish(
             event.kind,
             event.note,
-            event.transcript ?? buildTranscript(utterances),
+            event.transcript ?? buildTranscript(utterancesRef.current),
           );
           break;
         default:
@@ -678,18 +746,74 @@ export function TherapistLiveSession({
         </div>
       </header>
 
-      {error && <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</Card>}
+      {error && (
+        <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+          {phase === 'error' && !connectionLost && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button onClick={() => void start({ resume: utterances.length > 0 })}>
+                Try again
+              </Button>
+              {clientId && (
+                <Button variant="secondary" onClick={() => router.push(`/app?record=${clientId}`)}>
+                  Record the classic way
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                onClick={() => router.push(`/app/sessions/${sessionId}?tab=copilot`)}
+              >
+                Open session
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {consentBlocked && (
+        <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
+          <strong className="block">Consent is missing for the live scribe.</strong>
+          <p className="mt-1">{consentBlocked}</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {clientId && (
+              <Button onClick={() => router.push(`/app?record=${clientId}`)}>
+                Capture consent &amp; start
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => void start()}>
+              Try again
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {saveFailed && (
+        <Card className="border-red-300 bg-red-50 p-5 text-sm text-red-900">
+          <strong className="block">The note is finished but could not be saved.</strong>
+          <p className="mt-1">
+            {saveFailed} Nothing is lost while this tab stays open — the note and transcript are
+            held right here. Retry the save; if it keeps failing, keep this tab open and try again
+            in a minute.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={retrySave} disabled={saving}>
+              {saving ? 'Saving…' : 'Retry save'}
+            </Button>
+          </div>
+        </Card>
+      )}
 
       {connectionLost && (
         <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
           <strong className="block">The live connection dropped.</strong>
           <p className="mt-1">
-            The scribe lost its link to the gateway mid-session. The session itself is safe — what
-            was already transcribed is on this screen, but nothing new is being heard. Reconnect to
-            continue live, or switch to the classic recorder (it reuses this same session).
+            The scribe lost its link to the gateway mid-session. What was already transcribed is on
+            this screen and will carry over — Reconnect continues the same session (the transcript
+            so far is replayed to the scribe), or switch to the classic recorder (it reuses this
+            same session).
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => void start()}>Reconnect</Button>
+            <Button onClick={() => void start({ resume: true })}>Reconnect</Button>
             {clientId && (
               <Button variant="secondary" onClick={() => router.push(`/app?record=${clientId}`)}>
                 Continue as recording

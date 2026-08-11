@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireOnboardedTherapist } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
@@ -38,19 +37,14 @@ export default async function VirtualSessionPage({
 
   return (
     <Container className="py-6">
-      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-ink-3)]">
-            Virtual session
-          </p>
-          <h1 className="mt-1 font-serif text-2xl">{clientName}</h1>
-        </div>
-        <Link
-          href={`/app/sessions/${session.id}?tab=copilot`}
-          className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
-        >
-          Open session workspace →
-        </Link>
+      <div className="mb-4">
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--color-ink-3)]">
+          Virtual session
+        </p>
+        {/* The workspace link lives inside the shell, guarded by the
+            recorder's state — an unguarded Link here silently abandoned an
+            active recording (client-side nav skips beforeunload). */}
+        <h1 className="mt-1 font-serif text-2xl">{clientName}</h1>
       </div>
       <VirtualSessionShell
         sessionId={session.id}
