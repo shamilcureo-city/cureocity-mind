@@ -6,6 +6,8 @@ import { writeAudit } from '@/lib/audit';
 import { decryptForTenant, encryptForTenant } from '@/lib/tenant-crypto';
 import { after } from 'next/server';
 import { sendAppointmentConfirmedEmail } from '@/lib/appointment-email';
+import { computeSessionDefaults } from '@/lib/session-defaults';
+import { toNationalDigits } from '@/lib/phone';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,6 +60,38 @@ export async function POST(
     select: { defaultOutputLanguage: true },
   });
 
+  // A RETURNING client often books through the public page. Minting a new
+  // Client every time split their history in two (duplicate roster row, a
+  // second open episode, an intake-shaped note for what is really a
+  // continuation). Phone is the booking's identity anchor: an exact match
+  // against the existing roster links the appointment to that client
+  // instead. Phones are envelope-encrypted (non-deterministic), so this is
+  // a decrypt-and-compare sweep — fine at practice scale.
+  const bookedDigits = toNationalDigits(phone);
+  let matchedClientId: string | null = null;
+  if (bookedDigits.length === 10) {
+    const roster = await prisma.client.findMany({
+      where: { psychologistId: psyId, deletedAt: null, isDemo: false },
+      select: { id: true, contactPhoneEncrypted: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    for (const c of roster) {
+      if (!c.contactPhoneEncrypted) continue;
+      const p = await decryptForTenant(psyId, c.contactPhoneEncrypted);
+      if (p && toNationalDigits(p) === bookedDigits) {
+        matchedClientId = c.id;
+        break;
+      }
+    }
+  }
+  // For a matched client the session kind/modality come from the same
+  // server-side inference every other session-create path uses — a
+  // returning client gets a TREATMENT/REVIEW continuation, not a forced
+  // re-intake.
+  const matchedDefaults = matchedClientId
+    ? await computeSessionDefaults(matchedClientId, psyId)
+    : null;
+
   const [fullNameEncrypted, contactPhoneEncrypted, contactEmailEncrypted] = await Promise.all([
     encryptForTenant(psyId, name),
     encryptForTenant(psyId, phone),
@@ -65,37 +99,44 @@ export async function POST(
   ]);
 
   const result = await prisma.$transaction(async (tx) => {
-    const client = await tx.client.create({
-      data: {
-        psychologistId: psyId,
-        fullNameEncrypted,
-        contactPhoneEncrypted,
-        contactEmailEncrypted,
-        ...(concern && { presentingConcerns: concern }),
-      },
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: psyId,
-        action: 'CLIENT_CREATED',
-        targetType: 'Client',
-        targetId: client.id,
-        metadata: { source: 'public-appointment', appointmentId: appt.id },
-      },
-      tx,
-    );
+    let clientId: string;
+    if (matchedClientId) {
+      clientId = matchedClientId;
+    } else {
+      const client = await tx.client.create({
+        data: {
+          psychologistId: psyId,
+          fullNameEncrypted,
+          contactPhoneEncrypted,
+          contactEmailEncrypted,
+          ...(concern && { presentingConcerns: concern }),
+        },
+      });
+      clientId = client.id;
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: psyId,
+          action: 'CLIENT_CREATED',
+          targetType: 'Client',
+          targetId: client.id,
+          metadata: { source: 'public-appointment', appointmentId: appt.id },
+        },
+        tx,
+      );
+    }
 
-    // A first-contact client: the session is an INTAKE by definition.
     const session = await tx.session.create({
       data: {
-        clientId: client.id,
+        clientId,
         psychologistId: psyId,
-        kind: 'INTAKE',
-        modality: 'INTAKE',
+        // New client: an INTAKE by definition. Matched client: whatever the
+        // cumulative state says comes next.
+        kind: matchedDefaults?.kind ?? 'INTAKE',
+        modality: matchedDefaults ? matchedDefaults.modality : 'INTAKE',
         status: 'SCHEDULED',
         scheduledAt: appt.startAt,
-        language: psy?.defaultOutputLanguage ?? 'en',
+        language: matchedDefaults?.language ?? psy?.defaultOutputLanguage ?? 'en',
       },
     });
     await writeAudit(
@@ -105,28 +146,43 @@ export async function POST(
         action: 'SESSION_CREATED',
         targetType: 'Session',
         targetId: session.id,
-        metadata: { clientId: client.id, source: 'public-appointment', kind: 'INTAKE' },
+        metadata: {
+          clientId,
+          source: 'public-appointment',
+          kind: matchedDefaults?.kind ?? 'INTAKE',
+          ...(matchedClientId && { matchedExistingClient: true }),
+        },
       },
       tx,
     );
 
-    const episode = await tx.treatmentEpisode.create({
-      data: { clientId: client.id, psychologistId: psyId, status: 'OPEN' },
-    });
-    await writeAudit(
-      {
-        actorType: 'SYSTEM',
-        action: 'TREATMENT_EPISODE_OPENED',
-        targetType: 'TreatmentEpisode',
-        targetId: episode.id,
-        metadata: { clientId: client.id, sessionId: session.id },
-      },
-      tx,
-    );
+    // Open an episode only when the client doesn't already have one open —
+    // a returning client's booking must not stack a second OPEN episode.
+    const openEpisode = matchedClientId
+      ? await tx.treatmentEpisode.findFirst({
+          where: { clientId, psychologistId: psyId, status: 'OPEN' },
+          select: { id: true },
+        })
+      : null;
+    if (!openEpisode) {
+      const episode = await tx.treatmentEpisode.create({
+        data: { clientId, psychologistId: psyId, status: 'OPEN' },
+      });
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'TREATMENT_EPISODE_OPENED',
+          targetType: 'TreatmentEpisode',
+          targetId: episode.id,
+          metadata: { clientId, sessionId: session.id },
+        },
+        tx,
+      );
+    }
 
     await tx.appointment.update({
       where: { id: appt.id },
-      data: { status: 'CONFIRMED', clientId: client.id, sessionId: session.id },
+      data: { status: 'CONFIRMED', clientId, sessionId: session.id },
     });
     await writeAudit(
       {
@@ -135,11 +191,15 @@ export async function POST(
         action: 'APPOINTMENT_CONFIRMED',
         targetType: 'Appointment',
         targetId: appt.id,
-        metadata: { clientId: client.id, sessionId: session.id },
+        metadata: {
+          clientId,
+          sessionId: session.id,
+          ...(matchedClientId && { matchedExistingClient: true }),
+        },
       },
       tx,
     );
-    return { clientId: client.id, sessionId: session.id };
+    return { clientId, sessionId: session.id };
   });
 
   if (email) {

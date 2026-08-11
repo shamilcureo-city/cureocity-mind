@@ -112,7 +112,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return row.id;
     });
   } catch (e) {
-    if (e instanceof SlotTakenError) {
+    // SlotTakenError: the re-derived offer says the slot is gone. P2002:
+    // the partial unique index on (psychologistId, startAt) caught a race
+    // the re-check couldn't see (both requests read before either wrote).
+    if (e instanceof SlotTakenError || (e as { code?: string }).code === 'P2002') {
       return NextResponse.json(
         { error: 'That time was just taken — pick another slot.' },
         { status: 409 },

@@ -201,6 +201,8 @@ export function MarketingStudio({
   const [draft, setDraft] = useState<DraftMarketingResponse | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Which appointment's patient join link was just copied (for the ✓ flash).
+  const [copiedJoinId, setCopiedJoinId] = useState<string | null>(null);
 
   const refreshState = useCallback(async () => {
     const res = await fetch('/api/v1/psychologists/me/marketing', { cache: 'no-store' });
@@ -1425,6 +1427,22 @@ export function MarketingStudio({
                               >
                                 Join video →
                               </Link>
+                            )}
+                            {a.patientJoinUrl && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  void navigator.clipboard
+                                    .writeText(a.patientJoinUrl!)
+                                    .catch(() => {});
+                                  setCopiedJoinId(a.id);
+                                  setTimeout(() => setCopiedJoinId(null), 2500);
+                                }}
+                                className="text-[var(--color-accent)] hover:underline"
+                                title="Copy the patient's video link — text it to them if they booked without an email"
+                              >
+                                {copiedJoinId === a.id ? '✓ Copied' : 'Copy patient link'}
+                              </button>
                             )}
                             {a.sessionId && (
                               <Link

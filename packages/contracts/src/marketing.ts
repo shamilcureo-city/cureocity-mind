@@ -166,6 +166,12 @@ export const AppointmentSchema = z.object({
   clientId: CuidSchema.nullable(),
   sessionId: CuidSchema.nullable(),
   createdAt: IsoDateTimeSchema,
+  /**
+   * The patient's signed video join link (ONLINE + in-app video only) so the
+   * therapist can copy/text it — a phone-only patient otherwise has no
+   * channel to receive it (email is optional at booking).
+   */
+  patientJoinUrl: z.string().nullable().optional(),
 });
 export type Appointment = z.infer<typeof AppointmentSchema>;
 

@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { writeAudit } from '@/lib/audit';
-import { livekitConfigured, livekitUrl, mintRoomToken, sessionRoomNameFor } from '@/lib/livekit';
+import {
+  livekitConfigured,
+  livekitUrl,
+  mintRoomToken,
+  roomNameFor,
+  sessionRoomNameFor,
+} from '@/lib/livekit';
 import { verifySessionVideoSig } from '@/lib/session-video-links';
 import { prisma } from '@/lib/prisma';
 
@@ -47,7 +53,16 @@ export async function POST(
     );
   }
 
-  const token = await mintRoomToken(sessionRoomNameFor(sessionId), 'patient', 'Client');
+  // Same one-room rule as the therapist mint: a session from an ONLINE
+  // booking resolves to its appointment room, so this link and the emailed
+  // appointment link land the patient in the SAME call.
+  const linkedAppt = await prisma.appointment.findFirst({
+    where: { sessionId, status: 'CONFIRMED', mode: { not: 'IN_PERSON' } },
+    select: { id: true },
+  });
+  const roomName = linkedAppt ? roomNameFor(linkedAppt.id) : sessionRoomNameFor(sessionId);
+
+  const token = await mintRoomToken(roomName, 'patient', 'Client');
 
   // The signed-link join is part of the session's clinical record: it shows
   // the client entered the recorded room after seeing the recording notice

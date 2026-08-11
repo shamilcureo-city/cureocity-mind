@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
-import { livekitConfigured, livekitUrl, mintRoomToken, sessionRoomNameFor } from '@/lib/livekit';
+import {
+  livekitConfigured,
+  livekitUrl,
+  mintRoomToken,
+  roomNameFor,
+  sessionRoomNameFor,
+} from '@/lib/livekit';
 import { sessionJoinUrl } from '@/lib/session-video-links';
 import { prisma } from '@/lib/prisma';
 
@@ -49,8 +55,18 @@ export async function POST(
     );
   }
 
+  // A session minted from an ONLINE public booking already has a room the
+  // patient was emailed (appt_<id>). Use THAT room so the therapist's
+  // Virtual surface and the patient's emailed link meet in one call —
+  // otherwise each side waits alone in a parallel room.
+  const linkedAppt = await prisma.appointment.findFirst({
+    where: { sessionId, status: 'CONFIRMED', mode: { not: 'IN_PERSON' } },
+    select: { id: true },
+  });
+  const roomName = linkedAppt ? roomNameFor(linkedAppt.id) : sessionRoomNameFor(sessionId);
+
   const token = await mintRoomToken(
-    sessionRoomNameFor(sessionId),
+    roomName,
     'therapist',
     session.psychologist.fullName ?? 'Therapist',
   );

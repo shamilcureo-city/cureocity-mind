@@ -130,6 +130,53 @@ ${base}/p/appointments/${appointmentId}/cancel?sig=${sig}
 }
 
 /**
+ * JA-G — the therapist moved a booked session to a new time. The patient
+ * must hear about it (their reminders, join window and cancel link all
+ * follow the appointment row, which the reschedule route just moved).
+ * Only possible when the booking left an email.
+ */
+export async function sendAppointmentRescheduledEmail(
+  psychologistId: string,
+  appointmentId: string,
+  newStartAt: Date,
+): Promise<void> {
+  try {
+    const [psy, appt] = await Promise.all([
+      prisma.psychologist.findUnique({
+        where: { id: psychologistId },
+        select: { fullName: true },
+      }),
+      prisma.appointment.findUnique({
+        where: { id: appointmentId },
+        select: { patientEmailEncrypted: true },
+      }),
+    ]);
+    if (!psy || !appt?.patientEmailEncrypted) return;
+    const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
+    if (!patientEmail) return;
+    const sig = signAppointmentId(appointmentId);
+    const base = publicBaseUrl();
+    const when = IST_FORMAT.format(newStartAt);
+    const where = await locationBlock(psychologistId, appointmentId);
+    await client().sendEmail({
+      to: patientEmail,
+      subject: `Time changed — your session is now ${when}`,
+      textBody: `${psy.fullName} has moved your session to ${when} (IST).
+${where}
+Updated calendar entry:
+${base}/api/v1/public/appointments/${appointmentId}/calendar?sig=${sig}
+
+If the new time doesn't work, cancel here so the slot opens up:
+${base}/p/appointments/${appointmentId}/cancel?sig=${sig}
+
+— Cureocity`,
+    });
+  } catch (e) {
+    console.warn(`[appointment-email] reschedule send failed: ${(e as Error).message}`);
+  }
+}
+
+/**
  * MK8 — the courtesy close: the therapist declined, or the hold
  * expired unanswered. Instead of silence, the patient hears the time
  * didn't work out and where every currently-open slot lives. Only

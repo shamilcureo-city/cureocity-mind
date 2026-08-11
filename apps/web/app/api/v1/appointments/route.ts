@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { Appointment, ListAppointmentsResponse } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
+import { publicBaseUrl, signAppointmentId } from '@/lib/appointment-links';
+import { livekitConfigured } from '@/lib/livekit';
 import { prisma } from '@/lib/prisma';
 import { decryptForTenant } from '@/lib/tenant-crypto';
 
@@ -42,6 +44,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       clientId: r.clientId,
       sessionId: r.sessionId,
       createdAt: r.createdAt.toISOString(),
+      // The patient's signed join link, so a phone-only booking (email is
+      // optional) can still be texted its way into the video room.
+      patientJoinUrl:
+        r.mode !== 'IN_PERSON' && r.status === 'CONFIRMED' && livekitConfigured()
+          ? `${publicBaseUrl()}/p/appointments/${r.id}/join?sig=${signAppointmentId(r.id)}`
+          : null,
     })),
   );
 

@@ -1,7 +1,8 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse, after, type NextRequest } from 'next/server';
 import { SessionRescheduleInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { sendAppointmentRescheduledEmail } from '@/lib/appointment-email';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
@@ -48,7 +49,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
-  const created = await prisma.$transaction(async (tx) => {
+  const { created, movedAppointmentId } = await prisma.$transaction(async (tx) => {
     await tx.session.update({
       where: { id: sessionId },
       data: { status: 'RESCHEDULED' },
@@ -64,6 +65,32 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         language: existing.language,
       },
     });
+    // A session minted from a public booking carries a linked Appointment.
+    // Move it WITH the session: same new time, pointed at the new row, and
+    // reminder stamps cleared so the 24h/2h emails fire for the new slot.
+    // Without this the patient keeps being reminded of the OLD time, their
+    // video join window opens at the old time, and their cancel link
+    // targets a row that is no longer the real session.
+    const linkedAppt = await tx.appointment.findFirst({
+      where: {
+        sessionId,
+        psychologistId: auth.value.psychologistId,
+        status: 'CONFIRMED',
+      },
+    });
+    if (linkedAppt) {
+      const durationMs = linkedAppt.endAt.getTime() - linkedAppt.startAt.getTime();
+      await tx.appointment.update({
+        where: { id: linkedAppt.id },
+        data: {
+          startAt: newScheduledAt,
+          endAt: new Date(newScheduledAt.getTime() + durationMs),
+          sessionId: nextSession.id,
+          reminded24At: null,
+          reminded2At: null,
+        },
+      });
+    }
     await writeAudit(
       {
         actorType: 'PSYCHOLOGIST',
@@ -77,6 +104,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           previousScheduledAt: existing.scheduledAt.toISOString(),
           newScheduledAt: newScheduledAt.toISOString(),
           newSessionId: nextSession.id,
+          ...(linkedAppt && { movedAppointmentId: linkedAppt.id }),
           ...(dto.value.reason && { reason: dto.value.reason }),
         },
       },
@@ -99,7 +127,16 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       },
       tx,
     );
-    return nextSession;
+    return { created: nextSession, movedAppointmentId: linkedAppt?.id ?? null };
   });
+
+  // Tell the patient their time moved (best-effort, off the request path;
+  // only possible when the booking left an email).
+  if (movedAppointmentId) {
+    after(() =>
+      sendAppointmentRescheduledEmail(auth.value.psychologistId, movedAppointmentId, newScheduledAt),
+    );
+  }
+
   return NextResponse.json(toSession(created), { status: 201 });
 }
