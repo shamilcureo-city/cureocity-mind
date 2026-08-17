@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { AbdmPushInputSchema, type AbdmPushResult } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { abdmProvider } from '@/lib/abdm';
 import { FhirExportError, buildEncounterFhir } from '@/lib/fhir-export';
@@ -22,7 +22,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'ABDM_PUSH');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
 

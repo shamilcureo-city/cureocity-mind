@@ -130,7 +130,7 @@ export default async function PortalPage({ params }: PageProps) {
       )}
 
       <footer className="mt-10 border-t border-[var(--color-line-soft)] pt-5 text-xs text-[var(--color-ink-3)]">
-        <p>This page is private to you. Cureocity Mind does not share it with anyone else.</p>
+        <p>This page is private to you. Cureocity ORBIT does not share it with anyone else.</p>
         <p className="mt-3">
           <a
             href={watermarkUrl({

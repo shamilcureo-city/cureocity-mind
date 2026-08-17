@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { OrbitLogo } from '@/components/ui/OrbitLogo';
+import { BRAND } from '@/lib/brand';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { ButtonLink } from '@/components/ui/Button';
@@ -16,7 +18,7 @@ import { Reveal } from '@/components/landing/Reveal';
  * no testimonials; the product is in active development.
  */
 export const metadata: Metadata = {
-  title: 'Cureocity Scribe — the live AI copilot for Indian doctors',
+  title: `${BRAND.fullName} — the live AI copilot for Indian doctors`,
   description:
     'A live ambient scribe for the OPD: the note builds as you speak, missing questions and red flags surface in the room, and the prescription drafts itself — in the code-mix your patients actually speak. You confirm every clinical call.',
 };
@@ -41,22 +43,7 @@ export default function ForDoctorsLanding() {
 /* ============================== Nav ============================== */
 
 function Wordmark() {
-  return (
-    <Link href="/for-doctors" className="inline-flex items-center gap-2.5">
-      <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--color-accent)]">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </span>
-      <span className="font-serif text-lg font-semibold tracking-tight">Cureocity Scribe</span>
-    </Link>
-  );
+  return <OrbitLogo href="/" />;
 }
 
 function Nav() {
@@ -125,8 +112,8 @@ function Hero() {
           </Reveal>
           <Reveal delay={180}>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-2)]">
-              Two minutes a patient leaves no time to type. Cureocity Scribe listens, builds the
-              note live, and quietly flags the question you haven&rsquo;t asked and the red flag you
+              Two minutes a patient leaves no time to type. Cureocity ORBIT listens, builds the note
+              live, and quietly flags the question you haven&rsquo;t asked and the red flag you
               shouldn&rsquo;t miss — in the Hinglish, Manglish, or Tanglish your patients actually
               speak. The prescription drafts itself. You sign.
             </p>
@@ -253,7 +240,7 @@ function LiveCopilot() {
               <span className="italic text-[var(--color-accent)]">A copilot in the room.</span>
             </>
           }
-          sub="Most tools record now and write a note in 30 seconds — after the patient is gone. In a two-minute OPD that is too late. Cureocity Scribe runs three live rails the whole consult."
+          sub="Most tools record now and write a note in 30 seconds — after the patient is gone. In a two-minute OPD that is too late. Cureocity ORBIT runs three live rails the whole consult."
         />
         <div className="mt-12 grid gap-5 md:grid-cols-3">
           {RAILS.map((r, i) => (
@@ -397,7 +384,7 @@ function FinalCta() {
                 <span className="italic">We&rsquo;ll take the notes.</span>
               </h2>
               <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-white/80">
-                Cureocity Scribe for doctors is in active development. Sign in to set up your
+                Cureocity ORBIT for doctors is in active development. Sign in to set up your
                 practice and be among the first super-specialty OPDs to try the live copilot.
               </p>
               <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -467,7 +454,7 @@ function Footer() {
           </div>
         </div>
         <div className="mt-10 flex flex-col gap-2 border-t border-[var(--color-line-soft)] pt-6 text-xs text-[var(--color-ink-3)] sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Cureocity · Made for Indian practice</p>
+          <p>© 2026 Cureocity ORBIT · Made for Indian practice</p>
           <p>Not a medical device. Clinical decisions remain with the treating professional.</p>
         </div>
       </Container>

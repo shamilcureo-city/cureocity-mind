@@ -2,7 +2,7 @@
  * Sprint 56 (Lever 3a) — patient-artefact watermark.
  *
  * Patient-facing surfaces (portal + share email) carry a
- * "Powered by Cureocity Mind" footer with a UTM-tagged signup link, so
+ * "Powered by Cureocity ORBIT" footer with a UTM-tagged signup link, so
  * every artefact a paying therapist sends becomes a brand touch to
  * prospective therapists in the patient's network. The footer is on by
  * default; a future per-clinic suppress switch (Premium tier perk) is
@@ -39,4 +39,4 @@ export function watermarkUrl({ source, campaign }: WatermarkLinkArgs): string {
 }
 
 export const WATERMARK_TAGLINE =
-  'Powered by Cureocity Mind — the clinical co-pilot for Indian therapists.';
+  'Powered by Cureocity ORBIT — the clinical co-pilot for Indian therapists.';

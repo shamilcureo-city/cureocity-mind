@@ -2,13 +2,13 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Container } from '@/components/ui/Container';
 import { DoctorLiveEncounter } from '@/components/app/DoctorLiveEncounter';
-import { requireOnboardedDoctor } from '@/lib/auth-page';
+import { requirePageCapability } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * Sprint DV4 — the live copilot. Doctor-guarded + ownership checked; the
+ * Sprint DV4 — the live copilot. Capability-guarded + ownership checked; the
  * live UX itself is driven by the standalone WebSocket gateway, which
  * runs the real pipeline (Pass 1 transcription + Pass 2 medical note +
  * gap engine) on streamed mic audio. See services/live-gateway +
@@ -19,14 +19,14 @@ export default async function LiveEncounterPage({
 }: {
   params: Promise<{ id: string; sessionId: string }>;
 }) {
-  const doctor = await requireOnboardedDoctor();
+  const practitioner = await requirePageCapability('LIVE_ENCOUNTER');
   const { id: clientId, sessionId } = await params;
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     select: { id: true, psychologistId: true, clientId: true },
   });
-  if (!session || session.psychologistId !== doctor.id || session.clientId !== clientId) {
+  if (!session || session.psychologistId !== practitioner.id || session.clientId !== clientId) {
     notFound();
   }
 
@@ -49,7 +49,11 @@ export default async function LiveEncounterPage({
           stored. End the consult to get the finished note.
         </p>
       </header>
-      <DoctorLiveEncounter sessionId={sessionId} clientId={clientId} specialty={doctor.specialty} />
+      <DoctorLiveEncounter
+        sessionId={sessionId}
+        clientId={clientId}
+        specialty={practitioner.specialty}
+      />
     </Container>
   );
 }

@@ -34,7 +34,7 @@ export interface SellerIdentity {
 
 export function sellerIdentity(): SellerIdentity {
   return {
-    legalName: process.env['INVOICE_SELLER_LEGAL_NAME'] ?? 'Cureocity Mind',
+    legalName: process.env['INVOICE_SELLER_LEGAL_NAME'] ?? 'Cureocity ORBIT',
     gstin: process.env['INVOICE_SELLER_GSTIN'] ?? null,
     address: process.env['INVOICE_SELLER_ADDRESS'] ?? '—',
     state: process.env['INVOICE_SELLER_STATE'] ?? '—',

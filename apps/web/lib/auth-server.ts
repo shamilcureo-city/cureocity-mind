@@ -1,6 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { firebaseAuth } from './firebase-admin';
 import { prisma } from './prisma';
+import type {
+  PractitionerCapability,
+  PractitionerCredentialKind,
+  PractitionerProfession,
+} from '@cureocity/contracts';
+import { getEffectiveCapabilities, serializeCapabilities } from './capabilities';
+import { auditMetadataFromRequest, writeAudit } from './audit';
+import { isProductionEnvironment } from './production-readiness';
 
 /**
  * Three resolution functions, ported from the NestJS guards:
@@ -21,14 +29,13 @@ import { prisma } from './prisma';
  *     cookie — no Bearer plumbing in components needed.
  *
  * Bypass (resolves everything to the seeded dev fixtures) engages when:
- *   - AUTH_BYPASS=true                (explicit opt-in, any environment), or
+ *   - AUTH_BYPASS=true                (explicit opt-in, non-production only), or
  *   - Firebase Admin is unconfigured AND this is NOT a Vercel
  *     production deployment.
  *
  * On Vercel production with Firebase unconfigured and no explicit
  * AUTH_BYPASS, requests FAIL CLOSED with 503 instead of silently
- * becoming the demo therapist. Demo deployments must now opt in
- * explicitly with AUTH_BYPASS=true.
+ * becoming the demo therapist. Production deployments never permit the shared demo identity, even when AUTH_BYPASS is set.
  */
 
 const DEV_BYPASS_FIREBASE_UID = 'dev-firebase-uid-priya';
@@ -42,18 +49,21 @@ export const SESSION_COOKIE_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
 let warnedFailClosed = false;
 
 export function isAuthBypassed(): boolean {
+  // Never allow the shared demo identity in a production runtime, even when
+  // AUTH_BYPASS was accidentally carried into deployment configuration.
+  if (isProductionEnvironment()) return false;
   if (process.env['AUTH_BYPASS'] === 'true') return true;
   if (firebaseAuth() !== null) return false;
   // Unconfigured Firebase: bypass is a dev/preview convenience only.
   // A production deployment without Firebase env vars fails closed.
-  if (process.env['VERCEL_ENV'] === 'production') {
+  if (isProductionEnvironment()) {
     if (!warnedFailClosed) {
       warnedFailClosed = true;
       console.error(
         '[auth] Firebase Admin is not configured on a production deployment and ' +
           'AUTH_BYPASS is not set — refusing to serve the demo identity. ' +
           'Set FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY for real auth, ' +
-          'or AUTH_BYPASS=true for an explicit demo deployment.',
+          'Production does not permit the shared demo identity.',
       );
     }
     return false;
@@ -69,6 +79,9 @@ export interface AuthenticatedUser {
   /// Sprint DV1 — product vertical of the resolved account. Absent when
   /// no Psychologist row is linked yet. See docs/DOCTOR_VERTICAL.md.
   vertical?: 'THERAPIST' | 'DOCTOR';
+  profession?: PractitionerProfession;
+  capabilities?: PractitionerCapability[];
+  verifiedCredentialKinds?: PractitionerCredentialKind[];
 }
 
 export interface AuthenticatedClient {
@@ -138,8 +151,38 @@ export async function resolvePsychologist(req: NextRequest): Promise<Resolved<Au
     user.psychologistId = psy.id;
     user.role = psy.role;
     user.vertical = psy.vertical;
+    const effective = await getEffectiveCapabilities(psy.id);
+    user.profession = effective.profession;
+    user.capabilities = serializeCapabilities(effective);
+    user.verifiedCredentialKinds = [...effective.verifiedCredentialKinds].sort();
   }
   return { ok: true, value: user };
+}
+
+export async function requireCapability(
+  req: NextRequest,
+  capability: PractitionerCapability,
+): Promise<Resolved<{ user: AuthenticatedUser; psychologistId: string }>> {
+  const resolved = await requirePsychologistId(req);
+  if (!resolved.ok) return resolved;
+  if (!resolved.value.user.capabilities?.includes(capability)) {
+    await writeAudit({
+      actorType: 'PSYCHOLOGIST',
+      actorPsychologistId: resolved.value.psychologistId,
+      action: 'CAPABILITY_ACCESS_DENIED',
+      targetType: 'PractitionerCapability',
+      targetId: capability,
+      metadata: auditMetadataFromRequest(req),
+    });
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'This account is not authorized for the requested clinical capability' },
+        { status: 403 },
+      ),
+    };
+  }
+  return resolved;
 }
 
 export async function requirePsychologistId(

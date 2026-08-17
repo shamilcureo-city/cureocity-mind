@@ -31,7 +31,7 @@
       "executor": "nx:run-commands",
       "cache": true,
       "options": {
-        "command": "echo 'No web tests yet (component + e2e in Sprint 7/9)'",
+        "command": "vitest run",
         "cwd": "apps/web"
       }
     },

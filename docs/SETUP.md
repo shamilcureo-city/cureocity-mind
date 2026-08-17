@@ -132,13 +132,10 @@ BILLING_RETURN_URL=https://app.cureocitymind.com/app/settings/plan
 ### Sprint 11 — field encryption
 
 ```
-KMS_PROVIDER=aws                       # aws | gcp | local-dev
-AWS_KMS_KEY_ID=
-AWS_REGION=ap-south-1
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-# OR
-GCP_KMS_KEY_NAME=projects/.../locations/.../keyRings/.../cryptoKeys/...
+KMS_BACKEND=gcp-kms                   # local-dev is forbidden in production
+GCP_KMS_KEY_NAME=projects/.../locations/asia-south1/keyRings/.../cryptoKeys/...
+# Prefer Workload Identity/ADC; transitional Vercel deployments may use:
+GOOGLE_APPLICATION_CREDENTIALS_JSON=
 ```
 
 ### Sprint 12 — launch
@@ -194,11 +191,10 @@ NEXT_PUBLIC_APP_BASE_URL=https://app.cureocitymind.com   (public)
 - Existing project. For Sprint 11, enable encryption-at-rest (default
   on paid tiers) and verify the region matches the clinic's residency.
 
-### AWS / GCP KMS (Sprint 11)
+### Google Cloud KMS (Sprint 11)
 
-- Create one Customer Master Key per region (`ap-south-1` and
-  `ca-central-1`).
-- Use `LocalDevKmsProvider` until then.
+- Create one Cloud KMS CryptoKey per required region and grant the runtime only `roles/cloudkms.cryptoKeyEncrypterDecrypter` on that key.
+- Use `LocalDevKmsProvider` only for local development and CI with synthetic data.
 
 ### Stripe + Razorpay
 

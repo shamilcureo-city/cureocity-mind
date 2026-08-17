@@ -29,6 +29,7 @@ export * from './safety-plan';
 export * from './webauthn';
 export * from './invite';
 export * from './clinic';
+export * from './orbit-capability';
 
 // Sprint DV1 — doctor vertical scaffolds (see docs/DOCTOR_VERTICAL.md).
 export * from './medical-note';

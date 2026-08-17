@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { SessionOrders } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 import { toClinicalOrderDTO, toMedicationOrderDTO } from '@/lib/order-mappers';
 
@@ -19,7 +19,7 @@ interface RouteContext {
  * Tenant-checked (404 cross-tenant non-leak). Read-only — no audit.
  */
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'MEDICAL_DOCUMENTATION');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await ctx.params;
 

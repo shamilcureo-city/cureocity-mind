@@ -1,9 +1,11 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import type { Psychologist } from '@prisma/client';
+import type { PractitionerCapability } from '@cureocity/contracts';
 import { firebaseAuth } from './firebase-admin';
 import { SESSION_COOKIE_NAME, bypassFirebaseUid, isAuthBypassed } from './auth-server';
 import { prisma } from './prisma';
+import { getEffectiveCapabilities } from './capabilities';
 
 /**
  * Server-component (page) counterparts of the route guards in
@@ -69,24 +71,16 @@ export async function requireOnboardedPsychologist(): Promise<Psychologist> {
  */
 export async function requirePageAdmin(): Promise<Psychologist> {
   const psy = await requireOnboardedPsychologist();
-  if (psy.role !== 'ADMIN') redirect('/app');
+  if (psy.role !== 'ADMIN') redirect('/app/today');
   return psy;
 }
 
-/**
- * Sprint DV1 — vertical page guards. A doctor account and a therapist
- * account are mutually exclusive; these bounce a signed-in user who
- * lands on the wrong vertical's surface back to /app (their own home).
- * Both imply onboarded. See docs/DOCTOR_VERTICAL.md.
- */
-export async function requireOnboardedDoctor(): Promise<Psychologist> {
-  const psy = await requireOnboardedPsychologist();
-  if (psy.vertical !== 'DOCTOR') redirect('/app');
-  return psy;
-}
-
-export async function requireOnboardedTherapist(): Promise<Psychologist> {
-  const psy = await requireOnboardedPsychologist();
-  if (psy.vertical !== 'THERAPIST') redirect('/app');
-  return psy;
+/** Capability-based page guard for regulated ORBIT surfaces. */
+export async function requirePageCapability(
+  capability: PractitionerCapability,
+): Promise<Psychologist> {
+  const practitioner = await requireOnboardedPsychologist();
+  const effective = await getEffectiveCapabilities(practitioner.id);
+  if (!effective.capabilities.has(capability)) redirect('/app/today');
+  return practitioner;
 }

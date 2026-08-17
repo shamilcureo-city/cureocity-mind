@@ -73,7 +73,7 @@ export function NewClientForm({ onCancel, onReady }: Props) {
       if (crossBorder) ackedScopes.push('CROSS_BORDER_PROCESSING');
 
       // 1. Create the client with audio + AI note consents on file.
-      const clientRes = await fetch('/api/v1/clients', {
+      const clientRes = await fetch('/api/v1/patients', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

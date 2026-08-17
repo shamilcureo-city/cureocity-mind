@@ -231,7 +231,7 @@ function deriveNextBestAction(input: {
   instrumentChanges: InstrumentChange[];
   dischargeReady: boolean;
 }): NextBestAction | null {
-  const instrumentsAnchor = `/app/clients/${input.clientId}#instruments`;
+  const instrumentsAnchor = `/app/patients/${input.clientId}#instruments`;
 
   // 1. No sessions yet — record the intake.
   if (input.completedCount === 0) {

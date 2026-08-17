@@ -96,7 +96,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
   return (
     <Container className="py-8">
-      <Link href="/app" className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]">
+      <Link href="/app/today" className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]">
         ← All sessions
       </Link>
 

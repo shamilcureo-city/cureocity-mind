@@ -1,5 +1,6 @@
 import {
   AesGcmFieldEncryptor,
+  GcpKmsProvider,
   LocalDevKmsProvider,
   type IFieldEncryptor,
   type IKmsProvider,
@@ -8,6 +9,7 @@ import {
 } from '@cureocity/crypto';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
+import { GoogleCloudKmsTransport } from '@/lib/gcp-kms';
 
 /**
  * Sprint 32 — per-tenant envelope encryption for the live request path.
@@ -16,8 +18,8 @@ import { writeAudit } from '@/lib/audit';
  * scoped singleton suitable for Next.js route handlers. Two layers:
  *
  *   - IKmsProvider wraps/unwraps a tenant DEK against a Customer
- *     Master Key. Production swaps to AwsKmsProvider once S32 Phase
- *     2 (asia-south1 procurement) lands; dev uses LocalDevKmsProvider
+ *     Master Key. Production uses GcpKmsProvider with a regional Cloud KMS CryptoKey;
+ *     dev uses LocalDevKmsProvider
  *     keyed off CRYPTO_DEV_MASTER_SECRET.
  *   - AesGcmFieldEncryptor encrypts column values with the per-tenant
  *     DEK. Output is a single dot-separated string column for easy
@@ -45,7 +47,7 @@ interface TenantCrypto {
   kms: IKmsProvider;
   encryptor: IFieldEncryptor;
   cache: Map<string, CachedKey>;
-  backend: 'local-dev' | 'aws-kms';
+  backend: 'local-dev' | 'gcp-kms';
 }
 
 declare global {
@@ -54,16 +56,26 @@ declare global {
 
 function instance(): TenantCrypto {
   if (globalThis.__cureocityTenantCrypto) return globalThis.__cureocityTenantCrypto;
-  const backend = (process.env['KMS_BACKEND'] ?? 'local-dev') as 'local-dev' | 'aws-kms';
+  const configuredBackend = process.env['KMS_BACKEND'] ?? 'local-dev';
+  let backend: TenantCrypto['backend'];
   let kms: IKmsProvider;
-  if (backend === 'aws-kms') {
-    // AwsKmsProvider needs @aws-sdk/client-kms wired in apps/web. Track in
-    // S32 Phase 2 — asia-south1 region procurement decides the deployment
-    // story. Until then any non-local backend hard-fails at startup so we
-    // never silently fall through to the dev KMS in prod.
-    throw new Error('KMS_BACKEND=aws-kms is not yet wired in apps/web — pending S32 Phase 2.');
-  } else {
-    kms = new LocalDevKmsProvider();
+  switch (configuredBackend) {
+    case 'gcp-kms': {
+      const keyName = process.env['GCP_KMS_KEY_NAME'];
+      if (!keyName) throw new Error('GCP_KMS_KEY_NAME is required when KMS_BACKEND=gcp-kms');
+      backend = 'gcp-kms';
+      kms = new GcpKmsProvider(new GoogleCloudKmsTransport(), keyName);
+      break;
+    }
+    case 'local-dev':
+      if (process.env['VERCEL_ENV'] === 'production' || process.env['NODE_ENV'] === 'production') {
+        throw new Error('KMS_BACKEND=local-dev is forbidden in production');
+      }
+      backend = 'local-dev';
+      kms = new LocalDevKmsProvider();
+      break;
+    default:
+      throw new Error(`Unsupported KMS_BACKEND: ${configuredBackend}`);
   }
   const cached: TenantCrypto = {
     kms,
