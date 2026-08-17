@@ -16,7 +16,7 @@ export default async function ErasureQueuePage() {
   return (
     <Container className="py-10">
       <p className="mb-4 text-xs text-[var(--color-ink-3)]">
-        <Link href="/app/clients" className="hover:text-[var(--color-ink)]">
+        <Link href="/app/patients" className="hover:text-[var(--color-ink)]">
           ← Clients
         </Link>
       </p>

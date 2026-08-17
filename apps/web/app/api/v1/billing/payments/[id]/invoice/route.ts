@@ -52,7 +52,7 @@ export async function GET(
     paymentRef: payment.razorpayPaymentId ?? payment.razorpayOrderId,
     seller: sellerIdentity(),
     buyer: { name: psychologist.fullName, email: psychologist.email },
-    lineDescription: `Cureocity Mind — ${planLabel(payment.plan)} subscription`,
+    lineDescription: `Cureocity ORBIT — ${planLabel(payment.plan)} subscription`,
     gst,
   });
   const buffer = await renderToBuffer(doc);

@@ -6,39 +6,10 @@ import {
   isPaidPlan,
   planTierLabel,
   type BillingPlan,
-  type PractitionerVertical,
+  type PractitionerCapability,
 } from '@cureocity/contracts';
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'templates' | 'assistant' | 'learn' | 'me';
-}
-
-const PRIMARY: NavItem[] = [
-  // Sprint 57 — Dashboard is the practice-wide triage hub ("what needs me
-  // across my whole caseload"). Today (below) stays the time-ordered agenda
-  // and remains the post-login landing.
-  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
-  // Sprint 45 — Today: the screen a therapist opens each morning. Record
-  // stays for walk-ins / dictation; Today is the calendar-driven entry point.
-  { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app', label: 'Record', icon: 'record' },
-  { href: '/app/clients', label: 'Clients', icon: 'clients' },
-  { href: '/app/templates', label: 'Templates', icon: 'templates' },
-  { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
-  { href: '/app/me', label: 'My practice', icon: 'me' },
-  { href: '/app/learn', label: 'Learn', icon: 'learn' },
-];
-
-// Sprint DV2 — doctor nav. The doctor's home is the patient roster
-// (/app/patients, isolated from the therapy clients pages). The
-// therapy-shaped Today/Record surfaces are dropped until the doctor
-// encounter workspace lands (DV3/DV4). See docs/DOCTOR_VERTICAL.md.
-const DOCTOR_PRIMARY: NavItem[] = [
-  { href: '/app/patients', label: 'Patients', icon: 'clients' },
-  { href: '/app/learn', label: 'Learn', icon: 'learn' },
-];
+import { OrbitLogo } from '@/components/ui/OrbitLogo';
+import { buildOrbitNavigation, isOrbitNavItemActive, type OrbitNavIcon } from '@/lib/navigation';
 
 export interface PlanUsage {
   /// Sessions recorded against the free pilot allowance.
@@ -55,31 +26,32 @@ interface SidebarProps {
   /// Real usage computed by the app layout (server). Null hides the
   /// widget (e.g. unauthenticated edge states).
   usage?: PlanUsage | null;
-  /// Sprint DV1 — which vertical's nav to render. Defaults to THERAPIST.
-  vertical?: PractitionerVertical;
+  capabilities?: PractitionerCapability[];
 }
 
-export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) {
+export function Sidebar({ usage = null, capabilities = [] }: SidebarProps) {
   const path = usePathname() ?? '/app';
-  const items = vertical === 'DOCTOR' ? DOCTOR_PRIMARY : PRIMARY;
+  const navigation = buildOrbitNavigation(capabilities);
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] md:flex">
       <div className="px-6 py-6">
-        <Link href="/app" className="inline-flex items-center gap-2">
-          <span
-            aria-hidden
-            className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] font-serif text-base text-white"
-          >
-            cm
-          </span>
-          <span className="font-serif text-lg tracking-tight">Cureocity Mind</span>
+        <OrbitLogo href="/app/today" />
+      </div>
+
+      <div className="px-3 pb-4">
+        <Link
+          href={navigation.newEncounterHref}
+          className="flex items-center justify-center gap-2 rounded-xl bg-[var(--color-accent)] px-3 py-2.5 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+        >
+          <span className="text-base leading-none">+</span>
+          New encounter
         </Link>
       </div>
 
       <nav className="px-3" aria-label="Primary">
         <ul className="space-y-1">
-          {items.map((item) => {
-            const active = item.href === '/app' ? path === '/app' : path.startsWith(item.href);
+          {navigation.items.map((item) => {
+            const active = isOrbitNavItemActive(path, item);
             return (
               <li key={item.href}>
                 <Link
@@ -180,23 +152,7 @@ function FooterLinks() {
   );
 }
 
-export function Glyph({
-  kind,
-}: {
-  kind:
-    | 'dashboard'
-    | 'today'
-    | 'record'
-    | 'clients'
-    | 'templates'
-    | 'assistant'
-    | 'learn'
-    | 'me'
-    | 'gift'
-    | 'cog'
-    | 'help'
-    | 'signout';
-}) {
+export function Glyph({ kind }: { kind: OrbitNavIcon | 'gift' | 'help' | 'signout' }) {
   const paths: Record<typeof kind, string> = {
     dashboard: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
     today:

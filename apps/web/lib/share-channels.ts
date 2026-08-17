@@ -46,7 +46,7 @@ export function shareChannels(): ShareChannels {
   const watiToken = process.env['WATI_BEARER_TOKEN'];
   const sendgridKey = process.env['SENDGRID_API_KEY'];
   const fromEmail = process.env['SENDGRID_FROM_EMAIL'];
-  const fromName = process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity Mind';
+  const fromName = process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity ORBIT';
 
   let messaging: IMessagingPort;
   let email: IEmailPort;

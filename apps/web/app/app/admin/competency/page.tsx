@@ -121,7 +121,7 @@ export default async function CompetencyPage() {
   return (
     <Container className="py-10">
       <p className="mb-4 text-xs text-[var(--color-ink-3)]">
-        <Link href="/app" className="hover:text-[var(--color-ink)]">
+        <Link href="/app/today" className="hover:text-[var(--color-ink)]">
           ← Dashboard
         </Link>
       </p>

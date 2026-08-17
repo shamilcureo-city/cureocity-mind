@@ -134,7 +134,7 @@ export function ErasureQueueClient() {
             <header className="flex flex-wrap items-baseline justify-between gap-3">
               <div>
                 <Link
-                  href={`/app/clients/${r.client.id}`}
+                  href={`/app/patients/${r.client.id}`}
                   className="font-serif text-lg hover:underline"
                 >
                   {r.client.fullName}

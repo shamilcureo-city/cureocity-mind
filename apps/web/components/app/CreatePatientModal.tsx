@@ -6,34 +6,34 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, Textarea } from '../ui/Field';
 import { SpokenLanguageChips } from './SpokenLanguageChips';
-import { subjectNounFor } from '@/lib/vertical';
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  onCreated?: (clientId: string) => void;
-  /// Sprint DV2 — controls vocabulary (client vs patient), the
-  /// post-create redirect (/app/clients vs /app/patients), and whether
-  /// the therapy "preferred modality" field shows. Defaults THERAPIST.
-  vertical?: 'THERAPIST' | 'DOCTOR';
+  onCreated?: (patientId: string) => void;
+  showBehavioralFields?: boolean;
 }
 
 /**
- * Modal form to create a new client. Captures the minimum fields the
- * CreateClientInputSchema requires + records the four DPDP consent
+ * Modal form to create a new patient. The legacy CreateClientInputSchema
+ * remains the persistence compatibility contract while Sprint 6 converges
+ * the workspace. The form also records the four DPDP consent
  * scopes (AUDIO_RECORDING + AI_NOTE_GENERATION + CROSS_BORDER_
  * PROCESSING are all required for the scribe pipeline to run;
  * DATA_RETENTION_EXTENDED is opt-in). All consents are recorded as
  * captured IN_PERSON at script v1 — adjust when the consent script
  * versioning surface lands.
  *
- * On success, navigates to the new client's detail page so the
- * therapist can immediately start a session or record a workflow.
+ * On success, navigates to the canonical patient detail route.
  */
-export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAPIST' }: Props) {
+export function CreatePatientModal({
+  open,
+  onClose,
+  onCreated,
+  showBehavioralFields = false,
+}: Props) {
   const router = useRouter();
-  const isDoctor = vertical === 'DOCTOR';
-  const noun = subjectNounFor(vertical).singular;
+  const noun = 'patient';
   const [fullName, setFullName] = useState('');
   const [contactPhone, setContactPhone] = useState('+91');
   const [contactEmail, setContactEmail] = useState('');
@@ -83,7 +83,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
       }
       if (spokenLanguages.length > 0) body['spokenLanguages'] = spokenLanguages;
 
-      const res = await fetch('/api/v1/clients', {
+      const res = await fetch('/api/v1/patients', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
@@ -94,7 +94,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
       }
       const created = (await res.json()) as { id: string };
       onCreated?.(created.id);
-      router.push(`/app/${isDoctor ? 'patients' : 'clients'}/${created.id}`);
+      router.push(`/app/patients/${created.id}`);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -110,7 +110,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
     >
       <Card className="w-full max-w-xl max-h-[90vh] overflow-y-auto p-7">
         <header className="flex items-baseline justify-between gap-3">
-          <h2 className="font-serif text-2xl">{isDoctor ? 'New patient' : 'New client'}</h2>
+          <h2 className="font-serif text-2xl">New patient</h2>
           <button
             type="button"
             onClick={onClose}
@@ -164,7 +164,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
                 onChange={(e) => setDateOfBirth(e.target.value)}
               />
             </div>
-            {!isDoctor && (
+            {showBehavioralFields && (
               <div>
                 <Label htmlFor="cc-modality" hint="optional">
                   Preferred modality
@@ -249,7 +249,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
                 className="mt-0.5 h-4 w-4 accent-[var(--color-accent)]"
               />
               <span>
-                Client also consented to extended data retention beyond 30 days
+                Patient also consented to extended data retention beyond 30 days
                 (DATA_RETENTION_EXTENDED — optional).
               </span>
             </label>
@@ -259,7 +259,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
 
           <div className="flex justify-end gap-2">
             <Button type="submit" disabled={submitting}>
-              {submitting ? 'Creating…' : isDoctor ? 'Create patient' : 'Create client'}
+              {submitting ? 'Creating…' : 'Create patient'}
             </Button>
           </div>
         </form>

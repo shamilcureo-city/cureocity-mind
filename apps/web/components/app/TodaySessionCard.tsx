@@ -23,6 +23,7 @@ export interface TodaySessionCardProps {
     hasSignedNote: boolean;
     draftStatus: string | null;
   };
+  medicalWorkflow?: boolean;
 }
 
 /**
@@ -38,7 +39,7 @@ export interface TodaySessionCardProps {
  * re-runs the server query so the page reflects the new state without
  * a manual reload.
  */
-export function TodaySessionCard({ session }: TodaySessionCardProps) {
+export function TodaySessionCard({ session, medicalWorkflow = false }: TodaySessionCardProps) {
   const router = useRouter();
   const [busy, setBusy] = useState<'no-show' | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +82,7 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
               {formatTime(session.scheduledAt)}
             </span>
             <Link
-              href={`/app/clients/${session.clientId}`}
+              href={`/app/${medicalWorkflow ? 'patients' : 'clients'}/${session.clientId}`}
               className="text-base font-medium text-[var(--color-ink)] hover:text-[var(--color-accent)]"
             >
               {session.clientName}
@@ -108,7 +109,7 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
             {session.status === 'SCHEDULED' && (
               <>
                 <Link
-                  href={`/app/sessions/${session.id}`}
+                  href={encounterHref(session.id, session.clientId, medicalWorkflow)}
                   className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
                 >
                   Start session
@@ -131,7 +132,7 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
             )}
             {session.status === 'IN_PROGRESS' && (
               <Link
-                href={`/app/sessions/${session.id}`}
+                href={encounterHref(session.id, session.clientId, medicalWorkflow)}
                 className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
               >
                 Resume
@@ -142,7 +143,7 @@ export function TodaySessionCard({ session }: TodaySessionCardProps) {
               session.status === 'CANCELLED' ||
               session.status === 'RESCHEDULED') && (
               <Link
-                href={`/app/sessions/${session.id}`}
+                href={encounterHref(session.id, session.clientId, medicalWorkflow)}
                 className="rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
               >
                 Open
@@ -176,6 +177,12 @@ function formatTime(iso: string): string {
     minute: '2-digit',
     timeZone: 'Asia/Kolkata',
   });
+}
+
+function encounterHref(sessionId: string, patientId: string, medical: boolean): string {
+  return medical
+    ? `/app/patients/${patientId}/encounters/${sessionId}`
+    : `/app/sessions/${sessionId}`;
 }
 
 function kindTone(kind: 'INTAKE' | 'TREATMENT' | 'REVIEW'): 'accent' | 'muted' | 'default' {

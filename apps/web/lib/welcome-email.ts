@@ -22,19 +22,19 @@ function client(): IEmailPort {
   if (globalThis.__cureocityWelcomeEmail) return globalThis.__cureocityWelcomeEmail;
   const apiKey = process.env['SENDGRID_API_KEY'];
   const fromEmail = process.env['SENDGRID_FROM_EMAIL'];
-  const fromName = process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity Mind';
+  const fromName = process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity ORBIT';
   const port: IEmailPort =
     apiKey && fromEmail ? new SendGridBackend({ apiKey, fromEmail, fromName }) : new NoopBackend();
   globalThis.__cureocityWelcomeEmail = port;
   return port;
 }
 
-const DEFAULT_SUBJECT = 'Welcome to Cureocity Mind';
+const DEFAULT_SUBJECT = 'Welcome to Cureocity ORBIT';
 
 const DEFAULT_TEXT = (name: string): string =>
   `Hi ${name},
 
-Welcome to Cureocity Mind. Your account is set up and ready.
+Welcome to Cureocity ORBIT. Your account is set up and ready.
 
 A few things you can do next:
   - Add your first client
@@ -48,11 +48,11 @@ the client record.
 If you hit anything strange or have a question, just reply to this
 email.
 
-— The Cureocity Mind team`;
+— The Cureocity ORBIT team`;
 
 const DEFAULT_HTML = (name: string): string =>
   `<p>Hi ${escapeHtml(name)},</p>
-<p>Welcome to Cureocity Mind. Your account is set up and ready.</p>
+<p>Welcome to Cureocity ORBIT. Your account is set up and ready.</p>
 <p>A few things you can do next:</p>
 <ul>
   <li>Add your first client</li>
@@ -61,7 +61,7 @@ const DEFAULT_HTML = (name: string): string =>
 </ul>
 <p>Your transcripts, notes, and audio are encrypted and stay private to your practice. You can request data export or erasure any time from the client record.</p>
 <p>If you hit anything strange or have a question, just reply to this email.</p>
-<p>&mdash; The Cureocity Mind team</p>`;
+<p>&mdash; The Cureocity ORBIT team</p>`;
 
 function escapeHtml(s: string): string {
   return s

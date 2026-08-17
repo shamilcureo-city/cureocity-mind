@@ -4,6 +4,7 @@ import { CuidSchema, IsoDateTimeSchema, PaginationCursorSchema } from './common'
 export const AuditActionSchema = z.enum([
   'PSYCHOLOGIST_REGISTERED',
   'PSYCHOLOGIST_UPDATED',
+  'CAPABILITY_ACCESS_DENIED',
   'CLIENT_CREATED',
   'CLIENT_UPDATED',
   'CLIENT_VIEWED',

@@ -1,5 +1,5 @@
 /**
- * Cureocity Mind client-web Service Worker — Sprint 8 PR 1 baseline.
+ * Cureocity ORBIT client-web Service Worker — Sprint 8 PR 1 baseline.
  *
  * V1 responsibilities:
  *   - skipWaiting + clients.claim so the SW activates immediately on
@@ -72,9 +72,9 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data.json();
   } catch {
-    payload = { title: 'Cureocity Mind', body: event.data.text() || 'Reminder' };
+    payload = { title: 'Cureocity ORBIT', body: event.data.text() || 'Reminder' };
   }
-  const { title = 'Cureocity Mind', body = '', url = '/', tag } = payload;
+  const { title = 'Cureocity ORBIT', body = '', url = '/', tag } = payload;
   event.waitUntil(
     self.registration.showNotification(title, {
       body,

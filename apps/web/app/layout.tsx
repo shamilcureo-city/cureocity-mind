@@ -2,6 +2,7 @@ import './globals.css';
 import type { ReactNode } from 'react';
 import type { Metadata, Viewport } from 'next';
 import { Fraunces, Inter } from 'next/font/google';
+import { BRAND } from '@/lib/brand';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -21,9 +22,9 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: 'Cureocity Mind — AI scribe for your therapy practice',
-  description:
-    'Record sessions, generate clinical notes, edit by chat, and sign off — without leaving the room.',
+  title: `${BRAND.fullName} — intelligent clinical workspace`,
+  description: BRAND.description,
+  applicationName: BRAND.fullName,
 };
 
 export const viewport: Viewport = {

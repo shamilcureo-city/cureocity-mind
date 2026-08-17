@@ -12,7 +12,7 @@ export default function NotFound() {
           The link may be old, or the record may have been removed.
         </p>
         <Link
-          href="/app"
+          href="/app/today"
           className="mt-6 inline-block rounded-xl bg-[var(--color-accent)] px-5 py-2.5 text-sm font-medium text-white"
         >
           Back to your dashboard

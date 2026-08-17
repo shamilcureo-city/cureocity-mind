@@ -262,7 +262,7 @@ function buildNextActions(
 ): CaseBriefingAction[] {
   const { journey } = inputs;
   const actions: CaseBriefingAction[] = [];
-  const anchor = `/app/clients/${inputs.clientId}#instruments`;
+  const anchor = `/app/patients/${inputs.clientId}#instruments`;
 
   // 1. Safety always first.
   if (crisis.highestSeverity === 'high' || crisis.highestSeverity === 'critical') {

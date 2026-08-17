@@ -2,31 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { type PractitionerVertical } from '@cureocity/contracts';
+import { type PractitionerCapability } from '@cureocity/contracts';
 import { Glyph } from '@/components/app/Sidebar';
-
-// Sprint 45 — Today is the morning landing screen on phones too. Mobile
-// is capped at 5 grid cols. Sprint 57 — Dashboard takes a slot; Settings
-// drops off the bottom bar (still on the desktop footer) since it isn't an
-// in-session tool, same rationale as "My practice" dropping off earlier.
-const ITEMS: {
-  href: string;
-  label: string;
-  icon: 'dashboard' | 'today' | 'record' | 'clients' | 'assistant' | 'cog';
-}[] = [
-  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app', label: 'Record', icon: 'record' },
-  { href: '/app/clients', label: 'Clients', icon: 'clients' },
-  { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
-];
-
-// Sprint DV2 — doctor bottom bar: the patient roster + settings. See
-// docs/DOCTOR_VERTICAL.md.
-const DOCTOR_ITEMS: typeof ITEMS = [
-  { href: '/app/patients', label: 'Patients', icon: 'clients' },
-  { href: '/app/settings', label: 'Settings', icon: 'cog' },
-];
+import { buildOrbitNavigation, isOrbitNavItemActive } from '@/lib/navigation';
 
 /**
  * Bottom tab bar for phones. The desktop sidebar is `hidden md:flex`,
@@ -35,9 +13,9 @@ const DOCTOR_ITEMS: typeof ITEMS = [
  * nav for a large slice of the pilot. Pages get bottom padding from
  * the app layout so content never hides behind the bar.
  */
-export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerVertical }) {
+export function MobileNav({ capabilities = [] }: { capabilities?: PractitionerCapability[] }) {
   const path = usePathname() ?? '/app';
-  const items = vertical === 'DOCTOR' ? DOCTOR_ITEMS : ITEMS;
+  const items = buildOrbitNavigation(capabilities).items.filter((item) => item.mobile);
   return (
     <nav
       aria-label="Primary"
@@ -48,7 +26,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
         style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
       >
         {items.map((item) => {
-          const active = item.href === '/app' ? path === '/app' : path.startsWith(item.href);
+          const active = isOrbitNavItemActive(path, item);
           return (
             <li key={item.href}>
               <Link

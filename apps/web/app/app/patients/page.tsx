@@ -3,22 +3,25 @@ import type { Prisma } from '@prisma/client';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { ClientsHeader } from '@/components/app/ClientsHeader';
-import { requireOnboardedDoctor } from '@/lib/auth-page';
+import { PatientRosterHeader } from '@/components/app/PatientRosterHeader';
+import { PatientSearchControls } from '@/components/app/PatientSearchControls';
+import { requireOnboardedPsychologist } from '@/lib/auth-page';
+import { getEffectiveCapabilities } from '@/lib/capabilities';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * Sprint DV2 — the doctor's patient roster. The data layer is the same
- * Client model the therapist uses; this page is doctor-guarded + labelled
- * "Patients" and links into the doctor patient detail. Kept isolated from
- * the therapy clients pages (which carry journey/diagnosis surfaces) so
- * there's zero therapist-flow regression. See docs/DOCTOR_VERTICAL.md.
- */
 const PAGE_SIZE = 50;
+const STATUSES = ['ACTIVE', 'PAUSED', 'DISCHARGED', 'TRANSFERRED'] as const;
+type ClientStatus = (typeof STATUSES)[number];
+
+function parseStatus(raw: string | undefined): ClientStatus | undefined {
+  return STATUSES.find((s) => s === raw);
+}
 
 interface SearchParams {
+  q?: string;
+  status?: string;
   cursor?: string;
 }
 
@@ -27,16 +30,20 @@ export default async function PatientsPage({
 }: {
   searchParams: Promise<SearchParams>;
 }) {
-  const doctor = await requireOnboardedDoctor();
+  const practitioner = await requireOnboardedPsychologist();
   const sp = await searchParams;
+  const q = (sp.q ?? '').trim();
+  const status = parseStatus(sp.status);
   const cursor = sp.cursor;
 
   const where: Prisma.ClientWhereInput = {
-    psychologistId: doctor.id,
+    psychologistId: practitioner.id,
     deletedAt: null,
+    ...(status && { status }),
+    ...(q && { fullName: { contains: q, mode: 'insensitive' } }),
   };
 
-  const [rows, total] = await Promise.all([
+  const [rows, total, effective] = await Promise.all([
     prisma.client.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -57,21 +64,37 @@ export default async function PatientsPage({
       },
     }),
     prisma.client.count({ where }),
+    getEffectiveCapabilities(practitioner.id),
   ]);
 
   const hasMore = rows.length > PAGE_SIZE;
   const pageRows = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
   const nextCursor = hasMore ? (pageRows[pageRows.length - 1]?.id ?? null) : null;
-  const nextHref = nextCursor ? `/app/patients?cursor=${nextCursor}` : null;
+
+  // Preserve the active query + status when paginating.
+  const nextHref = nextCursor
+    ? `/app/patients?${new URLSearchParams({
+        ...(q && { q }),
+        ...(status && { status }),
+        cursor: nextCursor,
+      }).toString()}`
+    : null;
+
+  const filtered = Boolean(q || status);
 
   return (
     <Container className="py-10">
-      <ClientsHeader vertical="DOCTOR" />
+      <PatientRosterHeader
+        showBehavioralFields={effective.capabilities.has('BEHAVIORAL_HEALTH_DOCUMENTATION')}
+      />
+
+      <PatientSearchControls />
 
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--color-line-soft)] px-5 py-2.5 text-xs text-[var(--color-ink-3)]">
           <span>
             {total} patient{total === 1 ? '' : 's'}
+            {filtered ? ' match' : ''}
             {cursor ? ' · more pages' : ''}
           </span>
         </div>
@@ -84,7 +107,7 @@ export default async function PatientsPage({
         </div>
         {pageRows.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
-            No patients yet — add your first with “+ New patient”.
+            {filtered ? 'No patients match your search.' : 'No patients yet.'}
           </p>
         ) : (
           <ul className="divide-y divide-[var(--color-line-soft)]">

@@ -15,7 +15,7 @@ const SECTIONS = [
     n: 1,
     title: 'Add a client',
     body: 'Open Clients → New client (or "+ New client" straight from the Record screen). Capture their name and phone, and confirm they\'ve agreed to audio recording and AI note generation. Everything else — email, languages, presenting concerns — you can fill in later from their client page; the intake itself surfaces most of it.',
-    cta: { href: '/app/clients', label: 'Open Clients' },
+    cta: { href: '/app/patients', label: 'Open Clients' },
   },
   {
     n: 2,
@@ -39,7 +39,7 @@ const SECTIONS = [
     n: 5,
     title: 'Sign, measure, share',
     body: "Sign the note when it matches your judgement and download the PDF for your records. Administer PHQ-9 / GAD-7 to track change against validated thresholds, follow the client's Journey from intake through to discharge, and share a plain-language progress report or reflection questions with the client over WhatsApp, email, or a private portal link.",
-    cta: { href: '/app/clients', label: 'Pick a client' },
+    cta: { href: '/app/patients', label: 'Pick a client' },
   },
 ] as const;
 
@@ -68,7 +68,7 @@ export default function LearnPage() {
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
           Onboarding
         </p>
-        <h1 className="mt-2 font-serif text-3xl">Learn Cureocity Mind</h1>
+        <h1 className="mt-2 font-serif text-3xl">Learn Cureocity ORBIT</h1>
         <p className="mt-2 max-w-2xl text-sm text-[var(--color-ink-2)]">
           Five short steps to go from logged in to a signed clinical note. Each section is
           self-contained — skip ahead if the area is already familiar.

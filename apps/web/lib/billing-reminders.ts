@@ -73,7 +73,7 @@ export function renewalCopy({
         ? `${tierLabel} renews in 3 days`
         : `${tierLabel} renews tomorrow`;
   const textBody = [
-    `Hi from Cureocity Mind,`,
+    `Hi from Cureocity ORBIT,`,
     ``,
     `Your ${tierLabel} plan renews on ${dateStr} (₹${amountInr.toLocaleString('en-IN')}).`,
     ``,
@@ -81,7 +81,7 @@ export function renewalCopy({
       ? `If your card is up to date, the renewal will go through automatically. If anything needs updating, head to Settings → Plan in the app.`
       : `If you'd like to switch tiers or change billing interval, open Settings → Plan in the app before then.`,
     ``,
-    `— The Cureocity Mind team`,
+    `— The Cureocity ORBIT team`,
   ].join('\n');
   return {
     subject: subjectLead,
@@ -117,7 +117,7 @@ export function dunningCopy({
       ? `Last reminder — your ${tierLabel} plan lapsed`
       : `Your ${tierLabel} plan has lapsed — restore in one click`;
   const textBody = [
-    `Hi from Cureocity Mind,`,
+    `Hi from Cureocity ORBIT,`,
     ``,
     `Your ${tierLabel} plan lapsed on ${dateStr}. You're back on the free trial, so new`,
     `session recording is capped — your notes, shares, and AI Copilot still work.`,
@@ -126,7 +126,7 @@ export function dunningCopy({
       ? `This is our last reminder. Renew (₹${amountInr.toLocaleString('en-IN')}) from Settings → Plan whenever you're ready; we'll keep your history safe.`
       : `Renew (₹${amountInr.toLocaleString('en-IN')}) from Settings → Plan to restore unlimited recording.`,
     ``,
-    `— The Cureocity Mind team`,
+    `— The Cureocity ORBIT team`,
   ].join('\n');
   return {
     subject,

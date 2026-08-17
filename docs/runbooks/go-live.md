@@ -302,12 +302,12 @@ fire hose off until you know the product holds up under real load.
 
 ---
 
-## 13 · KMS read-cutover (defer for now, blocks at ~500 paid users)
+## 13 · Google Cloud KMS read-cutover
 
 The encryption dual-write is already on (`tenant-crypto.ts`). What
 remains:
 
-1. Set `KMS_BACKEND=aws-kms` + procure an AWS KMS CMK in asia-south1.
+1. Set `KMS_BACKEND=gcp-kms` and provision a Google Cloud KMS CryptoKey in `asia-south1`. Set its full resource name as `GCP_KMS_KEY_NAME`.
 2. Flip the read path on the PII fields (`Client.contactPhone`,
    `contactEmail`, `fullName`) to read the encrypted column. This is
    a code change — small, but I deferred it.

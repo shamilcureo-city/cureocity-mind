@@ -322,7 +322,7 @@ function CompletedBrief({
               return administerable ? (
                 <li key={key}>
                   <a
-                    href={`/app/clients/${clientId}#instruments`}
+                    href={`/app/patients/${clientId}#instruments`}
                     className="inline-flex items-center gap-1 rounded-full bg-[var(--color-accent-soft)] px-3 py-1 text-sm font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent)] hover:text-white"
                   >
                     + Administer {key}
