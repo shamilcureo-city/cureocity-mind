@@ -119,8 +119,8 @@ export function ClinicalBriefPdf(props: ClinicalBriefPdfProps) {
   return (
     <Document
       title={`Clinical brief — ${props.clientFullName}`}
-      author="Cureocity Mind"
-      creator="Cureocity Mind"
+      author="Cureocity ORBIT"
+      creator="Cureocity ORBIT"
     >
       <Page size="A4" style={styles.page}>
         <View style={styles.header}>
@@ -246,7 +246,7 @@ export function ClinicalBriefPdf(props: ClinicalBriefPdfProps) {
         ))}
 
         <Text style={styles.footer} fixed>
-          Cureocity Mind · Clinical brief generated {fmtDate(props.generatedAt)} · Confirmed
+          Cureocity ORBIT · Clinical brief generated {fmtDate(props.generatedAt)} · Confirmed
           diagnoses and plans are recorded on the client&rsquo;s cumulative record. Not a medical
           device.
         </Text>

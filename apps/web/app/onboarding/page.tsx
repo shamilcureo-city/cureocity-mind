@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  */
 export default async function OnboardingPage() {
   const me = await requirePagePsychologist();
-  if (me.onboardingCompletedAt !== null) redirect('/app');
+  if (me.onboardingCompletedAt !== null) redirect('/app/today');
 
   return (
     <main className="min-h-screen bg-[var(--color-bg)]">

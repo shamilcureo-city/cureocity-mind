@@ -37,7 +37,7 @@ export function DemoClientButton({ demoClientId, variant = 'cta' }: Props) {
         return;
       }
       const body = (await res.json()) as { clientId: string };
-      router.push(`/app/clients/${body.clientId}`);
+      router.push(`/app/patients/${body.clientId}`);
       router.refresh();
     } finally {
       setBusy(false);
@@ -58,7 +58,7 @@ export function DemoClientButton({ demoClientId, variant = 'cta' }: Props) {
         setError(body.error ?? 'Could not remove the example client.');
         return;
       }
-      router.push('/app');
+      router.push('/app/today');
       router.refresh();
     } finally {
       setBusy(false);
@@ -100,7 +100,7 @@ export function DemoClientButton({ demoClientId, variant = 'cta' }: Props) {
   if (demoClientId) {
     return (
       <a
-        href={`/app/clients/${demoClientId}`}
+        href={`/app/patients/${demoClientId}`}
         className="self-center text-xs font-medium text-[var(--color-accent)] hover:underline"
       >
         Open →

@@ -1,5 +1,6 @@
 import { verifyNoteSigningAssertion as verifyPure } from '@cureocity/crypto';
 import type { AssertionVerifyInput, AssertionVerifyResult } from '@cureocity/crypto';
+import { isProductionEnvironment } from './production-readiness';
 
 /**
  * Sprint 33 — apps/web wrapper over the pure WebAuthn assertion verifier
@@ -16,7 +17,12 @@ import type { AssertionVerifyInput, AssertionVerifyResult } from '@cureocity/cry
  */
 export function resolveAllowedOrigins(): string[] | null {
   const raw = process.env['WEBAUTHN_ORIGINS'];
-  if (!raw) return null;
+  if (!raw) {
+    if (isProductionEnvironment()) {
+      throw new Error('WEBAUTHN_ORIGINS is required in production');
+    }
+    return null;
+  }
   const list = raw
     .split(',')
     .map((s) => s.trim())

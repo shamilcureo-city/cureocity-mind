@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { UpdateClinicalOrderInputSchema } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -20,7 +20,7 @@ interface RouteContext {
  * order or discards it. Tenant-checked by the order's psychologistId.
  */
 export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'CLINICAL_ORDERS');
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
 

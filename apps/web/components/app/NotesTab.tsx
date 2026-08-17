@@ -278,10 +278,10 @@ export function NotesTab({
         </p>
         <div className="mt-4">
           <Link
-            href="/app"
+            href="/app/encounters/new"
             className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
           >
-            Back to Record
+            Back to encounter capture
           </Link>
         </div>
       </Card>

@@ -116,8 +116,8 @@ export function SignedNotePdf(props: SignedNotePdfProps) {
   return (
     <Document
       title={`Session note — ${props.clientFullName}`}
-      author={props.signedBy ?? 'Cureocity Mind'}
-      creator="Cureocity Mind"
+      author={props.signedBy ?? 'Cureocity ORBIT'}
+      creator="Cureocity ORBIT"
     >
       <Page size="A4" style={styles.page}>
         <View style={styles.header}>
@@ -204,7 +204,7 @@ export function SignedNotePdf(props: SignedNotePdfProps) {
                 Signed by {props.signedBy} on {new Date(props.signedAt).toLocaleString('en-GB')}
               </Text>
               <Text style={{ marginTop: 2 }}>
-                Cureocity Mind · therapeutic documentation system
+                Cureocity ORBIT · therapeutic documentation system
               </Text>
             </>
           ) : (

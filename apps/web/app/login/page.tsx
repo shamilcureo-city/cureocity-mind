@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import { signInWithPhoneNumber, type ConfirmationResult } from 'firebase/auth';
 import {
   completeGoogleRedirect,
@@ -18,6 +17,7 @@ import {
 import { Container } from '@/components/ui/Container';
 import { Button } from '@/components/ui/Button';
 import { Label, Input, FieldError } from '@/components/ui/Field';
+import { OrbitLogo } from '@/components/ui/OrbitLogo';
 
 const RECAPTCHA_ELEMENT_ID = 'recaptcha-anchor';
 
@@ -277,15 +277,7 @@ function LoginPageInner() {
         <div className="mx-auto grid w-full max-w-6xl items-center gap-12 lg:grid-cols-[1.05fr_1fr]">
           {/* Left rail — brand + value props */}
           <section className="hidden lg:block">
-            <Link href="/" className="inline-flex items-center gap-2.5">
-              <span
-                aria-hidden
-                className="grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent)] font-serif text-base text-white shadow-sm"
-              >
-                cm
-              </span>
-              <span className="font-serif text-lg tracking-tight">Cureocity Mind</span>
-            </Link>
+            <OrbitLogo href="/" size="lg" />
             <h1 className="mt-10 font-serif text-5xl leading-[1.1] tracking-tight text-[var(--color-ink)]">
               Get your evenings back.
             </h1>
@@ -336,14 +328,8 @@ function LoginPageInner() {
           {/* Right rail — sign-in card */}
           <aside className="w-full rounded-3xl border border-[var(--color-line)] bg-white/95 p-7 shadow-[0_30px_80px_-40px_rgba(15,27,42,0.25)] backdrop-blur sm:p-9">
             {/* Mobile brand head */}
-            <div className="mb-6 flex items-center gap-2 lg:hidden">
-              <span
-                aria-hidden
-                className="grid h-8 w-8 place-items-center rounded-full bg-[var(--color-accent)] font-serif text-base text-white"
-              >
-                cm
-              </span>
-              <span className="font-serif text-base tracking-tight">Cureocity Mind</span>
+            <div className="mb-6 lg:hidden">
+              <OrbitLogo href="/" />
             </div>
 
             {stage === 'pick' && (
@@ -578,7 +564,7 @@ function LoginPageInner() {
                 <div>
                   <h2 className="font-serif text-2xl">You’re almost in</h2>
                   <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                    Cureocity Mind is in invite-only pilot. Enter the code you were given.
+                    Cureocity ORBIT is in invite-only pilot. Enter the code you were given.
                   </p>
                 </div>
                 <div>

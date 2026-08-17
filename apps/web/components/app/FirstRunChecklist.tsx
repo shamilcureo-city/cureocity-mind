@@ -58,7 +58,7 @@ export async function FirstRunChecklist({ psychologistId }: Props) {
       label: 'Add your first client',
       done: clients > 0,
       hint: 'Their record holds sessions, instruments, and shares.',
-      href: '/app/clients',
+      href: '/app/patients',
     },
     {
       label: 'Record your first session',

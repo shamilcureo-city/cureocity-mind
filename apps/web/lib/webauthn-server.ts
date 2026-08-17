@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { isProductionEnvironment } from './production-readiness';
 
 /**
  * Sprint 18 — server-side WebAuthn registration support.
@@ -24,6 +25,9 @@ const TICKET_TTL_MS = 5 * 60 * 1000;
 function ticketSecret(): Buffer {
   const fromEnv = process.env['WEBAUTHN_TICKET_SECRET'];
   if (fromEnv && fromEnv.length >= 32) return Buffer.from(fromEnv, 'utf8');
+  if (isProductionEnvironment()) {
+    throw new Error('WEBAUTHN_TICKET_SECRET with at least 32 characters is required in production');
+  }
   // Dev fallback — deterministic so reloads don't invalidate in-flight
   // registrations. Production must set WEBAUTHN_TICKET_SECRET.
   return Buffer.from('cureocity-mind-dev-webauthn-ticket-secret-do-not-use-in-prod', 'utf8');

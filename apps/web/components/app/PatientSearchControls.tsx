@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 /**
- * Sprint 44 — search + status filter for the client list.
+ * Search + status filter for the canonical ORBIT Patient roster.
  *
  * Drives the list via URL params (`?q=`, `?status=`) so the page stays
  * a server component and the filter survives refresh / share. Typing
@@ -20,7 +20,7 @@ const STATUS_TABS = [
   { key: 'TRANSFERRED', label: 'Transferred' },
 ] as const;
 
-export function ClientSearchControls() {
+export function PatientSearchControls() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -57,8 +57,8 @@ export function ClientSearchControls() {
         type="search"
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search clients by name…"
-        aria-label="Search clients by name"
+        placeholder="Search patients by name…"
+        aria-label="Search patients by name"
         className="w-full rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm text-[var(--color-ink)] placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-accent)] focus:outline-none sm:max-w-xs"
       />
       <div className="flex flex-wrap gap-1.5">

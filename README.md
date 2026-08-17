@@ -1,7 +1,10 @@
-# Cureocity Mind
+# Cureocity ORBIT
 
-A clinical co-pilot for Indian psychotherapists that **closes the
-measurement-based-care loop**. The therapist records a session in the
+A unified intelligent clinical workspace for Indian practitioners. ORBIT brings behavioral-health
+and medical workflows around one longitudinal patient record while preserving specialty-specific
+clinical documents, safeguards, and permissions.
+
+The behavioral-health workflow pack **closes the measurement-based-care loop**. The therapist records a session in the
 browser; Gemini produces a transcript, an intake or SOAP note (depending
 on session kind), an ICD-11 clinical brief or initial-assessment brief
 with diagnosis candidates + cited evidence + (where relevant) a
@@ -28,6 +31,10 @@ spoken and transcribes faithfully in the spoken language(s).
 | Doc                                                                | Purpose                                                                          |
 | ------------------------------------------------------------------ | -------------------------------------------------------------------------------- |
 | [`CLAUDE.md`](CLAUDE.md)                                           | Agent + developer operational guide — read this first                            |
+| [`docs/orbit/PRODUCT_CHARTER.md`](docs/orbit/PRODUCT_CHARTER.md)   | Current ORBIT product definition, principles, users, and boundaries              |
+| [`docs/orbit/ARCHITECTURE.md`](docs/orbit/ARCHITECTURE.md)         | Target unified architecture and convergence decision                             |
+| [`docs/orbit/MIGRATION_PLAN.md`](docs/orbit/MIGRATION_PLAN.md)     | Twelve-sprint incremental convergence plan                                       |
+| [`docs/orbit/STATUS.md`](docs/orbit/STATUS.md)                     | Completed and pending ORBIT convergence work                                     |
 | [`docs/CLINICAL_COPILOT.md`](docs/CLINICAL_COPILOT.md)             | Product context — Sprints 13-19, clinical co-pilot pivot + intake-aware flow     |
 | [`docs/MEASUREMENT_BASED_CARE.md`](docs/MEASUREMENT_BASED_CARE.md) | Sprint 20 — the journey hub, reliable-change engine, progress report, episodes   |
 | [`docs/SPRINT_21.md`](docs/SPRINT_21.md)                           | Sprint 21 — diagnosis history, intake-note modify, My Practice view, goal status |

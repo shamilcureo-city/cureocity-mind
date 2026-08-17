@@ -13,7 +13,7 @@ import { ImageResponse } from 'next/og';
  */
 
 export const runtime = 'nodejs';
-export const alt = 'Cureocity Mind — the clinical co-pilot for Indian therapists';
+export const alt = 'Cureocity ORBIT — the intelligent clinical workspace';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
@@ -62,21 +62,14 @@ export default function OpengraphImage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
         <div
           style={{
-            width: 56,
-            height: 56,
-            borderRadius: 16,
-            background: cream,
-            color: accent,
+            width: 78,
+            height: 44,
+            borderRadius: '50%',
+            border: `11px solid ${cream}`,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 26,
-            fontWeight: 700,
           }}
-        >
-          cm
-        </div>
-        <div style={{ fontSize: 30, fontWeight: 600, letterSpacing: -0.5 }}>Cureocity Mind</div>
+        />
+        <div style={{ fontSize: 30, fontWeight: 500, letterSpacing: 7 }}>ORBIT</div>
       </div>
 
       {/* Headline */}

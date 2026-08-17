@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { OrbitLogo } from '@/components/ui/OrbitLogo';
+import { BRAND } from '@/lib/brand';
 import type { Metadata } from 'next';
 import type { CSSProperties, ReactNode } from 'react';
 import { ButtonLink } from '@/components/ui/Button';
@@ -22,9 +24,9 @@ import { Reveal } from '@/components/landing/Reveal';
  */
 
 export const metadata: Metadata = {
-  title: 'Cureocity Mind — the clinical co-pilot for Indian therapists',
+  title: `${BRAND.fullName} — the clinical co-pilot for Indian practitioners`,
   description:
-    'Record the session. Cureocity Mind drafts the SOAP note, an ICD-11 clinical brief, a step-by-step therapy script, and your next pre-session brief — in English, हिन्दी, മലയാളം, or the code-mix your clients actually speak. You confirm every clinical call.',
+    'Record the session. Cureocity ORBIT drafts the SOAP note, an ICD-11 clinical brief, a step-by-step therapy script, and your next pre-session brief — in English, हिन्दी, മലയാളം, or the code-mix your clients actually speak. You confirm every clinical call.',
 };
 
 export default function LandingPage() {
@@ -54,22 +56,7 @@ export default function LandingPage() {
    ========================================================================== */
 
 function Wordmark() {
-  return (
-    <Link href="/" className="inline-flex items-center gap-2.5">
-      <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--color-accent)]">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
-          <path
-            d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
-            stroke="white"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </span>
-      <span className="font-serif text-lg font-semibold tracking-tight">Cureocity Mind</span>
-    </Link>
-  );
+  return <OrbitLogo href="/" />;
 }
 
 function Nav() {
@@ -183,7 +170,7 @@ function Hero() {
           </Reveal>
           <Reveal delay={180}>
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-2)]">
-              Record the session — Cureocity Mind drafts the SOAP note, an ICD-11 clinical brief, a
+              Record the session — Cureocity ORBIT drafts the SOAP note, an ICD-11 clinical brief, a
               step-by-step therapy script, and your next pre-session brief. In English, हिन्दी,
               മലയാളം — or the code-mix your clients actually speak.
             </p>
@@ -920,7 +907,7 @@ function Footer() {
           </div>
         </div>
         <div className="mt-10 flex flex-col gap-2 border-t border-[var(--color-line-soft)] pt-6 text-xs text-[var(--color-ink-3)] sm:flex-row sm:items-center sm:justify-between">
-          <p>© 2026 Cureocity · Made for Indian practice</p>
+          <p>© 2026 Cureocity ORBIT · Made for Indian practice</p>
           <p>Not a medical device. Clinical decisions remain with the treating professional.</p>
         </div>
       </Container>

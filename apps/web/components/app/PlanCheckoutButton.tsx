@@ -88,7 +88,7 @@ export function PlanCheckoutButton({ plan, label, variant = 'primary' }: Props) 
         key: body.keyId,
         amount: body.amountInr * 100,
         currency: 'INR',
-        name: 'Cureocity Mind',
+        name: 'Cureocity ORBIT',
         description: `${planLabel(plan)} subscription`,
         order_id: body.orderId,
         handler: () => {
