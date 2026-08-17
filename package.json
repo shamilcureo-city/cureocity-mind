@@ -2,7 +2,7 @@
   "name": "cureocity-mind",
   "version": "0.0.0",
   "private": true,
-  "description": "Ambient therapy scribe for Indian psychologists practising CBT and EMDR",
+  "description": "Cureocity ORBIT — the intelligent workspace for every clinical encounter",
   "engines": {
     "node": ">=22.0.0",
     "pnpm": ">=10.0.0"

@@ -11,6 +11,9 @@ import {
   formatIstTime as formatTime,
 } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
+import { getEffectiveCapabilities } from '@/lib/capabilities';
+import { buildOrbitNavigation } from '@/lib/navigation';
+import { ButtonLink } from '@/components/ui/Button';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +36,7 @@ export default async function TodayPage() {
 
   const { startOfToday, endOfToday, startOfTomorrow, lookAheadEnd } = computeDayBoundaries();
 
-  const [todayRows, upcomingRows, clients] = await Promise.all([
+  const [todayRows, upcomingRows, clients, effective] = await Promise.all([
     prisma.session.findMany({
       where: {
         psychologistId: therapist.id,
@@ -57,7 +60,12 @@ export default async function TodayPage() {
       orderBy: { fullName: 'asc' },
       select: { id: true, fullName: true, preferredModality: true },
     }),
+    getEffectiveCapabilities(therapist.id),
   ]);
+  const navigation = buildOrbitNavigation([...effective.capabilities]);
+  const medicalWorkflow =
+    effective.capabilities.has('MEDICAL_DOCUMENTATION') &&
+    !effective.capabilities.has('BEHAVIORAL_HEALTH_DOCUMENTATION');
 
   const nowAndUpcoming = todayRows.filter(
     (s) => s.status === 'SCHEDULED' || s.status === 'IN_PROGRESS',
@@ -79,7 +87,12 @@ export default async function TodayPage() {
             {summary(nowAndUpcoming.length, doneToday.length)}
           </p>
         </div>
-        <ScheduleSessionPanel clients={clients} />
+        <div className="flex flex-wrap items-center gap-2">
+          <ButtonLink href={navigation.newEncounterHref} variant="primary" size="sm">
+            + New encounter
+          </ButtonLink>
+          <ScheduleSessionPanel clients={clients} />
+        </div>
       </header>
 
       <section className="mt-6">
@@ -89,14 +102,14 @@ export default async function TodayPage() {
         {nowAndUpcoming.length === 0 ? (
           <Card className="p-8 text-center text-sm text-[var(--color-ink-2)]">
             {todayRows.length === 0
-              ? 'Nothing scheduled today. Use Schedule session to book one in, or jump straight to Record for a walk-in.'
+              ? 'Nothing scheduled today. Schedule a visit or start a new encounter for a walk-in.'
               : 'No more sessions scheduled today. See below for what you’ve already done.'}
           </Card>
         ) : (
           <ul className="space-y-3">
             {nowAndUpcoming.map((s) => (
               <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} />
+                <TodaySessionCard session={toCardProps(s)} medicalWorkflow={medicalWorkflow} />
               </li>
             ))}
           </ul>
@@ -111,7 +124,7 @@ export default async function TodayPage() {
           <ul className="space-y-3">
             {doneToday.map((s) => (
               <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} />
+                <TodaySessionCard session={toCardProps(s)} medicalWorkflow={medicalWorkflow} />
               </li>
             ))}
           </ul>
@@ -126,7 +139,7 @@ export default async function TodayPage() {
           <ul className="space-y-3">
             {otherToday.map((s) => (
               <li key={s.id}>
-                <TodaySessionCard session={toCardProps(s)} />
+                <TodaySessionCard session={toCardProps(s)} medicalWorkflow={medicalWorkflow} />
               </li>
             ))}
           </ul>
@@ -140,8 +153,11 @@ export default async function TodayPage() {
         {upcomingRows.length === 0 ? (
           <Card className="p-6 text-sm text-[var(--color-ink-3)]">
             Nothing on the books yet.{' '}
-            <Link href="/app/clients" className="text-[var(--color-accent)] hover:underline">
-              Open a client
+            <Link
+              href={navigation.items.find((item) => item.id === 'patients')?.href ?? '/app/patients'}
+              className="text-[var(--color-accent)] hover:underline"
+            >
+              Open a patient
             </Link>{' '}
             to schedule a follow-up.
           </Card>
@@ -151,7 +167,11 @@ export default async function TodayPage() {
               {upcomingRows.map((s) => (
                 <li key={s.id}>
                   <Link
-                    href={`/app/sessions/${s.id}`}
+                    href={
+                      medicalWorkflow
+                        ? `/app/patients/${s.client.id}/encounters/${s.id}`
+                        : `/app/sessions/${s.id}`
+                    }
                     className="grid grid-cols-[1fr_1.2fr_1fr_auto] items-baseline gap-3 px-5 py-3 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
                   >
                     <span className="font-medium text-[var(--color-ink)]">

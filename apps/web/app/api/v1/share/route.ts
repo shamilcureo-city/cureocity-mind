@@ -405,7 +405,7 @@ async function sendViaChannel(args: SendArgs): Promise<SendResult> {
       '',
       'This link is private to you. It expires in 30 days.',
       '',
-      '— Cureocity Mind',
+      '— Cureocity ORBIT',
       '',
       `${WATERMARK_TAGLINE} ${cmsUrl}`,
     ];

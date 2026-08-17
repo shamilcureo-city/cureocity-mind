@@ -56,7 +56,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   });
 
   const rpId = process.env['WEBAUTHN_RP_ID'] ?? new URL(req.url).hostname;
-  const rpName = process.env['WEBAUTHN_RP_NAME'] ?? 'Cureocity Mind';
+  const rpName = process.env['WEBAUTHN_RP_NAME'] ?? 'Cureocity ORBIT';
 
   return NextResponse.json({
     challenge,

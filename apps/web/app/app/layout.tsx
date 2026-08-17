@@ -4,6 +4,8 @@ import { Sidebar, type PlanUsage } from '@/components/app/Sidebar';
 import { currentPsychologist } from '@/lib/auth-page';
 import { isAuthBypassed } from '@/lib/auth-server';
 import { getEntitlement } from '@/lib/billing';
+import { getEffectiveCapabilities, serializeCapabilities } from '@/lib/capabilities';
+import type { PractitionerCapability } from '@cureocity/contracts';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,14 +24,19 @@ export const dynamic = 'force-dynamic';
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const psy = await currentPsychologist();
   let usage: PlanUsage | null = null;
+  let capabilities: PractitionerCapability[] = [];
   if (psy) {
-    const ent = await getEntitlement(psy.id);
+    const [ent, effective] = await Promise.all([
+      getEntitlement(psy.id),
+      getEffectiveCapabilities(psy.id),
+    ]);
     usage = {
       used: ent.trialUsed,
       cap: ent.trialCap,
       plan: ent.plan,
       paidThroughAt: ent.paidThroughAt,
     };
+    capabilities = serializeCapabilities(effective);
   }
 
   // Sprint 56 ops — warn loudly when the server is in auth-bypass on a
@@ -52,9 +59,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         </div>
       )}
       <div className="flex flex-1">
-        <Sidebar usage={usage} vertical={psy?.vertical ?? 'THERAPIST'} />
+        <Sidebar usage={usage} capabilities={capabilities} />
         <div className="flex flex-1 flex-col pb-16 md:pb-0">{children}</div>
-        <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
+        <MobileNav capabilities={capabilities} />
       </div>
     </div>
   );

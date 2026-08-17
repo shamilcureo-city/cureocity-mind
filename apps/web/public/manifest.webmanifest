@@ -1,7 +1,7 @@
 {
-  "name": "Cureocity Mind",
-  "short_name": "Cureocity",
-  "description": "Your between-session companion",
+  "name": "Cureocity ORBIT",
+  "short_name": "ORBIT",
+  "description": "The intelligent workspace for every clinical encounter",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#fff8f1",

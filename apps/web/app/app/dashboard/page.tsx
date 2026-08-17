@@ -125,7 +125,7 @@ function AttentionSection({ attention }: { attention: AttentionData }) {
             {crises.map((c, i) => (
               <AttentionRow
                 key={`${c.clientId}-${c.kind}-${i}`}
-                href={`/app/clients/${c.clientId}`}
+                href={`/app/patients/${c.clientId}`}
                 name={c.clientName}
                 meta={`${c.kind} · ${c.severity}`}
                 tone="warn"
@@ -140,7 +140,7 @@ function AttentionSection({ attention }: { attention: AttentionData }) {
             {deteriorating.map((d, i) => (
               <AttentionRow
                 key={`${d.clientId}-${d.instrumentKey}-${i}`}
-                href={`/app/clients/${d.clientId}#instruments`}
+                href={`/app/patients/${d.clientId}#instruments`}
                 name={d.clientName}
                 meta={`${d.instrumentKey} worsened by ${Math.abs(d.delta)} pt${Math.abs(d.delta) === 1 ? '' : 's'}`}
                 tone="warn"
@@ -173,7 +173,7 @@ function AttentionSection({ attention }: { attention: AttentionData }) {
             {measuresDue.map((m, i) => (
               <AttentionRow
                 key={`${m.clientId}-${i}`}
-                href={`/app/clients/${m.clientId}#instruments`}
+                href={`/app/patients/${m.clientId}#instruments`}
                 name={m.clientName}
                 meta={
                   m.reason === 'REVIEW_DUE'
@@ -500,11 +500,11 @@ function QuickActions() {
   return (
     <section className="mt-8" aria-label="Quick actions">
       <div className="flex flex-wrap gap-2">
-        <ButtonLink href="/app" variant="primary" size="sm">
-          Start new session
+        <ButtonLink href="/app/encounters/new" variant="primary" size="sm">
+          New encounter
         </ButtonLink>
-        <ButtonLink href="/app/clients" variant="secondary" size="sm">
-          Clients
+        <ButtonLink href="/app/patients" variant="secondary" size="sm">
+          Patients
         </ButtonLink>
         <ButtonLink href="/app/me" variant="secondary" size="sm">
           My practice
@@ -531,11 +531,11 @@ function EmptyState({ psychologistId }: { psychologistId: string }) {
           — crises, notes to sign, outcomes drifting off track, and your caseload at a glance.
         </p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
-          <ButtonLink href="/app" variant="primary">
-            Record your first session
+          <ButtonLink href="/app/encounters/new" variant="primary">
+            Start your first encounter
           </ButtonLink>
-          <ButtonLink href="/app/clients" variant="secondary">
-            Add a client
+          <ButtonLink href="/app/patients" variant="secondary">
+            Add a patient
           </ButtonLink>
         </div>
       </Card>

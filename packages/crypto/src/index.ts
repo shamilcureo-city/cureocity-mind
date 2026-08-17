@@ -7,3 +7,5 @@ export {
 } from './backends/webauthn-assertion';
 export { LocalDevKmsProvider } from './kms/local-dev-kms';
 export { AwsKmsProvider } from './kms/aws-kms';
+
+export { GcpKmsProvider, type GcpKmsTransport } from './kms/gcp-kms';

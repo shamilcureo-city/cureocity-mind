@@ -69,10 +69,12 @@ model Psychologist {
 
   /// Sprint DV1 — product vertical (THERAPIST | DOCTOR). Drives landing,
   /// nav, prompt + contract selection. See docs/DOCTOR_VERTICAL.md.
-  vertical         PractitionerVertical @default(THERAPIST)
+  vertical         PractitionerVertical    @default(THERAPIST)
+  /// ORBIT Sprint 2 — durable identity; vertical remains compatibility only.
+  profession       PractitionerProfession?
   /// Sprint DV1 — doctor credential (NMC / state medical council reg).
   /// NULL for therapists, who use rciNumber instead.
-  medicalRegNumber String?              @unique
+  medicalRegNumber String?                 @unique
   /// Sprint DV1 — doctor specialty (e.g. "Cardiology"). NULL for therapists.
   specialty        String?
 
@@ -129,6 +131,8 @@ model Psychologist {
   safetyPlans         SafetyPlan[]
   webauthnCredentials WebAuthnCredential[]
   clinicMemberships   ClinicMembership[]
+  credentials         PractitionerCredential[]
+  capabilityGrants    PractitionerCapabilityGrant[]
 
   /// Sprint 56 (Lever 3a) — acquisition attribution captured at signup.
   /// Free-form JSON; shape is { utm_source, utm_medium, utm_campaign,
@@ -142,6 +146,113 @@ model Psychologist {
   @@index([isAcceptingNewClients])
   @@index([onboardingCompletedAt])
   @@map("psychologists")
+}
+
+// ============================================================================
+// ORBIT Sprint 2 — additive practitioner credentials + capabilities.
+// Legacy vertical remains a migration input only; regulated authority is
+// resolved from verified credentials and explicit capability grants.
+// ============================================================================
+
+enum PractitionerProfession {
+  PSYCHOLOGIST
+  COUNSELLOR
+  PSYCHIATRIST
+  PHYSICIAN
+  SPECIALIST_PHYSICIAN
+}
+
+enum PractitionerCredentialKind {
+  RCI_REGISTRATION
+  NMC_REGISTRATION
+  STATE_MEDICAL_COUNCIL_REGISTRATION
+  OTHER_CLINICAL_REGISTRATION
+}
+
+enum PractitionerCredentialStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  SUSPENDED
+  EXPIRED
+  REVOKED
+}
+
+enum PractitionerCapability {
+  AMBIENT_CAPTURE
+  LIVE_ENCOUNTER
+  BEHAVIORAL_HEALTH_DOCUMENTATION
+  MEDICAL_DOCUMENTATION
+  CLINICAL_ANALYSIS
+  THERAPY_WORKFLOWS
+  MEASUREMENT_BASED_CARE
+  SAFETY_PLANNING
+  PRESCRIPTION_DRAFTING
+  PRESCRIPTION_SIGNING
+  CLINICAL_ORDERS
+  CHRONIC_CARE
+  FHIR_EXPORT
+  ABDM_PUSH
+  PATIENT_SHARING
+}
+
+enum CapabilityGrantSource {
+  LEGACY_BACKFILL
+  VERIFIED_CREDENTIAL
+  ORGANIZATION_POLICY
+  ADMIN_OVERRIDE
+}
+
+model PractitionerCredential {
+  id                 String                       @id @default(cuid())
+  psychologistId     String
+  kind               PractitionerCredentialKind
+  registrationNumber String
+  issuingAuthority   String
+  jurisdiction       String                       @default("IN")
+  status             PractitionerCredentialStatus @default(PENDING_VERIFICATION)
+  verifiedAt         DateTime?
+  expiresAt          DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@unique([kind, registrationNumber, issuingAuthority])
+  @@index([psychologistId, status])
+  @@map("practitioner_credentials")
+}
+
+model PractitionerCapabilityGrant {
+  id             String                 @id @default(cuid())
+  psychologistId String
+  capability     PractitionerCapability
+  source         CapabilityGrantSource
+  active         Boolean                @default(true)
+  grantedAt      DateTime               @default(now())
+  revokedAt      DateTime?
+  metadata       Json?
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@unique([psychologistId, capability, source])
+  @@index([psychologistId, active])
+  @@map("practitioner_capability_grants")
+}
+
+model ClinicCapabilityGrant {
+  id         String                 @id @default(cuid())
+  clinicId   String
+  capability PractitionerCapability
+  active     Boolean                @default(true)
+  grantedAt  DateTime               @default(now())
+  revokedAt  DateTime?
+  metadata   Json?
+
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([clinicId, capability])
+  @@index([clinicId, active])
+  @@map("clinic_capability_grants")
 }
 
 // ============================================================================
@@ -201,7 +312,8 @@ model Clinic {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships ClinicMembership[]
+  memberships      ClinicMembership[]
+  capabilityGrants ClinicCapabilityGrant[]
 
   @@map("clinics")
 }
@@ -2239,6 +2351,7 @@ enum AuditAction {
   // Psychologist
   PSYCHOLOGIST_REGISTERED
   PSYCHOLOGIST_UPDATED
+  CAPABILITY_ACCESS_DENIED
 
   // Client
   CLIENT_CREATED

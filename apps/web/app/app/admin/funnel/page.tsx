@@ -159,7 +159,7 @@ export default async function FunnelPage() {
 
   return (
     <Container className="py-10">
-      <Link href="/app" className="text-sm text-[var(--color-accent)] hover:underline">
+      <Link href="/app/today" className="text-sm text-[var(--color-accent)] hover:underline">
         ← Dashboard
       </Link>
       <header className="mt-4">
