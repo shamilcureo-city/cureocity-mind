@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   signLiveToken: vi.fn(),
   fetchActiveMedications: vi.fn(),
   fetchAllergies: vi.fn(),
-  withdrawnScribeConsents: vi.fn(),
+  assertValidScribeConsent: vi.fn(),
+  withClientConsentLock: vi.fn(),
 }));
 
 vi.mock('./auth-server', () => ({
@@ -22,8 +23,15 @@ vi.mock('./patient-context', () => ({
   fetchAllergies: mocks.fetchAllergies,
 }));
 vi.mock('./consent-gate', () => ({
-  withdrawnScribeConsents: mocks.withdrawnScribeConsents,
-  withdrawalRefusalMessage: vi.fn(() => 'withdrawn'),
+  assertValidScribeConsent: mocks.assertValidScribeConsent,
+  ConsentAuthorizationError: class ConsentAuthorizationError extends Error {},
+  consentAuthorizationResponse: vi.fn(() => null),
+  withClientConsentLock: mocks.withClientConsentLock,
+}));
+vi.mock('./session-transition', () => ({
+  assertLiveTokenSessionStatus: vi.fn(),
+  conditionalSessionTransition: vi.fn(),
+  sessionConcurrentModificationResponse: vi.fn(() => null),
 }));
 vi.mock('./audit', () => ({ auditMetadataFromRequest: vi.fn(() => ({})), writeAudit: vi.fn() }));
 vi.mock('./prisma', () => ({
@@ -47,7 +55,10 @@ const auth = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requirePsychologistId.mockResolvedValue(auth);
-  mocks.withdrawnScribeConsents.mockResolvedValue([]);
+  mocks.transaction.mockImplementation(async (callback) =>
+    callback({ session: { findUnique: mocks.findSession } }),
+  );
+  mocks.withClientConsentLock.mockImplementation(async (_tx, _clientId, callback) => callback());
   mocks.findSession.mockResolvedValue({
     psychologistId: 'psy-1',
     status: 'IN_PROGRESS',
