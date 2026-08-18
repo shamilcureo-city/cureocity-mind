@@ -115,4 +115,17 @@ describe('per-chunk background authority', () => {
     );
     expect(JSON.stringify(mocks.writeAudit.mock.calls)).not.toContain('sensitive transcript');
   });
+
+  it('uses completion-only authority sources for the End-session backstop', async () => {
+    mocks.assertAuthority.mockResolvedValue({ psychologistId: 'psy-1' });
+
+    await expect(
+      transcribeChunkInline({ sessionId: 'session-1', chunkIndex: 0, fromBackstop: true }),
+    ).resolves.toMatchObject({ status: 'completed' });
+
+    expect(mocks.assertAuthority.mock.calls.map(([, boundary]) => boundary.source)).toEqual([
+      'transcribeChunkBackstopBeforeModel',
+      'transcribeChunkBackstopBeforePersistence',
+    ]);
+  });
 });

@@ -11,6 +11,7 @@ import { writeAudit } from './audit';
 import { checkCostCircuit } from './cost-guard';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
+import { assertCurrentScribeAuthority } from './scribe-authority';
 
 /**
  * Sprint DS12 — run the plan-dictation passes for one spoken instruction.
@@ -49,6 +50,16 @@ export async function transcribePlanCommand(args: {
     estimatedCostInr: estimate,
   });
 
+  try {
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'planDictationPass1BeforeModel',
+    });
+  } catch (error) {
+    args.audioBytes.fill(0);
+    throw error;
+  }
+
   let result;
   try {
     result = await modelRouter().pass1({
@@ -64,6 +75,18 @@ export async function transcribePlanCommand(args: {
   } catch (e) {
     await recordFailure(e, args.psychologistId);
     return null;
+  } finally {
+    // The backend receives this buffer by reference. Never retain dictated PHI.
+    args.audioBytes.fill(0);
+  }
+  try {
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'planDictationPass1BeforePersistence',
+    });
+  } catch (error) {
+    clearPass1Output(result.output);
+    throw error;
   }
   await persistCallLog(result.callLog, args.psychologistId);
   recordGeminiCall({
@@ -101,6 +124,10 @@ export async function runPlanDictation(args: {
   });
 
   const router = modelRouter();
+  await assertCurrentScribeAuthority(args.sessionId, {
+    psychologistId: args.psychologistId,
+    source: 'planDictationPass14BeforeModel',
+  });
   let result;
   try {
     result = await router.passPlanDictation({
@@ -114,6 +141,16 @@ export async function runPlanDictation(args: {
     throw e;
   }
 
+  try {
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'planDictationPass14BeforePersistence',
+    });
+  } catch (error) {
+    result.output.dictation.edits = [];
+    result.output.dictation.clarifications = [];
+    throw error;
+  }
   await persistCallLog(result.callLog, args.psychologistId);
   recordGeminiCall({
     pass: result.callLog.pass,
@@ -177,4 +214,16 @@ async function persistCallLog(log: GeminiCallLogData, psychologistId: string): P
       ...(log.errorMessage !== undefined && { errorMessage: log.errorMessage }),
     },
   });
+}
+
+function clearPass1Output(output: {
+  transcript: string;
+  speakerSegments: unknown[];
+  affectFeatures: unknown[];
+  detectedLanguages: string[];
+}): void {
+  output.transcript = '';
+  output.speakerSegments = [];
+  output.affectFeatures = [];
+  output.detectedLanguages = [];
 }

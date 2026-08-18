@@ -174,7 +174,9 @@ export async function transcribeChunkInline(
   try {
     await assertCurrentScribeAuthority(args.sessionId, {
       psychologistId: chunk.session.psychologistId,
-      source: 'transcribeChunkBeforeModel',
+      source: args.fromBackstop
+        ? 'transcribeChunkBackstopBeforeModel'
+        : 'transcribeChunkBeforeModel',
     });
   } catch {
     zeroAudio(chunk.bytes);
@@ -206,7 +208,9 @@ export async function transcribeChunkInline(
   try {
     await assertCurrentScribeAuthority(args.sessionId, {
       psychologistId: chunk.session.psychologistId,
-      source: 'transcribeChunkBeforePersistence',
+      source: args.fromBackstop
+        ? 'transcribeChunkBackstopBeforePersistence'
+        : 'transcribeChunkBeforePersistence',
     });
   } catch {
     zeroAudio(chunk.bytes);

@@ -25,6 +25,7 @@ import { assertCurrentScribeAuthority, ScribeAuthorityError } from './scribe-aut
 const session = {
   psychologistId: 'psy-1',
   clientId: 'client-1',
+  status: 'IN_PROGRESS',
   client: { status: 'ACTIVE', deletedAt: null },
   psychologist: { vertical: 'DOCTOR' },
 };
@@ -101,7 +102,7 @@ describe('current scribe authority', () => {
     ['inactive', { status: 'INACTIVE', deletedAt: null }],
     ['deleted', { status: 'ACTIVE', deletedAt: new Date() }],
   ])('denies an %s client before capability resolution', async (_label, client) => {
-    mocks.findSession.mockResolvedValue({ ...session, client });
+    mocks.findSession.mockResolvedValue({ ...session, status: 'COMPLETED', client });
 
     await expect(
       assertCurrentScribeAuthority('session-1', {
@@ -124,6 +125,7 @@ describe('current scribe authority', () => {
   it('uses behavioral-health documentation for therapist sessions', async () => {
     mocks.findSession.mockResolvedValue({
       ...session,
+      status: 'COMPLETED',
       psychologist: { vertical: 'THERAPIST' },
     });
 
@@ -137,5 +139,67 @@ describe('current scribe authority', () => {
       ['AMBIENT_CAPTURE', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
       expect.anything(),
     );
+  });
+
+  it.each(['SCHEDULED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULED'])(
+    'denies %s sessions before capability resolution',
+    async (status) => {
+      mocks.findSession.mockResolvedValue({ ...session, status });
+
+      await expect(
+        assertCurrentScribeAuthority('session-1', {
+          psychologistId: 'psy-1',
+          source: 'transcribeChunkBeforeModel',
+        }),
+      ).rejects.toMatchObject({ reason: 'SESSION_STATE' });
+
+      expect(mocks.assertCapabilities).not.toHaveBeenCalled();
+      expect(mocks.writeAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: {
+            source: 'transcribeChunkBeforeModel',
+            sessionId: 'session-1',
+            reason: 'SESSION_STATE',
+          },
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ['transcribeChunkBeforeModel', 'IN_PROGRESS'],
+    ['transcribeChunkBackstopBeforeModel', 'COMPLETED'],
+    ['transcribeChunkBackstopBeforePersistence', 'COMPLETED'],
+    ['legacyPass1BeforeModel', 'COMPLETED'],
+    ['pass2BeforeModel', 'COMPLETED'],
+    ['clinicalAnalysisBeforePersistence', 'COMPLETED'],
+    ['differentialBeforeModel', 'COMPLETED'],
+    ['planDictationPass1BeforeModel', 'IN_PROGRESS'],
+    ['planDictationPass1BeforePersistence', 'COMPLETED'],
+    ['planDictationPass14BeforeModel', 'COMPLETED'],
+    ['planDictationPass14BeforePersistence', 'COMPLETED'],
+  ] as const)('allows %s in its intended %s lifecycle', async (source, status) => {
+    mocks.findSession.mockResolvedValue({ ...session, status });
+
+    await expect(
+      assertCurrentScribeAuthority('session-1', { psychologistId: 'psy-1', source }),
+    ).resolves.toMatchObject({ psychologistId: 'psy-1' });
+  });
+
+  it('denies completed live capture while allowing explicit post-session operations', async () => {
+    mocks.findSession.mockResolvedValue({ ...session, status: 'COMPLETED' });
+
+    await expect(
+      assertCurrentScribeAuthority('session-1', {
+        psychologistId: 'psy-1',
+        source: 'transcribeChunkBeforeModel',
+      }),
+    ).rejects.toMatchObject({ reason: 'SESSION_STATE' });
+    await expect(
+      assertCurrentScribeAuthority('session-1', {
+        psychologistId: 'psy-1',
+        source: 'legacyPass1BeforeModel',
+      }),
+    ).resolves.toMatchObject({ psychologistId: 'psy-1' });
   });
 });

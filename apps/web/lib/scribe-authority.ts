@@ -1,9 +1,10 @@
+import type { SessionStatus } from '@prisma/client';
 import { SCRIBE_CONSENT_SCOPES } from './consent-gate';
 import { assertAuditedSessionCapabilities } from './capabilities';
 import { writeAudit } from './audit';
 import { prisma } from './prisma';
 
-export type ScribeAuthorityDenialReason = 'CLIENT' | 'CONSENT';
+export type ScribeAuthorityDenialReason = 'CLIENT' | 'CONSENT' | 'SESSION_STATE';
 
 export class ScribeAuthorityError extends Error {
   constructor(readonly reason: ScribeAuthorityDenialReason) {
@@ -15,6 +16,8 @@ export class ScribeAuthorityError extends Error {
 export type ScribeAuthoritySource =
   | 'transcribeChunkBeforeModel'
   | 'transcribeChunkBeforePersistence'
+  | 'transcribeChunkBackstopBeforeModel'
+  | 'transcribeChunkBackstopBeforePersistence'
   | 'pass1BeforeModel'
   | 'pass1BeforePersistence'
   | 'pass2BeforeModel'
@@ -25,7 +28,41 @@ export type ScribeAuthoritySource =
   | 'clinicalAnalysisBeforeModel'
   | 'clinicalAnalysisBeforePersistence'
   | 'differentialBeforeModel'
-  | 'differentialBeforePersistence';
+  | 'differentialBeforePersistence'
+  | 'planDictationPass1BeforeModel'
+  | 'planDictationPass1BeforePersistence'
+  | 'planDictationPass14BeforeModel'
+  | 'planDictationPass14BeforePersistence';
+
+type ActiveScribeSessionStatus = Extract<SessionStatus, 'IN_PROGRESS' | 'COMPLETED'>;
+
+/**
+ * Lifecycle authority is operation-specific. Capture callbacks may execute
+ * only while capture is active; model passes which are intentionally queued
+ * after End Session may execute against the just-completed encounter.
+ */
+const ALLOWED_SESSION_STATES = {
+  transcribeChunkBeforeModel: ['IN_PROGRESS'],
+  transcribeChunkBeforePersistence: ['IN_PROGRESS'],
+  transcribeChunkBackstopBeforeModel: ['COMPLETED'],
+  transcribeChunkBackstopBeforePersistence: ['COMPLETED'],
+  pass1BeforeModel: ['IN_PROGRESS'],
+  pass1BeforePersistence: ['COMPLETED'],
+  pass2BeforeModel: ['COMPLETED'],
+  pass2BeforePersistence: ['COMPLETED'],
+  noteTranslationBeforeModel: ['COMPLETED'],
+  legacyPass1BeforeModel: ['COMPLETED'],
+  legacyPass1BeforePersistence: ['COMPLETED'],
+  clinicalAnalysisBeforeModel: ['COMPLETED'],
+  clinicalAnalysisBeforePersistence: ['COMPLETED'],
+  differentialBeforeModel: ['COMPLETED'],
+  differentialBeforePersistence: ['COMPLETED'],
+  // Plan review is valid during an encounter and immediately after ending it.
+  planDictationPass1BeforeModel: ['IN_PROGRESS', 'COMPLETED'],
+  planDictationPass1BeforePersistence: ['IN_PROGRESS', 'COMPLETED'],
+  planDictationPass14BeforeModel: ['IN_PROGRESS', 'COMPLETED'],
+  planDictationPass14BeforePersistence: ['IN_PROGRESS', 'COMPLETED'],
+} as const satisfies Record<ScribeAuthoritySource, readonly ActiveScribeSessionStatus[]>;
 
 export interface ScribeAuthorityBoundary {
   psychologistId: string;
@@ -48,6 +85,7 @@ export async function assertCurrentScribeAuthority(
         select: {
           psychologistId: true,
           clientId: true,
+          status: true,
           client: { select: { status: true, deletedAt: true } },
           psychologist: { select: { vertical: true } },
         },
@@ -72,6 +110,11 @@ export async function assertCurrentScribeAuthority(
   if (!session) throw new Error(`Session ${sessionId} not found`);
   if (session.psychologistId !== boundary.psychologistId) {
     throw new Error('Session authorization context mismatch');
+  }
+  const allowedStates: readonly SessionStatus[] = ALLOWED_SESSION_STATES[boundary.source];
+  if (!allowedStates.includes(session.status)) {
+    await auditScribeDenial(sessionId, boundary, 'SESSION_STATE');
+    throw new ScribeAuthorityError('SESSION_STATE');
   }
   if (session.client.status !== 'ACTIVE' || session.client.deletedAt !== null) {
     await auditScribeDenial(sessionId, boundary, 'CLIENT');
