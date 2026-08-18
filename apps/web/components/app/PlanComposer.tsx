@@ -8,6 +8,7 @@ import {
   type RxPadPatchOp,
   type SuggestedPlan,
 } from '@cureocity/contracts';
+import { canonicalSignedRxPad } from '@/lib/sign-note-payload';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -46,7 +47,7 @@ export function PlanComposer({
    *  investigations, advice or a follow-up. In Indian OPD practice the
    *  prescription sheet is also where investigations + advice go, so a
    *  meds-free "EEG, MRI, review with reports" pad is still a real Rx. */
-  onPadChange?: (hasContent: boolean) => void;
+  onPadChange?: (hasContent: boolean, signedPad: RxPadDraft | null) => void;
   /**
    * Batch B — prescription-safety blockers on the current pad, recomputed
    * whenever it changes. `hard` blocks the signature until it is confirmed
@@ -68,12 +69,13 @@ export function PlanComposer({
 
   const setPadAndNotify = useCallback((next: RxPadDraft | null) => {
     setPad(next);
-    onPadChangeRef.current?.(
+    const hasContent =
       (next?.meds ?? []).length > 0 ||
-        (next?.investigations ?? []).length > 0 ||
-        (next?.adviceLines ?? []).length > 0 ||
-        Boolean(next?.followUp?.when),
-    );
+      (next?.investigations ?? []).length > 0 ||
+      (next?.adviceLines ?? []).length > 0 ||
+      Boolean(next?.followUp?.when);
+    const signedPad = next ? canonicalSignedRxPad(next) : null;
+    onPadChangeRef.current?.(hasContent, signedPad);
     onSignBlockersRef.current?.(signBlockersFor(next));
   }, []);
 

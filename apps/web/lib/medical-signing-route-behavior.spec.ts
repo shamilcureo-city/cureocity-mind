@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { canonicalJson, canonicalSigningPayload } from './sign-note-payload';
 
 const mocks = vi.hoisted(() => ({
   signableKind: 'MEDICAL' as 'MEDICAL' | 'THERAPY',
@@ -16,18 +17,21 @@ const mocks = vi.hoisted(() => ({
   queryRaw: vi.fn(),
   noteCreate: vi.fn(),
   noteUpdate: vi.fn(),
+  signatureVersionCreate: vi.fn(),
   editsCreateMany: vi.fn(),
   webAuthnUpdate: vi.fn(),
+  noteSafeParse: vi.fn(),
+  rxSafeParse: vi.fn(),
 }));
 
 vi.mock('@cureocity/contracts', () => {
-  const passthrough = { parse: (value: unknown) => value };
+  const passthrough = { safeParse: mocks.noteSafeParse };
   return {
     IntakeNoteV1Schema: passthrough,
     MedicalEncounterNoteV1Schema: passthrough,
     TherapyNoteV1Schema: passthrough,
     SignNoteInputSchema: passthrough,
-    RxPadV1Schema: { safeParse: () => ({ success: false }) },
+    RxPadV1Schema: { safeParse: mocks.rxSafeParse },
   };
 });
 vi.mock('./auth-server', () => ({
@@ -70,7 +74,16 @@ const auth = {
 };
 
 const finalNote = { version: 'V1' };
-const payload = JSON.stringify(finalNote);
+const draftContentHashHex = createHash('sha256').update(canonicalJson(finalNote)).digest('hex');
+const payload = canonicalSigningPayload({
+  sessionId: 'session-1',
+  draftContentHashHex,
+  note: finalNote,
+  edits: [],
+  signedAt: '2026-08-18T12:00:00.000Z',
+  safetyOverride: undefined,
+  rxPad: null,
+});
 const payloadHashHex = createHash('sha256').update(payload).digest('hex');
 
 function request() {
@@ -84,6 +97,7 @@ function request() {
 const tx = {
   $queryRaw: mocks.queryRaw,
   therapyNote: { create: mocks.noteCreate, update: mocks.noteUpdate },
+  noteSignatureVersion: { create: mocks.signatureVersionCreate },
   noteEdit: { createMany: mocks.editsCreateMany },
   webAuthnCredential: { update: mocks.webAuthnUpdate },
 };
@@ -97,6 +111,8 @@ beforeEach(() => {
   mocks.signableKind = 'MEDICAL';
   mocks.requirePsychologistId.mockResolvedValue(auth);
   mocks.requireCapability.mockResolvedValue(auth);
+  mocks.noteSafeParse.mockImplementation((value) => ({ success: true, data: value }));
+  mocks.rxSafeParse.mockReturnValue({ success: false });
   mocks.parseJson.mockResolvedValue({
     ok: true,
     value: {
@@ -170,22 +186,62 @@ beforeEach(() => {
         },
       ]);
     }
+    if (sql.includes('FROM "sessions"')) {
+      return Promise.resolve([
+        {
+          id: 'session-1',
+          psychologistId: 'psy-1',
+          status: 'COMPLETED',
+          kind: 'TREATMENT',
+          vertical: 'DOCTOR',
+        },
+      ]);
+    }
+    if (sql.includes('FROM "note_drafts"')) {
+      return Promise.resolve([
+        {
+          id: 'draft-1',
+          status: 'COMPLETED',
+          content: finalNote,
+          rxPad: null,
+        },
+      ]);
+    }
+    if (sql.includes('FROM "therapy_notes"')) return Promise.resolve([]);
+    if (sql.includes('FROM "webauthn_credentials"')) return Promise.resolve([]);
     return Promise.resolve([]);
   });
 });
 
 describe('medical signing route transaction behavior', () => {
+  it('takes every authoritative signing read inside the transaction under row locks', async () => {
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
+    expect(mocks.webAuthnFindMany).not.toHaveBeenCalled();
+    expect(mocks.draftFindUnique).not.toHaveBeenCalled();
+    expect(mocks.noteFindUnique).not.toHaveBeenCalled();
+    const lockedSql = mocks.queryRaw.mock.calls.map(([strings]) => sqlText(strings));
+    expect(lockedSql).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('FROM "sessions"'),
+        expect.stringContaining('FROM "note_drafts"'),
+        expect.stringContaining('FROM "therapy_notes"'),
+        expect.stringContaining('FROM "webauthn_credentials"'),
+      ]),
+    );
+    for (const sql of lockedSql) expect(sql).toContain('FOR UPDATE');
+  });
+
   it('persists exact medical authority provenance with note and audit in one transaction', async () => {
     const response = await POST(request() as never, {
       params: Promise.resolve({ id: 'session-1' }),
     });
 
     expect(response.status).toBe(201);
-    expect(mocks.requireCapability).toHaveBeenCalledWith(
-      expect.anything(),
-      'PRESCRIPTION_SIGNING',
-      auth,
-    );
     expect(mocks.noteCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         medicalSigningCredentialId: 'credential-1',
@@ -213,30 +269,11 @@ describe('medical signing route transaction behavior', () => {
   });
 
   it('rolls back before note mutation when locked credential evidence is no longer valid', async () => {
-    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
       const sql = sqlText(strings);
-      if (sql.includes('FROM "psychologists"')) {
-        return Promise.resolve([
-          {
-            id: 'psy-1',
-            vertical: 'DOCTOR',
-            profession: 'PHYSICIAN',
-            status: 'ACTIVE',
-            deletedAt: null,
-          },
-        ]);
-      }
-      if (sql.includes('FROM "practitioner_capability_grants"')) {
-        return Promise.resolve([
-          {
-            capability: 'PRESCRIPTION_DRAFTING',
-            source: 'ADMIN_OVERRIDE',
-            active: true,
-            revokedAt: null,
-          },
-        ]);
-      }
-      return Promise.resolve([]);
+      if (sql.includes('FROM "practitioner_credentials"')) return Promise.resolve([]);
+      return baseQuery(strings, ...values);
     });
 
     const response = await POST(request() as never, {
@@ -248,6 +285,155 @@ describe('medical signing route transaction behavior', () => {
     expect(mocks.writeAudit).not.toHaveBeenCalled();
   });
 
+  it('snapshots prior signature proof before updating a re-signed note', async () => {
+    const prior = {
+      id: 'note-1',
+      locked: false,
+      version: 'V1',
+      content: finalNote,
+      rxPad: { meds: [] },
+      signedAt: new Date('2026-08-17T12:00:00.000Z'),
+      signedBy: 'psy-1',
+      signCredentialId: 'passkey-old',
+      signClientDataJsonB64u: 'client-old',
+      signAuthenticatorDataB64u: 'auth-old',
+      signSignatureB64u: 'signature-old',
+      signChallengeHashHex: 'c'.repeat(64),
+      signPayload: payload,
+      medicalSigningCredentialId: 'medical-old',
+      medicalSigningCredentialSnapshot: { registrationNumber: 'OLD-1' },
+    };
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+      sqlText(strings).includes('FROM "therapy_notes"')
+        ? Promise.resolve([prior])
+        : baseQuery(strings, ...values),
+    );
+    mocks.noteUpdate.mockResolvedValue({
+      id: 'note-1',
+      sessionId: 'session-1',
+      draftId: 'draft-1',
+      version: 'V1',
+      content: finalNote,
+      signedAt: new Date('2026-08-18T12:00:00.000Z'),
+      signedBy: 'psy-1',
+      createdAt: new Date('2026-08-17T12:00:00.000Z'),
+      signCredentialId: null,
+      signChallengeHashHex: payloadHashHex,
+    });
+
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.signatureVersionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        therapyNoteId: 'note-1',
+        version: 'V1',
+        content: finalNote,
+        rxPad: { meds: [] },
+        signedAt: prior.signedAt,
+        signedBy: 'psy-1',
+        signCredentialId: 'passkey-old',
+        signClientDataJsonB64u: 'client-old',
+        signAuthenticatorDataB64u: 'auth-old',
+        signSignatureB64u: 'signature-old',
+        signChallengeHashHex: 'c'.repeat(64),
+        signPayload: payload,
+        medicalSigningCredentialId: 'medical-old',
+        medicalSigningCredentialSnapshot: { registrationNumber: 'OLD-1' },
+        contentHashHex: createHash('sha256').update(canonicalJson(finalNote)).digest('hex'),
+      }),
+    });
+    expect(mocks.signatureVersionCreate.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.noteUpdate.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it('rejects a malformed non-null locked Rx instead of signing it as null', async () => {
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+      sqlText(strings).includes('FROM "note_drafts"')
+        ? Promise.resolve([
+            { id: 'draft-1', status: 'COMPLETED', content: finalNote, rxPad: { bad: true } },
+          ])
+        : baseQuery(strings, ...values),
+    );
+
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(mocks.noteCreate).not.toHaveBeenCalled();
+    expect(mocks.writeAudit).not.toHaveBeenCalled();
+  });
+
+  it('maps an invalid locked draft to 409 and rolls back', async () => {
+    mocks.noteSafeParse.mockReturnValueOnce({ success: false, error: new Error('bad draft') });
+
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(mocks.noteCreate).not.toHaveBeenCalled();
+    expect(mocks.writeAudit).not.toHaveBeenCalled();
+  });
+
+  it('maps an invalid submitted kind-specific note to 400 and rolls back', async () => {
+    mocks.noteSafeParse
+      .mockReturnValueOnce({ success: true, data: finalNote })
+      .mockReturnValueOnce({ success: false, error: new Error('wrong shape') });
+
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(mocks.noteCreate).not.toHaveBeenCalled();
+  });
+
+  it('maps an invalid prior signed note to 409 without overwriting its history', async () => {
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+      sqlText(strings).includes('FROM "therapy_notes"')
+        ? Promise.resolve([
+            {
+              id: 'note-1',
+              locked: false,
+              version: 'V1',
+              content: { malformed: true },
+              rxPad: null,
+              signedAt: new Date('2026-08-17T12:00:00.000Z'),
+              signedBy: 'psy-1',
+              signCredentialId: null,
+              signClientDataJsonB64u: null,
+              signAuthenticatorDataB64u: null,
+              signSignatureB64u: null,
+              signChallengeHashHex: null,
+              signPayload: null,
+              medicalSigningCredentialId: null,
+              medicalSigningCredentialSnapshot: null,
+            },
+          ])
+        : baseQuery(strings, ...values),
+    );
+    mocks.noteSafeParse
+      .mockReturnValueOnce({ success: true, data: finalNote })
+      .mockReturnValueOnce({ success: true, data: finalNote })
+      .mockReturnValueOnce({ success: false, error: new Error('bad prior note') });
+
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(mocks.signatureVersionCreate).not.toHaveBeenCalled();
+    expect(mocks.noteUpdate).not.toHaveBeenCalled();
+  });
+
   it('keeps therapy signing capability-free with null medical provenance', async () => {
     mocks.signableKind = 'THERAPY';
 
@@ -257,10 +443,15 @@ describe('medical signing route transaction behavior', () => {
 
     expect(response.status).toBe(201);
     expect(mocks.requireCapability).not.toHaveBeenCalled();
-    expect(mocks.queryRaw).not.toHaveBeenCalled();
+    const lockedSql = mocks.queryRaw.mock.calls.map(([strings]) => sqlText(strings));
+    expect(lockedSql).toHaveLength(4);
+    for (const sql of lockedSql) expect(sql).toContain('FOR UPDATE');
+    expect(lockedSql.some((sql) => sql.includes('FROM "practitioner_credentials"'))).toBe(false);
     expect(mocks.noteCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({
         medicalSigningCredentialId: null,
+        medicalSigningCredentialSnapshot: expect.anything(),
+        rxPad: expect.anything(),
       }),
     });
     expect(mocks.writeAudit).toHaveBeenCalledWith(

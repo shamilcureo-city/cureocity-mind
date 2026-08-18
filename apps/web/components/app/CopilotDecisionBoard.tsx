@@ -2519,21 +2519,17 @@ function WrapUpSignStep({
     try {
       const note = closeout.noteContent;
       const signedAt = new Date().toISOString();
-      const payload = JSON.stringify({ note, signedAt });
-      const payloadHashHex = await sha256Hex(payload);
       const res = await postSignNote(sessionId, {
-        payload,
-        payloadHashHex,
         note,
+        draftContent: note,
         edits: [],
         signedAt,
+        rxPad: null,
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         if (res.status === 403) {
-          setNeedsPasskey(
-            body.error ?? 'Signing requires a registered passkey on this account.',
-          );
+          setNeedsPasskey(body.error ?? 'Signing requires a registered passkey on this account.');
           return;
         }
         throw new Error(body.error ?? `Sign failed (${res.status})`);
@@ -2874,14 +2870,6 @@ function SpeakerChip({
       {label}
     </button>
   );
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
 }
 
 // ============================================================================

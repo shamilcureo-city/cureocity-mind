@@ -147,10 +147,9 @@ describe('regulated boundary coverage', () => {
 
   it('gates medical sign and Rx drafting without changing therapy signing', () => {
     const sign = source('app/api/v1/sessions/[id]/sign/route.ts');
-    expect(sign).toContain("requireCapability(req, 'PRESCRIPTION_SIGNING', auth)");
-    expect(sign.indexOf("vertical === 'DOCTOR'")).toBeLessThan(
-      sign.indexOf("'PRESCRIPTION_SIGNING'"),
-    );
+    expect(sign).toContain("signableKind === 'MEDICAL'");
+    expect(sign).toContain('lockAndResolveMedicalSigningAuthority(');
+    expect(sign).not.toContain("requireCapability(req, 'PRESCRIPTION_SIGNING', auth)");
     expect(source('app/api/v1/sessions/[id]/rx-pad/route.ts')).toContain(
       "requireCapability(req, 'PRESCRIPTION_DRAFTING')",
     );
@@ -192,23 +191,21 @@ describe('regulated boundary coverage', () => {
     expect(transaction).toBeGreaterThan(-1);
     expect(authority).toBeGreaterThan(transaction);
     expect(noteMutation).toBeGreaterThan(authority);
-    expect(sign).toContain('medicalSigningCredentialId: medicalAuthority.id');
+    expect(sign).toContain('medicalSigningCredentialId: medicalAuthority?.id ?? null');
     expect(sign).toMatch(
-      /medicalSigningCredentialSnapshot:\s*medicalAuthority as unknown as Prisma\.InputJsonValue/,
+      /medicalAuthority === null\s*\? Prisma\.DbNull\s*:\s*\(medicalAuthority as unknown as Prisma\.InputJsonValue\)/,
     );
-    expect(sign).toContain('medicalSigningCredentialId: null');
-    expect(sign).toContain('medicalSigningCredentialSnapshot: Prisma.DbNull');
     expect(sign).toContain('medicalSigningCredentialId: medicalAuthority.id');
     expect(sign).toContain('medicalSigningCredentialKind: medicalAuthority.kind');
     expect(sign).toContain('FROM "therapy_notes"');
     expect(sign).toContain('FROM "webauthn_credentials"');
-    expect(sign).toContain('storedSignCount: lockedCredential.signCount');
+    expect(sign).toContain('storedSignCount: matched.signCount');
     expect(sign.indexOf('FROM "webauthn_credentials"', transaction)).toBeLessThan(noteMutation);
     expect(sign.indexOf('FROM "therapy_notes"', transaction)).toBeLessThan(noteMutation);
-    expect(sign).toContain('return NextResponse.json({ error: error.message }, { status: 409 })');
-    expect(sign).toContain(
-      'Medical note was signed concurrently; reload and review the saved signature',
-    );
+    expect(sign).toContain('error instanceof SigningHttpError');
+    expect(sign).toContain('status: error.status');
+    expect(sign).toContain("error.code === 'P2002'");
+    expect(sign).toContain('Note was signed concurrently; reload and review the saved signature');
   });
 
   it('uses PostgreSQL row locks for every revocable medical signing authority source', () => {
@@ -223,5 +220,24 @@ describe('regulated boundary coverage', () => {
       expect(authority).toContain(`"${table}"`);
     }
     expect(authority.match(/FOR UPDATE/g)).toHaveLength(5);
+  });
+
+  it('does not treat every signing conflict as proof that the note was signed', () => {
+    const review = source('components/app/ReviewAndSign.tsx');
+    expect(review).not.toContain('if (res.status === 409) {');
+    expect(review).toContain("message === 'Therapy note already signed for this session'");
+    expect(review).toContain(
+      "message === 'Note was signed concurrently; reload and review the saved signature'",
+    );
+  });
+
+  it('makes signature history replay-safe, reconstructable, and append-only including truncate', () => {
+    const migration = source(
+      '../../prisma/migrations/20260818050000_note_signature_versions/migration.sql',
+    );
+    expect(migration).toContain('"signPayload" TEXT');
+    expect(migration).toContain("conrelid = 'note_signature_versions'::regclass");
+    expect(migration).toContain('BEFORE UPDATE OR DELETE');
+    expect(migration).toContain('BEFORE TRUNCATE');
   });
 });

@@ -1,37 +1,22 @@
 'use client';
 
 import { authenticateWithChallenge } from '@/lib/webauthn';
+import { canonicalJson, canonicalSigningPayload } from './sign-note-payload';
 
-/**
- * Sprint TS0 (F6) — note sign-off with WebAuthn step-up.
- *
- * The sign route (`app/api/v1/sessions/[id]/sign/route.ts`) returns 401 on an
- * assertion-free attempt IFF the account has a registered passkey. The
- * previous client code (both `NotesTab` and `ReviewAndSign`) never collected
- * an assertion, so a therapist/doctor who HAD enrolled a passkey could not
- * sign — the request 401'd and surfaced a raw error.
- *
- * This helper posts the sign request without an assertion first (unchanged
- * happy path for accounts with no passkey), and ONLY on a 401 runs the
- * WebAuthn ceremony bound to the same payload hash, then retries once. A 401
- * on the assertion-free attempt unambiguously means "a credential is
- * registered — assert" (it is the sole first-attempt 401 the route emits), so
- * this never triggers for no-passkey accounts and cannot regress them.
- */
 export interface SignNoteBody {
-  /** The exact JSON string the server SHA-256s to verify (+ bind the assertion). */
-  payload: string;
-  payloadHashHex: string;
-  /** The note content (TherapyNoteV1 | IntakeNoteV1 | MedicalEncounterNoteV1). */
   note: unknown;
+  /** Exact draft body the UI loaded; server rejects it if the locked draft changed. */
+  draftContent: unknown;
   edits: unknown[];
   signedAt: string;
-  /**
-   * Batch B — set when the prescriber is signing PAST a drug-allergy
-   * contraindication. The route writes an RX_SAFETY_OVERRIDE audit row
-   * atomic with the signature.
-   */
+  /** Exact confirmed Rx projection, including explicit null. */
+  rxPad: unknown | null;
   safetyOverride?: { reason: string; blockers: string[] };
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function postOnce(sessionId: string, body: unknown): Promise<Response> {
@@ -42,11 +27,29 @@ async function postOnce(sessionId: string, body: unknown): Promise<Response> {
   });
 }
 
+/** Build the only accepted payload shape before optionally binding WebAuthn. */
 export async function postSignNote(sessionId: string, body: SignNoteBody): Promise<Response> {
-  const first = await postOnce(sessionId, body);
+  const draftContentHashHex = await sha256Hex(canonicalJson(body.draftContent));
+  const payload = canonicalSigningPayload({
+    sessionId,
+    draftContentHashHex,
+    note: body.note,
+    edits: body.edits,
+    signedAt: body.signedAt,
+    safetyOverride: body.safetyOverride,
+    rxPad: body.rxPad,
+  });
+  const payloadHashHex = await sha256Hex(payload);
+  const requestBody = {
+    payload,
+    payloadHashHex,
+    note: body.note,
+    edits: body.edits,
+    signedAt: body.signedAt,
+    ...(body.safetyOverride ? { safetyOverride: body.safetyOverride } : {}),
+  };
+  const first = await postOnce(sessionId, requestBody);
   if (first.status !== 401) return first;
-  // A registered passkey exists — run the biometric ceremony, binding the
-  // SAME payload the server will re-hash, then retry exactly once.
-  const assertion = await authenticateWithChallenge(body.payload);
-  return postOnce(sessionId, { ...body, assertion });
+  const assertion = await authenticateWithChallenge(payload);
+  return postOnce(sessionId, { ...requestBody, assertion });
 }

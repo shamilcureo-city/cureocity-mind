@@ -327,20 +327,12 @@ export function NotesTab({
     try {
       const note = phase.draft.content as TherapyNoteV1;
       const signedAt = new Date().toISOString();
-      // Payload is the canonical JSON the server will SHA-256 to verify.
-      // Stable ordering is left to the JSON.stringify defaults — the server
-      // re-hashes whatever we send, so any deterministic string works as
-      // long as the same bytes round-trip.
-      const payload = JSON.stringify({ note, signedAt });
-      const payloadHashHex = await sha256Hex(payload);
-      // TS0 (F6) — steps up to a WebAuthn assertion only when the account has
-      // a registered passkey (the route 401s the assertion-free attempt then).
       const res = await postSignNote(sessionId, {
-        payload,
-        payloadHashHex,
         note,
+        draftContent: phase.draft.content,
         edits: [],
         signedAt,
+        rxPad: null,
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -1527,12 +1519,4 @@ function derivePhase(
   }
   if (sessionStatus === 'COMPLETED') return { kind: 'ready-to-generate' };
   return { kind: 'awaiting-end', status: sessionStatus };
-}
-
-async function sha256Hex(input: string): Promise<string> {
-  const data = new TextEncoder().encode(input);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
 }

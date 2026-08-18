@@ -1389,6 +1389,7 @@ model TherapyNote {
   signAuthenticatorDataB64u String?
   signSignatureB64u         String?
   signChallengeHashHex      String?
+  signPayload               String? @db.Text
 
   // Immutable clinical-authority provenance captured independently from the
   // WebAuthn authenticator above. Scalars intentionally avoid a mutable FK.
@@ -1397,9 +1398,10 @@ model TherapyNote {
 
   createdAt DateTime @default(now())
 
-  session Session    @relation(fields: [sessionId], references: [id])
-  draft   NoteDraft  @relation(fields: [draftId], references: [id])
-  edits   NoteEdit[]
+  session           Session                @relation(fields: [sessionId], references: [id])
+  draft             NoteDraft              @relation(fields: [draftId], references: [id])
+  edits             NoteEdit[]
+  signatureVersions NoteSignatureVersion[]
 
   @@map("therapy_notes")
 }
@@ -1444,6 +1446,36 @@ model NoteEdit {
 
   @@index([therapyNoteId, createdAt])
   @@map("note_edits")
+}
+
+/// Append-only snapshot of a superseded signature. A database trigger rejects
+/// UPDATE/DELETE so re-signing cannot erase prior content or credential proof.
+model NoteSignatureVersion {
+  id            String @id @default(cuid())
+  therapyNoteId String
+
+  version        String
+  content        Json
+  contentHashHex String
+  rxPad          Json?
+  signedAt       DateTime
+  signedBy       String
+
+  signCredentialId          String?
+  signClientDataJsonB64u    String?
+  signAuthenticatorDataB64u String?
+  signSignatureB64u         String?
+  signChallengeHashHex      String?
+  signPayload               String? @db.Text
+
+  medicalSigningCredentialId       String?
+  medicalSigningCredentialSnapshot Json?
+  createdAt                        DateTime @default(now())
+
+  therapyNote TherapyNote @relation(fields: [therapyNoteId], references: [id], onDelete: Restrict)
+
+  @@index([therapyNoteId, createdAt])
+  @@map("note_signature_versions")
 }
 
 // ============================================================================
