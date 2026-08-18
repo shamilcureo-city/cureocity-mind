@@ -28,6 +28,34 @@ describe('ORBIT capability contracts', () => {
     expect(credential.jurisdiction).toBe('IN');
   });
 
+  it('normalizes credential evidence text and rejects whitespace-only values', () => {
+    const baseCredential = {
+      id: 'ccredaaaaaaaaaaaaaaaaaaaa',
+      psychologistId: 'cpsyaaaaaaaaaaaaaaaaaaaaa',
+      kind: 'NMC_REGISTRATION' as const,
+      registrationNumber: '  NMC-12345  ',
+      issuingAuthority: '  National Medical Commission  ',
+      jurisdiction: '  IN  ',
+      status: 'PENDING_VERIFICATION' as const,
+      verifiedAt: null,
+      expiresAt: null,
+      createdAt: '2026-08-12T00:00:00.000Z',
+      updatedAt: '2026-08-12T00:00:00.000Z',
+    };
+
+    expect(PractitionerCredentialSchema.parse(baseCredential)).toMatchObject({
+      registrationNumber: 'NMC-12345',
+      issuingAuthority: 'National Medical Commission',
+      jurisdiction: 'IN',
+    });
+
+    for (const field of ['registrationNumber', 'issuingAuthority', 'jurisdiction'] as const) {
+      expect(() =>
+        PractitionerCredentialSchema.parse({ ...baseCredential, [field]: '   ' }),
+      ).toThrow();
+    }
+  });
+
   it('validates capability grants as first-class contracts', () => {
     const grant = PractitionerCapabilityGrantSchema.parse({
       id: 'cgrantaaaaaaaaaaaaaaaaaaa',

@@ -79,13 +79,22 @@ export function resolveEffectiveCapabilities(
     capabilities.delete('PRESCRIPTION_SIGNING');
   }
 
+  const hasRciCredential = verifiedCredentialKinds.has('RCI_REGISTRATION');
   const behavioral = capabilities.has('BEHAVIORAL_HEALTH_DOCUMENTATION');
   const medical = capabilities.has('MEDICAL_DOCUMENTATION');
   let profession: PractitionerProfession | null = null;
-  if (input.configuredProfession) profession = input.configuredProfession;
-  else if (behavioral && medical && hasMedicalCredential) profession = 'PSYCHIATRIST';
+  if (input.configuredProfession === 'COUNSELLOR') profession = 'COUNSELLOR';
+  else if (input.configuredProfession === 'PSYCHOLOGIST' && hasRciCredential) {
+    profession = 'PSYCHOLOGIST';
+  } else if (
+    input.configuredProfession &&
+    input.configuredProfession !== 'PSYCHOLOGIST' &&
+    hasMedicalCredential
+  ) {
+    profession = input.configuredProfession;
+  } else if (behavioral && medical && hasMedicalCredential) profession = 'PSYCHIATRIST';
   else if (hasMedicalCredential) profession = 'PHYSICIAN';
-  else if (verifiedCredentialKinds.has('RCI_REGISTRATION')) profession = 'PSYCHOLOGIST';
+  else if (hasRciCredential) profession = 'PSYCHOLOGIST';
 
   return { profession, capabilities, verifiedCredentialKinds };
 }

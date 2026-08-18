@@ -11,20 +11,27 @@ import {
 
 /** Maps only explicit legacy professional evidence; a product vertical is not a profession. */
 export function mapPsychologistToPractitioner(row: Psychologist): Practitioner {
-  const doctor = row.vertical === 'DOCTOR';
-  const registrationNumber = doctor
-    ? row.medicalRegNumber
-    : row.rciVerifiedAt
-      ? row.rciNumber
-      : null;
+  const rciVerifiedAt = row.rciVerifiedAt ? new Date(row.rciVerifiedAt) : null;
+  const rciRegistrationNumber = row.rciNumber.trim();
+  const hasVerifiedRciEvidence =
+    rciRegistrationNumber.length > 0 &&
+    rciVerifiedAt !== null &&
+    Number.isFinite(rciVerifiedAt.getTime()) &&
+    rciVerifiedAt.getTime() <= Date.now();
+  const registrationNumber = hasVerifiedRciEvidence ? rciRegistrationNumber : null;
+  const profession =
+    row.profession === 'COUNSELLOR'
+      ? 'COUNSELLOR'
+      : hasVerifiedRciEvidence && (row.profession === null || row.profession === 'PSYCHOLOGIST')
+        ? 'PSYCHOLOGIST'
+        : null;
   return {
     id: practitionerId(row.id),
     firebaseUid: row.firebaseUid,
     fullName: row.fullName,
     email: row.email,
     phone: row.phone,
-    profession:
-      row.profession ?? (registrationNumber ? (doctor ? 'PHYSICIAN' : 'PSYCHOLOGIST') : null),
+    profession,
     legacyVertical: row.vertical,
     registrationNumber,
     specialty: row.specialty,

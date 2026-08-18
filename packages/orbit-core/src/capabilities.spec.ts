@@ -31,6 +31,20 @@ describe('effective ORBIT capability resolution', () => {
     expect(result.profession).toBeNull();
   });
 
+  it.each(['PSYCHOLOGIST', 'PSYCHIATRIST', 'PHYSICIAN', 'SPECIALIST_PHYSICIAN'] as const)(
+    'rejects configured regulated profession %s without corroborating credentials',
+    (configuredProfession) => {
+      const result = resolveEffectiveCapabilities({
+        legacyVertical: 'DOCTOR',
+        configuredProfession,
+        grants: [active('MEDICAL_DOCUMENTATION')],
+        credentials: [],
+      });
+
+      expect(result.profession).toBeNull();
+    },
+  );
+
   it('grants prescription signing only with an active verified medical credential', () => {
     const result = resolveEffectiveCapabilities({
       legacyVertical: 'DOCTOR',

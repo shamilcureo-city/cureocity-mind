@@ -9,6 +9,41 @@ import {
 
 const now = '2026-08-12T10:00:00.000Z';
 
+const psychologistFixture = (overrides: Record<string, unknown> = {}) =>
+  PsychologistSchema.parse({
+    id: 'cpsyfffffffffffffffffffff',
+    firebaseUid: 'firebase-fixture',
+    email: 'fixture@example.com',
+    fullName: 'Fixture Practitioner',
+    phone: '+919****3299',
+    rciNumber: 'RCI-FIXTURE',
+    rciVerifiedAt: null,
+    status: 'ACTIVE',
+    role: 'THERAPIST',
+    vertical: 'THERAPIST',
+    profession: null,
+    medicalRegNumber: null,
+    specialty: null,
+    headline: null,
+    bio: null,
+    photoUrl: null,
+    specialties: [],
+    languages: ['English'],
+    modalities: [],
+    yearsOfExperience: 0,
+    locationCity: null,
+    locationProvince: null,
+    sessionFeeInr: null,
+    isAcceptingNewClients: false,
+    defaultOutputLanguage: 'en',
+    defaultModality: null,
+    backupEmail: null,
+    onboardingCompletedAt: null,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
+
 describe('ORBIT legacy compatibility adapters', () => {
   it('maps a therapist account to a canonical practitioner without changing its identity', () => {
     const legacy = PsychologistSchema.parse({
@@ -53,7 +88,40 @@ describe('ORBIT legacy compatibility adapters', () => {
     });
   });
 
-  it('maps a doctor registration into the canonical practitioner shape', () => {
+  it('uses verified RCI evidence independently of the legacy product vertical', () => {
+    const practitioner = mapPsychologistToPractitioner(
+      psychologistFixture({ vertical: 'DOCTOR', rciVerifiedAt: now }),
+    );
+
+    expect(practitioner).toMatchObject({
+      profession: 'PSYCHOLOGIST',
+      registrationNumber: 'RCI-FIXTURE',
+    });
+  });
+
+  it('rejects RCI evidence with a future verification timestamp', () => {
+    const practitioner = mapPsychologistToPractitioner(
+      psychologistFixture({ rciVerifiedAt: '2999-01-01T00:00:00.000Z' }),
+    );
+
+    expect(practitioner).toMatchObject({
+      profession: null,
+      registrationNumber: null,
+    });
+  });
+
+  it('rejects blank RCI registration evidence', () => {
+    const practitioner = mapPsychologistToPractitioner(
+      psychologistFixture({ rciNumber: '   ', rciVerifiedAt: now }),
+    );
+
+    expect(practitioner).toMatchObject({
+      profession: null,
+      registrationNumber: null,
+    });
+  });
+
+  it('does not promote an unverified legacy medical registration into professional evidence', () => {
     const legacy = PsychologistSchema.parse({
       id: 'cpsybbbbbbbbbbbbbbbbbbbbb',
       firebaseUid: 'firebase-2',
@@ -87,9 +155,24 @@ describe('ORBIT legacy compatibility adapters', () => {
     });
 
     expect(mapPsychologistToPractitioner(legacy)).toMatchObject({
-      profession: 'PHYSICIAN',
-      registrationNumber: 'KMC-12345',
+      profession: null,
+      registrationNumber: null,
       specialty: 'Cardiology',
+    });
+  });
+
+  it('does not trust a regulated configured profession without qualifying evidence', () => {
+    const practitioner = mapPsychologistToPractitioner(
+      psychologistFixture({
+        vertical: 'DOCTOR',
+        profession: 'PHYSICIAN',
+        medicalRegNumber: 'KMC-12345',
+      }),
+    );
+
+    expect(practitioner).toMatchObject({
+      profession: null,
+      registrationNumber: null,
     });
   });
 
