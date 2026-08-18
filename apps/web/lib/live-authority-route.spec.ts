@@ -34,7 +34,11 @@ describe('internal live authority verifier', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env['LIVE_GATEWAY_SECRET'] = 'service-secret';
-    mocks.sessionFindUnique.mockResolvedValue({ psychologistId: PSYCHOLOGIST_ID });
+    mocks.sessionFindUnique.mockResolvedValue({
+      psychologistId: PSYCHOLOGIST_ID,
+      status: 'IN_PROGRESS',
+      captureMode: 'LIVE',
+    });
     mocks.getEffectiveCapabilities.mockResolvedValue({
       capabilities: new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'CLINICAL_ANALYSIS']),
     });
@@ -71,6 +75,22 @@ describe('internal live authority verifier', () => {
         metadata: { source: 'liveGatewayRevalidation', sessionId: SESSION_ID },
       }),
     );
+  });
+
+  it.each([
+    { status: 'COMPLETED', captureMode: 'LIVE' },
+    { status: 'CANCELLED', captureMode: 'LIVE' },
+    { status: 'IN_PROGRESS', captureMode: 'DICTATE' },
+  ])('denies a session outside the active live lifecycle (%o)', async (sessionState) => {
+    mocks.sessionFindUnique.mockResolvedValue({
+      psychologistId: PSYCHOLOGIST_ID,
+      ...sessionState,
+    });
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(403);
+    expect(mocks.getEffectiveCapabilities).not.toHaveBeenCalled();
   });
 
   it('keeps the denial response authoritative when denial auditing is unavailable', async () => {

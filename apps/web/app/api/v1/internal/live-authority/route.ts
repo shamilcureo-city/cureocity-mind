@@ -25,11 +25,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const session = await prisma.session.findUnique({
     where: { id: body.sessionId },
-    select: { psychologistId: true },
+    select: { psychologistId: true, status: true, captureMode: true },
   });
   const actorPsychologistId = session?.psychologistId ?? body.psychologistId;
   try {
-    if (!session || session.psychologistId !== body.psychologistId) throw new Error('denied');
+    if (
+      !session ||
+      session.psychologistId !== body.psychologistId ||
+      session.status !== 'IN_PROGRESS' ||
+      session.captureMode !== 'LIVE'
+    ) {
+      throw new Error('denied');
+    }
     const effective = await getEffectiveCapabilities(session.psychologistId);
     return NextResponse.json({
       authorized: true,

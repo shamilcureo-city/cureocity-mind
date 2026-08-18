@@ -321,7 +321,6 @@ wss.on('connection', (ws, req) => {
         const pendingAuthority = new LiveAuthority({
           sessionId: claims.sessionId,
           psychologistId: claims.psychologistId,
-          tokenExpiresAtSec: claims.exp,
           requiredCapabilities: new Set<PractitionerCapability>([
             'LIVE_ENCOUNTER',
             vertical === 'DOCTOR' ? 'MEDICAL_DOCUMENTATION' : 'BEHAVIORAL_HEALTH_DOCUMENTATION',

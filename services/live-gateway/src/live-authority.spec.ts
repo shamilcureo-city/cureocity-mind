@@ -9,6 +9,7 @@ const ALL = [
   'CLINICAL_ANALYSIS',
   'PRESCRIPTION_DRAFTING',
   'CLINICAL_ORDERS',
+  'CHRONIC_CARE',
 ] as PractitionerCapability[];
 
 const noteEvent = (): LiveGatewayEvent => ({ type: 'note', partial: {} });
@@ -30,13 +31,16 @@ describe('continuous live authority', () => {
   const close = vi.fn();
   const updateCapabilities = vi.fn();
 
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    fetchImpl.mockReset();
+    close.mockReset();
+    updateCapabilities.mockReset();
+  });
 
-  function authority(exp = Math.floor(Date.now() / 1000) + 60) {
+  function authority() {
     return new LiveAuthority({
       sessionId: 'session-opaque-id',
       psychologistId: 'practitioner-opaque-id',
-      tokenExpiresAtSec: exp,
       requiredCapabilities: REQUIRED,
       verifierUrl: 'https://web.internal/api/v1/internal/live-authority',
       serviceSecret: 'shared-secret',
@@ -58,12 +62,12 @@ describe('continuous live authority', () => {
     },
   );
 
-  it('terminates at token expiry without consulting a stale capability snapshot', async () => {
-    const auth = authority(Math.floor(Date.now() / 1000) - 1);
+  it('does not turn the five-minute connection token into a live-session time limit', async () => {
+    fetchImpl.mockResolvedValue(response());
+    const auth = authority();
 
-    await expect(auth.authorizeEvent(noteEvent())).resolves.toBeNull();
-    expect(fetchImpl).not.toHaveBeenCalled();
-    expect(close).toHaveBeenCalledWith('live_token_expired');
+    await expect(auth.authorizeEvent(noteEvent())).resolves.toEqual(noteEvent());
+    expect(close).not.toHaveBeenCalled();
   });
 
   it('dynamically suppresses optional outputs after downgrade while documentation continues', async () => {
@@ -120,5 +124,48 @@ describe('continuous live authority', () => {
     resolveResponse(response());
     await expect(Promise.all([first, second])).resolves.toEqual([noteEvent(), noteEvent()]);
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    [
+      { type: 'command', command: { kind: 'ADD_MEDICATION', raw: 'add x', drug: 'x' } },
+      'PRESCRIPTION_DRAFTING',
+    ],
+    [
+      { type: 'command', command: { kind: 'ORDER_TEST', raw: 'order x', description: 'x' } },
+      'CLINICAL_ORDERS',
+    ],
+    [
+      { type: 'command', command: { kind: 'SHOW_DATA', raw: 'show bp', measure: 'BP' } },
+      'CHRONIC_CARE',
+    ],
+
+    [
+      { type: 'gap', gap: { kind: 'DRUG_INTERACTION', severity: 'warn', message: 'x' } },
+      'PRESCRIPTION_DRAFTING',
+    ],
+    [
+      { type: 'gap', gap: { kind: 'RED_FLAG', severity: 'critical', message: 'x' } },
+      'CLINICAL_ANALYSIS',
+    ],
+  ] as const)('authorizes queued %o output against %s', async (rawEvent, capability) => {
+    const event = rawEvent as LiveGatewayEvent;
+    fetchImpl
+      .mockResolvedValueOnce(response(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION']))
+      .mockResolvedValueOnce(response(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', capability]));
+    const auth = authority();
+
+    await expect(auth.authorizeEvent(event)).resolves.toBeNull();
+    await expect(auth.authorizeEvent(event)).resolves.toEqual(event);
+  });
+
+  it('allows queue-control commands only through the mandatory live authority', async () => {
+    const event = {
+      type: 'command',
+      command: { kind: 'NEXT_PATIENT', raw: 'next', hold: false },
+    } as LiveGatewayEvent;
+    fetchImpl.mockResolvedValue(response(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION']));
+
+    await expect(authority().authorizeEvent(event)).resolves.toEqual(event);
   });
 });

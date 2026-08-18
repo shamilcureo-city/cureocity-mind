@@ -4,15 +4,11 @@ import {
   type PractitionerCapability,
 } from '@cureocity/contracts';
 
-export type LiveAuthorityCloseReason =
-  | 'live_authority_denied'
-  | 'live_authority_unavailable'
-  | 'live_token_expired';
+export type LiveAuthorityCloseReason = 'live_authority_denied' | 'live_authority_unavailable';
 
 interface LiveAuthorityOptions {
   sessionId: string;
   psychologistId: string;
-  tokenExpiresAtSec: number;
   requiredCapabilities: ReadonlySet<PractitionerCapability>;
   verifierUrl: string;
   serviceSecret: string;
@@ -23,15 +19,32 @@ interface LiveAuthorityOptions {
   updateCapabilities: (capabilities: ReadonlySet<PractitionerCapability>) => void;
 }
 
-const OPTIONAL_EVENT_CAPABILITY: Partial<Record<LiveGatewayEvent['type'], PractitionerCapability>> =
-  {
-    finding: 'CLINICAL_ANALYSIS',
-    reasoning: 'CLINICAL_ANALYSIS',
-    therapyReasoning: 'CLINICAL_ANALYSIS',
-    gap: 'CLINICAL_ANALYSIS',
-    rxDraft: 'PRESCRIPTION_DRAFTING',
-    command: 'CLINICAL_ANALYSIS',
-  };
+function optionalEventCapability(event: LiveGatewayEvent): PractitionerCapability | undefined {
+  switch (event.type) {
+    case 'finding':
+    case 'reasoning':
+    case 'therapyReasoning':
+      return 'CLINICAL_ANALYSIS';
+    case 'rxDraft':
+      return 'PRESCRIPTION_DRAFTING';
+    case 'command':
+      switch (event.command.kind) {
+        case 'ADD_MEDICATION':
+          return 'PRESCRIPTION_DRAFTING';
+        case 'ORDER_TEST':
+          return 'CLINICAL_ORDERS';
+        case 'SHOW_DATA':
+          return 'CHRONIC_CARE';
+        case 'NEXT_PATIENT':
+          return 'LIVE_ENCOUNTER';
+      }
+      return undefined;
+    case 'gap':
+      return event.gap.kind === 'DRUG_INTERACTION' ? 'PRESCRIPTION_DRAFTING' : 'CLINICAL_ANALYSIS';
+    default:
+      return undefined;
+  }
+}
 
 /**
  * Revalidates a live socket against the web app's current server-side authority.
@@ -43,7 +56,6 @@ export class LiveAuthority {
   private readonly intervalMs: number;
   private capabilities = new Set<PractitionerCapability>();
   private interval: NodeJS.Timeout | null = null;
-  private expiry: NodeJS.Timeout | null = null;
   private inFlight: Promise<boolean> | null = null;
   private closed = false;
 
@@ -54,32 +66,20 @@ export class LiveAuthority {
   }
 
   start(): void {
-    const untilExpiryMs = this.options.tokenExpiresAtSec * 1_000 - Date.now();
-    if (untilExpiryMs <= 0) {
-      this.deny('live_token_expired');
-      return;
-    }
-    this.expiry = setTimeout(() => this.deny('live_token_expired'), untilExpiryMs);
     this.interval = setInterval(() => void this.revalidate(), this.intervalMs);
   }
 
   dispose(): void {
     if (this.interval) clearInterval(this.interval);
-    if (this.expiry) clearTimeout(this.expiry);
     this.interval = null;
-    this.expiry = null;
   }
 
   /** Recheck immediately before every regulated gateway output. */
   async authorizeEvent(event: LiveGatewayEvent): Promise<LiveGatewayEvent | null> {
     if (this.closed) return null;
-    if (this.options.tokenExpiresAtSec * 1_000 <= Date.now()) {
-      this.deny('live_token_expired');
-      return null;
-    }
     if (!(await this.revalidate())) return null;
 
-    const required = OPTIONAL_EVENT_CAPABILITY[event.type];
+    const required = optionalEventCapability(event);
     if (required && !this.capabilities.has(required)) return null;
     if (event.type === 'final') {
       return {
@@ -142,13 +142,9 @@ export class LiveAuthority {
         this.deny('live_authority_denied');
         return false;
       }
-      // Expiry or another mandatory denial may have fired while the verifier
-      // request was in flight. Never publish that now-stale successful result.
+      // Another mandatory denial may have fired while the verifier request was
+      // in flight. Never publish that now-stale successful result.
       if (this.closed) return false;
-      if (this.options.tokenExpiresAtSec * 1_000 <= Date.now()) {
-        this.deny('live_token_expired');
-        return false;
-      }
       this.capabilities = capabilities;
       this.options.updateCapabilities(capabilities);
       return true;
