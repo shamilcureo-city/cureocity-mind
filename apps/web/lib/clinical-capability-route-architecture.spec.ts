@@ -179,4 +179,49 @@ describe('regulated boundary coverage', () => {
     expect(liveNote).toContain("capabilities?.includes('PRESCRIPTION_DRAFTING')");
     expect(liveNote).toContain("capabilities?.includes('CLINICAL_ORDERS')");
   });
+
+  it('locks medical authority inside the same transaction before signature mutation', () => {
+    const sign = source('app/api/v1/sessions/[id]/sign/route.ts');
+    const transaction = sign.indexOf('prisma.$transaction(async (tx) =>');
+    const authority = sign.indexOf('lockAndResolveMedicalSigningAuthority(', transaction);
+    const noteMutation = Math.min(
+      sign.indexOf('tx.therapyNote.update', transaction),
+      sign.indexOf('tx.therapyNote.create', transaction),
+    );
+
+    expect(transaction).toBeGreaterThan(-1);
+    expect(authority).toBeGreaterThan(transaction);
+    expect(noteMutation).toBeGreaterThan(authority);
+    expect(sign).toContain('medicalSigningCredentialId: medicalAuthority.id');
+    expect(sign).toMatch(
+      /medicalSigningCredentialSnapshot:\s*medicalAuthority as unknown as Prisma\.InputJsonValue/,
+    );
+    expect(sign).toContain('medicalSigningCredentialId: null');
+    expect(sign).toContain('medicalSigningCredentialSnapshot: Prisma.DbNull');
+    expect(sign).toContain('medicalSigningCredentialId: medicalAuthority.id');
+    expect(sign).toContain('medicalSigningCredentialKind: medicalAuthority.kind');
+    expect(sign).toContain('FROM "therapy_notes"');
+    expect(sign).toContain('FROM "webauthn_credentials"');
+    expect(sign).toContain('storedSignCount: lockedCredential.signCount');
+    expect(sign.indexOf('FROM "webauthn_credentials"', transaction)).toBeLessThan(noteMutation);
+    expect(sign.indexOf('FROM "therapy_notes"', transaction)).toBeLessThan(noteMutation);
+    expect(sign).toContain('return NextResponse.json({ error: error.message }, { status: 409 })');
+    expect(sign).toContain(
+      'Medical note was signed concurrently; reload and review the saved signature',
+    );
+  });
+
+  it('uses PostgreSQL row locks for every revocable medical signing authority source', () => {
+    const authority = source('lib/medical-signing-authority.ts');
+    for (const table of [
+      'psychologists',
+      'practitioner_credentials',
+      'practitioner_capability_grants',
+      'clinic_memberships',
+      'clinic_capability_grants',
+    ]) {
+      expect(authority).toContain(`"${table}"`);
+    }
+    expect(authority.match(/FOR UPDATE/g)).toHaveLength(5);
+  });
 });

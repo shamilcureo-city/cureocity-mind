@@ -11,7 +11,7 @@ import {
   type SignedNoteContent,
   type TherapyNote,
 } from '@cureocity/contracts';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { isAuthBypassed, requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import {
@@ -19,6 +19,11 @@ import {
   signableKindFor,
   type SignableKind,
 } from '@/lib/note-edit-fields';
+import {
+  lockAndResolveMedicalSigningAuthority,
+  MedicalSigningAuthorizationError,
+  type MedicalSigningCredentialSnapshot,
+} from '@/lib/medical-signing-authority';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauthn-verify';
@@ -32,6 +37,20 @@ export const dynamic = 'force-dynamic';
 
 interface RouteContext {
   params: Promise<{ id: string }>;
+}
+
+class MedicalSigningConflictError extends Error {
+  constructor(message = 'Medical note signing state changed concurrently; reload and sign again') {
+    super(message);
+    this.name = 'MedicalSigningConflictError';
+  }
+}
+
+class MedicalSigningWebAuthnError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MedicalSigningWebAuthnError';
+  }
 }
 
 function readField(note: SignedNoteContent, field: NoteEditField): string {
@@ -246,8 +265,6 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       { status: 409 },
     );
   }
-  const isResign = existing !== null;
-
   // Sprint 49 — parse both draft + final note against the kind-keyed
   // schema. An INTAKE session whose draft happens to validate against
   // TherapyNoteV1 (or vice-versa) would still be wrong shape for sign-off.
@@ -290,91 +307,210 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         })()
       : null;
 
-  const created = await prisma.$transaction(async (tx) => {
-    const noteData = {
-      version: finalNote.version,
-      content: finalNote as unknown as object,
-      signedAt: new Date(input.value.signedAt),
-      signedBy: auth.value.psychologistId,
-      locked: true,
-      signCredentialId: input.value.assertion?.credentialId ?? null,
-      signClientDataJsonB64u: input.value.assertion?.clientDataJSON ?? null,
-      signAuthenticatorDataB64u: input.value.assertion?.authenticatorData ?? null,
-      signSignatureB64u: input.value.assertion?.signature ?? null,
-      signChallengeHashHex: input.value.assertion?.challengeHashHex ?? recomputed,
-      // Only set when we derived a signed pad (doctor encounter); therapy
-      // notes leave the column null.
-      ...(signedRxPad !== null && { rxPad: signedRxPad as unknown as Prisma.InputJsonValue }),
-    };
-    const note = existing
-      ? await tx.therapyNote.update({ where: { id: existing.id }, data: noteData })
-      : await tx.therapyNote.create({ data: { sessionId, draftId: draft.id, ...noteData } });
-    if (editsToWrite.length > 0) {
-      await tx.noteEdit.createMany({
-        data: editsToWrite.map((e) => ({
-          therapyNoteId: note.id,
-          field: e.field,
-          before: e.before,
-          after: e.after,
-        })),
-      });
-    }
-    const auditBase = {
-      actorType: 'PSYCHOLOGIST' as const,
-      actorPsychologistId: auth.value.psychologistId,
-      targetType: 'TherapyNote',
-      targetId: note.id,
-      metadata: {
-        ...auditMetadataFromRequest(req),
-        sessionId,
-        draftId: draft.id,
-        editedFields: editsToWrite.map((e) => e.field),
-        resign: isResign,
-        payloadHashHex: recomputed,
-        webauthnUsed: input.value.assertion !== undefined,
-        webauthnEnforced: credentialBump !== null,
-        // Sprint 49 — disaggregate intake vs treatment (vs medical) in the
-        // signed-note audit trail so My Practice can split them.
-        kind: signableKind,
-      },
-    };
-    // Sprint DV3 — medical encounter notes audit ENCOUNTER_NOTE_SIGNED;
-    // therapy notes keep NOTE_SIGNED. Two literal calls so the audit
-    // chaos-test regex picks both action strings up.
-    if (signableKind === 'MEDICAL') {
-      await writeAudit({ ...auditBase, action: 'ENCOUNTER_NOTE_SIGNED' }, tx);
-    } else {
-      await writeAudit({ ...auditBase, action: 'NOTE_SIGNED' }, tx);
-    }
-    // Batch B — the prescriber signed PAST a hard drug-allergy blocker. The
-    // gate is an override, not a locked door (a mislabeled allergy and a
-    // desensitised patient are both real), but it must leave a trail: one
-    // row, atomic with the signature, carrying what was overridden and why.
-    const override = input.value.safetyOverride;
-    if (override) {
-      await writeAudit(
-        {
-          ...auditBase,
-          action: 'RX_SAFETY_OVERRIDE',
-          metadata: {
-            ...auditBase.metadata,
-            reason: override.reason,
-            blockers: override.blockers,
-          },
+  let created;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      const medicalAuthority: MedicalSigningCredentialSnapshot | null =
+        signableKind === 'MEDICAL'
+          ? await lockAndResolveMedicalSigningAuthority(tx, auth.value.psychologistId, new Date())
+          : null;
+
+      let transactionCredentialBump = credentialBump;
+      if (signableKind === 'MEDICAL' && credentialBump !== null && input.value.assertion) {
+        const lockedCredentials = await tx.$queryRaw<
+          Array<{ id: string; publicKey: string; signCount: number }>
+        >`
+          SELECT "id", "publicKey", "signCount"
+          FROM "webauthn_credentials"
+          WHERE "id" = ${credentialBump.id}
+            AND "psychologistId" = ${auth.value.psychologistId}
+            AND "credentialId" = ${input.value.assertion.credentialId}
+            AND "revokedAt" IS NULL
+          FOR UPDATE
+        `;
+        const lockedCredential = lockedCredentials[0];
+        if (!lockedCredential) {
+          throw new MedicalSigningWebAuthnError(
+            'The signing passkey was revoked or changed; authenticate again',
+          );
+        }
+        const rpId = process.env['WEBAUTHN_RP_ID'] ?? new URL(req.url).hostname;
+        const verification = verifyNoteSigningAssertion({
+          publicKeySpkiB64Url: lockedCredential.publicKey,
+          authenticatorDataB64Url: input.value.assertion.authenticatorData,
+          clientDataJsonB64Url: input.value.assertion.clientDataJSON,
+          signatureB64Url: input.value.assertion.signature,
+          expectedChallengeHashHex: recomputed,
+          expectedRpId: rpId,
+          allowedOrigins: resolveAllowedOrigins(),
+          storedSignCount: lockedCredential.signCount,
+        });
+        if (!verification.ok) {
+          throw new MedicalSigningWebAuthnError(
+            `WebAuthn assertion verification failed: ${verification.reason}`,
+          );
+        }
+        transactionCredentialBump = {
+          id: lockedCredential.id,
+          newSignCount: verification.newSignCount,
+        };
+      }
+
+      let transactionExisting = existing;
+      if (signableKind === 'MEDICAL') {
+        const lockedNotes = await tx.$queryRaw<
+          Array<{ id: string; locked: boolean; content: Prisma.JsonValue }>
+        >`
+          SELECT "id", "locked", "content"
+          FROM "therapy_notes"
+          WHERE "sessionId" = ${sessionId}
+          FOR UPDATE
+        `;
+        const lockedNote = lockedNotes[0] ?? null;
+        if (
+          lockedNote?.locked ||
+          (existing === null && lockedNote !== null) ||
+          (existing !== null && (lockedNote === null || lockedNote.id !== existing.id))
+        ) {
+          throw new MedicalSigningConflictError();
+        }
+        transactionExisting = lockedNote;
+      }
+
+      let transactionEdits = editsToWrite;
+      if (signableKind === 'MEDICAL' && transactionExisting !== null) {
+        transactionEdits = [];
+        const prior = noteSchema.parse(transactionExisting.content) as SignedNoteContent;
+        for (const field of signableFields) {
+          const before = readField(prior, field);
+          const after = readField(finalNote, field);
+          if (typeof before === 'string' && typeof after === 'string' && before !== after) {
+            transactionEdits.push({ field, before, after });
+          }
+        }
+      }
+
+      const medicalProvenance =
+        medicalAuthority !== null
+          ? {
+              medicalSigningCredentialId: medicalAuthority.id,
+              medicalSigningCredentialSnapshot:
+                medicalAuthority as unknown as Prisma.InputJsonValue,
+            }
+          : transactionExisting === null
+            ? {
+                medicalSigningCredentialId: null,
+                medicalSigningCredentialSnapshot: Prisma.DbNull,
+              }
+            : {};
+      const noteData = {
+        version: finalNote.version,
+        content: finalNote as unknown as object,
+        signedAt: new Date(input.value.signedAt),
+        signedBy: auth.value.psychologistId,
+        locked: true,
+        signCredentialId: input.value.assertion?.credentialId ?? null,
+        signClientDataJsonB64u: input.value.assertion?.clientDataJSON ?? null,
+        signAuthenticatorDataB64u: input.value.assertion?.authenticatorData ?? null,
+        signSignatureB64u: input.value.assertion?.signature ?? null,
+        signChallengeHashHex: input.value.assertion?.challengeHashHex ?? recomputed,
+        // Only set when we derived a signed pad (doctor encounter); therapy
+        // notes leave the column null.
+        ...(signedRxPad !== null && { rxPad: signedRxPad as unknown as Prisma.InputJsonValue }),
+        ...medicalProvenance,
+      };
+      const note = transactionExisting
+        ? await tx.therapyNote.update({ where: { id: transactionExisting.id }, data: noteData })
+        : await tx.therapyNote.create({ data: { sessionId, draftId: draft.id, ...noteData } });
+      if (transactionEdits.length > 0) {
+        await tx.noteEdit.createMany({
+          data: transactionEdits.map((e) => ({
+            therapyNoteId: note.id,
+            field: e.field,
+            before: e.before,
+            after: e.after,
+          })),
+        });
+      }
+      const auditBase = {
+        actorType: 'PSYCHOLOGIST' as const,
+        actorPsychologistId: auth.value.psychologistId,
+        targetType: 'TherapyNote',
+        targetId: note.id,
+        metadata: {
+          ...auditMetadataFromRequest(req),
+          sessionId,
+          draftId: draft.id,
+          editedFields: transactionEdits.map((e) => e.field),
+          resign: transactionExisting !== null,
+          payloadHashHex: recomputed,
+          webauthnUsed: input.value.assertion !== undefined,
+          webauthnEnforced: transactionCredentialBump !== null,
+          // Sprint 49 — disaggregate intake vs treatment (vs medical) in the
+          // signed-note audit trail so My Practice can split them.
+          kind: signableKind,
+          ...(medicalAuthority !== null && {
+            medicalSigningCredentialId: medicalAuthority.id,
+            medicalSigningCredentialKind: medicalAuthority.kind,
+            medicalSigningCredentialJurisdiction: medicalAuthority.jurisdiction,
+          }),
         },
-        tx,
+      };
+      // Sprint DV3 — medical encounter notes audit ENCOUNTER_NOTE_SIGNED;
+      // therapy notes keep NOTE_SIGNED. Two literal calls so the audit
+      // chaos-test regex picks both action strings up.
+      if (signableKind === 'MEDICAL') {
+        await writeAudit({ ...auditBase, action: 'ENCOUNTER_NOTE_SIGNED' }, tx);
+      } else {
+        await writeAudit({ ...auditBase, action: 'NOTE_SIGNED' }, tx);
+      }
+      // Batch B — the prescriber signed PAST a hard drug-allergy blocker. The
+      // gate is an override, not a locked door (a mislabeled allergy and a
+      // desensitised patient are both real), but it must leave a trail: one
+      // row, atomic with the signature, carrying what was overridden and why.
+      const override = input.value.safetyOverride;
+      if (override) {
+        await writeAudit(
+          {
+            ...auditBase,
+            action: 'RX_SAFETY_OVERRIDE',
+            metadata: {
+              ...auditBase.metadata,
+              reason: override.reason,
+              blockers: override.blockers,
+            },
+          },
+          tx,
+        );
+      }
+      if (transactionCredentialBump !== null) {
+        // Persist the authenticator's reported counter (not a blind +1) so
+        // the next sign can detect a rollback / cloned authenticator.
+        await tx.webAuthnCredential.update({
+          where: { id: transactionCredentialBump.id },
+          data: { lastUsedAt: new Date(), signCount: transactionCredentialBump.newSignCount },
+        });
+      }
+      return note;
+    });
+  } catch (error) {
+    if (error instanceof MedicalSigningAuthorizationError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
+    if (error instanceof MedicalSigningWebAuthnError) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+    if (error instanceof MedicalSigningConflictError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return NextResponse.json(
+        { error: 'Medical note was signed concurrently; reload and review the saved signature' },
+        { status: 409 },
       );
     }
-    if (credentialBump !== null) {
-      // Persist the authenticator's reported counter (not a blind +1) so
-      // the next sign can detect a rollback / cloned authenticator.
-      await tx.webAuthnCredential.update({
-        where: { id: credentialBump.id },
-        data: { lastUsedAt: new Date(), signCount: credentialBump.newSignCount },
-      });
-    }
-    return note;
-  });
+    throw error;
+  }
 
   const persistedEdits = await prisma.noteEdit.findMany({
     where: { therapyNoteId: created.id },
