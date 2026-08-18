@@ -3,7 +3,10 @@ import { SessionRescheduleInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { sendAppointmentRescheduledEmail } from '@/lib/appointment-email';
-import { cancelAppointmentReminderDeliveriesForReschedule } from '@/lib/appointment-reminder-outbox';
+import {
+  AppointmentReminderSubmissionInProgressError,
+  cancelAppointmentReminderDeliveriesForReschedule,
+} from '@/lib/appointment-reminder-outbox';
 import { lockLinkedAppointmentForSession } from '@/lib/appointment-transition';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
@@ -141,6 +144,12 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       return { created: nextSession, movedAppointmentId: linkedAppt?.id ?? null };
     });
   } catch (error) {
+    if (error instanceof AppointmentReminderSubmissionInProgressError) {
+      return NextResponse.json(
+        { error: 'A reminder is currently being submitted; retry the reschedule shortly' },
+        { status: 409 },
+      );
+    }
     const response =
       sessionConcurrentModificationResponse(error) ?? transactionConflictResponse(error);
     if (response) return response;

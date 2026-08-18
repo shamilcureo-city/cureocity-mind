@@ -32,6 +32,20 @@ export async function conditionalAppointmentTransition(
   return tx.appointment.findUniqueOrThrow({ where: { id: input.appointmentId } });
 }
 
+/** Lock one physical Appointment row using the shared lifecycle lock order. */
+export async function lockAppointmentById(
+  tx: Prisma.TransactionClient,
+  appointmentId: string,
+): Promise<Appointment | null> {
+  const rows = await tx.$queryRaw<Appointment[]>(Prisma.sql`
+    SELECT a.*
+    FROM "Appointment" a
+    WHERE a."id" = ${appointmentId}
+    FOR UPDATE
+  `);
+  return rows[0] ?? null;
+}
+
 /**
  * Lock any appointment linked to a session before that session is mutated.
  * Combined lifecycle writers use one global row-lock order: Appointment,
@@ -44,7 +58,7 @@ export async function lockLinkedAppointmentForSession(
 ): Promise<Appointment | null> {
   const rows = await tx.$queryRaw<Appointment[]>(Prisma.sql`
     SELECT a.*
-    FROM "appointments" a
+    FROM "Appointment" a
     WHERE a."sessionId" = ${input.sessionId}
       AND a."psychologistId" = ${input.psychologistId}
       AND a."status" = 'CONFIRMED'::"AppointmentStatus"

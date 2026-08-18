@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   appointmentConcurrentModificationResponse,
   conditionalAppointmentTransition,
+  lockAppointmentById,
+  lockLinkedAppointmentForSession,
 } from './appointment-transition';
 
 function transaction(count: number) {
@@ -46,6 +48,36 @@ describe('conditionalAppointmentTransition', () => {
       }),
     ).rejects.toMatchObject({ code: 'APPOINTMENT_CONCURRENT_MODIFICATION' });
     expect(tx.appointment.findUniqueOrThrow).not.toHaveBeenCalled();
+  });
+});
+
+describe('appointment row locks', () => {
+  it('queries the physical Appointment table when locking by id', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ id: 'appt-1' }]);
+
+    await expect(lockAppointmentById({ $queryRaw: queryRaw } as never, 'appt-1')).resolves.toEqual({
+      id: 'appt-1',
+    });
+
+    const query = queryRaw.mock.calls[0]?.[0] as { strings: readonly string[] };
+    const sql = query.strings.join('?');
+    expect(sql).toContain('FROM "Appointment" a');
+    expect(sql).toContain('FOR UPDATE');
+    expect(sql).not.toContain('FROM "appointments"');
+  });
+
+  it('queries the physical Appointment table when locking by linked session', async () => {
+    const queryRaw = vi.fn().mockResolvedValue([{ id: 'appt-1' }]);
+
+    await lockLinkedAppointmentForSession({ $queryRaw: queryRaw } as never, {
+      sessionId: 'session-1',
+      psychologistId: 'psy-1',
+    });
+
+    const query = queryRaw.mock.calls[0]?.[0] as { strings: readonly string[] };
+    const sql = query.strings.join('?');
+    expect(sql).toContain('FROM "Appointment" a');
+    expect(sql).not.toContain('FROM "appointments"');
   });
 });
 

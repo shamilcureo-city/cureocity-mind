@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  AppointmentReminderSubmissionInProgressError,
   beginAppointmentReminderSubmission,
+  cancelAppointmentReminderDeliveriesForCancellation,
+  cancelAppointmentReminderDeliveriesForReschedule,
   claimAppointmentReminderDelivery,
   completeAppointmentReminderDelivery,
   enqueueDueAppointmentReminderDeliveries,
@@ -125,6 +128,7 @@ describe('at-most-once submission state machine', () => {
 
   it('commits SUBMISSION_STARTED before the provider call boundary', async () => {
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([appointment()]),
       appointmentReminderDelivery: {
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: vi
@@ -142,9 +146,98 @@ describe('at-most-once submission state machine', () => {
       submissionStartedAt: NOW,
     });
     expect(tx.appointmentReminderDelivery.updateMany).toHaveBeenCalledWith({
-      where: { id: 'delivery-patient', status: 'DISPATCHING', leaseExpiresAt: LEASE_END },
+      where: {
+        id: 'delivery-patient',
+        appointmentId: 'appt-1',
+        scheduledStartAt: START,
+        status: 'DISPATCHING',
+        leaseExpiresAt: LEASE_END,
+      },
       data: { status: 'SUBMISSION_STARTED', submissionStartedAt: NOW, leaseExpiresAt: null },
     });
+  });
+
+  it('locks and validates the appointment before crossing the submission boundary', async () => {
+    const tx = {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValue([appointment({ startAt: new Date(START.getTime() + 1) })]),
+      appointmentReminderDelivery: {
+        updateMany: vi.fn(),
+        findUniqueOrThrow: vi.fn(),
+      },
+    };
+
+    await expect(beginAppointmentReminderSubmission(tx as never, row(), NOW)).resolves.toBeNull();
+    expect(tx.appointmentReminderDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('prevents send when cancellation wins after claim but before begin', async () => {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([appointment({ status: 'CANCELLED' })]),
+      appointmentReminderDelivery: {
+        updateMany: vi.fn(),
+        findUniqueOrThrow: vi.fn(),
+      },
+    };
+
+    await expect(beginAppointmentReminderSubmission(tx as never, row(), NOW)).resolves.toBeNull();
+    expect(tx.appointmentReminderDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('revalidates the current reminder window before submission starts', async () => {
+    const beforeTwoHourWindow = new Date('2026-08-18T11:59:59.999Z');
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([appointment()]),
+      appointmentReminderDelivery: {
+        updateMany: vi.fn(),
+        findUniqueOrThrow: vi.fn(),
+      },
+    };
+
+    await expect(
+      beginAppointmentReminderSubmission(tx as never, row(), beforeTwoHourWindow),
+    ).resolves.toBeNull();
+    expect(tx.appointmentReminderDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('public cancellation cancels every pre-submission state and preserves terminal proof', async () => {
+    const updateMany = vi.fn().mockResolvedValue({ count: 4 });
+    const tx = { appointmentReminderDelivery: { updateMany } };
+
+    await expect(
+      cancelAppointmentReminderDeliveriesForCancellation(tx as never, {
+        appointmentId: 'appt-1',
+      }),
+    ).resolves.toBe(4);
+
+    expect(updateMany).toHaveBeenCalledWith({
+      where: {
+        appointmentId: 'appt-1',
+        status: { in: ['PENDING', 'FAILED', 'IN_FLIGHT', 'DISPATCHING'] },
+      },
+      data: { status: 'CANCELLED', leaseExpiresAt: null, lastError: null },
+    });
+    expect(JSON.stringify(updateMany.mock.calls)).not.toMatch(
+      /SUBMISSION_STARTED|UNKNOWN|DELIVERED/,
+    );
+  });
+
+  it('blocks reschedule while a provider submission is in progress', async () => {
+    const tx = {
+      appointmentReminderDelivery: {
+        count: vi.fn().mockResolvedValue(1),
+        updateMany: vi.fn(),
+      },
+    };
+
+    await expect(
+      cancelAppointmentReminderDeliveriesForReschedule(tx as never, {
+        appointmentId: 'appt-1',
+        scheduledStartAt: START,
+      }),
+    ).rejects.toBeInstanceOf(AppointmentReminderSubmissionInProgressError);
+    expect(tx.appointmentReminderDelivery.updateMany).not.toHaveBeenCalled();
   });
 
   it('never automatically reclaims SUBMISSION_STARTED after restart or lease expiry', async () => {

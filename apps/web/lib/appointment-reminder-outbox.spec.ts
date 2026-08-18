@@ -123,7 +123,10 @@ describe('durable reminder enqueue', () => {
 describe('reschedule invalidation', () => {
   it('cancels only recipient rows that have not started submission', async () => {
     const tx = {
-      appointmentReminderDelivery: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
+      appointmentReminderDelivery: {
+        count: vi.fn().mockResolvedValue(0),
+        updateMany: vi.fn().mockResolvedValue({ count: 2 }),
+      },
     };
 
     await expect(
@@ -132,6 +135,13 @@ describe('reschedule invalidation', () => {
         scheduledStartAt: SCHEDULED_START,
       }),
     ).resolves.toBe(2);
+    expect(tx.appointmentReminderDelivery.count).toHaveBeenCalledWith({
+      where: {
+        appointmentId: 'appt-1',
+        scheduledStartAt: SCHEDULED_START,
+        status: 'SUBMISSION_STARTED',
+      },
+    });
     expect(tx.appointmentReminderDelivery.updateMany).toHaveBeenCalledWith({
       where: {
         appointmentId: 'appt-1',

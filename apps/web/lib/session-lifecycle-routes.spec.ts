@@ -101,6 +101,21 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(source).toContain('appointmentConcurrentModificationResponse(error)');
   });
 
+  it('locks public cancellation before its expected-state transition and reminder cancellation', () => {
+    const source = route('public/appointments/[id]/cancel');
+    const lock = source.indexOf('lockAppointmentById(');
+    const transition = source.indexOf('conditionalAppointmentTransition(', lock);
+    const reminders = source.indexOf(
+      'cancelAppointmentReminderDeliveriesForCancellation(',
+      transition,
+    );
+
+    expect(lock).toBeGreaterThan(-1);
+    expect(transition).toBeGreaterThan(lock);
+    expect(reminders).toBeGreaterThan(transition);
+    expect(source.slice(transition, reminders)).toContain('expectedStatus: appt.status');
+  });
+
   it.each(['public/appointments/[id]/cancel', 'sessions/[id]/reschedule'])(
     'maps database concurrency aborts to a stable conflict in %s',
     (path) => {
@@ -204,6 +219,12 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(source).toContain("deliveryStatus: 'UNKNOWN'");
     expect(source).toContain('manualReconciliationRequired: true');
     expect(source).not.toContain("transient: result.outcome === 'transient_failure'");
+  });
+
+  it('returns conflict rather than rescheduling across an in-flight reminder submission', () => {
+    const source = route('sessions/[id]/reschedule');
+    expect(source).toContain('AppointmentReminderSubmissionInProgressError');
+    expect(source).toContain('status: 409');
   });
 
   it('claims confirmation before creating any client or session side effects', () => {

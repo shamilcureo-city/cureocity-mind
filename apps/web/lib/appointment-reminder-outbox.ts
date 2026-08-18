@@ -2,6 +2,13 @@ import { Prisma, type Appointment, type AppointmentReminderDelivery } from '@pri
 
 export type ReminderWindowKind = '24H' | '2H';
 
+export class AppointmentReminderSubmissionInProgressError extends Error {
+  constructor() {
+    super('A reminder provider submission is in progress for this appointment schedule');
+    this.name = 'AppointmentReminderSubmissionInProgressError';
+  }
+}
+
 const TWO_HOURS_MS = 2 * 60 * 60_000;
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60_000;
 const MAX_BACKOFF_MS = 60 * 60_000;
@@ -101,11 +108,39 @@ export async function cancelAppointmentReminderDeliveriesForReschedule(
   tx: Prisma.TransactionClient,
   input: { appointmentId: string; scheduledStartAt: Date },
 ): Promise<number> {
+  const submissionStarted = await tx.appointmentReminderDelivery.count({
+    where: {
+      appointmentId: input.appointmentId,
+      scheduledStartAt: input.scheduledStartAt,
+      status: 'SUBMISSION_STARTED',
+    },
+  });
+  if (submissionStarted > 0) throw new AppointmentReminderSubmissionInProgressError();
+
   const result = await tx.appointmentReminderDelivery.updateMany({
     where: {
       appointmentId: input.appointmentId,
       scheduledStartAt: input.scheduledStartAt,
       status: { in: ['PENDING', 'FAILED', 'DISPATCHING'] },
+    },
+    data: { status: 'CANCELLED', leaseExpiresAt: null, lastError: null },
+  });
+  return result.count;
+}
+
+/**
+ * Cancel every delivery that provably has not crossed the provider boundary.
+ * Appointment lifecycle callers must hold the Appointment row lock first, so
+ * this update serializes with beginAppointmentReminderSubmission.
+ */
+export async function cancelAppointmentReminderDeliveriesForCancellation(
+  tx: Prisma.TransactionClient,
+  input: { appointmentId: string },
+): Promise<number> {
+  const result = await tx.appointmentReminderDelivery.updateMany({
+    where: {
+      appointmentId: input.appointmentId,
+      status: { in: ['PENDING', 'FAILED', 'IN_FLIGHT', 'DISPATCHING'] },
     },
     data: { status: 'CANCELLED', leaseExpiresAt: null, lastError: null },
   });
@@ -199,11 +234,40 @@ export async function claimAppointmentReminderDelivery(
  */
 export async function beginAppointmentReminderSubmission(
   tx: Prisma.TransactionClient,
-  delivery: Pick<AppointmentReminderDelivery, 'id' | 'leaseExpiresAt'>,
+  delivery: Pick<
+    AppointmentReminderDelivery,
+    'id' | 'appointmentId' | 'scheduledStartAt' | 'kind' | 'leaseExpiresAt'
+  >,
   startedAt: Date,
 ): Promise<AppointmentReminderDelivery | null> {
+  const appointments = await tx.$queryRaw<
+    Array<Pick<Appointment, 'id' | 'status' | 'startAt'>>
+  >(Prisma.sql`
+    SELECT a."id", a."status", a."startAt"
+    FROM "Appointment" a
+    WHERE a."id" = ${delivery.appointmentId}
+    FOR UPDATE
+  `);
+  const appointment = appointments[0];
+  const expectedKind = appointment ? reminderKindForStart(startedAt, appointment.startAt) : null;
+  if (
+    !appointment ||
+    appointment.status !== 'CONFIRMED' ||
+    appointment.startAt.getTime() !== delivery.scheduledStartAt.getTime() ||
+    expectedKind === null ||
+    prismaReminderKind(expectedKind) !== delivery.kind
+  ) {
+    return null;
+  }
+
   const result = await tx.appointmentReminderDelivery.updateMany({
-    where: { id: delivery.id, status: 'DISPATCHING', leaseExpiresAt: delivery.leaseExpiresAt },
+    where: {
+      id: delivery.id,
+      appointmentId: delivery.appointmentId,
+      scheduledStartAt: delivery.scheduledStartAt,
+      status: 'DISPATCHING',
+      leaseExpiresAt: delivery.leaseExpiresAt,
+    },
     data: { status: 'SUBMISSION_STARTED', submissionStartedAt: startedAt, leaseExpiresAt: null },
   });
   if (result.count !== 1) return null;

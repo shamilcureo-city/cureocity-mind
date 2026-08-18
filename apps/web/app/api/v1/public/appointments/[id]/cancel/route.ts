@@ -6,7 +6,9 @@ import { verifyAppointmentSig } from '@/lib/appointment-links';
 import {
   appointmentConcurrentModificationResponse,
   conditionalAppointmentTransition,
+  lockAppointmentById,
 } from '@/lib/appointment-transition';
+import { cancelAppointmentReminderDeliveriesForCancellation } from '@/lib/appointment-reminder-outbox';
 import {
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
@@ -49,11 +51,13 @@ export async function POST(
 
   try {
     await prisma.$transaction(async (tx) => {
+      await lockAppointmentById(tx, id);
       const cancelled = await conditionalAppointmentTransition(tx, {
         appointmentId: id,
         expectedStatus: appt.status,
         data: { status: 'CANCELLED' },
       });
+      await cancelAppointmentReminderDeliveriesForCancellation(tx, { appointmentId: id });
       if (cancelled.sessionId) {
         await conditionalSessionTransition(tx, {
           sessionId: cancelled.sessionId,
