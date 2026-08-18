@@ -4,7 +4,13 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
-import { withdrawalRefusalMessage, withdrawnScribeConsents } from '@/lib/consent-gate';
+import {
+  ConsentAuthorizationError,
+  consentAuthorizationResponse,
+  withdrawalRefusalMessage,
+  withdrawnScribeConsents,
+  withClientConsentLock,
+} from '@/lib/consent-gate';
 import {
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
@@ -76,31 +82,56 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
 
   let updated;
   try {
-    updated = await prisma.$transaction(async (tx) => {
-      const row = await conditionalSessionTransition(tx, {
-        sessionId,
-        expectedStatus: 'SCHEDULED',
-        data: {
-          status: 'IN_PROGRESS',
-          startedAt: new Date(),
-          ...(captureMode && { captureMode }),
-        },
-      });
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'SESSION_STARTED',
-          targetType: 'Session',
-          targetId: sessionId,
-          metadata: auditMetadataFromRequest(req),
-        },
-        tx,
-      );
-      return row;
-    });
+    updated = await prisma.$transaction((tx) =>
+      withClientConsentLock(tx, existing.clientId, async () => {
+        const current = await tx.session.findUnique({
+          where: { id: sessionId },
+          select: { consentSnapshot: true },
+        });
+        if (current?.consentSnapshot === null) {
+          throw new ConsentAuthorizationError('Session consent must be recorded before starting');
+        }
+        const currentScopes = new Set(
+          (
+            (current?.consentSnapshot as { entries?: Array<{ scope?: string }> })?.entries ?? []
+          ).map((entry) => entry.scope),
+        );
+        if (!currentScopes.has('CROSS_BORDER_PROCESSING')) {
+          throw new ConsentAuthorizationError(
+            'AI note analysis requires current cross-border processing consent',
+          );
+        }
+        const currentlyWithdrawn = await withdrawnScribeConsents(existing.clientId, tx);
+        if (currentlyWithdrawn.length > 0) {
+          throw new ConsentAuthorizationError(withdrawalRefusalMessage(currentlyWithdrawn));
+        }
+
+        const row = await conditionalSessionTransition(tx, {
+          sessionId,
+          expectedStatus: 'SCHEDULED',
+          data: {
+            status: 'IN_PROGRESS',
+            startedAt: new Date(),
+            ...(captureMode && { captureMode }),
+          },
+        });
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'SESSION_STARTED',
+            targetType: 'Session',
+            targetId: sessionId,
+            metadata: auditMetadataFromRequest(req),
+          },
+          tx,
+        );
+        return row;
+      }),
+    );
   } catch (error) {
-    const response = sessionConcurrentModificationResponse(error);
+    const response =
+      consentAuthorizationResponse(error) ?? sessionConcurrentModificationResponse(error);
     if (response) return response;
     throw error;
   }

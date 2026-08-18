@@ -10,6 +10,21 @@ export class ConditionalSessionTransitionError extends Error {
   }
 }
 
+export class SessionInvalidStateError extends Error {
+  readonly code = 'SESSION_INVALID_STATE' as const;
+
+  constructor(status: SessionStatus) {
+    super(`Cannot authorize live capture for a session in ${status} state`);
+    this.name = 'SessionInvalidStateError';
+  }
+}
+
+export function assertLiveTokenSessionStatus(status: SessionStatus): void {
+  if (status !== 'SCHEDULED' && status !== 'IN_PROGRESS') {
+    throw new SessionInvalidStateError(status);
+  }
+}
+
 export async function conditionalSessionTransition(
   tx: Prisma.TransactionClient,
   input: {
@@ -46,7 +61,12 @@ export async function finalizeLiveSession<T>(
 }
 
 export function sessionConcurrentModificationResponse(error: unknown): NextResponse | null {
-  if (!(error instanceof ConditionalSessionTransitionError)) return null;
+  if (
+    !(error instanceof ConditionalSessionTransitionError) &&
+    !(error instanceof SessionInvalidStateError)
+  ) {
+    return null;
+  }
   return NextResponse.json(
     {
       error: error.message,

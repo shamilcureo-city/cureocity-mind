@@ -1,4 +1,34 @@
+import { Prisma } from '@prisma/client';
+import { NextResponse } from 'next/server';
 import { prisma } from './prisma';
+
+export class ConsentAuthorizationError extends Error {
+  readonly code = 'SESSION_CONSENT_INVALID' as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConsentAuthorizationError';
+  }
+}
+
+export function consentAuthorizationResponse(error: unknown): NextResponse | null {
+  if (!(error instanceof ConsentAuthorizationError)) return null;
+  return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+}
+
+/**
+ * Serialize capture authorization and standing-consent mutations for one
+ * client. PostgreSQL holds this row lock until the caller's outer transaction
+ * commits or rolls back.
+ */
+export async function withClientConsentLock<T>(
+  tx: Prisma.TransactionClient,
+  clientId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "clients" WHERE "id" = ${clientId} FOR UPDATE`);
+  return operation();
+}
 
 /**
  * Batch E — the consent WITHDRAWAL check at capture time.
@@ -37,8 +67,11 @@ export interface WithdrawnConsentResult {
  * "never granted" case the snapshot logic already handles; conflating the two
  * would break every session created before a scope existed.
  */
-export async function withdrawnScribeConsents(clientId: string): Promise<ScribeConsentScope[]> {
-  const rows = await prisma.consent.findMany({
+export async function withdrawnScribeConsents(
+  clientId: string,
+  db: Pick<Prisma.TransactionClient, 'consent'> = prisma,
+): Promise<ScribeConsentScope[]> {
+  const rows = await db.consent.findMany({
     where: {
       clientId,
       scope: { in: [...SCRIBE_CONSENT_SCOPES] },
@@ -54,7 +87,7 @@ export async function withdrawnScribeConsents(clientId: string): Promise<ScribeC
     withdrawn.add(scope);
   }
   if (withdrawn.size === 0) return [];
-  const active = await prisma.consent.findMany({
+  const active = await db.consent.findMany({
     where: {
       clientId,
       scope: { in: [...withdrawn] },

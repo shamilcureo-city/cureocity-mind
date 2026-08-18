@@ -5,6 +5,11 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
+import { withClientConsentLock } from '@/lib/consent-gate';
 import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -48,69 +53,78 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   // missed at client creation) is persisted as a client-level Consent row,
   // so the pre-flight asks at most once and /start's cross-border gate sees
   // a durable record — not just this session's snapshot.
-  const standing = await prisma.consent.findMany({
-    where: {
-      clientId: existing.clientId,
-      scope: { in: dto.value.scopes },
-      status: 'GRANTED',
-      withdrawnAt: null,
-    },
-    select: { scope: true },
-  });
-  const standingScopes = new Set(standing.map((c) => c.scope));
-  const newScopes = dto.value.scopes.filter((s) => !standingScopes.has(s));
-
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.session.update({
-      where: { id: sessionId },
-      data: { consentSnapshot: snapshot },
-    });
-    for (const scope of newScopes) {
-      const consentRow = await tx.consent.create({
-        data: {
-          clientId: existing.clientId,
-          psychologistId: auth.value.psychologistId,
-          scope,
-          status: 'GRANTED',
-          scriptVersion: dto.value.scriptVersion,
-          capturedVia: 'IN_PERSON',
-          grantedAt: new Date(),
-          notes: `Captured in the pre-session consent step (session ${sessionId})`,
-        },
-      });
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'CONSENT_GRANTED',
-          targetType: 'Consent',
-          targetId: consentRow.id,
-          metadata: {
-            ...auditMetadataFromRequest(req),
-            scope,
+  let updated;
+  try {
+    updated = await prisma.$transaction((tx) =>
+      withClientConsentLock(tx, existing.clientId, async () => {
+        const standing = await tx.consent.findMany({
+          where: {
             clientId: existing.clientId,
-            source: 'SESSION_PRE_FLIGHT',
+            scope: { in: dto.value.scopes },
+            status: 'GRANTED',
+            withdrawnAt: null,
           },
-        },
-        tx,
-      );
-    }
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_CONSENT_RECORDED',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          scopes: dto.value.scopes,
-          scriptVersion: dto.value.scriptVersion,
-        },
-      },
-      tx,
+          select: { scope: true },
+        });
+        const standingScopes = new Set(standing.map((consent) => consent.scope));
+        const newScopes = dto.value.scopes.filter((scope) => !standingScopes.has(scope));
+        const row = await conditionalSessionTransition(tx, {
+          sessionId,
+          expectedStatus: 'SCHEDULED',
+          data: { consentSnapshot: snapshot },
+        });
+        for (const scope of newScopes) {
+          const consentRow = await tx.consent.create({
+            data: {
+              clientId: existing.clientId,
+              psychologistId: auth.value.psychologistId,
+              scope,
+              status: 'GRANTED',
+              scriptVersion: dto.value.scriptVersion,
+              capturedVia: 'IN_PERSON',
+              grantedAt: new Date(),
+              notes: `Captured in the pre-session consent step (session ${sessionId})`,
+            },
+          });
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'CONSENT_GRANTED',
+              targetType: 'Consent',
+              targetId: consentRow.id,
+              metadata: {
+                ...auditMetadataFromRequest(req),
+                scope,
+                clientId: existing.clientId,
+                source: 'SESSION_PRE_FLIGHT',
+              },
+            },
+            tx,
+          );
+        }
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'SESSION_CONSENT_RECORDED',
+            targetType: 'Session',
+            targetId: sessionId,
+            metadata: {
+              ...auditMetadataFromRequest(req),
+              scopes: dto.value.scopes,
+              scriptVersion: dto.value.scriptVersion,
+            },
+          },
+          tx,
+        );
+        return row;
+      }),
     );
-    return row;
-  });
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
   return NextResponse.json(toSession(updated));
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  assertLiveTokenSessionStatus,
   conditionalSessionTransition,
   finalizeLiveSession,
   sessionConcurrentModificationResponse,
@@ -114,6 +115,36 @@ describe('conditional Session lifecycle transition', () => {
       expect(writeLifecycleAudit).not.toHaveBeenCalled();
     },
   );
+
+  it.each(['SCHEDULED', 'IN_PROGRESS'] as const)(
+    'allows live-token authorization for %s',
+    (status) => {
+      expect(() => assertLiveTokenSessionStatus(status)).not.toThrow();
+    },
+  );
+
+  it.each(['COMPLETED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULED'] as const)(
+    'rejects live-token authorization for terminal state %s with a stable code',
+    (status) => {
+      expect(() => assertLiveTokenSessionStatus(status)).toThrowError(
+        expect.objectContaining({ code: 'SESSION_INVALID_STATE' }),
+      );
+    },
+  );
+
+  it('maps an invalid live-token state to a stable 409 response code', async () => {
+    try {
+      assertLiveTokenSessionStatus('COMPLETED');
+      throw new Error('expected authorization to fail');
+    } catch (error) {
+      const response = sessionConcurrentModificationResponse(error);
+      expect(response?.status).toBe(409);
+      await expect(response?.json()).resolves.toEqual({
+        error: 'Cannot authorize live capture for a session in COMPLETED state',
+        code: 'SESSION_INVALID_STATE',
+      });
+    }
+  });
 
   it('maps a lost transition to a stable 409 response code', async () => {
     const tx = transaction(0);

@@ -4,9 +4,16 @@ import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { signLiveToken } from '@/lib/live-token';
 import { fetchActiveMedications, fetchAllergies } from '@/lib/patient-context';
-import { withdrawalRefusalMessage, withdrawnScribeConsents } from '@/lib/consent-gate';
+import {
+  ConsentAuthorizationError,
+  consentAuthorizationResponse,
+  withdrawalRefusalMessage,
+  withdrawnScribeConsents,
+  withClientConsentLock,
+} from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
 import {
+  assertLiveTokenSessionStatus,
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
@@ -84,129 +91,121 @@ export async function POST(
     LIVE_SCOPED_CAPABILITIES.has(capability),
   );
 
-  // Batch E (DPDP) — checked on EVERY mint, not just the first. The old code
-  // only validated consent when a SCHEDULED session lacked a snapshot, so a
-  // patient who withdrew recording consent could still be streamed live: the
-  // session was already IN_PROGRESS, or already carried a snapshot from
-  // before the withdrawal, and neither path looked at the standing rows.
-  const withdrawn = await withdrawnScribeConsents(session.clientId);
-  if (withdrawn.length > 0) {
-    return NextResponse.json({ error: withdrawalRefusalMessage(withdrawn) }, { status: 409 });
-  }
-
-  if (session.status === 'SCHEDULED') {
-    const needsSnapshot = session.consentSnapshot === null;
-    // PROD5 (DPDP) — this route used to STAMP all three scopes onto the
-    // session unconditionally, fabricating a cross-border ack the patient
-    // may never have given. Now: a fresh snapshot is only written when the
-    // patient's STANDING consents actually cover the scribe scopes, and a
-    // pre-recorded snapshot must itself carry the cross-border scope.
-    if (needsSnapshot) {
-      const standing = await prisma.consent.findMany({
-        where: {
-          clientId: session.clientId,
-          scope: { in: [...LIVE_CONSENT_SCOPES] },
-          status: 'GRANTED',
-          withdrawnAt: null,
-        },
-        select: { scope: true },
-      });
-      const grantedSet = new Set(standing.map((c) => c.scope));
-      const missing = LIVE_CONSENT_SCOPES.filter((s) => !grantedSet.has(s));
-      if (missing.length > 0) {
-        return NextResponse.json(
-          {
-            error:
-              `The patient's consents on record do not cover the live scribe ` +
-              `(missing: ${missing.join(', ')}). Capture the missing consent on the ` +
-              `patient's record before starting a live consult — AI analysis processes ` +
-              `the transcript outside India.`,
-          },
-          { status: 409 },
-        );
-      }
-    } else {
-      const priorScopes = new Set(
-        ((session.consentSnapshot as { entries?: Array<{ scope?: string }> }).entries ?? []).map(
-          (e) => e.scope,
-        ),
-      );
-      if (!priorScopes.has('CROSS_BORDER_PROCESSING')) {
-        return NextResponse.json(
-          {
-            error:
-              'This session was consented without cross-border processing, which the live ' +
-              'scribe requires (AI analysis processes the transcript outside India). Capture ' +
-              'that consent before starting a live consult.',
-          },
-          { status: 409 },
-        );
-      }
-    }
-    const ackedAt = new Date().toISOString();
-    const snapshot: SessionConsentSnapshot = {
-      entries: LIVE_CONSENT_SCOPES.map((scope) => ({
-        scope,
-        scriptVersion: 'v1.0',
-        ackedAt,
-      })),
-      notes: 'Standing consents re-acknowledged at live consult start',
-    };
-    try {
-      await prisma.$transaction(async (tx) => {
-        await conditionalSessionTransition(tx, {
-          sessionId,
-          expectedStatus: 'SCHEDULED',
-          data: {
-            status: 'IN_PROGRESS',
-            startedAt: new Date(),
-            captureMode: 'LIVE',
-            ...(needsSnapshot && { consentSnapshot: snapshot }),
-          },
+  let tokenResult: ReturnType<typeof signLiveToken>;
+  try {
+    tokenResult = await prisma.$transaction((tx) =>
+      withClientConsentLock(tx, session.clientId, async () => {
+        const current = await tx.session.findUnique({
+          where: { id: sessionId },
+          select: { status: true, consentSnapshot: true },
         });
+        if (!current) throw new ConsentAuthorizationError('Session changed during authorization');
+        assertLiveTokenSessionStatus(current.status);
+
+        const withdrawn = await withdrawnScribeConsents(session.clientId, tx);
+        if (withdrawn.length > 0) {
+          throw new ConsentAuthorizationError(withdrawalRefusalMessage(withdrawn));
+        }
+
+        const needsSnapshot = current.status === 'SCHEDULED' && current.consentSnapshot === null;
         if (needsSnapshot) {
+          const standing = await tx.consent.findMany({
+            where: {
+              clientId: session.clientId,
+              scope: { in: [...LIVE_CONSENT_SCOPES] },
+              status: 'GRANTED',
+              withdrawnAt: null,
+            },
+            select: { scope: true },
+          });
+          const grantedSet = new Set(standing.map((consent) => consent.scope));
+          const missing = LIVE_CONSENT_SCOPES.filter((scope) => !grantedSet.has(scope));
+          if (missing.length > 0) {
+            throw new ConsentAuthorizationError(
+              `The patient's consents on record do not cover the live scribe (missing: ${missing.join(', ')})`,
+            );
+          }
+        } else {
+          const snapshotScopes = new Set(
+            (
+              (current.consentSnapshot as { entries?: Array<{ scope?: string }> } | null)
+                ?.entries ?? []
+            ).map((entry) => entry.scope),
+          );
+          if (!snapshotScopes.has('CROSS_BORDER_PROCESSING')) {
+            throw new ConsentAuthorizationError(
+              'This session does not have cross-border processing consent required by the live scribe',
+            );
+          }
+        }
+
+        if (current.status === 'SCHEDULED') {
+          const ackedAt = new Date().toISOString();
+          const snapshot: SessionConsentSnapshot = {
+            entries: LIVE_CONSENT_SCOPES.map((scope) => ({
+              scope,
+              scriptVersion: 'v1.0',
+              ackedAt,
+            })),
+            notes: 'Standing consents re-acknowledged at live consult start',
+          };
+          await conditionalSessionTransition(tx, {
+            sessionId,
+            expectedStatus: 'SCHEDULED',
+            data: {
+              status: 'IN_PROGRESS',
+              startedAt: new Date(),
+              captureMode: 'LIVE',
+              ...(needsSnapshot && { consentSnapshot: snapshot }),
+            },
+          });
+          if (needsSnapshot) {
+            await writeAudit(
+              {
+                actorType: 'PSYCHOLOGIST',
+                actorPsychologistId: auth.value.psychologistId,
+                action: 'SESSION_CONSENT_RECORDED',
+                targetType: 'Session',
+                targetId: sessionId,
+                metadata: {
+                  ...auditMetadataFromRequest(req),
+                  scopes: [...LIVE_CONSENT_SCOPES],
+                  scriptVersion: 'v1.0',
+                  source: 'LIVE',
+                },
+              },
+              tx,
+            );
+          }
           await writeAudit(
             {
               actorType: 'PSYCHOLOGIST',
               actorPsychologistId: auth.value.psychologistId,
-              action: 'SESSION_CONSENT_RECORDED',
+              action: 'SESSION_STARTED',
               targetType: 'Session',
               targetId: sessionId,
-              metadata: {
-                ...auditMetadataFromRequest(req),
-                scopes: [...LIVE_CONSENT_SCOPES],
-                scriptVersion: 'v1.0',
-                source: 'LIVE',
-              },
+              metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
             },
             tx,
           );
         }
-        await writeAudit(
-          {
-            actorType: 'PSYCHOLOGIST',
-            actorPsychologistId: auth.value.psychologistId,
-            action: 'SESSION_STARTED',
-            targetType: 'Session',
-            targetId: sessionId,
-            metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
-          },
-          tx,
-        );
-      });
-    } catch (error) {
-      const response = sessionConcurrentModificationResponse(error);
-      if (response) return response;
-      throw error;
-    }
+
+        return signLiveToken({
+          sessionId,
+          psychologistId: auth.value.psychologistId,
+          vertical: session.psychologist.vertical,
+          capabilities,
+        });
+      }),
+    );
+  } catch (error) {
+    const response =
+      consentAuthorizationResponse(error) ?? sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
   }
 
-  const { token, expiresInSec } = signLiveToken({
-    sessionId,
-    psychologistId: auth.value.psychologistId,
-    vertical: session.psychologist.vertical,
-    capabilities,
-  });
+  const { token, expiresInSec } = tokenResult;
 
   // DOC-3 — hand the browser the patient's confirmed active meds so it can
   // seed the live CaseState. The gateway's drug-interaction engine then sees

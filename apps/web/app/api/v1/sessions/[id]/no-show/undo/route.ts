@@ -4,6 +4,10 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,27 +39,35 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.session.update({
-      where: { id: sessionId },
-      data: { status: 'SCHEDULED' },
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_NO_SHOW_UNDONE',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          clientId: existing.clientId,
-          scheduledAt: existing.scheduledAt.toISOString(),
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      const row = await conditionalSessionTransition(tx, {
+        sessionId,
+        expectedStatus: 'NO_SHOW',
+        data: { status: 'SCHEDULED' },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'SESSION_NO_SHOW_UNDONE',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            clientId: existing.clientId,
+            scheduledAt: existing.scheduledAt.toISOString(),
+          },
         },
-      },
-      tx,
-    );
-    return row;
-  });
+        tx,
+      );
+      return row;
+    });
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
   return NextResponse.json(toSession(updated));
 }
