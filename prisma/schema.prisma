@@ -2761,7 +2761,7 @@ model NoteReview {
 /// it holds the unit economics honest: ≤ ₹2 / consult, transcript p95 ≤ 2s.
 model LiveConsultMetric {
   id             String @id @default(cuid())
-  sessionId      String
+  sessionId      String @unique
   psychologistId String
 
   /// 'mock' | 'vertex' — which backend produced these numbers.
@@ -2896,6 +2896,7 @@ enum AuditAction {
   DSR_ACCESS_FULFILLED
   DSR_CORRECTION_REQUESTED
   DSR_ERASURE_REQUESTED
+  DSR_ERASURE_APPROVED
   DSR_ERASURE_FULFILLED
   DSR_NOMINATION_RECORDED
   DSR_GRIEVANCE_FILED

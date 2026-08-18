@@ -82,7 +82,7 @@ export class ConsultMeter {
     this.costInr += c.costInr;
   }
 
-  summary(sessionId: string, backend: string, elapsedMs: number): MeterSummary {
+  summary(sessionId: string, backend: MeterSummary['backend'], elapsedMs: number): MeterSummary {
     return {
       sessionId,
       backend,

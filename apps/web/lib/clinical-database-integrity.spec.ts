@@ -81,6 +81,15 @@ describe('DPDP erasure decision integrity', () => {
       /metadata:[\s\S]{0,500}resolutionNotes:\s*body\.value\.resolutionNotes/,
     );
   });
+
+  it('never describes approval as fulfilment and emits fulfilment only beside erasure', () => {
+    const route = source('apps/web/app/api/v1/admin/erasure/[id]/route.ts');
+    expect(route).toContain("action: 'DSR_ERASURE_APPROVED'");
+    expect(route).not.toMatch(/status === 'APPROVED'[\s\S]{0,120}DSR_ERASURE_FULFILLED/);
+    expect(route).toMatch(
+      /if \(body\.value\.status === 'FULFILLED'\) \{[\s\S]*eraseClientPhi[\s\S]*DSR_ERASURE_FULFILLED/,
+    );
+  });
 });
 
 describe('signed-note correction concurrency boundary', () => {

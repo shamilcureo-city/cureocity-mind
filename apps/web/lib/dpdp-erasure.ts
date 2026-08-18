@@ -162,6 +162,25 @@ export async function eraseClientPhi(
   await tx.clientPushSubscription.deleteMany({ where: { clientId } });
   await tx.clientClaimToken.deleteMany({ where: { clientId } });
 
+  // AppointmentReminderDelivery lands in the appointment-lifecycle stream.
+  // Feature branches may deploy independently, so discover the table without
+  // weakening the eventual fixed-point erasure: when present, the FK child and
+  // provider idempotency metadata are deleted before Appointment is redacted.
+  const [reminderDeliveryTable] = await tx.$queryRaw<Array<{ exists: boolean }>>`
+    SELECT to_regclass('public.appointment_reminder_deliveries') IS NOT NULL AS "exists"
+  `;
+  if (reminderDeliveryTable?.exists) {
+    await tx.$executeRaw`
+      DELETE FROM "appointment_reminder_deliveries"
+      WHERE "appointmentId" IN (
+        SELECT "id"
+        FROM "Appointment"
+        WHERE "clientId" = ${clientId}
+           OR "sessionId" IN (${Prisma.join(sessionIds.length > 0 ? sessionIds : [''])})
+      )
+    `;
+  }
+
   await tx.consent.updateMany({ where: { clientId }, data: { notes: null } });
   await tx.noteDraft.updateMany({
     where: { sessionId: { in: sessionIds } },

@@ -51,6 +51,27 @@ describe('live metric PHI serialization', () => {
     expect(route).not.toMatch(/prisma\.(liveConsultMetric|geminiCallLog)\.create/);
     expect(route).toMatch(/writeAudit\([\s\S]*?,\s*tx,?\s*\)/);
   });
+
+  it('accepts only finalized sessions and persists each session spend once', () => {
+    const route = source('app/api/v1/sessions/[id]/live-metric/route.ts');
+    const doctor = source('components/app/DoctorLiveEncounter.tsx');
+    const schema = source('../../prisma/schema.prisma');
+    const migration = source(
+      '../../prisma/migrations/20260919000000_live_metric_idempotency/migration.sql',
+    );
+
+    expect(route).toContain("{ allowedStatuses: ['COMPLETED'] }");
+    expect(route).toContain('liveConsultMetric.upsert');
+    expect(route).toContain('liveConsultMetric.findUnique');
+    expect(doctor).toMatch(
+      /await fetch\(`\/api\/v1\/sessions\/\$\{sessionId\}\/live-note`[\s\S]*await persistMeter/,
+    );
+    expect(doctor).not.toMatch(/event\.state === 'done'[\s\S]{0,300}persistMeter/);
+    expect(schema).toMatch(/model LiveConsultMetric[\s\S]*?sessionId\s+String\s+@unique/);
+    expect(migration).toContain('ROW_NUMBER() OVER');
+    expect(migration).toContain('CREATE UNIQUE INDEX');
+    expect(migration).toContain('LIVE_CONSULT_ROLLUP_V1');
+  });
 });
 
 describe('plan dictation PHI serialization', () => {

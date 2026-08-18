@@ -1137,7 +1137,7 @@ export class LiveSession {
   }
 
   private meterSummary() {
-    return this.meter.summary(this.sessionId, this.backends.backend, Date.now() - this.startedAtMs);
+    return this.meter.summary(this.sessionId, this.backends.backend, this.elapsedMs());
   }
 
   /**

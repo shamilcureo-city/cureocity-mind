@@ -111,24 +111,56 @@ export async function PATCH(
         throw new ErasureHttpError(409, 'Erasure decision changed concurrently');
       }
 
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          ...(body.value.status === 'FULFILLED' || body.value.status === 'APPROVED'
-            ? { action: 'DSR_ERASURE_FULFILLED' as const }
-            : { action: 'DSR_ERASURE_REQUESTED' as const }),
-          targetType: 'ClientErasureRequest',
-          targetId: id,
-          metadata: {
-            ...(body.value.status !== 'FULFILLED' && auditMetadataFromRequest(req)),
-            ...(body.value.status !== 'FULFILLED' && { clientId: locked.clientId }),
-            transition: `${locked.status} -> ${body.value.status}`,
-            ...(resolutionNotesHashHex && { resolutionNotesHashHex }),
+      if (body.value.status === 'FULFILLED') {
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'DSR_ERASURE_FULFILLED',
+            targetType: 'ClientErasureRequest',
+            targetId: id,
+            metadata: {
+              transition: `${locked.status} -> FULFILLED`,
+              ...(resolutionNotesHashHex && { resolutionNotesHashHex }),
+            },
           },
-        },
-        tx,
-      );
+          tx,
+        );
+      } else if (body.value.status === 'APPROVED') {
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'DSR_ERASURE_APPROVED',
+            targetType: 'ClientErasureRequest',
+            targetId: id,
+            metadata: {
+              ...auditMetadataFromRequest(req),
+              clientId: locked.clientId,
+              transition: `${locked.status} -> APPROVED`,
+              ...(resolutionNotesHashHex && { resolutionNotesHashHex }),
+            },
+          },
+          tx,
+        );
+      } else {
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'DSR_ERASURE_REQUESTED',
+            targetType: 'ClientErasureRequest',
+            targetId: id,
+            metadata: {
+              ...auditMetadataFromRequest(req),
+              clientId: locked.clientId,
+              transition: `${locked.status} -> REJECTED`,
+              ...(resolutionNotesHashHex && { resolutionNotesHashHex }),
+            },
+          },
+          tx,
+        );
+      }
     });
   } catch (error) {
     if (error instanceof ErasureHttpError) {

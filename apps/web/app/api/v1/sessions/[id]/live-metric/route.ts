@@ -47,15 +47,26 @@ export async function POST(
   // LIVE_METRIC_PHI_WRITE_GROUP — gateway/network work is already complete.
   // Lock the Client only for the short atomic metric + ledger + audit write;
   // erasure either follows this commit or wins and prevents every row.
-  let metric: { id: string };
+  let result: { metric: { id: string }; created: boolean };
   try {
-    metric = await withActiveSessionPhiWrite(
+    result = await withActiveSessionPhiWrite(
       prisma,
       sessionId,
       auth.value.psychologistId,
       async (tx) => {
-        const created = await tx.liveConsultMetric.create({
-          data: {
+        // The Client row lock serializes duplicate browser retries. The unique
+        // session key is the database backstop; an existing finalized rollup
+        // is returned unchanged and never creates a second spend ledger row.
+        const existing = await tx.liveConsultMetric.findUnique({
+          where: { sessionId },
+          select: { id: true },
+        });
+        if (existing) return { metric: existing, created: false };
+
+        const created = await tx.liveConsultMetric.upsert({
+          where: { sessionId },
+          update: {},
+          create: {
             // The URL param + auth are authoritative; the body is telemetry.
             sessionId,
             psychologistId: auth.value.psychologistId,
@@ -78,10 +89,9 @@ export async function POST(
           select: { id: true },
         });
 
-        // Batch D — mirror the consult's spend into GeminiCallLog.
-        // One rollup row per consult is the honest granularity available here.
-        // Mock consults cost nothing and are skipped to keep dev traffic out.
-        if (summary.backend !== 'mock' && summary.costInr > 0) {
+        // Batch D — mirror the consult's spend into GeminiCallLog exactly once.
+        // Mock consults are contractually zero-cost and never enter the ledger.
+        if (summary.backend === 'vertex' && summary.costInr > 0) {
           await tx.geminiCallLog.create({
             data: {
               sessionId,
@@ -91,10 +101,10 @@ export async function POST(
               model: `live-gateway:${summary.backend}`,
               region: 'asia-south1',
               promptVersion: 'LIVE_CONSULT_ROLLUP_V1',
-              inputTokens: Math.round(summary.inputTokens),
-              outputTokens: Math.round(summary.outputTokens),
+              inputTokens: summary.inputTokens,
+              outputTokens: summary.outputTokens,
               costInr: summary.costInr,
-              latencyMs: Math.round(summary.elapsedMs),
+              latencyMs: summary.elapsedMs,
               status: 'SUCCESS',
             },
           });
@@ -118,13 +128,14 @@ export async function POST(
           },
           tx,
         );
-        return created;
+        return { metric: created, created: true };
       },
+      { allowedStatuses: ['COMPLETED'] },
     );
   } catch (error) {
     if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ id: metric.id }, { status: 201 });
+  return NextResponse.json({ id: result.metric.id }, { status: result.created ? 201 : 200 });
 }

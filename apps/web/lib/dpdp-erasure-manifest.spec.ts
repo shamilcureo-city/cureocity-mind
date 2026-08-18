@@ -26,8 +26,14 @@ function schemaModels(): Map<string, Map<string, string>> {
 
 function clientLinkedModels(): Set<string> {
   const models = schemaModels();
+  // Seed every scalar client/session pointer before traversing relations. A
+  // direct scalar-only model (Appointment) can itself own PHI children
+  // (AppointmentReminderDelivery), so discovery must run to a fixed point.
   const linked = new Set<string>(['Client']);
-  const queue = ['Client'];
+  for (const [model, fields] of models) {
+    if (fields.has('clientId') || fields.has('sessionId')) linked.add(model);
+  }
+  const queue = [...linked];
   while (queue.length > 0) {
     const model = queue.shift()!;
     for (const target of models.get(model)?.values() ?? []) {
@@ -37,12 +43,12 @@ function clientLinkedModels(): Set<string> {
       }
     }
   }
-  for (const [model, fields] of models) {
-    if (fields.has('clientId') || fields.has('sessionId')) linked.add(model);
-  }
   linked.delete('Client');
   // Audit rows intentionally have no FK so they remain append-only proof.
   linked.add('AuditLog');
+  // The reminder outbox is introduced by the appointment-lifecycle stream.
+  // Keep it fail-closed while this branch is integrated with that schema.
+  linked.add('AppointmentReminderDelivery');
   return linked;
 }
 
@@ -109,6 +115,7 @@ describe('schema-complete DPDP erasure manifest', () => {
       'ClinicalReading',
       'TherapyNote',
       'NoteSignatureVersion',
+      'AppointmentReminderDelivery',
     ];
     expect(reviewerModels.every((model) => model in DPDP_ERASURE_MANIFEST)).toBe(true);
     expect(CLIENT_FIELD_ERASURE_MANIFEST).toMatchObject({
@@ -176,6 +183,17 @@ describe('schema-complete DPDP erasure manifest', () => {
         }
       }
     }
+  });
+
+  it('deletes appointment reminder delivery identifiers before redacting appointments', () => {
+    expect(DPDP_ERASURE_MANIFEST.AppointmentReminderDelivery).toMatchObject({
+      disposition: 'DELETE',
+      retentionClass: 'ERASE_ON_FULFILMENT',
+    });
+    const reminder = implementation.indexOf('appointment_reminder_deliveries');
+    const appointment = implementation.indexOf('tx.appointment.updateMany');
+    expect(reminder).toBeGreaterThan(0);
+    expect(reminder).toBeLessThan(appointment);
   });
 
   it('fixes signed-note erasure forward without changing the applied migration checksum', () => {

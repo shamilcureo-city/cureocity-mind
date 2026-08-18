@@ -113,6 +113,9 @@ export const DPDP_ERASURE_MANIFEST = {
   LiveConsultMetric: clinicalDelete('delete per-consult latency and quality measurements'),
   Letter: clinicalDelete('delete clinical letter recipient, subject and body'),
   ProblemListItem: clinicalDelete('delete problem title, detail and status history'),
+  AppointmentReminderDelivery: clinicalDelete(
+    'delete provider idempotency key, delivery errors, lease and delivery timestamps before redacting appointment',
+  ),
   Appointment: redact('unlink client/session and redact patient identity and concern'),
   AuditLog: legalProof(
     'retain append-only event proof; remove/hash PHI-bearing metadata and retain bounded codes/IDs',

@@ -138,38 +138,51 @@ export type VoiceCommand = z.infer<typeof VoiceCommandSchema>;
 // p95 ≤ 2s. costInr is a plain number (INR, ≤ 4 dp) — the DB column is the
 // Decimal. Latencies are whole ms.
 // ============================================================================
-export const MeterSummarySchema = z.object({
-  sessionId: z.string(),
-  /** 'mock' | 'vertex' — which backend produced these numbers. */
-  backend: z.string(),
-  /** Finalized transcription windows so far. */
-  windows: z.number().int().nonnegative(),
-  pass1Calls: z.number().int().nonnegative(),
-  pass2Calls: z.number().int().nonnegative(),
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-  costInr: z.number().nonnegative(),
-  /** Pass-1 (transcription) latency percentiles across windows. */
-  transcriptP50Ms: z.number().int().nonnegative(),
-  transcriptP95Ms: z.number().int().nonnegative(),
-  /**
-   * DOC-9 — the HONEST speech→transcript latency: from when a window's audio
-   * was actually spoken (wall-clock, derived from the real-time byte stream)
-   * to when its transcript was emitted. This includes the dominant
-   * window-wait (a VAD window is 6–12 s) + pump + the Pass-1 call, unlike
-   * transcriptP*Ms which times only the Pass-1 call and so reads
-   * systematically optimistic against the ≤2 s target. Default 0 for older
-   * rows. The real sub-2s fix is streaming ASR — this just stops the meter
-   * from reporting green while the lived latency is 7–15 s.
-   */
-  speechToTranscriptP50Ms: z.number().int().nonnegative().default(0),
-  speechToTranscriptP95Ms: z.number().int().nonnegative().default(0),
-  /** Pass-2 (note) latency percentiles across windows. */
-  noteP50Ms: z.number().int().nonnegative(),
-  noteP95Ms: z.number().int().nonnegative(),
-  /** Wall-clock since the consult started. */
-  elapsedMs: z.number().int().nonnegative(),
-});
+const LiveMeterCountSchema = z.number().int().nonnegative().max(2_147_483_647);
+const LiveMeterLatencySchema = z.number().int().nonnegative().max(86_400_000);
+
+export const MeterSummarySchema = z
+  .object({
+    sessionId: z.string().min(1).max(128),
+    /** 'mock' | 'vertex' — which backend produced these numbers. */
+    backend: z.enum(['mock', 'vertex']),
+    /** Finalized transcription windows so far. */
+    windows: LiveMeterCountSchema,
+    pass1Calls: LiveMeterCountSchema,
+    pass2Calls: LiveMeterCountSchema,
+    inputTokens: LiveMeterCountSchema,
+    outputTokens: LiveMeterCountSchema,
+    costInr: z.number().finite().nonnegative().max(999_999).multipleOf(0.0001),
+    /** Pass-1 (transcription) latency percentiles across windows. */
+    transcriptP50Ms: LiveMeterLatencySchema,
+    transcriptP95Ms: LiveMeterLatencySchema,
+    /**
+     * DOC-9 — the HONEST speech→transcript latency: from when a window's audio
+     * was actually spoken (wall-clock, derived from the real-time byte stream)
+     * to when its transcript was emitted. This includes the dominant
+     * window-wait (a VAD window is 6–12 s) + pump + the Pass-1 call, unlike
+     * transcriptP*Ms which times only the Pass-1 call and so reads
+     * systematically optimistic against the ≤2 s target. Default 0 for older
+     * rows. The real sub-2s fix is streaming ASR — this just stops the meter
+     * from reporting green while the lived latency is 7–15 s.
+     */
+    speechToTranscriptP50Ms: LiveMeterLatencySchema.default(0),
+    speechToTranscriptP95Ms: LiveMeterLatencySchema.default(0),
+    /** Pass-2 (note) latency percentiles across windows. */
+    noteP50Ms: LiveMeterLatencySchema,
+    noteP95Ms: LiveMeterLatencySchema,
+    /** Wall-clock since the consult started. */
+    elapsedMs: LiveMeterLatencySchema,
+  })
+  .superRefine((summary, ctx) => {
+    if (summary.backend === 'mock' && summary.costInr !== 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['costInr'],
+        message: 'Mock live sessions must report zero spend',
+      });
+    }
+  });
 export type MeterSummary = z.infer<typeof MeterSummarySchema>;
 
 // ============================================================================
