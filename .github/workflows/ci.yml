@@ -118,6 +118,13 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      # This one historical migration references Appointment before the table's
+      # later creation migration. It is already applied in production and must
+      # not be edited; reconcile only this disposable fresh CI database, then a
+      # fix-forward migration restores the intended indexes.
+      - name: Reconcile historical fresh-database migration ordering
+        run: pnpm db:prepare-fresh-ci
+
       - name: Apply Prisma migrations
         run: pnpm db:migrate:deploy
 
