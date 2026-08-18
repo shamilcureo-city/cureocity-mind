@@ -134,7 +134,11 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   // only possible when the booking left an email).
   if (movedAppointmentId) {
     after(() =>
-      sendAppointmentRescheduledEmail(auth.value.psychologistId, movedAppointmentId, newScheduledAt),
+      sendAppointmentRescheduledEmail(
+        auth.value.psychologistId,
+        movedAppointmentId,
+        newScheduledAt,
+      ),
     );
   }
 

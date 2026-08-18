@@ -103,9 +103,17 @@ describe('asynchronous note-generation PHI serialization', () => {
     expect(transcribeSegment).toContain('withActiveSessionPhiWrite');
     expect(transcribeSegment).toContain('PASS_1_SEGMENT_COMPLETED');
     expect(transcribeSegment).toContain('PASS_1_SEGMENT_FAILED');
+    expect(transcribeSegment).toContain('PASS_1_CALL_LOG');
+    expect(transcribeSegment).not.toContain('await persistCallLog(result.callLog);');
+    expect(transcribeSegment).not.toMatch(/prisma\.geminiCallLog\.create/);
     expect(transcribeSegment).not.toMatch(
       /prisma\.transcriptSegment\.(update|updateMany)\([\s\S]{0,300}(transcript:|errorMessage:)/,
     );
+
+    const liveNote = source('app/api/v1/sessions/[id]/live-note/route.ts');
+    expect(liveNote).toContain('PASS_9_LIVE_PREWARM_MARKER');
+    expect(liveNote).toContain('withActiveSessionPhiWrite');
+    expect(liveNote).not.toMatch(/prisma\.differential\.(findUnique|upsert)/);
 
     for (const writer of [
       'PASS_1_DRAFT_AND_LANGUAGE',

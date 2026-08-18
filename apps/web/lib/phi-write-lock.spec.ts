@@ -44,10 +44,10 @@ describe('DPDP PHI write serialization', () => {
   });
 
   it('marks the client terminal before any signed-note or child redaction', () => {
-    const route = source('app/api/v1/admin/erasure/[id]/route.ts');
-    const terminal = route.indexOf('deletedAt: now');
-    const signedRedaction = route.indexOf('redact_client_signed_note_phi');
-    const childRedaction = route.indexOf('tx.letter.deleteMany');
+    const erasure = source('lib/dpdp-erasure.ts');
+    const terminal = erasure.indexOf('deletedAt: now');
+    const signedRedaction = erasure.indexOf('redact_client_signed_note_phi');
+    const childRedaction = erasure.indexOf('tx.letter.deleteMany');
     expect(terminal).toBeGreaterThan(-1);
     expect(terminal).toBeLessThan(signedRedaction);
     expect(terminal).toBeLessThan(childRedaction);

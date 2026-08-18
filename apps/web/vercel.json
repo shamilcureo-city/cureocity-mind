@@ -37,6 +37,10 @@
     {
       "path": "/api/v1/cron/appointments",
       "schedule": "45 * * * *"
+    },
+    {
+      "path": "/api/v1/cron/erasure-object-deletion",
+      "schedule": "*/10 * * * *"
     }
   ],
   "env": {

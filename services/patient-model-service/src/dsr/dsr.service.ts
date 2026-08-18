@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type {
   AuditMetadata,
@@ -268,6 +269,9 @@ export class DsrService {
       );
     }
     const now = new Date();
+    const reasonHashHex = dto.reason
+      ? createHash('sha256').update(dto.reason).digest('hex')
+      : undefined;
     await this.prisma.$transaction(async (tx) => {
       await tx.consent.update({
         where: { id: active.id },
@@ -283,7 +287,7 @@ export class DsrService {
             ...auditMeta,
             clientId,
             scope: dto.scope,
-            ...(dto.reason !== undefined && { reason: dto.reason }),
+            ...(reasonHashHex && { reasonHashHex }),
           },
         },
         tx,

@@ -72,7 +72,8 @@ describe('DPDP erasure decision integrity', () => {
 
   it('uses the scoped owner function and hashes resolution notes in audits', () => {
     const route = source('apps/web/app/api/v1/admin/erasure/[id]/route.ts');
-    expect(route).toContain('redact_client_signed_note_phi');
+    const erasure = source('apps/web/lib/dpdp-erasure.ts');
+    expect(erasure).toContain('redact_client_signed_note_phi');
     expect(route).toContain("import { getMigrationPrisma } from '@/lib/prisma-migration'");
     expect(route).toContain('getMigrationPrisma().$transaction');
     expect(route).toContain('resolutionNotesHashHex');

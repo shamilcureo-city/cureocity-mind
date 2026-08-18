@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
-import { Prisma, type DsrErasureStatus } from '@prisma/client';
+import type { DsrErasureStatus } from '@prisma/client';
 import { z } from 'zod';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { eraseClientPhi } from '@/lib/dpdp-erasure';
 import { getMigrationPrisma } from '@/lib/prisma-migration';
 import { parseJson } from '@/lib/validate';
 
@@ -73,92 +74,11 @@ export async function PATCH(
       }
 
       if (body.value.status === 'FULFILLED') {
-        const clientId = locked.clientId;
-        // Mark the terminal state while the shared Client lock is held and
-        // before redaction. Later PHI writers acquire this lock and fail their
-        // deletedAt recheck; earlier writers must commit before this proceeds.
-        await tx.client.update({
-          where: { id: clientId },
-          data: {
-            deletedAt: now,
-            fullNameEncrypted: null,
-            contactPhoneEncrypted: null,
-            contactEmailEncrypted: null,
-            presentingConcerns: null,
-          },
-        });
-        // SECURITY DEFINER function owns the only narrowly-scoped exception to
-        // append-only signature history and redacts content/rxPad/signPayload.
-        await tx.$executeRaw`
-          SELECT redact_client_signed_note_phi(${id}, ${auth.value.psychologistId})
-        `;
-        const sessions = await tx.session.findMany({
-          where: { clientId },
-          select: { id: true },
-        });
-        const sessionIds = sessions.map(({ id: sessionId }) => sessionId);
-        const notes = await tx.therapyNote.findMany({
-          where: { sessionId: { in: sessionIds } },
-          select: { id: true },
-        });
-        const therapyNoteIds = notes.map(({ id: noteId }) => noteId);
-
-        await tx.letter.deleteMany({ where: { clientId } });
-        await tx.problemListItem.deleteMany({ where: { clientId } });
-        if (sessionIds.length > 0) {
-          await tx.noteReview.deleteMany({ where: { sessionId: { in: sessionIds } } });
-          await tx.audioChunk.updateMany({
-            where: { sessionId: { in: sessionIds } },
-            data: { bytes: null },
-          });
-          await tx.transcriptSegment.updateMany({
-            where: { sessionId: { in: sessionIds } },
-            data: {
-              transcript: null,
-              speakerSegments: Prisma.DbNull,
-              affectFeatures: Prisma.DbNull,
-              errorMessage: null,
-            },
-          });
-          await tx.noteDraft.updateMany({
-            where: { sessionId: { in: sessionIds } },
-            data: {
-              transcriptEncrypted: null,
-              speakerSegments: Prisma.DbNull,
-              affectFeatures: Prisma.DbNull,
-              content: Prisma.DbNull,
-              rxPad: Prisma.DbNull,
-              errorMessage: null,
-            },
-          });
-        }
-        if (therapyNoteIds.length > 0) {
-          await tx.noteEdit.updateMany({
-            where: { therapyNoteId: { in: therapyNoteIds } },
-            data: { before: 'redacted', after: 'redacted' },
-          });
-        }
-        await tx.clinicalReport.updateMany({
-          where: { clientId },
-          data: { body: Prisma.DbNull, confirmations: {}, errorMessage: null },
-        });
-        await tx.clientDiagnosis.updateMany({
-          where: { clientId },
-          data: { supportingEvidence: [], notes: null },
-        });
-        await tx.treatmentPlan.updateMany({ where: { clientId }, data: { body: {} } });
-        await tx.instrumentResponse.updateMany({
-          where: { clientId },
-          data: { responses: {}, notes: null },
-        });
-        await tx.preSessionBrief.updateMany({
-          where: { clientId },
-          data: { body: Prisma.DbNull, errorMessage: null },
-        });
-        await tx.therapyScript.updateMany({ where: { clientId }, data: { body: {} } });
-        await tx.patientShare.updateMany({
-          where: { clientId },
-          data: { snapshot: {}, toContact: null, subject: 'redacted', errorDetail: null },
+        await eraseClientPhi(tx, {
+          clientId: locked.clientId,
+          erasureRequestId: id,
+          psychologistId: auth.value.psychologistId,
+          now,
         });
 
         await writeAudit(
@@ -167,9 +87,8 @@ export async function PATCH(
             actorPsychologistId: auth.value.psychologistId,
             action: 'CLIENT_SOFT_DELETED',
             targetType: 'Client',
-            targetId: clientId,
+            targetId: locked.clientId,
             metadata: {
-              ...auditMetadataFromRequest(req),
               cause: 'DSR_ERASURE',
               erasureRequestId: id,
             },
@@ -184,9 +103,8 @@ export async function PATCH(
           status: body.value.status,
           resolvedAt: now,
           resolvedByPsychologistId: auth.value.psychologistId,
-          ...(body.value.resolutionNotes !== undefined && {
-            resolutionNotes: body.value.resolutionNotes,
-          }),
+          resolutionNotes: null,
+          resolutionNotesHashHex: resolutionNotesHashHex ?? null,
         },
       });
       if (transitioned.count !== 1) {
@@ -203,8 +121,8 @@ export async function PATCH(
           targetType: 'ClientErasureRequest',
           targetId: id,
           metadata: {
-            ...auditMetadataFromRequest(req),
-            clientId: locked.clientId,
+            ...(body.value.status !== 'FULFILLED' && auditMetadataFromRequest(req)),
+            ...(body.value.status !== 'FULFILLED' && { clientId: locked.clientId }),
             transition: `${locked.status} -> ${body.value.status}`,
             ...(resolutionNotesHashHex && { resolutionNotesHashHex }),
           },

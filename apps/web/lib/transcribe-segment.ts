@@ -274,6 +274,8 @@ export async function transcribeChunkInline(
     args.sessionId,
     chunk.session.psychologistId,
     async (tx) => {
+      // PASS_1_CALL_LOG — session ownership/state is reread while the Client
+      // lock is held; erasure cannot leave a delayed model log behind.
       await persistCallLog(result.callLog, tx);
       await tx.transcriptSegment.update({
         where: { id: segmentId },
@@ -348,6 +350,8 @@ async function markSegmentFailed(
       sessionId,
       psychologistId,
       async (tx) => {
+        // PASS_1_CALL_LOG — failed call logs carry bounded errors and are PHI-
+        // linked artifacts, so persist them under the same erasure lock.
         if (callLog) await persistCallLog(callLog, tx);
         const safeReason = compactPassError(reason);
         const updated = await tx.transcriptSegment.update({
@@ -386,9 +390,9 @@ async function markSegmentFailed(
 
 async function persistCallLog(
   log: GeminiCallLogData,
-  db: Pick<Prisma.TransactionClient, 'geminiCallLog'> = prisma,
+  tx: Pick<Prisma.TransactionClient, 'geminiCallLog'>,
 ): Promise<void> {
-  await db.geminiCallLog.create({
+  await tx.geminiCallLog.create({
     data: {
       ...(log.sessionId !== undefined && { sessionId: log.sessionId }),
       pass: log.pass,

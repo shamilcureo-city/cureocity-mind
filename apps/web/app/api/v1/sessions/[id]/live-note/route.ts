@@ -23,7 +23,11 @@ import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
-import { lockActiveClientForSession } from '@/lib/phi-write-lock';
+import {
+  ClientPhiWriteForbiddenError,
+  lockActiveClientForSession,
+  withActiveSessionPhiWrite,
+} from '@/lib/phi-write-lock';
 import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
@@ -377,19 +381,42 @@ export async function POST(
   // pending row instead of triggering a duplicate run, then do the heavy pass
   // in after() so the doctor's response isn't blocked. Skipped when a
   // COMPLETED differential already exists (a re-POST must not wipe it).
-  const existingDiff = await prisma.differential.findUnique({
-    where: { sessionId },
-    select: { status: true },
-  });
-  if (
-    auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS') &&
-    existingDiff?.status !== 'COMPLETED'
-  ) {
-    await prisma.differential.upsert({
-      where: { sessionId },
-      update: { status: 'IN_PROGRESS', errorMessage: null },
-      create: { sessionId, psychologistId: auth.value.psychologistId, status: 'IN_PROGRESS' },
-    });
+  let shouldPrewarmDifferential = false;
+  if (auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
+    try {
+      // PASS_9_LIVE_PREWARM_MARKER — the find + upsert are one short PHI
+      // transaction that locks the active Client and rereads Session ownership
+      // and COMPLETED state. Erasure therefore wins cleanly without a marker.
+      shouldPrewarmDifferential = await withActiveSessionPhiWrite(
+        prisma,
+        sessionId,
+        auth.value.psychologistId,
+        async (tx) => {
+          const existingDiff = await tx.differential.findUnique({
+            where: { sessionId },
+            select: { status: true },
+          });
+          if (existingDiff?.status === 'COMPLETED') return false;
+          await tx.differential.upsert({
+            where: { sessionId },
+            update: { status: 'IN_PROGRESS', errorMessage: null },
+            create: {
+              sessionId,
+              psychologistId: auth.value.psychologistId,
+              status: 'IN_PROGRESS',
+            },
+          });
+          return true;
+        },
+        { allowedStatuses: ['COMPLETED'] },
+      );
+    } catch (error) {
+      if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
+      // The note committed before erasure, then erasure won the next Client
+      // lock. Its terminal state is authoritative; do not recreate a marker.
+    }
+  }
+  if (shouldPrewarmDifferential) {
     after(async () => {
       // runDifferential owns its own error handling (marks the row FAILED,
       // never throws) — this guard is belt-and-braces for the after() context.

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { DsrConsentWithdrawalInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
@@ -48,6 +49,9 @@ export async function POST(
   }
 
   const now = new Date();
+  const reasonHashHex = body.value.reason
+    ? createHash('sha256').update(body.value.reason).digest('hex')
+    : undefined;
   await prisma.$transaction(async (tx) => {
     await tx.consent.update({
       where: { id: active.id },
@@ -64,7 +68,7 @@ export async function POST(
           ...auditMetadataFromRequest(req),
           onBehalfOf: clientId,
           scope: body.value.scope,
-          ...(body.value.reason && { reason: body.value.reason }),
+          ...(reasonHashHex && { reasonHashHex }),
         },
       },
       tx,

@@ -654,6 +654,13 @@ enum DsrErasureStatus {
   FULFILLED
 }
 
+enum ErasureObjectDeletionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum DsrGrievanceStatus {
   OPEN
   ACKNOWLEDGED
@@ -694,23 +701,52 @@ model ClientErasureRequest {
   clientId String
   status   DsrErasureStatus @default(PENDING)
 
-  /// Free-text reason the client supplied.
-  reason String? @db.Text
+  /// Free-text reason exists only while the request is open. Fulfilment stores
+  /// a one-way digest as bounded proof and clears the payload.
+  reason        String? @db.Text
+  reasonHashHex String?
 
   /// Admin who acted on it (null until reviewed). FK kept loose
   /// because admins may be soft-deleted later.
   resolvedByPsychologistId String?
   resolvedAt               DateTime?
   resolutionNotes          String?   @db.Text
+  resolutionNotesHashHex   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client              Client                      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  objectDeletionTasks ErasureObjectDeletionTask[]
 
   @@index([clientId, status])
   @@index([status, createdAt])
   @@map("client_erasure_requests")
+}
+
+/// Transactional outbox for externally stored client audio. objectKey is
+/// removed after confirmed deletion; its digest remains bounded DSR proof.
+model ErasureObjectDeletionTask {
+  id               String                      @id @default(cuid())
+  erasureRequestId String
+  storageProvider  String
+  objectKey        String?
+  objectKeyHashHex String
+  status           ErasureObjectDeletionStatus @default(PENDING)
+  attempts         Int                         @default(0)
+  lastErrorCode    String?
+  nextAttemptAt    DateTime                    @default(now())
+  leaseToken       String?
+  leaseExpiresAt   DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  erasureRequest ClientErasureRequest @relation(fields: [erasureRequestId], references: [id], onDelete: Restrict)
+
+  @@unique([erasureRequestId, storageProvider, objectKeyHashHex])
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@map("erasure_object_deletion_tasks")
 }
 
 model ClientGrievance {
