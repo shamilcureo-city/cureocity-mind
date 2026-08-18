@@ -1,6 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import type {
+  PractitionerCapability,
+  PractitionerCredentialKind,
+  PractitionerProfession,
+} from '@cureocity/contracts';
 import { firebaseAuth } from './firebase-admin';
 import { prisma } from './prisma';
+import { getEffectiveCapabilities, serializeCapabilities } from './capabilities';
+import { auditMetadataFromRequest, writeAudit } from './audit';
 
 /**
  * Three resolution functions, ported from the NestJS guards:
@@ -63,22 +70,19 @@ export function sessionCookieDomain(): string | undefined {
 let warnedFailClosed = false;
 
 export function isAuthBypassed(): boolean {
-  if (process.env['AUTH_BYPASS'] === 'true') return true;
-  if (firebaseAuth() !== null) return false;
-  // Unconfigured Firebase: bypass is a dev/preview convenience only.
-  // A production deployment without Firebase env vars fails closed.
-  if (process.env['VERCEL_ENV'] === 'production') {
-    if (!warnedFailClosed) {
+  const production =
+    process.env['NODE_ENV'] === 'production' || process.env['VERCEL_ENV'] === 'production';
+  if (production) {
+    if (firebaseAuth() === null && !warnedFailClosed) {
       warnedFailClosed = true;
       console.error(
-        '[auth] Firebase Admin is not configured on a production deployment and ' +
-          'AUTH_BYPASS is not set — refusing to serve the demo identity. ' +
-          'Set FIREBASE_PROJECT_ID/CLIENT_EMAIL/PRIVATE_KEY for real auth, ' +
-          'or AUTH_BYPASS=true for an explicit demo deployment.',
+        '[auth] Firebase Admin is not configured in production — refusing demo identity.',
       );
     }
     return false;
   }
+  if (process.env['AUTH_BYPASS'] === 'true') return true;
+  if (firebaseAuth() !== null) return false;
   return true;
 }
 
@@ -90,6 +94,9 @@ export interface AuthenticatedUser {
   /// Sprint DV1 — product vertical of the resolved account. Absent when
   /// no Psychologist row is linked yet. See docs/DOCTOR_VERTICAL.md.
   vertical?: 'THERAPIST' | 'DOCTOR';
+  profession?: PractitionerProfession;
+  capabilities?: PractitionerCapability[];
+  verifiedCredentialKinds?: PractitionerCredentialKind[];
 }
 
 export interface AuthenticatedClient {
@@ -215,6 +222,10 @@ export async function resolvePsychologist(req: NextRequest): Promise<Resolved<Au
     user.psychologistId = psy.id;
     user.role = psy.role;
     user.vertical = psy.vertical;
+    const effective = await getEffectiveCapabilities(psy.id);
+    user.profession = effective.profession ?? undefined;
+    user.capabilities = serializeCapabilities(effective);
+    user.verifiedCredentialKinds = [...effective.verifiedCredentialKinds].sort();
   }
   return { ok: true, value: user };
 }
@@ -239,6 +250,78 @@ export async function requirePsychologistId(
   return {
     ok: true,
     value: { user: resolved.value, psychologistId: resolved.value.psychologistId },
+  };
+}
+
+export async function requireCapability(
+  req: NextRequest,
+  capability: PractitionerCapability,
+  preResolved?: Resolved<{ user: AuthenticatedUser; psychologistId: string }>,
+): Promise<Resolved<{ user: AuthenticatedUser; psychologistId: string }>> {
+  const resolved = preResolved ?? (await requirePsychologistId(req));
+  if (!resolved.ok) return resolved;
+  // Re-query at the regulated boundary: a capability may have been revoked
+  // after the identity snapshot was resolved earlier in the request.
+  const effective = await getEffectiveCapabilities(resolved.value.psychologistId);
+  if (effective.capabilities.has(capability)) {
+    resolved.value.user.profession = effective.profession ?? undefined;
+    resolved.value.user.capabilities = serializeCapabilities(effective);
+    resolved.value.user.verifiedCredentialKinds = [...effective.verifiedCredentialKinds].sort();
+    return resolved;
+  }
+  await writeAudit({
+    actorType: 'PSYCHOLOGIST',
+    actorPsychologistId: resolved.value.psychologistId,
+    action: 'CAPABILITY_ACCESS_DENIED',
+    targetType: 'PractitionerCapability',
+    targetId: capability,
+    metadata: auditMetadataFromRequest(req),
+  });
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { error: 'This account is not authorized for the requested clinical capability' },
+      { status: 403 },
+    ),
+  };
+}
+
+/**
+ * Authorize a mixed read surface when the practitioner may independently
+ * access any one of several regulated sections. Callers must still filter
+ * the response using the refreshed capability snapshot returned here.
+ */
+export async function requireAnyCapability(
+  req: NextRequest,
+  capabilities: readonly PractitionerCapability[],
+): Promise<Resolved<{ user: AuthenticatedUser; psychologistId: string }>> {
+  const resolved = await requirePsychologistId(req);
+  if (!resolved.ok) return resolved;
+
+  const effective = await getEffectiveCapabilities(resolved.value.psychologistId);
+  resolved.value.user.profession = effective.profession ?? undefined;
+  resolved.value.user.capabilities = serializeCapabilities(effective);
+  resolved.value.user.verifiedCredentialKinds = [...effective.verifiedCredentialKinds].sort();
+  if (capabilities.some((capability) => effective.capabilities.has(capability))) return resolved;
+
+  await Promise.all(
+    capabilities.map((capability) =>
+      writeAudit({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: resolved.value.psychologistId,
+        action: 'CAPABILITY_ACCESS_DENIED',
+        targetType: 'PractitionerCapability',
+        targetId: capability,
+        metadata: auditMetadataFromRequest(req),
+      }),
+    ),
+  );
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { error: 'This account is not authorized for the requested clinical capabilities' },
+      { status: 403 },
+    ),
   };
 }
 

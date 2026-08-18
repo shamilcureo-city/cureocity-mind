@@ -16,7 +16,7 @@ import {
   type ShareInput,
   type ShareResultEntry,
 } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { shareChannels } from '@/lib/share-channels';
 import { buildSnapshot, SnapshotBuildError } from '@/lib/share-snapshots';
@@ -55,7 +55,7 @@ const SHARES_PER_HOUR_CAP = Number(process.env['SHARES_PER_HOUR_CAP'] ?? 30);
  * Every row writes PATIENT_ARTEFACT_SHARED with the channel + outcome.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'PATIENT_SHARING');
   if (!auth.ok) return auth.response;
 
   const body = await parseJson(req, ShareInputSchema);

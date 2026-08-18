@@ -39,6 +39,8 @@ import {
 } from './transcribe-segment';
 import { compactPassError } from './pass-error';
 import { hasTranscript } from './note-transcript';
+import { assertSessionCapabilities } from './capabilities';
+import { requiredMedicalCapabilities } from './regulated-actions';
 
 /**
  * Synchronous orchestrator port — runs Pass 1 → Pass 2 inline on the
@@ -71,6 +73,11 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     include: { client: true, psychologist: { select: { vertical: true } } },
   });
   if (!session) throw new Error(`Session ${sessionId} not found`);
+  await assertSessionCapabilities(sessionId, [
+    session.psychologist.vertical === 'DOCTOR'
+      ? 'MEDICAL_DOCUMENTATION'
+      : 'BEHAVIORAL_HEALTH_DOCUMENTATION',
+  ]);
 
   // Idempotency — only short-circuit if the previous run produced
   // substantive content. A COMPLETED draft with zero transcript chars
@@ -761,6 +768,8 @@ export interface ClinicalAnalysisArgs {
 }
 
 export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<void> {
+  const ownerId = await assertSessionCapabilities(args.sessionId, ['CLINICAL_ANALYSIS']);
+  if (args.psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
   // Upsert the report row in PENDING so the UI can poll for it
   // (matches NoteDraft IN_PROGRESS pattern).
   const report = await prisma.clinicalReport.upsert({
@@ -970,6 +979,14 @@ export async function persistDraftedOrders(
   medications: MedicationOrderV1[],
   clinicalOrders: ClinicalOrderV1[],
 ): Promise<void> {
+  const required = requiredMedicalCapabilities({
+    medications: medications.length,
+    clinicalOrders: clinicalOrders.length,
+    hasVitals: false,
+    hasRxPad: false,
+  });
+  const ownerId = await assertSessionCapabilities(sessionId, required);
+  if (psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
   if (medications.length > 0) {
     // DOC-3 — cross-visit interaction check. Include the patient's confirmed
     // active meds from PRIOR encounters, not just today's draft, so warfarin
@@ -1081,6 +1098,8 @@ export async function persistVitalReadings(
     });
   }
   if (rows.length === 0) return;
+  const ownerId = await assertSessionCapabilities(sessionId, ['CHRONIC_CARE']);
+  if (psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
   await prisma.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
   await prisma.clinicalReading.createMany({ data: rows });
   await writeAudit({
@@ -1111,6 +1130,8 @@ export interface DifferentialArgs {
 }
 
 export async function runDifferential(args: DifferentialArgs): Promise<void> {
+  const ownerId = await assertSessionCapabilities(args.sessionId, ['CLINICAL_ANALYSIS']);
+  if (args.psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
   await prisma.differential.upsert({
     where: { sessionId: args.sessionId },
     update: { status: 'IN_PROGRESS', errorMessage: null },

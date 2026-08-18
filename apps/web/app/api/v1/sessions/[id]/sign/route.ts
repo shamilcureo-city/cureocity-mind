@@ -12,7 +12,7 @@ import {
   type TherapyNote,
 } from '@cureocity/contracts';
 import type { Prisma } from '@prisma/client';
-import { isAuthBypassed, requirePsychologistId } from '@/lib/auth-server';
+import { isAuthBypassed, requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import {
   SIGNABLE_FIELDS_BY_KIND,
@@ -139,6 +139,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   // INTAKE notes sign their own shape; TREATMENT + REVIEW share SOAP;
   // a doctor's session signs a MedicalEncounterNoteV1 (Sprint DV3).
   const signableKind: SignableKind = signableKindFor(session.kind, session.psychologist.vertical);
+  if (signableKind === 'MEDICAL') {
+    const signingAuth = await requireCapability(req, 'PRESCRIPTION_SIGNING', auth);
+    if (!signingAuth.ok) return signingAuth.response;
+  }
   const noteSchema =
     signableKind === 'INTAKE'
       ? IntakeNoteV1Schema

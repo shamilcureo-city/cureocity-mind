@@ -9,7 +9,7 @@ import {
   type MedicationOrderV1,
   type TherapyNoteV1,
 } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { ensureEnglishNote } from '@/lib/ensure-english-note';
 import {
@@ -19,6 +19,7 @@ import {
   runDifferential,
 } from '@/lib/note-orchestrator';
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
+import { requiredMedicalCapabilities } from '@/lib/regulated-actions';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -72,6 +73,13 @@ export async function POST(
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+
+  const documentationCapability =
+    session.psychologist.vertical === 'DOCTOR'
+      ? 'MEDICAL_DOCUMENTATION'
+      : 'BEHAVIORAL_HEALTH_DOCUMENTATION';
+  const documentationAuth = await requireCapability(req, documentationCapability, auth);
+  if (!documentationAuth.ok) return documentationAuth.response;
 
   // Batch C — REFUSE to overwrite the draft behind a SIGNED note.
   //
@@ -189,31 +197,33 @@ export async function POST(
     // the Pass 3 prompt is told not to guess speakers).
     const p3Transcript = tTranscriptText;
     const p3Kind = session.kind;
-    after(async () => {
-      try {
-        await runClinicalAnalysis({
-          sessionId,
-          clientId: session.clientId,
-          psychologistId: session.psychologistId,
-          language: (session.language as ClinicalLocale | undefined) ?? 'en',
-          kind: p3Kind,
-          modality: session.modality,
-          presentingConcerns: session.client.presentingConcerns,
-          transcript: p3Transcript,
-          speakerSegments: coverTranscriptWithSegments({
+    if (auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
+      after(async () => {
+        try {
+          await runClinicalAnalysis({
+            sessionId,
+            clientId: session.clientId,
+            psychologistId: session.psychologistId,
+            language: (session.language as ClinicalLocale | undefined) ?? 'en',
+            kind: p3Kind,
+            modality: session.modality,
+            presentingConcerns: session.client.presentingConcerns,
             transcript: p3Transcript,
-            segments: [],
-            startMs: 0,
-            endMs: 0,
-          }),
-          note: tnote as Parameters<typeof runClinicalAnalysis>[0]['note'],
-        });
-      } catch (e) {
-        console.error(
-          `[live-note] clinical analysis failed for session=${sessionId}: ${(e as Error).message}`,
-        );
-      }
-    });
+            speakerSegments: coverTranscriptWithSegments({
+              transcript: p3Transcript,
+              segments: [],
+              startMs: 0,
+              endMs: 0,
+            }),
+            note: tnote as Parameters<typeof runClinicalAnalysis>[0]['note'],
+          });
+        } catch (e) {
+          console.error(
+            `[live-note] clinical analysis failed for session=${sessionId}: ${(e as Error).message}`,
+          );
+        }
+      });
+    }
     return NextResponse.json({ draftId: tDraft.id, status: 'COMPLETED' }, { status: 201 });
   }
 
@@ -225,6 +235,16 @@ export async function POST(
   const note = parsed.value.note as MedicalEncounterNoteV1;
   const medications = (parsed.value.medications ?? []) as MedicationOrderV1[];
   const orders = (parsed.value.orders ?? []) as ClinicalOrderV1[];
+  const required = requiredMedicalCapabilities({
+    medications: medications.length,
+    clinicalOrders: orders.length,
+    hasVitals: Object.keys(note.vitals ?? {}).length > 0,
+    hasRxPad: parsed.value.rxPad != null,
+  });
+  for (const capability of required) {
+    const actionAuth = await requireCapability(req, capability, auth);
+    if (!actionAuth.ok) return actionAuth.response;
+  }
   // DOC-7 — the verbatim consult transcript the gateway streamed. Trim and
   // fall back to the presence marker when empty so a transcript-less consult
   // still satisfies the NoteDraft presence check.
@@ -355,7 +375,10 @@ export async function POST(
     where: { sessionId },
     select: { status: true },
   });
-  if (existingDiff?.status !== 'COMPLETED') {
+  if (
+    auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS') &&
+    existingDiff?.status !== 'COMPLETED'
+  ) {
     await prisma.differential.upsert({
       where: { sessionId },
       update: { status: 'IN_PROGRESS', errorMessage: null },

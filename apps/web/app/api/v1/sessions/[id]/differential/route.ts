@@ -6,7 +6,7 @@ import {
   type DifferentialResponse,
 } from '@cureocity/contracts';
 import type { Differential } from '@prisma/client';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { runDifferential } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
 import { hasTranscript, resolveNoteTranscript } from '@/lib/note-transcript';
@@ -26,7 +26,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'CLINICAL_ANALYSIS');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
 
@@ -105,7 +105,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'CLINICAL_ANALYSIS');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
 

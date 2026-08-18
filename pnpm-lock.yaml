@@ -85,6 +85,9 @@ importers:
       '@cureocity/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@cureocity/orbit-core':
+        specifier: workspace:*
+        version: link:../../packages/orbit-core
       '@cureocity/storage':
         specifier: workspace:*
         version: link:../../packages/storage

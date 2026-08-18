@@ -19,6 +19,7 @@
     "@cureocity/llm": "workspace:*",
     "@cureocity/notifications": "workspace:*",
     "@cureocity/observability": "workspace:*",
+    "@cureocity/orbit-core": "workspace:*",
     "@cureocity/storage": "workspace:*",
     "@google/genai": "^2.8.0",
     "@neondatabase/serverless": "^0.10.4",

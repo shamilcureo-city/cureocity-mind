@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { ClinicalLocale } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { runClinicalAnalysis } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
 import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
@@ -38,7 +38,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'CLINICAL_ANALYSIS');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
 
@@ -163,7 +163,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'CLINICAL_ANALYSIS');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
 

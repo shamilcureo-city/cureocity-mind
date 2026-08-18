@@ -9,7 +9,7 @@ import {
 } from '@cureocity/contracts';
 import { allergyWarningsByDrug, interactionWarningsByDrug } from '@cureocity/clinical';
 import type { Prisma } from '@prisma/client';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -37,7 +37,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'PRESCRIPTION_DRAFTING');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
 
@@ -57,7 +57,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'PRESCRIPTION_DRAFTING');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
   const parsed = await parseJson(req, RxPadPatchInputSchema);
