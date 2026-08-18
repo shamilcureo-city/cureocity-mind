@@ -68,9 +68,14 @@ for (const dir of readdirSync(MIGRATIONS_DIR).sort()) {
 // This migration turns legacy practitioner fields into security-sensitive
 // credential evidence. Keep the evidence rules explicit so later edits cannot
 // silently infer profession or promote malformed/unverified registrations.
-const orbitDir = '20260812000000_orbit_sprint2_capabilities';
-const orbitFile = join(MIGRATIONS_DIR, orbitDir, 'migration.sql');
-if (existsSync(orbitFile)) {
+const orbitDir = '20260908000000_orbit_sprint2_capabilities';
+const orbitPath = join(MIGRATIONS_DIR, orbitDir);
+const orbitFile = join(orbitPath, 'migration.sql');
+if (!existsSync(orbitPath)) {
+  problems.push(`${orbitDir}: required migration directory is missing`);
+} else if (!existsSync(orbitFile)) {
+  problems.push(`${orbitDir}/migration.sql: required migration file is missing`);
+} else {
   const orbitSql = readFileSync(orbitFile, 'utf8').replace(/--[^\n]*/g, '');
   const requiredEvidenceSql = [
     [

@@ -26,7 +26,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:validate": "prisma validate && prisma format --check",
-    "db:check-migrations": "node scripts/check-migration-idempotency.mjs",
+    "db:check-migrations": "node --test scripts/check-migration-idempotency.test.mjs && node scripts/check-migration-idempotency.mjs",
     "eval:reasoning": "pnpm --filter @cureocity/llm eval:reasoning",
     "eval:asr": "pnpm --filter @cureocity/llm eval:asr",
     "eval:note": "pnpm --filter @cureocity/llm eval:note"
