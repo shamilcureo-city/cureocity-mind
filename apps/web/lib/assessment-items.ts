@@ -3,6 +3,8 @@ import { ClinicalReportV1Schema, InitialAssessmentBriefV1Schema } from '@cureoci
 import { writeAudit } from './audit';
 import { prisma } from './prisma';
 
+type AssessmentItemDatabase = Pick<Prisma.TransactionClient, 'treatmentEpisode' | 'assessmentItem'>;
+
 /**
  * Sprint 22 — reconcile Pass 3 output into the running differential.
  *
@@ -43,12 +45,16 @@ function normalise(q: string): string {
     .trim();
 }
 
-export async function reconcileAssessmentItems(args: ReconcileArgs): Promise<void> {
+export async function reconcileAssessmentItems(
+  args: ReconcileArgs,
+  tx?: Prisma.TransactionClient,
+): Promise<void> {
+  const db: AssessmentItemDatabase = tx ?? prisma;
   const candidates = extractCandidates(args.pass3Body, args.kind);
   if (candidates.length === 0) return;
 
   // Resolve the client's open episode so new items group correctly.
-  const openEpisode = await prisma.treatmentEpisode.findFirst({
+  const openEpisode = await db.treatmentEpisode.findFirst({
     where: { clientId: args.clientId, status: 'OPEN' },
     orderBy: { openedAt: 'desc' },
     select: { id: true },
@@ -56,7 +62,7 @@ export async function reconcileAssessmentItems(args: ReconcileArgs): Promise<voi
 
   // Existing non-closed items → dedup set (CLOSED ones are intentionally
   // excluded so a resolved question stays resolved).
-  const existing = await prisma.assessmentItem.findMany({
+  const existing = await db.assessmentItem.findMany({
     where: { clientId: args.clientId, status: { in: ['OPEN', 'ADDRESSED'] } },
     select: { question: true },
   });
@@ -66,7 +72,7 @@ export async function reconcileAssessmentItems(args: ReconcileArgs): Promise<voi
     const key = normalise(c.question);
     if (seen.has(key)) continue;
     seen.add(key);
-    const created = await prisma.assessmentItem.create({
+    const created = await db.assessmentItem.create({
       data: {
         clientId: args.clientId,
         psychologistId: args.psychologistId,
@@ -79,18 +85,21 @@ export async function reconcileAssessmentItems(args: ReconcileArgs): Promise<voi
         sourceSessionId: args.sourceSessionId,
       },
     });
-    await writeAudit({
-      actorType: 'SYSTEM',
-      action: 'ASSESSMENT_ITEM_CREATED',
-      targetType: 'AssessmentItem',
-      targetId: created.id,
-      metadata: {
-        clientId: args.clientId,
-        sourceSessionId: args.sourceSessionId,
-        kind: c.kind,
-        icd11Code: c.icd11Code,
+    await writeAudit(
+      {
+        actorType: 'SYSTEM',
+        action: 'ASSESSMENT_ITEM_CREATED',
+        targetType: 'AssessmentItem',
+        targetId: created.id,
+        metadata: {
+          clientId: args.clientId,
+          sourceSessionId: args.sourceSessionId,
+          kind: c.kind,
+          icd11Code: c.icd11Code,
+        },
       },
-    });
+      tx,
+    );
   }
 }
 

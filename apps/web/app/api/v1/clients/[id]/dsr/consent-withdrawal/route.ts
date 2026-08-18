@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { DsrConsentWithdrawalInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
+import { withClientConsentLock } from '@/lib/consent-gate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,40 +38,60 @@ export async function POST(
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
 
-  const active = await prisma.consent.findFirst({
-    where: { clientId, scope: body.value.scope, status: 'GRANTED', withdrawnAt: null },
-    orderBy: { grantedAt: 'desc' },
-  });
-  if (!active) {
+  const now = new Date();
+  const reasonHashHex = body.value.reason
+    ? createHash('sha256').update(body.value.reason).digest('hex')
+    : undefined;
+  const withdrawnCount = await prisma.$transaction((tx) =>
+    withClientConsentLock(tx, clientId, async () => {
+      const active = await tx.consent.findFirst({
+        where: {
+          clientId,
+          scope: body.value.scope,
+          status: 'GRANTED',
+          withdrawnAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+        orderBy: { grantedAt: 'desc' },
+      });
+      if (!active) return 0;
+
+      const result = await tx.consent.updateMany({
+        where: {
+          clientId,
+          scope: body.value.scope,
+          status: 'GRANTED',
+          withdrawnAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
+        data: { status: 'WITHDRAWN', withdrawnAt: now },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'DSR_CONSENT_WITHDRAWN',
+          targetType: 'Consent',
+          targetId: active.id,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            onBehalfOf: clientId,
+            scope: body.value.scope,
+            withdrawnCount: result.count,
+            ...(reasonHashHex && { reasonHashHex }),
+          },
+        },
+        tx,
+      );
+      return result.count;
+    }),
+  );
+  if (withdrawnCount === 0) {
     return NextResponse.json(
       { error: `No active consent for scope ${body.value.scope}` },
       { status: 404 },
     );
   }
-
-  const now = new Date();
-  await prisma.$transaction(async (tx) => {
-    await tx.consent.update({
-      where: { id: active.id },
-      data: { status: 'WITHDRAWN', withdrawnAt: now },
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'DSR_CONSENT_WITHDRAWN',
-        targetType: 'Consent',
-        targetId: active.id,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          onBehalfOf: clientId,
-          scope: body.value.scope,
-          ...(body.value.reason && { reason: body.value.reason }),
-        },
-      },
-      tx,
-    );
-  });
 
   return new NextResponse(null, { status: 204 });
 }

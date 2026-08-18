@@ -6,7 +6,7 @@ export function toNoteDraft(row: NoteDraftRow): NoteDraft {
     id: row.id,
     sessionId: row.sessionId,
     status: row.status,
-    transcript: row.transcript,
+    transcript: null,
     speakerSegments:
       row.speakerSegments === null ? null : (row.speakerSegments as unknown as SpeakerSegment[]),
     affectFeatures:

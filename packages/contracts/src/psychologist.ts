@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CuidSchema, IndianPhoneSchema, IsoDateTimeSchema } from './common';
 import { SessionModalitySchema } from './client';
+import { PractitionerProfessionSchema } from './orbit-capability';
 
 export const PsychologistStatusSchema = z.enum([
   'PENDING_VERIFICATION',
@@ -101,6 +102,7 @@ export const PsychologistSchema = z.object({
   /// Sprint DV1 — product vertical. Defaults to THERAPIST so every
   /// pre-DV1 row + caller still validates without supplying it.
   vertical: PractitionerVerticalSchema.default('THERAPIST'),
+  profession: PractitionerProfessionSchema.nullable().default(null),
   /// Sprint DV1 — doctor credential; NULL for therapists.
   medicalRegNumber: z.string().nullable().default(null),
   /// Sprint DV1 — doctor specialty; NULL for therapists.

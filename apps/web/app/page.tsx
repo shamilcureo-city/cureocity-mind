@@ -34,7 +34,14 @@ const d = (ms: number) => ({ '--d': `${ms}ms` }) as CSSProperties;
 
 function Check() {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      aria-hidden
+    >
       <path d="M5 13l4 4 10-11" />
     </svg>
   );

@@ -4,7 +4,15 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
-import { withdrawalRefusalMessage, withdrawnScribeConsents } from '@/lib/consent-gate';
+import {
+  assertValidScribeConsent,
+  consentAuthorizationResponse,
+  withClientConsentLock,
+} from '@/lib/consent-gate';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,40 +37,6 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       { status: 400 },
     );
   }
-  if (existing.consentSnapshot === null) {
-    return NextResponse.json(
-      { error: 'Session consent must be recorded before starting' },
-      { status: 400 },
-    );
-  }
-  // PROD5 (DPDP) — Pass 2–5 process the transcript on Google's GLOBAL
-  // endpoint, so a session may only start when the snapshot carries the
-  // cross-border scope. docs/dpdp-data-flow.md declares this mandatory;
-  // this is the gate that makes the claim true.
-  const snapshotScopes = new Set(
-    ((existing.consentSnapshot as { entries?: Array<{ scope?: string }> }).entries ?? []).map(
-      (e) => e.scope,
-    ),
-  );
-  if (!snapshotScopes.has('CROSS_BORDER_PROCESSING')) {
-    return NextResponse.json(
-      {
-        error:
-          'AI note analysis processes the transcript outside India, and this client has not ' +
-          'consented to cross-border processing. Capture that consent in the pre-session ' +
-          'consent step before starting an AI-scribed session.',
-      },
-      { status: 409 },
-    );
-  }
-
-  // Batch E (DPDP) — a snapshot proves consent was GIVEN; only the standing
-  // rows prove it still HOLDS. Consent is withdrawable at any time, and
-  // nothing read Consent.withdrawnAt at the moment it matters most.
-  const withdrawn = await withdrawnScribeConsents(existing.clientId);
-  if (withdrawn.length > 0) {
-    return NextResponse.json({ error: withdrawalRefusalMessage(withdrawn) }, { status: 409 });
-  }
 
   // DS11.7 — the doctor capture surfaces declare their pipeline. Optional
   // body; therapist callers send none and captureMode stays null.
@@ -70,27 +44,44 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   const captureMode =
     body?.captureMode === 'DICTATE' || body?.captureMode === 'UPLOAD' ? body.captureMode : null;
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.session.update({
-      where: { id: sessionId },
-      data: {
-        status: 'IN_PROGRESS',
-        startedAt: new Date(),
-        ...(captureMode && { captureMode }),
-      },
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_STARTED',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: auditMetadataFromRequest(req),
-      },
-      tx,
+  let updated;
+  try {
+    updated = await prisma.$transaction((tx) =>
+      withClientConsentLock(tx, existing.clientId, async () => {
+        const current = await tx.session.findUnique({
+          where: { id: sessionId },
+          select: { consentSnapshot: true },
+        });
+        await assertValidScribeConsent(current?.consentSnapshot ?? null, existing.clientId, tx);
+
+        const row = await conditionalSessionTransition(tx, {
+          sessionId,
+          expectedStatus: 'SCHEDULED',
+          data: {
+            status: 'IN_PROGRESS',
+            startedAt: new Date(),
+            ...(captureMode && { captureMode }),
+          },
+        });
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'SESSION_STARTED',
+            targetType: 'Session',
+            targetId: sessionId,
+            metadata: auditMetadataFromRequest(req),
+          },
+          tx,
+        );
+        return row;
+      }),
     );
-    return row;
-  });
+  } catch (error) {
+    const response =
+      consentAuthorizationResponse(error) ?? sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
   return NextResponse.json(toSession(updated));
 }

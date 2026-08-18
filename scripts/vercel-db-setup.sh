@@ -9,6 +9,11 @@
 # into the live DB on every deploy. Run seed manually for local dev:
 #   DATABASE_URL=... pnpm exec prisma db seed
 set -euo pipefail
+: "${DATABASE_URL_UNPOOLED:?DATABASE_URL_UNPOOLED (migration-owner URL) is required}"
+if [ "${VERCEL_ENV:-production}" = "production" ]; then
+  : "${DATABASE_RUNTIME_URL:?DATABASE_RUNTIME_URL (least-privilege app URL) is required in production}"
+  : "${DATABASE_RUNTIME_ROLE:?DATABASE_RUNTIME_ROLE is required in production}"
+fi
 export DATABASE_URL="$DATABASE_URL_UNPOOLED"
 
 # ---------------------------------------------------------------------------
@@ -44,34 +49,40 @@ run_migrate() {
   return "${PIPESTATUS[0]}"
 }
 
-if run_migrate; then
-  exit 0
+if ! run_migrate; then
+  if ! grep -q "P3009" "$MIGRATE_LOG"; then
+    echo "[vercel-db-setup] migrate deploy failed and it is NOT a P3009 stuck-migration — surfacing the error."
+    exit 1
+  fi
+
+  echo "[vercel-db-setup] P3009 detected: a previous build left a failed migration. Auto-resolving (migrations are idempotent) and retrying once."
+
+  # Prisma prints one line per failed migration:
+  #   The `20260717000000_dv1_practitioner_vertical` migration started at ... failed
+  # Extract the migration directory names (14-digit timestamp + name).
+  FAILED_MIGRATIONS="$(grep -oE 'The `[0-9]{14}_[A-Za-z0-9_]+` migration' "$MIGRATE_LOG" \
+    | grep -oE '[0-9]{14}_[A-Za-z0-9_]+' \
+    | sort -u || true)"
+
+  if [ -z "$FAILED_MIGRATIONS" ]; then
+    echo "[vercel-db-setup] could not parse the failed migration name from the P3009 output — surfacing the error."
+    exit 1
+  fi
+
+  while IFS= read -r migration; do
+    [ -z "$migration" ] && continue
+    echo "[vercel-db-setup] rolling back failed migration: $migration"
+    pnpm exec prisma migrate resolve --rolled-back "$migration"
+  done <<<"$FAILED_MIGRATIONS"
+
+  echo "[vercel-db-setup] retrying migrate deploy after rollback"
+  pnpm exec prisma migrate deploy
 fi
 
-if ! grep -q "P3009" "$MIGRATE_LOG"; then
-  echo "[vercel-db-setup] migrate deploy failed and it is NOT a P3009 stuck-migration — surfacing the error."
-  exit 1
+# Migrations always run as the owner. Production then configures and verifies
+# the separately provisioned runtime role; any missing/misowned role fails the
+# deploy. Preview databases retain their existing single-role compatibility.
+if [ "${VERCEL_ENV:-production}" = "production" ]; then
+  node scripts/configure-runtime-db-role.mjs
+  node scripts/verify-runtime-db-role.mjs
 fi
-
-echo "[vercel-db-setup] P3009 detected: a previous build left a failed migration. Auto-resolving (migrations are idempotent) and retrying once."
-
-# Prisma prints one line per failed migration:
-#   The `20260717000000_dv1_practitioner_vertical` migration started at ... failed
-# Extract the migration directory names (14-digit timestamp + name).
-FAILED_MIGRATIONS="$(grep -oE 'The `[0-9]{14}_[A-Za-z0-9_]+` migration' "$MIGRATE_LOG" \
-  | grep -oE '[0-9]{14}_[A-Za-z0-9_]+' \
-  | sort -u || true)"
-
-if [ -z "$FAILED_MIGRATIONS" ]; then
-  echo "[vercel-db-setup] could not parse the failed migration name from the P3009 output — surfacing the error."
-  exit 1
-fi
-
-while IFS= read -r migration; do
-  [ -z "$migration" ] && continue
-  echo "[vercel-db-setup] rolling back failed migration: $migration"
-  pnpm exec prisma migrate resolve --rolled-back "$migration"
-done <<<"$FAILED_MIGRATIONS"
-
-echo "[vercel-db-setup] retrying migrate deploy after rollback"
-pnpm exec prisma migrate deploy

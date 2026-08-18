@@ -2,8 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,31 +38,37 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.session.update({
-      where: { id: sessionId },
-      data: { status: 'COMPLETED', endedAt: new Date() },
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      const row = await conditionalSessionTransition(tx, {
+        sessionId,
+        expectedStatus: 'IN_PROGRESS',
+        data: { status: 'COMPLETED', endedAt: new Date() },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'SESSION_ENDED',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: auditMetadataFromRequest(req),
+        },
+        tx,
+      );
+      await tx.noteDraft.upsert({
+        where: { sessionId },
+        create: { sessionId, status: 'PENDING' },
+        update: {},
+      });
+      return row;
     });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_ENDED',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: auditMetadataFromRequest(req),
-      },
-      tx,
-    );
-    // Create the empty draft so the review screen poll has a row to
-    // see. Sprint 11 PR 4 fills the draft in-line on this same
-    // request (and removes this stub) once the LLM port lands.
-    await tx.noteDraft.upsert({
-      where: { sessionId },
-      create: { sessionId, status: 'PENDING' },
-      update: {},
-    });
-    return row;
-  });
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
   return NextResponse.json(toSession(updated));
 }

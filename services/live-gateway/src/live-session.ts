@@ -7,6 +7,7 @@ import type {
   MedicalEncounterNoteV1,
   MedicationOrderV1,
   PatientContext,
+  PractitionerCapability,
   PractitionerVertical,
   RxPadV1,
   SessionKind,
@@ -80,6 +81,15 @@ import {
  * slow Pass 1; a no-op tick is just a cheap buffer-length check.
  */
 const CYCLE_MS = 1_000;
+const DEFAULT_CAPABILITIES = new Set<PractitionerCapability>([
+  'LIVE_ENCOUNTER',
+  'BEHAVIORAL_HEALTH_DOCUMENTATION',
+  'MEDICAL_DOCUMENTATION',
+  'CLINICAL_ANALYSIS',
+  'PRESCRIPTION_DRAFTING',
+  'CLINICAL_ORDERS',
+  'CHRONIC_CARE',
+]);
 
 /**
  * Sprint 74 — minimum NEW transcript (ms of speech) between interim note
@@ -202,6 +212,7 @@ export class LiveSession {
   private readonly vertical: PractitionerVertical;
   private readonly sessionKind: SessionKind;
   private readonly sessionModality: SessionModality | null;
+  private capabilities: ReadonlySet<PractitionerCapability>;
   /** Sprint TS1 — the therapist's latest note (SOAP or intake), for the final. */
   private latestTherapyNote: TherapyNoteV1 | IntakeNoteV1 | null = null;
   private latestTherapyKind: SessionKind = 'TREATMENT';
@@ -239,6 +250,7 @@ export class LiveSession {
     // Sprint TS5 — therapist live copilot context (carried questions + prior
     // risk + planned length). Null for doctors and for a thin therapist start.
     therapyContext: TherapyLiveContext | null = null,
+    capabilities: ReadonlySet<PractitionerCapability> = DEFAULT_CAPABILITIES,
   ) {
     this.sessionId = sessionId;
     this.specialty = specialty;
@@ -248,6 +260,7 @@ export class LiveSession {
     this.vertical = vertical;
     this.sessionKind = sessionKind;
     this.sessionModality = sessionModality;
+    this.capabilities = capabilities;
     // Therapy runs ~45-60 min vs a ~10-min consult, so slow the interim-note
     // refresh to keep Pass-2 spend bounded (the finalize note is never debounced).
     this.noteRefreshMs =
@@ -302,6 +315,11 @@ export class LiveSession {
   /** Per-window Pass-1 input tokens, in order (telemetry + O(n) tests). */
   get transcribeTokenSamples(): readonly number[] {
     return this.meter.transcribeInputTokens;
+  }
+
+  /** Replace optional scopes after trusted server-side live reauthorization. */
+  updateCapabilities(capabilities: ReadonlySet<PractitionerCapability>): void {
+    this.capabilities = capabilities;
   }
 
   /**
@@ -370,7 +388,7 @@ export class LiveSession {
     // Sprint TS5 — advance the session arc even during silence, so the
     // pacing rail moves through opening → working → closing on its own. Only
     // emits when the arc PHASE changes (the change-key ignores the minute tick).
-    if (this.therapyStore && !this.stopped) {
+    if (this.therapyStore && this.has('CLINICAL_ANALYSIS') && !this.stopped) {
       const { changed, snapshot } = this.therapyStore.recompute(this.elapsedMs());
       if (changed) this.emit({ type: 'therapyReasoning', reasoning: snapshot });
     }
@@ -482,6 +500,7 @@ export class LiveSession {
     // the browser can render a 🗣 quote-chip back to the transcript.
     for (const command of parseVoiceCommands(this.cumulativeTranscript())) {
       if (this.seenCommands.has(command.raw)) continue;
+      if (!this.canEmitCommand(command)) continue;
       this.seenCommands.add(command.raw);
       const anchored =
         command.kind === 'ADD_MEDICATION' || command.kind === 'ORDER_TEST'
@@ -539,7 +558,7 @@ export class LiveSession {
    */
   private async runReasoning(newUtterances: Utterance[]): Promise<void> {
     // Sprint TS1 — no live differential for therapy (TS5 adds a therapy rail).
-    if (this.vertical === 'THERAPIST') return;
+    if (this.vertical === 'THERAPIST' || !this.has('CLINICAL_ANALYSIS')) return;
     if (newUtterances.length === 0) return;
     try {
       const res = await this.backends.reasoning.run({
@@ -596,7 +615,7 @@ export class LiveSession {
    */
   private async runTherapyReasoning(newUtterances: Utterance[]): Promise<void> {
     const store = this.therapyStore;
-    if (!store || newUtterances.length === 0) return;
+    if (!store || !this.has('CLINICAL_ANALYSIS') || newUtterances.length === 0) return;
     try {
       const newIds = new Set(newUtterances.map((u) => u.id));
       const recentUtterances = store.recentTail(newIds);
@@ -680,6 +699,7 @@ export class LiveSession {
     // Sprint TS5 — the therapist path dismisses risk/ask/thread cards through
     // the same command; route to the therapy store and re-emit its snapshot.
     if (this.therapyStore) {
+      if (!this.has('CLINICAL_ANALYSIS')) return;
       if (this.therapyStore.dismiss(questionId)) {
         const { snapshot } = this.therapyStore.recompute(this.elapsedMs());
         this.emit({ type: 'therapyReasoning', reasoning: snapshot });
@@ -856,8 +876,8 @@ export class LiveSession {
     }
     const note = pass2.output.encounterNote;
     this.latestNote = note;
-    this.latestMedications = pass2.output.medications;
-    this.latestOrders = pass2.output.orders;
+    this.latestMedications = this.has('PRESCRIPTION_DRAFTING') ? pass2.output.medications : [];
+    this.latestOrders = this.has('CLINICAL_ORDERS') ? pass2.output.orders : [];
 
     if (isFinal) {
       if (this.finalEmitted) return;
@@ -867,7 +887,7 @@ export class LiveSession {
         note,
         medications: this.latestMedications,
         orders: this.latestOrders,
-        rxPad: this.assembleRx(), // DS5 — the finalized signable pad
+        ...(this.has('PRESCRIPTION_DRAFTING') ? { rxPad: this.assembleRx() } : {}),
       });
       return;
     }
@@ -885,6 +905,7 @@ export class LiveSession {
     // processWindow + finalizeWork.
 
     // Sprint DS5 — the Rx pad assembling live. Emit only when it changed.
+    if (!this.has('PRESCRIPTION_DRAFTING')) return;
     const rxPad = this.assembleRx();
     const rxJson = JSON.stringify(rxPad);
     if (rxJson !== this.lastRxJson) {
@@ -907,11 +928,14 @@ export class LiveSession {
     if (this.vertical === 'THERAPIST') return;
     const transcript = this.cumulativeTranscript();
     if (transcript.length === 0) return;
-    for (const gap of detectGaps(transcript, this.latestNote, this.specialty)) {
-      if (this.seenGaps.has(gap.message)) continue;
-      this.seenGaps.add(gap.message);
-      this.emit({ type: 'gap', gap: gap satisfies EncounterGap });
+    if (this.has('CLINICAL_ANALYSIS')) {
+      for (const gap of detectGaps(transcript, this.latestNote, this.specialty)) {
+        if (this.seenGaps.has(gap.message)) continue;
+        this.seenGaps.add(gap.message);
+        this.emit({ type: 'gap', gap: gap satisfies EncounterGap });
+      }
     }
+    if (!this.has('PRESCRIPTION_DRAFTING')) return;
     // DOC-3 — cross-visit interaction check. Include the patient's confirmed
     // active meds (seeded into the CaseState at consult start) alongside the
     // meds drafted today, so a standing warfarin + ibuprofen prescribed now
@@ -981,6 +1005,7 @@ export class LiveSession {
    * new LLM pass — Pass 2 already scores riskFlags on every interim note.
    */
   private emitTherapyRisk(note: TherapyNoteV1 | IntakeNoteV1): void {
+    if (!this.has('CLINICAL_ANALYSIS')) return;
     const rf = note.riskFlags;
     if (!rf || rf.severity === 'none') return;
     const message =
@@ -1112,7 +1137,7 @@ export class LiveSession {
   }
 
   private meterSummary() {
-    return this.meter.summary(this.sessionId, this.backends.backend, Date.now() - this.startedAtMs);
+    return this.meter.summary(this.sessionId, this.backends.backend, this.elapsedMs());
   }
 
   /**
@@ -1175,8 +1200,27 @@ export class LiveSession {
       note: this.latestNote,
       medications: this.latestMedications,
       orders: this.latestOrders,
-      rxPad: this.assembleRx(),
+      ...(this.has('PRESCRIPTION_DRAFTING') ? { rxPad: this.assembleRx() } : {}),
     });
+  }
+
+  private canEmitCommand(command: VoiceCommand): boolean {
+    switch (command.kind) {
+      case 'ADD_MEDICATION':
+        return this.has('PRESCRIPTION_DRAFTING');
+      case 'ORDER_TEST':
+        return this.has('CLINICAL_ORDERS');
+      case 'SHOW_DATA':
+        return this.has('CHRONIC_CARE');
+      case 'NEXT_PATIENT':
+        return false;
+      default:
+        return false;
+    }
+  }
+
+  private has(capability: PractitionerCapability): boolean {
+    return this.capabilities.has(capability);
   }
 
   private stopAudio(): void {

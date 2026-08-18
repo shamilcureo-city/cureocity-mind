@@ -340,7 +340,11 @@ export function DoctorLiveEncounter({
       // refused to replace the attested note. That is the correct outcome,
       // not a failure: nothing was lost, and telling the doctor "couldn't
       // save" would be wrong.
-      setSaveState(res.ok || res.status === 409 ? 'saved' : 'error');
+      const saved = res.ok || res.status === 409;
+      setSaveState(saved ? 'saved' : 'error');
+      // live-note is the lifecycle authority: only after it has finalized the
+      // Session to COMPLETED may finalized telemetry pass the route guard.
+      if (saved && latestMeterRef.current) await persistMeter(latestMeterRef.current);
     } catch {
       setSaveState('error');
     }
@@ -709,8 +713,6 @@ export function DoctorLiveEncounter({
           else if (event.state === 'done') {
             if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
             setPhase('done');
-            // The final meter arrives just before `done`; relay it now.
-            if (latestMeterRef.current) void persistMeter(latestMeterRef.current);
             // Batch A — `done` WITHOUT a preceding `final` used to be a dead
             // end: the doctor sat on a stopped screen with no note and no way
             // forward. The gateway only does this when it had nothing to
@@ -938,7 +940,6 @@ export function DoctorLiveEncounter({
           : 'The consult ended without a finished note. The draft below is built from what the live rails captured — review every section before signing.',
       );
       await persistLiveNote(salvaged, [], [], rxFinalRef.current, transcript);
-      if (latestMeterRef.current) void persistMeter(latestMeterRef.current);
     } else {
       setPhase('error');
       setError(

@@ -65,6 +65,68 @@ for (const dir of readdirSync(MIGRATIONS_DIR).sort()) {
   }
 }
 
+// This migration turns legacy practitioner fields into security-sensitive
+// credential evidence. Keep the evidence rules explicit so later edits cannot
+// silently infer profession or promote malformed/unverified registrations.
+const orbitDir = '20260908000000_orbit_sprint2_capabilities';
+const orbitPath = join(MIGRATIONS_DIR, orbitDir);
+const orbitFile = join(orbitPath, 'migration.sql');
+if (!existsSync(orbitPath)) {
+  problems.push(`${orbitDir}: required migration directory is missing`);
+} else if (!existsSync(orbitFile)) {
+  problems.push(`${orbitDir}/migration.sql: required migration file is missing`);
+} else {
+  const orbitSql = readFileSync(orbitFile, 'utf8').replace(/--[^\n]*/g, '');
+  const requiredEvidenceSql = [
+    [
+      /'RCI_REGISTRATION',\s+NULLIF\(btrim\(p\."rciNumber"\), ''\)/i,
+      'store trimmed nonblank RCI registrations',
+    ],
+    [
+      /p\."rciVerifiedAt" IS NOT NULL\s+AND p\."rciVerifiedAt" <= CURRENT_TIMESTAMP/i,
+      'only verify non-future RCI evidence',
+    ],
+    [
+      /WHERE p\."vertical" = 'THERAPIST' AND NULLIF\(btrim\(p\."rciNumber"\), ''\) IS NOT NULL/i,
+      'skip blank RCI registrations',
+    ],
+    [
+      /'STATE_MEDICAL_COUNCIL_REGISTRATION',\s+NULLIF\(btrim\(p\."medicalRegNumber"\), ''\),[\s\S]*?'PENDING_VERIFICATION'/i,
+      'store trimmed medical registrations as pending',
+    ],
+    [
+      /WHERE NULLIF\(btrim\(p\."medicalRegNumber"\), ''\) IS NOT NULL/i,
+      'skip blank medical registrations',
+    ],
+    [
+      /CONSTRAINT "practitioner_credentials_registrationNumber_nonblank_check"\s+CHECK \(btrim\("registrationNumber"\) <> ''\)/i,
+      'enforce nonblank credential registration numbers',
+    ],
+    [
+      /CONSTRAINT "practitioner_credentials_issuingAuthority_nonblank_check"\s+CHECK \(btrim\("issuingAuthority"\) <> ''\)/i,
+      'enforce nonblank credential issuing authorities',
+    ],
+    [
+      /CONSTRAINT "practitioner_credentials_jurisdiction_nonblank_check"\s+CHECK \(btrim\("jurisdiction"\) <> ''\)/i,
+      'enforce nonblank credential jurisdictions',
+    ],
+    [
+      /CONSTRAINT "practitioner_credentials_verified_status_timestamp_check"\s+CHECK \("status" <> 'VERIFIED' OR "verifiedAt" IS NOT NULL\)/i,
+      'require a verification timestamp for verified credentials',
+    ],
+  ];
+
+  if (/UPDATE\s+"psychologists"\s+SET\s+"profession"/i.test(orbitSql)) {
+    problems.push(`${orbitDir}: must not infer profession from the legacy vertical`);
+  }
+  if (/CHECK\s*\([^;]*CURRENT_TIMESTAMP/is.test(orbitSql)) {
+    problems.push(`${orbitDir}: CHECK constraints must not use non-immutable CURRENT_TIMESTAMP`);
+  }
+  for (const [pattern, requirement] of requiredEvidenceSql) {
+    if (!pattern.test(orbitSql)) problems.push(`${orbitDir}: must ${requirement}`);
+  }
+}
+
 if (problems.length > 0) {
   console.error('✖ Non-idempotent migration DDL (must be replay-safe):\n');
   for (const p of problems) console.error('  - ' + p);

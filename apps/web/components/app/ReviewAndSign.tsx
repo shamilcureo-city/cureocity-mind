@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import type { MedicalEncounterNoteV1 } from '@cureocity/contracts';
+import type { MedicalEncounterNoteV1, RxPadDraft } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { MedicalNoteView } from './MedicalNoteView';
@@ -59,6 +59,7 @@ export function ReviewAndSign({
   // Sprint DS5-fu — an assembled Rx pad enables the prescription PDF +
   // patient share; consults with no Rx hide them. Fed by PlanComposer.
   const [hasRx, setHasRx] = useState(false);
+  const [signedRxPad, setSignedRxPad] = useState<RxPadDraft | null>(null);
   const [rxShareUrl, setRxShareUrl] = useState<string | null>(null);
   const [rxSharing, setRxSharing] = useState(false);
   // Batch B — prescription-safety gate. `hard` = a drug that conflicts with a
@@ -87,29 +88,39 @@ export function ReviewAndSign({
     setSigning(true);
     setSignError(null);
     try {
-      const payload = JSON.stringify(working);
-      const payloadHashHex = await sha256Hex(payload);
-      // TS0 (F6) — steps up to a WebAuthn assertion only when the account has
-      // a registered passkey (the route 401s the assertion-free attempt then).
+      const signedAt = new Date().toISOString();
       const res = await postSignNote(sessionId, {
-        payload,
-        payloadHashHex,
         note: working,
+        draftContent: note,
         edits,
-        signedAt: new Date().toISOString(),
+        signedAt,
+        rxPad: signedRxPad,
         // Batch B — signing past a drug-allergy contraindication is allowed,
         // but never silent: the reason rides along and lands one
         // RX_SAFETY_OVERRIDE audit row atomic with the signature.
         ...(overriding && overrideReason.trim()
-          ? { safetyOverride: { reason: overrideReason.trim(), blockers: blockers.hard } }
+          ? {
+              safetyOverride: {
+                reasonCode: 'CLINICAL_JUDGMENT' as const,
+                reason: overrideReason.trim(),
+                blockers: blockers.hard,
+              },
+            }
           : {}),
       });
-      if (res.status === 409) {
-        setSigned(true); // already signed in a previous visit
-        onSigned?.();
-        return;
+      if (!res.ok) {
+        const message = await errorOf(res, 'Could not sign the note');
+        if (
+          res.status === 409 &&
+          (message === 'Therapy note already signed for this session' ||
+            message === 'Note was signed concurrently; reload and review the saved signature')
+        ) {
+          setSigned(true);
+          onSigned?.();
+          return;
+        }
+        throw new Error(message);
       }
-      if (!res.ok) throw new Error(await errorOf(res, 'Could not sign the note'));
       setSigned(true);
       onSigned?.();
     } catch (e) {
@@ -237,7 +248,10 @@ export function ReviewAndSign({
       <PlanComposer
         sessionId={sessionId}
         signed={signed}
-        onPadChange={setHasRx}
+        onPadChange={(hasContent, pad) => {
+          setHasRx(hasContent);
+          setSignedRxPad(pad);
+        }}
         onSignBlockers={setBlockers}
       />
       <EncounterDifferentialPanel sessionId={sessionId} />
@@ -371,11 +385,4 @@ export function ReviewAndSign({
 async function errorOf(res: Response, fallback: string): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   return body.error ?? `${fallback} (${res.status}).`;
-}
-
-async function sha256Hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
 }

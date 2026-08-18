@@ -375,11 +375,25 @@ export const ReviseIntakeNoteInputSchema = z.object({
 });
 export type ReviseIntakeNoteInput = z.infer<typeof ReviseIntakeNoteInputSchema>;
 
+export const ReviseMedicalNoteInputSchema = z.object({
+  kind: z.literal('MEDICAL'),
+  chiefComplaint: z.string().min(1).optional(),
+  hpi: z.string().min(1).optional(),
+  assessment: z.string().min(1).optional(),
+  plan: z.string().min(1).optional(),
+  reason: z.string().min(5).max(2000),
+});
+export type ReviseMedicalNoteInput = z.infer<typeof ReviseMedicalNoteInputSchema>;
+
 // Discriminated union demands raw ZodObjects (refines produce ZodEffects
 // and break the discriminator path), so the "at least one body field"
 // check rides on top via superRefine after the kind branch is settled.
 export const ReviseNoteInputSchema = z
-  .discriminatedUnion('kind', [ReviseTreatmentNoteInputSchema, ReviseIntakeNoteInputSchema])
+  .discriminatedUnion('kind', [
+    ReviseTreatmentNoteInputSchema,
+    ReviseIntakeNoteInputSchema,
+    ReviseMedicalNoteInputSchema,
+  ])
   .superRefine((d, ctx) => {
     if (d.kind === 'TREATMENT') {
       if (!d.subjective && !d.objective && !d.assessment && !d.plan) {
@@ -391,6 +405,7 @@ export const ReviseNoteInputSchema = z
       return;
     }
     if (
+      d.kind === 'INTAKE' &&
       !d.presentingConcerns &&
       !d.historyOfPresentingIllness &&
       !d.pastPsychiatricHistory &&
@@ -403,6 +418,12 @@ export const ReviseNoteInputSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'At least one intake field must be revised',
+      });
+    }
+    if (d.kind === 'MEDICAL' && !d.chiefComplaint && !d.hpi && !d.assessment && !d.plan) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'At least one medical note field must be revised',
       });
     }
   });
@@ -461,6 +482,13 @@ export const SignNoteInputSchema = z.object({
    */
   safetyOverride: z
     .object({
+      reasonCode: z.enum([
+        'CLINICAL_JUDGMENT',
+        'ALLERGY_RECORD_INACCURATE',
+        'DESENSITIZED',
+        'BENEFIT_OUTWEIGHS_RISK',
+        'OTHER_DOCUMENTED',
+      ]),
       reason: z.string().min(3).max(2000),
       blockers: z.array(z.string()).max(50).default([]),
     })

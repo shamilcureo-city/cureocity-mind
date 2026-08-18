@@ -269,6 +269,7 @@ export function toPsychologist(row: PsychologistRow): Psychologist {
     status: row.status,
     role: row.role,
     vertical: row.vertical,
+    profession: row.profession,
     medicalRegNumber: row.medicalRegNumber,
     specialty: row.specialty,
     headline: row.headline,

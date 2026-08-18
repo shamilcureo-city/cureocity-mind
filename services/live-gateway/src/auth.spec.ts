@@ -1,6 +1,11 @@
 import { createHmac } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { authRequired, isFailClosedMisconfig, verifyStartToken } from './auth';
+import {
+  authRequired,
+  extractVerifiedClaims,
+  isFailClosedMisconfig,
+  verifyStartToken,
+} from './auth';
 
 /**
  * DOC-4 — the gateway must fail CLOSED in production when the secret is
@@ -11,10 +16,17 @@ import { authRequired, isFailClosedMisconfig, verifyStartToken } from './auth';
 const SECRET = 'test-secret';
 const SID = 'sess-123';
 
-function mintToken(sessionId: string, exp: number, secret = SECRET): string {
-  const payload = Buffer.from(JSON.stringify({ sessionId, psychologistId: 'p1', exp })).toString(
-    'base64url',
-  );
+function mintToken(sessionId: string, exp: number, secret = SECRET, extra: object = {}): string {
+  const payload = Buffer.from(
+    JSON.stringify({
+      sessionId,
+      psychologistId: 'p1',
+      exp,
+      vertical: 'DOCTOR',
+      capabilities: ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'],
+      ...extra,
+    }),
+  ).toString('base64url');
   const sig = createHmac('sha256', secret).update(payload).digest('hex');
   return `${payload}.${sig}`;
 }
@@ -66,6 +78,30 @@ describe('live-gateway auth', () => {
     expect(verifyStartToken(mintToken('other', future()), SID)).toBe(false); // wrong session
     expect(verifyStartToken(mintToken(SID, future(), 'wrong-secret'), SID)).toBe(false); // bad sig
     expect(verifyStartToken('garbage', SID)).toBe(false);
+  });
+
+  it('requires signed live/documentation scopes and returns only validated scoped claims', () => {
+    process.env['LIVE_GATEWAY_SECRET'] = SECRET;
+    const token = mintToken(SID, future(), SECRET, {
+      vertical: 'DOCTOR',
+      capabilities: ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'CLINICAL_ANALYSIS'],
+    });
+    expect(extractVerifiedClaims(token, SID)).toEqual({
+      sessionId: SID,
+      psychologistId: 'p1',
+      exp: expect.any(Number),
+      vertical: 'DOCTOR',
+      capabilities: ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'CLINICAL_ANALYSIS'],
+    });
+    expect(
+      verifyStartToken(
+        mintToken(SID, future(), SECRET, {
+          vertical: 'DOCTOR',
+          capabilities: ['LIVE_ENCOUNTER', 'CLINICAL_ANALYSIS'],
+        }),
+        SID,
+      ),
+    ).toBe(false);
   });
 });
 

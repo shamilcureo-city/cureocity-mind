@@ -8,6 +8,10 @@ import { after } from 'next/server';
 import { sendAppointmentConfirmedEmail } from '@/lib/appointment-email';
 import { computeSessionDefaults } from '@/lib/session-defaults';
 import { toNationalDigits } from '@/lib/phone';
+import {
+  appointmentConcurrentModificationResponse,
+  conditionalAppointmentTransition,
+} from '@/lib/appointment-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -98,109 +102,122 @@ export async function POST(
     email ? encryptForTenant(psyId, email) : null,
   ]);
 
-  const result = await prisma.$transaction(async (tx) => {
-    let clientId: string;
-    if (matchedClientId) {
-      clientId = matchedClientId;
-    } else {
-      const client = await tx.client.create({
+  let result: ConfirmAppointmentResponse;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      await conditionalAppointmentTransition(tx, {
+        appointmentId: appt.id,
+        expectedStatus: 'REQUESTED',
+        data: { status: 'CONFIRMED' },
+      });
+
+      let clientId: string;
+      if (matchedClientId) {
+        clientId = matchedClientId;
+      } else {
+        const client = await tx.client.create({
+          data: {
+            psychologistId: psyId,
+            fullNameEncrypted,
+            contactPhoneEncrypted,
+            contactEmailEncrypted,
+            ...(concern && { presentingConcerns: concern }),
+          },
+        });
+        clientId = client.id;
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: psyId,
+            action: 'CLIENT_CREATED',
+            targetType: 'Client',
+            targetId: client.id,
+            metadata: { source: 'public-appointment', appointmentId: appt.id },
+          },
+          tx,
+        );
+      }
+
+      const session = await tx.session.create({
         data: {
+          clientId,
           psychologistId: psyId,
-          fullNameEncrypted,
-          contactPhoneEncrypted,
-          contactEmailEncrypted,
-          ...(concern && { presentingConcerns: concern }),
+          // New client: an INTAKE by definition. Matched client: whatever the
+          // cumulative state says comes next.
+          kind: matchedDefaults?.kind ?? 'INTAKE',
+          modality: matchedDefaults ? matchedDefaults.modality : 'INTAKE',
+          status: 'SCHEDULED',
+          scheduledAt: appt.startAt,
+          language: matchedDefaults?.language ?? psy?.defaultOutputLanguage ?? 'en',
         },
       });
-      clientId = client.id;
       await writeAudit(
         {
           actorType: 'PSYCHOLOGIST',
           actorPsychologistId: psyId,
-          action: 'CLIENT_CREATED',
-          targetType: 'Client',
-          targetId: client.id,
-          metadata: { source: 'public-appointment', appointmentId: appt.id },
+          action: 'SESSION_CREATED',
+          targetType: 'Session',
+          targetId: session.id,
+          metadata: {
+            clientId,
+            source: 'public-appointment',
+            kind: matchedDefaults?.kind ?? 'INTAKE',
+            ...(matchedClientId && { matchedExistingClient: true }),
+          },
         },
         tx,
       );
-    }
 
-    const session = await tx.session.create({
-      data: {
-        clientId,
-        psychologistId: psyId,
-        // New client: an INTAKE by definition. Matched client: whatever the
-        // cumulative state says comes next.
-        kind: matchedDefaults?.kind ?? 'INTAKE',
-        modality: matchedDefaults ? matchedDefaults.modality : 'INTAKE',
-        status: 'SCHEDULED',
-        scheduledAt: appt.startAt,
-        language: matchedDefaults?.language ?? psy?.defaultOutputLanguage ?? 'en',
-      },
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: psyId,
-        action: 'SESSION_CREATED',
-        targetType: 'Session',
-        targetId: session.id,
-        metadata: {
-          clientId,
-          source: 'public-appointment',
-          kind: matchedDefaults?.kind ?? 'INTAKE',
-          ...(matchedClientId && { matchedExistingClient: true }),
-        },
-      },
-      tx,
-    );
+      // Open an episode only when the client doesn't already have one open —
+      // a returning client's booking must not stack a second OPEN episode.
+      const openEpisode = matchedClientId
+        ? await tx.treatmentEpisode.findFirst({
+            where: { clientId, psychologistId: psyId, status: 'OPEN' },
+            select: { id: true },
+          })
+        : null;
+      if (!openEpisode) {
+        const episode = await tx.treatmentEpisode.create({
+          data: { clientId, psychologistId: psyId, status: 'OPEN' },
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'TREATMENT_EPISODE_OPENED',
+            targetType: 'TreatmentEpisode',
+            targetId: episode.id,
+            metadata: { clientId, sessionId: session.id },
+          },
+          tx,
+        );
+      }
 
-    // Open an episode only when the client doesn't already have one open —
-    // a returning client's booking must not stack a second OPEN episode.
-    const openEpisode = matchedClientId
-      ? await tx.treatmentEpisode.findFirst({
-          where: { clientId, psychologistId: psyId, status: 'OPEN' },
-          select: { id: true },
-        })
-      : null;
-    if (!openEpisode) {
-      const episode = await tx.treatmentEpisode.create({
-        data: { clientId, psychologistId: psyId, status: 'OPEN' },
+      await tx.appointment.update({
+        where: { id: appt.id },
+        data: { clientId, sessionId: session.id },
       });
       await writeAudit(
         {
-          actorType: 'SYSTEM',
-          action: 'TREATMENT_EPISODE_OPENED',
-          targetType: 'TreatmentEpisode',
-          targetId: episode.id,
-          metadata: { clientId, sessionId: session.id },
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: psyId,
+          action: 'APPOINTMENT_CONFIRMED',
+          targetType: 'Appointment',
+          targetId: appt.id,
+          metadata: {
+            clientId,
+            sessionId: session.id,
+            ...(matchedClientId && { matchedExistingClient: true }),
+          },
         },
         tx,
       );
-    }
-
-    await tx.appointment.update({
-      where: { id: appt.id },
-      data: { status: 'CONFIRMED', clientId, sessionId: session.id },
+      return { clientId, sessionId: session.id };
     });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: psyId,
-        action: 'APPOINTMENT_CONFIRMED',
-        targetType: 'Appointment',
-        targetId: appt.id,
-        metadata: {
-          clientId,
-          sessionId: session.id,
-          ...(matchedClientId && { matchedExistingClient: true }),
-        },
-      },
-      tx,
-    );
-    return { clientId, sessionId: session.id };
-  });
+  } catch (error) {
+    const response = appointmentConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
 
   if (email) {
     const psyName = await prisma.psychologist.findUnique({

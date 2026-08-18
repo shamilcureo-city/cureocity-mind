@@ -507,9 +507,10 @@ The five existing passes are the template — pick the closest analogue.
 - **Vertex SDK** is `@google/genai` (the new one) NOT
   `@google-cloud/vertexai` (deprecated). The migration was done in early
   Sprint 13.
-- **Auth bypass** auto-engages when Firebase env vars are missing OR
-  `AUTH_BYPASS=true`. Requests then resolve to the seeded dev fixture
-  (`dev-firebase-uid-priya`). Real Firebase env disables bypass.
+- **Auth bypass** auto-engages outside production when Firebase env vars are
+  missing or `AUTH_BYPASS=true`. Requests then resolve to the seeded dev fixture
+  (`dev-firebase-uid-priya`). Production always ignores bypass and fails closed
+  when Firebase Admin is unavailable.
 - **Mock backends in dev** prefix outputs with `[mock]`. Share snapshots
   strip the tag automatically (`share-snapshots.ts` `stripBracketTag`).
 - **The mock LLM backend is REFUSED on any deployed environment** (Vercel

@@ -68,16 +68,48 @@ function normaliseConnectionString(raw: string): string {
   }
 }
 
-function resolveConnectionString(): string {
+type DatabaseEnvironment = Record<string, string | undefined>;
+
+function databaseUsername(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(new URL(raw).username) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveConnectionString(env: DatabaseEnvironment = process.env): string {
+  const isProduction = env['VERCEL_ENV']
+    ? env['VERCEL_ENV'] === 'production'
+    : env['NODE_ENV'] === 'production';
+  if (isProduction) {
+    const runtimeUrl = env['DATABASE_RUNTIME_URL'];
+    if (!runtimeUrl) {
+      throw new Error(
+        'DATABASE_RUNTIME_URL is required in production; owner/migration URLs are forbidden for application queries',
+      );
+    }
+    const runtimeRole = databaseUsername(runtimeUrl);
+    const ownerRole = databaseUsername(
+      env['DATABASE_URL_UNPOOLED'] ?? env['POSTGRES_URL_NON_POOLING'] ?? env['DATABASE_URL'],
+    );
+    if (runtimeRole !== null && ownerRole !== null && runtimeRole === ownerRole) {
+      throw new Error('DATABASE_RUNTIME_URL must not use the migration-owner role');
+    }
+    return normaliseConnectionString(runtimeUrl);
+  }
+
   const candidate =
-    process.env['POSTGRES_PRISMA_URL'] ??
-    process.env['DATABASE_URL'] ??
-    process.env['POSTGRES_URL'] ??
-    process.env['DATABASE_URL_UNPOOLED'] ??
-    process.env['POSTGRES_URL_NON_POOLING'];
+    env['DATABASE_RUNTIME_URL'] ??
+    env['POSTGRES_PRISMA_URL'] ??
+    env['DATABASE_URL'] ??
+    env['POSTGRES_URL'] ??
+    env['DATABASE_URL_UNPOOLED'] ??
+    env['POSTGRES_URL_NON_POOLING'];
   if (!candidate) {
     throw new Error(
-      'No database connection string set (looked for POSTGRES_PRISMA_URL, DATABASE_URL, POSTGRES_URL, DATABASE_URL_UNPOOLED, POSTGRES_URL_NON_POOLING)',
+      'No database connection string set (looked for DATABASE_RUNTIME_URL, POSTGRES_PRISMA_URL, DATABASE_URL, POSTGRES_URL, DATABASE_URL_UNPOOLED, POSTGRES_URL_NON_POOLING)',
     );
   }
   return normaliseConnectionString(candidate);

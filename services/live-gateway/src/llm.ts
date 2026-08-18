@@ -30,7 +30,7 @@ import {
  *   LLM_BACKEND=vertex → real Vertex Gemini.
  */
 export interface LiveBackends {
-  backend: string;
+  backend: 'mock' | 'vertex';
   pass1: IPass1Backend;
   /** Interim note refreshes during the consult (cheap; debounced). */
   pass2: IPass2Backend;

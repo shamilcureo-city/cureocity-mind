@@ -4,7 +4,7 @@ import {
   UpdateMedicationOrderInputSchema,
   type MedicationOrderV1,
 } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -28,7 +28,7 @@ interface RouteContext {
  * client-supplied warning). Tenant-checked by the order's psychologistId.
  */
 export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'PRESCRIPTION_DRAFTING');
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
 

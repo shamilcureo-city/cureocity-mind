@@ -1,5 +1,5 @@
 import { NoopBackend, SendGridBackend } from '@cureocity/notifications';
-import type { IEmailPort } from '@cureocity/notifications';
+import type { IEmailPort, SendResult } from '@cureocity/notifications';
 import { prisma } from '@/lib/prisma';
 import { decryptForTenant } from '@/lib/tenant-crypto';
 import { publicBaseUrl, signAppointmentId } from '@/lib/appointment-links';
@@ -218,64 +218,113 @@ Reaching out took courage. Please don't let a scheduling miss stop you.
   }
 }
 
-/**
- * MK4 — reminders (24h / 2h). Therapist always; patient too when they
- * left an email. WhatsApp joins when WATI is procured (ops backlog).
- */
-export async function sendAppointmentReminderEmails(
-  psychologistId: string,
-  appointmentId: string,
-  startAt: Date,
-  windowHours: number,
-): Promise<void> {
-  try {
-    const [psy, appt] = await Promise.all([
-      prisma.psychologist.findUnique({
-        where: { id: psychologistId },
-        select: { email: true, fullName: true },
-      }),
-      prisma.appointment.findUnique({
-        where: { id: appointmentId },
-        select: { patientEmailEncrypted: true },
-      }),
-    ]);
-    const when = IST_FORMAT.format(startAt);
-    const sends: Promise<unknown>[] = [];
-    if (psy) {
-      sends.push(
-        client().sendEmail({
-          to: psy.email,
-          subject: `Reminder — session at ${when}`,
-          textBody: `Hi ${psy.fullName},
+export type PreparedAppointmentReminder =
+  | { outcome: 'pre_dispatch_failure'; errorCode: string }
+  | { outcome: 'ready'; submit: () => Promise<SendResult> };
 
-You have a booked session at ${when} (IST), about ${windowHours} hours from now.
+function reminderClient(): IEmailPort | null {
+  const injected = globalThis.__cureocityAppointmentEmail;
+  if (injected && !(injected instanceof NoopBackend)) return injected;
+  const apiKey = process.env['SENDGRID_API_KEY'];
+  const fromEmail = process.env['SENDGRID_FROM_EMAIL'];
+  if (!apiKey || !fromEmail) return null;
+  const port = new SendGridBackend({
+    apiKey,
+    fromEmail,
+    fromName: process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity Mind',
+  });
+  globalThis.__cureocityAppointmentEmail = port;
+  return port;
+}
+
+function claimedLocationBlock(
+  appointment: { id: string; mode: string },
+  psychologist: { videoCallLink: string | null; officeAddress: string | null },
+): string {
+  if (appointment.mode === 'IN_PERSON') {
+    return psychologist.officeAddress ? `\nWhere: ${psychologist.officeAddress}\n` : '';
+  }
+  if (livekitConfigured()) {
+    const sig = signAppointmentId(appointment.id);
+    return `\nThis is an online video session. Join from your phone or computer (the room opens 30 minutes before):\n${publicBaseUrl()}/p/appointments/${appointment.id}/join?sig=${sig}\n`;
+  }
+  return psychologist.videoCallLink
+    ? `\nThis is an online session. Join here at your time:\n${psychologist.videoCallLink}\n`
+    : '';
+}
+
+/**
+ * Prepare exactly one recipient request without touching the provider. The
+ * caller must durably commit SUBMISSION_STARTED before invoking submit().
+ * Missing configuration and local preparation errors are therefore safely
+ * retryable; every outcome after submit starts is at-most-once and may need
+ * manual reconciliation.
+ */
+export async function prepareAppointmentReminderEmail(input: {
+  appointment: {
+    id: string;
+    psychologistId: string;
+    startAt: Date;
+    mode: string;
+    patientEmailEncrypted: string | null;
+  };
+  recipient: 'PRACTITIONER_EMAIL' | 'PATIENT_EMAIL';
+  windowHours: number;
+}): Promise<PreparedAppointmentReminder> {
+  const port = reminderClient();
+  if (!port) {
+    return { outcome: 'pre_dispatch_failure', errorCode: 'SENDGRID_NOT_CONFIGURED' };
+  }
+
+  const psy = await prisma.psychologist.findUnique({
+    where: { id: input.appointment.psychologistId },
+    select: {
+      email: true,
+      fullName: true,
+      videoCallLink: true,
+      officeAddress: true,
+    },
+  });
+  if (!psy) {
+    return { outcome: 'pre_dispatch_failure', errorCode: 'PRACTITIONER_NOT_FOUND' };
+  }
+
+  const when = IST_FORMAT.format(input.appointment.startAt);
+  if (input.recipient === 'PRACTITIONER_EMAIL') {
+    const request = {
+      to: psy.email,
+      subject: `Reminder — session at ${when}`,
+      textBody: `Hi ${psy.fullName},
+
+You have a booked session at ${when} (IST), about ${input.windowHours} hours from now.
 Details: ${publicBaseUrl()}/app/marketing
 
 — Cureocity Mind`,
-        }),
-      );
-    }
-    if (appt?.patientEmailEncrypted && psy) {
-      const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
-      if (patientEmail) {
-        const sig = signAppointmentId(appointmentId);
-        const where = await locationBlock(psychologistId, appointmentId);
-        sends.push(
-          client().sendEmail({
-            to: patientEmail,
-            subject: `Reminder — your session at ${when}`,
-            textBody: `Your session with ${psy.fullName} is at ${when} (IST).
+    };
+    return { outcome: 'ready', submit: () => port.sendEmail(request) };
+  }
+
+  if (!input.appointment.patientEmailEncrypted) {
+    return { outcome: 'pre_dispatch_failure', errorCode: 'PATIENT_EMAIL_UNAVAILABLE' };
+  }
+  const patientEmail = await decryptForTenant(
+    input.appointment.psychologistId,
+    input.appointment.patientEmailEncrypted,
+  );
+  if (!patientEmail) {
+    return { outcome: 'pre_dispatch_failure', errorCode: 'PATIENT_EMAIL_UNAVAILABLE' };
+  }
+  const sig = signAppointmentId(input.appointment.id);
+  const where = claimedLocationBlock(input.appointment, psy);
+  const request = {
+    to: patientEmail,
+    subject: `Reminder — your session at ${when}`,
+    textBody: `Your session with ${psy.fullName} is at ${when} (IST).
 ${where}
 Can't make it? Cancel here so the time opens up for someone else:
-${publicBaseUrl()}/p/appointments/${appointmentId}/cancel?sig=${sig}
+${publicBaseUrl()}/p/appointments/${input.appointment.id}/cancel?sig=${sig}
 
 — Cureocity`,
-          }),
-        );
-      }
-    }
-    await Promise.all(sends);
-  } catch (e) {
-    console.warn(`[appointment-email] reminder send failed: ${(e as Error).message}`);
-  }
+  };
+  return { outcome: 'ready', submit: () => port.sendEmail(request) };
 }

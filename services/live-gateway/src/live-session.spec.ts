@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LiveGatewayEventSchema, type LiveGatewayEvent } from '@cureocity/contracts';
+import {
+  LiveGatewayEventSchema,
+  type LiveGatewayEvent,
+  type PractitionerCapability,
+} from '@cureocity/contracts';
 import {
   MockGeminiPass1Backend,
   MockGeminiPass2Backend,
@@ -45,6 +49,45 @@ function mockBackends(): LiveBackends {
     reasoning: new MockGeminiReasoningBackend(),
     therapyReasoning: new MockGeminiTherapyReasoningBackend(),
   };
+}
+
+class TranscriptPass1 implements IPass1Backend {
+  private readonly inner = new MockGeminiPass1Backend();
+
+  constructor(private readonly transcript: string) {}
+
+  async run(input: Pass1Input) {
+    const result = await this.inner.run(input);
+    return {
+      output: { ...result.output, transcript: this.transcript, speakerSegments: [] },
+      callLog: result.callLog,
+    };
+  }
+}
+
+async function commandEvents(
+  transcript: string,
+  capabilities: ReadonlySet<PractitionerCapability>,
+) {
+  const events: LiveGatewayEvent[] = [];
+  const session = new LiveSession(
+    'sess-command-authz',
+    null,
+    { ...mockBackends(), pass1: new TranscriptPass1(transcript) },
+    (event) => events.push(event),
+    OPTS,
+    undefined,
+    0,
+    'DOCTOR',
+    'TREATMENT',
+    null,
+    null,
+    capabilities,
+  );
+  session.pushAudio(BLOCK);
+  await session.pump();
+  session.dispose();
+  return events.flatMap((event) => (event.type === 'command' ? [event.command] : []));
 }
 
 /** One "utterance" of audio: 5s of speech + a 0.5s pause. */
@@ -102,6 +145,96 @@ describe('LiveSession — per-segment diarized utterances (TS-B1)', () => {
 });
 
 describe('LiveSession — incremental windowing + metering (DS0)', () => {
+  it('suppresses every parsed command for documentation-only claims', async () => {
+    const commands = await commandEvents(
+      'Add aspirin 75 mg OD. Order HbA1c. Show last BP. Next patient please.',
+      new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION']),
+    );
+
+    expect(commands).toEqual([]);
+  });
+
+  it('emits ADD_MEDICATION only with prescription drafting authority', async () => {
+    const commands = await commandEvents(
+      'Add aspirin 75 mg OD.',
+      new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'PRESCRIPTION_DRAFTING']),
+    );
+
+    expect(commands).toMatchObject([{ kind: 'ADD_MEDICATION', drug: 'Aspirin' }]);
+  });
+
+  it('emits ORDER_TEST only with clinical orders authority', async () => {
+    const commands = await commandEvents(
+      'Order HbA1c.',
+      new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'CLINICAL_ORDERS']),
+    );
+
+    expect(commands).toMatchObject([{ kind: 'ORDER_TEST', description: 'Hba1c' }]);
+  });
+
+  it('emits SHOW_DATA only with chronic care authority', async () => {
+    const commands = await commandEvents(
+      'Show last BP.',
+      new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'CHRONIC_CARE']),
+    );
+
+    expect(commands).toMatchObject([{ kind: 'SHOW_DATA', measure: 'BP' }]);
+  });
+
+  it('suppresses NEXT_PATIENT even when every regulated capability is present', async () => {
+    const commands = await commandEvents(
+      'Next patient please.',
+      new Set([
+        'LIVE_ENCOUNTER',
+        'MEDICAL_DOCUMENTATION',
+        'PRESCRIPTION_DRAFTING',
+        'CLINICAL_ORDERS',
+        'CHRONIC_CARE',
+      ]),
+    );
+
+    expect(commands).toEqual([]);
+  });
+
+  it('keeps documentation live while suppressing every unauthorized optional output', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-scoped',
+      'Cardiology',
+      mockBackends(),
+      (event) => events.push(event),
+      OPTS,
+      {
+        activeMeds: ['warfarin'],
+        allergies: ['penicillin'],
+        knownConditions: ['HTN'],
+        sex: 'male',
+      },
+      0,
+      'DOCTOR',
+      'TREATMENT',
+      null,
+      null,
+      new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION']),
+    );
+
+    session.start();
+    session.pushAudio(BLOCK);
+    await session.pump();
+    await session.finalize();
+
+    expect(events.some((event) => event.type === 'note')).toBe(true);
+    expect(
+      events.some((event) =>
+        ['finding', 'reasoning', 'rxDraft', 'command', 'gap'].includes(event.type),
+      ),
+    ).toBe(false);
+    const final = events.find((event) => event.type === 'final');
+    expect(final).toMatchObject({ type: 'final', medications: [], orders: [] });
+    if (final?.type === 'final') expect(final.rxPad).toBeUndefined();
+    session.dispose();
+  });
+
   it('emits schema-valid events, one utterance per window, and a final note + meter', async () => {
     const events: LiveGatewayEvent[] = [];
     const session = new LiveSession(

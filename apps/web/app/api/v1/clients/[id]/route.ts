@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma';
 import { toClient } from '@/lib/mappers';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
+import { markLegacyPatientResponse } from '@/lib/patient-compatibility';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,7 @@ async function fetchOwnedClient(psychologistId: string, clientId: string) {
 /**
  * GET /api/v1/clients/:id — single read + CLIENT_VIEWED audit row.
  */
-export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+async function legacyClientGET(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
  * PATCH /api/v1/clients/:id — partial update. Writes a CLIENT_UPDATED
  * audit row with both before + after captured in metadata.
  */
-export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+async function legacyClientPATCH(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
@@ -136,7 +137,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
  * GET; see docs/AUTH_SESSION.md). Idempotent in effect: a second call on
  * an already-archived client 404s via `fetchOwnedClient`.
  */
-export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+async function legacyClientDELETE(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
@@ -159,4 +160,24 @@ export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextR
   });
 
   return NextResponse.json({ ok: true });
+}
+
+async function markDetailResponse(
+  response: NextResponse,
+  ctx: RouteContext,
+): Promise<NextResponse> {
+  const { id } = await ctx.params;
+  return markLegacyPatientResponse(response, `/api/v1/patients/${id}`);
+}
+
+export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  return markDetailResponse(await legacyClientGET(req, ctx), ctx);
+}
+
+export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  return markDetailResponse(await legacyClientPATCH(req, ctx), ctx);
+}
+
+export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  return markDetailResponse(await legacyClientDELETE(req, ctx), ctx);
 }

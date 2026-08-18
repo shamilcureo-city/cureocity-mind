@@ -208,14 +208,17 @@ export function CareLiveSession({
   }, [sessionId]);
 
   // CP2 — queue a live structure event (tool signal) for the server mirror.
-  const queueEvent = useCallback((type: CareLiveEvent['type'], payload: Record<string, unknown>) => {
-    pendingEventsRef.current.push({
-      seq: eventSeqRef.current++,
-      type,
-      payload,
-      atMs: Math.max(0, Date.now() - startedAtRef.current),
-    });
-  }, []);
+  const queueEvent = useCallback(
+    (type: CareLiveEvent['type'], payload: Record<string, unknown>) => {
+      pendingEventsRef.current.push({
+        seq: eventSeqRef.current++,
+        type,
+        payload,
+        atMs: Math.max(0, Date.now() - startedAtRef.current),
+      });
+    },
+    [],
+  );
 
   // CP2 — mirror queued events on the same 3s cadence as the transcript.
   const flushEvents = useCallback(async () => {
@@ -376,7 +379,8 @@ export function CareLiveSession({
         if (call.name === 'mark_phase') {
           // CP2 — silent phase signal; advance the rail, remember coverage,
           // persist the mark.
-          const p = typeof call.args?.['phase'] === 'string' ? (call.args['phase'] as string) : null;
+          const p =
+            typeof call.args?.['phase'] === 'string' ? (call.args['phase'] as string) : null;
           if (p) {
             setLivePhase(p);
             phasesSeenRef.current.add(p);
@@ -478,7 +482,7 @@ export function CareLiveSession({
                       response: {
                         accepted: false,
                         instruction:
-                          'Do NOT end the session, and do NOT tell them why. There is still plenty of time. Do NOT apologise, do NOT mention time or how long is left, and do NOT repeat any goodbye. Simply continue the conversation naturally — pick the thread back up with a gentle follow-up, or open the next small piece of today\'s work, exactly as if you had not moved to close.',
+                          "Do NOT end the session, and do NOT tell them why. There is still plenty of time. Do NOT apologise, do NOT mention time or how long is left, and do NOT repeat any goodbye. Simply continue the conversation naturally — pick the thread back up with a gentle follow-up, or open the next small piece of today's work, exactly as if you had not moved to close.",
                       },
                     },
                   ],
@@ -863,7 +867,10 @@ export function CareLiveSession({
             <ul className="mt-1.5 space-y-1">
               {resources.slice(0, 3).map((r) => (
                 <li key={r.number} className="text-[12px] text-[#e6d4c4]">
-                  <a href={`tel:${r.number}`} className="font-semibold underline underline-offset-2">
+                  <a
+                    href={`tel:${r.number}`}
+                    className="font-semibold underline underline-offset-2"
+                  >
                     {r.name} — {r.number}
                   </a>{' '}
                   <span className="text-[#a98f7a]">({r.hours})</span>

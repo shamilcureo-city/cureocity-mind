@@ -20,9 +20,9 @@ self-resolves once answered.
 
 ### Auth bypass
 
-When Firebase env vars are missing (or `AUTH_BYPASS=true`), every request
-resolves to the seeded dev fixture `dev-firebase-uid-priya`. Fails **closed**
-on Vercel production. See `docs/AUTH_SESSION.md`.
+Outside production, missing Firebase env vars (or `AUTH_BYPASS=true`) resolve
+practitioner requests to the seeded dev fixture `dev-firebase-uid-priya`.
+Production ignores bypass and fails **closed**. See `docs/AUTH_SESSION.md`.
 
 ### CaptureMode
 

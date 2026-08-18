@@ -1,5 +1,5 @@
 import { NextResponse, after, type NextRequest } from 'next/server';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { runClinicalAnalysis, runNoteGeneration } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
 
@@ -34,7 +34,11 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { psychologistId: true, status: true },
+    select: {
+      psychologistId: true,
+      status: true,
+      psychologist: { select: { vertical: true } },
+    },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -46,13 +50,23 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
+  const documentationCapability =
+    session.psychologist.vertical === 'DOCTOR'
+      ? 'MEDICAL_DOCUMENTATION'
+      : 'BEHAVIORAL_HEALTH_DOCUMENTATION';
+  const documentationAuth = await requireCapability(req, documentationCapability, auth);
+  if (!documentationAuth.ok) return documentationAuth.response;
+
   const result = await runNoteGeneration(sessionId);
   // Schedule Pass 3 (Clinical Analysis) to run AFTER the response is
   // sent. Vercel keeps the function alive for the after() callback up
   // to maxDuration; a Pass 3 failure is non-fatal (the Clinical Brief
   // / Initial Assessment tab surfaces it and offers manual retry).
   // pendingClinicalAnalysisArgs is only present on Pass 2 success.
-  if (result.pendingClinicalAnalysisArgs) {
+  if (
+    result.pendingClinicalAnalysisArgs &&
+    auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')
+  ) {
     const pass3Args = result.pendingClinicalAnalysisArgs;
     after(async () => {
       try {

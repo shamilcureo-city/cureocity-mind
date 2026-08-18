@@ -43,6 +43,24 @@ describe('SendGridBackend.sendEmail', () => {
     expect(r.providerMessageId).toBe('sendgrid:sg-abc-123');
   });
 
+  it('does not inspect a response body or retry after SendGrid accepts the message', async () => {
+    const text = vi.fn().mockRejectedValue(new Error('response stream reset after acceptance'));
+    const fetchImpl = vi.fn(async () => ({
+      status: 202,
+      headers: { get: () => 'sg-accepted' },
+      text,
+    })) as unknown as typeof fetch;
+    const s = new SendGridBackend({ ...cfg, fetchImpl });
+
+    await expect(s.sendEmail({ to: 'x@y.com', subject: 'hi', textBody: 'hello' })).resolves.toEqual(
+      {
+        outcome: 'sent',
+        providerMessageId: 'sendgrid:sg-accepted',
+      },
+    );
+    expect(text).not.toHaveBeenCalled();
+  });
+
   it('marks 4xx as permanent', async () => {
     const fetchImpl = fetchMock(() => ({ status: 400, text: '{"errors":[{"message":"bad to"}]}' }));
     const s = new SendGridBackend({ ...cfg, fetchImpl: fetchImpl as unknown as typeof fetch });
@@ -69,6 +87,20 @@ describe('SendGridBackend.sendEmail', () => {
     const call = fetchImpl.mock.calls[0]!;
     expect(call[1]!.body).toContain('"filename":"plan.pdf"');
     expect(call[1]!.body).toContain('"content":"aGVsbG8="');
+  });
+
+  it('does not send an unsupported idempotency header', async () => {
+    const fetchImpl = fetchMock(() => ({ status: 202, text: '' }));
+    const s = new SendGridBackend({ ...cfg, fetchImpl: fetchImpl as unknown as typeof fetch });
+
+    await s.sendEmail({
+      to: 'x@y.com',
+      subject: 's',
+      textBody: 'b',
+      idempotencyKey: 'caller-key-for-a-different-provider',
+    });
+
+    expect(fetchImpl.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Idempotency-Key');
   });
 
   it('marks network errors as transient', async () => {

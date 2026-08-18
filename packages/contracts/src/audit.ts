@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema, PaginationCursorSchema } from './common';
 
 export const AuditActionSchema = z.enum([
+  'CAPABILITY_ACCESS_DENIED',
   'PSYCHOLOGIST_REGISTERED',
   'PSYCHOLOGIST_UPDATED',
   'CLIENT_CREATED',
@@ -29,6 +30,7 @@ export const AuditActionSchema = z.enum([
   'TRANSCRIPT_SEGMENT_FAILED',
   'NOTE_DRAFT_CREATED',
   'NOTE_DRAFT_VIEWED',
+  'NOTE_DRAFT_EDITED',
   'NOTE_SIGNED',
   'NOTE_UNLOCKED',
   'COST_CIRCUIT_TRIPPED',
@@ -80,6 +82,7 @@ export const AuditActionSchema = z.enum([
   'DSR_ACCESS_FULFILLED',
   'DSR_CORRECTION_REQUESTED',
   'DSR_ERASURE_REQUESTED',
+  'DSR_ERASURE_APPROVED',
   'DSR_ERASURE_FULFILLED',
   'DSR_NOMINATION_RECORDED',
   'DSR_GRIEVANCE_FILED',

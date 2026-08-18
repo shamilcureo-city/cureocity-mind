@@ -9,7 +9,7 @@ import {
   type MedicationOrderV1,
   type TherapyNoteV1,
 } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { ensureEnglishNote } from '@/lib/ensure-english-note';
 import {
@@ -19,10 +19,20 @@ import {
   runDifferential,
 } from '@/lib/note-orchestrator';
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
+
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import {
+  ClientPhiWriteForbiddenError,
+  lockActiveClientForSession,
+  withActiveSessionPhiWrite,
+} from '@/lib/phi-write-lock';
 import type { Prisma } from '@prisma/client';
+import {
+  finalizeLiveSession,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,6 +82,13 @@ export async function POST(
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+
+  const documentationCapability =
+    session.psychologist.vertical === 'DOCTOR'
+      ? 'MEDICAL_DOCUMENTATION'
+      : 'BEHAVIORAL_HEALTH_DOCUMENTATION';
+  const documentationAuth = await requireCapability(req, documentationCapability, auth);
+  if (!documentationAuth.ok) return documentationAuth.response;
 
   // Batch C — REFUSE to overwrite the draft behind a SIGNED note.
   //
@@ -129,56 +146,67 @@ export async function POST(
       );
     }
     const tWrite = tTranscript.length > 0 ? { transcriptEncrypted: tTranscriptEncrypted } : {};
-    const tDraft = await prisma.noteDraft.upsert({
-      where: { sessionId },
-      update: {
-        status: 'COMPLETED',
-        content: tnote as unknown as Prisma.InputJsonValue,
-        riskSeverity: 'NONE',
-        errorMessage: null,
-        ...tWrite,
-      },
-      create: {
-        sessionId,
-        status: 'COMPLETED',
-        content: tnote as unknown as Prisma.InputJsonValue,
-        riskSeverity: 'NONE',
-        // The presence marker is encrypted too — ciphertext presence is what
-        // the NoteDraft presence checks read.
-        transcriptEncrypted: tTranscriptEncrypted,
-      },
-    });
-    await writeAudit({
-      actorType: 'PSYCHOLOGIST',
-      actorPsychologistId: auth.value.psychologistId,
-      action: 'NOTE_DRAFT_CREATED',
-      targetType: 'NoteDraft',
-      targetId: tDraft.id,
-      metadata: {
-        sessionId,
-        source: 'LIVE',
-        kind: parsedT.value.kind,
-        ...auditMetadataFromRequest(req),
-      },
-    });
-    if (session.status !== 'COMPLETED') {
-      await prisma.$transaction(async (tx) => {
-        await tx.session.update({
-          where: { id: sessionId },
-          data: { status: 'COMPLETED', endedAt: new Date() },
-        });
-        await writeAudit(
-          {
-            actorType: 'PSYCHOLOGIST',
-            actorPsychologistId: auth.value.psychologistId,
-            action: 'SESSION_ENDED',
-            targetType: 'Session',
-            targetId: sessionId,
-            metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+    let tDraft;
+    try {
+      tDraft = await prisma.$transaction(async (tx) => {
+        await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+        return finalizeLiveSession(tx, {
+          sessionId,
+          endedAt: new Date(),
+          persistDraft: async () => {
+            const draft = await tx.noteDraft.upsert({
+              where: { sessionId },
+              update: {
+                status: 'COMPLETED',
+                content: tnote as unknown as Prisma.InputJsonValue,
+                riskSeverity: 'NONE',
+                errorMessage: null,
+                ...tWrite,
+              },
+              create: {
+                sessionId,
+                status: 'COMPLETED',
+                content: tnote as unknown as Prisma.InputJsonValue,
+                riskSeverity: 'NONE',
+                transcriptEncrypted: tTranscriptEncrypted,
+              },
+            });
+            await writeAudit(
+              {
+                actorType: 'PSYCHOLOGIST',
+                actorPsychologistId: auth.value.psychologistId,
+                action: 'NOTE_DRAFT_CREATED',
+                targetType: 'NoteDraft',
+                targetId: draft.id,
+                metadata: {
+                  sessionId,
+                  source: 'LIVE',
+                  kind: parsedT.value.kind,
+                  ...auditMetadataFromRequest(req),
+                },
+              },
+              tx,
+            );
+            return draft;
           },
-          tx,
-        );
+          writeLifecycleAudit: () =>
+            writeAudit(
+              {
+                actorType: 'PSYCHOLOGIST',
+                actorPsychologistId: auth.value.psychologistId,
+                action: 'SESSION_ENDED',
+                targetType: 'Session',
+                targetId: sessionId,
+                metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+              },
+              tx,
+            ),
+        });
       });
+    } catch (error) {
+      const response = sessionConcurrentModificationResponse(error);
+      if (response) return response;
+      throw error;
     }
     // The batch path schedules Pass 3 (the copilot reading) in generate-note's
     // after(); this branch never did, so every live session landed on a board
@@ -189,31 +217,33 @@ export async function POST(
     // the Pass 3 prompt is told not to guess speakers).
     const p3Transcript = tTranscriptText;
     const p3Kind = session.kind;
-    after(async () => {
-      try {
-        await runClinicalAnalysis({
-          sessionId,
-          clientId: session.clientId,
-          psychologistId: session.psychologistId,
-          language: (session.language as ClinicalLocale | undefined) ?? 'en',
-          kind: p3Kind,
-          modality: session.modality,
-          presentingConcerns: session.client.presentingConcerns,
-          transcript: p3Transcript,
-          speakerSegments: coverTranscriptWithSegments({
+    if (auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
+      after(async () => {
+        try {
+          await runClinicalAnalysis({
+            sessionId,
+            clientId: session.clientId,
+            psychologistId: session.psychologistId,
+            language: (session.language as ClinicalLocale | undefined) ?? 'en',
+            kind: p3Kind,
+            modality: session.modality,
+            presentingConcerns: session.client.presentingConcerns,
             transcript: p3Transcript,
-            segments: [],
-            startMs: 0,
-            endMs: 0,
-          }),
-          note: tnote as Parameters<typeof runClinicalAnalysis>[0]['note'],
-        });
-      } catch (e) {
-        console.error(
-          `[live-note] clinical analysis failed for session=${sessionId}: ${(e as Error).message}`,
-        );
-      }
-    });
+            speakerSegments: coverTranscriptWithSegments({
+              transcript: p3Transcript,
+              segments: [],
+              startMs: 0,
+              endMs: 0,
+            }),
+            note: tnote as Parameters<typeof runClinicalAnalysis>[0]['note'],
+          });
+        } catch (e) {
+          console.error(
+            `[live-note] clinical analysis failed for session=${sessionId}: ${(e as Error).message}`,
+          );
+        }
+      });
+    }
     return NextResponse.json({ draftId: tDraft.id, status: 'COMPLETED' }, { status: 201 });
   }
 
@@ -223,16 +253,22 @@ export async function POST(
   // The schema's `.default([])`s mean the validated value is fully
   // populated at runtime; narrow to the output types the helpers expect.
   const note = parsed.value.note as MedicalEncounterNoteV1;
-  const medications = (parsed.value.medications ?? []) as MedicationOrderV1[];
-  const orders = (parsed.value.orders ?? []) as ClinicalOrderV1[];
+  const capabilities = documentationAuth.value.user.capabilities;
+  const medications = capabilities?.includes('PRESCRIPTION_DRAFTING')
+    ? ((parsed.value.medications ?? []) as MedicationOrderV1[])
+    : [];
+  const orders = capabilities?.includes('CLINICAL_ORDERS')
+    ? ((parsed.value.orders ?? []) as ClinicalOrderV1[])
+    : [];
   // DOC-7 — the verbatim consult transcript the gateway streamed. Trim and
   // fall back to the presence marker when empty so a transcript-less consult
   // still satisfies the NoteDraft presence check.
   const transcript = parsed.value.transcript?.trim() ?? '';
   // Sprint DS5 — the finalized Rx pad, stored alongside the note.
-  const rxPad = parsed.value.rxPad
-    ? (parsed.value.rxPad as unknown as Prisma.InputJsonValue)
-    : undefined;
+  const rxPad =
+    capabilities?.includes('PRESCRIPTION_DRAFTING') && parsed.value.rxPad
+      ? (parsed.value.rxPad as unknown as Prisma.InputJsonValue)
+      : undefined;
 
   // DOC-7 — the streamed transcript is the medico-legal source record behind
   // the note; persist it verbatim (with the presence marker as the fallback
@@ -267,78 +303,89 @@ export async function POST(
   // marker.
   const transcriptWrite = transcript.length > 0 ? { transcriptEncrypted } : {};
 
-  // Persist the note as a COMPLETED draft. The doctor signs it from the
-  // encounter workspace — that signature is the attestation.
-  const draft = await prisma.noteDraft.upsert({
-    where: { sessionId },
-    update: {
-      status: 'COMPLETED',
-      content: note as unknown as Prisma.InputJsonValue,
-      riskSeverity: 'NONE',
-      errorMessage: null,
-      ...transcriptWrite,
-      ...(rxPad !== undefined && { rxPad }),
-    },
-    create: {
-      sessionId,
-      status: 'COMPLETED',
-      content: note as unknown as Prisma.InputJsonValue,
-      riskSeverity: 'NONE',
-      // The presence marker for a transcript-less consult is encrypted too —
-      // ciphertext presence is what the NoteDraft presence checks read.
-      transcriptEncrypted,
-      ...(rxPad !== undefined && { rxPad }),
-    },
-  });
-
-  await writeAudit({
-    actorType: 'PSYCHOLOGIST',
-    actorPsychologistId: auth.value.psychologistId,
-    action: 'ENCOUNTER_NOTE_DRAFTED',
-    targetType: 'NoteDraft',
-    targetId: draft.id,
-    metadata: {
-      sessionId,
-      source: 'LIVE',
-      medicationCount: medications.length,
-      orderCount: orders.length,
-      ...auditMetadataFromRequest(req),
-    },
-  });
-
-  // DS11.1 — the live consult is over: mark the session COMPLETED so the
-  // clinic queue shows DONE and the sign route (requires COMPLETED)
-  // accepts the note. Batch parity with POST /sessions/:id/end.
-  if (session.status !== 'COMPLETED') {
-    await prisma.$transaction(async (tx) => {
-      await tx.session.update({
-        where: { id: sessionId },
-        data: { status: 'COMPLETED', endedAt: new Date() },
-      });
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'SESSION_ENDED',
-          targetType: 'Session',
-          targetId: sessionId,
-          metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+  let draft;
+  try {
+    draft = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      return finalizeLiveSession(tx, {
+        sessionId,
+        endedAt: new Date(),
+        persistDraft: async () => {
+          const persisted = await tx.noteDraft.upsert({
+            where: { sessionId },
+            update: {
+              status: 'COMPLETED',
+              content: note as unknown as Prisma.InputJsonValue,
+              riskSeverity: 'NONE',
+              errorMessage: null,
+              ...transcriptWrite,
+              ...(rxPad !== undefined && { rxPad }),
+            },
+            create: {
+              sessionId,
+              status: 'COMPLETED',
+              content: note as unknown as Prisma.InputJsonValue,
+              riskSeverity: 'NONE',
+              transcriptEncrypted,
+              ...(rxPad !== undefined && { rxPad }),
+            },
+          });
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'ENCOUNTER_NOTE_DRAFTED',
+              targetType: 'NoteDraft',
+              targetId: persisted.id,
+              metadata: {
+                sessionId,
+                source: 'LIVE',
+                medicationCount: medications.length,
+                orderCount: orders.length,
+                ...auditMetadataFromRequest(req),
+              },
+            },
+            tx,
+          );
+          return persisted;
         },
-        tx,
-      );
+        writeLifecycleAudit: () =>
+          writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'SESSION_ENDED',
+              targetType: 'Session',
+              targetId: sessionId,
+              metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+            },
+            tx,
+          ),
+      });
     });
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
   }
 
   // Reuse the batch helpers: draft the Rx + clinical orders (interaction-
   // checked server-side) and capture vitals into the chronic series.
-  await persistDraftedOrders(sessionId, auth.value.psychologistId, medications, orders);
-  await persistVitalReadings(
-    sessionId,
-    session.clientId,
-    auth.value.psychologistId,
-    session.scheduledAt,
-    note.vitals,
-  );
+  if (
+    capabilities?.includes('PRESCRIPTION_DRAFTING') ||
+    capabilities?.includes('CLINICAL_ORDERS')
+  ) {
+    await persistDraftedOrders(sessionId, auth.value.psychologistId, medications, orders);
+  }
+  if (capabilities?.includes('CHRONIC_CARE')) {
+    await persistVitalReadings(
+      sessionId,
+      session.clientId,
+      auth.value.psychologistId,
+      session.scheduledAt,
+      note.vitals,
+    );
+  }
 
   // DS-perf — pre-warm the differential. Previously the Review & Sign panel
   // fired the differential (a 15-40s Vertex Pro pass) only when it MOUNTED,
@@ -351,16 +398,42 @@ export async function POST(
   // pending row instead of triggering a duplicate run, then do the heavy pass
   // in after() so the doctor's response isn't blocked. Skipped when a
   // COMPLETED differential already exists (a re-POST must not wipe it).
-  const existingDiff = await prisma.differential.findUnique({
-    where: { sessionId },
-    select: { status: true },
-  });
-  if (existingDiff?.status !== 'COMPLETED') {
-    await prisma.differential.upsert({
-      where: { sessionId },
-      update: { status: 'IN_PROGRESS', errorMessage: null },
-      create: { sessionId, psychologistId: auth.value.psychologistId, status: 'IN_PROGRESS' },
-    });
+  let shouldPrewarmDifferential = false;
+  if (auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
+    try {
+      // PASS_9_LIVE_PREWARM_MARKER — the find + upsert are one short PHI
+      // transaction that locks the active Client and rereads Session ownership
+      // and COMPLETED state. Erasure therefore wins cleanly without a marker.
+      shouldPrewarmDifferential = await withActiveSessionPhiWrite(
+        prisma,
+        sessionId,
+        auth.value.psychologistId,
+        async (tx) => {
+          const existingDiff = await tx.differential.findUnique({
+            where: { sessionId },
+            select: { status: true },
+          });
+          if (existingDiff?.status === 'COMPLETED') return false;
+          await tx.differential.upsert({
+            where: { sessionId },
+            update: { status: 'IN_PROGRESS', errorMessage: null },
+            create: {
+              sessionId,
+              psychologistId: auth.value.psychologistId,
+              status: 'IN_PROGRESS',
+            },
+          });
+          return true;
+        },
+        { allowedStatuses: ['COMPLETED'] },
+      );
+    } catch (error) {
+      if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
+      // The note committed before erasure, then erasure won the next Client
+      // lock. Its terminal state is authoritative; do not recreate a marker.
+    }
+  }
+  if (shouldPrewarmDifferential) {
     after(async () => {
       // runDifferential owns its own error handling (marks the row FAILED,
       // never throws) — this guard is belt-and-braces for the after() context.

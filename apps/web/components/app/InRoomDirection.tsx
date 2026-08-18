@@ -70,9 +70,7 @@ export function InRoomDirection({ clientId }: Props) {
 
       {open && (
         <div className="mt-3 space-y-4">
-          {state === 'loading' && (
-            <p className="text-sm text-[var(--color-ink-3)]">Loading…</p>
-          )}
+          {state === 'loading' && <p className="text-sm text-[var(--color-ink-3)]">Loading…</p>}
           {state === 'error' && (
             <p className="text-sm text-[var(--color-ink-3)]">
               Couldn&rsquo;t load the plan.{' '}

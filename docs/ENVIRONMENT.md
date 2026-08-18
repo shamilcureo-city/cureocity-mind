@@ -63,7 +63,7 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | Server-side Firebase Admin. **If any is missing → `AUTH_BYPASS` auto-engages** (fails closed on Vercel prod).                                                                       |
 | `NEXT_PUBLIC_FIREBASE_*` (public)                                        | Browser Firebase SDK config.                                                                                                                                                        |
-| `AUTH_BYPASS`                                                            | Explicit override. `true` = every sign-in resolves to the demo therapist.                                                                                                           |
+| `AUTH_BYPASS`                                                            | Non-production override. `true` = practitioner sign-in resolves to the demo therapist; ignored in production.                                                                       |
 | `BOOTSTRAP_ADMIN_EMAILS`                                                 | Comma-separated emails auto-granted ADMIN on first sign-in.                                                                                                                         |
 | `SESSION_COOKIE_DOMAIN`                                                  | Unset = host-only login cookie (default; localhost/previews need this). Set `.cureocity.in` in prod to share login across subdomains for the `admin.cureocity.in` operator console. |
 | `WEBAUTHN_TICKET_SECRET`                                                 | HMAC key for the registration ticket (≥32 chars).                                                                                                                                   |
@@ -90,6 +90,8 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 | Var                                                                                                                | Purpose                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `LIVE_GATEWAY_SECRET`                                                                                              | HMAC key verifying the browser's start-token. **Gateway fails closed in prod without it.** Must match what `apps/web/lib/live-token.ts` signs with. |
+| `LIVE_AUTHZ_REVALIDATE_URL`                                                                                        | **Required for authenticated live sessions.** Absolute app URL for `POST /api/v1/internal/live-authority`; the gateway refuses the start if unset.  |
+| `LIVE_AUTHZ_INTERVAL_MS` / `LIVE_AUTHZ_TIMEOUT_MS`                                                                 | Current-authority polling interval (5s) and per-check timeout (2s). Any denial, malformed response, timeout, or outage closes the socket.           |
 | `LIVE_GATEWAY_PORT`                                                                                                | Listen port (default 8787).                                                                                                                         |
 | `LIVE_GATEWAY_MAX_CONNECTIONS` / `LIVE_GATEWAY_MAX_SESSIONS`                                                       | Connection cap (200) + concurrent-consult pool (50, graceful "busy" shed).                                                                          |
 | `LIVE_GATEWAY_STARTUP_GRACE_MS` / `LIVE_GATEWAY_IDLE_TIMEOUT_MS`                                                   | Per-connection timers.                                                                                                                              |
@@ -132,10 +134,13 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 
 ## 9. Gotchas
 
-- Missing Firebase env silently flips the app into **auth bypass** — a
-  security footgun in prod; `GET /api/v1/health/auth` reports the live posture.
+- Missing Firebase env silently flips non-production deployments into **auth
+  bypass**. Production instead fails closed; `GET /api/v1/health/auth` reports
+  the live posture.
 - The gateway and the app must share the **same** `LIVE_GATEWAY_SECRET`, or
-  every live consult 401s at connect.
+  every live consult 401s at connect. The gateway must also set
+  `LIVE_AUTHZ_REVALIDATE_URL` to the app's internal authority endpoint; an
+  authenticated consult fails closed when the URL or verifier is unavailable.
 - `.env.example` is a snapshot — trust the code + this file for KMS (`gcp-kms`)
   and any post-Sprint-72 vars.
 - Public (`NEXT_PUBLIC_*`) vars are baked into the client bundle at build

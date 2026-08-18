@@ -3,10 +3,20 @@ import { SessionRescheduleInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { sendAppointmentRescheduledEmail } from '@/lib/appointment-email';
+import {
+  AppointmentReminderSubmissionInProgressError,
+  cancelAppointmentReminderDeliveriesForReschedule,
+} from '@/lib/appointment-reminder-outbox';
+import { lockLinkedAppointmentForSession } from '@/lib/appointment-transition';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
 import { parseJson } from '@/lib/validate';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
+import { transactionConflictResponse } from '@/lib/transaction-conflict';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -49,92 +59,113 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     );
   }
 
-  const { created, movedAppointmentId } = await prisma.$transaction(async (tx) => {
-    await tx.session.update({
-      where: { id: sessionId },
-      data: { status: 'RESCHEDULED' },
-    });
-    const nextSession = await tx.session.create({
-      data: {
-        clientId: existing.clientId,
-        psychologistId: existing.psychologistId,
-        modality: existing.modality,
-        kind: existing.kind,
-        status: 'SCHEDULED',
-        scheduledAt: newScheduledAt,
-        language: existing.language,
-      },
-    });
-    // A session minted from a public booking carries a linked Appointment.
-    // Move it WITH the session: same new time, pointed at the new row, and
-    // reminder stamps cleared so the 24h/2h emails fire for the new slot.
-    // Without this the patient keeps being reminded of the OLD time, their
-    // video join window opens at the old time, and their cancel link
-    // targets a row that is no longer the real session.
-    const linkedAppt = await tx.appointment.findFirst({
-      where: {
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      const linkedAppt = await lockLinkedAppointmentForSession(tx, {
         sessionId,
         psychologistId: auth.value.psychologistId,
-        status: 'CONFIRMED',
-      },
-    });
-    if (linkedAppt) {
-      const durationMs = linkedAppt.endAt.getTime() - linkedAppt.startAt.getTime();
-      await tx.appointment.update({
-        where: { id: linkedAppt.id },
+      });
+      await conditionalSessionTransition(tx, {
+        sessionId,
+        expectedStatus: 'SCHEDULED',
+        data: { status: 'RESCHEDULED' },
+      });
+      const nextSession = await tx.session.create({
         data: {
-          startAt: newScheduledAt,
-          endAt: new Date(newScheduledAt.getTime() + durationMs),
-          sessionId: nextSession.id,
-          reminded24At: null,
-          reminded2At: null,
+          clientId: existing.clientId,
+          psychologistId: existing.psychologistId,
+          modality: existing.modality,
+          kind: existing.kind,
+          status: 'SCHEDULED',
+          scheduledAt: newScheduledAt,
+          language: existing.language,
         },
       });
+      // A session minted from a public booking carries a linked Appointment.
+      // Move it WITH the session: same new time, pointed at the new row, and
+      // reminder stamps cleared so the 24h/2h emails fire for the new slot.
+      // Without this the patient keeps being reminded of the OLD time, their
+      // video join window opens at the old time, and their cancel link
+      // targets a row that is no longer the real session.
+      if (linkedAppt) {
+        const durationMs = linkedAppt.endAt.getTime() - linkedAppt.startAt.getTime();
+        await cancelAppointmentReminderDeliveriesForReschedule(tx, {
+          appointmentId: linkedAppt.id,
+          scheduledStartAt: linkedAppt.startAt,
+        });
+        await tx.appointment.update({
+          where: { id: linkedAppt.id },
+          data: {
+            startAt: newScheduledAt,
+            endAt: new Date(newScheduledAt.getTime() + durationMs),
+            sessionId: nextSession.id,
+            reminded24At: null,
+            reminded2At: null,
+          },
+        });
+      }
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'SESSION_RESCHEDULED',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            clientId: existing.clientId,
+            previousScheduledAt: existing.scheduledAt.toISOString(),
+            newScheduledAt: newScheduledAt.toISOString(),
+            newSessionId: nextSession.id,
+            ...(linkedAppt && { movedAppointmentId: linkedAppt.id }),
+            ...(dto.value.reason && { reason: dto.value.reason }),
+          },
+        },
+        tx,
+      );
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'SESSION_CREATED',
+          targetType: 'Session',
+          targetId: nextSession.id,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            clientId: existing.clientId,
+            modality: nextSession.modality,
+            kind: nextSession.kind,
+            rescheduledFromSessionId: sessionId,
+          },
+        },
+        tx,
+      );
+      return { created: nextSession, movedAppointmentId: linkedAppt?.id ?? null };
+    });
+  } catch (error) {
+    if (error instanceof AppointmentReminderSubmissionInProgressError) {
+      return NextResponse.json(
+        { error: 'A reminder is currently being submitted; retry the reschedule shortly' },
+        { status: 409 },
+      );
     }
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_RESCHEDULED',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          clientId: existing.clientId,
-          previousScheduledAt: existing.scheduledAt.toISOString(),
-          newScheduledAt: newScheduledAt.toISOString(),
-          newSessionId: nextSession.id,
-          ...(linkedAppt && { movedAppointmentId: linkedAppt.id }),
-          ...(dto.value.reason && { reason: dto.value.reason }),
-        },
-      },
-      tx,
-    );
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_CREATED',
-        targetType: 'Session',
-        targetId: nextSession.id,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          clientId: existing.clientId,
-          modality: nextSession.modality,
-          kind: nextSession.kind,
-          rescheduledFromSessionId: sessionId,
-        },
-      },
-      tx,
-    );
-    return { created: nextSession, movedAppointmentId: linkedAppt?.id ?? null };
-  });
+    const response =
+      sessionConcurrentModificationResponse(error) ?? transactionConflictResponse(error);
+    if (response) return response;
+    throw error;
+  }
+  const { created, movedAppointmentId } = result;
 
   // Tell the patient their time moved (best-effort, off the request path;
   // only possible when the booking left an email).
   if (movedAppointmentId) {
     after(() =>
-      sendAppointmentRescheduledEmail(auth.value.psychologistId, movedAppointmentId, newScheduledAt),
+      sendAppointmentRescheduledEmail(
+        auth.value.psychologistId,
+        movedAppointmentId,
+        newScheduledAt,
+      ),
     );
   }
 

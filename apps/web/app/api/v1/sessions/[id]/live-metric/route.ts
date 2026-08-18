@@ -4,6 +4,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import { ClientPhiWriteForbiddenError, withActiveSessionPhiWrite } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -43,78 +44,98 @@ export async function POST(
   }
   // Sprint TS1 — both verticals record live-consult metrics (generic telemetry).
 
-  const metric = await prisma.liveConsultMetric.create({
-    data: {
-      // The URL param + auth are authoritative; the body is telemetry.
+  // LIVE_METRIC_PHI_WRITE_GROUP — gateway/network work is already complete.
+  // Lock the Client only for the short atomic metric + ledger + audit write;
+  // erasure either follows this commit or wins and prevents every row.
+  let result: { metric: { id: string }; created: boolean };
+  try {
+    result = await withActiveSessionPhiWrite(
+      prisma,
       sessionId,
-      psychologistId: auth.value.psychologistId,
-      backend: summary.backend,
-      windows: summary.windows,
-      pass1Calls: summary.pass1Calls,
-      pass2Calls: summary.pass2Calls,
-      inputTokens: summary.inputTokens,
-      outputTokens: summary.outputTokens,
-      costInr: summary.costInr,
-      transcriptP50Ms: summary.transcriptP50Ms,
-      transcriptP95Ms: summary.transcriptP95Ms,
-      // DOC-9 — the honest speech→transcript latency (window-wait included).
-      speechToTranscriptP50Ms: summary.speechToTranscriptP50Ms,
-      speechToTranscriptP95Ms: summary.speechToTranscriptP95Ms,
-      noteP50Ms: summary.noteP50Ms,
-      noteP95Ms: summary.noteP95Ms,
-      elapsedMs: summary.elapsedMs,
-    },
-    select: { id: true },
-  });
+      auth.value.psychologistId,
+      async (tx) => {
+        // The Client row lock serializes duplicate browser retries. The unique
+        // session key is the database backstop; an existing finalized rollup
+        // is returned unchanged and never creates a second spend ledger row.
+        const existing = await tx.liveConsultMetric.findUnique({
+          where: { sessionId },
+          select: { id: true },
+        });
+        if (existing) return { metric: existing, created: false };
 
-  // Batch D — mirror the consult's spend into GeminiCallLog.
-  //
-  // The gateway's LLM spend was invisible to every cost surface in the app.
-  // The monthly cost circuit (lib/cost-guard.ts) and the console cost page
-  // both sum GeminiCallLog; live consults wrote only LiveConsultMetric. A
-  // doctor running a full OPD day generated real Vertex spend that never
-  // counted toward the ₹15,000/month cap, so the circuit could not trip and
-  // the dashboard under-reported by however much the live path cost.
-  //
-  // One rollup row per consult is the honest granularity available here — the
-  // gateway meters per call but relays an aggregate, and the aggregate is
-  // exactly what the circuit sums. `mock` consults cost nothing and are
-  // skipped so dev traffic can't poison the ledger.
-  if (summary.backend !== 'mock' && summary.costInr > 0) {
-    await prisma.geminiCallLog.create({
-      data: {
-        sessionId,
-        psychologistId: auth.value.psychologistId,
-        // The consult runs Pass 1 + Pass 2 + the reasoning pass; PASS_11 is
-        // the one unique to the live path, so it names the rollup.
-        pass: 'PASS_11_REASONING',
-        model: `live-gateway:${summary.backend}`,
-        region: 'asia-south1',
-        promptVersion: 'LIVE_CONSULT_ROLLUP_V1',
-        inputTokens: Math.round(summary.inputTokens),
-        outputTokens: Math.round(summary.outputTokens),
-        costInr: summary.costInr,
-        latencyMs: Math.round(summary.elapsedMs),
-        status: 'SUCCESS',
+        const created = await tx.liveConsultMetric.upsert({
+          where: { sessionId },
+          update: {},
+          create: {
+            // The URL param + auth are authoritative; the body is telemetry.
+            sessionId,
+            psychologistId: auth.value.psychologistId,
+            backend: summary.backend,
+            windows: summary.windows,
+            pass1Calls: summary.pass1Calls,
+            pass2Calls: summary.pass2Calls,
+            inputTokens: summary.inputTokens,
+            outputTokens: summary.outputTokens,
+            costInr: summary.costInr,
+            transcriptP50Ms: summary.transcriptP50Ms,
+            transcriptP95Ms: summary.transcriptP95Ms,
+            // DOC-9 — the honest speech→transcript latency (window-wait included).
+            speechToTranscriptP50Ms: summary.speechToTranscriptP50Ms,
+            speechToTranscriptP95Ms: summary.speechToTranscriptP95Ms,
+            noteP50Ms: summary.noteP50Ms,
+            noteP95Ms: summary.noteP95Ms,
+            elapsedMs: summary.elapsedMs,
+          },
+          select: { id: true },
+        });
+
+        // Batch D — mirror the consult's spend into GeminiCallLog exactly once.
+        // Mock consults are contractually zero-cost and never enter the ledger.
+        if (summary.backend === 'vertex' && summary.costInr > 0) {
+          await tx.geminiCallLog.create({
+            data: {
+              sessionId,
+              psychologistId: auth.value.psychologistId,
+              // PASS_11 uniquely names the live path's aggregate spend.
+              pass: 'PASS_11_REASONING',
+              model: `live-gateway:${summary.backend}`,
+              region: 'asia-south1',
+              promptVersion: 'LIVE_CONSULT_ROLLUP_V1',
+              inputTokens: summary.inputTokens,
+              outputTokens: summary.outputTokens,
+              costInr: summary.costInr,
+              latencyMs: summary.elapsedMs,
+              status: 'SUCCESS',
+            },
+          });
+        }
+
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'LIVE_CONSULT_METERED',
+            targetType: 'LiveConsultMetric',
+            targetId: created.id,
+            metadata: {
+              sessionId,
+              backend: summary.backend,
+              windows: summary.windows,
+              costInr: summary.costInr,
+              transcriptP95Ms: summary.transcriptP95Ms,
+              ...auditMetadataFromRequest(req),
+            },
+          },
+          tx,
+        );
+        return { metric: created, created: true };
       },
-    });
+      { allowedStatuses: ['COMPLETED'] },
+    );
+  } catch (error) {
+    if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
+    return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 
-  await writeAudit({
-    actorType: 'PSYCHOLOGIST',
-    actorPsychologistId: auth.value.psychologistId,
-    action: 'LIVE_CONSULT_METERED',
-    targetType: 'LiveConsultMetric',
-    targetId: metric.id,
-    metadata: {
-      sessionId,
-      backend: summary.backend,
-      windows: summary.windows,
-      costInr: summary.costInr,
-      transcriptP95Ms: summary.transcriptP95Ms,
-      ...auditMetadataFromRequest(req),
-    },
-  });
-
-  return NextResponse.json({ id: metric.id }, { status: 201 });
+  return NextResponse.json({ id: result.metric.id }, { status: result.created ? 201 : 200 });
 }

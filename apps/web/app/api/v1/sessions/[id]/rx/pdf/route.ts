@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { RxPadV1Schema, type RxPadV1 } from '@cureocity/contracts';
 import { RxPadPdf } from '@/components/pdf/RxPadPdf';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { decryptClientField } from '@/lib/client-pii';
 import { ageFromDob, safeFileSlug } from '@/lib/doc-format';
@@ -23,7 +23,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse | Response> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'PRESCRIPTION_DRAFTING');
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
 

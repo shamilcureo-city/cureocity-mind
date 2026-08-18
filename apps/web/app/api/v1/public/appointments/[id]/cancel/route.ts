@@ -3,6 +3,17 @@ import type { CancelAppointmentResponse } from '@cureocity/contracts';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { verifyAppointmentSig } from '@/lib/appointment-links';
+import {
+  appointmentConcurrentModificationResponse,
+  conditionalAppointmentTransition,
+  lockAppointmentById,
+} from '@/lib/appointment-transition';
+import { cancelAppointmentReminderDeliveriesForCancellation } from '@/lib/appointment-reminder-outbox';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
+import { transactionConflictResponse } from '@/lib/transaction-conflict';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +38,7 @@ export async function POST(
 
   const appt = await prisma.appointment.findUnique({
     where: { id },
-    select: { status: true, sessionId: true, psychologistId: true, startAt: true },
+    select: { status: true, psychologistId: true, startAt: true },
   });
   if (!appt) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (appt.status === 'CANCELLED') {
@@ -38,30 +49,46 @@ export async function POST(
     return NextResponse.json({ error: 'This request was already declined.' }, { status: 409 });
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.appointment.update({ where: { id }, data: { status: 'CANCELLED' } });
-    if (appt.sessionId) {
-      await tx.session.updateMany({
-        where: { id: appt.sessionId, status: 'SCHEDULED' },
+  try {
+    await prisma.$transaction(async (tx) => {
+      await lockAppointmentById(tx, id);
+      const cancelled = await conditionalAppointmentTransition(tx, {
+        appointmentId: id,
+        expectedStatus: appt.status,
         data: { status: 'CANCELLED' },
       });
-    }
-    await writeAudit(
-      {
-        actorType: 'CLIENT',
-        action: 'APPOINTMENT_CANCELLED',
-        targetType: 'Appointment',
-        targetId: id,
-        metadata: {
-          psychologistId: appt.psychologistId,
-          startAt: appt.startAt.toISOString(),
-          sessionId: appt.sessionId,
-          via: 'patient-link',
+      await cancelAppointmentReminderDeliveriesForCancellation(tx, { appointmentId: id });
+      if (cancelled.sessionId) {
+        await conditionalSessionTransition(tx, {
+          sessionId: cancelled.sessionId,
+          expectedStatus: 'SCHEDULED',
+          data: { status: 'CANCELLED' },
+        });
+      }
+      await writeAudit(
+        {
+          actorType: 'CLIENT',
+          action: 'APPOINTMENT_CANCELLED',
+          targetType: 'Appointment',
+          targetId: id,
+          metadata: {
+            psychologistId: appt.psychologistId,
+            startAt: appt.startAt.toISOString(),
+            sessionId: cancelled.sessionId,
+            via: 'patient-link',
+          },
         },
-      },
-      tx,
-    );
-  });
+        tx,
+      );
+    });
+  } catch (error) {
+    const response =
+      appointmentConcurrentModificationResponse(error) ??
+      sessionConcurrentModificationResponse(error) ??
+      transactionConflictResponse(error);
+    if (response) return response;
+    throw error;
+  }
 
   const body: CancelAppointmentResponse = { status: 'CANCELLED' };
   return NextResponse.json(body);

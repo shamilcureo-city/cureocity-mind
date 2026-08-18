@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { Container } from '@/components/ui/Container';
 import { PublicAvatar } from '@/components/public/Avatar';
 import { loadPublishedPost } from '@/lib/public-profile';
+import { serializeJsonForHtml } from '@/lib/html-safe-json';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,7 +50,7 @@ export default async function ProfilePostPage({
     <main className="min-h-screen bg-[var(--color-bg)]">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonForHtml(jsonLd) }}
       />
       <Container className="max-w-3xl py-14">
         <Link

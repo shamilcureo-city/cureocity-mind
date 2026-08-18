@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import type { SessionOrders } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireAnyCapability } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 import { toClinicalOrderDTO, toMedicationOrderDTO } from '@/lib/order-mappers';
 
@@ -19,7 +19,7 @@ interface RouteContext {
  * Tenant-checked (404 cross-tenant non-leak). Read-only — no audit.
  */
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireAnyCapability(req, ['PRESCRIPTION_DRAFTING', 'CLINICAL_ORDERS']);
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await ctx.params;
 
@@ -31,15 +31,20 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 
+  const capabilities = new Set(auth.value.user.capabilities ?? []);
   const [medications, clinicalOrders] = await Promise.all([
-    prisma.medicationOrder.findMany({
-      where: { sessionId, status: { not: 'DISCARDED' } },
-      orderBy: { createdAt: 'asc' },
-    }),
-    prisma.clinicalOrder.findMany({
-      where: { sessionId, status: { not: 'DISCARDED' } },
-      orderBy: { createdAt: 'asc' },
-    }),
+    capabilities.has('PRESCRIPTION_DRAFTING')
+      ? prisma.medicationOrder.findMany({
+          where: { sessionId, status: { not: 'DISCARDED' } },
+          orderBy: { createdAt: 'asc' },
+        })
+      : Promise.resolve([]),
+    capabilities.has('CLINICAL_ORDERS')
+      ? prisma.clinicalOrder.findMany({
+          where: { sessionId, status: { not: 'DISCARDED' } },
+          orderBy: { createdAt: 'asc' },
+        })
+      : Promise.resolve([]),
   ]);
 
   const body: SessionOrders = {

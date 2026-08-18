@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { LiveGatewayCommandSchema, type LiveGatewayEvent } from '@cureocity/contracts';
+import {
+  LiveGatewayCommandSchema,
+  type LiveGatewayEvent,
+  type PatientContext,
+  type PractitionerCapability,
+} from '@cureocity/contracts';
 import {
   authRequired,
   extractVerifiedClaims,
@@ -8,6 +13,7 @@ import {
   verifyStartToken,
 } from './auth';
 import { buildBackends } from './llm';
+import { LiveAuthority } from './live-authority';
 import { LiveSession } from './live-session';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
 import { initSentry } from './sentry';
@@ -43,6 +49,21 @@ const PORT = Number(process.env['LIVE_GATEWAY_PORT'] ?? 8787);
 const MAX_CONNECTIONS = Number(process.env['LIVE_GATEWAY_MAX_CONNECTIONS'] ?? 200);
 const STARTUP_GRACE_MS = Number(process.env['LIVE_GATEWAY_STARTUP_GRACE_MS'] ?? 60_000);
 const IDLE_TIMEOUT_MS = Number(process.env['LIVE_GATEWAY_IDLE_TIMEOUT_MS'] ?? 300_000);
+const LIVE_AUTHZ_REVALIDATE_URL = validatedAuthorityUrl(process.env['LIVE_AUTHZ_REVALIDATE_URL']);
+const LIVE_AUTHZ_INTERVAL_MS = boundedPositiveInteger(
+  'LIVE_AUTHZ_INTERVAL_MS',
+  process.env['LIVE_AUTHZ_INTERVAL_MS'],
+  5_000,
+  1_000,
+  300_000,
+);
+const LIVE_AUTHZ_TIMEOUT_MS = boundedPositiveInteger(
+  'LIVE_AUTHZ_TIMEOUT_MS',
+  process.env['LIVE_AUTHZ_TIMEOUT_MS'],
+  2_000,
+  100,
+  LIVE_AUTHZ_INTERVAL_MS - 1,
+);
 // Batch A — how long a SIGTERM drain waits for live consults to finalize
 // before force-exiting. Cloud Run's default grace is 10s; set
 // `--timeout`/terminationGracePeriod ≥ this (see the deploy notes in README).
@@ -59,6 +80,15 @@ const pool = new GatewayPool(maxSessionsFromEnv());
 // replayed tokens). New starts over the cap are shed as `busy`; a consult
 // already streaming always finishes. In-memory, per-instance, IST day.
 const tenantSpend = ledgerFromEnv();
+const DEV_OPEN_CAPABILITIES = new Set<PractitionerCapability>([
+  'LIVE_ENCOUNTER',
+  'BEHAVIORAL_HEALTH_DOCUMENTATION',
+  'MEDICAL_DOCUMENTATION',
+  'CLINICAL_ANALYSIS',
+  'PRESCRIPTION_DRAFTING',
+  'CLINICAL_ORDERS',
+  'CHRONIC_CARE',
+]);
 
 // Sprint DS8 — a plain HTTP server hosts the health endpoint AND upgrades
 // to WebSocket, so a load balancer / systemd can probe liveness + readiness.
@@ -128,6 +158,7 @@ wss.on('connection', (ws, req) => {
   ws.on('error', releaseIp);
   send(ws, { type: 'status', state: 'connected' });
   let session: LiveSession | null = null;
+  let authority: LiveAuthority | null = null;
   let started = false;
   // Sprint DS8 — one pool slot per connection, taken on the first start,
   // returned exactly once on close/error.
@@ -154,17 +185,26 @@ wss.on('connection', (ws, req) => {
   };
   armIdle(STARTUP_GRACE_MS);
 
-  ws.on('message', (raw: RawData, isBinary: boolean) => {
+  ws.on('message', async (raw: RawData, isBinary: boolean) => {
     armIdle(started ? IDLE_TIMEOUT_MS : STARTUP_GRACE_MS);
     // Binary frames are streamed PCM audio for the active session.
     if (isBinary) {
-      session?.pushAudio(toBuffer(raw));
+      if (started && (!authority || (await authority.authorizeCurrentInput()))) {
+        session?.pushAudio(toBuffer(raw));
+      }
       return;
     }
     const parsed = LiveGatewayCommandSchema.safeParse(safeJson(raw));
     if (!parsed.success) return;
     const cmd = parsed.data;
     if (cmd.type === 'start') {
+      // One socket owns one authorization/session lifecycle. This also keeps a
+      // second start from racing the first asynchronous authority check.
+      if (session || authority || started) {
+        send(ws, { type: 'status', state: 'unauthorized' });
+        ws.close();
+        return;
+      }
       // Batch A — the node is shutting down; shed the start so the browser
       // retries against a healthy instance instead of streaming into a corpse.
       if (draining) {
@@ -184,6 +224,10 @@ wss.on('connection', (ws, req) => {
       // matching mock's zero cost).
       const claims = extractVerifiedClaims(cmd.token, cmd.sessionId);
       const tenantId = claims?.psychologistId ?? null;
+      let capabilities: ReadonlySet<PractitionerCapability> = claims
+        ? new Set(claims.capabilities)
+        : DEV_OPEN_CAPABILITIES;
+      const vertical = claims?.vertical ?? cmd.vertical ?? 'DOCTOR';
       if (tenantId && tenantSpend.isOverCap(tenantId)) {
         console.warn(`[gateway] tenant ${tenantId} over daily cost cap — shedding start`);
         send(ws, { type: 'status', state: 'busy' });
@@ -200,61 +244,115 @@ wss.on('connection', (ws, req) => {
         }
         acquired = true;
       }
-      if (session) {
-        liveSessions.delete(session);
-        session.dispose();
-      }
       // NEXT4 — feed the ledger from meter events. `summary.costInr` is
       // cumulative per consult, so only the delta since the last event is
       // added.
       let lastMeterInr = 0;
+      let outputQueue = Promise.resolve();
       const forward = (event: LiveGatewayEvent): void => {
-        if (tenantId && event.type === 'meter') {
-          tenantSpend.add(tenantId, event.summary.costInr - lastMeterInr);
-          lastMeterInr = Math.max(lastMeterInr, event.summary.costInr);
-        }
-        send(ws, event);
+        outputQueue = outputQueue
+          .then(async () => {
+            const authorized = authority ? await authority.authorizeEvent(event) : event;
+            if (!authorized) return;
+            if (tenantId && authorized.type === 'meter') {
+              tenantSpend.add(tenantId, authorized.summary.costInr - lastMeterInr);
+              lastMeterInr = Math.max(lastMeterInr, authorized.summary.costInr);
+            }
+            send(ws, authorized);
+          })
+          .catch(() => {
+            // Keep the queue usable and fail closed if an unexpected verifier
+            // or callback failure escapes LiveAuthority.
+            send(ws, { type: 'status', state: 'unauthorized' });
+            ws.close();
+          });
       };
-      session = new LiveSession(
-        cmd.sessionId ?? `live-${Date.now()}`,
-        cmd.specialty ?? null,
-        backends,
-        forward,
-        windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
-        cmd.context, // Sprint DS1 — seed the CaseState's patient context
-        undefined, // noteRefreshMs — the constructor picks the per-vertical default
-        cmd.vertical ?? 'DOCTOR', // Sprint TS1 — therapist live scribe support
-        cmd.kind ?? 'TREATMENT',
-        cmd.modality ?? null,
-        cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
-      );
-      // Batch A — a reconnect after a dropped socket replays the transcript the
-      // browser still holds, so the consult continues instead of starting blank.
-      if (cmd.resume?.utterances.length) {
-        session.seedResume(cmd.resume.utterances);
-        console.log(
-          `[gateway] resumed ${cmd.sessionId ?? '(anon)'} with ${cmd.resume.utterances.length} replayed utterances`,
+      const beginSession = (): void => {
+        if (session || ws.readyState !== ws.OPEN) return;
+        // Construct only after the immediate current-authority check, so
+        // downgraded optional capabilities also scope patient context before
+        // any model/store sees it.
+        session = new LiveSession(
+          cmd.sessionId ?? `live-${Date.now()}`,
+          cmd.specialty ?? null,
+          backends,
+          forward,
+          windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
+          scopePatientContext(cmd.context, capabilities),
+          undefined, // noteRefreshMs — the constructor picks the per-vertical default
+          vertical,
+          cmd.kind ?? 'TREATMENT',
+          cmd.modality ?? null,
+          cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
+          capabilities,
         );
-      }
-      // Sprint DS13 — the flag-gated streaming display rail (doctor path
-      // only for now). Failures degrade to "provisional line stops
-      // updating"; the windowed pipeline is untouched.
-      if ((cmd.vertical ?? 'DOCTOR') === 'DOCTOR') {
-        const forSession = session;
-        const transcriber = makeStreamTranscriber({
-          sessionId: cmd.sessionId ?? 'live',
-          env: process.env,
-          onPartial: (fragment) => forSession.handleStreamPartial(fragment),
-        });
-        if (transcriber) {
-          forSession.attachStreamTranscriber(transcriber);
-          transcriber.start();
+        // Batch A — a reconnect after a dropped socket replays the transcript the
+        // browser still holds, so the consult continues instead of starting blank.
+        if (cmd.resume?.utterances.length) {
+          session.seedResume(cmd.resume.utterances);
+          console.log(
+            `[gateway] resumed ${cmd.sessionId ?? '(anon)'} with ${cmd.resume.utterances.length} replayed utterances`,
+          );
         }
+        // Sprint DS13 — the flag-gated streaming display rail (doctor path only).
+        if (vertical === 'DOCTOR') {
+          const forSession = session;
+          const transcriber = makeStreamTranscriber({
+            sessionId: cmd.sessionId ?? 'live',
+            env: process.env,
+            onPartial: (fragment) => forSession.handleStreamPartial(fragment),
+          });
+          if (transcriber) {
+            forSession.attachStreamTranscriber(transcriber);
+            transcriber.start();
+          }
+        }
+        session.start();
+        liveSessions.add(session);
+        started = true;
+        armIdle(IDLE_TIMEOUT_MS);
+      };
+
+      if (claims) {
+        const serviceSecret = process.env['LIVE_GATEWAY_SECRET'];
+        if (!LIVE_AUTHZ_REVALIDATE_URL || !serviceSecret) {
+          send(ws, { type: 'status', state: 'unauthorized' });
+          ws.close();
+          return;
+        }
+        const pendingAuthority = new LiveAuthority({
+          sessionId: claims.sessionId,
+          psychologistId: claims.psychologistId,
+          tokenExpiresAt: claims.exp,
+          vertical: claims.vertical,
+          requiredCapabilities: new Set<PractitionerCapability>([
+            'LIVE_ENCOUNTER',
+            vertical === 'DOCTOR' ? 'MEDICAL_DOCUMENTATION' : 'BEHAVIORAL_HEALTH_DOCUMENTATION',
+          ]),
+          verifierUrl: LIVE_AUTHZ_REVALIDATE_URL,
+          serviceSecret,
+          intervalMs: LIVE_AUTHZ_INTERVAL_MS,
+          timeoutMs: LIVE_AUTHZ_TIMEOUT_MS,
+          updateCapabilities: (updated) => {
+            capabilities = updated;
+            session?.updateCapabilities(updated);
+          },
+          close: () => {
+            send(ws, { type: 'status', state: 'unauthorized' });
+            ws.close();
+          },
+        });
+        authority = pendingAuthority;
+        void pendingAuthority.revalidate().then((authorized) => {
+          if (!authorized || authority !== pendingAuthority) return;
+          pendingAuthority.start();
+          beginSession();
+        });
+      } else {
+        beginSession();
       }
-      session.start();
-      liveSessions.add(session);
-      started = true;
-      armIdle(IDLE_TIMEOUT_MS);
+    } else if (authority && !(await authority.authorizeCurrentInput())) {
+      return;
     } else if (cmd.type === 'stop') {
       void session?.finalize();
     } else if (cmd.type === 'dismiss') {
@@ -268,6 +366,8 @@ wss.on('connection', (ws, req) => {
 
   const teardown = (): void => {
     clearTimeout(idleTimer);
+    authority?.dispose();
+    authority = null;
     if (session) {
       liveSessions.delete(session);
       session.dispose();
@@ -342,4 +442,59 @@ function toBuffer(raw: RawData): Buffer {
   if (Buffer.isBuffer(raw)) return raw;
   if (Array.isArray(raw)) return Buffer.concat(raw);
   return Buffer.from(raw as ArrayBuffer);
+}
+
+function scopePatientContext(
+  context: PatientContext | undefined,
+  capabilities: ReadonlySet<PractitionerCapability>,
+): PatientContext | undefined {
+  if (!context) return undefined;
+  const analysis = capabilities.has('CLINICAL_ANALYSIS');
+  const chronic = capabilities.has('CHRONIC_CARE');
+  const prescription = capabilities.has('PRESCRIPTION_DRAFTING');
+  if (!analysis && !chronic && !prescription) return undefined;
+  return {
+    sex: analysis ? context.sex : 'unknown',
+    ...(analysis && context.age !== undefined ? { age: context.age } : {}),
+    knownConditions: analysis || chronic ? context.knownConditions : [],
+    activeMeds: prescription ? context.activeMeds : [],
+    allergies: prescription ? context.allergies : [],
+  };
+}
+
+function validatedAuthorityUrl(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('LIVE_AUTHZ_REVALIDATE_URL must be an absolute URL');
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('LIVE_AUTHZ_REVALIDATE_URL must not contain credentials, query, or fragment');
+  }
+  if (url.pathname.replace(/\/$/, '') !== '/api/v1/internal/live-authority') {
+    throw new Error('LIVE_AUTHZ_REVALIDATE_URL must target /api/v1/internal/live-authority');
+  }
+  if (process.env['NODE_ENV'] === 'production' && url.protocol !== 'https:') {
+    throw new Error('LIVE_AUTHZ_REVALIDATE_URL must use HTTPS in production');
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('LIVE_AUTHZ_REVALIDATE_URL must use HTTP or HTTPS');
+  }
+  return url.toString();
+}
+
+function boundedPositiveInteger(
+  name: string,
+  raw: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  const value = raw === undefined ? fallback : Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return value;
 }

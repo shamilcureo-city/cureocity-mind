@@ -18,8 +18,8 @@ const ITEMS: {
   icon: 'today' | 'record' | 'clients' | 'search' | 'templates' | 'clinic' | 'insights' | 'cog';
 }[] = [
   { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app', label: 'Record', icon: 'record' },
-  { href: '/app/clients', label: 'Clients', icon: 'clients' },
+  { href: '/app/encounters/new', label: 'Encounter', icon: 'record' },
+  { href: '/app/clients', label: 'Patients', icon: 'clients' },
   { href: '/app/search', label: 'Search', icon: 'search' },
 ];
 
@@ -30,8 +30,8 @@ const MORE_ITEMS: {
   icon: 'templates' | 'dashboard' | 'assistant' | 'me' | 'learn' | 'cog' | 'help';
 }[] = [
   { href: '/app/templates', label: 'Templates', icon: 'templates' },
-  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
+  { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
+  { href: '/app/practice-assistant', label: 'ORBIT Assistant', icon: 'assistant' },
   { href: '/app/me', label: 'My practice', icon: 'me' },
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
   { href: '/app/settings', label: 'Settings', icon: 'cog' },

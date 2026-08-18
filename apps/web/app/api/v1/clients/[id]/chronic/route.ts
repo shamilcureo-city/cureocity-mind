@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { buildChronicTrajectory } from '@/lib/chronic-trajectory';
 import { prisma } from '@/lib/prisma';
 
@@ -17,7 +17,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireCapability(req, 'CHRONIC_CARE');
   if (!auth.ok) return auth.response;
   const { id: clientId } = await params;
 

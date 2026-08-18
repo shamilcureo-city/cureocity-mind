@@ -89,7 +89,8 @@ To click through Care without real phone auth (e.g. to demo the UI on a
 Vercel **Preview**), set `AUTH_BYPASS=true` **scoped to Preview only**, then
 open the branch preview. The demo user (Kavya) walks the whole arc.
 
-> ⚠️ **Never set `AUTH_BYPASS=true` on Production.** It is the
-> platform-wide bypass shared by the therapist and doctor apps — on prod it
-> would turn every visitor into the seeded demo identity across all three
+> ⚠️ **Do not set `AUTH_BYPASS=true` on Production.** Production ignores the
+> flag and fails closed, so it cannot be used as a fallback for missing
+> Firebase configuration. On non-production deployments it is platform-wide
+> and resolves visitors to seeded demo identities across all three
 > products. Previews only.

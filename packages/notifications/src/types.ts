@@ -88,6 +88,8 @@ export interface EmailRequest {
   subject: string;
   textBody: string;
   htmlBody?: string;
+  /** Stable logical-delivery key; forwarded when the provider supports deduplication. */
+  idempotencyKey?: string;
   attachments?: { filename: string; contentBase64: string; mimeType: string }[];
 }
 

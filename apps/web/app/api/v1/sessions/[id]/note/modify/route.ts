@@ -11,6 +11,7 @@ import { ensureGcpCreds, resolveThinkingBudget } from '@/lib/llm';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -245,6 +246,7 @@ export async function POST(
 
   // changedFields was computed above per-kind via diffKeys.
   await prisma.$transaction(async (tx) => {
+    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
     await tx.noteDraft.update({
       where: { id: session.noteDraft!.id },
       data: { content: validated as unknown as object },

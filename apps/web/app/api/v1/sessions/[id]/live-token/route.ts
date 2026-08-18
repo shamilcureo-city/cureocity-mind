@@ -1,11 +1,21 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import type { SessionConsentSnapshot } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import type { PractitionerCapability } from '@cureocity/contracts';
+import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { signLiveToken } from '@/lib/live-token';
 import { fetchActiveMedications, fetchAllergies } from '@/lib/patient-context';
-import { withdrawalRefusalMessage, withdrawnScribeConsents } from '@/lib/consent-gate';
+import {
+  assertValidScribeConsent,
+  ConsentAuthorizationError,
+  consentAuthorizationResponse,
+  withClientConsentLock,
+} from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
+import {
+  assertLiveTokenSessionStatus,
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,20 +29,22 @@ export const dynamic = 'force-dynamic';
  *
  * DS11.1 (session lifecycle truth): this call IS the live consult's
  * capture-start, so it now carries the same lifecycle side effects the
- * batch /consent + /start pair has. A SCHEDULED session transitions to
- * IN_PROGRESS with a consent snapshot (the scribe scopes the patient
- * granted at creation, re-acknowledged at consult start) — making the
+ * batch /consent + /start pair has. A SCHEDULED session with a complete,
+ * currently-backed consent snapshot transitions to IN_PROGRESS — making the
  * clinic queue statuses truthful and unblocking the sign route (which
  * requires COMPLETED, set by /live-note). Reconnects (already
  * IN_PROGRESS) just mint; a COMPLETED session is never regressed.
  */
 
-/** The DPDP scopes the scribe pipeline runs under (parity with batch). */
-const LIVE_CONSENT_SCOPES = [
-  'AUDIO_RECORDING',
-  'AI_NOTE_GENERATION',
-  'CROSS_BORDER_PROCESSING',
-] as const;
+const LIVE_SCOPED_CAPABILITIES = new Set<PractitionerCapability>([
+  'LIVE_ENCOUNTER',
+  'BEHAVIORAL_HEALTH_DOCUMENTATION',
+  'MEDICAL_DOCUMENTATION',
+  'CLINICAL_ANALYSIS',
+  'PRESCRIPTION_DRAFTING',
+  'CLINICAL_ORDERS',
+  'CHRONIC_CARE',
+]);
 
 export async function POST(
   req: NextRequest,
@@ -44,127 +56,84 @@ export async function POST(
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
-    select: { psychologistId: true, status: true, consentSnapshot: true, clientId: true },
+    select: {
+      psychologistId: true,
+      status: true,
+      consentSnapshot: true,
+      clientId: true,
+      psychologist: { select: { vertical: true } },
+    },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 
-  // Batch E (DPDP) — checked on EVERY mint, not just the first. The old code
-  // only validated consent when a SCHEDULED session lacked a snapshot, so a
-  // patient who withdrew recording consent could still be streamed live: the
-  // session was already IN_PROGRESS, or already carried a snapshot from
-  // before the withdrawal, and neither path looked at the standing rows.
-  const withdrawn = await withdrawnScribeConsents(session.clientId);
-  if (withdrawn.length > 0) {
-    return NextResponse.json({ error: withdrawalRefusalMessage(withdrawn) }, { status: 409 });
-  }
+  // This mint is the regulated execution/disclosure boundary, including on a
+  // reconnect. Route guards re-query current grants and own the audited 403.
+  const liveAuth = await requireCapability(req, 'LIVE_ENCOUNTER', auth);
+  if (!liveAuth.ok) return liveAuth.response;
+  const documentationCapability: PractitionerCapability =
+    session.psychologist.vertical === 'DOCTOR'
+      ? 'MEDICAL_DOCUMENTATION'
+      : 'BEHAVIORAL_HEALTH_DOCUMENTATION';
+  const documentationAuth = await requireCapability(req, documentationCapability, liveAuth);
+  if (!documentationAuth.ok) return documentationAuth.response;
+  const capabilities = (documentationAuth.value.user.capabilities ?? []).filter((capability) =>
+    LIVE_SCOPED_CAPABILITIES.has(capability),
+  );
 
-  if (session.status === 'SCHEDULED') {
-    const needsSnapshot = session.consentSnapshot === null;
-    // PROD5 (DPDP) — this route used to STAMP all three scopes onto the
-    // session unconditionally, fabricating a cross-border ack the patient
-    // may never have given. Now: a fresh snapshot is only written when the
-    // patient's STANDING consents actually cover the scribe scopes, and a
-    // pre-recorded snapshot must itself carry the cross-border scope.
-    if (needsSnapshot) {
-      const standing = await prisma.consent.findMany({
-        where: {
-          clientId: session.clientId,
-          scope: { in: [...LIVE_CONSENT_SCOPES] },
-          status: 'GRANTED',
-          withdrawnAt: null,
-        },
-        select: { scope: true },
-      });
-      const grantedSet = new Set(standing.map((c) => c.scope));
-      const missing = LIVE_CONSENT_SCOPES.filter((s) => !grantedSet.has(s));
-      if (missing.length > 0) {
-        return NextResponse.json(
-          {
-            error:
-              `The patient's consents on record do not cover the live scribe ` +
-              `(missing: ${missing.join(', ')}). Capture the missing consent on the ` +
-              `patient's record before starting a live consult — AI analysis processes ` +
-              `the transcript outside India.`,
-          },
-          { status: 409 },
-        );
-      }
-    } else {
-      const priorScopes = new Set(
-        ((session.consentSnapshot as { entries?: Array<{ scope?: string }> }).entries ?? []).map(
-          (e) => e.scope,
-        ),
-      );
-      if (!priorScopes.has('CROSS_BORDER_PROCESSING')) {
-        return NextResponse.json(
-          {
-            error:
-              'This session was consented without cross-border processing, which the live ' +
-              'scribe requires (AI analysis processes the transcript outside India). Capture ' +
-              'that consent before starting a live consult.',
-          },
-          { status: 409 },
-        );
-      }
-    }
-    const ackedAt = new Date().toISOString();
-    const snapshot: SessionConsentSnapshot = {
-      entries: LIVE_CONSENT_SCOPES.map((scope) => ({
-        scope,
-        scriptVersion: 'v1.0',
-        ackedAt,
-      })),
-      notes: 'Standing consents re-acknowledged at live consult start',
-    };
-    await prisma.$transaction(async (tx) => {
-      await tx.session.update({
-        where: { id: sessionId },
-        data: {
-          status: 'IN_PROGRESS',
-          startedAt: new Date(),
-          // DS11.3 — record the capture pipeline on the row.
-          captureMode: 'LIVE',
-          ...(needsSnapshot && { consentSnapshot: snapshot }),
-        },
-      });
-      if (needsSnapshot) {
-        await writeAudit(
-          {
-            actorType: 'PSYCHOLOGIST',
-            actorPsychologistId: auth.value.psychologistId,
-            action: 'SESSION_CONSENT_RECORDED',
-            targetType: 'Session',
-            targetId: sessionId,
-            metadata: {
-              ...auditMetadataFromRequest(req),
-              scopes: [...LIVE_CONSENT_SCOPES],
-              scriptVersion: 'v1.0',
-              source: 'LIVE',
+  let tokenResult: ReturnType<typeof signLiveToken>;
+  try {
+    tokenResult = await prisma.$transaction((tx) =>
+      withClientConsentLock(tx, session.clientId, async () => {
+        const current = await tx.session.findUnique({
+          where: { id: sessionId },
+          select: { status: true, consentSnapshot: true },
+        });
+        if (!current) throw new ConsentAuthorizationError('Session changed during authorization');
+        assertLiveTokenSessionStatus(current.status);
+
+        await assertValidScribeConsent(current.consentSnapshot, session.clientId, tx);
+
+        if (current.status === 'SCHEDULED') {
+          await conditionalSessionTransition(tx, {
+            sessionId,
+            expectedStatus: 'SCHEDULED',
+            data: {
+              status: 'IN_PROGRESS',
+              startedAt: new Date(),
+              captureMode: 'LIVE',
             },
-          },
-          tx,
-        );
-      }
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'SESSION_STARTED',
-          targetType: 'Session',
-          targetId: sessionId,
-          metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
-        },
-        tx,
-      );
-    });
+          });
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'SESSION_STARTED',
+              targetType: 'Session',
+              targetId: sessionId,
+              metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+            },
+            tx,
+          );
+        }
+
+        return signLiveToken({
+          sessionId,
+          psychologistId: auth.value.psychologistId,
+          vertical: session.psychologist.vertical,
+          capabilities,
+        });
+      }),
+    );
+  } catch (error) {
+    const response =
+      consentAuthorizationResponse(error) ?? sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
   }
 
-  const { token, expiresInSec } = signLiveToken({
-    sessionId,
-    psychologistId: auth.value.psychologistId,
-  });
+  const { token, expiresInSec } = tokenResult;
 
   // DOC-3 — hand the browser the patient's confirmed active meds so it can
   // seed the live CaseState. The gateway's drug-interaction engine then sees
@@ -173,14 +142,17 @@ export async function POST(
   // Batch B — the allergy list rides along too. `PatientContext.allergies` has
   // existed since DS1 and the Rx pad has always printed it, but nothing ever
   // filled it: the live consult's allergy check had no data to check against.
-  const [activeMeds, allergies] = await Promise.all([
-    fetchActiveMedications(session.clientId, { excludeSessionId: sessionId }),
-    fetchAllergies(session.clientId),
-  ]);
+  const patientContext = capabilities.includes('PRESCRIPTION_DRAFTING')
+    ? await Promise.all([
+        fetchActiveMedications(session.clientId, { excludeSessionId: sessionId }),
+        fetchAllergies(session.clientId),
+      ]).then(([activeMeds, allergies]) => ({ activeMeds, allergies }))
+    : undefined;
 
   return NextResponse.json({
     token,
     expiresInSec,
-    patientContext: { activeMeds, allergies },
+    capabilities,
+    ...(patientContext ? { patientContext } : {}),
   });
 }

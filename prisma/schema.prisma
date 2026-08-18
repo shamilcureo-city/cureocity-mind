@@ -73,10 +73,12 @@ model Psychologist {
 
   /// Sprint DV1 — product vertical (THERAPIST | DOCTOR). Drives landing,
   /// nav, prompt + contract selection. See docs/DOCTOR_VERTICAL.md.
-  vertical         PractitionerVertical @default(THERAPIST)
+  vertical         PractitionerVertical    @default(THERAPIST)
+  /// ORBIT Sprint 2 — durable identity; vertical remains compatibility only.
+  profession       PractitionerProfession?
   /// Sprint DV1 — doctor credential (NMC / state medical council reg).
   /// NULL for therapists, who use rciNumber instead.
-  medicalRegNumber String?              @unique
+  medicalRegNumber String?                 @unique
   /// Sprint DV1 — doctor specialty (e.g. "Cardiology"). NULL for therapists.
   specialty        String?
 
@@ -172,6 +174,8 @@ model Psychologist {
   safetyPlans         SafetyPlan[]
   webauthnCredentials WebAuthnCredential[]
   clinicMemberships   ClinicMembership[]
+  credentials         PractitionerCredential[]
+  capabilityGrants    PractitionerCapabilityGrant[]
 
   /// Sprint 56 (Lever 3a) — acquisition attribution captured at signup.
   /// Free-form JSON; shape is { utm_source, utm_medium, utm_campaign,
@@ -185,6 +189,113 @@ model Psychologist {
   @@index([isAcceptingNewClients])
   @@index([onboardingCompletedAt])
   @@map("psychologists")
+}
+
+// ============================================================================
+// ORBIT Sprint 2 — additive practitioner credentials + capabilities.
+// Legacy vertical remains a migration input only; regulated authority is
+// resolved from verified credentials and explicit capability grants.
+// ============================================================================
+
+enum PractitionerProfession {
+  PSYCHOLOGIST
+  COUNSELLOR
+  PSYCHIATRIST
+  PHYSICIAN
+  SPECIALIST_PHYSICIAN
+}
+
+enum PractitionerCredentialKind {
+  RCI_REGISTRATION
+  NMC_REGISTRATION
+  STATE_MEDICAL_COUNCIL_REGISTRATION
+  OTHER_CLINICAL_REGISTRATION
+}
+
+enum PractitionerCredentialStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  SUSPENDED
+  EXPIRED
+  REVOKED
+}
+
+enum PractitionerCapability {
+  AMBIENT_CAPTURE
+  LIVE_ENCOUNTER
+  BEHAVIORAL_HEALTH_DOCUMENTATION
+  MEDICAL_DOCUMENTATION
+  CLINICAL_ANALYSIS
+  THERAPY_WORKFLOWS
+  MEASUREMENT_BASED_CARE
+  SAFETY_PLANNING
+  PRESCRIPTION_DRAFTING
+  PRESCRIPTION_SIGNING
+  CLINICAL_ORDERS
+  CHRONIC_CARE
+  FHIR_EXPORT
+  ABDM_PUSH
+  PATIENT_SHARING
+}
+
+enum CapabilityGrantSource {
+  LEGACY_BACKFILL
+  VERIFIED_CREDENTIAL
+  ORGANIZATION_POLICY
+  ADMIN_OVERRIDE
+}
+
+model PractitionerCredential {
+  id                 String                       @id @default(cuid())
+  psychologistId     String
+  kind               PractitionerCredentialKind
+  registrationNumber String
+  issuingAuthority   String
+  jurisdiction       String                       @default("IN")
+  status             PractitionerCredentialStatus @default(PENDING_VERIFICATION)
+  verifiedAt         DateTime?
+  expiresAt          DateTime?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@unique([kind, registrationNumber, issuingAuthority])
+  @@index([psychologistId, status])
+  @@map("practitioner_credentials")
+}
+
+model PractitionerCapabilityGrant {
+  id             String                 @id @default(cuid())
+  psychologistId String
+  capability     PractitionerCapability
+  source         CapabilityGrantSource
+  active         Boolean                @default(true)
+  grantedAt      DateTime               @default(now())
+  revokedAt      DateTime?
+  metadata       Json?
+
+  psychologist Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@unique([psychologistId, capability, source])
+  @@index([psychologistId, active])
+  @@map("practitioner_capability_grants")
+}
+
+model ClinicCapabilityGrant {
+  id         String                 @id @default(cuid())
+  clinicId   String
+  capability PractitionerCapability
+  active     Boolean                @default(true)
+  grantedAt  DateTime               @default(now())
+  revokedAt  DateTime?
+  metadata   Json?
+
+  clinic Clinic @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+
+  @@unique([clinicId, capability])
+  @@index([clinicId, active])
+  @@map("clinic_capability_grants")
 }
 
 // ============================================================================
@@ -244,7 +355,8 @@ model Clinic {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships ClinicMembership[]
+  memberships      ClinicMembership[]
+  capabilityGrants ClinicCapabilityGrant[]
 
   @@map("clinics")
 }
@@ -542,6 +654,13 @@ enum DsrErasureStatus {
   FULFILLED
 }
 
+enum ErasureObjectDeletionStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
 enum DsrGrievanceStatus {
   OPEN
   ACKNOWLEDGED
@@ -582,23 +701,52 @@ model ClientErasureRequest {
   clientId String
   status   DsrErasureStatus @default(PENDING)
 
-  /// Free-text reason the client supplied.
-  reason String? @db.Text
+  /// Free-text reason exists only while the request is open. Fulfilment stores
+  /// a one-way digest as bounded proof and clears the payload.
+  reason        String? @db.Text
+  reasonHashHex String?
 
   /// Admin who acted on it (null until reviewed). FK kept loose
   /// because admins may be soft-deleted later.
   resolvedByPsychologistId String?
   resolvedAt               DateTime?
   resolutionNotes          String?   @db.Text
+  resolutionNotesHashHex   String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client              Client                      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  objectDeletionTasks ErasureObjectDeletionTask[]
 
   @@index([clientId, status])
   @@index([status, createdAt])
   @@map("client_erasure_requests")
+}
+
+/// Transactional outbox for externally stored client audio. objectKey is
+/// removed after confirmed deletion; its digest remains bounded DSR proof.
+model ErasureObjectDeletionTask {
+  id               String                      @id @default(cuid())
+  erasureRequestId String
+  storageProvider  String
+  objectKey        String?
+  objectKeyHashHex String
+  status           ErasureObjectDeletionStatus @default(PENDING)
+  attempts         Int                         @default(0)
+  lastErrorCode    String?
+  nextAttemptAt    DateTime                    @default(now())
+  leaseToken       String?
+  leaseExpiresAt   DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  erasureRequest ClientErasureRequest @relation(fields: [erasureRequestId], references: [id], onDelete: Restrict)
+
+  @@unique([erasureRequestId, storageProvider, objectKeyHashHex])
+  @@index([status, nextAttemptAt, leaseExpiresAt])
+  @@map("erasure_object_deletion_tasks")
 }
 
 model ClientGrievance {
@@ -1277,12 +1425,19 @@ model TherapyNote {
   signAuthenticatorDataB64u String?
   signSignatureB64u         String?
   signChallengeHashHex      String?
+  signPayload               String? @db.Text
+
+  // Immutable clinical-authority provenance captured independently from the
+  // WebAuthn authenticator above. Scalars intentionally avoid a mutable FK.
+  medicalSigningCredentialId       String?
+  medicalSigningCredentialSnapshot Json?
 
   createdAt DateTime @default(now())
 
-  session Session    @relation(fields: [sessionId], references: [id])
-  draft   NoteDraft  @relation(fields: [draftId], references: [id])
-  edits   NoteEdit[]
+  session           Session                @relation(fields: [sessionId], references: [id])
+  draft             NoteDraft              @relation(fields: [draftId], references: [id])
+  edits             NoteEdit[]
+  signatureVersions NoteSignatureVersion[]
 
   @@map("therapy_notes")
 }
@@ -1327,6 +1482,36 @@ model NoteEdit {
 
   @@index([therapyNoteId, createdAt])
   @@map("note_edits")
+}
+
+/// Append-only snapshot of a superseded signature. A database trigger rejects
+/// UPDATE/DELETE so re-signing cannot erase prior content or credential proof.
+model NoteSignatureVersion {
+  id            String @id @default(cuid())
+  therapyNoteId String
+
+  version        String
+  content        Json
+  contentHashHex String
+  rxPad          Json?
+  signedAt       DateTime
+  signedBy       String
+
+  signCredentialId          String?
+  signClientDataJsonB64u    String?
+  signAuthenticatorDataB64u String?
+  signSignatureB64u         String?
+  signChallengeHashHex      String?
+  signPayload               String? @db.Text
+
+  medicalSigningCredentialId       String?
+  medicalSigningCredentialSnapshot Json?
+  createdAt                        DateTime @default(now())
+
+  therapyNote TherapyNote @relation(fields: [therapyNoteId], references: [id], onDelete: Restrict)
+
+  @@index([therapyNoteId, createdAt])
+  @@map("note_signature_versions")
 }
 
 // ============================================================================
@@ -2576,7 +2761,7 @@ model NoteReview {
 /// it holds the unit economics honest: ≤ ₹2 / consult, transcript p95 ≤ 2s.
 model LiveConsultMetric {
   id             String @id @default(cuid())
-  sessionId      String
+  sessionId      String @unique
   psychologistId String
 
   /// 'mock' | 'vertex' — which backend produced these numbers.
@@ -2615,6 +2800,7 @@ enum AuditAction {
   // Psychologist
   PSYCHOLOGIST_REGISTERED
   PSYCHOLOGIST_UPDATED
+  CAPABILITY_ACCESS_DENIED
 
   // Client
   CLIENT_CREATED
@@ -2647,6 +2833,7 @@ enum AuditAction {
   TRANSCRIPT_SEGMENT_FAILED
   NOTE_DRAFT_CREATED
   NOTE_DRAFT_VIEWED
+  NOTE_DRAFT_EDITED
   NOTE_SIGNED
   // Sprint 71 — a signed note re-opened for editing.
   NOTE_UNLOCKED
@@ -2709,6 +2896,7 @@ enum AuditAction {
   DSR_ACCESS_FULFILLED
   DSR_CORRECTION_REQUESTED
   DSR_ERASURE_REQUESTED
+  DSR_ERASURE_APPROVED
   DSR_ERASURE_FULFILLED
   DSR_NOMINATION_RECORDED
   DSR_GRIEVANCE_FILED
@@ -2992,6 +3180,28 @@ enum AppointmentStatus {
   CANCELLED
 }
 
+enum AppointmentReminderKind {
+  H24 @map("24H")
+  H2  @map("2H")
+}
+
+enum AppointmentReminderDeliveryStatus {
+  PENDING
+  DISPATCHING
+  SUBMISSION_STARTED
+  DELIVERED
+  FAILED
+  UNKNOWN
+  CANCELLED
+  /// Retained only because deployed databases may still contain the legacy value.
+  IN_FLIGHT
+}
+
+enum AppointmentReminderRecipient {
+  PRACTITIONER_EMAIL
+  PATIENT_EMAIL
+}
+
 /// A public appointment request against a concrete slot. A REQUESTED or
 /// CONFIRMED row HOLDS its slot (excluded from the public slot feed).
 /// Patient PII is tenant-envelope-encrypted at capture, same posture as
@@ -3020,15 +3230,41 @@ model Appointment {
   clientId  String?
   sessionId String?
 
-  /// MK4 — reminder stamps so the cron sends each window exactly once.
+  /// MK4 compatibility stamps; updated only after durable delivery succeeds.
   reminded24At DateTime?
   reminded2At  DateTime?
+
+  reminderDeliveries AppointmentReminderDelivery[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([psychologistId, status, startAt])
   @@index([psychologistId, startAt])
+}
+
+/// Per-recipient at-most-once appointment reminder outbox. The schedule snapshot
+/// versions logical deliveries. SUBMISSION_STARTED is irreversible for automatic
+/// workers: a crash may miss a reminder, and manual reconciliation is required.
+model AppointmentReminderDelivery {
+  id                  String                            @id @default(cuid())
+  appointmentId       String
+  appointment         Appointment                       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  scheduledStartAt    DateTime
+  kind                AppointmentReminderKind
+  recipient           AppointmentReminderRecipient
+  status              AppointmentReminderDeliveryStatus @default(PENDING)
+  attemptCount        Int                               @default(0)
+  leaseExpiresAt      DateTime?
+  submissionStartedAt DateTime?
+  lastError           String?                           @db.VarChar(128)
+  deliveredAt         DateTime?
+  createdAt           DateTime                          @default(now())
+  updatedAt           DateTime                          @updatedAt
+
+  @@unique([appointmentId, scheduledStartAt, kind, recipient])
+  @@index([status, leaseExpiresAt])
+  @@map("appointment_reminder_deliveries")
 }
 
 /// MK2 — the profile headshot, stored inline (postgres bytea) like audio

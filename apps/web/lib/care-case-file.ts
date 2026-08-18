@@ -436,7 +436,7 @@ export function caseFileJsonForReport(
   const liveWork =
     liveEvents && liveEvents.length > 0
       ? {
-          note: 'The work that ACTUALLY happened live — ground the report in it. homework must match HOMEWORK_ASSIGNED exactly if present; prefer MOMENT_LOGGED verbatim quotes as evidence; the worksheet fields are the session\'s real output.',
+          note: "The work that ACTUALLY happened live — ground the report in it. homework must match HOMEWORK_ASSIGNED exactly if present; prefer MOMENT_LOGGED verbatim quotes as evidence; the worksheet fields are the session's real output.",
           events: liveEvents.map((e) => ({
             type: e.type,
             atMs: e.atMs,
