@@ -11,6 +11,8 @@ export async function getEffectiveCapabilities(
   const practitioner = await prisma.psychologist.findUnique({
     where: { id: psychologistId },
     select: {
+      status: true,
+      deletedAt: true,
       vertical: true,
       profession: true,
       credentials: {
@@ -36,6 +38,9 @@ export async function getEffectiveCapabilities(
     },
   });
   if (!practitioner) throw new Error(`Practitioner ${psychologistId} not found`);
+  if (practitioner.status !== 'ACTIVE' || practitioner.deletedAt !== null) {
+    throw new PractitionerInactiveAuthorizationError();
+  }
   const effective = resolveEffectiveCapabilities({
     legacyVertical: practitioner.vertical,
     configuredProfession: practitioner.profession,
@@ -67,7 +72,6 @@ export async function assertCurrentCapabilities(
   psychologistId: string,
   required: readonly PractitionerCapability[],
 ): Promise<void> {
-  if (required.length === 0) return;
   const effective = await getEffectiveCapabilities(psychologistId);
   const missing = required.find((capability) => !effective.capabilities.has(capability));
   if (missing) throw new CapabilityAuthorizationError(missing);
@@ -118,28 +122,58 @@ export async function assertAuditedSessionCapabilities(
   if (boundary.psychologistId !== session.psychologistId) {
     throw new Error('Session authorization context mismatch');
   }
-  if (required.length === 0) return session.psychologistId;
-
-  const effective = await getEffectiveCapabilities(session.psychologistId);
+  let effective: EffectiveCapabilitySet;
+  try {
+    effective = await getEffectiveCapabilities(session.psychologistId);
+  } catch (error) {
+    if (!(error instanceof PractitionerInactiveAuthorizationError)) throw error;
+    try {
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: session.psychologistId,
+          action: 'CAPABILITY_ACCESS_DENIED',
+          targetType: 'PractitionerStatus',
+          targetId: 'INACTIVE',
+          metadata: {
+            source: boundary.source,
+            sessionId,
+            targetType: boundary.targetType ?? 'Session',
+            targetId: boundary.targetId ?? sessionId,
+          },
+        },
+        tx,
+      );
+    } catch {
+      // Authorization remains fail-closed when the denial audit sink is unavailable.
+      console.error('[capabilities] Failed to persist inactive-practitioner denial audit.');
+    }
+    throw error;
+  }
   const missing = required.find((capability) => !effective.capabilities.has(capability));
   if (!missing) return session.psychologistId;
 
-  await writeAudit(
-    {
-      actorType: 'PSYCHOLOGIST',
-      actorPsychologistId: session.psychologistId,
-      action: 'CAPABILITY_ACCESS_DENIED',
-      targetType: 'PractitionerCapability',
-      targetId: missing,
-      metadata: {
-        source: boundary.source,
-        sessionId,
-        targetType: boundary.targetType ?? 'Session',
-        targetId: boundary.targetId ?? sessionId,
+  try {
+    await writeAudit(
+      {
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: session.psychologistId,
+        action: 'CAPABILITY_ACCESS_DENIED',
+        targetType: 'PractitionerCapability',
+        targetId: missing,
+        metadata: {
+          source: boundary.source,
+          sessionId,
+          targetType: boundary.targetType ?? 'Session',
+          targetId: boundary.targetId ?? sessionId,
+        },
       },
-    },
-    tx,
-  );
+      tx,
+    );
+  } catch {
+    // Authorization remains fail-closed when the denial audit sink is unavailable.
+    console.error('[capabilities] Failed to persist capability-denial audit.');
+  }
   throw new CapabilityAuthorizationError(missing);
 }
 
@@ -147,5 +181,13 @@ export class CapabilityAuthorizationError extends Error {
   constructor(readonly capability: PractitionerCapability) {
     super(`Missing current ${capability} authorization`);
     this.name = 'CapabilityAuthorizationError';
+  }
+}
+
+/** Typed fail-closed denial for suspended, deactivated, or soft-deleted practitioners. */
+export class PractitionerInactiveAuthorizationError extends Error {
+  constructor() {
+    super('Practitioner is not active');
+    this.name = 'PractitionerInactiveAuthorizationError';
   }
 }

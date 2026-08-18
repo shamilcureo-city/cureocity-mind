@@ -33,6 +33,9 @@ Set on the **gateway** service:
 | `VERTEX_PROJECT_ID`                   | your GCP project         |                                                                                                                                                                                                                                                                                                                                                                     |
 | `VERTEX_FLASH_REGION`                 | `asia-south1`            | Pass 1 residency (audio)                                                                                                                                                                                                                                                                                                                                            |
 | `LIVE_GATEWAY_SECRET`                 | a 32+ byte random secret | **required in prod** (auth)                                                                                                                                                                                                                                                                                                                                         |
+| `LIVE_AUTHZ_REVALIDATE_URL`           | app internal endpoint    | **required for authenticated sessions**; e.g. `https://mind.cureocity.in/api/v1/internal/live-authority`. Missing/unavailable verifier fails closed.                                                                                                                                                                                                                |
+| `LIVE_AUTHZ_INTERVAL_MS`              | `5000` (default)         | current-authority polling cadence; regulated output also revalidates immediately                                                                                                                                                                                                                                                                                    |
+| `LIVE_AUTHZ_TIMEOUT_MS`               | `2000` (default)         | timeout per verifier request; timeout closes the socket                                                                                                                                                                                                                                                                                                             |
 | `LIVE_GATEWAY_MAX_SESSIONS`           | `50` (tune to the node)  | concurrency cap                                                                                                                                                                                                                                                                                                                                                     |
 | `LIVE_GATEWAY_PORT`                   | `8787`                   | behind the TLS proxy                                                                                                                                                                                                                                                                                                                                                |
 | `NODE_ENV`                            | `production`             | enables the fail-closed warning                                                                                                                                                                                                                                                                                                                                     |
@@ -47,10 +50,16 @@ Set on the **app** (Vercel prod):
 | `NEXT_PUBLIC_LIVE_GATEWAY_URL` | `wss://gateway.cureo.city`     | the public wss endpoint              |
 | `LIVE_GATEWAY_SECRET`          | **same secret as the gateway** | the app mints the signed start token |
 
-The secret MUST match on both sides — the app signs the start token
+The secret MUST match on both sides and be managed as a secret (never a
+`NEXT_PUBLIC_*` value) — the app signs the start token
 (`apps/web/lib/live-token.ts`), the gateway verifies it (`src/auth.ts`).
-If it's unset on the gateway in prod, it logs a loud OPEN warning and
-accepts anyone who can reach the socket — do not ship that.
+If it is unset in production, token verification fails closed. The gateway
+also refuses authenticated starts unless `LIVE_AUTHZ_REVALIDATE_URL` and the
+shared secret are both available.
+In production the verifier URL must use HTTPS, contain no credentials, query,
+or fragment, and target exactly `/api/v1/internal/live-authority`; redirects
+are refused so the service secret cannot be forwarded to another origin. Keep
+the timeout below the interval (interval range 1000–300000 ms; timeout ≥100 ms).
 
 ## 2. Build + run (container)
 
@@ -109,6 +118,9 @@ same env. The concurrency cap still applies per instance.
    after End.
 4. Load: script ≥ 50 concurrent mock clients against a staging node;
    confirm existing sessions are unaffected and the 51st gets `busy`.
+5. Suspend a staging practitioner or revoke `LIVE_ENCOUNTER` during a consult;
+   confirm the next authority check emits `unauthorized`, closes the socket,
+   and no later regulated event reaches the browser.
 
 ## 4. DPDP checklist (confirm at deploy)
 

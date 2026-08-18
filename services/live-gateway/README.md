@@ -70,6 +70,19 @@ termination grace period. The browser also reconnects and **replays its
 transcript** (`start.resume`), so a consult that can't finish during the
 drain resumes on the new instance instead of starting over.
 
+Authenticated sessions also require
+`LIVE_AUTHZ_REVALIDATE_URL=https://<app-host>/api/v1/internal/live-authority`.
+The app and gateway share `LIVE_GATEWAY_SECRET` for this service call. The
+gateway verifies current practitioner status and capabilities before starting,
+every five seconds, and immediately before regulated output. A denial, timeout,
+or verifier outage closes the socket rather than continuing from stale token
+claims. Tune only with `LIVE_AUTHZ_INTERVAL_MS` (default 5000) and
+`LIVE_AUTHZ_TIMEOUT_MS` (default 2000).
+Production accepts only an HTTPS verifier URL with the exact internal endpoint
+path and refuses redirects. Keep the timeout shorter than the interval. Set the
+same secret on Vercel (`apps/web`) and Cloud Run (`live-gateway`), never in a
+`NEXT_PUBLIC_*` variable.
+
 ## Wire protocol
 
 Shared, validated schemas live in `@cureocity/contracts`

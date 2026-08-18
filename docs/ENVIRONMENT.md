@@ -90,6 +90,8 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 | Var                                                                                                                | Purpose                                                                                                                                             |
 | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `LIVE_GATEWAY_SECRET`                                                                                              | HMAC key verifying the browser's start-token. **Gateway fails closed in prod without it.** Must match what `apps/web/lib/live-token.ts` signs with. |
+| `LIVE_AUTHZ_REVALIDATE_URL`                                                                                        | **Required for authenticated live sessions.** Absolute app URL for `POST /api/v1/internal/live-authority`; the gateway refuses the start if unset.  |
+| `LIVE_AUTHZ_INTERVAL_MS` / `LIVE_AUTHZ_TIMEOUT_MS`                                                                 | Current-authority polling interval (5s) and per-check timeout (2s). Any denial, malformed response, timeout, or outage closes the socket.           |
 | `LIVE_GATEWAY_PORT`                                                                                                | Listen port (default 8787).                                                                                                                         |
 | `LIVE_GATEWAY_MAX_CONNECTIONS` / `LIVE_GATEWAY_MAX_SESSIONS`                                                       | Connection cap (200) + concurrent-consult pool (50, graceful "busy" shed).                                                                          |
 | `LIVE_GATEWAY_STARTUP_GRACE_MS` / `LIVE_GATEWAY_IDLE_TIMEOUT_MS`                                                   | Per-connection timers.                                                                                                                              |
@@ -136,7 +138,9 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
   bypass**. Production instead fails closed; `GET /api/v1/health/auth` reports
   the live posture.
 - The gateway and the app must share the **same** `LIVE_GATEWAY_SECRET`, or
-  every live consult 401s at connect.
+  every live consult 401s at connect. The gateway must also set
+  `LIVE_AUTHZ_REVALIDATE_URL` to the app's internal authority endpoint; an
+  authenticated consult fails closed when the URL or verifier is unavailable.
 - `.env.example` is a snapshot — trust the code + this file for KMS (`gcp-kms`)
   and any post-Sprint-72 vars.
 - Public (`NEXT_PUBLIC_*`) vars are baked into the client bundle at build

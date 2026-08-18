@@ -212,7 +212,7 @@ export class LiveSession {
   private readonly vertical: PractitionerVertical;
   private readonly sessionKind: SessionKind;
   private readonly sessionModality: SessionModality | null;
-  private readonly capabilities: ReadonlySet<PractitionerCapability>;
+  private capabilities: ReadonlySet<PractitionerCapability>;
   /** Sprint TS1 — the therapist's latest note (SOAP or intake), for the final. */
   private latestTherapyNote: TherapyNoteV1 | IntakeNoteV1 | null = null;
   private latestTherapyKind: SessionKind = 'TREATMENT';
@@ -315,6 +315,11 @@ export class LiveSession {
   /** Per-window Pass-1 input tokens, in order (telemetry + O(n) tests). */
   get transcribeTokenSamples(): readonly number[] {
     return this.meter.transcribeInputTokens;
+  }
+
+  /** Replace optional scopes after trusted server-side live reauthorization. */
+  updateCapabilities(capabilities: ReadonlySet<PractitionerCapability>): void {
+    this.capabilities = capabilities;
   }
 
   /**

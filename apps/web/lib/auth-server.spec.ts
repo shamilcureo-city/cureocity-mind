@@ -52,6 +52,24 @@ describe('authentication bypass boundary', () => {
     process.env = { ...originalEnv, AUTH_BYPASS: 'true', NODE_ENV, VERCEL_ENV: 'preview' };
     expect(isAuthBypassed()).toBe(true);
   });
+
+  it('returns 503 at the request boundary when production Firebase Admin is unavailable', async () => {
+    process.env = {
+      ...originalEnv,
+      AUTH_BYPASS: 'true',
+      NODE_ENV: 'production',
+    };
+    delete process.env['VERCEL_ENV'];
+    mocks.firebaseAuth.mockReturnValue(null);
+
+    const auth = await requirePsychologistId(
+      new Request('https://example.test/api/v1/sessions', { method: 'GET' }) as never,
+    );
+
+    expect(auth.ok).toBe(false);
+    if (!auth.ok) expect(auth.response.status).toBe(503);
+    expect(mocks.psychologistFindUnique).not.toHaveBeenCalled();
+  });
 });
 
 describe('practitioner state boundary', () => {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CuidSchema } from './common';
 import { ClinicalFindingSchema, PatientContextSchema } from './case-state';
 import { SessionKindSchema, SessionModalitySchema } from './client';
 import { LiveReasoningSchema } from './live-reasoning';
@@ -14,6 +15,15 @@ import { RxPadDraftSchema, RxPadV1Schema } from './rx-pad';
  * live copilot). STUB for the DV4 live-path sprint.
  * See docs/DOCTOR_VERTICAL.md §4, §6.
  */
+
+/** Opaque identifiers used by the gateway's service-to-service authority check. */
+export const LiveAuthorityRequestSchema = z
+  .object({
+    sessionId: CuidSchema,
+    psychologistId: CuidSchema,
+  })
+  .strict();
+export type LiveAuthorityRequest = z.infer<typeof LiveAuthorityRequestSchema>;
 
 /// Rail 1 — an interim/final ASR token delta.
 export const LiveTranscriptDeltaSchema = z.object({

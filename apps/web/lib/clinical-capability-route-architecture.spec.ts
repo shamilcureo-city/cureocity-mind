@@ -2,6 +2,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { REGULATED_ROUTE_CAPABILITIES } from './regulated-route-capabilities';
+import { analyzeRegulatedRouteSource, exportedRouteHandlers } from './regulated-route-discovery';
 
 const source = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8');
 
@@ -11,10 +12,15 @@ describe('regulated boundary coverage', () => {
     expect(REGULATED_ROUTE_CAPABILITIES.length).toBeGreaterThan(60);
   });
 
+  it('contains exactly one policy entry per route and method boundary', () => {
+    const boundaries = REGULATED_ROUTE_CAPABILITIES.flatMap((entry) =>
+      entry.methods.map((method) => `${entry.route}:${method}`),
+    );
+    expect(new Set(boundaries).size).toBe(boundaries.length);
+  });
+
   it('classifies every discovered practitioner clinical-data boundary', () => {
     const apiRoot = resolve(process.cwd(), 'app/api/v1');
-    const markers =
-      /therapyNote|noteDraft|medicalEncounterNote|clinicalReport|transcript|safetyPlan|treatmentWorkflow|modalityState|instrumentResponse|clinicalReading|medicationOrder|clinicalOrder|assessmentItem|clientDiagnosis|problemListItem|affectFeatures|preSessionBrief|decryptClientField|persistVitalReadings/i;
     const classified = new Set(
       REGULATED_ROUTE_CAPABILITIES.flatMap((entry) =>
         entry.methods.map((method) => `${entry.route}:${method}`),
@@ -29,18 +35,22 @@ describe('regulated boundary coverage', () => {
       // Operator-only erasure and synthetic health checks mention clinical
       // models but are governed by ADMIN/health authentication, not a
       // practitioner clinical capability.
-      if (path.includes('/api/v1/admin/') || path.includes('/api/v1/health/')) continue;
       if (
-        !markers.test(routeSource) ||
-        !/require(?:PsychologistId|Capability|AnyCapability)\(/.test(routeSource)
+        path.includes('/api/v1/admin/') ||
+        path.includes('/api/v1/health/') ||
+        path.includes('/api/v1/internal/') ||
+        path.includes('/api/v1/cron/') ||
+        path.includes('/api/v1/care/') ||
+        path.includes('/api/v1/p/') ||
+        path.includes('/api/v1/billing/') ||
+        path.includes('/api/v1/psychologists/me/marketing/') ||
+        path.includes('/api/v1/psychologists/me/posts/')
       ) {
         continue;
       }
       const route = `api/v1/${relative(apiRoot, path).replace(/\/route\.ts$/, '')}`;
-      for (const method of routeSource.matchAll(
-        /export async function (GET|POST|PUT|PATCH|DELETE)/g,
-      )) {
-        const key = `${route}:${method[1]}`;
+      for (const handler of analyzeRegulatedRouteSource(routeSource).regulatedHandlers) {
+        const key = `${route}:${handler.method}`;
         if (!classified.has(key)) missing.push(key);
       }
     }
@@ -55,22 +65,45 @@ describe('regulated boundary coverage', () => {
       const routeFile = `app/${entry.route}/route.ts`;
       expect(existsSync(resolve(process.cwd(), routeFile)), routeFile).toBe(true);
       const routeSource = source(routeFile);
-      const guard = /require(?:PsychologistId|Capability|AnyCapability)\(/.exec(routeSource);
-      expect(guard, routeFile).not.toBeNull();
-      const firstProtectedOperation =
-        /(?:prisma\.|parseJson\(|parseQuery\(|decryptClientField\(|renderToBuffer\(|modelRouter\(|computeClientJourney\()/.exec(
-          routeSource,
-        );
-      if (firstProtectedOperation) {
-        expect(guard!.index, routeFile).toBeLessThan(firstProtectedOperation.index);
+      const analysis = analyzeRegulatedRouteSource(routeSource);
+      for (const method of entry.methods) {
+        expect(analysis.unguardedMethods, routeFile).not.toContain(method);
+        expect(analysis.guardOrderViolations, routeFile).not.toContain(method);
       }
-      const actualMethods = [
-        ...routeSource.matchAll(/export async function (GET|POST|PUT|PATCH|DELETE)/g),
-      ]
-        .map((match) => match[1])
+      const actualMethods = exportedRouteHandlers(routeSource)
+        .map((handler) => handler.method)
         .sort();
       expect([...entry.methods].sort(), routeFile).toEqual(actualMethods);
     }
+  });
+
+  it('discovers an unguarded regulated route independently of guard presence', () => {
+    const fixture = `
+      export async function POST(req: Request) {
+        const note = await prisma.noteDraft.findUnique({ where: { id: 'n1' } });
+        return Response.json(note);
+      }
+    `;
+    const analysis = analyzeRegulatedRouteSource(fixture);
+    expect(analysis.regulatedHandlers.map((handler) => handler.method)).toEqual(['POST']);
+    expect(analysis.unguardedMethods).toEqual(['POST']);
+  });
+
+  it('checks each exported handler segment instead of accepting a file-wide guard', () => {
+    const fixture = `
+      export async function GET(req: Request) {
+        const auth = await requirePsychologistId(req);
+        if (!auth.ok) return auth.response;
+        return Response.json(await prisma.noteDraft.findMany());
+      }
+      export async function PUT(req: Request) {
+        const input = await parseJson(req, UpdateNoteSchema);
+        return Response.json(await prisma.noteDraft.update({ data: input }));
+      }
+    `;
+    const analysis = analyzeRegulatedRouteSource(fixture);
+    expect(analysis.unguardedMethods).toEqual(['PUT']);
+    expect(analysis.guardOrderViolations).toEqual(['PUT']);
   });
 
   it.each([
