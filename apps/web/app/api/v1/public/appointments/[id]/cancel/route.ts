@@ -11,6 +11,7 @@ import {
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
+import { transactionConflictResponse } from '@/lib/transaction-conflict';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -79,7 +80,8 @@ export async function POST(
   } catch (error) {
     const response =
       appointmentConcurrentModificationResponse(error) ??
-      sessionConcurrentModificationResponse(error);
+      sessionConcurrentModificationResponse(error) ??
+      transactionConflictResponse(error);
     if (response) return response;
     throw error;
   }

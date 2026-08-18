@@ -56,6 +56,15 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(source).toContain('sessionConcurrentModificationResponse(error)');
   });
 
+  it('locks a linked appointment before reschedule touches the session row', () => {
+    const source = route('sessions/[id]/reschedule');
+    const appointmentLock = source.indexOf('lockLinkedAppointmentForSession(');
+    const sessionTransition = source.indexOf('conditionalSessionTransition(', appointmentLock);
+
+    expect(appointmentLock).toBeGreaterThan(-1);
+    expect(sessionTransition).toBeGreaterThan(appointmentLock);
+  });
+
   it('returns the stable conflict response when consent snapshot loses to start', () => {
     const source = route('sessions/[id]/consent');
     expect(source).toContain('sessionConcurrentModificationResponse(error)');
@@ -80,6 +89,13 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(source).toContain('appointmentConcurrentModificationResponse(error)');
   });
 
+  it.each(['public/appointments/[id]/cancel', 'sessions/[id]/reschedule'])(
+    'maps database concurrency aborts to a stable conflict in %s',
+    (path) => {
+      expect(route(path)).toContain('transactionConflictResponse(error)');
+    },
+  );
+
   it.each(['appointments/[id]/confirm', 'appointments/[id]/decline'])(
     'claims the requested appointment in %s and maps a lost race to 409',
     (path) => {
@@ -89,6 +105,20 @@ describe('session lifecycle route concurrency architecture', () => {
       expect(source).toContain('appointmentConcurrentModificationResponse(error)');
     },
   );
+
+  it('claims each stale appointment before expiry audit and email side effects', () => {
+    const source = route('cron/appointments');
+    const claim = source.indexOf('conditionalAppointmentTransition(');
+    const audit = source.indexOf("action: 'APPOINTMENT_EXPIRED'", claim);
+    const email = source.indexOf('sendAppointmentClosedEmail(', claim);
+
+    expect(claim).toBeGreaterThan(-1);
+    expect(source).toContain("expectedStatus: 'REQUESTED'");
+    expect(audit).toBeGreaterThan(claim);
+    expect(email).toBeGreaterThan(audit);
+    expect(source).toContain('ConditionalAppointmentTransitionError');
+    expect(source).not.toContain('expired: stale.length');
+  });
 
   it('claims confirmation before creating any client or session side effects', () => {
     const source = route('appointments/[id]/confirm');

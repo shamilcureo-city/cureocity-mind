@@ -1,4 +1,4 @@
-import type { Appointment, AppointmentStatus, Prisma } from '@prisma/client';
+import { Prisma, type Appointment, type AppointmentStatus } from '@prisma/client';
 import { NextResponse } from 'next/server';
 
 export class ConditionalAppointmentTransitionError extends Error {
@@ -30,6 +30,28 @@ export async function conditionalAppointmentTransition(
   });
   if (result.count !== 1) throw new ConditionalAppointmentTransitionError();
   return tx.appointment.findUniqueOrThrow({ where: { id: input.appointmentId } });
+}
+
+/**
+ * Lock any appointment linked to a session before that session is mutated.
+ * Combined lifecycle writers use one global row-lock order: Appointment,
+ * then Session. This matches appointment confirmation/cancellation and keeps
+ * session rescheduling from deadlocking with public cancellation.
+ */
+export async function lockLinkedAppointmentForSession(
+  tx: Prisma.TransactionClient,
+  input: { sessionId: string; psychologistId: string },
+): Promise<Appointment | null> {
+  const rows = await tx.$queryRaw<Appointment[]>(Prisma.sql`
+    SELECT a.*
+    FROM "appointments" a
+    WHERE a."sessionId" = ${input.sessionId}
+      AND a."psychologistId" = ${input.psychologistId}
+      AND a."status" = 'CONFIRMED'::"AppointmentStatus"
+    ORDER BY a."id"
+    FOR UPDATE
+  `);
+  return rows[0] ?? null;
 }
 
 export function appointmentConcurrentModificationResponse(error: unknown): NextResponse | null {

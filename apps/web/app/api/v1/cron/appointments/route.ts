@@ -2,6 +2,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { sendAppointmentClosedEmail, sendAppointmentReminderEmails } from '@/lib/appointment-email';
+import {
+  ConditionalAppointmentTransitionError,
+  conditionalAppointmentTransition,
+} from '@/lib/appointment-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,24 +38,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     select: { id: true, psychologistId: true, startAt: true },
     take: 200,
   });
+  let expired = 0;
   for (const appt of stale) {
-    await prisma.$transaction(async (tx) => {
-      await tx.appointment.update({ where: { id: appt.id }, data: { status: 'CANCELLED' } });
-      await writeAudit(
-        {
-          actorType: 'SYSTEM',
-          action: 'APPOINTMENT_EXPIRED',
-          targetType: 'Appointment',
-          targetId: appt.id,
-          metadata: {
-            psychologistId: appt.psychologistId,
-            startAt: appt.startAt.toISOString(),
-            holdHours: HOLD_HOURS,
+    try {
+      await prisma.$transaction(async (tx) => {
+        await conditionalAppointmentTransition(tx, {
+          appointmentId: appt.id,
+          expectedStatus: 'REQUESTED',
+          data: { status: 'CANCELLED' },
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'APPOINTMENT_EXPIRED',
+            targetType: 'Appointment',
+            targetId: appt.id,
+            metadata: {
+              psychologistId: appt.psychologistId,
+              startAt: appt.startAt.toISOString(),
+              holdHours: HOLD_HOURS,
+            },
           },
-        },
-        tx,
-      );
-    });
+          tx,
+        );
+      });
+    } catch (error) {
+      if (error instanceof ConditionalAppointmentTransitionError) continue;
+      throw error;
+    }
+    expired++;
     // MK8 — tell the patient the hold lapsed instead of going silent.
     await sendAppointmentClosedEmail(appt.psychologistId, appt.id, appt.startAt);
   }
@@ -94,7 +109,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     }
   }
 
-  return NextResponse.json({ expired: stale.length, reminded });
+  return NextResponse.json({ expired, reminded });
 }
 
 function isAuthorized(req: NextRequest): boolean {

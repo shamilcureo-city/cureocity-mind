@@ -3,6 +3,7 @@ import { SessionRescheduleInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { sendAppointmentRescheduledEmail } from '@/lib/appointment-email';
+import { lockLinkedAppointmentForSession } from '@/lib/appointment-transition';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
@@ -11,6 +12,7 @@ import {
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
+import { transactionConflictResponse } from '@/lib/transaction-conflict';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -56,6 +58,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   let result;
   try {
     result = await prisma.$transaction(async (tx) => {
+      const linkedAppt = await lockLinkedAppointmentForSession(tx, {
+        sessionId,
+        psychologistId: auth.value.psychologistId,
+      });
       await conditionalSessionTransition(tx, {
         sessionId,
         expectedStatus: 'SCHEDULED',
@@ -78,13 +84,6 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       // Without this the patient keeps being reminded of the OLD time, their
       // video join window opens at the old time, and their cancel link
       // targets a row that is no longer the real session.
-      const linkedAppt = await tx.appointment.findFirst({
-        where: {
-          sessionId,
-          psychologistId: auth.value.psychologistId,
-          status: 'CONFIRMED',
-        },
-      });
       if (linkedAppt) {
         const durationMs = linkedAppt.endAt.getTime() - linkedAppt.startAt.getTime();
         await tx.appointment.update({
@@ -137,7 +136,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       return { created: nextSession, movedAppointmentId: linkedAppt?.id ?? null };
     });
   } catch (error) {
-    const response = sessionConcurrentModificationResponse(error);
+    const response =
+      sessionConcurrentModificationResponse(error) ?? transactionConflictResponse(error);
     if (response) return response;
     throw error;
   }
