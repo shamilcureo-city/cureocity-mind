@@ -259,8 +259,15 @@ export class DsrService {
     dto: DsrConsentWithdrawalInput,
     auditMeta: AuditMetadata,
   ): Promise<void> {
+    const now = new Date();
     const active = await this.prisma.consent.findFirst({
-      where: { clientId, scope: dto.scope, status: 'GRANTED' },
+      where: {
+        clientId,
+        scope: dto.scope,
+        status: 'GRANTED',
+        withdrawnAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
       orderBy: { grantedAt: 'desc' },
     });
     if (!active) {
@@ -268,7 +275,6 @@ export class DsrService {
         `No active consent for scope ${dto.scope} — nothing to withdraw`,
       );
     }
-    const now = new Date();
     const reasonHashHex = dto.reason
       ? createHash('sha256').update(dto.reason).digest('hex')
       : undefined;

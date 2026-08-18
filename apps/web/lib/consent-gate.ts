@@ -55,56 +55,56 @@ export const SCRIBE_CONSENT_SCOPES = [
 
 export type ScribeConsentScope = (typeof SCRIBE_CONSENT_SCOPES)[number];
 
-export interface WithdrawnConsentResult {
-  withdrawn: ScribeConsentScope[];
-}
-
 /**
- * Scopes the client has explicitly WITHDRAWN. Empty ⇒ nothing was revoked.
- *
- * Deliberately narrow: this reports scopes with a withdrawal on record, not
- * scopes that are merely absent. A missing consent row is the pre-existing
- * "never granted" case the snapshot logic already handles; conflating the two
- * would break every session created before a scope existed.
+ * Fail-closed capture authorization shared by batch start, live start, and
+ * live reconnect. Callers must hold the client consent lock while awaiting
+ * this function so a concurrent withdrawal cannot race token mint/start.
  */
-export async function withdrawnScribeConsents(
+export async function assertValidScribeConsent(
+  snapshot: Prisma.JsonValue | null,
   clientId: string,
   db: Pick<Prisma.TransactionClient, 'consent'> = prisma,
-): Promise<ScribeConsentScope[]> {
+  now = new Date(),
+): Promise<void> {
+  const entries =
+    snapshot !== null && typeof snapshot === 'object' && !Array.isArray(snapshot)
+      ? snapshot.entries
+      : null;
+  const snapshotScopes = new Set(
+    (Array.isArray(entries) ? entries : []).map((entry) =>
+      entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+        ? entry.scope
+        : undefined,
+    ),
+  );
+  const missingFromSnapshot = SCRIBE_CONSENT_SCOPES.filter((scope) => !snapshotScopes.has(scope));
+  if (missingFromSnapshot.length > 0) {
+    throw new ConsentAuthorizationError(
+      `Session consent snapshot is missing required scopes: ${missingFromSnapshot.join(', ')}`,
+    );
+  }
+
   const rows = await db.consent.findMany({
     where: {
       clientId,
       scope: { in: [...SCRIBE_CONSENT_SCOPES] },
-      OR: [{ withdrawnAt: { not: null } }, { status: 'WITHDRAWN' }],
     },
-    select: { scope: true, withdrawnAt: true, status: true },
+    select: { scope: true, status: true, withdrawnAt: true, expiresAt: true },
   });
-  const withdrawn = new Set<ScribeConsentScope>();
+  const validScopes = new Set<ScribeConsentScope>();
   for (const row of rows) {
-    const scope = row.scope as ScribeConsentScope;
-    // A later GRANTED row for the same scope re-authorises it, so only treat
-    // the scope as withdrawn when no active grant supersedes the withdrawal.
-    withdrawn.add(scope);
+    if (
+      row.status === 'GRANTED' &&
+      row.withdrawnAt === null &&
+      (row.expiresAt === null || row.expiresAt > now)
+    ) {
+      validScopes.add(row.scope as ScribeConsentScope);
+    }
   }
-  if (withdrawn.size === 0) return [];
-  const active = await db.consent.findMany({
-    where: {
-      clientId,
-      scope: { in: [...withdrawn] },
-      status: 'GRANTED',
-      withdrawnAt: null,
-    },
-    select: { scope: true },
-  });
-  for (const row of active) withdrawn.delete(row.scope as ScribeConsentScope);
-  return [...withdrawn];
-}
-
-/** Human-readable refusal for a capture blocked by a withdrawal. */
-export function withdrawalRefusalMessage(scopes: ScribeConsentScope[]): string {
-  return (
-    `The patient has withdrawn consent for ${scopes.join(', ')}. ` +
-    `Recording cannot start until that consent is granted again on the patient's record. ` +
-    `Document this encounter by hand, or capture fresh consent first.`
-  );
+  const missingStandingGrants = SCRIBE_CONSENT_SCOPES.filter((scope) => !validScopes.has(scope));
+  if (missingStandingGrants.length > 0) {
+    throw new ConsentAuthorizationError(
+      `Current standing consent does not cover required scopes: ${missingStandingGrants.join(', ')}`,
+    );
+  }
 }

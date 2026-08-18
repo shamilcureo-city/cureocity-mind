@@ -3,6 +3,10 @@ import type { CancelAppointmentResponse } from '@cureocity/contracts';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { verifyAppointmentSig } from '@/lib/appointment-links';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,30 +42,37 @@ export async function POST(
     return NextResponse.json({ error: 'This request was already declined.' }, { status: 409 });
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.appointment.update({ where: { id }, data: { status: 'CANCELLED' } });
-    if (appt.sessionId) {
-      await tx.session.updateMany({
-        where: { id: appt.sessionId, status: 'SCHEDULED' },
-        data: { status: 'CANCELLED' },
-      });
-    }
-    await writeAudit(
-      {
-        actorType: 'CLIENT',
-        action: 'APPOINTMENT_CANCELLED',
-        targetType: 'Appointment',
-        targetId: id,
-        metadata: {
-          psychologistId: appt.psychologistId,
-          startAt: appt.startAt.toISOString(),
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.appointment.update({ where: { id }, data: { status: 'CANCELLED' } });
+      if (appt.sessionId) {
+        await conditionalSessionTransition(tx, {
           sessionId: appt.sessionId,
-          via: 'patient-link',
+          expectedStatus: 'SCHEDULED',
+          data: { status: 'CANCELLED' },
+        });
+      }
+      await writeAudit(
+        {
+          actorType: 'CLIENT',
+          action: 'APPOINTMENT_CANCELLED',
+          targetType: 'Appointment',
+          targetId: id,
+          metadata: {
+            psychologistId: appt.psychologistId,
+            startAt: appt.startAt.toISOString(),
+            sessionId: appt.sessionId,
+            via: 'patient-link',
+          },
         },
-      },
-      tx,
-    );
-  });
+        tx,
+      );
+    });
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
 
   const body: CancelAppointmentResponse = { status: 'CANCELLED' };
   return NextResponse.json(body);

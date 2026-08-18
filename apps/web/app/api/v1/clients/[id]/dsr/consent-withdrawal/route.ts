@@ -45,13 +45,25 @@ export async function POST(
   const withdrawnCount = await prisma.$transaction((tx) =>
     withClientConsentLock(tx, clientId, async () => {
       const active = await tx.consent.findFirst({
-        where: { clientId, scope: body.value.scope, status: 'GRANTED', withdrawnAt: null },
+        where: {
+          clientId,
+          scope: body.value.scope,
+          status: 'GRANTED',
+          withdrawnAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
         orderBy: { grantedAt: 'desc' },
       });
       if (!active) return 0;
 
       const result = await tx.consent.updateMany({
-        where: { clientId, scope: body.value.scope, status: 'GRANTED', withdrawnAt: null },
+        where: {
+          clientId,
+          scope: body.value.scope,
+          status: 'GRANTED',
+          withdrawnAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+        },
         data: { status: 'WITHDRAWN', withdrawnAt: now },
       });
       await writeAudit(

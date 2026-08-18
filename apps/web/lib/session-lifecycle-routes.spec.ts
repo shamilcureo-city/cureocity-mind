@@ -27,6 +27,17 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(token).toBeGreaterThan(authorization);
   });
 
+  it.each(['sessions/[id]/start', 'sessions/[id]/live-token'])(
+    'uses the centralized complete snapshot and standing-grant predicate in %s',
+    (path) => {
+      const source = route(path);
+      const lock = source.indexOf('withClientConsentLock(');
+      const authorization = source.indexOf('assertValidScribeConsent(', lock);
+
+      expect(authorization).toBeGreaterThan(lock);
+    },
+  );
+
   it.each([
     ['sessions/[id]/reschedule', "expectedStatus: 'SCHEDULED'"],
     ['sessions/[id]/no-show/undo', "expectedStatus: 'NO_SHOW'"],
@@ -49,5 +60,20 @@ describe('session lifecycle route concurrency architecture', () => {
     const source = route('sessions/[id]/consent');
     expect(source).toContain('sessionConcurrentModificationResponse(error)');
     expect(source).toContain("expectedStatus: 'SCHEDULED'");
+  });
+
+  it.each(['sessions/[id]/consent', 'clients/[id]/dsr/consent-withdrawal'])(
+    'does not treat expired grants as active in %s',
+    (path) => {
+      expect(route(path)).toContain('expiresAt: { gt: now }');
+    },
+  );
+
+  it('conditionally cancels a linked scheduled session and maps a lost race to 409', () => {
+    const source = route('public/appointments/[id]/cancel');
+
+    expect(source).toContain('conditionalSessionTransition(');
+    expect(source).toContain("expectedStatus: 'SCHEDULED'");
+    expect(source).toContain('sessionConcurrentModificationResponse(error)');
   });
 });

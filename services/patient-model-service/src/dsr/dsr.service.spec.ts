@@ -249,6 +249,24 @@ describe('DsrService.withdrawConsent', () => {
     );
   });
 
+  it('only selects an unwithdrawn, unexpired GRANTED row', async () => {
+    const deps = makeDeps();
+    const svc = new DsrService(deps.prisma, deps.audit);
+
+    await svc.withdrawConsent(CLIENT, { scope: 'AUDIO_RECORDING' }, {});
+
+    expect(deps.consentFindFirst).toHaveBeenCalledWith({
+      where: {
+        clientId: CLIENT,
+        scope: 'AUDIO_RECORDING',
+        status: 'GRANTED',
+        withdrawnAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
+      orderBy: { grantedAt: 'desc' },
+    });
+  });
+
   it('400s when no active consent exists for that scope', async () => {
     const deps = makeDeps({ activeConsent: null });
     const svc = new DsrService(deps.prisma, deps.audit);

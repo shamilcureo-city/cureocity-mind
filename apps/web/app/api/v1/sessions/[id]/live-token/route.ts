@@ -1,14 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import type { PractitionerCapability, SessionConsentSnapshot } from '@cureocity/contracts';
+import type { PractitionerCapability } from '@cureocity/contracts';
 import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { signLiveToken } from '@/lib/live-token';
 import { fetchActiveMedications, fetchAllergies } from '@/lib/patient-context';
 import {
+  assertValidScribeConsent,
   ConsentAuthorizationError,
   consentAuthorizationResponse,
-  withdrawalRefusalMessage,
-  withdrawnScribeConsents,
   withClientConsentLock,
 } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
@@ -30,20 +29,12 @@ export const dynamic = 'force-dynamic';
  *
  * DS11.1 (session lifecycle truth): this call IS the live consult's
  * capture-start, so it now carries the same lifecycle side effects the
- * batch /consent + /start pair has. A SCHEDULED session transitions to
- * IN_PROGRESS with a consent snapshot (the scribe scopes the patient
- * granted at creation, re-acknowledged at consult start) — making the
+ * batch /consent + /start pair has. A SCHEDULED session with a complete,
+ * currently-backed consent snapshot transitions to IN_PROGRESS — making the
  * clinic queue statuses truthful and unblocking the sign route (which
  * requires COMPLETED, set by /live-note). Reconnects (already
  * IN_PROGRESS) just mint; a COMPLETED session is never regressed.
  */
-
-/** The DPDP scopes the scribe pipeline runs under (parity with batch). */
-const LIVE_CONSENT_SCOPES = [
-  'AUDIO_RECORDING',
-  'AI_NOTE_GENERATION',
-  'CROSS_BORDER_PROCESSING',
-] as const;
 
 const LIVE_SCOPED_CAPABILITIES = new Set<PractitionerCapability>([
   'LIVE_ENCOUNTER',
@@ -102,53 +93,9 @@ export async function POST(
         if (!current) throw new ConsentAuthorizationError('Session changed during authorization');
         assertLiveTokenSessionStatus(current.status);
 
-        const withdrawn = await withdrawnScribeConsents(session.clientId, tx);
-        if (withdrawn.length > 0) {
-          throw new ConsentAuthorizationError(withdrawalRefusalMessage(withdrawn));
-        }
-
-        const needsSnapshot = current.status === 'SCHEDULED' && current.consentSnapshot === null;
-        if (needsSnapshot) {
-          const standing = await tx.consent.findMany({
-            where: {
-              clientId: session.clientId,
-              scope: { in: [...LIVE_CONSENT_SCOPES] },
-              status: 'GRANTED',
-              withdrawnAt: null,
-            },
-            select: { scope: true },
-          });
-          const grantedSet = new Set(standing.map((consent) => consent.scope));
-          const missing = LIVE_CONSENT_SCOPES.filter((scope) => !grantedSet.has(scope));
-          if (missing.length > 0) {
-            throw new ConsentAuthorizationError(
-              `The patient's consents on record do not cover the live scribe (missing: ${missing.join(', ')})`,
-            );
-          }
-        } else {
-          const snapshotScopes = new Set(
-            (
-              (current.consentSnapshot as { entries?: Array<{ scope?: string }> } | null)
-                ?.entries ?? []
-            ).map((entry) => entry.scope),
-          );
-          if (!snapshotScopes.has('CROSS_BORDER_PROCESSING')) {
-            throw new ConsentAuthorizationError(
-              'This session does not have cross-border processing consent required by the live scribe',
-            );
-          }
-        }
+        await assertValidScribeConsent(current.consentSnapshot, session.clientId, tx);
 
         if (current.status === 'SCHEDULED') {
-          const ackedAt = new Date().toISOString();
-          const snapshot: SessionConsentSnapshot = {
-            entries: LIVE_CONSENT_SCOPES.map((scope) => ({
-              scope,
-              scriptVersion: 'v1.0',
-              ackedAt,
-            })),
-            notes: 'Standing consents re-acknowledged at live consult start',
-          };
           await conditionalSessionTransition(tx, {
             sessionId,
             expectedStatus: 'SCHEDULED',
@@ -156,27 +103,8 @@ export async function POST(
               status: 'IN_PROGRESS',
               startedAt: new Date(),
               captureMode: 'LIVE',
-              ...(needsSnapshot && { consentSnapshot: snapshot }),
             },
           });
-          if (needsSnapshot) {
-            await writeAudit(
-              {
-                actorType: 'PSYCHOLOGIST',
-                actorPsychologistId: auth.value.psychologistId,
-                action: 'SESSION_CONSENT_RECORDED',
-                targetType: 'Session',
-                targetId: sessionId,
-                metadata: {
-                  ...auditMetadataFromRequest(req),
-                  scopes: [...LIVE_CONSENT_SCOPES],
-                  scriptVersion: 'v1.0',
-                  source: 'LIVE',
-                },
-              },
-              tx,
-            );
-          }
           await writeAudit(
             {
               actorType: 'PSYCHOLOGIST',

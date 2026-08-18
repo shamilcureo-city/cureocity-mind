@@ -38,7 +38,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   const dto = await parseJson(req, SessionConsentAckInputSchema);
   if (!dto.ok) return dto.response;
 
-  const ackedAt = new Date().toISOString();
+  const now = new Date();
+  const ackedAt = now.toISOString();
   const snapshot: SessionConsentSnapshot = {
     entries: dto.value.scopes.map((scope) => ({
       scope,
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
             scope: { in: dto.value.scopes },
             status: 'GRANTED',
             withdrawnAt: null,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
           },
           select: { scope: true },
         });
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
               status: 'GRANTED',
               scriptVersion: dto.value.scriptVersion,
               capturedVia: 'IN_PERSON',
-              grantedAt: new Date(),
+              grantedAt: now,
               notes: `Captured in the pre-session consent step (session ${sessionId})`,
             },
           });

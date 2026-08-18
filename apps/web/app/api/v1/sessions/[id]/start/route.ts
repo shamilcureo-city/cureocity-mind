@@ -5,10 +5,8 @@ import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
 import {
-  ConsentAuthorizationError,
+  assertValidScribeConsent,
   consentAuthorizationResponse,
-  withdrawalRefusalMessage,
-  withdrawnScribeConsents,
   withClientConsentLock,
 } from '@/lib/consent-gate';
 import {
@@ -39,40 +37,6 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       { status: 400 },
     );
   }
-  if (existing.consentSnapshot === null) {
-    return NextResponse.json(
-      { error: 'Session consent must be recorded before starting' },
-      { status: 400 },
-    );
-  }
-  // PROD5 (DPDP) — Pass 2–5 process the transcript on Google's GLOBAL
-  // endpoint, so a session may only start when the snapshot carries the
-  // cross-border scope. docs/dpdp-data-flow.md declares this mandatory;
-  // this is the gate that makes the claim true.
-  const snapshotScopes = new Set(
-    ((existing.consentSnapshot as { entries?: Array<{ scope?: string }> }).entries ?? []).map(
-      (e) => e.scope,
-    ),
-  );
-  if (!snapshotScopes.has('CROSS_BORDER_PROCESSING')) {
-    return NextResponse.json(
-      {
-        error:
-          'AI note analysis processes the transcript outside India, and this client has not ' +
-          'consented to cross-border processing. Capture that consent in the pre-session ' +
-          'consent step before starting an AI-scribed session.',
-      },
-      { status: 409 },
-    );
-  }
-
-  // Batch E (DPDP) — a snapshot proves consent was GIVEN; only the standing
-  // rows prove it still HOLDS. Consent is withdrawable at any time, and
-  // nothing read Consent.withdrawnAt at the moment it matters most.
-  const withdrawn = await withdrawnScribeConsents(existing.clientId);
-  if (withdrawn.length > 0) {
-    return NextResponse.json({ error: withdrawalRefusalMessage(withdrawn) }, { status: 409 });
-  }
 
   // DS11.7 — the doctor capture surfaces declare their pipeline. Optional
   // body; therapist callers send none and captureMode stays null.
@@ -88,23 +52,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           where: { id: sessionId },
           select: { consentSnapshot: true },
         });
-        if (current?.consentSnapshot === null) {
-          throw new ConsentAuthorizationError('Session consent must be recorded before starting');
-        }
-        const currentScopes = new Set(
-          (
-            (current?.consentSnapshot as { entries?: Array<{ scope?: string }> })?.entries ?? []
-          ).map((entry) => entry.scope),
-        );
-        if (!currentScopes.has('CROSS_BORDER_PROCESSING')) {
-          throw new ConsentAuthorizationError(
-            'AI note analysis requires current cross-border processing consent',
-          );
-        }
-        const currentlyWithdrawn = await withdrawnScribeConsents(existing.clientId, tx);
-        if (currentlyWithdrawn.length > 0) {
-          throw new ConsentAuthorizationError(withdrawalRefusalMessage(currentlyWithdrawn));
-        }
+        await assertValidScribeConsent(current?.consentSnapshot ?? null, existing.clientId, tx);
 
         const row = await conditionalSessionTransition(tx, {
           sessionId,
