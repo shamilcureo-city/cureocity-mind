@@ -8,8 +8,10 @@ export interface ExportedRouteHandler {
 }
 
 const EXPORTED_HANDLER = /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\s*\(/g;
+const REEXPORTED_HANDLER =
+  /export\s*\{\s*(GET|POST|PUT|PATCH|DELETE)(?:\s+as\s+(GET|POST|PUT|PATCH|DELETE))?\s*\}\s*from\s*['"][^'"]+['"]\s*;?/g;
 const REGULATED_MARKER =
-  /therapyNote|noteDraft|medicalEncounterNote|clinicalReport|transcript|safetyPlan|treatmentWorkflow|modalityState|instrumentResponse|clinicalReading|medicationOrder|clinicalOrder|assessmentItem|clientDiagnosis|problemListItem|affectFeatures|preSessionBrief|decryptClientField|renderToBuffer|modelRouter|generateContent|persistVitalReadings|computeClientJourney|run(?:ClinicalAnalysis|Differential|NoteGeneration)/i;
+  /therapyNote|noteDraft|medicalEncounterNote|clinicalReport|transcript|safetyPlan|treatmentWorkflow|modalityState|instrumentResponse|clinicalReading|medicationOrder|clinicalOrder|assessmentItem|clientDiagnosis|problemListItem|affectFeatures|preSessionBrief|decryptClientField|renderToBuffer|modelRouter|generateContent|persistVitalReadings|computeClientJourney|delegateSessionRoute|run(?:ClinicalAnalysis|Differential|NoteGeneration)/i;
 const GUARD = /require(?:PsychologistId|Capability|AnyCapability)\s*\(/;
 const PROTECTED_OPERATION =
   /prisma\.|parseJson\s*\(|parseQuery\s*\(|decryptClientField\s*\(|renderToBuffer\s*\(|modelRouter\s*\(|generateContent\s*\(|computeClientJourney\s*\(|(?:enqueue|schedule|queue)[A-Z\w]*\s*\(/i;
@@ -25,7 +27,16 @@ export function exportedRouteHandlers(source: string): ExportedRouteHandler[] {
     const end = findBalancedBodyEnd(source, bodyStart);
     handlers.push({ method, source: source.slice(start, end), start, end });
   }
-  return handlers;
+  for (const match of source.matchAll(REEXPORTED_HANDLER)) {
+    const start = match.index ?? 0;
+    handlers.push({
+      method: (match[2] ?? match[1]) as RouteMethod,
+      source: match[0],
+      start,
+      end: start + match[0].length,
+    });
+  }
+  return handlers.sort((left, right) => left.start - right.start);
 }
 
 export function analyzeRegulatedRouteSource(source: string): {
@@ -34,7 +45,9 @@ export function analyzeRegulatedRouteSource(source: string): {
   guardOrderViolations: RouteMethod[];
 } {
   const handlers = exportedRouteHandlers(source);
-  const regulatedHandlers = handlers.filter((handler) => REGULATED_MARKER.test(handler.source));
+  const regulatedHandlers = handlers.filter(
+    (handler) => REGULATED_MARKER.test(handler.source) || /^\s*export\s*\{/.test(handler.source),
+  );
   const unguardedMethods: RouteMethod[] = [];
   const guardOrderViolations: RouteMethod[] = [];
 

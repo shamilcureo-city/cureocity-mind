@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { LiveAuthorityRequestSchema } from '@cureocity/contracts';
 import { getEffectiveCapabilities, serializeCapabilities } from '@/lib/capabilities';
 import { writeAudit } from '@/lib/audit';
+import { SCRIBE_CONSENT_SCOPES } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -23,17 +24,51 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
 
-  const session = await prisma.session.findUnique({
-    where: { id: body.sessionId },
-    select: { psychologistId: true, status: true, captureMode: true },
-  });
+  const { session, currentConsentScopes } = await prisma.$transaction(
+    async (tx) => {
+      const currentSession = await tx.session.findUnique({
+        where: { id: body.sessionId },
+        select: {
+          psychologistId: true,
+          status: true,
+          captureMode: true,
+          clientId: true,
+          psychologist: { select: { vertical: true } },
+        },
+      });
+      if (!currentSession) return { session: null, currentConsentScopes: new Set<string>() };
+
+      // Read lifecycle + all standing consent grants from one serializable,
+      // current server-side snapshot. Expired, withdrawn, and absent grants
+      // are all denials; the historical Session snapshot is audit evidence,
+      // never continuing authority.
+      const consents = await tx.consent.findMany({
+        where: {
+          clientId: currentSession.clientId,
+          scope: { in: [...SCRIBE_CONSENT_SCOPES] },
+          status: 'GRANTED',
+          withdrawnAt: null,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        select: { scope: true },
+      });
+      return {
+        session: currentSession,
+        currentConsentScopes: new Set(consents.map((consent) => consent.scope)),
+      };
+    },
+    { isolationLevel: 'Serializable' },
+  );
   const actorPsychologistId = session?.psychologistId ?? body.psychologistId;
   try {
     if (
       !session ||
       session.psychologistId !== body.psychologistId ||
+      session.psychologist.vertical !== body.vertical ||
+      body.tokenExpiresAt <= Math.floor(Date.now() / 1_000) ||
       session.status !== 'IN_PROGRESS' ||
-      session.captureMode !== 'LIVE'
+      session.captureMode !== 'LIVE' ||
+      SCRIBE_CONSENT_SCOPES.some((scope) => !currentConsentScopes.has(scope))
     ) {
       throw new Error('denied');
     }

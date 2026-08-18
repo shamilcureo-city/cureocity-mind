@@ -185,11 +185,13 @@ wss.on('connection', (ws, req) => {
   };
   armIdle(STARTUP_GRACE_MS);
 
-  ws.on('message', (raw: RawData, isBinary: boolean) => {
+  ws.on('message', async (raw: RawData, isBinary: boolean) => {
     armIdle(started ? IDLE_TIMEOUT_MS : STARTUP_GRACE_MS);
     // Binary frames are streamed PCM audio for the active session.
     if (isBinary) {
-      if (started) session?.pushAudio(toBuffer(raw));
+      if (started && (!authority || (await authority.authorizeCurrentInput()))) {
+        session?.pushAudio(toBuffer(raw));
+      }
       return;
     }
     const parsed = LiveGatewayCommandSchema.safeParse(safeJson(raw));
@@ -321,6 +323,8 @@ wss.on('connection', (ws, req) => {
         const pendingAuthority = new LiveAuthority({
           sessionId: claims.sessionId,
           psychologistId: claims.psychologistId,
+          tokenExpiresAt: claims.exp,
+          vertical: claims.vertical,
           requiredCapabilities: new Set<PractitionerCapability>([
             'LIVE_ENCOUNTER',
             vertical === 'DOCTOR' ? 'MEDICAL_DOCUMENTATION' : 'BEHAVIORAL_HEALTH_DOCUMENTATION',
@@ -347,6 +351,8 @@ wss.on('connection', (ws, req) => {
       } else {
         beginSession();
       }
+    } else if (authority && !(await authority.authorizeCurrentInput())) {
+      return;
     } else if (cmd.type === 'stop') {
       void session?.finalize();
     } else if (cmd.type === 'dismiss') {

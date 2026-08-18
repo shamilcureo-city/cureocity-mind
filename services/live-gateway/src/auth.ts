@@ -88,7 +88,7 @@ export function extractVerifiedClaims(
       Buffer.from(payload, 'base64url').toString('utf8'),
     ) as LiveTokenClaims;
     if (claims.sessionId !== sessionId) return null;
-    if (typeof claims.exp !== 'number' || claims.exp < Math.floor(Date.now() / 1000)) return null;
+    if (typeof claims.exp !== 'number' || claims.exp <= Math.floor(Date.now() / 1000)) return null;
     if (typeof claims.psychologistId !== 'string' || !claims.psychologistId) return null;
     const vertical = PractitionerVerticalSchema.safeParse(claims.vertical);
     if (!vertical.success || !Array.isArray(claims.capabilities)) return null;

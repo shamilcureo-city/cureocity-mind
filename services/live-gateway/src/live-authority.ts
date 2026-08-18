@@ -9,12 +9,15 @@ export type LiveAuthorityCloseReason = 'live_authority_denied' | 'live_authority
 interface LiveAuthorityOptions {
   sessionId: string;
   psychologistId: string;
+  tokenExpiresAt: number;
+  vertical: 'THERAPIST' | 'DOCTOR';
   requiredCapabilities: ReadonlySet<PractitionerCapability>;
   verifierUrl: string;
   serviceSecret: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   intervalMs?: number;
+  now?: () => number;
   close: (reason: LiveAuthorityCloseReason) => void;
   updateCapabilities: (capabilities: ReadonlySet<PractitionerCapability>) => void;
 }
@@ -54,8 +57,10 @@ export class LiveAuthority {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly intervalMs: number;
+  private readonly now: () => number;
   private capabilities = new Set<PractitionerCapability>();
   private interval: NodeJS.Timeout | null = null;
+  private expiryTimer: NodeJS.Timeout | null = null;
   private inFlight: Promise<boolean> | null = null;
   private closed = false;
 
@@ -63,15 +68,38 @@ export class LiveAuthority {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 2_000;
     this.intervalMs = options.intervalMs ?? 5_000;
+    this.now = options.now ?? Date.now;
   }
 
   start(): void {
+    if (!this.authorizeInput()) return;
     this.interval = setInterval(() => void this.revalidate(), this.intervalMs);
+    this.expiryTimer = setTimeout(
+      () => this.deny('live_authority_denied'),
+      Math.max(0, this.options.tokenExpiresAt * 1_000 - this.now()),
+    );
   }
 
   dispose(): void {
     if (this.interval) clearInterval(this.interval);
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
     this.interval = null;
+    this.expiryTimer = null;
+  }
+
+  /** Synchronous local gate immediately before accepting any socket input. */
+  authorizeInput(): boolean {
+    if (this.closed) return false;
+    if (this.now() >= this.options.tokenExpiresAt * 1_000) {
+      this.deny('live_authority_denied');
+      return false;
+    }
+    return true;
+  }
+
+  /** Current server authority gate immediately before consuming socket input. */
+  authorizeCurrentInput(): Promise<boolean> {
+    return this.revalidate();
   }
 
   /** Recheck immediately before every regulated gateway output. */
@@ -93,7 +121,7 @@ export class LiveAuthority {
   }
 
   async revalidate(): Promise<boolean> {
-    if (this.closed) return false;
+    if (!this.authorizeInput()) return false;
     if (this.inFlight) return this.inFlight;
     const check = this.performRevalidation();
     this.inFlight = check;
@@ -116,6 +144,8 @@ export class LiveAuthority {
         body: JSON.stringify({
           sessionId: this.options.sessionId,
           psychologistId: this.options.psychologistId,
+          tokenExpiresAt: this.options.tokenExpiresAt,
+          vertical: this.options.vertical,
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -144,7 +174,7 @@ export class LiveAuthority {
       }
       // Another mandatory denial may have fired while the verifier request was
       // in flight. Never publish that now-stale successful result.
-      if (this.closed) return false;
+      if (!this.authorizeInput()) return false;
       this.capabilities = capabilities;
       this.options.updateCapabilities(capabilities);
       return true;

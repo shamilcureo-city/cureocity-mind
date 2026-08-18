@@ -106,6 +106,29 @@ describe('regulated boundary coverage', () => {
     expect(analysis.guardOrderViolations).toEqual(['PUT']);
   });
 
+  it('discovers delegated and aliased route-handler re-exports', () => {
+    const fixture = `
+      export { GET } from '../../sessions/[id]/route';
+      export { POST as PATCH } from '../../sessions/[id]/end/route';
+    `;
+
+    expect(exportedRouteHandlers(fixture).map(({ method }) => method)).toEqual(['GET', 'PATCH']);
+  });
+
+  it('classifies every Encounter compatibility pathname before its Session delegate runs', () => {
+    expect(
+      REGULATED_ROUTE_CAPABILITIES.filter((entry) => entry.route.includes('/encounters')).map(
+        (entry) => `${entry.route}:${entry.methods.join(',')}`,
+      ),
+    ).toEqual([
+      'api/v1/encounters:POST',
+      'api/v1/encounters/[id]:GET',
+      'api/v1/encounters/[id]/start:POST',
+      'api/v1/encounters/[id]/complete:POST',
+      'api/v1/encounters/[id]/no-show:POST',
+    ]);
+  });
+
   it.each([
     ['app/api/v1/share/route.ts', 'PATIENT_SHARING'],
     ['app/api/v1/sessions/[id]/fhir/route.ts', 'FHIR_EXPORT'],

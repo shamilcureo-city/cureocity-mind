@@ -2,11 +2,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   sessionFindUnique: vi.fn(),
+  consentFindMany: vi.fn(),
+  queryRaw: vi.fn(),
   getEffectiveCapabilities: vi.fn(),
   writeAudit: vi.fn(),
 }));
 vi.mock('@/lib/prisma', () => ({
-  prisma: { session: { findUnique: mocks.sessionFindUnique } },
+  prisma: {
+    session: { findUnique: mocks.sessionFindUnique },
+    consent: { findMany: mocks.consentFindMany },
+    $queryRaw: mocks.queryRaw,
+    $transaction: vi.fn(async (callback: (tx: unknown) => unknown) =>
+      callback({
+        session: { findUnique: mocks.sessionFindUnique },
+        consent: { findMany: mocks.consentFindMany },
+        $queryRaw: mocks.queryRaw,
+      }),
+    ),
+  },
 }));
 vi.mock('@/lib/capabilities', () => ({
   getEffectiveCapabilities: mocks.getEffectiveCapabilities,
@@ -27,7 +40,12 @@ const request = (secret = 'service-secret') =>
       authorization: `Bearer ${secret}`,
       'content-type': 'application/json',
     },
-    body: JSON.stringify({ sessionId: SESSION_ID, psychologistId: PSYCHOLOGIST_ID }),
+    body: JSON.stringify({
+      sessionId: SESSION_ID,
+      psychologistId: PSYCHOLOGIST_ID,
+      tokenExpiresAt: 2_000_000_000,
+      vertical: 'DOCTOR',
+    }),
   }) as never;
 
 describe('internal live authority verifier', () => {
@@ -38,7 +56,14 @@ describe('internal live authority verifier', () => {
       psychologistId: PSYCHOLOGIST_ID,
       status: 'IN_PROGRESS',
       captureMode: 'LIVE',
+      clientId: 'c987654321098765432109876',
+      psychologist: { vertical: 'DOCTOR' },
     });
+    mocks.consentFindMany.mockResolvedValue([
+      { scope: 'AUDIO_RECORDING' },
+      { scope: 'AI_NOTE_GENERATION' },
+      { scope: 'CROSS_BORDER_PROCESSING' },
+    ]);
     mocks.getEffectiveCapabilities.mockResolvedValue({
       capabilities: new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'CLINICAL_ANALYSIS']),
     });
@@ -75,6 +100,19 @@ describe('internal live authority verifier', () => {
         metadata: { source: 'liveGatewayRevalidation', sessionId: SESSION_ID },
       }),
     );
+  });
+
+  it.each([
+    ['withdrawal', [{ scope: 'AI_NOTE_GENERATION' }, { scope: 'CROSS_BORDER_PROCESSING' }]],
+    ['expiry', [{ scope: 'AUDIO_RECORDING' }, { scope: 'CROSS_BORDER_PROCESSING' }]],
+    ['missing scope', [{ scope: 'AUDIO_RECORDING' }, { scope: 'AI_NOTE_GENERATION' }]],
+  ])('denies post-connect output after consent %s', async (_label, currentConsents) => {
+    mocks.consentFindMany.mockResolvedValue(currentConsents);
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(403);
+    expect(mocks.getEffectiveCapabilities).not.toHaveBeenCalled();
   });
 
   it.each([

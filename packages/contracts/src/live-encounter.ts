@@ -21,6 +21,8 @@ export const LiveAuthorityRequestSchema = z
   .object({
     sessionId: CuidSchema,
     psychologistId: CuidSchema,
+    tokenExpiresAt: z.number().int().positive(),
+    vertical: PractitionerVerticalSchema,
   })
   .strict();
 export type LiveAuthorityRequest = z.infer<typeof LiveAuthorityRequestSchema>;

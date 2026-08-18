@@ -29,6 +29,19 @@ const policy = (
  * route names so additions are reviewable and testable.
  */
 export const REGULATED_ROUTE_CAPABILITIES = [
+  // Doctor-facing Encounter compatibility paths delegate to Session handlers,
+  // but authorization is always resolved against the original pathname.
+  policy('api/v1/encounters', ['POST'], ['LIVE_ENCOUNTER'], 'write'),
+  policy(
+    'api/v1/encounters/[id]',
+    ['GET'],
+    ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'],
+    'disclosure',
+  ),
+  policy('api/v1/encounters/[id]/start', ['POST'], ['LIVE_ENCOUNTER'], 'live'),
+  policy('api/v1/encounters/[id]/complete', ['POST'], ['LIVE_ENCOUNTER'], 'write'),
+  policy('api/v1/encounters/[id]/no-show', ['POST'], ['LIVE_ENCOUNTER'], 'write'),
+
   // Clinical documentation artifacts and disclosures.
   policy('api/v1/sessions/[id]', ['GET'], ['VERTICAL_DOCUMENTATION'], 'disclosure'),
   policy(

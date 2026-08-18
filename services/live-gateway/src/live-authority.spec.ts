@@ -41,6 +41,8 @@ describe('continuous live authority', () => {
     return new LiveAuthority({
       sessionId: 'session-opaque-id',
       psychologistId: 'practitioner-opaque-id',
+      tokenExpiresAt: 2_000_000_000,
+      vertical: 'DOCTOR',
       requiredCapabilities: REQUIRED,
       verifierUrl: 'https://web.internal/api/v1/internal/live-authority',
       serviceSecret: 'shared-secret',
@@ -62,12 +64,29 @@ describe('continuous live authority', () => {
     },
   );
 
-  it('does not turn the five-minute connection token into a live-session time limit', async () => {
+  it('closes as soon as the verified connection token expires even when the verifier stays active', async () => {
     fetchImpl.mockResolvedValue(response());
-    const auth = authority();
+    let now = 1_999_999_999_000;
+    const auth = new LiveAuthority({
+      sessionId: 'session-opaque-id',
+      psychologistId: 'practitioner-opaque-id',
+      tokenExpiresAt: 2_000_000_000,
+      vertical: 'DOCTOR',
+      requiredCapabilities: REQUIRED,
+      verifierUrl: 'https://web.internal/api/v1/internal/live-authority',
+      serviceSecret: 'shared-secret',
+      fetchImpl,
+      now: () => now,
+      close,
+      updateCapabilities,
+    });
 
     await expect(auth.authorizeEvent(noteEvent())).resolves.toEqual(noteEvent());
-    expect(close).not.toHaveBeenCalled();
+    now = 2_000_000_000_000;
+    expect(auth.authorizeInput()).toBe(false);
+    await expect(auth.authorizeEvent(noteEvent())).resolves.toBeNull();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledWith('live_authority_denied');
   });
 
   it('dynamically suppresses optional outputs after downgrade while documentation continues', async () => {
@@ -90,7 +109,15 @@ describe('continuous live authority', () => {
     expect(close).toHaveBeenCalledWith('live_authority_unavailable');
   });
 
-  it('sends only opaque authorization identifiers and the service secret', async () => {
+  it('revalidates current consent and authority immediately before accepting each input', async () => {
+    fetchImpl.mockResolvedValue(response([], false));
+    const auth = authority();
+
+    await expect(auth.authorizeCurrentInput()).resolves.toBe(false);
+    expect(close).toHaveBeenCalledWith('live_authority_denied');
+  });
+
+  it('sends only opaque authorization identifiers, immutable token claims, and the service secret', async () => {
     fetchImpl.mockResolvedValue(response());
     const auth = authority();
 
@@ -105,6 +132,8 @@ describe('continuous live authority', () => {
         body: JSON.stringify({
           sessionId: 'session-opaque-id',
           psychologistId: 'practitioner-opaque-id',
+          tokenExpiresAt: 2_000_000_000,
+          vertical: 'DOCTOR',
         }),
       }),
     );
