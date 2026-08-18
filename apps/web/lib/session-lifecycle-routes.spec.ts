@@ -150,40 +150,40 @@ describe('session lifecycle route concurrency architecture', () => {
     );
   });
 
-  it('transactionally claims each reminder before dispatch and skips lost races', () => {
+  it('upserts mutually exclusive 24-hour and 2-hour outbox windows', () => {
     const source = route('cron/appointments');
-    const loop = source.indexOf('for (const appt of due)');
-    const transaction = source.indexOf('await prisma.$transaction(', loop);
-    const claim = source.indexOf('claimAppointmentReminder(', transaction);
-    const skip = source.indexOf('if (!claimed) continue;', claim);
-    const dispatch = source.indexOf('sendAppointmentReminderEmails(', skip);
 
-    expect(loop).toBeGreaterThan(-1);
-    expect(transaction).toBeGreaterThan(loop);
-    expect(claim).toBeGreaterThan(transaction);
-    expect(skip).toBeGreaterThan(claim);
-    expect(dispatch).toBeGreaterThan(skip);
-    expect(source).not.toContain('prisma.appointment.update({');
+    expect(source).toContain("kind: 'H24'");
+    expect(source).toContain("kind: 'H2'");
+    expect(source).toContain('startAt: { gt: twoHourEnd, lte: twentyFourHourEnd }');
+    expect(source).toContain('startAt: { gt: now, lte: twoHourEnd }');
+    expect(source).toContain('appointmentId_kind: { appointmentId: appt.id, kind }');
+    expect(source).toContain('providerIdempotencyKey(appt.id, reminderKind)');
+    expect(source).not.toContain("['reminded24At', 24]");
   });
 
-  it('keeps the 24-hour and 2-hour reminder claims on separate markers', () => {
+  it('claims durable deliveries before dispatch and completes compatibility markers transactionally', () => {
     const source = route('cron/appointments');
-
-    expect(source).toContain("['reminded24At', 24]");
-    expect(source).toContain("['reminded2At', 2]");
-    expect(source).toContain('column,');
-  });
-
-  it('retains a failed delivery claim and audits the failure instead of retrying inline', () => {
-    const source = route('cron/appointments');
-    const claim = source.indexOf('claimAppointmentReminder(');
+    const claim = source.indexOf('claimAppointmentReminderDelivery(');
     const dispatch = source.indexOf('sendAppointmentReminderEmails(', claim);
-    const failedAudit = source.indexOf("deliveryStatus: 'FAILED'", dispatch);
+    const complete = source.indexOf('completeAppointmentReminderDelivery(', dispatch);
 
     expect(claim).toBeGreaterThan(-1);
     expect(dispatch).toBeGreaterThan(claim);
-    expect(failedAudit).toBeGreaterThan(dispatch);
-    expect(source).not.toContain('data: { [column]: null }');
+    expect(source.slice(dispatch, complete)).toContain('claimed.providerIdempotencyKey');
+    expect(complete).toBeGreaterThan(dispatch);
+    expect(source.slice(complete)).toContain('await prisma.$transaction(async (tx) =>');
+  });
+
+  it('persists provider failures for lease-backed retry without storing error detail', () => {
+    const source = route('cron/appointments');
+    const dispatch = source.indexOf('sendAppointmentReminderEmails(');
+    const failed = source.indexOf('failAppointmentReminderDelivery(', dispatch);
+
+    expect(failed).toBeGreaterThan(dispatch);
+    expect(source).toContain("transient: result.outcome === 'transient_failure'");
+    expect(source).toContain('code: result.errorCode');
+    expect(source).not.toContain('error.message');
   });
 
   it('claims confirmation before creating any client or session side effects', () => {

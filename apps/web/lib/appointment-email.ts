@@ -1,5 +1,5 @@
 import { NoopBackend, SendGridBackend } from '@cureocity/notifications';
-import type { IEmailPort } from '@cureocity/notifications';
+import type { IEmailPort, SendResult } from '@cureocity/notifications';
 import { prisma } from '@/lib/prisma';
 import { decryptForTenant } from '@/lib/tenant-crypto';
 import { publicBaseUrl, signAppointmentId } from '@/lib/appointment-links';
@@ -218,6 +218,28 @@ Reaching out took courage. Please don't let a scheduling miss stop you.
   }
 }
 
+export type AppointmentReminderSendResult =
+  | { outcome: 'sent'; providerMessageIds: string[] }
+  | { outcome: 'transient_failure' | 'permanent_failure'; errorCode: string };
+
+export function summarizeReminderSendResults(results: SendResult[]): AppointmentReminderSendResult {
+  const failure =
+    results.find((result) => result.outcome === 'transient_failure') ??
+    results.find((result) => result.outcome === 'permanent_failure');
+  if (failure && failure.outcome !== 'sent') {
+    return {
+      outcome: failure.outcome,
+      errorCode: failure.errorCode ?? 'REMINDER_PROVIDER_ERROR',
+    };
+  }
+  return {
+    outcome: 'sent',
+    providerMessageIds: results.flatMap((result) =>
+      result.providerMessageId ? [result.providerMessageId] : [],
+    ),
+  };
+}
+
 /**
  * MK4 — reminders (24h / 2h). Therapist always; patient too when they
  * left an email. WhatsApp joins when WATI is procured (ops backlog).
@@ -227,55 +249,53 @@ export async function sendAppointmentReminderEmails(
   appointmentId: string,
   startAt: Date,
   windowHours: number,
-): Promise<void> {
-  try {
-    const [psy, appt] = await Promise.all([
-      prisma.psychologist.findUnique({
-        where: { id: psychologistId },
-        select: { email: true, fullName: true },
-      }),
-      prisma.appointment.findUnique({
-        where: { id: appointmentId },
-        select: { patientEmailEncrypted: true },
-      }),
-    ]);
-    const when = IST_FORMAT.format(startAt);
-    const sends: Promise<unknown>[] = [];
-    if (psy) {
-      sends.push(
-        client().sendEmail({
-          to: psy.email,
-          subject: `Reminder — session at ${when}`,
-          textBody: `Hi ${psy.fullName},
+  idempotencyKey: string,
+): Promise<AppointmentReminderSendResult> {
+  const [psy, appt] = await Promise.all([
+    prisma.psychologist.findUnique({
+      where: { id: psychologistId },
+      select: { email: true, fullName: true },
+    }),
+    prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: { patientEmailEncrypted: true },
+    }),
+  ]);
+  if (!psy) return { outcome: 'permanent_failure', errorCode: 'PRACTITIONER_NOT_FOUND' };
+
+  const when = IST_FORMAT.format(startAt);
+  const sends: Promise<SendResult>[] = [
+    client().sendEmail({
+      to: psy.email,
+      subject: `Reminder — session at ${when}`,
+      textBody: `Hi ${psy.fullName},
 
 You have a booked session at ${when} (IST), about ${windowHours} hours from now.
 Details: ${publicBaseUrl()}/app/marketing
 
 — Cureocity Mind`,
-        }),
-      );
-    }
-    if (appt?.patientEmailEncrypted && psy) {
-      const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
-      if (patientEmail) {
-        const sig = signAppointmentId(appointmentId);
-        const where = await locationBlock(psychologistId, appointmentId);
-        sends.push(
-          client().sendEmail({
-            to: patientEmail,
-            subject: `Reminder — your session at ${when}`,
-            textBody: `Your session with ${psy.fullName} is at ${when} (IST).
+      idempotencyKey: `${idempotencyKey}:therapist`,
+    }),
+  ];
+  if (appt?.patientEmailEncrypted) {
+    const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
+    if (patientEmail) {
+      const sig = signAppointmentId(appointmentId);
+      const where = await locationBlock(psychologistId, appointmentId);
+      sends.push(
+        client().sendEmail({
+          to: patientEmail,
+          subject: `Reminder — your session at ${when}`,
+          textBody: `Your session with ${psy.fullName} is at ${when} (IST).
 ${where}
 Can't make it? Cancel here so the time opens up for someone else:
 ${publicBaseUrl()}/p/appointments/${appointmentId}/cancel?sig=${sig}
 
 — Cureocity`,
-          }),
-        );
-      }
+          idempotencyKey: `${idempotencyKey}:patient`,
+        }),
+      );
     }
-    await Promise.all(sends);
-  } catch (e) {
-    console.warn(`[appointment-email] reminder send failed: ${(e as Error).message}`);
   }
+  return summarizeReminderSendResults(await Promise.all(sends));
 }

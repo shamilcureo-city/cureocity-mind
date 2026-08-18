@@ -50,6 +50,7 @@ export class SendGridBackend implements IEmailPort {
         headers: {
           Authorization: `Bearer ${this.opts.apiKey}`,
           'Content-Type': 'application/json',
+          ...(req.idempotencyKey ? { 'Idempotency-Key': req.idempotencyKey } : {}),
         },
         body: JSON.stringify(body),
       });

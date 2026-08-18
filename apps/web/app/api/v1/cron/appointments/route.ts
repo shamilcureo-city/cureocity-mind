@@ -3,10 +3,18 @@ import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { sendAppointmentClosedEmail, sendAppointmentReminderEmails } from '@/lib/appointment-email';
 import {
-  claimAppointmentReminder,
   ConditionalAppointmentTransitionError,
   conditionalAppointmentTransition,
 } from '@/lib/appointment-transition';
+import {
+  claimAppointmentReminderDelivery,
+  completeAppointmentReminderDelivery,
+  failAppointmentReminderDelivery,
+  prismaReminderKind,
+  providerIdempotencyKey,
+  type ReminderWindowKind,
+  windowHours,
+} from '@/lib/appointment-reminder-outbox';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -75,63 +83,139 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     await sendAppointmentClosedEmail(appt.psychologistId, appt.id, appt.startAt);
   }
 
-  // 2 — reminders.
-  let reminded = 0;
-  for (const [column, hours] of [
-    ['reminded24At', 24],
-    ['reminded2At', 2],
-  ] as const) {
+  // 2 — enqueue mutually exclusive reminder windows in the durable outbox.
+  const twoHourEnd = new Date(now.getTime() + 2 * 60 * 60_000);
+  const twentyFourHourEnd = new Date(now.getTime() + 24 * 60 * 60_000);
+  const reminderWindows: Array<{
+    kind: 'H24' | 'H2';
+    reminderKind: ReminderWindowKind;
+    startAt: { gt: Date; lte: Date };
+  }> = [
+    { kind: 'H24', reminderKind: '24H', startAt: { gt: twoHourEnd, lte: twentyFourHourEnd } },
+    { kind: 'H2', reminderKind: '2H', startAt: { gt: now, lte: twoHourEnd } },
+  ];
+  let queued = 0;
+  for (const { kind, reminderKind, startAt } of reminderWindows) {
     const due = await prisma.appointment.findMany({
-      where: {
-        status: 'CONFIRMED',
-        startAt: { gt: now, lt: new Date(now.getTime() + hours * 60 * 60_000) },
-        [column]: null,
-      },
-      select: { id: true, psychologistId: true, startAt: true, patientEmailEncrypted: true },
+      where: { status: 'CONFIRMED', startAt },
+      select: { id: true },
       take: 200,
     });
     for (const appt of due) {
-      const claimed = await prisma.$transaction((tx) =>
-        claimAppointmentReminder(tx, {
+      await prisma.appointmentReminderDelivery.upsert({
+        where: { appointmentId_kind: { appointmentId: appt.id, kind } },
+        create: {
           appointmentId: appt.id,
-          column,
-          claimedAt: now,
-        }),
-      );
-      if (!claimed) continue;
-
-      // Delivery is intentionally at-most-once: the committed claim remains if
-      // the provider fails, because clearing it could duplicate a partially sent
-      // therapist/patient pair. The failure audit is the manual-recovery record.
-      try {
-        await sendAppointmentReminderEmails(appt.psychologistId, appt.id, appt.startAt, hours);
-      } catch (error) {
-        await writeAudit({
-          actorType: 'SYSTEM',
-          action: 'NOTIFICATION_DISPATCHED',
-          targetType: 'Appointment',
-          targetId: appt.id,
-          metadata: {
-            psychologistId: appt.psychologistId,
-            windowHours: hours,
-            deliveryStatus: 'FAILED',
-            error: error instanceof Error ? error.message : 'Unknown reminder delivery error',
-          },
-        });
-        continue;
-      }
-      await writeAudit({
-        actorType: 'SYSTEM',
-        action: 'APPOINTMENT_REMINDER_SENT',
-        targetType: 'Appointment',
-        targetId: appt.id,
-        metadata: { psychologistId: appt.psychologistId, windowHours: hours },
+          kind: prismaReminderKind(reminderKind),
+          providerIdempotencyKey: providerIdempotencyKey(appt.id, reminderKind),
+        },
+        update: {},
       });
-      reminded++;
+      queued++;
     }
   }
 
-  return NextResponse.json({ expired, reminded });
+  // 3 — claim and dispatch eligible rows. Window predicates prevent a stale
+  // 24H row and a newly due 2H row from being sent back-to-back.
+  const candidates = await prisma.appointmentReminderDelivery.findMany({
+    where: {
+      AND: [
+        {
+          OR: [
+            { status: 'PENDING', leaseExpiresAt: null },
+            { status: { in: ['FAILED', 'IN_FLIGHT'] }, leaseExpiresAt: { lte: now } },
+          ],
+        },
+        {
+          OR: [
+            { kind: 'H24', appointment: { startAt: { gt: twoHourEnd, lte: twentyFourHourEnd } } },
+            { kind: 'H2', appointment: { startAt: { gt: now, lte: twoHourEnd } } },
+          ],
+        },
+      ],
+      appointment: { status: 'CONFIRMED' },
+    },
+    include: { appointment: true },
+    orderBy: { createdAt: 'asc' },
+    take: 200,
+  });
+
+  let reminded = 0;
+  for (const candidate of candidates) {
+    const claimed = await prisma.$transaction((tx) =>
+      claimAppointmentReminderDelivery(tx, {
+        deliveryId: candidate.id,
+        now,
+        leaseMs: 5 * 60_000,
+      }),
+    );
+    if (!claimed) continue;
+
+    let result;
+    try {
+      result = await sendAppointmentReminderEmails(
+        candidate.appointment.psychologistId,
+        candidate.appointmentId,
+        candidate.appointment.startAt,
+        windowHours(claimed.kind),
+        claimed.providerIdempotencyKey,
+      );
+    } catch {
+      result = { outcome: 'transient_failure', errorCode: 'REMINDER_DISPATCH_EXCEPTION' } as const;
+    }
+
+    if (result.outcome === 'sent') {
+      const completed = await prisma.$transaction(async (tx) => {
+        const won = await completeAppointmentReminderDelivery(tx, claimed, new Date());
+        if (!won) return false;
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'APPOINTMENT_REMINDER_SENT',
+            targetType: 'Appointment',
+            targetId: candidate.appointmentId,
+            metadata: {
+              psychologistId: candidate.appointment.psychologistId,
+              windowHours: windowHours(claimed.kind),
+            },
+          },
+          tx,
+        );
+        return true;
+      });
+      if (completed) reminded++;
+      continue;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await failAppointmentReminderDelivery(
+        tx,
+        claimed,
+        {
+          code: result.errorCode,
+          transient: result.outcome === 'transient_failure',
+        },
+        new Date(),
+      );
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'NOTIFICATION_DISPATCHED',
+          targetType: 'Appointment',
+          targetId: candidate.appointmentId,
+          metadata: {
+            psychologistId: candidate.appointment.psychologistId,
+            windowHours: windowHours(claimed.kind),
+            deliveryStatus: 'FAILED',
+            errorCode: result.errorCode,
+          },
+        },
+        tx,
+      );
+    });
+  }
+
+  return NextResponse.json({ expired, queued, reminded });
 }
 
 function isAuthorized(req: NextRequest): boolean {

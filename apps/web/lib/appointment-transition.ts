@@ -10,32 +10,6 @@ export class ConditionalAppointmentTransitionError extends Error {
   }
 }
 
-export type AppointmentReminderColumn = 'reminded24At' | 'reminded2At';
-
-/**
- * Atomically claim one reminder marker. Concurrent cron invocations can select
- * the same candidate, but only the update whose expected marker is still null
- * returns true and is allowed to dispatch.
- */
-export async function claimAppointmentReminder(
-  tx: Prisma.TransactionClient,
-  input: {
-    appointmentId: string;
-    column: AppointmentReminderColumn;
-    claimedAt: Date;
-  },
-): Promise<boolean> {
-  const result = await tx.appointment.updateMany({
-    where: {
-      id: input.appointmentId,
-      status: 'CONFIRMED',
-      [input.column]: null,
-    },
-    data: { [input.column]: input.claimedAt },
-  });
-  return result.count === 1;
-}
-
 /**
  * Atomically claim an appointment lifecycle edge and return the row as it
  * exists inside the same transaction. A zero count means another transition
