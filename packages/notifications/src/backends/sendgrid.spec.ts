@@ -89,7 +89,7 @@ describe('SendGridBackend.sendEmail', () => {
     expect(call[1]!.body).toContain('"content":"aGVsbG8="');
   });
 
-  it('passes a caller idempotency key to providers that support it', async () => {
+  it('does not send an unsupported idempotency header', async () => {
     const fetchImpl = fetchMock(() => ({ status: 202, text: '' }));
     const s = new SendGridBackend({ ...cfg, fetchImpl: fetchImpl as unknown as typeof fetch });
 
@@ -97,12 +97,10 @@ describe('SendGridBackend.sendEmail', () => {
       to: 'x@y.com',
       subject: 's',
       textBody: 'b',
-      idempotencyKey: 'appointment-reminder:appt-1:2H:therapist',
+      idempotencyKey: 'caller-key-for-a-different-provider',
     });
 
-    expect(fetchImpl.mock.calls[0]?.[1]?.headers).toMatchObject({
-      'Idempotency-Key': 'appointment-reminder:appt-1:2H:therapist',
-    });
+    expect(fetchImpl.mock.calls[0]?.[1]?.headers).not.toHaveProperty('Idempotency-Key');
   });
 
   it('marks network errors as transient', async () => {

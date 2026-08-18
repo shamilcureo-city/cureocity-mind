@@ -3187,10 +3187,19 @@ enum AppointmentReminderKind {
 
 enum AppointmentReminderDeliveryStatus {
   PENDING
-  IN_FLIGHT
+  DISPATCHING
+  SUBMISSION_STARTED
   DELIVERED
   FAILED
+  UNKNOWN
   CANCELLED
+  /// Retained only because deployed databases may still contain the legacy value.
+  IN_FLIGHT
+}
+
+enum AppointmentReminderRecipient {
+  PRACTITIONER_EMAIL
+  PATIENT_EMAIL
 }
 
 /// A public appointment request against a concrete slot. A REQUESTED or
@@ -3234,25 +3243,26 @@ model Appointment {
   @@index([psychologistId, startAt])
 }
 
-/// Durable retryable appointment reminder outbox. The scheduled-start snapshot
-/// versions logical deliveries so a moved appointment can enqueue fresh reminders
-/// while preserving prior delivery history.
+/// Per-recipient at-most-once appointment reminder outbox. The schedule snapshot
+/// versions logical deliveries. SUBMISSION_STARTED is irreversible for automatic
+/// workers: a crash may miss a reminder, and manual reconciliation is required.
 model AppointmentReminderDelivery {
-  id                     String                            @id @default(cuid())
-  appointmentId          String
-  appointment            Appointment                       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-  scheduledStartAt       DateTime
-  kind                   AppointmentReminderKind
-  status                 AppointmentReminderDeliveryStatus @default(PENDING)
-  attemptCount           Int                               @default(0)
-  leaseExpiresAt         DateTime?
-  providerIdempotencyKey String                            @unique
-  lastError              String?                           @db.VarChar(128)
-  deliveredAt            DateTime?
-  createdAt              DateTime                          @default(now())
-  updatedAt              DateTime                          @updatedAt
+  id                  String                            @id @default(cuid())
+  appointmentId       String
+  appointment         Appointment                       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  scheduledStartAt    DateTime
+  kind                AppointmentReminderKind
+  recipient           AppointmentReminderRecipient
+  status              AppointmentReminderDeliveryStatus @default(PENDING)
+  attemptCount        Int                               @default(0)
+  leaseExpiresAt      DateTime?
+  submissionStartedAt DateTime?
+  lastError           String?                           @db.VarChar(128)
+  deliveredAt         DateTime?
+  createdAt           DateTime                          @default(now())
+  updatedAt           DateTime                          @updatedAt
 
-  @@unique([appointmentId, scheduledStartAt, kind])
+  @@unique([appointmentId, scheduledStartAt, kind, recipient])
   @@index([status, leaseExpiresAt])
   @@map("appointment_reminder_deliveries")
 }

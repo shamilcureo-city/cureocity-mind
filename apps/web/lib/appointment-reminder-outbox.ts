@@ -12,14 +12,6 @@ export function reminderKindForStart(now: Date, startAt: Date): ReminderWindowKi
   return untilStart <= TWO_HOURS_MS ? '2H' : '24H';
 }
 
-export function providerIdempotencyKey(
-  appointmentId: string,
-  scheduledStartAt: Date,
-  kind: ReminderWindowKind,
-): string {
-  return `appointment-reminder:${appointmentId}:${scheduledStartAt.getTime()}:${kind}`;
-}
-
 export function prismaReminderKind(kind: ReminderWindowKind): 'H24' | 'H2' {
   return kind === '24H' ? 'H24' : 'H2';
 }
@@ -36,7 +28,11 @@ interface ReminderEnqueueDatabase {
   >;
 }
 
-/** Enqueue one bounded batch while excluding exact deliveries already present. */
+/**
+ * Enqueue one bounded appointment batch, creating a PHI-free row for each
+ * required recipient. The anti-join checks each recipient so a partial prior
+ * insert cannot starve the missing row behind the 200-appointment page.
+ */
 export async function enqueueDueAppointmentReminderDeliveries(
   db: ReminderEnqueueDatabase,
   input: {
@@ -46,41 +42,61 @@ export async function enqueueDueAppointmentReminderDeliveries(
     take: number;
   },
 ): Promise<number> {
-  const appointments = await db.$queryRaw<Array<{ id: string; startAt: Date }>>(Prisma.sql`
-    SELECT a."id", a."startAt"
-    FROM "appointments" a
+  const appointments = await db.$queryRaw<
+    Array<{ id: string; startAt: Date; hasPatientEmail: boolean }>
+  >(Prisma.sql`
+    SELECT a."id", a."startAt", (a."patientEmailEncrypted" IS NOT NULL) AS "hasPatientEmail"
+    FROM "Appointment" a
     WHERE a."status" = 'CONFIRMED'::"AppointmentStatus"
       AND a."startAt" > ${input.startAt.gt}
       AND a."startAt" <= ${input.startAt.lte}
-      AND NOT EXISTS (
-        SELECT 1
-        FROM "appointment_reminder_deliveries" d
-        WHERE d."appointmentId" = a."id"
-          AND d."scheduledStartAt" = a."startAt"
-          AND d."kind" = ${input.reminderKind}::"AppointmentReminderKind"
+      AND (
+        NOT EXISTS (
+          SELECT 1 FROM "appointment_reminder_deliveries" d
+          WHERE d."appointmentId" = a."id"
+            AND d."scheduledStartAt" = a."startAt"
+            AND d."kind" = ${input.reminderKind}::"AppointmentReminderKind"
+            AND d."recipient" = 'PRACTITIONER_EMAIL'::"AppointmentReminderRecipient"
+        )
+        OR (
+          a."patientEmailEncrypted" IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM "appointment_reminder_deliveries" d
+            WHERE d."appointmentId" = a."id"
+              AND d."scheduledStartAt" = a."startAt"
+              AND d."kind" = ${input.reminderKind}::"AppointmentReminderKind"
+              AND d."recipient" = 'PATIENT_EMAIL'::"AppointmentReminderRecipient"
+          )
+        )
       )
     ORDER BY a."startAt" ASC, a."id" ASC
     LIMIT ${input.take}
   `);
   if (appointments.length === 0) return 0;
 
-  const result = await db.appointmentReminderDelivery.createMany({
-    data: appointments.map((appointment) => ({
+  const data = appointments.flatMap((appointment) => [
+    {
       appointmentId: appointment.id,
       scheduledStartAt: appointment.startAt,
       kind: input.kind,
-      providerIdempotencyKey: providerIdempotencyKey(
-        appointment.id,
-        appointment.startAt,
-        input.reminderKind,
-      ),
-    })),
-    skipDuplicates: true,
-  });
+      recipient: 'PRACTITIONER_EMAIL' as const,
+    },
+    ...(appointment.hasPatientEmail
+      ? [
+          {
+            appointmentId: appointment.id,
+            scheduledStartAt: appointment.startAt,
+            kind: input.kind,
+            recipient: 'PATIENT_EMAIL' as const,
+          },
+        ]
+      : []),
+  ]);
+  const result = await db.appointmentReminderDelivery.createMany({ data, skipDuplicates: true });
   return result.count;
 }
 
-/** Preserve delivered history while making the old schedule undispatchable. */
+/** Preserve terminal history while cancelling only rows that have not submitted. */
 export async function cancelAppointmentReminderDeliveriesForReschedule(
   tx: Prisma.TransactionClient,
   input: { appointmentId: string; scheduledStartAt: Date },
@@ -89,18 +105,30 @@ export async function cancelAppointmentReminderDeliveriesForReschedule(
     where: {
       appointmentId: input.appointmentId,
       scheduledStartAt: input.scheduledStartAt,
-      status: { in: ['PENDING', 'FAILED', 'IN_FLIGHT'] },
+      status: { in: ['PENDING', 'FAILED', 'DISPATCHING'] },
     },
     data: { status: 'CANCELLED', leaseExpiresAt: null, lastError: null },
   });
   return result.count;
 }
 
+function claimable(
+  delivery: Pick<AppointmentReminderDelivery, 'status' | 'leaseExpiresAt'>,
+  now: Date,
+): boolean {
+  if (delivery.status === 'PENDING') return delivery.leaseExpiresAt === null;
+  return (
+    (delivery.status === 'FAILED' || delivery.status === 'DISPATCHING') &&
+    delivery.leaseExpiresAt !== null &&
+    delivery.leaseExpiresAt <= now
+  );
+}
+
 /**
- * Locks both the outbox row and its Appointment, then validates the exact
- * schedule snapshot and mutually exclusive window before acquiring the lease.
- * The returned Appointment was reread under that lock and is the only data the
- * caller may use for dispatch.
+ * Lock Appointment before its recipient row, then re-read the exact schedule,
+ * window, status, and recipient availability. DISPATCHING is a retryable lease:
+ * no provider call is allowed until a second transaction irreversibly records
+ * SUBMISSION_STARTED.
  */
 export async function claimAppointmentReminderDelivery(
   tx: Prisma.TransactionClient,
@@ -108,15 +136,19 @@ export async function claimAppointmentReminderDelivery(
 ): Promise<(AppointmentReminderDelivery & { appointment: Appointment }) | null> {
   const delivery = await tx.appointmentReminderDelivery.findUnique({
     where: { id: input.deliveryId },
-    select: { appointmentId: true, scheduledStartAt: true, kind: true },
+    select: {
+      appointmentId: true,
+      scheduledStartAt: true,
+      kind: true,
+      recipient: true,
+      status: true,
+      leaseExpiresAt: true,
+    },
   });
-  if (!delivery) return null;
+  if (!delivery || !claimable(delivery, input.now)) return null;
 
-  // Follow the lifecycle-wide lock order: Appointment before dependent rows.
-  // Reschedule takes this same lock before cancelling outbox rows.
   const appointments = await tx.$queryRaw<Appointment[]>(Prisma.sql`
-    SELECT a.*
-    FROM "appointments" a
+    SELECT a.* FROM "Appointment" a
     WHERE a."id" = ${delivery.appointmentId}
     FOR UPDATE
   `);
@@ -127,7 +159,8 @@ export async function claimAppointmentReminderDelivery(
     appointment.status !== 'CONFIRMED' ||
     appointment.startAt.getTime() !== delivery.scheduledStartAt.getTime() ||
     expectedKind === null ||
-    prismaReminderKind(expectedKind) !== delivery.kind
+    prismaReminderKind(expectedKind) !== delivery.kind ||
+    (delivery.recipient === 'PATIENT_EMAIL' && !appointment.patientEmailEncrypted)
   ) {
     return null;
   }
@@ -140,13 +173,13 @@ export async function claimAppointmentReminderDelivery(
       OR: [
         { status: 'PENDING', leaseExpiresAt: null },
         {
-          status: { in: ['FAILED', 'IN_FLIGHT'] },
+          status: { in: ['FAILED', 'DISPATCHING'] },
           leaseExpiresAt: { lte: input.now },
         },
       ],
     },
     data: {
-      status: 'IN_FLIGHT',
+      status: 'DISPATCHING',
       attemptCount: { increment: 1 },
       leaseExpiresAt,
       lastError: null,
@@ -159,21 +192,38 @@ export async function claimAppointmentReminderDelivery(
   });
 }
 
-/** Must run in one transaction so the legacy marker never leads DELIVERED. */
+/**
+ * Irreversible automatic-worker boundary. Commit this transition before the
+ * first network byte can be sent. A crash afterwards may miss the reminder;
+ * automatic retry is forbidden and manual reconciliation is required.
+ */
+export async function beginAppointmentReminderSubmission(
+  tx: Prisma.TransactionClient,
+  delivery: Pick<AppointmentReminderDelivery, 'id' | 'leaseExpiresAt'>,
+  startedAt: Date,
+): Promise<AppointmentReminderDelivery | null> {
+  const result = await tx.appointmentReminderDelivery.updateMany({
+    where: { id: delivery.id, status: 'DISPATCHING', leaseExpiresAt: delivery.leaseExpiresAt },
+    data: { status: 'SUBMISSION_STARTED', submissionStartedAt: startedAt, leaseExpiresAt: null },
+  });
+  if (result.count !== 1) return null;
+  return tx.appointmentReminderDelivery.findUniqueOrThrow({ where: { id: delivery.id } });
+}
+
+/** Mark one accepted recipient and stamp compatibility only when all are delivered. */
 export async function completeAppointmentReminderDelivery(
   tx: Prisma.TransactionClient,
   delivery: Pick<
     AppointmentReminderDelivery,
-    'id' | 'appointmentId' | 'kind' | 'providerIdempotencyKey' | 'leaseExpiresAt'
+    'id' | 'appointmentId' | 'scheduledStartAt' | 'kind' | 'submissionStartedAt'
   >,
   deliveredAt: Date,
 ): Promise<boolean> {
   const result = await tx.appointmentReminderDelivery.updateMany({
     where: {
       id: delivery.id,
-      status: 'IN_FLIGHT',
-      providerIdempotencyKey: delivery.providerIdempotencyKey,
-      leaseExpiresAt: delivery.leaseExpiresAt,
+      status: 'SUBMISSION_STARTED',
+      submissionStartedAt: delivery.submissionStartedAt,
     },
     data: {
       status: 'DELIVERED',
@@ -184,16 +234,29 @@ export async function completeAppointmentReminderDelivery(
   });
   if (result.count !== 1) return false;
 
-  await tx.appointment.updateMany({
-    where: { id: delivery.appointmentId, status: 'CONFIRMED' },
-    data: { [delivery.kind === 'H24' ? 'reminded24At' : 'reminded2At']: deliveredAt },
+  const incompleteRecipients = await tx.appointmentReminderDelivery.count({
+    where: {
+      appointmentId: delivery.appointmentId,
+      scheduledStartAt: delivery.scheduledStartAt,
+      kind: delivery.kind,
+      status: { not: 'DELIVERED' },
+    },
   });
+  if (incompleteRecipients === 0) {
+    await tx.appointment.updateMany({
+      where: {
+        id: delivery.appointmentId,
+        status: 'CONFIRMED',
+        startAt: delivery.scheduledStartAt,
+      },
+      data: { [delivery.kind === 'H24' ? 'reminded24At' : 'reminded2At']: deliveredAt },
+    });
+  }
   return true;
 }
 
 export interface ReminderFailure {
   code: string;
-  transient: boolean;
   /** Deliberately ignored: provider details can contain patient PHI. */
   detail?: string;
 }
@@ -206,27 +269,40 @@ function compactNonPhiError(code: string): string {
   return compact || 'REMINDER_DELIVERY_ERROR';
 }
 
-export async function failAppointmentReminderDelivery(
+/** A local/config/preparation failure is retryable only before submission starts. */
+export async function failAppointmentReminderBeforeSubmission(
   tx: Prisma.TransactionClient,
-  delivery: Pick<
-    AppointmentReminderDelivery,
-    'id' | 'attemptCount' | 'providerIdempotencyKey' | 'leaseExpiresAt'
-  >,
+  delivery: Pick<AppointmentReminderDelivery, 'id' | 'attemptCount' | 'leaseExpiresAt'>,
   failure: ReminderFailure,
   now: Date,
 ): Promise<boolean> {
-  // 1m, 2m, 4m ... bounded at 1h. attemptCount already includes this try.
   const delayMs = Math.min(2 ** Math.max(delivery.attemptCount - 1, 0) * 60_000, MAX_BACKOFF_MS);
+  const result = await tx.appointmentReminderDelivery.updateMany({
+    where: { id: delivery.id, status: 'DISPATCHING', leaseExpiresAt: delivery.leaseExpiresAt },
+    data: {
+      status: 'FAILED',
+      leaseExpiresAt: new Date(now.getTime() + delayMs),
+      lastError: compactNonPhiError(failure.code),
+    },
+  });
+  return result.count === 1;
+}
+
+/** Provider acceptance is unknowable after submission begins; never auto-retry. */
+export async function markAppointmentReminderSubmissionUnknown(
+  tx: Prisma.TransactionClient,
+  delivery: Pick<AppointmentReminderDelivery, 'id' | 'submissionStartedAt'>,
+  failure: ReminderFailure,
+): Promise<boolean> {
   const result = await tx.appointmentReminderDelivery.updateMany({
     where: {
       id: delivery.id,
-      status: 'IN_FLIGHT',
-      providerIdempotencyKey: delivery.providerIdempotencyKey,
-      leaseExpiresAt: delivery.leaseExpiresAt,
+      status: 'SUBMISSION_STARTED',
+      submissionStartedAt: delivery.submissionStartedAt,
     },
     data: {
-      status: 'FAILED',
-      leaseExpiresAt: failure.transient ? new Date(now.getTime() + delayMs) : null,
+      status: 'UNKNOWN',
+      leaseExpiresAt: null,
       lastError: compactNonPhiError(failure.code),
     },
   });

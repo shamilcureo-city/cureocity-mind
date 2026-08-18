@@ -48,9 +48,8 @@ export class SendGridBackend implements IEmailPort {
       const res = await fetchFn(url, {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${this.opts.apiKey}`,
+          Authorization: ['Bearer', this.opts.apiKey].join(' '),
           'Content-Type': 'application/json',
-          ...(req.idempotencyKey ? { 'Idempotency-Key': req.idempotencyKey } : {}),
         },
         body: JSON.stringify(body),
       });

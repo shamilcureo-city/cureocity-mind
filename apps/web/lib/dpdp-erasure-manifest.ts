@@ -114,7 +114,7 @@ export const DPDP_ERASURE_MANIFEST = {
   Letter: clinicalDelete('delete clinical letter recipient, subject and body'),
   ProblemListItem: clinicalDelete('delete problem title, detail and status history'),
   AppointmentReminderDelivery: clinicalDelete(
-    'delete provider idempotency key, delivery errors, lease and delivery timestamps before redacting appointment',
+    'delete recipient channel, PHI-free error code, dispatch lease and delivery timestamps before redacting appointment',
   ),
   Appointment: redact(
     'cancel before deleting reminder outbox rows, minimize schedule, unlink client/session and redact patient identity and concern',

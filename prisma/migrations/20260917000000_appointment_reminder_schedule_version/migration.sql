@@ -24,7 +24,7 @@ SET "scheduledStartAt" = CASE
   ) THEN appointment."startAt"
   ELSE delivery."createdAt"
 END
-FROM "appointments" AS appointment
+FROM "Appointment" AS appointment
 WHERE appointment."id" = delivery."appointmentId"
   AND delivery."scheduledStartAt" IS NULL;
 

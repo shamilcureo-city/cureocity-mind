@@ -175,31 +175,35 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(source).not.toContain("['reminded24At', 24]");
   });
 
-  it('claims durable deliveries before dispatch and completes compatibility markers transactionally', () => {
+  it('commits per-recipient submission state before one provider request', () => {
     const source = route('cron/appointments');
     const claim = source.indexOf('claimAppointmentReminderDelivery(');
-    const dispatch = source.indexOf('sendAppointmentReminderEmails(', claim);
-    const complete = source.indexOf('completeAppointmentReminderDelivery(', dispatch);
+    const prepare = source.indexOf('prepareAppointmentReminderEmail(', claim);
+    const begin = source.indexOf('beginAppointmentReminderSubmission(', prepare);
+    const submit = source.indexOf('prepared.submit()', begin);
+    const complete = source.indexOf('completeAppointmentReminderDelivery(', submit);
 
     expect(claim).toBeGreaterThan(-1);
-    expect(dispatch).toBeGreaterThan(claim);
-    expect(source.slice(dispatch, complete)).toContain('claimed.appointment.psychologistId');
-    expect(source.slice(dispatch, complete)).toContain('claimed.appointment.startAt');
-    expect(source.slice(dispatch, complete)).toContain('claimed.providerIdempotencyKey');
-    expect(source.slice(dispatch, complete)).not.toContain('candidate.appointment.');
-    expect(complete).toBeGreaterThan(dispatch);
-    expect(source.slice(complete)).toContain('await prisma.$transaction(async (tx) =>');
+    expect(prepare).toBeGreaterThan(claim);
+    expect(begin).toBeGreaterThan(prepare);
+    expect(submit).toBeGreaterThan(begin);
+    expect(complete).toBeGreaterThan(submit);
+    expect(source.slice(claim, submit)).toContain('claimed.recipient');
+    expect(source).not.toContain('sendAppointmentReminderEmails(');
+    expect(source).not.toContain('providerIdempotencyKey');
   });
 
-  it('persists provider failures for lease-backed retry without storing error detail', () => {
+  it('never retries a provider outcome after SUBMISSION_STARTED', () => {
     const source = route('cron/appointments');
-    const dispatch = source.indexOf('sendAppointmentReminderEmails(');
-    const failed = source.indexOf('failAppointmentReminderDelivery(', dispatch);
+    const submit = source.indexOf('prepared.submit()');
+    const unknown = source.indexOf('markAppointmentReminderSubmissionUnknown(', submit);
 
-    expect(failed).toBeGreaterThan(dispatch);
-    expect(source).toContain("transient: result.outcome === 'transient_failure'");
-    expect(source).toContain('code: result.errorCode');
-    expect(source).not.toContain('error.message');
+    expect(unknown).toBeGreaterThan(submit);
+    expect(source).toContain("status: { in: ['FAILED', 'DISPATCHING'] }");
+    expect(source).not.toMatch(/SUBMISSION_STARTED[^\n]*leaseExpiresAt/);
+    expect(source).toContain("deliveryStatus: 'UNKNOWN'");
+    expect(source).toContain('manualReconciliationRequired: true');
+    expect(source).not.toContain("transient: result.outcome === 'transient_failure'");
   });
 
   it('claims confirmation before creating any client or session side effects', () => {

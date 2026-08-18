@@ -1,16 +1,21 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
-import { sendAppointmentClosedEmail, sendAppointmentReminderEmails } from '@/lib/appointment-email';
+import {
+  prepareAppointmentReminderEmail,
+  sendAppointmentClosedEmail,
+} from '@/lib/appointment-email';
 import {
   ConditionalAppointmentTransitionError,
   conditionalAppointmentTransition,
 } from '@/lib/appointment-transition';
 import {
+  beginAppointmentReminderSubmission,
   claimAppointmentReminderDelivery,
   completeAppointmentReminderDelivery,
   enqueueDueAppointmentReminderDeliveries,
-  failAppointmentReminderDelivery,
+  failAppointmentReminderBeforeSubmission,
+  markAppointmentReminderSubmissionUnknown,
   type ReminderWindowKind,
   windowHours,
 } from '@/lib/appointment-reminder-outbox';
@@ -24,9 +29,10 @@ export const maxDuration = 60;
  *
  * 1. EXPIRE: REQUESTED holds older than HOLD_HOURS (48h) release their
  *    slot. A ghosted request must not block a bookable time forever.
- * 2. REMIND: confirmed appointments starting within 24h / 2h get their
- *    reminder (therapist email now; WhatsApp when WATI is procured).
- *    Stamps reminded24At/reminded2At so each window sends exactly once.
+ * 2. REMIND: confirmed appointments starting within 24h / 2h get separate
+ *    practitioner/patient recipient rows. Provider submission is at-most-once:
+ *    a crash may miss, and ambiguous outcomes require manual reconciliation.
+ *    Compatibility stamps are set only after all required rows are DELIVERED.
  *
  * Same fail-closed CRON_SECRET auth as every other cron.
  */
@@ -103,15 +109,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  // 3 — claim and dispatch eligible rows. Window predicates prevent a stale
-  // 24H row and a newly due 2H row from being sent back-to-back.
+  // 3 — claim one recipient row at a time. DISPATCHING leases may be
+  // reclaimed only before submission begins; SUBMISSION_STARTED and UNKNOWN
+  // are terminal for automatic workers (at-most-once; crash may miss;
+  // manual reconciliation required).
   const candidates = await prisma.appointmentReminderDelivery.findMany({
     where: {
       AND: [
         {
           OR: [
             { status: 'PENDING', leaseExpiresAt: null },
-            { status: { in: ['FAILED', 'IN_FLIGHT'] }, leaseExpiresAt: { lte: now } },
+            { status: { in: ['FAILED', 'DISPATCHING'] }, leaseExpiresAt: { lte: now } },
           ],
         },
         {
@@ -129,6 +137,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   });
 
   let reminded = 0;
+  let manualReview = 0;
   for (const candidate of candidates) {
     const claimed = await prisma.$transaction((tx) =>
       claimAppointmentReminderDelivery(tx, {
@@ -139,22 +148,66 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
     if (!claimed) continue;
 
+    let prepared;
+    try {
+      prepared = await prepareAppointmentReminderEmail({
+        appointment: claimed.appointment,
+        recipient: claimed.recipient,
+        windowHours: windowHours(claimed.kind),
+      });
+    } catch {
+      prepared = {
+        outcome: 'pre_dispatch_failure',
+        errorCode: 'REMINDER_PREPARATION_EXCEPTION',
+      } as const;
+    }
+
+    if (prepared.outcome === 'pre_dispatch_failure') {
+      await prisma.$transaction(async (tx) => {
+        await failAppointmentReminderBeforeSubmission(
+          tx,
+          claimed,
+          { code: prepared.errorCode },
+          new Date(),
+        );
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'NOTIFICATION_DISPATCHED',
+            targetType: 'Appointment',
+            targetId: claimed.appointmentId,
+            metadata: {
+              psychologistId: claimed.appointment.psychologistId,
+              windowHours: windowHours(claimed.kind),
+              recipient: claimed.recipient,
+              deliveryStatus: 'FAILED',
+              errorCode: prepared.errorCode,
+              submissionStarted: false,
+            },
+          },
+          tx,
+        );
+      });
+      continue;
+    }
+
+    // Commit the irreversible boundary before invoking the closure that can
+    // issue the one and only SendGrid request for this recipient row.
+    const submitted = await prisma.$transaction((tx) =>
+      beginAppointmentReminderSubmission(tx, claimed, new Date()),
+    );
+    if (!submitted) continue;
+
     let result;
     try {
-      result = await sendAppointmentReminderEmails(
-        claimed.appointment.psychologistId,
-        claimed.appointmentId,
-        claimed.appointment.startAt,
-        windowHours(claimed.kind),
-        claimed.providerIdempotencyKey,
-      );
+      result = await prepared.submit();
     } catch {
       result = { outcome: 'transient_failure', errorCode: 'REMINDER_DISPATCH_EXCEPTION' } as const;
     }
 
     if (result.outcome === 'sent') {
       const completed = await prisma.$transaction(async (tx) => {
-        const won = await completeAppointmentReminderDelivery(tx, claimed, new Date());
+        const won = await completeAppointmentReminderDelivery(tx, submitted, new Date());
         if (!won) return false;
         await writeAudit(
           {
@@ -165,6 +218,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             metadata: {
               psychologistId: claimed.appointment.psychologistId,
               windowHours: windowHours(claimed.kind),
+              recipient: claimed.recipient,
+              deliverySemantics: 'AT_MOST_ONCE',
             },
           },
           tx,
@@ -175,16 +230,11 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       continue;
     }
 
-    await prisma.$transaction(async (tx) => {
-      await failAppointmentReminderDelivery(
-        tx,
-        claimed,
-        {
-          code: result.errorCode,
-          transient: result.outcome === 'transient_failure',
-        },
-        new Date(),
-      );
+    const markedUnknown = await prisma.$transaction(async (tx) => {
+      const won = await markAppointmentReminderSubmissionUnknown(tx, submitted, {
+        code: result.errorCode ?? 'REMINDER_PROVIDER_ERROR',
+      });
+      if (!won) return false;
       await writeAudit(
         {
           actorType: 'SYSTEM',
@@ -194,16 +244,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           metadata: {
             psychologistId: claimed.appointment.psychologistId,
             windowHours: windowHours(claimed.kind),
-            deliveryStatus: 'FAILED',
-            errorCode: result.errorCode,
+            recipient: claimed.recipient,
+            deliveryStatus: 'UNKNOWN',
+            errorCode: result.errorCode ?? 'REMINDER_PROVIDER_ERROR',
+            manualReconciliationRequired: true,
           },
         },
         tx,
       );
+      return true;
     });
+    if (markedUnknown) manualReview++;
   }
 
-  return NextResponse.json({ expired, queued, reminded });
+  return NextResponse.json({ expired, queued, reminded, manualReview });
 }
 
 function isAuthorized(req: NextRequest): boolean {

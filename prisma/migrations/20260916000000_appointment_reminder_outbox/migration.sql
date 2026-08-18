@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS "appointment_reminder_deliveries" (
   "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT "appointment_reminder_deliveries_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "appointment_reminder_deliveries_appointmentId_fkey"
-    FOREIGN KEY ("appointmentId") REFERENCES "appointments"("id") ON DELETE CASCADE ON UPDATE CASCADE
+    FOREIGN KEY ("appointmentId") REFERENCES "Appointment"("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "appointment_reminder_deliveries_appointmentId_kind_key"
@@ -41,7 +41,7 @@ INSERT INTO "appointment_reminder_deliveries" (
 SELECT
   'legacy-24h-' || "id", "id", '24H', 'DELIVERED', 1,
   'appointment-reminder:' || "id" || ':24H', "reminded24At", "reminded24At", "reminded24At"
-FROM "appointments"
+FROM "Appointment"
 WHERE "reminded24At" IS NOT NULL
 ON CONFLICT ("appointmentId", "kind") DO NOTHING;
 
@@ -52,6 +52,6 @@ INSERT INTO "appointment_reminder_deliveries" (
 SELECT
   'legacy-2h-' || "id", "id", '2H', 'DELIVERED', 1,
   'appointment-reminder:' || "id" || ':2H', "reminded2At", "reminded2At", "reminded2At"
-FROM "appointments"
+FROM "Appointment"
 WHERE "reminded2At" IS NOT NULL
 ON CONFLICT ("appointmentId", "kind") DO NOTHING;
