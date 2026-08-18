@@ -8,6 +8,7 @@ import {
   type BillingPlan,
   type PractitionerVertical,
 } from '@cureocity/contracts';
+import { OrbitLogo } from '@/components/ui/OrbitLogo';
 
 interface NavItem {
   href: string;
@@ -37,8 +38,8 @@ const PRIMARY: NavItem[] = [
   // Sprint 45 — Today: the screen a therapist opens each morning, and the
   // calendar-driven entry point into the live scribe (TS3-F1).
   { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app', label: 'Record', icon: 'record' },
-  { href: '/app/clients', label: 'Clients', icon: 'clients' },
+  { href: '/app/encounters/new', label: 'New encounter', icon: 'record' },
+  { href: '/app/clients', label: 'Patients', icon: 'clients' },
   { href: '/app/search', label: 'Search', icon: 'search' },
   { href: '/app/templates', label: 'Templates', icon: 'templates' },
   { href: '/app/learn', label: 'Learn', icon: 'learn' },
@@ -49,8 +50,8 @@ const PRIMARY: NavItem[] = [
 // Practice Assistant and My-practice stats are occasional lookups, not part
 // of the record-a-session spine.
 const SECONDARY: NavItem[] = [
-  { href: '/app/dashboard', label: 'Dashboard', icon: 'dashboard' },
-  { href: '/app/practice-assistant', label: 'Assistant', icon: 'assistant' },
+  { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
+  { href: '/app/practice-assistant', label: 'ORBIT Assistant', icon: 'assistant' },
   { href: '/app/me', label: 'My practice', icon: 'me' },
   // Marketing V1 — public page + appointment inbox.
   { href: '/app/marketing', label: 'Marketing', icon: 'marketing' },
@@ -98,25 +99,7 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-white/70 bg-white/55 backdrop-blur-xl md:flex print:!hidden">
       <div className="px-6 py-6">
-        <Link href="/app" className="inline-flex items-center gap-2.5">
-          <span
-            aria-hidden
-            className="u-tile u-tile-ink grid h-9 w-9 place-items-center rounded-xl"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-              <path
-                d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
-                stroke="#fff"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </span>
-          <span className="font-serif text-lg tracking-tight">
-            Cureocity <em className="italic">{vertical === 'DOCTOR' ? 'Scribe' : 'Mind'}</em>
-          </span>
-        </Link>
+        <OrbitLogo href="/app" />
       </div>
 
       <nav className="px-3" aria-label="Primary">

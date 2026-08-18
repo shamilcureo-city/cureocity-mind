@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma';
 import { toClient } from '@/lib/mappers';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson, parseQuery } from '@/lib/validate';
+import { markLegacyPatientResponse } from '@/lib/patient-compatibility';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -17,7 +18,7 @@ export const dynamic = 'force-dynamic';
 /**
  * GET /api/v1/clients — list, cursor-paginated, filtered by status.
  */
-export async function GET(req: NextRequest): Promise<NextResponse> {
+async function legacyClientGET(req: NextRequest): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const q = parseQuery(req.url, ListClientsQuerySchema);
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 /**
  * POST /api/v1/clients — create + record initial consents in one tx.
  */
-export async function POST(req: NextRequest): Promise<NextResponse> {
+async function legacyClientPOST(req: NextRequest): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const body = await parseJson(req, CreateClientInputSchema);
@@ -149,4 +150,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return row;
   });
   return NextResponse.json(await toClient(created), { status: 201 });
+}
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  return markLegacyPatientResponse(await legacyClientGET(req), '/api/v1/patients');
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  return markLegacyPatientResponse(await legacyClientPOST(req), '/api/v1/patients');
 }
