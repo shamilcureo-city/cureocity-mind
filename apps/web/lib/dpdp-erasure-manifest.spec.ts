@@ -185,15 +185,18 @@ describe('schema-complete DPDP erasure manifest', () => {
     }
   });
 
-  it('deletes appointment reminder delivery identifiers before redacting appointments', () => {
+  it('terminalizes appointments before deleting reminders and then unlinks them', () => {
     expect(DPDP_ERASURE_MANIFEST.AppointmentReminderDelivery).toMatchObject({
       disposition: 'DELETE',
       retentionClass: 'ERASE_ON_FULFILMENT',
     });
     const reminder = implementation.indexOf('appointment_reminder_deliveries');
-    const appointment = implementation.indexOf('tx.appointment.updateMany');
+    const terminalAppointment = implementation.indexOf("status: 'CANCELLED'");
+    const unlinkedAppointment = implementation.indexOf('patientNameEncrypted', terminalAppointment);
+    expect(terminalAppointment).toBeGreaterThan(0);
     expect(reminder).toBeGreaterThan(0);
-    expect(reminder).toBeLessThan(appointment);
+    expect(terminalAppointment).toBeLessThan(reminder);
+    expect(reminder).toBeLessThan(unlinkedAppointment);
   });
 
   it('fixes signed-note erasure forward without changing the applied migration checksum', () => {

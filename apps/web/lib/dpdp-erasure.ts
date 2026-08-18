@@ -162,6 +162,24 @@ export async function eraseClientPhi(
   await tx.clientPushSubscription.deleteMany({ where: { clientId } });
   await tx.clientClaimToken.deleteMany({ where: { clientId } });
 
+  const linkedAppointmentWhere: Prisma.AppointmentWhereInput = {
+    OR: [{ clientId }, { sessionId: { in: sessionIds } }],
+  };
+
+  // Terminalize while the Client lock and this transaction are still held.
+  // This update also locks the matching appointments: after commit, reminder
+  // producers cannot rediscover them as CONFIRMED even though their old outbox
+  // rows are erased below. Replace the scheduled instant with the erasure time
+  // because it is identifying health-service data and both fields are required.
+  await tx.appointment.updateMany({
+    where: linkedAppointmentWhere,
+    data: {
+      status: 'CANCELLED',
+      startAt: now,
+      endAt: now,
+    },
+  });
+
   // AppointmentReminderDelivery lands in the appointment-lifecycle stream.
   // Feature branches may deploy independently, so discover the table without
   // weakening the eventual fixed-point erasure: when present, the FK child and
@@ -206,7 +224,7 @@ export async function eraseClientPhi(
     },
   });
   await tx.appointment.updateMany({
-    where: { OR: [{ clientId }, { sessionId: { in: sessionIds } }] },
+    where: linkedAppointmentWhere,
     data: {
       patientNameEncrypted: 'redacted',
       patientPhoneEncrypted: 'redacted',

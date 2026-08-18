@@ -116,7 +116,9 @@ export const DPDP_ERASURE_MANIFEST = {
   AppointmentReminderDelivery: clinicalDelete(
     'delete provider idempotency key, delivery errors, lease and delivery timestamps before redacting appointment',
   ),
-  Appointment: redact('unlink client/session and redact patient identity and concern'),
+  Appointment: redact(
+    'cancel before deleting reminder outbox rows, minimize schedule, unlink client/session and redact patient identity and concern',
+  ),
   AuditLog: legalProof(
     'retain append-only event proof; remove/hash PHI-bearing metadata and retain bounded codes/IDs',
     'SECURITY_AND_DSR_PROOF',
