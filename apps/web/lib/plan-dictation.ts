@@ -10,6 +10,7 @@ import { recordCostInr, recordGeminiCall } from '@cureocity/observability/metric
 import { writeAudit } from './audit';
 import { checkCostCircuit } from './cost-guard';
 import { modelRouter } from './llm';
+import { withActiveSessionPhiWrite } from './phi-write-lock';
 import { prisma } from './prisma';
 import { assertCurrentScribeAuthority } from './scribe-authority';
 
@@ -73,7 +74,7 @@ export async function transcribePlanCommand(args: {
         }),
     });
   } catch (e) {
-    await recordFailure(e, args.psychologistId);
+    await recordFailure(e, args.sessionId, args.psychologistId);
     return null;
   } finally {
     // The backend receives this buffer by reference. Never retain dictated PHI.
@@ -88,7 +89,11 @@ export async function transcribePlanCommand(args: {
     clearPass1Output(result.output);
     throw error;
   }
-  await persistCallLog(result.callLog, args.psychologistId);
+  // PLAN_DICTATION_ASR_CALL_LOG — the model call and future auth recheck are
+  // outside this short lock; erasure wins before any delayed ledger row.
+  await withActiveSessionPhiWrite(prisma, args.sessionId, args.psychologistId, (tx) =>
+    persistCallLog(result.callLog, args.sessionId, args.psychologistId, tx),
+  );
   recordGeminiCall({
     pass: result.callLog.pass,
     status: result.callLog.status,
@@ -137,7 +142,7 @@ export async function runPlanDictation(args: {
       language: args.language,
     });
   } catch (e) {
-    await recordFailure(e, args.psychologistId);
+    await recordFailure(e, args.sessionId, args.psychologistId);
     throw e;
   }
 
@@ -151,7 +156,29 @@ export async function runPlanDictation(args: {
     result.output.dictation.clarifications = [];
     throw error;
   }
-  await persistCallLog(result.callLog, args.psychologistId);
+
+  const dictation = result.output.dictation;
+  // PLAN_DICTATION_PROPOSAL_WRITE_GROUP — after the model call and auth
+  // recheck, commit the linked call log and proposal audit under one Client lock.
+  await withActiveSessionPhiWrite(prisma, args.sessionId, args.psychologistId, async (tx) => {
+    await persistCallLog(result.callLog, args.sessionId, args.psychologistId, tx);
+    await writeAudit(
+      {
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: args.psychologistId,
+        action: 'PLAN_DICTATION_PROPOSED',
+        targetType: 'Session',
+        targetId: args.sessionId,
+        metadata: {
+          sessionId: args.sessionId,
+          editCount: dictation.edits.length,
+          clarificationCount: dictation.clarifications.length,
+          costInr: result.callLog.costInr,
+        },
+      },
+      tx,
+    );
+  });
   recordGeminiCall({
     pass: result.callLog.pass,
     status: result.callLog.status,
@@ -164,29 +191,18 @@ export async function runPlanDictation(args: {
     inr: result.callLog.costInr,
   });
 
-  const dictation = result.output.dictation;
-  await writeAudit({
-    actorType: 'PSYCHOLOGIST',
-    actorPsychologistId: args.psychologistId,
-    action: 'PLAN_DICTATION_PROPOSED',
-    targetType: 'Session',
-    targetId: args.sessionId,
-    metadata: {
-      sessionId: args.sessionId,
-      editCount: dictation.edits.length,
-      clarificationCount: dictation.clarifications.length,
-      costInr: result.callLog.costInr,
-    },
-  });
-
   return dictation;
 }
 
 /** Backend errors carry their call-log — persist the failure trail too. */
-async function recordFailure(e: unknown, psychologistId: string): Promise<void> {
+async function recordFailure(e: unknown, sessionId: string, psychologistId: string): Promise<void> {
   const callLog = (e as { callLog?: GeminiCallLogData }).callLog;
   if (!callLog) return;
-  await persistCallLog(callLog, psychologistId).catch(() => {
+  // PLAN_DICTATION_FAILURE_CALL_LOG — the failed model/network call is over;
+  // best-effort logging still obeys the same terminal erasure boundary.
+  await withActiveSessionPhiWrite(prisma, sessionId, psychologistId, (tx) =>
+    persistCallLog(callLog, sessionId, psychologistId, tx),
+  ).catch(() => {
     /* the failure response matters more than the failed log row */
   });
   recordGeminiCall({
@@ -197,10 +213,15 @@ async function recordFailure(e: unknown, psychologistId: string): Promise<void> 
   });
 }
 
-async function persistCallLog(log: GeminiCallLogData, psychologistId: string): Promise<void> {
-  await prisma.geminiCallLog.create({
+async function persistCallLog(
+  log: GeminiCallLogData,
+  sessionId: string,
+  psychologistId: string,
+  tx: Pick<Prisma.TransactionClient, 'geminiCallLog'>,
+): Promise<void> {
+  await tx.geminiCallLog.create({
     data: {
-      ...(log.sessionId !== undefined && { sessionId: log.sessionId }),
+      sessionId,
       psychologistId,
       pass: log.pass,
       model: log.model,
