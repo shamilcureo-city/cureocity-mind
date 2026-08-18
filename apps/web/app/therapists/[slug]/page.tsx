@@ -14,6 +14,7 @@ import {
 } from '@/lib/public-profile';
 import { recordProfileMetric } from '@/lib/profile-metrics';
 import { currentPsychologist } from '@/lib/auth-page';
+import { serializeJsonForHtml } from '@/lib/html-safe-json';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,7 +95,7 @@ export default async function TherapistProfilePage({
     <main className="min-h-screen bg-[var(--color-bg)]">
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        dangerouslySetInnerHTML={{ __html: serializeJsonForHtml(jsonLd) }}
       />
       <Container className="py-14">
         {isPreview && (
