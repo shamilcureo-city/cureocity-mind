@@ -3190,6 +3190,7 @@ enum AppointmentReminderDeliveryStatus {
   IN_FLIGHT
   DELIVERED
   FAILED
+  CANCELLED
 }
 
 /// A public appointment request against a concrete slot. A REQUESTED or
@@ -3233,13 +3234,14 @@ model Appointment {
   @@index([psychologistId, startAt])
 }
 
-/// Durable retryable appointment reminder outbox. The unique appointment/kind
-/// pair prevents duplicate logical deliveries; the provider key remains stable
-/// across retries so transports with idempotency support can suppress duplicates.
+/// Durable retryable appointment reminder outbox. The scheduled-start snapshot
+/// versions logical deliveries so a moved appointment can enqueue fresh reminders
+/// while preserving prior delivery history.
 model AppointmentReminderDelivery {
   id                     String                            @id @default(cuid())
   appointmentId          String
   appointment            Appointment                       @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  scheduledStartAt       DateTime
   kind                   AppointmentReminderKind
   status                 AppointmentReminderDeliveryStatus @default(PENDING)
   attemptCount           Int                               @default(0)
@@ -3250,7 +3252,7 @@ model AppointmentReminderDelivery {
   createdAt              DateTime                          @default(now())
   updatedAt              DateTime                          @updatedAt
 
-  @@unique([appointmentId, kind])
+  @@unique([appointmentId, scheduledStartAt, kind])
   @@index([status, leaseExpiresAt])
   @@map("appointment_reminder_deliveries")
 }

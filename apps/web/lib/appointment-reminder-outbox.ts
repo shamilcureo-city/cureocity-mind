@@ -1,4 +1,4 @@
-import { Prisma, type AppointmentReminderDelivery } from '@prisma/client';
+import { Prisma, type Appointment, type AppointmentReminderDelivery } from '@prisma/client';
 
 export type ReminderWindowKind = '24H' | '2H';
 
@@ -12,8 +12,12 @@ export function reminderKindForStart(now: Date, startAt: Date): ReminderWindowKi
   return untilStart <= TWO_HOURS_MS ? '2H' : '24H';
 }
 
-export function providerIdempotencyKey(appointmentId: string, kind: ReminderWindowKind): string {
-  return `appointment-reminder:${appointmentId}:${kind}`;
+export function providerIdempotencyKey(
+  appointmentId: string,
+  scheduledStartAt: Date,
+  kind: ReminderWindowKind,
+): string {
+  return `appointment-reminder:${appointmentId}:${scheduledStartAt.getTime()}:${kind}`;
 }
 
 export function prismaReminderKind(kind: ReminderWindowKind): 'H24' | 'H2' {
@@ -24,19 +28,63 @@ export function windowHours(kind: AppointmentReminderDelivery['kind']): 24 | 2 {
   return kind === 'H24' ? 24 : 2;
 }
 
+/** Preserve delivered history while making the old schedule undispatchable. */
+export async function cancelAppointmentReminderDeliveriesForReschedule(
+  tx: Prisma.TransactionClient,
+  input: { appointmentId: string; scheduledStartAt: Date },
+): Promise<number> {
+  const result = await tx.appointmentReminderDelivery.updateMany({
+    where: {
+      appointmentId: input.appointmentId,
+      scheduledStartAt: input.scheduledStartAt,
+      status: { in: ['PENDING', 'FAILED', 'IN_FLIGHT'] },
+    },
+    data: { status: 'CANCELLED', leaseExpiresAt: null, lastError: null },
+  });
+  return result.count;
+}
+
 /**
- * Conditional update is the outbox lock. PENDING can be claimed once; FAILED
- * and abandoned IN_FLIGHT rows become claimable only when their lease expires.
+ * Locks both the outbox row and its Appointment, then validates the exact
+ * schedule snapshot and mutually exclusive window before acquiring the lease.
+ * The returned Appointment was reread under that lock and is the only data the
+ * caller may use for dispatch.
  */
 export async function claimAppointmentReminderDelivery(
   tx: Prisma.TransactionClient,
   input: { deliveryId: string; now: Date; leaseMs: number },
-): Promise<AppointmentReminderDelivery | null> {
+): Promise<(AppointmentReminderDelivery & { appointment: Appointment }) | null> {
+  const delivery = await tx.appointmentReminderDelivery.findUnique({
+    where: { id: input.deliveryId },
+    select: { appointmentId: true, scheduledStartAt: true, kind: true },
+  });
+  if (!delivery) return null;
+
+  // Follow the lifecycle-wide lock order: Appointment before dependent rows.
+  // Reschedule takes this same lock before cancelling outbox rows.
+  const appointments = await tx.$queryRaw<Appointment[]>(Prisma.sql`
+    SELECT a.*
+    FROM "appointments" a
+    WHERE a."id" = ${delivery.appointmentId}
+    FOR UPDATE
+  `);
+  const appointment = appointments[0];
+  if (!appointment) return null;
+  const expectedKind = reminderKindForStart(input.now, appointment.startAt);
+  if (
+    appointment.status !== 'CONFIRMED' ||
+    appointment.startAt.getTime() !== delivery.scheduledStartAt.getTime() ||
+    expectedKind === null ||
+    prismaReminderKind(expectedKind) !== delivery.kind
+  ) {
+    return null;
+  }
+
   const leaseExpiresAt = new Date(input.now.getTime() + input.leaseMs);
   const result = await tx.appointmentReminderDelivery.updateMany({
     where: {
       id: input.deliveryId,
-      appointment: { status: 'CONFIRMED', startAt: { gt: input.now } },
+      scheduledStartAt: appointment.startAt,
       OR: [
         { status: 'PENDING', leaseExpiresAt: null },
         {
@@ -53,7 +101,10 @@ export async function claimAppointmentReminderDelivery(
     },
   });
   if (result.count !== 1) return null;
-  return tx.appointmentReminderDelivery.findUniqueOrThrow({ where: { id: input.deliveryId } });
+  return tx.appointmentReminderDelivery.findUniqueOrThrow({
+    where: { id: input.deliveryId },
+    include: { appointment: true },
+  });
 }
 
 /** Must run in one transaction so the legacy marker never leads DELIVERED. */

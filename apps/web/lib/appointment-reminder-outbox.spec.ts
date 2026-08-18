@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  cancelAppointmentReminderDeliveriesForReschedule,
   claimAppointmentReminderDelivery,
   completeAppointmentReminderDelivery,
   failAppointmentReminderDelivery,
@@ -9,18 +10,30 @@ import {
 
 const NOW = new Date('2026-08-18T12:00:00.000Z');
 const LEASE_END = new Date('2026-08-18T12:05:00.000Z');
+const SCHEDULED_START = new Date('2026-08-18T14:00:00.000Z');
 
 function delivery(overrides: Record<string, unknown> = {}) {
   return {
     id: 'delivery-1',
     appointmentId: 'appt-1',
+    scheduledStartAt: SCHEDULED_START,
     kind: 'H2' as const,
     status: 'IN_FLIGHT' as const,
     attemptCount: 1,
     leaseExpiresAt: LEASE_END,
-    providerIdempotencyKey: 'appointment-reminder:appt-1:2H',
+    providerIdempotencyKey: 'appointment-reminder:appt-1:1787061600000:2H',
     ...overrides,
   };
+}
+
+function lockedSchedule(startAt = SCHEDULED_START) {
+  return [
+    {
+      id: 'appt-1',
+      status: 'CONFIRMED',
+      startAt,
+    },
+  ];
 }
 
 describe('reminderKindForStart', () => {
@@ -35,9 +48,43 @@ describe('reminderKindForStart', () => {
 });
 
 describe('providerIdempotencyKey', () => {
-  it('is stable per appointment and reminder kind', () => {
-    expect(providerIdempotencyKey('appt-1', '24H')).toBe('appointment-reminder:appt-1:24H');
-    expect(providerIdempotencyKey('appt-1', '2H')).toBe('appointment-reminder:appt-1:2H');
+  it('is stable per appointment, scheduled start, and reminder kind', () => {
+    expect(providerIdempotencyKey('appt-1', SCHEDULED_START, '24H')).toBe(
+      'appointment-reminder:appt-1:1787061600000:24H',
+    );
+    expect(providerIdempotencyKey('appt-1', SCHEDULED_START, '2H')).toBe(
+      'appointment-reminder:appt-1:1787061600000:2H',
+    );
+  });
+
+  it('creates a new logical delivery key after rescheduling', () => {
+    const movedStart = new Date('2026-08-19T14:00:00.000Z');
+    expect(providerIdempotencyKey('appt-1', movedStart, '2H')).not.toBe(
+      providerIdempotencyKey('appt-1', SCHEDULED_START, '2H'),
+    );
+  });
+});
+
+describe('reschedule invalidation', () => {
+  it('cancels only undelivered rows for the old scheduled start', async () => {
+    const tx = {
+      appointmentReminderDelivery: { updateMany: vi.fn().mockResolvedValue({ count: 2 }) },
+    };
+
+    await expect(
+      cancelAppointmentReminderDeliveriesForReschedule(tx as never, {
+        appointmentId: 'appt-1',
+        scheduledStartAt: SCHEDULED_START,
+      }),
+    ).resolves.toBe(2);
+    expect(tx.appointmentReminderDelivery.updateMany).toHaveBeenCalledWith({
+      where: {
+        appointmentId: 'appt-1',
+        scheduledStartAt: SCHEDULED_START,
+        status: { in: ['PENDING', 'FAILED', 'IN_FLIGHT'] },
+      },
+      data: { status: 'CANCELLED', leaseExpiresAt: null, lastError: null },
+    });
   });
 });
 
@@ -45,7 +92,9 @@ describe('claimAppointmentReminderDelivery', () => {
   it('allows exactly one of twenty concurrent workers to claim', async () => {
     let available = true;
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue(lockedSchedule()),
       appointmentReminderDelivery: {
+        findUnique: vi.fn().mockResolvedValue(delivery({ status: 'PENDING' })),
         updateMany: vi.fn(async () => {
           if (!available) return { count: 0 };
           available = false;
@@ -66,12 +115,15 @@ describe('claimAppointmentReminderDelivery', () => {
     );
 
     expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(tx.appointmentReminderDelivery.findUnique).toHaveBeenCalledTimes(20);
     expect(tx.appointmentReminderDelivery.findUniqueOrThrow).toHaveBeenCalledTimes(1);
   });
 
   it('does not reclaim a live lease after a crash', async () => {
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue(lockedSchedule()),
       appointmentReminderDelivery: {
+        findUnique: vi.fn().mockResolvedValue(delivery({ status: 'IN_FLIGHT' })),
         updateMany: vi.fn().mockResolvedValue({ count: 0 }),
         findUniqueOrThrow: vi.fn(),
       },
@@ -87,9 +139,31 @@ describe('claimAppointmentReminderDelivery', () => {
     expect(tx.appointmentReminderDelivery.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 
+  it('does not claim a stale row when the appointment is rescheduled after selection', async () => {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue(lockedSchedule(new Date('2026-08-19T14:00:00.000Z'))),
+      appointmentReminderDelivery: {
+        findUnique: vi.fn().mockResolvedValue(delivery({ status: 'PENDING' })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue(delivery()),
+      },
+    };
+
+    await expect(
+      claimAppointmentReminderDelivery(tx as never, {
+        deliveryId: 'delivery-1',
+        now: NOW,
+        leaseMs: 5 * 60_000,
+      }),
+    ).resolves.toBeNull();
+    expect(tx.appointmentReminderDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
   it('reclaims an expired in-flight lease', async () => {
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue(lockedSchedule()),
       appointmentReminderDelivery: {
+        findUnique: vi.fn().mockResolvedValue(delivery({ status: 'IN_FLIGHT' })),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: vi.fn().mockResolvedValue(delivery({ attemptCount: 2 })),
       },
@@ -105,7 +179,7 @@ describe('claimAppointmentReminderDelivery', () => {
     expect(tx.appointmentReminderDelivery.updateMany).toHaveBeenCalledWith({
       where: {
         id: 'delivery-1',
-        appointment: { status: 'CONFIRMED', startAt: { gt: NOW } },
+        scheduledStartAt: SCHEDULED_START,
         OR: [
           { status: 'PENDING', leaseExpiresAt: null },
           { status: { in: ['FAILED', 'IN_FLIGHT'] }, leaseExpiresAt: { lte: NOW } },
@@ -136,7 +210,7 @@ describe('delivery completion and retry', () => {
       where: {
         id: 'delivery-1',
         status: 'IN_FLIGHT',
-        providerIdempotencyKey: 'appointment-reminder:appt-1:2H',
+        providerIdempotencyKey: 'appointment-reminder:appt-1:1787061600000:2H',
         leaseExpiresAt: LEASE_END,
       },
       data: { status: 'DELIVERED', deliveredAt: NOW, leaseExpiresAt: null, lastError: null },
@@ -163,7 +237,7 @@ describe('delivery completion and retry', () => {
       where: {
         id: 'delivery-1',
         status: 'IN_FLIGHT',
-        providerIdempotencyKey: 'appointment-reminder:appt-1:2H',
+        providerIdempotencyKey: 'appointment-reminder:appt-1:1787061600000:2H',
         leaseExpiresAt: LEASE_END,
       },
       data: {
@@ -197,7 +271,9 @@ describe('delivery completion and retry', () => {
 
   it('keeps the same provider idempotency key when a failed delivery retries', async () => {
     const tx = {
+      $queryRaw: vi.fn().mockResolvedValue(lockedSchedule()),
       appointmentReminderDelivery: {
+        findUnique: vi.fn().mockResolvedValue(delivery({ status: 'FAILED' })),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         findUniqueOrThrow: vi
           .fn()
@@ -211,6 +287,6 @@ describe('delivery completion and retry', () => {
       leaseMs: 5 * 60_000,
     });
 
-    expect(retried?.providerIdempotencyKey).toBe('appointment-reminder:appt-1:2H');
+    expect(retried?.providerIdempotencyKey).toBe('appointment-reminder:appt-1:1787061600000:2H');
   });
 });

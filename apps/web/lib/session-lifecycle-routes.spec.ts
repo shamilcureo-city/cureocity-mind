@@ -65,6 +65,18 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(sessionTransition).toBeGreaterThan(appointmentLock);
   });
 
+  it('cancels old-schedule reminder rows before moving the linked appointment', () => {
+    const source = route('sessions/[id]/reschedule');
+    const cancellation = source.indexOf('cancelAppointmentReminderDeliveriesForReschedule(');
+    const appointmentUpdate = source.indexOf('tx.appointment.update({', cancellation);
+
+    expect(cancellation).toBeGreaterThan(-1);
+    expect(appointmentUpdate).toBeGreaterThan(cancellation);
+    expect(source.slice(cancellation, appointmentUpdate)).toContain(
+      'scheduledStartAt: linkedAppt.startAt',
+    );
+  });
+
   it('returns the stable conflict response when consent snapshot loses to start', () => {
     const source = route('sessions/[id]/consent');
     expect(source).toContain('sessionConcurrentModificationResponse(error)');
@@ -157,8 +169,10 @@ describe('session lifecycle route concurrency architecture', () => {
     expect(source).toContain("kind: 'H2'");
     expect(source).toContain('startAt: { gt: twoHourEnd, lte: twentyFourHourEnd }');
     expect(source).toContain('startAt: { gt: now, lte: twoHourEnd }');
-    expect(source).toContain('appointmentId_kind: { appointmentId: appt.id, kind }');
-    expect(source).toContain('providerIdempotencyKey(appt.id, reminderKind)');
+    expect(source).toContain('appointmentId_scheduledStartAt_kind: {');
+    expect(source).toContain('appointmentId: appt.id');
+    expect(source).toContain('scheduledStartAt: appt.startAt');
+    expect(source).toContain('providerIdempotencyKey(appt.id, appt.startAt, reminderKind)');
     expect(source).not.toContain("['reminded24At', 24]");
   });
 
@@ -170,7 +184,10 @@ describe('session lifecycle route concurrency architecture', () => {
 
     expect(claim).toBeGreaterThan(-1);
     expect(dispatch).toBeGreaterThan(claim);
+    expect(source.slice(dispatch, complete)).toContain('claimed.appointment.psychologistId');
+    expect(source.slice(dispatch, complete)).toContain('claimed.appointment.startAt');
     expect(source.slice(dispatch, complete)).toContain('claimed.providerIdempotencyKey');
+    expect(source.slice(dispatch, complete)).not.toContain('candidate.appointment.');
     expect(complete).toBeGreaterThan(dispatch);
     expect(source.slice(complete)).toContain('await prisma.$transaction(async (tx) =>');
   });

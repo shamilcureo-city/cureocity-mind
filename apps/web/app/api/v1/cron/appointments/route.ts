@@ -98,16 +98,23 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   for (const { kind, reminderKind, startAt } of reminderWindows) {
     const due = await prisma.appointment.findMany({
       where: { status: 'CONFIRMED', startAt },
-      select: { id: true },
+      select: { id: true, startAt: true },
       take: 200,
     });
     for (const appt of due) {
       await prisma.appointmentReminderDelivery.upsert({
-        where: { appointmentId_kind: { appointmentId: appt.id, kind } },
+        where: {
+          appointmentId_scheduledStartAt_kind: {
+            appointmentId: appt.id,
+            scheduledStartAt: appt.startAt,
+            kind,
+          },
+        },
         create: {
           appointmentId: appt.id,
+          scheduledStartAt: appt.startAt,
           kind: prismaReminderKind(reminderKind),
-          providerIdempotencyKey: providerIdempotencyKey(appt.id, reminderKind),
+          providerIdempotencyKey: providerIdempotencyKey(appt.id, appt.startAt, reminderKind),
         },
         update: {},
       });
@@ -135,7 +142,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       ],
       appointment: { status: 'CONFIRMED' },
     },
-    include: { appointment: true },
+    select: { id: true },
     orderBy: { createdAt: 'asc' },
     take: 200,
   });
@@ -154,9 +161,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     let result;
     try {
       result = await sendAppointmentReminderEmails(
-        candidate.appointment.psychologistId,
-        candidate.appointmentId,
-        candidate.appointment.startAt,
+        claimed.appointment.psychologistId,
+        claimed.appointmentId,
+        claimed.appointment.startAt,
         windowHours(claimed.kind),
         claimed.providerIdempotencyKey,
       );
@@ -173,9 +180,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
             actorType: 'SYSTEM',
             action: 'APPOINTMENT_REMINDER_SENT',
             targetType: 'Appointment',
-            targetId: candidate.appointmentId,
+            targetId: claimed.appointmentId,
             metadata: {
-              psychologistId: candidate.appointment.psychologistId,
+              psychologistId: claimed.appointment.psychologistId,
               windowHours: windowHours(claimed.kind),
             },
           },
@@ -202,9 +209,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           actorType: 'SYSTEM',
           action: 'NOTIFICATION_DISPATCHED',
           targetType: 'Appointment',
-          targetId: candidate.appointmentId,
+          targetId: claimed.appointmentId,
           metadata: {
-            psychologistId: candidate.appointment.psychologistId,
+            psychologistId: claimed.appointment.psychologistId,
             windowHours: windowHours(claimed.kind),
             deliveryStatus: 'FAILED',
             errorCode: result.errorCode,

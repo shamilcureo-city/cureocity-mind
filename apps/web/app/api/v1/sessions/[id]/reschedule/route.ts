@@ -3,6 +3,7 @@ import { SessionRescheduleInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { sendAppointmentRescheduledEmail } from '@/lib/appointment-email';
+import { cancelAppointmentReminderDeliveriesForReschedule } from '@/lib/appointment-reminder-outbox';
 import { lockLinkedAppointmentForSession } from '@/lib/appointment-transition';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
@@ -86,6 +87,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       // targets a row that is no longer the real session.
       if (linkedAppt) {
         const durationMs = linkedAppt.endAt.getTime() - linkedAppt.startAt.getTime();
+        await cancelAppointmentReminderDeliveriesForReschedule(tx, {
+          appointmentId: linkedAppt.id,
+          scheduledStartAt: linkedAppt.startAt,
+        });
         await tx.appointment.update({
           where: { id: linkedAppt.id },
           data: {
