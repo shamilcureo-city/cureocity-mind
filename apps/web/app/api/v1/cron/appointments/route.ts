@@ -31,15 +31,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
   const now = new Date();
 
-  // 1 — expire stale holds.
+  // 1 — expire stale holds and requests whose slot already started.
   const staleCutoff = new Date(now.getTime() - HOLD_HOURS * 60 * 60_000);
-  const stale = await prisma.appointment.findMany({
-    where: { status: 'REQUESTED', createdAt: { lt: staleCutoff } },
+  const expiryCandidates = await prisma.appointment.findMany({
+    where: {
+      status: 'REQUESTED',
+      OR: [{ createdAt: { lt: staleCutoff } }, { startAt: { lt: now } }],
+    },
     select: { id: true, psychologistId: true, startAt: true },
     take: 200,
   });
   let expired = 0;
-  for (const appt of stale) {
+  for (const appt of expiryCandidates) {
     try {
       await prisma.$transaction(async (tx) => {
         await conditionalAppointmentTransition(tx, {
@@ -71,13 +74,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     await sendAppointmentClosedEmail(appt.psychologistId, appt.id, appt.startAt);
   }
 
-  // 2 — reminders. Also expire un-actioned REQUESTED holds whose slot
-  // already started (they'd otherwise linger inside the hold window).
-  await prisma.appointment.updateMany({
-    where: { status: 'REQUESTED', startAt: { lt: now } },
-    data: { status: 'CANCELLED' },
-  });
-
+  // 2 — reminders.
   let reminded = 0;
   for (const [column, hours] of [
     ['reminded24At', 24],

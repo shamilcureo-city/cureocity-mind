@@ -106,18 +106,48 @@ describe('session lifecycle route concurrency architecture', () => {
     },
   );
 
-  it('claims each stale appointment before expiry audit and email side effects', () => {
+  it('selects both stale holds and already-started requests as expiry candidates', () => {
     const source = route('cron/appointments');
-    const claim = source.indexOf('conditionalAppointmentTransition(');
-    const audit = source.indexOf("action: 'APPOINTMENT_EXPIRED'", claim);
-    const email = source.indexOf('sendAppointmentClosedEmail(', claim);
 
-    expect(claim).toBeGreaterThan(-1);
+    expect(source).toMatch(
+      /const expiryCandidates = await prisma\.appointment\.findMany\(\{[\s\S]*?OR:\s*\[\s*\{ createdAt: \{ lt: staleCutoff \} \},\s*\{ startAt: \{ lt: now \} \},?\s*\]/,
+    );
+    expect(source).toContain('for (const appt of expiryCandidates)');
+  });
+
+  it('claims every expiry candidate before transactional audit and post-commit effects', () => {
+    const source = route('cron/appointments');
+    const loop = source.indexOf('for (const appt of expiryCandidates)');
+    const transaction = source.indexOf('await prisma.$transaction(async (tx) => {', loop);
+    const claim = source.indexOf('conditionalAppointmentTransition(', transaction);
+    const audit = source.indexOf("action: 'APPOINTMENT_EXPIRED'", claim);
+    const transactionEnd = source.indexOf('\n      });', audit);
+    const lostRace = source.indexOf(
+      'if (error instanceof ConditionalAppointmentTransitionError) continue;',
+      transactionEnd,
+    );
+    const increment = source.indexOf('expired++;', lostRace);
+    const email = source.indexOf('sendAppointmentClosedEmail(', increment);
+
+    expect(loop).toBeGreaterThan(-1);
+    expect(transaction).toBeGreaterThan(loop);
+    expect(claim).toBeGreaterThan(transaction);
     expect(source).toContain("expectedStatus: 'REQUESTED'");
     expect(audit).toBeGreaterThan(claim);
-    expect(email).toBeGreaterThan(audit);
-    expect(source).toContain('ConditionalAppointmentTransitionError');
-    expect(source).not.toContain('expired: stale.length');
+    expect(source.slice(audit, transactionEnd)).toMatch(/},\s*tx,?\s*\);/);
+    expect(transactionEnd).toBeGreaterThan(audit);
+    expect(lostRace).toBeGreaterThan(transactionEnd);
+    expect(increment).toBeGreaterThan(lostRace);
+    expect(email).toBeGreaterThan(increment);
+    expect(source).not.toContain('expired: expiryCandidates.length');
+  });
+
+  it('has no direct appointment writer that cancels requested appointments', () => {
+    const source = route('cron/appointments');
+
+    expect(source).not.toMatch(
+      /prisma\.appointment\.(?:update|updateMany)\s*\(\s*\{[\s\S]*?data:\s*\{\s*status:\s*'CANCELLED'/,
+    );
   });
 
   it('claims confirmation before creating any client or session side effects', () => {
