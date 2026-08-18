@@ -45,9 +45,19 @@ The script uses the migration-owner connection, validates `DATABASE_RUNTIME_ROLE
 the role already exists, and grants schema usage, CRUD on all existing application tables,
 sequence use, plus matching default privileges for tables created by later migrations. It then
 verifies `note_signature_versions` is still owned by the current migration role, revokes all
-runtime privileges on that table, and grants only `SELECT, INSERT`. Re-running the script is
-idempotent. It embeds and logs no URL or credential. The migration separately revokes `UPDATE`,
-`DELETE`, and `TRUNCATE` from `PUBLIC`.
+runtime privileges on that table, grants only `SELECT, INSERT`, and explicitly revokes execution
+of `redact_client_signed_note_phi`. The lawful DPDP fulfilment route invokes that narrowly scoped
+owner-controlled function with `DATABASE_URL_UNPOOLED`; runtime and `PUBLIC` cannot execute it or
+update signature history directly. Re-running the script is idempotent. It embeds and logs no URL
+or credential. The migration separately revokes function execution and destructive table access
+from `PUBLIC`.
+
+After applying grants, deployment connects through `DATABASE_RUNTIME_URL` and verifies the live
+identity (`current_user` and `current_database()`). It fails closed if the role is superuser,
+`BYPASSRLS`, can create roles/databases, replicates, belongs to a table-owner role, inherits
+destructive access to signature history, or has `CREATE` on `public`. The query uses
+`pg_has_role`, `has_table_privilege`, `has_function_privilege`, and `has_schema_privilege`;
+connection strings are never printed.
 
 A missing role, owner drift, role/URL mismatch, or privilege-setup failure blocks deployment.
 Do not point application runtime traffic at `DATABASE_URL_UNPOOLED`.

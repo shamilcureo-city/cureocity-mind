@@ -29,7 +29,9 @@ describe('therapy-note database integrity boundary', () => {
 
   it('allows the only audited content writers to set a transaction-local context', () => {
     const sign = source('apps/web/app/api/v1/sessions/[id]/sign/route.ts');
-    const erasure = source('apps/web/app/api/v1/admin/erasure/[id]/route.ts');
+    const erasure = source(
+      'prisma/migrations/20260818100000_dpdp_signed_note_erasure/migration.sql',
+    );
     expect(sign).toContain("set_config('app.therapy_note_write_context', 'signing', true)");
     expect(erasure).toContain("set_config('app.therapy_note_write_context', 'erasure', true)");
     expect(source('apps/web/app/api/v1/sessions/[id]/note/edit/route.ts')).not.toMatch(
@@ -47,7 +49,6 @@ describe('therapy-note database integrity boundary', () => {
       .map((path) => relative(repo, path).replace(/\\/g, '/'))
       .sort();
     expect(writers).toEqual([
-      'apps/web/app/api/v1/admin/erasure/[id]/route.ts',
       'apps/web/app/api/v1/sessions/[id]/note/unlock/route.ts',
       'apps/web/app/api/v1/sessions/[id]/sign/route.ts',
     ]);
@@ -55,6 +56,50 @@ describe('therapy-note database integrity boundary', () => {
     const unlockMutation = unlock.match(/therapyNote\.update\(\{[\s\S]*?\n\s*\}\);/)?.[0];
     expect(unlockMutation).toBeDefined();
     expect(unlockMutation).not.toMatch(/\bcontent\s*:/);
+  });
+});
+
+describe('DPDP erasure decision integrity', () => {
+  it('locks request and client, then conditionally transitions the expected status', () => {
+    const route = source('apps/web/app/api/v1/admin/erasure/[id]/route.ts');
+    expect(route).toContain('FROM "client_erasure_requests"');
+    expect(route).toContain('FOR UPDATE OF r, c');
+    expect(route).toContain('clientErasureRequest.updateMany');
+    expect(route).toContain('status: locked.status');
+    expect(route).toContain('Erasure decision changed concurrently');
+  });
+
+  it('uses the scoped owner function and hashes resolution notes in audits', () => {
+    const route = source('apps/web/app/api/v1/admin/erasure/[id]/route.ts');
+    expect(route).toContain('redact_client_signed_note_phi');
+    expect(route).toContain("import { migrationPrisma } from '@/lib/prisma-migration'");
+    expect(route).toContain('migrationPrisma.$transaction');
+    expect(route).toContain('resolutionNotesHashHex');
+    expect(route).not.toMatch(
+      /metadata:[\s\S]{0,500}resolutionNotes:\s*body\.value\.resolutionNotes/,
+    );
+  });
+});
+
+describe('signed-note correction concurrency boundary', () => {
+  it('locks Session, NoteDraft and TherapyNote in order and rejects stale draft state', () => {
+    const route = source('apps/web/app/api/v1/sessions/[id]/note/edit/route.ts');
+    const session = route.indexOf('FROM "sessions"');
+    const draft = route.indexOf('FROM "note_drafts"');
+    const note = route.indexOf('FROM "therapy_notes"');
+    expect(session).toBeGreaterThan(0);
+    expect(draft).toBeGreaterThan(session);
+    expect(note).toBeGreaterThan(draft);
+    expect(route.match(/FOR UPDATE/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(route).toContain('Draft changed concurrently; reload before editing');
+    expect(route).toContain('canonicalJson(draft.content) !== canonicalJson(note.content)');
+    expect(route).toContain('noteDraft.updateMany');
+  });
+
+  it('resolves medical correction shape from the locked practitioner vertical', () => {
+    const route = source('apps/web/app/api/v1/sessions/[id]/note/edit/route.ts');
+    expect(route).toContain('MedicalEncounterNoteV1Schema');
+    expect(route).toContain('signableKindFor(session.kind as never, session.vertical as never)');
   });
 });
 
@@ -113,5 +158,50 @@ describe('signature-history least privilege', () => {
       deploy.lastIndexOf('prisma migrate deploy'),
     );
     expect(deploy).toContain('VERCEL_ENV');
+    expect(deploy).toContain('verify-runtime-db-role.mjs');
+  });
+
+  it('provides an owner-only, transaction-scoped DPDP erasure path for every signed PHI field', () => {
+    const migration = source(
+      'prisma/migrations/20260818100000_dpdp_signed_note_erasure/migration.sql',
+    );
+    expect(migration).toContain('redact_client_signed_note_phi');
+    expect(migration).toContain(
+      "set_config('app.note_signature_erasure_context', 'lawful_erasure', true)",
+    );
+    expect(migration).toContain('UPDATE "therapy_notes"');
+    expect(migration).toContain('"content" = \'{}\'::jsonb');
+    expect(migration).toContain('"rxPad" = NULL');
+    expect(migration).toContain('"signPayload" = NULL');
+    expect(migration).toContain('UPDATE "note_signature_versions"');
+    expect(migration).toContain(
+      'REVOKE ALL ON FUNCTION redact_client_signed_note_phi(TEXT, TEXT) FROM PUBLIC',
+    );
+    expect(migration).toContain('current_user = relation_owner');
+    expect(migration).toContain('note_signature_versions is append-only');
+  });
+
+  it('verifies effective runtime identity and privileges through the runtime connection', () => {
+    const setup = source('scripts/configure-runtime-db-role.mjs');
+    const verify = source('scripts/verify-runtime-db-role.mjs');
+    const deploy = source('scripts/vercel-db-setup.sh');
+    expect(deploy).toContain('verify-runtime-db-role.mjs');
+    expect(setup).toContain('REVOKE ALL ON FUNCTION redact_client_signed_note_phi(TEXT, TEXT)');
+    expect(setup).not.toContain(
+      'GRANT EXECUTE ON FUNCTION redact_client_signed_note_phi(TEXT, TEXT)',
+    );
+    expect(verify).toContain('DATABASE_RUNTIME_URL');
+    expect(verify).toContain('current_user');
+    expect(verify).toContain('current_database()');
+    expect(verify).toContain('rolsuper');
+    expect(verify).toContain('rolbypassrls');
+    expect(verify).toContain('rolcreaterole');
+    expect(verify).toContain('rolcreatedb');
+    expect(verify).toContain('rolreplication');
+    expect(verify).toContain('pg_has_role');
+    expect(verify).toContain('has_table_privilege');
+    expect(verify).toContain('has_function_privilege');
+    expect(verify).toContain('has_schema_privilege');
+    expect(verify).not.toMatch(/console\.(?:log|error)\([^)]*runtimeUrl/);
   });
 });

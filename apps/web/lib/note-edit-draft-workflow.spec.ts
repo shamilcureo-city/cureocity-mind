@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   writeAudit: vi.fn(),
   sessionFindUnique: vi.fn(),
   transaction: vi.fn(),
+  queryRaw: vi.fn(),
   draftUpdate: vi.fn(),
   noteUpdate: vi.fn(),
   noteEditCreateMany: vi.fn(),
@@ -15,6 +16,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@cureocity/contracts', () => ({
   IntakeNoteV1Schema: { safeParse: mocks.noteSafeParse, parse: (value: unknown) => value },
+  MedicalEncounterNoteV1Schema: {
+    safeParse: mocks.noteSafeParse,
+    parse: (value: unknown) => value,
+  },
   TherapyNoteV1Schema: { safeParse: mocks.noteSafeParse, parse: (value: unknown) => value },
   ReviseNoteInputSchema: {},
 }));
@@ -47,7 +52,8 @@ const current = {
 const next = { ...current, subjective: 'new private note' };
 const reason = 'private correction rationale';
 const tx = {
-  noteDraft: { update: mocks.draftUpdate },
+  $queryRaw: mocks.queryRaw,
+  noteDraft: { updateMany: mocks.draftUpdate },
   therapyNote: { update: mocks.noteUpdate },
   noteEdit: { createMany: mocks.noteEditCreateMany },
 };
@@ -69,7 +75,24 @@ beforeEach(() => {
     .mockReturnValueOnce({ success: true, data: current })
     .mockReturnValueOnce({ success: true, data: next });
   mocks.transaction.mockImplementation((callback) => callback(tx));
-  mocks.draftUpdate.mockResolvedValue({ id: 'draft-1' });
+  mocks.draftUpdate.mockResolvedValue({ count: 1 });
+  mocks.queryRaw.mockImplementation((strings: TemplateStringsArray) => {
+    const sql = Array.from(strings).join('?');
+    if (sql.includes('FROM "sessions"')) {
+      return Promise.resolve([
+        { id: 'session-1', psychologistId: 'psy-1', kind: 'TREATMENT', vertical: 'THERAPIST' },
+      ]);
+    }
+    if (sql.includes('FROM "note_drafts"')) {
+      return Promise.resolve([{ id: 'draft-1', status: 'COMPLETED', content: current }]);
+    }
+    if (sql.includes('FROM "therapy_notes"')) {
+      return Promise.resolve([
+        { id: 'note-1', draftId: 'draft-1', locked: false, content: current },
+      ]);
+    }
+    return Promise.resolve([]);
+  });
 });
 
 function request() {
@@ -88,7 +111,7 @@ describe('signed-note edit draft workflow', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.draftUpdate).toHaveBeenCalledWith({
-      where: { id: 'draft-1' },
+      where: { id: 'draft-1', status: 'COMPLETED' },
       data: { content: next, status: 'COMPLETED' },
     });
     expect(mocks.noteUpdate).not.toHaveBeenCalled();

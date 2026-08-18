@@ -151,6 +151,15 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   const input = await parseJson(req, SignNoteInputSchema);
   if (!input.ok) return input.response;
 
+  const serverReceivedAt = new Date();
+  const clientSignedAt = new Date(input.value.signedAt);
+  if (Math.abs(serverReceivedAt.getTime() - clientSignedAt.getTime()) > 5 * 60 * 1000) {
+    return NextResponse.json(
+      { error: 'Client signing timestamp is outside the five-minute server receipt window' },
+      { status: 409 },
+    );
+  }
+
   const submittedHash = createHash('sha256').update(input.value.payload).digest('hex');
   if (submittedHash !== input.value.payloadHashHex) {
     return NextResponse.json(
@@ -380,7 +389,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         content: finalNote as unknown as Prisma.InputJsonValue,
         rxPad:
           signedRxPad === null ? Prisma.DbNull : (signedRxPad as unknown as Prisma.InputJsonValue),
-        signedAt: new Date(input.value.signedAt),
+        signedAt: serverReceivedAt,
         signedBy: auth.value.psychologistId,
         locked: true,
         signCredentialId: input.value.assertion?.credentialId ?? null,
@@ -425,6 +434,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           webauthnUsed: input.value.assertion !== undefined,
           webauthnEnforced: credentialBump !== null,
           kind: signableKind,
+          clientSignedAt: input.value.signedAt,
+          serverReceivedAt: serverReceivedAt.toISOString(),
           ...(medicalAuthority && {
             medicalSigningCredentialId: medicalAuthority.id,
             medicalSigningCredentialKind: medicalAuthority.kind,

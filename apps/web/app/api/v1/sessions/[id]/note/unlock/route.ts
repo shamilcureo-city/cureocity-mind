@@ -74,7 +74,8 @@ function assertPayloadBoundVersion(note: LockedNote, sessionId: string): void {
     payload.sessionId !== sessionId ||
     canonicalJson(payload.note) !== canonicalJson(note.content) ||
     canonicalJson(payload.rxPad) !== canonicalJson(note.rxPad) ||
-    payload.signedAt !== note.signedAt.toISOString() ||
+    typeof payload.signedAt !== 'string' ||
+    Math.abs(new Date(payload.signedAt).getTime() - note.signedAt.getTime()) > 5 * 60 * 1000 ||
     payloadHash !== note.signChallengeHashHex ||
     !webauthnComplete
   ) {

@@ -49,6 +49,7 @@ BEGIN
   -- coherent least-privilege access. The immutable signature-history table is
   -- narrowed again below after the broad application grant.
   EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', configured_role);
+  EXECUTE format('REVOKE CREATE ON SCHEMA public FROM %I', configured_role);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO %I', configured_role);
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO %I', configured_role);
   EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', configured_role);
@@ -56,6 +57,7 @@ BEGIN
 
   EXECUTE format('REVOKE ALL PRIVILEGES ON TABLE "note_signature_versions" FROM %I', configured_role);
   EXECUTE format('GRANT SELECT, INSERT ON TABLE "note_signature_versions" TO %I', configured_role);
+  EXECUTE format('REVOKE ALL ON FUNCTION redact_client_signed_note_phi(TEXT, TEXT) FROM %I', configured_role);
 END
 $runtime_role$;
 `;
@@ -67,4 +69,4 @@ const result = spawnSync(
 );
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);
-console.log('Runtime database role privileges verified and applied.');
+console.log('Runtime database role privileges applied.');

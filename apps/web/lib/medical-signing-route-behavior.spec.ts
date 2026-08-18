@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalJson, canonicalSigningPayload } from './sign-note-payload';
 
 const mocks = vi.hoisted(() => ({
@@ -109,6 +109,8 @@ function sqlText(strings: TemplateStringsArray): string {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-18T12:00:00.000Z'));
   vi.clearAllMocks();
   mocks.signableKind = 'MEDICAL';
   mocks.requirePsychologistId.mockResolvedValue(auth);
@@ -215,7 +217,83 @@ beforeEach(() => {
   });
 });
 
+afterAll(() => vi.useRealTimers());
+
 describe('medical signing route transaction behavior', () => {
+  it.each([
+    ['stale', '2026-08-18T11:54:59.999Z'],
+    ['future', '2026-08-18T12:05:00.001Z'],
+  ])(
+    'rejects a %s client timestamp outside the five-minute receipt window',
+    async (_, signedAt) => {
+      const skewedPayload = canonicalSigningPayload({
+        sessionId: 'session-1',
+        draftContentHashHex,
+        note: finalNote,
+        edits: [],
+        signedAt,
+        safetyOverride: undefined,
+        rxPad: null,
+      });
+      mocks.parseJson.mockResolvedValue({
+        ok: true,
+        value: {
+          payload: skewedPayload,
+          payloadHashHex: createHash('sha256').update(skewedPayload).digest('hex'),
+          note: finalNote,
+          edits: [],
+          signedAt,
+        },
+      });
+      const response = await POST(request() as never, {
+        params: Promise.resolve({ id: 'session-1' }),
+      });
+      expect(response.status).toBe(409);
+      expect(mocks.noteCreate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('stores server receipt time while retaining bounded client time in proof and audit', async () => {
+    const clientSignedAt = '2026-08-18T11:59:00.000Z';
+    const clientPayload = canonicalSigningPayload({
+      sessionId: 'session-1',
+      draftContentHashHex,
+      note: finalNote,
+      edits: [],
+      signedAt: clientSignedAt,
+      safetyOverride: undefined,
+      rxPad: null,
+    });
+    mocks.parseJson.mockResolvedValue({
+      ok: true,
+      value: {
+        payload: clientPayload,
+        payloadHashHex: createHash('sha256').update(clientPayload).digest('hex'),
+        note: finalNote,
+        edits: [],
+        signedAt: clientSignedAt,
+      },
+    });
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.noteCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        signedAt: new Date('2026-08-18T12:00:00.000Z'),
+        signPayload: clientPayload,
+      }),
+    });
+    expect(mocks.writeAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          clientSignedAt,
+          serverReceivedAt: '2026-08-18T12:00:00.000Z',
+        }),
+      }),
+      tx,
+    );
+  });
   it('takes every authoritative signing read inside the transaction under row locks', async () => {
     const response = await POST(request() as never, {
       params: Promise.resolve({ id: 'session-1' }),

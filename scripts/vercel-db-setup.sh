@@ -84,4 +84,5 @@ fi
 # deploy. Preview databases retain their existing single-role compatibility.
 if [ "${VERCEL_ENV:-production}" = "production" ]; then
   node scripts/configure-runtime-db-role.mjs
+  node scripts/verify-runtime-db-role.mjs
 fi
