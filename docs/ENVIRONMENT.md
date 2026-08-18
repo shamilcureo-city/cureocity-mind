@@ -63,7 +63,7 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `FIREBASE_PROJECT_ID` / `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` | Server-side Firebase Admin. **If any is missing → `AUTH_BYPASS` auto-engages** (fails closed on Vercel prod).                                                                       |
 | `NEXT_PUBLIC_FIREBASE_*` (public)                                        | Browser Firebase SDK config.                                                                                                                                                        |
-| `AUTH_BYPASS`                                                            | Explicit override. `true` = every sign-in resolves to the demo therapist.                                                                                                           |
+| `AUTH_BYPASS`                                                            | Non-production override. `true` = practitioner sign-in resolves to the demo therapist; ignored in production.                                                                       |
 | `BOOTSTRAP_ADMIN_EMAILS`                                                 | Comma-separated emails auto-granted ADMIN on first sign-in.                                                                                                                         |
 | `SESSION_COOKIE_DOMAIN`                                                  | Unset = host-only login cookie (default; localhost/previews need this). Set `.cureocity.in` in prod to share login across subdomains for the `admin.cureocity.in` operator console. |
 | `WEBAUTHN_TICKET_SECRET`                                                 | HMAC key for the registration ticket (≥32 chars).                                                                                                                                   |
@@ -132,8 +132,9 @@ So a human only ever sees real Vertex output or a loud failure — never a silen
 
 ## 9. Gotchas
 
-- Missing Firebase env silently flips the app into **auth bypass** — a
-  security footgun in prod; `GET /api/v1/health/auth` reports the live posture.
+- Missing Firebase env silently flips non-production deployments into **auth
+  bypass**. Production instead fails closed; `GET /api/v1/health/auth` reports
+  the live posture.
 - The gateway and the app must share the **same** `LIVE_GATEWAY_SECRET`, or
   every live consult 401s at connect.
 - `.env.example` is a snapshot — trust the code + this file for KMS (`gcp-kms`)

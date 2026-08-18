@@ -3,11 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   firebaseAuth: vi.fn(() => null),
   getEffectiveCapabilities: vi.fn(),
+  psychologistFindUnique: vi.fn(),
   writeAudit: vi.fn(),
 }));
 
 vi.mock('./firebase-admin', () => ({ firebaseAuth: mocks.firebaseAuth }));
-vi.mock('./prisma', () => ({ prisma: { psychologist: { findUnique: vi.fn() } } }));
+vi.mock('./prisma', () => ({
+  prisma: { psychologist: { findUnique: mocks.psychologistFindUnique } },
+}));
 vi.mock('./capabilities', () => ({
   getEffectiveCapabilities: mocks.getEffectiveCapabilities,
   serializeCapabilities: (effective: { capabilities: Set<string> }) =>
@@ -18,7 +21,12 @@ vi.mock('./audit', () => ({
   writeAudit: mocks.writeAudit,
 }));
 
-import { isAuthBypassed, requireCapability } from './auth-server';
+import {
+  isAuthBypassed,
+  requireCapability,
+  requirePsychologistId,
+  resolvePsychologist,
+} from './auth-server';
 
 const originalEnv = { ...process.env };
 
@@ -43,6 +51,95 @@ describe('authentication bypass boundary', () => {
   it.each(['development', 'test'] as const)('permits explicit bypass in %s', (NODE_ENV) => {
     process.env = { ...originalEnv, AUTH_BYPASS: 'true', NODE_ENV, VERCEL_ENV: 'preview' };
     expect(isAuthBypassed()).toBe(true);
+  });
+});
+
+describe('practitioner state boundary', () => {
+  it.each([
+    { status: 'PENDING_VERIFICATION', deletedAt: null },
+    { status: 'SUSPENDED', deletedAt: null },
+    { status: 'OFFBOARDED', deletedAt: null },
+    { status: 'ACTIVE', deletedAt: new Date('2026-01-01T00:00:00.000Z') },
+  ] as const)(
+    'rejects unavailable practitioner state %# before resolving grants',
+    async (state) => {
+      process.env = { ...originalEnv, NODE_ENV: 'test', AUTH_BYPASS: 'true' };
+      mocks.psychologistFindUnique.mockResolvedValue({
+        id: 'psy-1',
+        role: 'THERAPIST',
+        vertical: 'THERAPIST',
+        ...state,
+      });
+
+      const resolved = await resolvePsychologist(
+        new Request('https://example.test/api/v1/sessions') as never,
+      );
+
+      expect(resolved.ok).toBe(false);
+      if (!resolved.ok) expect(resolved.response.status).toBe(403);
+      expect(mocks.getEffectiveCapabilities).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('regulated route boundary', () => {
+  it.each([
+    ['absent', []],
+    ['revoked', []],
+  ] as const)(
+    'denies signed-note search when documentation authority is %s',
+    async (_state, caps) => {
+      process.env = { ...originalEnv, NODE_ENV: 'test', AUTH_BYPASS: 'true' };
+      mocks.psychologistFindUnique.mockResolvedValue({
+        id: 'psy-1',
+        role: 'THERAPIST',
+        vertical: 'THERAPIST',
+        deletedAt: null,
+        status: 'ACTIVE',
+      });
+      mocks.getEffectiveCapabilities.mockResolvedValue({
+        profession: 'CLINICAL_PSYCHOLOGIST',
+        capabilities: new Set(caps),
+        verifiedCredentialKinds: new Set(),
+      });
+
+      const auth = await requirePsychologistId(
+        new Request('https://example.test/api/v1/search/notes?q=sleep', { method: 'GET' }) as never,
+      );
+
+      expect(auth.ok).toBe(false);
+      if (!auth.ok) expect(auth.response.status).toBe(403);
+      expect(mocks.writeAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'CAPABILITY_ACCESS_DENIED',
+          targetId: 'BEHAVIORAL_HEALTH_DOCUMENTATION',
+        }),
+      );
+    },
+  );
+
+  it('fails closed even when denial audit persistence is unavailable', async () => {
+    process.env = { ...originalEnv, NODE_ENV: 'test', AUTH_BYPASS: 'true' };
+    mocks.psychologistFindUnique.mockResolvedValue({
+      id: 'psy-1',
+      role: 'THERAPIST',
+      vertical: 'THERAPIST',
+      deletedAt: null,
+      status: 'ACTIVE',
+    });
+    mocks.getEffectiveCapabilities.mockResolvedValue({
+      profession: 'CLINICAL_PSYCHOLOGIST',
+      capabilities: new Set(),
+      verifiedCredentialKinds: new Set(),
+    });
+    mocks.writeAudit.mockRejectedValueOnce(new Error('audit storage unavailable'));
+
+    const auth = await requirePsychologistId(
+      new Request('https://example.test/api/v1/search/notes', { method: 'GET' }) as never,
+    );
+
+    expect(auth.ok).toBe(false);
+    if (!auth.ok) expect(auth.response.status).toBe(403);
   });
 });
 

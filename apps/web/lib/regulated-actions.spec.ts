@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { requiredMedicalCapabilities } from './regulated-actions';
+import { EMBEDDED_ENCOUNTER_VITALS_POLICY, requiredMedicalCapabilities } from './regulated-actions';
 
 describe('mixed medical action capability planning', () => {
+  it('classifies embedded vitals separately from longitudinal readings', () => {
+    expect(EMBEDDED_ENCOUNTER_VITALS_POLICY).toEqual({
+      artifactCapability: 'MEDICAL_DOCUMENTATION',
+      longitudinalPersistenceCapability: 'CHRONIC_CARE',
+    });
+  });
+
   it('gates each requested optional action independently', () => {
     expect(
       requiredMedicalCapabilities({
@@ -26,7 +33,7 @@ describe('mixed medical action capability planning', () => {
         hasVitals: true,
         hasRxPad: false,
       }),
-    ).toEqual(['CHRONIC_CARE']);
+    ).toEqual([]);
     expect(
       requiredMedicalCapabilities({
         medications: 0,

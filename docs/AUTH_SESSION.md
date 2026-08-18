@@ -215,10 +215,10 @@ vercel-db-setup.sh`, PR #19). It writes the dev fixtures
   with `prisma migrate resolve --rolled-back`, and retries once — safe
   only because **every migration is idempotent** (`ADD COLUMN IF NOT
 EXISTS`, guarded `CREATE TYPE`, …). New migrations must preserve that.
-- **`AUTH_BYPASS`** still resolves every request to the seeded fixture
-  (`dev-firebase-uid-priya`) when set; it auto-engages when Firebase env
-  is missing on a non-production deploy and **fails closed** (no bypass)
-  on Vercel production. The `/app` layout shows a "Demo mode" banner when
+- **`AUTH_BYPASS`** resolves practitioner requests to the seeded fixture
+  (`dev-firebase-uid-priya`) only outside production; it auto-engages when
+  Firebase env is missing on a non-production deploy and **fails closed**
+  (no bypass) in production. The `/app` layout shows a "Demo mode" banner when
   bypass is active on a Vercel deploy.
 
 ---

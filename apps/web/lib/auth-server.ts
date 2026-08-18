@@ -8,6 +8,10 @@ import { firebaseAuth } from './firebase-admin';
 import { prisma } from './prisma';
 import { getEffectiveCapabilities, serializeCapabilities } from './capabilities';
 import { auditMetadataFromRequest, writeAudit } from './audit';
+import {
+  regulatedPolicyForRequest,
+  resolveRegulatedRequirements,
+} from './regulated-route-capabilities';
 
 /**
  * Three resolution functions, ported from the NestJS guards:
@@ -27,15 +31,12 @@ import { auditMetadataFromRequest, writeAudit } from './audit';
  *     plain same-origin fetches from client components ride on the
  *     cookie — no Bearer plumbing in components needed.
  *
- * Bypass (resolves everything to the seeded dev fixtures) engages when:
- *   - AUTH_BYPASS=true                (explicit opt-in, any environment), or
- *   - Firebase Admin is unconfigured AND this is NOT a Vercel
- *     production deployment.
+ * Outside production, bypass (resolves to seeded dev fixtures) engages when
+ * AUTH_BYPASS=true or Firebase Admin is unconfigured.
  *
- * On Vercel production with Firebase unconfigured and no explicit
- * AUTH_BYPASS, requests FAIL CLOSED with 503 instead of silently
- * becoming the demo therapist. Demo deployments must now opt in
- * explicitly with AUTH_BYPASS=true.
+ * On production with Firebase unconfigured, requests FAIL CLOSED with 503
+ * instead of silently becoming the demo therapist. AUTH_BYPASS is ignored in
+ * production; demo deployments must use a non-production environment.
  */
 
 const DEV_BYPASS_FIREBASE_UID = 'dev-firebase-uid-priya';
@@ -105,6 +106,30 @@ export interface AuthenticatedClient {
 }
 
 type Resolved<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
+
+async function auditCapabilityDenials(
+  req: NextRequest,
+  psychologistId: string,
+  capabilities: readonly PractitionerCapability[],
+): Promise<void> {
+  const results = await Promise.allSettled(
+    capabilities.map((capability) =>
+      writeAudit({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: psychologistId,
+        action: 'CAPABILITY_ACCESS_DENIED',
+        targetType: 'PractitionerCapability',
+        targetId: capability,
+        metadata: auditMetadataFromRequest(req),
+      }),
+    ),
+  );
+  if (results.some((result) => result.status === 'rejected')) {
+    // Authorization remains fail-closed even when the best-effort denial
+    // audit sink is unavailable. Do not include request or patient data here.
+    console.error('[auth] Failed to persist one or more capability-denial audit events.');
+  }
+}
 
 /**
  * Firebase Admin token/cookie verification fetches Google's public
@@ -218,7 +243,13 @@ export async function resolvePsychologist(req: NextRequest): Promise<Resolved<Au
     select: { id: true, role: true, vertical: true, deletedAt: true, status: true },
   });
   const user: AuthenticatedUser = { firebaseUid: uidRes.value };
-  if (psy && psy.deletedAt === null) {
+  if (psy && (psy.deletedAt !== null || psy.status !== 'ACTIVE')) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Practitioner account is not active' }, { status: 403 }),
+    };
+  }
+  if (psy) {
     user.psychologistId = psy.id;
     user.role = psy.role;
     user.vertical = psy.vertical;
@@ -247,6 +278,27 @@ export async function requirePsychologistId(
       ),
     };
   }
+
+  const routePolicy = regulatedPolicyForRequest(new URL(req.url).pathname, req.method);
+  if (routePolicy) {
+    const required = resolveRegulatedRequirements(routePolicy, resolved.value.vertical);
+    const granted = new Set(resolved.value.capabilities ?? []);
+    const authorized =
+      routePolicy.mode === 'any'
+        ? required.some((capability) => granted.has(capability))
+        : required.every((capability) => granted.has(capability));
+    if (!authorized) {
+      const denied = required.filter((capability) => !granted.has(capability));
+      await auditCapabilityDenials(req, resolved.value.psychologistId, denied);
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: 'This account is not authorized for the requested clinical capability' },
+          { status: 403 },
+        ),
+      };
+    }
+  }
   return {
     ok: true,
     value: { user: resolved.value, psychologistId: resolved.value.psychologistId },
@@ -269,14 +321,7 @@ export async function requireCapability(
     resolved.value.user.verifiedCredentialKinds = [...effective.verifiedCredentialKinds].sort();
     return resolved;
   }
-  await writeAudit({
-    actorType: 'PSYCHOLOGIST',
-    actorPsychologistId: resolved.value.psychologistId,
-    action: 'CAPABILITY_ACCESS_DENIED',
-    targetType: 'PractitionerCapability',
-    targetId: capability,
-    metadata: auditMetadataFromRequest(req),
-  });
+  await auditCapabilityDenials(req, resolved.value.psychologistId, [capability]);
   return {
     ok: false,
     response: NextResponse.json(
@@ -304,18 +349,7 @@ export async function requireAnyCapability(
   resolved.value.user.verifiedCredentialKinds = [...effective.verifiedCredentialKinds].sort();
   if (capabilities.some((capability) => effective.capabilities.has(capability))) return resolved;
 
-  await Promise.all(
-    capabilities.map((capability) =>
-      writeAudit({
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: resolved.value.psychologistId,
-        action: 'CAPABILITY_ACCESS_DENIED',
-        targetType: 'PractitionerCapability',
-        targetId: capability,
-        metadata: auditMetadataFromRequest(req),
-      }),
-    ),
-  );
+  await auditCapabilityDenials(req, resolved.value.psychologistId, capabilities);
   return {
     ok: false,
     response: NextResponse.json(
