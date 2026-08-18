@@ -123,7 +123,7 @@ INSERT INTO "practitioner_credentials" (
   "id", "psychologistId", "kind", "registrationNumber", "issuingAuthority", "jurisdiction",
   "status", "verifiedAt", "createdAt", "updatedAt"
 )
-SELECT concat('orc_', md5(p."id" || ':rci')), p."id", 'RCI_REGISTRATION', p."rciNumber",
+SELECT concat('c', substr(md5(p."id" || ':rci'), 1, 24)), p."id", 'RCI_REGISTRATION', p."rciNumber",
        'Rehabilitation Council of India', 'IN',
        CASE WHEN p."rciVerifiedAt" IS NOT NULL THEN 'VERIFIED'::"PractitionerCredentialStatus"
             ELSE 'PENDING_VERIFICATION'::"PractitionerCredentialStatus" END,
@@ -136,7 +136,7 @@ INSERT INTO "practitioner_credentials" (
   "id", "psychologistId", "kind", "registrationNumber", "issuingAuthority", "jurisdiction",
   "status", "createdAt", "updatedAt"
 )
-SELECT concat('orc_', md5(p."id" || ':medical')), p."id", 'STATE_MEDICAL_COUNCIL_REGISTRATION',
+SELECT concat('c', substr(md5(p."id" || ':medical'), 1, 24)), p."id", 'STATE_MEDICAL_COUNCIL_REGISTRATION',
        p."medicalRegNumber", 'Pending council verification', 'IN', 'PENDING_VERIFICATION',
        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM "psychologists" p
@@ -148,15 +148,14 @@ ON CONFLICT ("kind", "registrationNumber", "issuingAuthority") DO NOTHING;
 INSERT INTO "practitioner_capability_grants" (
   "id", "psychologistId", "capability", "source", "active", "grantedAt"
 )
-SELECT concat('orb_', md5(p."id" || ':' || c.capability)), p."id",
+SELECT concat('c', substr(md5(p."id" || ':' || c.capability), 1, 24)), p."id",
        c.capability::"PractitionerCapability", 'LEGACY_BACKFILL', true, CURRENT_TIMESTAMP
 FROM "psychologists" p
 CROSS JOIN LATERAL (
   SELECT unnest(
     CASE WHEN p."vertical" = 'DOCTOR' THEN ARRAY[
       'AMBIENT_CAPTURE', 'LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION', 'CLINICAL_ANALYSIS',
-      'PRESCRIPTION_DRAFTING', 'CLINICAL_ORDERS', 'CHRONIC_CARE', 'FHIR_EXPORT',
-      'ABDM_PUSH', 'PATIENT_SHARING'
+      'PRESCRIPTION_DRAFTING', 'CLINICAL_ORDERS', 'CHRONIC_CARE', 'PATIENT_SHARING'
     ]::text[] ELSE ARRAY[
       'AMBIENT_CAPTURE', 'BEHAVIORAL_HEALTH_DOCUMENTATION', 'CLINICAL_ANALYSIS',
       'THERAPY_WORKFLOWS', 'MEASUREMENT_BASED_CARE', 'SAFETY_PLANNING', 'PATIENT_SHARING'
