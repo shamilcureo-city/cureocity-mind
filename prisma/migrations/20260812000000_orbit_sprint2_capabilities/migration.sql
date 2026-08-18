@@ -38,12 +38,6 @@ EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 ALTER TABLE "psychologists"
   ADD COLUMN IF NOT EXISTS "profession" "PractitionerProfession";
-UPDATE "psychologists"
-SET "profession" = CASE
-  WHEN "vertical" = 'DOCTOR' THEN 'PHYSICIAN'::"PractitionerProfession"
-  ELSE 'PSYCHOLOGIST'::"PractitionerProfession"
-END
-WHERE "profession" IS NULL;
 
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'CAPABILITY_ACCESS_DENIED';
 
@@ -61,6 +55,30 @@ CREATE TABLE IF NOT EXISTS "practitioner_credentials" (
   "updatedAt" TIMESTAMP(3) NOT NULL,
   CONSTRAINT "practitioner_credentials_pkey" PRIMARY KEY ("id")
 );
+
+DO $$ BEGIN
+  ALTER TABLE "practitioner_credentials"
+    ADD CONSTRAINT "practitioner_credentials_registrationNumber_nonblank_check"
+    CHECK (btrim("registrationNumber") <> '');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "practitioner_credentials"
+    ADD CONSTRAINT "practitioner_credentials_issuingAuthority_nonblank_check"
+    CHECK (btrim("issuingAuthority") <> '');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "practitioner_credentials"
+    ADD CONSTRAINT "practitioner_credentials_jurisdiction_nonblank_check"
+    CHECK (btrim("jurisdiction") <> '');
+EXCEPTION WHEN duplicate_object THEN null; END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "practitioner_credentials"
+    ADD CONSTRAINT "practitioner_credentials_verified_status_timestamp_check"
+    CHECK ("status" <> 'VERIFIED' OR "verifiedAt" IS NOT NULL);
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 CREATE TABLE IF NOT EXISTS "practitioner_capability_grants" (
   "id" TEXT NOT NULL,
@@ -123,13 +141,15 @@ INSERT INTO "practitioner_credentials" (
   "id", "psychologistId", "kind", "registrationNumber", "issuingAuthority", "jurisdiction",
   "status", "verifiedAt", "createdAt", "updatedAt"
 )
-SELECT concat('c', substr(md5(p."id" || ':rci'), 1, 24)), p."id", 'RCI_REGISTRATION', p."rciNumber",
+SELECT concat('c', substr(md5(p."id" || ':rci'), 1, 24)), p."id", 'RCI_REGISTRATION',
+       NULLIF(btrim(p."rciNumber"), ''),
        'Rehabilitation Council of India', 'IN',
-       CASE WHEN p."rciVerifiedAt" IS NOT NULL THEN 'VERIFIED'::"PractitionerCredentialStatus"
+       CASE WHEN p."rciVerifiedAt" IS NOT NULL AND p."rciVerifiedAt" <= CURRENT_TIMESTAMP
+            THEN 'VERIFIED'::"PractitionerCredentialStatus"
             ELSE 'PENDING_VERIFICATION'::"PractitionerCredentialStatus" END,
        p."rciVerifiedAt", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM "psychologists" p
-WHERE p."vertical" = 'THERAPIST' AND p."rciNumber" IS NOT NULL
+WHERE p."vertical" = 'THERAPIST' AND NULLIF(btrim(p."rciNumber"), '') IS NOT NULL
 ON CONFLICT ("kind", "registrationNumber", "issuingAuthority") DO NOTHING;
 
 INSERT INTO "practitioner_credentials" (
@@ -137,10 +157,11 @@ INSERT INTO "practitioner_credentials" (
   "status", "createdAt", "updatedAt"
 )
 SELECT concat('c', substr(md5(p."id" || ':medical'), 1, 24)), p."id", 'STATE_MEDICAL_COUNCIL_REGISTRATION',
-       p."medicalRegNumber", 'Pending council verification', 'IN', 'PENDING_VERIFICATION',
+       NULLIF(btrim(p."medicalRegNumber"), ''), 'Pending council verification', 'IN',
+       'PENDING_VERIFICATION',
        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM "psychologists" p
-WHERE p."medicalRegNumber" IS NOT NULL
+WHERE NULLIF(btrim(p."medicalRegNumber"), '') IS NOT NULL
 ON CONFLICT ("kind", "registrationNumber", "issuingAuthority") DO NOTHING;
 
 -- Safe compatibility backfill. This preserves current product access but never grants
