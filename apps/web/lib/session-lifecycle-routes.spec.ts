@@ -162,17 +162,16 @@ describe('session lifecycle route concurrency architecture', () => {
     );
   });
 
-  it('upserts mutually exclusive 24-hour and 2-hour outbox windows', () => {
+  it('enqueues mutually exclusive 24-hour and 2-hour windows through bounded exclusion', () => {
     const source = route('cron/appointments');
 
     expect(source).toContain("kind: 'H24'");
     expect(source).toContain("kind: 'H2'");
     expect(source).toContain('startAt: { gt: twoHourEnd, lte: twentyFourHourEnd }');
     expect(source).toContain('startAt: { gt: now, lte: twoHourEnd }');
-    expect(source).toContain('appointmentId_scheduledStartAt_kind: {');
-    expect(source).toContain('appointmentId: appt.id');
-    expect(source).toContain('scheduledStartAt: appt.startAt');
-    expect(source).toContain('providerIdempotencyKey(appt.id, appt.startAt, reminderKind)');
+    expect(source).toContain('enqueueDueAppointmentReminderDeliveries(prisma, {');
+    expect(source).toContain('take: 200');
+    expect(source).not.toContain('appointmentReminderDelivery.upsert({');
     expect(source).not.toContain("['reminded24At', 24]");
   });
 

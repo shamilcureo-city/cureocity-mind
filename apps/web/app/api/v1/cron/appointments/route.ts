@@ -9,9 +9,8 @@ import {
 import {
   claimAppointmentReminderDelivery,
   completeAppointmentReminderDelivery,
+  enqueueDueAppointmentReminderDeliveries,
   failAppointmentReminderDelivery,
-  prismaReminderKind,
-  providerIdempotencyKey,
   type ReminderWindowKind,
   windowHours,
 } from '@/lib/appointment-reminder-outbox';
@@ -96,30 +95,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   ];
   let queued = 0;
   for (const { kind, reminderKind, startAt } of reminderWindows) {
-    const due = await prisma.appointment.findMany({
-      where: { status: 'CONFIRMED', startAt },
-      select: { id: true, startAt: true },
+    queued += await enqueueDueAppointmentReminderDeliveries(prisma, {
+      kind,
+      reminderKind,
+      startAt,
       take: 200,
     });
-    for (const appt of due) {
-      await prisma.appointmentReminderDelivery.upsert({
-        where: {
-          appointmentId_scheduledStartAt_kind: {
-            appointmentId: appt.id,
-            scheduledStartAt: appt.startAt,
-            kind,
-          },
-        },
-        create: {
-          appointmentId: appt.id,
-          scheduledStartAt: appt.startAt,
-          kind: prismaReminderKind(reminderKind),
-          providerIdempotencyKey: providerIdempotencyKey(appt.id, appt.startAt, reminderKind),
-        },
-        update: {},
-      });
-      queued++;
-    }
   }
 
   // 3 — claim and dispatch eligible rows. Window predicates prevent a stale

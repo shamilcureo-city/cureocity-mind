@@ -28,6 +28,58 @@ export function windowHours(kind: AppointmentReminderDelivery['kind']): 24 | 2 {
   return kind === 'H24' ? 24 : 2;
 }
 
+interface ReminderEnqueueDatabase {
+  $queryRaw<T>(query: Prisma.Sql): Promise<T>;
+  appointmentReminderDelivery: Pick<
+    Prisma.TransactionClient['appointmentReminderDelivery'],
+    'createMany'
+  >;
+}
+
+/** Enqueue one bounded batch while excluding exact deliveries already present. */
+export async function enqueueDueAppointmentReminderDeliveries(
+  db: ReminderEnqueueDatabase,
+  input: {
+    kind: 'H24' | 'H2';
+    reminderKind: ReminderWindowKind;
+    startAt: { gt: Date; lte: Date };
+    take: number;
+  },
+): Promise<number> {
+  const appointments = await db.$queryRaw<Array<{ id: string; startAt: Date }>>(Prisma.sql`
+    SELECT a."id", a."startAt"
+    FROM "appointments" a
+    WHERE a."status" = 'CONFIRMED'::"AppointmentStatus"
+      AND a."startAt" > ${input.startAt.gt}
+      AND a."startAt" <= ${input.startAt.lte}
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "appointment_reminder_deliveries" d
+        WHERE d."appointmentId" = a."id"
+          AND d."scheduledStartAt" = a."startAt"
+          AND d."kind" = ${input.reminderKind}::"AppointmentReminderKind"
+      )
+    ORDER BY a."startAt" ASC, a."id" ASC
+    LIMIT ${input.take}
+  `);
+  if (appointments.length === 0) return 0;
+
+  const result = await db.appointmentReminderDelivery.createMany({
+    data: appointments.map((appointment) => ({
+      appointmentId: appointment.id,
+      scheduledStartAt: appointment.startAt,
+      kind: input.kind,
+      providerIdempotencyKey: providerIdempotencyKey(
+        appointment.id,
+        appointment.startAt,
+        input.reminderKind,
+      ),
+    })),
+    skipDuplicates: true,
+  });
+  return result.count;
+}
+
 /** Preserve delivered history while making the old schedule undispatchable. */
 export async function cancelAppointmentReminderDeliveriesForReschedule(
   tx: Prisma.TransactionClient,
