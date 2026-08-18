@@ -1,5 +1,7 @@
+import type { Prisma } from '@prisma/client';
 import { PractitionerCapabilitySchema, type PractitionerCapability } from '@cureocity/contracts';
 import { resolveEffectiveCapabilities, type EffectiveCapabilitySet } from '@cureocity/orbit-core';
+import { writeAudit } from './audit';
 import { prisma } from './prisma';
 
 export async function getEffectiveCapabilities(
@@ -84,6 +86,61 @@ export async function assertSessionCapabilities(
   if (!session) throw new Error(`Session ${sessionId} not found`);
   await assertCurrentCapabilities(session.psychologistId, required);
   return session.psychologistId;
+}
+
+export interface AuditedCapabilityBoundary {
+  /** Expected owner from the caller's already-resolved execution context. */
+  psychologistId: string;
+  /** Static helper/worker name only; never request or patient content. */
+  source: string;
+  targetType?: string;
+  targetId?: string;
+}
+
+/**
+ * Revalidate an internal/background regulated boundary and durably audit a
+ * denial before propagating CapabilityAuthorizationError. Request metadata is
+ * deliberately absent: these callers do not have a real HTTP request and must
+ * not fabricate one.
+ */
+export async function assertAuditedSessionCapabilities(
+  sessionId: string,
+  required: readonly PractitionerCapability[],
+  boundary: AuditedCapabilityBoundary,
+  tx?: Prisma.TransactionClient,
+): Promise<string> {
+  if (!sessionId) throw new Error('Session context is required');
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { psychologistId: true },
+  });
+  if (!session) throw new Error(`Session ${sessionId} not found`);
+  if (boundary.psychologistId !== session.psychologistId) {
+    throw new Error('Session authorization context mismatch');
+  }
+  if (required.length === 0) return session.psychologistId;
+
+  const effective = await getEffectiveCapabilities(session.psychologistId);
+  const missing = required.find((capability) => !effective.capabilities.has(capability));
+  if (!missing) return session.psychologistId;
+
+  await writeAudit(
+    {
+      actorType: 'PSYCHOLOGIST',
+      actorPsychologistId: session.psychologistId,
+      action: 'CAPABILITY_ACCESS_DENIED',
+      targetType: 'PractitionerCapability',
+      targetId: missing,
+      metadata: {
+        source: boundary.source,
+        sessionId,
+        targetType: boundary.targetType ?? 'Session',
+        targetId: boundary.targetId ?? sessionId,
+      },
+    },
+    tx,
+  );
+  throw new CapabilityAuthorizationError(missing);
 }
 
 export class CapabilityAuthorizationError extends Error {

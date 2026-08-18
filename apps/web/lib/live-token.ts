@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import type { PractitionerCapability, PractitionerVertical } from '@cureocity/contracts';
 
 /**
  * Sprint DV8 hardening — short-lived signed tokens for the live gateway.
@@ -28,17 +29,26 @@ function secret(): string {
 export interface LiveTokenClaims {
   sessionId: string;
   psychologistId: string;
+  vertical: PractitionerVertical;
+  capabilities: PractitionerCapability[];
   /** Unix seconds. */
   exp: number;
 }
 
 export function signLiveToken(
-  input: { sessionId: string; psychologistId: string },
+  input: {
+    sessionId: string;
+    psychologistId: string;
+    vertical: PractitionerVertical;
+    capabilities: PractitionerCapability[];
+  },
   ttlSec: number = DEFAULT_TTL_SEC,
 ): { token: string; expiresInSec: number } {
   const claims: LiveTokenClaims = {
     sessionId: input.sessionId,
     psychologistId: input.psychologistId,
+    vertical: input.vertical,
+    capabilities: input.capabilities,
     exp: Math.floor(Date.now() / 1000) + ttlSec,
   };
   const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');

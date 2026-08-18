@@ -1,4 +1,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import {
+  PractitionerCapabilitySchema,
+  PractitionerVerticalSchema,
+  type PractitionerCapability,
+  type PractitionerVertical,
+} from '@cureocity/contracts';
 
 /**
  * Sprint DV8 hardening — verify the live-start token minted by the app
@@ -18,6 +24,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 export interface LiveTokenClaims {
   sessionId: string;
   psychologistId: string;
+  vertical: PractitionerVertical;
+  capabilities: PractitionerCapability[];
   exp: number;
 }
 
@@ -82,7 +90,22 @@ export function extractVerifiedClaims(
     if (claims.sessionId !== sessionId) return null;
     if (typeof claims.exp !== 'number' || claims.exp < Math.floor(Date.now() / 1000)) return null;
     if (typeof claims.psychologistId !== 'string' || !claims.psychologistId) return null;
-    return claims;
+    const vertical = PractitionerVerticalSchema.safeParse(claims.vertical);
+    if (!vertical.success || !Array.isArray(claims.capabilities)) return null;
+    const parsedCapabilities = claims.capabilities.map((capability) =>
+      PractitionerCapabilitySchema.safeParse(capability),
+    );
+    if (parsedCapabilities.some((capability) => !capability.success)) return null;
+    const scoped = [
+      ...new Set(
+        parsedCapabilities.flatMap((capability) => (capability.success ? [capability.data] : [])),
+      ),
+    ];
+    const documentationCapability =
+      vertical.data === 'DOCTOR' ? 'MEDICAL_DOCUMENTATION' : 'BEHAVIORAL_HEALTH_DOCUMENTATION';
+    if (!scoped.includes('LIVE_ENCOUNTER') || !scoped.includes(documentationCapability))
+      return null;
+    return { ...claims, vertical: vertical.data, capabilities: scoped };
   } catch {
     return null;
   }

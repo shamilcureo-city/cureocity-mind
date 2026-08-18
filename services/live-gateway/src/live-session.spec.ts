@@ -102,6 +102,45 @@ describe('LiveSession — per-segment diarized utterances (TS-B1)', () => {
 });
 
 describe('LiveSession — incremental windowing + metering (DS0)', () => {
+  it('keeps documentation live while suppressing every unauthorized optional output', async () => {
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'sess-scoped',
+      'Cardiology',
+      mockBackends(),
+      (event) => events.push(event),
+      OPTS,
+      {
+        activeMeds: ['warfarin'],
+        allergies: ['penicillin'],
+        knownConditions: ['HTN'],
+        sex: 'male',
+      },
+      0,
+      'DOCTOR',
+      'TREATMENT',
+      null,
+      null,
+      new Set(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION']),
+    );
+
+    session.start();
+    session.pushAudio(BLOCK);
+    await session.pump();
+    await session.finalize();
+
+    expect(events.some((event) => event.type === 'note')).toBe(true);
+    expect(
+      events.some((event) =>
+        ['finding', 'reasoning', 'rxDraft', 'command', 'gap'].includes(event.type),
+      ),
+    ).toBe(false);
+    const final = events.find((event) => event.type === 'final');
+    expect(final).toMatchObject({ type: 'final', medications: [], orders: [] });
+    if (final?.type === 'final') expect(final.rxPad).toBeUndefined();
+    session.dispose();
+  });
+
   it('emits schema-valid events, one utterance per window, and a final note + meter', async () => {
     const events: LiveGatewayEvent[] = [];
     const session = new LiveSession(

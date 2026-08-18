@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
-import { LiveGatewayCommandSchema, type LiveGatewayEvent } from '@cureocity/contracts';
+import {
+  LiveGatewayCommandSchema,
+  type LiveGatewayEvent,
+  type PatientContext,
+  type PractitionerCapability,
+} from '@cureocity/contracts';
 import {
   authRequired,
   extractVerifiedClaims,
@@ -59,6 +64,15 @@ const pool = new GatewayPool(maxSessionsFromEnv());
 // replayed tokens). New starts over the cap are shed as `busy`; a consult
 // already streaming always finishes. In-memory, per-instance, IST day.
 const tenantSpend = ledgerFromEnv();
+const DEV_OPEN_CAPABILITIES = new Set<PractitionerCapability>([
+  'LIVE_ENCOUNTER',
+  'BEHAVIORAL_HEALTH_DOCUMENTATION',
+  'MEDICAL_DOCUMENTATION',
+  'CLINICAL_ANALYSIS',
+  'PRESCRIPTION_DRAFTING',
+  'CLINICAL_ORDERS',
+  'CHRONIC_CARE',
+]);
 
 // Sprint DS8 — a plain HTTP server hosts the health endpoint AND upgrades
 // to WebSocket, so a load balancer / systemd can probe liveness + readiness.
@@ -184,6 +198,8 @@ wss.on('connection', (ws, req) => {
       // matching mock's zero cost).
       const claims = extractVerifiedClaims(cmd.token, cmd.sessionId);
       const tenantId = claims?.psychologistId ?? null;
+      const capabilities = claims ? new Set(claims.capabilities) : DEV_OPEN_CAPABILITIES;
+      const vertical = claims?.vertical ?? cmd.vertical ?? 'DOCTOR';
       if (tenantId && tenantSpend.isOverCap(tenantId)) {
         console.warn(`[gateway] tenant ${tenantId} over daily cost cap — shedding start`);
         send(ws, { type: 'status', state: 'busy' });
@@ -221,12 +237,13 @@ wss.on('connection', (ws, req) => {
         backends,
         forward,
         windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
-        cmd.context, // Sprint DS1 — seed the CaseState's patient context
+        scopePatientContext(cmd.context, capabilities),
         undefined, // noteRefreshMs — the constructor picks the per-vertical default
-        cmd.vertical ?? 'DOCTOR', // Sprint TS1 — therapist live scribe support
+        vertical,
         cmd.kind ?? 'TREATMENT',
         cmd.modality ?? null,
         cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
+        capabilities,
       );
       // Batch A — a reconnect after a dropped socket replays the transcript the
       // browser still holds, so the consult continues instead of starting blank.
@@ -239,7 +256,7 @@ wss.on('connection', (ws, req) => {
       // Sprint DS13 — the flag-gated streaming display rail (doctor path
       // only for now). Failures degrade to "provisional line stops
       // updating"; the windowed pipeline is untouched.
-      if ((cmd.vertical ?? 'DOCTOR') === 'DOCTOR') {
+      if (vertical === 'DOCTOR') {
         const forSession = session;
         const transcriber = makeStreamTranscriber({
           sessionId: cmd.sessionId ?? 'live',
@@ -342,4 +359,22 @@ function toBuffer(raw: RawData): Buffer {
   if (Buffer.isBuffer(raw)) return raw;
   if (Array.isArray(raw)) return Buffer.concat(raw);
   return Buffer.from(raw as ArrayBuffer);
+}
+
+function scopePatientContext(
+  context: PatientContext | undefined,
+  capabilities: ReadonlySet<PractitionerCapability>,
+): PatientContext | undefined {
+  if (!context) return undefined;
+  const analysis = capabilities.has('CLINICAL_ANALYSIS');
+  const chronic = capabilities.has('CHRONIC_CARE');
+  const prescription = capabilities.has('PRESCRIPTION_DRAFTING');
+  if (!analysis && !chronic && !prescription) return undefined;
+  return {
+    sex: analysis ? context.sex : 'unknown',
+    ...(analysis && context.age !== undefined ? { age: context.age } : {}),
+    knownConditions: analysis || chronic ? context.knownConditions : [],
+    activeMeds: prescription ? context.activeMeds : [],
+    allergies: prescription ? context.allergies : [],
+  };
 }

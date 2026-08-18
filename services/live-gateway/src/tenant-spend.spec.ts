@@ -85,9 +85,15 @@ describe('extractVerifiedClaims', () => {
   const SID = 'sess-123';
 
   function mintToken(sessionId: string, exp: number, secret = SECRET): string {
-    const payload = Buffer.from(JSON.stringify({ sessionId, psychologistId: 'p1', exp })).toString(
-      'base64url',
-    );
+    const payload = Buffer.from(
+      JSON.stringify({
+        sessionId,
+        psychologistId: 'p1',
+        exp,
+        vertical: 'DOCTOR',
+        capabilities: ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'],
+      }),
+    ).toString('base64url');
     const sig = createHmac('sha256', secret).update(payload).digest('hex');
     return `${payload}.${sig}`;
   }

@@ -39,7 +39,7 @@ import {
 } from './transcribe-segment';
 import { compactPassError } from './pass-error';
 import { hasTranscript } from './note-transcript';
-import { assertSessionCapabilities } from './capabilities';
+import { assertAuditedSessionCapabilities } from './capabilities';
 import { requiredMedicalCapabilities } from './regulated-actions';
 
 /**
@@ -73,11 +73,15 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     include: { client: true, psychologist: { select: { vertical: true } } },
   });
   if (!session) throw new Error(`Session ${sessionId} not found`);
-  await assertSessionCapabilities(sessionId, [
-    session.psychologist.vertical === 'DOCTOR'
-      ? 'MEDICAL_DOCUMENTATION'
-      : 'BEHAVIORAL_HEALTH_DOCUMENTATION',
-  ]);
+  await assertAuditedSessionCapabilities(
+    sessionId,
+    [
+      session.psychologist.vertical === 'DOCTOR'
+        ? 'MEDICAL_DOCUMENTATION'
+        : 'BEHAVIORAL_HEALTH_DOCUMENTATION',
+    ],
+    { psychologistId: session.psychologistId, source: 'runNoteGeneration' },
+  );
 
   // Idempotency — only short-circuit if the previous run produced
   // substantive content. A COMPLETED draft with zero transcript chars
@@ -768,8 +772,10 @@ export interface ClinicalAnalysisArgs {
 }
 
 export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<void> {
-  const ownerId = await assertSessionCapabilities(args.sessionId, ['CLINICAL_ANALYSIS']);
-  if (args.psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
+  await assertAuditedSessionCapabilities(args.sessionId, ['CLINICAL_ANALYSIS'], {
+    psychologistId: args.psychologistId,
+    source: 'runClinicalAnalysis',
+  });
   // Upsert the report row in PENDING so the UI can poll for it
   // (matches NoteDraft IN_PROGRESS pattern).
   const report = await prisma.clinicalReport.upsert({
@@ -985,8 +991,10 @@ export async function persistDraftedOrders(
     hasVitals: false,
     hasRxPad: false,
   });
-  const ownerId = await assertSessionCapabilities(sessionId, required);
-  if (psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
+  await assertAuditedSessionCapabilities(sessionId, required, {
+    psychologistId,
+    source: 'persistDraftedOrders',
+  });
   if (medications.length > 0) {
     // DOC-3 — cross-visit interaction check. Include the patient's confirmed
     // active meds from PRIOR encounters, not just today's draft, so warfarin
@@ -1098,8 +1106,10 @@ export async function persistVitalReadings(
     });
   }
   if (rows.length === 0) return;
-  const ownerId = await assertSessionCapabilities(sessionId, ['CHRONIC_CARE']);
-  if (psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
+  await assertAuditedSessionCapabilities(sessionId, ['CHRONIC_CARE'], {
+    psychologistId,
+    source: 'persistVitalReadings',
+  });
   await prisma.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
   await prisma.clinicalReading.createMany({ data: rows });
   await writeAudit({
@@ -1130,8 +1140,10 @@ export interface DifferentialArgs {
 }
 
 export async function runDifferential(args: DifferentialArgs): Promise<void> {
-  const ownerId = await assertSessionCapabilities(args.sessionId, ['CLINICAL_ANALYSIS']);
-  if (args.psychologistId !== ownerId) throw new Error('Session authorization context mismatch');
+  await assertAuditedSessionCapabilities(args.sessionId, ['CLINICAL_ANALYSIS'], {
+    psychologistId: args.psychologistId,
+    source: 'runDifferential',
+  });
   await prisma.differential.upsert({
     where: { sessionId: args.sessionId },
     update: { status: 'IN_PROGRESS', errorMessage: null },

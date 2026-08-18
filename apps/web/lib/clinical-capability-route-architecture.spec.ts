@@ -34,9 +34,25 @@ describe('regulated boundary coverage', () => {
 
   it('revalidates clinical analysis and differential at execution helpers', () => {
     const orchestrator = source('lib/note-orchestrator.ts');
-    expect(orchestrator).toContain(
-      "assertSessionCapabilities(args.sessionId, ['CLINICAL_ANALYSIS'])",
-    );
-    expect(orchestrator).toContain('assertSessionCapabilities(sessionId, required)');
+    expect(orchestrator).toContain("source: 'runClinicalAnalysis'");
+    expect(orchestrator).toContain("source: 'runDifferential'");
+    expect(orchestrator).toContain("source: 'persistDraftedOrders'");
+    expect(orchestrator).toContain("source: 'persistVitalReadings'");
+    expect(orchestrator).toContain("source: 'runNoteGeneration'");
+  });
+
+  it('treats live-token as the mandatory live and vertical-documentation boundary', () => {
+    const liveToken = source('app/api/v1/sessions/[id]/live-token/route.ts');
+    expect(liveToken).toContain("requireCapability(req, 'LIVE_ENCOUNTER', auth)");
+    expect(liveToken).toContain("'MEDICAL_DOCUMENTATION'");
+    expect(liveToken).toContain("'BEHAVIORAL_HEALTH_DOCUMENTATION'");
+    expect(liveToken).toContain('capabilities,');
+  });
+
+  it('does not invoke optional live persistence when the refreshed scope is absent', () => {
+    const liveNote = source('app/api/v1/sessions/[id]/live-note/route.ts');
+    expect(liveNote).toContain("capabilities?.includes('CHRONIC_CARE')");
+    expect(liveNote).toContain("capabilities?.includes('PRESCRIPTION_DRAFTING')");
+    expect(liveNote).toContain("capabilities?.includes('CLINICAL_ORDERS')");
   });
 });

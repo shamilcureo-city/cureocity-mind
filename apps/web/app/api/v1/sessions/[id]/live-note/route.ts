@@ -19,7 +19,7 @@ import {
   runDifferential,
 } from '@/lib/note-orchestrator';
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
-import { requiredMedicalCapabilities } from '@/lib/regulated-actions';
+
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -233,26 +233,22 @@ export async function POST(
   // The schema's `.default([])`s mean the validated value is fully
   // populated at runtime; narrow to the output types the helpers expect.
   const note = parsed.value.note as MedicalEncounterNoteV1;
-  const medications = (parsed.value.medications ?? []) as MedicationOrderV1[];
-  const orders = (parsed.value.orders ?? []) as ClinicalOrderV1[];
-  const required = requiredMedicalCapabilities({
-    medications: medications.length,
-    clinicalOrders: orders.length,
-    hasVitals: Object.keys(note.vitals ?? {}).length > 0,
-    hasRxPad: parsed.value.rxPad != null,
-  });
-  for (const capability of required) {
-    const actionAuth = await requireCapability(req, capability, auth);
-    if (!actionAuth.ok) return actionAuth.response;
-  }
+  const capabilities = documentationAuth.value.user.capabilities;
+  const medications = capabilities?.includes('PRESCRIPTION_DRAFTING')
+    ? ((parsed.value.medications ?? []) as MedicationOrderV1[])
+    : [];
+  const orders = capabilities?.includes('CLINICAL_ORDERS')
+    ? ((parsed.value.orders ?? []) as ClinicalOrderV1[])
+    : [];
   // DOC-7 — the verbatim consult transcript the gateway streamed. Trim and
   // fall back to the presence marker when empty so a transcript-less consult
   // still satisfies the NoteDraft presence check.
   const transcript = parsed.value.transcript?.trim() ?? '';
   // Sprint DS5 — the finalized Rx pad, stored alongside the note.
-  const rxPad = parsed.value.rxPad
-    ? (parsed.value.rxPad as unknown as Prisma.InputJsonValue)
-    : undefined;
+  const rxPad =
+    capabilities?.includes('PRESCRIPTION_DRAFTING') && parsed.value.rxPad
+      ? (parsed.value.rxPad as unknown as Prisma.InputJsonValue)
+      : undefined;
 
   // DOC-7 — the streamed transcript is the medico-legal source record behind
   // the note; persist it verbatim (with the presence marker as the fallback
@@ -351,14 +347,21 @@ export async function POST(
 
   // Reuse the batch helpers: draft the Rx + clinical orders (interaction-
   // checked server-side) and capture vitals into the chronic series.
-  await persistDraftedOrders(sessionId, auth.value.psychologistId, medications, orders);
-  await persistVitalReadings(
-    sessionId,
-    session.clientId,
-    auth.value.psychologistId,
-    session.scheduledAt,
-    note.vitals,
-  );
+  if (
+    capabilities?.includes('PRESCRIPTION_DRAFTING') ||
+    capabilities?.includes('CLINICAL_ORDERS')
+  ) {
+    await persistDraftedOrders(sessionId, auth.value.psychologistId, medications, orders);
+  }
+  if (capabilities?.includes('CHRONIC_CARE')) {
+    await persistVitalReadings(
+      sessionId,
+      session.clientId,
+      auth.value.psychologistId,
+      session.scheduledAt,
+      note.vitals,
+    );
+  }
 
   // DS-perf — pre-warm the differential. Previously the Review & Sign panel
   // fired the differential (a 15-40s Vertex Pro pass) only when it MOUNTED,

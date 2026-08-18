@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   findPsychologist: vi.fn(),
   findSession: vi.fn(),
+  writeAudit: vi.fn(),
 }));
+vi.mock('./audit', () => ({ writeAudit: mocks.writeAudit }));
 vi.mock('./prisma', () => ({
   prisma: {
     psychologist: { findUnique: mocks.findPsychologist },
@@ -12,6 +14,7 @@ vi.mock('./prisma', () => ({
 }));
 
 import {
+  assertAuditedSessionCapabilities,
   assertSessionCapabilities,
   getEffectiveCapabilities,
   serializeCapabilities,
@@ -122,5 +125,36 @@ describe('effective capability query', () => {
       'Session context is required',
     );
     expect(mocks.findSession).not.toHaveBeenCalled();
+  });
+
+  it('audits a boundary-time denial with safe execution metadata before throwing', async () => {
+    mocks.findSession.mockResolvedValue({ psychologistId: 'server-owner' });
+    mocks.findPsychologist.mockResolvedValue(practitioner());
+
+    await expect(
+      assertAuditedSessionCapabilities('session-1', ['CLINICAL_ANALYSIS'], {
+        psychologistId: 'server-owner',
+        source: 'runClinicalAnalysis',
+      }),
+    ).rejects.toMatchObject({
+      name: 'CapabilityAuthorizationError',
+      capability: 'CLINICAL_ANALYSIS',
+    });
+    expect(mocks.writeAudit).toHaveBeenCalledWith(
+      {
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: 'server-owner',
+        action: 'CAPABILITY_ACCESS_DENIED',
+        targetType: 'PractitionerCapability',
+        targetId: 'CLINICAL_ANALYSIS',
+        metadata: {
+          source: 'runClinicalAnalysis',
+          sessionId: 'session-1',
+          targetType: 'Session',
+          targetId: 'session-1',
+        },
+      },
+      undefined,
+    );
   });
 });
