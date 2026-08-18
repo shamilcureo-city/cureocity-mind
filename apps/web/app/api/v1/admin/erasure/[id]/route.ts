@@ -152,6 +152,9 @@ export async function PATCH(
             errorMessage: null,
           },
         });
+        await tx.$executeRaw`
+          SELECT set_config('app.therapy_note_write_context', 'erasure', true)
+        `;
         await tx.therapyNote.updateMany({
           where: { sessionId: { in: sessionIds } },
           data: { content: {}, rxPad: Prisma.DbNull },

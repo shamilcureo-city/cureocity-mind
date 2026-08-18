@@ -1,0 +1,117 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const repo = resolve(process.cwd(), '../..');
+const source = (path: string) => readFileSync(resolve(repo, path), 'utf8');
+
+function typescriptFiles(root: string): string[] {
+  const result: string[] = [];
+  for (const entry of readdirSync(root)) {
+    if (['node_modules', '.git', '.next', 'dist', 'coverage'].includes(entry)) continue;
+    const path = join(root, entry);
+    const stat = statSync(path);
+    if (stat.isDirectory()) result.push(...typescriptFiles(path));
+    else if (/\.(ts|tsx)$/.test(entry) && !/\.spec\./.test(entry)) result.push(path);
+  }
+  return result;
+}
+
+describe('therapy-note database integrity boundary', () => {
+  const migrationPath = 'prisma/migrations/20260818080000_signed_note_integrity/migration.sql';
+
+  it('rejects direct TherapyNote.content updates without an explicit signing or erasure transaction context', () => {
+    const migration = source(migrationPath);
+    expect(migration).toContain('BEFORE UPDATE OF "content" ON "therapy_notes"');
+    expect(migration).toContain("current_setting('app.therapy_note_write_context', true)");
+    expect(migration).toContain("NOT IN ('signing', 'erasure')");
+  });
+
+  it('allows the only audited content writers to set a transaction-local context', () => {
+    const sign = source('apps/web/app/api/v1/sessions/[id]/sign/route.ts');
+    const erasure = source('apps/web/app/api/v1/admin/erasure/[id]/route.ts');
+    expect(sign).toContain("set_config('app.therapy_note_write_context', 'signing', true)");
+    expect(erasure).toContain("set_config('app.therapy_note_write_context', 'erasure', true)");
+    expect(source('apps/web/app/api/v1/sessions/[id]/note/edit/route.ts')).not.toMatch(
+      /therapyNote\.(update|updateMany|upsert)\s*\(/,
+    );
+  });
+
+  it('has no unclassified TherapyNote update writer', () => {
+    const roots = [resolve(repo, 'apps'), resolve(repo, 'services')];
+    const writers = roots
+      .flatMap(typescriptFiles)
+      .filter((path) =>
+        /therapyNote\.(update|updateMany|upsert)\s*\(/.test(readFileSync(path, 'utf8')),
+      )
+      .map((path) => relative(repo, path).replace(/\\/g, '/'))
+      .sort();
+    expect(writers).toEqual([
+      'apps/web/app/api/v1/admin/erasure/[id]/route.ts',
+      'apps/web/app/api/v1/sessions/[id]/note/unlock/route.ts',
+      'apps/web/app/api/v1/sessions/[id]/sign/route.ts',
+    ]);
+    const unlock = source('apps/web/app/api/v1/sessions/[id]/note/unlock/route.ts');
+    const unlockMutation = unlock.match(/therapyNote\.update\(\{[\s\S]*?\n\s*\}\);/)?.[0];
+    expect(unlockMutation).toBeDefined();
+    expect(unlockMutation).not.toMatch(/\bcontent\s*:/);
+  });
+});
+
+describe('signature-history least privilege', () => {
+  const migrationPath = 'prisma/migrations/20260818080000_signed_note_integrity/migration.sql';
+
+  it('revokes destructive privileges from PUBLIC and grants runtime only SELECT and INSERT', () => {
+    const migration = source(migrationPath);
+    expect(migration).toContain(
+      'REVOKE UPDATE, DELETE, TRUNCATE ON TABLE "note_signature_versions" FROM PUBLIC',
+    );
+    const setup = source('scripts/configure-runtime-db-role.mjs');
+    expect(setup).toContain('REVOKE ALL PRIVILEGES ON TABLE "note_signature_versions" FROM');
+    expect(setup).toContain('GRANT SELECT, INSERT ON TABLE "note_signature_versions" TO');
+    expect(setup).not.toMatch(
+      /GRANT[^;]*(UPDATE|DELETE|TRUNCATE)[^;]*ON TABLE "note_signature_versions"/,
+    );
+    expect(setup).toContain('tableowner');
+    expect(setup).toContain('must remain owned by the migration role');
+  });
+
+  it('grants coherent runtime access to all application tables, sequences, and future migrations', () => {
+    const setup = source('scripts/configure-runtime-db-role.mjs');
+    expect(setup).toContain('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public');
+    expect(setup).toContain('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public');
+    expect(setup).toContain('ALTER DEFAULT PRIVILEGES IN SCHEMA public');
+    expect(
+      setup.indexOf('REVOKE ALL PRIVILEGES ON TABLE "note_signature_versions"'),
+    ).toBeGreaterThan(
+      setup.indexOf('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public'),
+    );
+  });
+
+  it('validates the runtime role identifier and contains no embedded URL or password', () => {
+    const setup = source('scripts/configure-runtime-db-role.mjs');
+    expect(setup).toContain('/^[A-Za-z_][A-Za-z0-9_]{0,62}$/');
+    expect(setup).not.toMatch(/postgres(?:ql)?:\/\//i);
+    expect(setup).not.toMatch(/password\s*=|secret\s*=/i);
+  });
+
+  it('documents the privileged provisioning prerequisite and owner limitation', () => {
+    const runbook = source('docs/runbooks/database-roles.md');
+    expect(runbook).toContain('DATABASE_RUNTIME_URL');
+    expect(runbook).toContain('DATABASE_RUNTIME_ROLE');
+    expect(runbook).toContain('CREATE ROLE');
+    expect(runbook).toContain('table owner');
+    expect(runbook).toContain('scripts/configure-runtime-db-role.mjs');
+  });
+
+  it('makes production deployment fail closed and applies privileges after migrations', () => {
+    const deploy = source('scripts/vercel-db-setup.sh');
+    expect(deploy).toContain('DATABASE_RUNTIME_URL');
+    expect(deploy).toContain('DATABASE_RUNTIME_ROLE');
+    expect(deploy).toContain('configure-runtime-db-role.mjs');
+    expect(deploy.indexOf('configure-runtime-db-role.mjs')).toBeGreaterThan(
+      deploy.lastIndexOf('prisma migrate deploy'),
+    );
+    expect(deploy).toContain('VERCEL_ENV');
+  });
+});

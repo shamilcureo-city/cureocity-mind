@@ -347,7 +347,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         );
       }
 
-      if (existing) {
+      if (existing?.signPayload !== null && existing?.signPayload !== undefined) {
         await tx.noteSignatureVersion.create({
           data: {
             therapyNoteId: existing.id,
@@ -395,6 +395,11 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
             ? Prisma.DbNull
             : (medicalAuthority as unknown as Prisma.InputJsonValue),
       };
+      if (existing) {
+        await tx.$executeRaw`
+          SELECT set_config('app.therapy_note_write_context', 'signing', true)
+        `;
+      }
       const note = existing
         ? await tx.therapyNote.update({ where: { id: existing.id }, data: noteData })
         : await tx.therapyNote.create({ data: { sessionId, draftId: draft.id, ...noteData } });
@@ -433,14 +438,22 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         await writeAudit({ ...auditBase, action: 'NOTE_SIGNED' }, tx);
       }
       if (input.value.safetyOverride) {
+        const blockers = input.value.safetyOverride.blockers ?? [];
         await writeAudit(
           {
             ...auditBase,
             action: 'RX_SAFETY_OVERRIDE',
             metadata: {
               ...auditBase.metadata,
-              reason: input.value.safetyOverride.reason,
-              blockers: input.value.safetyOverride.blockers,
+              reasonCode: input.value.safetyOverride.reasonCode,
+              reasonHashHex: createHash('sha256')
+                .update(input.value.safetyOverride.reason)
+                .digest('hex'),
+              blockerCount: blockers.length,
+              blockerHashes: blockers.map((blocker) =>
+                createHash('sha256').update(blocker).digest('hex'),
+              ),
+              signedNoteId: note.id,
             },
           },
           tx,

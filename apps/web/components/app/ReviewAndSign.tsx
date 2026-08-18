@@ -99,7 +99,13 @@ export function ReviewAndSign({
         // but never silent: the reason rides along and lands one
         // RX_SAFETY_OVERRIDE audit row atomic with the signature.
         ...(overriding && overrideReason.trim()
-          ? { safetyOverride: { reason: overrideReason.trim(), blockers: blockers.hard } }
+          ? {
+              safetyOverride: {
+                reasonCode: 'CLINICAL_JUDGMENT' as const,
+                reason: overrideReason.trim(),
+                blockers: blockers.hard,
+              },
+            }
           : {}),
       });
       if (!res.ok) {

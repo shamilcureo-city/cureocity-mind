@@ -2797,6 +2797,7 @@ enum AuditAction {
   TRANSCRIPT_SEGMENT_FAILED
   NOTE_DRAFT_CREATED
   NOTE_DRAFT_VIEWED
+  NOTE_DRAFT_EDITED
   NOTE_SIGNED
   // Sprint 71 — a signed note re-opened for editing.
   NOTE_UNLOCKED

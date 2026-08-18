@@ -461,6 +461,13 @@ export const SignNoteInputSchema = z.object({
    */
   safetyOverride: z
     .object({
+      reasonCode: z.enum([
+        'CLINICAL_JUDGMENT',
+        'ALLERGY_RECORD_INACCURATE',
+        'DESENSITIZED',
+        'BENEFIT_OUTWEIGHS_RISK',
+        'OTHER_DOCUMENTED',
+      ]),
       reason: z.string().min(3).max(2000),
       blockers: z.array(z.string()).max(50).default([]),
     })

@@ -11,7 +11,16 @@ export interface SignNoteBody {
   signedAt: string;
   /** Exact confirmed Rx projection, including explicit null. */
   rxPad: unknown | null;
-  safetyOverride?: { reason: string; blockers: string[] };
+  safetyOverride?: {
+    reasonCode:
+      | 'CLINICAL_JUDGMENT'
+      | 'ALLERGY_RECORD_INACCURATE'
+      | 'DESENSITIZED'
+      | 'BENEFIT_OUTWEIGHS_RISK'
+      | 'OTHER_DOCUMENTED';
+    reason: string;
+    blockers: string[];
+  };
 }
 
 async function sha256Hex(input: string): Promise<string> {

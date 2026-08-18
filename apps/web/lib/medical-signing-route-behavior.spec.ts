@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   persistedEdits: vi.fn(),
   transaction: vi.fn(),
   queryRaw: vi.fn(),
+  executeRaw: vi.fn(),
   noteCreate: vi.fn(),
   noteUpdate: vi.fn(),
   signatureVersionCreate: vi.fn(),
@@ -96,6 +97,7 @@ function request() {
 
 const tx = {
   $queryRaw: mocks.queryRaw,
+  $executeRaw: mocks.executeRaw,
   therapyNote: { create: mocks.noteCreate, update: mocks.noteUpdate },
   noteSignatureVersion: { create: mocks.signatureVersionCreate },
   noteEdit: { createMany: mocks.editsCreateMany },
@@ -432,6 +434,55 @@ describe('medical signing route transaction behavior', () => {
     expect(response.status).toBe(409);
     expect(mocks.signatureVersionCreate).not.toHaveBeenCalled();
     expect(mocks.noteUpdate).not.toHaveBeenCalled();
+  });
+
+  it('stores only bounded codes, counts, hashes, and references for safety-override audit metadata', async () => {
+    const safetyOverride = {
+      reasonCode: 'CLINICAL_JUDGMENT',
+      reason: 'private patient-specific rationale',
+      blockers: ['private allergy text'],
+    };
+    const overridePayload = canonicalSigningPayload({
+      sessionId: 'session-1',
+      draftContentHashHex,
+      note: finalNote,
+      edits: [],
+      signedAt: '2026-08-18T12:00:00.000Z',
+      safetyOverride,
+      rxPad: null,
+    });
+    mocks.parseJson.mockResolvedValue({
+      ok: true,
+      value: {
+        payload: overridePayload,
+        payloadHashHex: createHash('sha256').update(overridePayload).digest('hex'),
+        note: finalNote,
+        edits: [],
+        signedAt: '2026-08-18T12:00:00.000Z',
+        safetyOverride,
+      },
+    });
+
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+
+    expect(response.status).toBe(201);
+    const overrideAudit = mocks.writeAudit.mock.calls.find(
+      ([entry]) => entry.action === 'RX_SAFETY_OVERRIDE',
+    )?.[0];
+    expect(overrideAudit.metadata).toEqual(
+      expect.objectContaining({
+        reasonCode: 'CLINICAL_JUDGMENT',
+        reasonHashHex: createHash('sha256').update(safetyOverride.reason).digest('hex'),
+        blockerCount: 1,
+        blockerHashes: [createHash('sha256').update(safetyOverride.blockers[0]).digest('hex')],
+        signedNoteId: 'note-1',
+      }),
+    );
+    const serialized = JSON.stringify(overrideAudit.metadata);
+    expect(serialized).not.toContain(safetyOverride.reason);
+    expect(serialized).not.toContain(safetyOverride.blockers[0]);
   });
 
   it('keeps therapy signing capability-free with null medical provenance', async () => {
