@@ -9,6 +9,7 @@ import { recordGeminiCall } from '@cureocity/observability/metrics';
 import { writeAudit } from './audit';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
+import { assertCurrentScribeAuthority } from './scribe-authority';
 
 /**
  * Sprint 57 — transcribe-on-arrival.
@@ -171,9 +172,20 @@ export async function transcribeChunkInline(
 
   let result: { output: Pass1Output; callLog: GeminiCallLogData };
   try {
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: chunk.session.psychologistId,
+      source: 'transcribeChunkBeforeModel',
+    });
+  } catch {
+    zeroAudio(chunk.bytes);
+    await markSegmentFailed(segmentId, 'authorization-denied');
+    return { status: 'failed', reason: 'authorization-denied' };
+  }
+  const modelAudio = Buffer.from(chunk.bytes);
+  try {
     result = await router.pass1({
       sessionId: args.sessionId,
-      audioBytes: Buffer.from(chunk.bytes),
+      audioBytes: modelAudio,
       durationMs: chunk.durationMs,
       ...(hints && { hints }),
       // DOC-6 — a DICTATE/UPLOAD doctor consult gets the medical prompt too.
@@ -185,6 +197,24 @@ export async function transcribeChunkInline(
     // exceptions before the call site.
     await markSegmentFailed(segmentId, (e as Error).message);
     return { status: 'failed', reason: (e as Error).message };
+  } finally {
+    // The router receives this copy by reference. Clear it on every exit so a
+    // denied or failed background call cannot retain plaintext audio in memory.
+    zeroAudio(modelAudio);
+  }
+
+  try {
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: chunk.session.psychologistId,
+      source: 'transcribeChunkBeforePersistence',
+    });
+  } catch {
+    zeroAudio(chunk.bytes);
+    result.output.transcript = '';
+    result.output.speakerSegments = [];
+    result.output.affectFeatures = [];
+    await markSegmentFailed(segmentId, 'authorization-denied');
+    return { status: 'failed', reason: 'authorization-denied' };
   }
 
   // 4. Persist the Gemini call log for cost rollups even on per-chunk runs.
@@ -245,6 +275,10 @@ export async function transcribeChunkInline(
     transcriptChars: result.output.transcript.length,
     latencyMs: result.callLog.latencyMs,
   };
+}
+
+function zeroAudio(bytes: Uint8Array | null): void {
+  bytes?.fill(0);
 }
 
 async function markSegmentFailed(segmentId: string, reason: string): Promise<void> {

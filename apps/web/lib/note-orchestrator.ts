@@ -41,6 +41,7 @@ import { compactPassError } from './pass-error';
 import { hasTranscript } from './note-transcript';
 import { assertAuditedSessionCapabilities, getEffectiveCapabilities } from './capabilities';
 import { requiredMedicalCapabilities } from './regulated-actions';
+import { assertCurrentScribeAuthority } from './scribe-authority';
 
 /**
  * Synchronous orchestrator port — runs Pass 1 → Pass 2 inline on the
@@ -112,6 +113,11 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         'No audio chunks reached storage for this session. Record at least one 30-second chunk and end the session again — the orchestrator skips empty sessions to avoid an unnecessary Gemini bill.',
       );
     }
+
+    await assertCurrentScribeAuthority(sessionId, {
+      psychologistId: session.psychologistId,
+      source: 'pass1BeforePersistence',
+    });
 
     const pass1Cost = new Prisma.Decimal(pass1.totalCostInr);
 
@@ -214,6 +220,10 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     const templateArg = resolvedTemplate ? { template: resolvedTemplate } : {};
 
     const router = modelRouter();
+    await assertCurrentScribeAuthority(sessionId, {
+      psychologistId: session.psychologistId,
+      source: 'pass2BeforeModel',
+    });
     const pass2 = await router.pass2({
       sessionId,
       transcript: pass1.transcript,
@@ -244,6 +254,10 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // and return: no therapy risk-flag handling, no Pass 3 (the medical
     // differential is DV6). Must branch BEFORE the therapy union arms.
     if (pass2.output.kind === 'MEDICAL') {
+      await assertCurrentScribeAuthority(sessionId, {
+        psychologistId: session.psychologistId,
+        source: 'pass2BeforePersistence',
+      });
       const encounterNote = pass2.output.encounterNote;
       // Optional model suggestions are independently capability-scoped. Refresh
       // current grants after Pass 2, immediately before any regulated write;
@@ -314,7 +328,16 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // Malayalam/Hindi-dominant transcript's language, translate it back with one
     // fast Flash call before persisting. Best-effort: returns the original on
     // any failure or on a non-Vertex backend.
-    const pass2Body = await ensureEnglishNote(pass2BodyRaw, session.kind);
+    const pass2Body = await ensureEnglishNote(pass2BodyRaw, session.kind, async () => {
+      await assertCurrentScribeAuthority(sessionId, {
+        psychologistId: session.psychologistId,
+        source: 'noteTranslationBeforeModel',
+      });
+    });
+    await assertCurrentScribeAuthority(sessionId, {
+      psychologistId: session.psychologistId,
+      source: 'pass2BeforePersistence',
+    });
     const pass2RiskFlags = pass2Body.riskFlags;
     await persistCallLog(pass2.callLog);
     recordGeminiCall({
@@ -665,13 +688,40 @@ async function runLegacyWholeSessionPass1(args: {
       : undefined;
 
   const router = modelRouter();
-  const pass1 = await router.pass1({
-    sessionId: args.sessionId,
-    audioBytes,
-    durationMs,
-    ...(clientSpokenHints && { hints: { spokenLanguageHints: clientSpokenHints } }),
-    vertical: client?.psychologist.vertical === 'DOCTOR' ? 'DOCTOR' : 'THERAPIST',
-  });
+  try {
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'legacyPass1BeforeModel',
+    });
+  } catch (error) {
+    audioBytes.fill(0);
+    throw error;
+  }
+  let pass1: Awaited<ReturnType<(typeof router)['pass1']>>;
+  try {
+    pass1 = await router.pass1({
+      sessionId: args.sessionId,
+      audioBytes,
+      durationMs,
+      ...(clientSpokenHints && { hints: { spokenLanguageHints: clientSpokenHints } }),
+      vertical: client?.psychologist.vertical === 'DOCTOR' ? 'DOCTOR' : 'THERAPIST',
+    });
+  } finally {
+    // The model adapter receives this buffer by reference. Clear it even when
+    // the call fails so background execution cannot retain plaintext audio.
+    audioBytes.fill(0);
+  }
+  try {
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'legacyPass1BeforePersistence',
+    });
+  } catch (error) {
+    pass1.output.transcript = '';
+    pass1.output.speakerSegments = [];
+    pass1.output.affectFeatures = [];
+    throw error;
+  }
   await persistCallLog(pass1.callLog);
   recordGeminiCall({
     pass: pass1.callLog.pass,
@@ -865,6 +915,10 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     }
 
     const router = modelRouter();
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'clinicalAnalysisBeforeModel',
+    });
     const pass3 = await router.pass3({
       sessionId: args.sessionId,
       transcript: args.transcript,
@@ -886,6 +940,10 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
       ...(caseDigest && { caseDigest }),
     });
 
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'clinicalAnalysisBeforePersistence',
+    });
     await persistCallLog(pass3.callLog);
     recordGeminiCall({
       pass: pass3.callLog.pass,
@@ -1174,6 +1232,10 @@ export async function runDifferential(args: DifferentialArgs): Promise<void> {
     });
 
     const router = modelRouter();
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'differentialBeforeModel',
+    });
     const result = await router.passDifferential({
       sessionId: args.sessionId,
       transcript: args.transcript,
@@ -1183,6 +1245,10 @@ export async function runDifferential(args: DifferentialArgs): Promise<void> {
       language: args.language,
     });
 
+    await assertCurrentScribeAuthority(args.sessionId, {
+      psychologistId: args.psychologistId,
+      source: 'differentialBeforePersistence',
+    });
     await persistCallLog(result.callLog);
     recordGeminiCall({
       pass: result.callLog.pass,

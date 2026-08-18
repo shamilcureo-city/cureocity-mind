@@ -29,27 +29,81 @@ const denied = () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.requireCapability.mockResolvedValue(denied());
 });
 
-describe('Encounter compatibility route authorization', () => {
-  it.each([
-    ['GET', getEncounter, mocks.getEncounter, '/api/v1/encounters/enc-1'],
-    ['create', createEncounter, mocks.createEncounter, '/api/v1/encounters'],
-    ['start', startEncounter, mocks.startEncounter, '/api/v1/encounters/enc-1/start'],
-    ['complete', completeEncounter, mocks.completeEncounter, '/api/v1/encounters/enc-1/complete'],
-    ['no-show', noShowEncounter, mocks.noShowEncounter, '/api/v1/encounters/enc-1/no-show'],
-  ])(
-    'denies absent or revoked LIVE_ENCOUNTER authority before the %s Session delegate',
-    async (_label, handler, delegate, pathname) => {
-      const request = new Request(`https://example.test${pathname}`, { method: 'POST' }) as never;
-      const response = await handler(request, {
-        params: Promise.resolve({ id: 'enc-1' }),
-      } as never);
+type Handler = (request: never, context: { params: Promise<{ id: string }> }) => Promise<Response>;
 
-      expect(response.status).toBe(403);
-      expect(mocks.requireCapability).toHaveBeenCalledWith(request, 'LIVE_ENCOUNTER');
-      expect(delegate).not.toHaveBeenCalled();
-    },
-  );
+const routes = [
+  {
+    label: 'GET',
+    handler: getEncounter as Handler,
+    delegate: mocks.getEncounter,
+    pathname: '/api/v1/encounters/enc-1',
+    method: 'GET',
+    capabilities: ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'],
+  },
+  {
+    label: 'create',
+    handler: createEncounter as Handler,
+    delegate: mocks.createEncounter,
+    pathname: '/api/v1/encounters',
+    method: 'POST',
+    capabilities: ['LIVE_ENCOUNTER'],
+  },
+  {
+    label: 'start',
+    handler: startEncounter as Handler,
+    delegate: mocks.startEncounter,
+    pathname: '/api/v1/encounters/enc-1/start',
+    method: 'POST',
+    capabilities: ['LIVE_ENCOUNTER', 'AMBIENT_CAPTURE'],
+  },
+  {
+    label: 'complete',
+    handler: completeEncounter as Handler,
+    delegate: mocks.completeEncounter,
+    pathname: '/api/v1/encounters/enc-1/complete',
+    method: 'POST',
+    capabilities: ['LIVE_ENCOUNTER', 'AMBIENT_CAPTURE', 'MEDICAL_DOCUMENTATION'],
+  },
+  {
+    label: 'no-show',
+    handler: noShowEncounter as Handler,
+    delegate: mocks.noShowEncounter,
+    pathname: '/api/v1/encounters/enc-1/no-show',
+    method: 'POST',
+    capabilities: ['LIVE_ENCOUNTER'],
+  },
+] as const;
+
+describe('Encounter compatibility route authorization', () => {
+  for (const route of routes) {
+    it.each(route.capabilities)(
+      `denies missing %s before the ${route.label} Session delegate`,
+      async (missing) => {
+        const granted = {
+          ok: true as const,
+          value: { psychologistId: 'psy-1', user: { capabilities: route.capabilities } },
+        };
+        mocks.requireCapability.mockImplementation(async (_request, capability) =>
+          capability === missing ? denied() : granted,
+        );
+        const request = new Request(`https://example.test${route.pathname}`, {
+          method: route.method,
+        }) as never;
+
+        const response = await route.handler(request, {
+          params: Promise.resolve({ id: 'enc-1' }),
+        });
+
+        expect(response.status).toBe(403);
+        expect(
+          mocks.requireCapability.mock.calls.some(
+            ([calledRequest, capability]) => calledRequest === request && capability === missing,
+          ),
+        ).toBe(true);
+        expect(route.delegate).not.toHaveBeenCalled();
+      },
+    );
+  }
 });

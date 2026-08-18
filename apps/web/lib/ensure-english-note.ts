@@ -41,6 +41,7 @@ const SAFETY_OFF = [
 export async function ensureEnglishNote<T extends TherapyNoteV1 | IntakeNoteV1>(
   note: T,
   kind: SessionKind,
+  beforeModel?: () => Promise<void>,
 ): Promise<T> {
   // Only meaningful on the real backend; mock/dev never mistranslates.
   if ((process.env['LLM_BACKEND'] ?? 'mock') !== 'vertex') return note;
@@ -57,6 +58,7 @@ export async function ensureEnglishNote<T extends TherapyNoteV1 | IntakeNoteV1>(
     const ai = new GoogleGenAI({ vertexai: true, project, location: region });
     const isIntake = kind === 'INTAKE';
 
+    await beforeModel?.();
     const res = await ai.models.generateContent({
       model,
       contents: [

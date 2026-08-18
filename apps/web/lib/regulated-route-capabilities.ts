@@ -10,6 +10,8 @@ export interface RegulatedRouteCapability {
   /** `any` is used only for independently-filtered mixed disclosures. */
   mode?: 'all' | 'any';
   boundary: 'read' | 'write' | 'disclosure' | 'background' | 'live';
+  /** Canonical Session policy inherited by a compatibility alias. */
+  aliasOf?: `api/v1/${string}`;
 }
 
 const policy = (
@@ -18,7 +20,15 @@ const policy = (
   requirements: RegulatedRouteCapability['requirements'],
   boundary: RegulatedRouteCapability['boundary'],
   mode: RegulatedRouteCapability['mode'] = 'all',
-): RegulatedRouteCapability => ({ route, methods, requirements, boundary, mode });
+  aliasOf?: RegulatedRouteCapability['aliasOf'],
+): RegulatedRouteCapability => ({
+  route,
+  methods,
+  requirements,
+  boundary,
+  mode,
+  ...(aliasOf && { aliasOf }),
+});
 
 /**
  * Complete inventory of practitioner-facing regulated clinical API boundaries.
@@ -31,16 +41,39 @@ const policy = (
 export const REGULATED_ROUTE_CAPABILITIES = [
   // Doctor-facing Encounter compatibility paths delegate to Session handlers,
   // but authorization is always resolved against the original pathname.
-  policy('api/v1/encounters', ['POST'], ['LIVE_ENCOUNTER'], 'write'),
+  policy('api/v1/encounters', ['POST'], ['LIVE_ENCOUNTER'], 'write', 'all', 'api/v1/sessions'),
   policy(
     'api/v1/encounters/[id]',
     ['GET'],
     ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'],
     'disclosure',
+    'all',
+    'api/v1/sessions/[id]',
   ),
-  policy('api/v1/encounters/[id]/start', ['POST'], ['LIVE_ENCOUNTER'], 'live'),
-  policy('api/v1/encounters/[id]/complete', ['POST'], ['LIVE_ENCOUNTER'], 'write'),
-  policy('api/v1/encounters/[id]/no-show', ['POST'], ['LIVE_ENCOUNTER'], 'write'),
+  policy(
+    'api/v1/encounters/[id]/start',
+    ['POST'],
+    ['LIVE_ENCOUNTER'],
+    'live',
+    'all',
+    'api/v1/sessions/[id]/start',
+  ),
+  policy(
+    'api/v1/encounters/[id]/complete',
+    ['POST'],
+    ['LIVE_ENCOUNTER'],
+    'write',
+    'all',
+    'api/v1/sessions/[id]/end',
+  ),
+  policy(
+    'api/v1/encounters/[id]/no-show',
+    ['POST'],
+    ['LIVE_ENCOUNTER'],
+    'write',
+    'all',
+    'api/v1/sessions/[id]/no-show',
+  ),
 
   // Clinical documentation artifacts and disclosures.
   policy('api/v1/sessions/[id]', ['GET'], ['VERTICAL_DOCUMENTATION'], 'disclosure'),
@@ -249,11 +282,19 @@ export function resolveRegulatedRequirements(
   entry: RegulatedRouteCapability,
   vertical: 'THERAPIST' | 'DOCTOR' | undefined,
 ): PractitionerCapability[] {
-  return entry.requirements.map((requirement) =>
+  const own = entry.requirements.map((requirement) =>
     requirement === 'VERTICAL_DOCUMENTATION'
       ? vertical === 'DOCTOR'
         ? 'MEDICAL_DOCUMENTATION'
         : 'BEHAVIORAL_HEALTH_DOCUMENTATION'
       : requirement,
   );
+  if (!entry.aliasOf) return [...new Set(own)];
+  const canonical = REGULATED_ROUTE_CAPABILITIES.find(
+    (candidate) =>
+      candidate.route === entry.aliasOf &&
+      candidate.methods.some((method) => entry.methods.includes(method)),
+  );
+  if (!canonical) return [...new Set(own)];
+  return [...new Set([...own, ...resolveRegulatedRequirements(canonical, vertical)])];
 }
