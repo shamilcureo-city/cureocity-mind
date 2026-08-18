@@ -70,3 +70,4 @@ export * from './note-review';
 export * from './formulation';
 // Marketing V1 — public therapist pages + real-slot booking.
 export * from './marketing';
+export * from './orbit-capability';
