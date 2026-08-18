@@ -10,6 +10,8 @@ import { writeAudit } from './audit';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
 import { assertCurrentScribeAuthority } from './scribe-authority';
+import { ClientPhiWriteForbiddenError, withActiveSessionPhiWrite } from './phi-write-lock';
+import { compactPassError } from './pass-error';
 
 /**
  * Sprint 57 — transcribe-on-arrival.
@@ -107,17 +109,24 @@ export async function transcribeChunkInline(
   let segmentId: string;
   if (!existing) {
     try {
-      const created = await prisma.transcriptSegment.create({
-        data: {
-          sessionId: args.sessionId,
-          audioChunkId: chunk.id,
-          chunkIndex: args.chunkIndex,
-          status: 'TRANSCRIBING',
-          startedAt: new Date(),
-          attempts: 1,
-        },
-        select: { id: true },
-      });
+      const created = await withActiveSessionPhiWrite(
+        prisma,
+        args.sessionId,
+        chunk.session.psychologistId,
+        (tx) =>
+          tx.transcriptSegment.create({
+            data: {
+              sessionId: args.sessionId,
+              audioChunkId: chunk.id,
+              chunkIndex: args.chunkIndex,
+              status: 'TRANSCRIBING',
+              startedAt: new Date(),
+              attempts: 1,
+            },
+            select: { id: true },
+          }),
+        { allowedStatuses: ['IN_PROGRESS', 'COMPLETED'] },
+      );
       segmentId = created.id;
     } catch (e) {
       // P2002 = another caller raced us to the create. Re-fetch and let
@@ -180,7 +189,12 @@ export async function transcribeChunkInline(
     });
   } catch {
     zeroAudio(chunk.bytes);
-    await markSegmentFailed(segmentId, 'authorization-denied');
+    await markSegmentFailed(
+      args.sessionId,
+      chunk.session.psychologistId,
+      segmentId,
+      'authorization-denied',
+    );
     return { status: 'failed', reason: 'authorization-denied' };
   }
   const modelAudio = Buffer.from(chunk.bytes);
@@ -197,7 +211,12 @@ export async function transcribeChunkInline(
     // The backend's own try/catch returns an ERROR callLog rather than
     // throwing in normal failure modes; this is the path for unexpected
     // exceptions before the call site.
-    await markSegmentFailed(segmentId, (e as Error).message);
+    await markSegmentFailed(
+      args.sessionId,
+      chunk.session.psychologistId,
+      segmentId,
+      (e as Error).message,
+    );
     return { status: 'failed', reason: (e as Error).message };
   } finally {
     // The router receives this copy by reference. Clear it on every exit so a
@@ -217,61 +236,90 @@ export async function transcribeChunkInline(
     result.output.transcript = '';
     result.output.speakerSegments = [];
     result.output.affectFeatures = [];
-    await markSegmentFailed(segmentId, 'authorization-denied');
+    await markSegmentFailed(
+      args.sessionId,
+      chunk.session.psychologistId,
+      segmentId,
+      'authorization-denied',
+    );
     return { status: 'failed', reason: 'authorization-denied' };
   }
 
-  // 4. Persist the Gemini call log for cost rollups even on per-chunk runs.
-  await persistCallLog(result.callLog);
-  recordGeminiCall({
-    pass: result.callLog.pass,
-    status: result.callLog.status,
-    region: result.callLog.region,
-    durationMs: result.callLog.latencyMs,
-  });
-
   if (result.callLog.status !== 'SUCCESS') {
     const reason = result.callLog.errorMessage ?? 'vertex-error';
-    await markSegmentFailed(segmentId, reason);
+    await markSegmentFailed(
+      args.sessionId,
+      chunk.session.psychologistId,
+      segmentId,
+      reason,
+      result.callLog,
+    );
+    recordGeminiCall({
+      pass: result.callLog.pass,
+      status: result.callLog.status,
+      region: result.callLog.region,
+      durationMs: result.callLog.latencyMs,
+    });
     return { status: 'failed', reason };
   }
 
   // 5. Persist the per-window transcript + diarization. Timestamps inside
   //    speakerSegments / affectFeatures stay window-relative; the
   //    orchestrator offsets them by cumulative chunk durations at assembly.
-  await prisma.transcriptSegment.update({
-    where: { id: segmentId },
-    data: {
-      status: 'COMPLETED',
-      transcript: result.output.transcript,
-      speakerSegments: result.output.speakerSegments as unknown as Prisma.InputJsonValue,
-      affectFeatures: result.output.affectFeatures as unknown as Prisma.InputJsonValue,
-      detectedLanguages: result.output.detectedLanguages,
-      model: result.callLog.model,
-      region: result.callLog.region,
-      costInr: new Prisma.Decimal(result.callLog.costInr),
-      latencyMs: result.callLog.latencyMs,
-      completedAt: new Date(),
-      errorMessage: null,
-    },
-  });
+  // PASS_1_SEGMENT_COMPLETED — Pass 1/network work is already finished. Take
+  // the Client lock only for this short persistence group, then recheck the
+  // Session immediately before committing transcript PHI.
+  await withActiveSessionPhiWrite(
+    prisma,
+    args.sessionId,
+    chunk.session.psychologistId,
+    async (tx) => {
+      await persistCallLog(result.callLog, tx);
+      await tx.transcriptSegment.update({
+        where: { id: segmentId },
+        data: {
+          status: 'COMPLETED',
+          transcript: result.output.transcript,
+          speakerSegments: result.output.speakerSegments as unknown as Prisma.InputJsonValue,
+          affectFeatures: result.output.affectFeatures as unknown as Prisma.InputJsonValue,
+          detectedLanguages: result.output.detectedLanguages,
+          model: result.callLog.model,
+          region: result.callLog.region,
+          costInr: new Prisma.Decimal(result.callLog.costInr),
+          latencyMs: result.callLog.latencyMs,
+          completedAt: new Date(),
+          errorMessage: null,
+        },
+      });
 
-  await writeAudit({
-    actorType: 'SYSTEM',
-    actorPsychologistId: chunk.session.psychologistId,
-    action: 'TRANSCRIPT_SEGMENT_TRANSCRIBED',
-    targetType: 'TranscriptSegment',
-    targetId: segmentId,
-    metadata: {
-      sessionId: args.sessionId,
-      chunkIndex: args.chunkIndex,
-      audioChunkId: chunk.id,
-      transcriptChars: result.output.transcript.length,
-      detectedLanguages: result.output.detectedLanguages,
-      model: result.callLog.model,
-      latencyMs: result.callLog.latencyMs,
-      costInr: result.callLog.costInr,
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          actorPsychologistId: chunk.session.psychologistId,
+          action: 'TRANSCRIPT_SEGMENT_TRANSCRIBED',
+          targetType: 'TranscriptSegment',
+          targetId: segmentId,
+          metadata: {
+            sessionId: args.sessionId,
+            chunkIndex: args.chunkIndex,
+            audioChunkId: chunk.id,
+            transcriptChars: result.output.transcript.length,
+            detectedLanguages: result.output.detectedLanguages,
+            model: result.callLog.model,
+            latencyMs: result.callLog.latencyMs,
+            costInr: result.callLog.costInr,
+          },
+        },
+        tx,
+      );
     },
+    { allowedStatuses: ['IN_PROGRESS', 'COMPLETED'] },
+  );
+  recordGeminiCall({
+    pass: result.callLog.pass,
+    status: result.callLog.status,
+    region: result.callLog.region,
+    durationMs: result.callLog.latencyMs,
   });
 
   return {
@@ -285,32 +333,62 @@ function zeroAudio(bytes: Uint8Array | null): void {
   bytes?.fill(0);
 }
 
-async function markSegmentFailed(segmentId: string, reason: string): Promise<void> {
-  const updated = await prisma.transcriptSegment.update({
-    where: { id: segmentId },
-    data: {
-      status: 'FAILED',
-      errorMessage: reason,
-      completedAt: new Date(),
-    },
-    select: { sessionId: true, chunkIndex: true, attempts: true },
-  });
-  await writeAudit({
-    actorType: 'SYSTEM',
-    action: 'TRANSCRIPT_SEGMENT_FAILED',
-    targetType: 'TranscriptSegment',
-    targetId: segmentId,
-    metadata: {
-      sessionId: updated.sessionId,
-      chunkIndex: updated.chunkIndex,
-      attempts: updated.attempts,
-      reason,
-    },
-  });
+async function markSegmentFailed(
+  sessionId: string,
+  psychologistId: string,
+  segmentId: string,
+  reason: string,
+  callLog?: GeminiCallLogData,
+): Promise<void> {
+  try {
+    // PASS_1_SEGMENT_FAILED — failure details can contain clinical context, so
+    // serialize their persistence against erasure just like successful text.
+    await withActiveSessionPhiWrite(
+      prisma,
+      sessionId,
+      psychologistId,
+      async (tx) => {
+        if (callLog) await persistCallLog(callLog, tx);
+        const safeReason = compactPassError(reason);
+        const updated = await tx.transcriptSegment.update({
+          where: { id: segmentId },
+          data: {
+            status: 'FAILED',
+            errorMessage: safeReason,
+            completedAt: new Date(),
+          },
+          select: { sessionId: true, chunkIndex: true, attempts: true },
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'TRANSCRIPT_SEGMENT_FAILED',
+            targetType: 'TranscriptSegment',
+            targetId: segmentId,
+            metadata: {
+              sessionId: updated.sessionId,
+              chunkIndex: updated.chunkIndex,
+              attempts: updated.attempts,
+              reason: safeReason,
+            },
+          },
+          tx,
+        );
+      },
+      { allowedStatuses: ['IN_PROGRESS', 'COMPLETED'] },
+    );
+  } catch (error) {
+    if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
+    // Erasure won the Client lock. Do not recreate a FAILED marker or retain
+    // delayed error details after the terminal deletion state.
+  }
 }
 
-async function persistCallLog(log: GeminiCallLogData): Promise<void> {
-  await prisma.geminiCallLog.create({
+async function persistCallLog(
+  log: GeminiCallLogData,
+  db: Pick<Prisma.TransactionClient, 'geminiCallLog'> = prisma,
+): Promise<void> {
+  await db.geminiCallLog.create({
     data: {
       ...(log.sessionId !== undefined && { sessionId: log.sessionId }),
       pass: log.pass,
@@ -322,7 +400,7 @@ async function persistCallLog(log: GeminiCallLogData): Promise<void> {
       costInr: new Prisma.Decimal(log.costInr),
       latencyMs: log.latencyMs,
       status: log.status,
-      ...(log.errorMessage !== undefined && { errorMessage: log.errorMessage }),
+      ...(log.errorMessage !== undefined && { errorMessage: compactPassError(log.errorMessage) }),
     },
   });
 }

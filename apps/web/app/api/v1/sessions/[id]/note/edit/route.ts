@@ -13,6 +13,7 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { SIGNABLE_FIELDS_BY_KIND, signableKindFor } from '@/lib/note-edit-fields';
 import { canonicalJson } from '@/lib/sign-note-payload';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -54,6 +55,7 @@ export async function POST(
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
       const sessions = await tx.$queryRaw<LockedSession[]>`
         SELECT s."id", s."psychologistId", s."kind", p."vertical"
         FROM "sessions" s

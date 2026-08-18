@@ -90,6 +90,9 @@ beforeEach(() => {
   mocks.transaction.mockImplementation((callback) => callback(tx));
   mocks.queryRaw.mockImplementation((strings: TemplateStringsArray) => {
     const sql = sqlText(strings);
+    if (sql.includes('FROM "clients" c')) {
+      return Promise.resolve([{ id: 'client-1', psychologistId: 'psy-1' }]);
+    }
     if (sql.includes('FROM "sessions"')) {
       return Promise.resolve([{ id: 'session-1', psychologistId: 'psy-1' }]);
     }
@@ -115,6 +118,7 @@ describe('signed-note unlock integrity', () => {
     expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
     const lockedSql = mocks.queryRaw.mock.calls.map(([strings]) => sqlText(strings));
     expect(lockedSql.map((sql) => sql.match(/FROM "([^"]+)"/)?.[1])).toEqual([
+      'clients',
       'sessions',
       'note_drafts',
       'therapy_notes',

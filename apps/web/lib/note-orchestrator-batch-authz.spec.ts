@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => {
   return {
     sessionFindUnique: fn(),
     sessionUpdate: fn(),
+    transaction: fn(),
+    queryRaw: fn(),
     audioChunkFindMany: fn(),
     transcriptSegmentFindMany: fn(),
     noteDraftFindUnique: fn(),
@@ -29,6 +31,8 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('./prisma', () => ({
   prisma: {
+    $transaction: mocks.transaction,
+    $queryRaw: mocks.queryRaw,
     session: { findUnique: mocks.sessionFindUnique, update: mocks.sessionUpdate },
     audioChunk: { findMany: mocks.audioChunkFindMany },
     transcriptSegment: { findMany: mocks.transcriptSegmentFindMany },
@@ -96,6 +100,7 @@ const SESSION = {
   psychologistId: 'psy-1',
   clientId: 'client-1',
   scheduledAt: new Date('2026-08-18T00:00:00.000Z'),
+  status: 'COMPLETED',
   noteTemplateId: null,
   kind: 'TREATMENT',
   modality: null,
@@ -120,6 +125,27 @@ function callLog(pass: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.queryRaw.mockResolvedValue([{ id: 'client-1', psychologistId: 'psy-1' }]);
+  mocks.transaction.mockImplementation(async (callback) =>
+    callback({
+      $queryRaw: mocks.queryRaw,
+      session: { findUnique: mocks.sessionFindUnique, update: mocks.sessionUpdate },
+      noteDraft: { upsert: mocks.noteDraftUpsert, update: mocks.noteDraftUpdate },
+      geminiCallLog: { create: mocks.geminiCallLogCreate },
+      medicationOrder: {
+        deleteMany: mocks.medicationDeleteMany,
+        createMany: mocks.medicationCreateMany,
+      },
+      clinicalOrder: {
+        deleteMany: mocks.clinicalOrderDeleteMany,
+        createMany: mocks.clinicalOrderCreateMany,
+      },
+      clinicalReading: {
+        deleteMany: mocks.clinicalReadingDeleteMany,
+        createMany: mocks.clinicalReadingCreateMany,
+      },
+    }),
+  );
   process.env['LLM_BACKEND'] = 'mock';
   mocks.sessionFindUnique.mockResolvedValue(SESSION);
   mocks.audioChunkFindMany.mockResolvedValue([]);

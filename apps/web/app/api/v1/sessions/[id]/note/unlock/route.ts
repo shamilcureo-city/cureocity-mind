@@ -5,6 +5,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { canonicalJson } from '@/lib/sign-note-payload';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -98,6 +99,7 @@ export async function POST(
 
   try {
     const result = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
       const sessions = await tx.$queryRaw<LockedSession[]>`
         SELECT "id", "psychologistId"
         FROM "sessions"

@@ -154,6 +154,9 @@ beforeEach(() => {
   mocks.transaction.mockImplementation((callback) => callback(tx));
   mocks.queryRaw.mockImplementation((strings: TemplateStringsArray) => {
     const sql = sqlText(strings);
+    if (sql.includes('FROM "clients" c')) {
+      return Promise.resolve([{ id: 'client-1', psychologistId: 'psy-1' }]);
+    }
     if (sql.includes('FROM "psychologists"')) {
       return Promise.resolve([
         {
@@ -573,7 +576,8 @@ describe('medical signing route transaction behavior', () => {
     expect(response.status).toBe(201);
     expect(mocks.requireCapability).not.toHaveBeenCalled();
     const lockedSql = mocks.queryRaw.mock.calls.map(([strings]) => sqlText(strings));
-    expect(lockedSql).toHaveLength(4);
+    expect(lockedSql).toHaveLength(5);
+    expect(lockedSql[0]).toContain('FROM "clients" c');
     for (const sql of lockedSql) expect(sql).toContain('FOR UPDATE');
     expect(lockedSql.some((sql) => sql.includes('FROM "practitioner_credentials"'))).toBe(false);
     expect(mocks.noteCreate).toHaveBeenCalledWith({

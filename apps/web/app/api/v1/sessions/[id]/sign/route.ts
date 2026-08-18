@@ -29,6 +29,7 @@ import {
   canonicalSigningPayload,
 } from '@/lib/sign-note-payload';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
 import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauthn-verify';
 
@@ -174,6 +175,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   };
   try {
     result = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
       const sessions = await tx.$queryRaw<LockedSession[]>`
         SELECT s."id", s."psychologistId", s."status", s."kind", p."vertical"
         FROM "sessions" s

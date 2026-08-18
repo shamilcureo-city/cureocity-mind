@@ -78,6 +78,9 @@ beforeEach(() => {
   mocks.draftUpdate.mockResolvedValue({ count: 1 });
   mocks.queryRaw.mockImplementation((strings: TemplateStringsArray) => {
     const sql = Array.from(strings).join('?');
+    if (sql.includes('FROM "clients" c')) {
+      return Promise.resolve([{ id: 'client-1', psychologistId: 'psy-1' }]);
+    }
     if (sql.includes('FROM "sessions"')) {
       return Promise.resolve([
         { id: 'session-1', psychologistId: 'psy-1', kind: 'TREATMENT', vertical: 'THERAPIST' },

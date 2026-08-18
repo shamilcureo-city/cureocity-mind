@@ -5,6 +5,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toSafetyPlanRow } from '@/lib/clinical-mappers';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClient } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -43,6 +44,7 @@ export async function POST(
   });
 
   const row = await prisma.$transaction(async (tx) => {
+    await lockActiveClient(tx, clientId, auth.value.psychologistId);
     await tx.safetyPlan.updateMany({
       where: { clientId, supersededAt: null },
       data: { supersededAt: now },

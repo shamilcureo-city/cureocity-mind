@@ -42,6 +42,15 @@ import { hasTranscript } from './note-transcript';
 import { assertAuditedSessionCapabilities, getEffectiveCapabilities } from './capabilities';
 import { requiredMedicalCapabilities } from './regulated-actions';
 import { assertCurrentScribeAuthority } from './scribe-authority';
+import { ClientPhiWriteForbiddenError, withActiveSessionPhiWrite } from './phi-write-lock';
+
+// ASYNC_NOTE_PHI_WRITE_INVENTORY
+// PASS_1_DRAFT_AND_LANGUAGE; PASS_2_THERAPY_DRAFT; PASS_2_MEDICAL_DRAFT;
+// PASS_2_DRAFTED_ORDERS; PASS_2_VITAL_READINGS; PASS_3_REPORT_PENDING;
+// PASS_3_REPORT_COMPLETED; PASS_3_REPORT_FAILED; PASS_3_ASSESSMENT_ITEMS;
+// PASS_9_DIFFERENTIAL_PENDING; PASS_9_DIFFERENTIAL_COMPLETED;
+// PASS_9_DIFFERENTIAL_FAILED. Every group enters withActiveSessionPhiWrite
+// only after LLM/network latency, then locks Client and rereads Session.
 
 /**
  * Synchronous orchestrator port — runs Pass 1 → Pass 2 inline on the
@@ -95,11 +104,18 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     return { draftId: existing.id, status: 'COMPLETED' };
   }
 
-  const draft = await prisma.noteDraft.upsert({
-    where: { sessionId },
-    update: { status: 'IN_PROGRESS', errorMessage: null },
-    create: { sessionId, status: 'IN_PROGRESS' },
-  });
+  const draft = await withActiveSessionPhiWrite(
+    prisma,
+    sessionId,
+    session.psychologistId,
+    async (tx) =>
+      tx.noteDraft.upsert({
+        where: { sessionId },
+        update: { status: 'IN_PROGRESS', errorMessage: null },
+        create: { sessionId, status: 'IN_PROGRESS' },
+      }),
+    { allowedStatuses: ['COMPLETED'] },
+  );
 
   try {
     const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
@@ -135,26 +151,31 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       );
     }
 
-    await prisma.noteDraft.update({
-      where: { id: draft.id },
-      data: {
-        transcriptEncrypted,
-        speakerSegments: pass1.speakerSegments as unknown as Prisma.InputJsonValue,
-        affectFeatures: pass1.affectFeatures as unknown as Prisma.InputJsonValue,
-        totalCostInr: pass1Cost,
+    // PASS_1_DRAFT_AND_LANGUAGE — the LLM and KMS calls are complete before
+    // this short lock. Transcript + derived Session language commit together.
+    await withActiveSessionPhiWrite(
+      prisma,
+      sessionId,
+      session.psychologistId,
+      async (tx) => {
+        await tx.noteDraft.update({
+          where: { id: draft.id },
+          data: {
+            transcriptEncrypted,
+            speakerSegments: pass1.speakerSegments as unknown as Prisma.InputJsonValue,
+            affectFeatures: pass1.affectFeatures as unknown as Prisma.InputJsonValue,
+            totalCostInr: pass1Cost,
+          },
+        });
+        if (pass1.detectedLanguages.length > 0) {
+          await tx.session.update({
+            where: { id: sessionId },
+            data: { spokenLanguages: pass1.detectedLanguages },
+          });
+        }
       },
-    });
-
-    // Sprint 16 — persist the languages Pass 1 actually detected onto
-    // the Session row. Used by the UI to show language badges +
-    // by Pass 4 to choose the verbatim therapistSays language when
-    // the client has no spokenLanguages on file.
-    if (pass1.detectedLanguages.length > 0) {
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { spokenLanguages: pass1.detectedLanguages },
-      });
-    }
+      { allowedStatuses: ['COMPLETED'] },
+    );
 
     // Sprint 56 hotfix — guard against an empty Pass 1 transcript.
     // A zero-char transcript means the recording had no intelligible
@@ -171,10 +192,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         `check your microphone / input device and that you weren't muted — or the model returned ` +
         `nothing this time. No note was generated (you were not charged for note-writing). ` +
         `Re-record, or hit Retry to run transcription again on the same audio.`;
-      await prisma.noteDraft.update({
-        where: { id: draft.id },
-        data: { status: 'FAILED', errorMessage: compactPassError(message) },
-      });
+      await markDraftFailed(sessionId, session.psychologistId, draft.id, message);
       return { draftId: draft.id, status: 'FAILED', errorMessage: message };
     }
 
@@ -271,7 +289,6 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         ? pass2.output.orders
         : [];
       const vitals = effective.capabilities.has('CHRONIC_CARE') ? encounterNote.vitals : undefined;
-      await persistCallLog(pass2.callLog);
       recordGeminiCall({
         pass: pass2.callLog.pass,
         status: pass2.callLog.status,
@@ -284,27 +301,40 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         inr: pass2.callLog.costInr,
       });
       const pass2CostMedical = new Prisma.Decimal(pass2.callLog.costInr);
-      await prisma.noteDraft.update({
-        where: { id: draft.id },
-        data: {
-          content: encounterNote as unknown as Prisma.InputJsonValue,
-          riskSeverity: mapRiskSeverity('none'),
-          status: 'COMPLETED',
-          totalCostInr: pass1Cost.plus(pass2CostMedical),
+      // PASS_2_MEDICAL_DRAFT
+      await withActiveSessionPhiWrite(
+        prisma,
+        sessionId,
+        session.psychologistId,
+        async (tx) => {
+          await persistCallLog(pass2.callLog, tx);
+          await tx.noteDraft.update({
+            where: { id: draft.id },
+            data: {
+              content: encounterNote as unknown as Prisma.InputJsonValue,
+              riskSeverity: mapRiskSeverity('none'),
+              status: 'COMPLETED',
+              totalCostInr: pass1Cost.plus(pass2CostMedical),
+            },
+          });
+          await writeAudit(
+            {
+              actorType: 'SYSTEM',
+              action: 'ENCOUNTER_NOTE_DRAFTED',
+              targetType: 'NoteDraft',
+              targetId: draft.id,
+              metadata: {
+                sessionId,
+                pass1CostInr: pass1.totalCostInr,
+                pass2CostInr: pass2.callLog.costInr,
+                totalCostInr: pass1.totalCostInr + pass2.callLog.costInr,
+              },
+            },
+            tx,
+          );
         },
-      });
-      await writeAudit({
-        actorType: 'SYSTEM',
-        action: 'ENCOUNTER_NOTE_DRAFTED',
-        targetType: 'NoteDraft',
-        targetId: draft.id,
-        metadata: {
-          sessionId,
-          pass1CostInr: pass1.totalCostInr,
-          pass2CostInr: pass2.callLog.costInr,
-          totalCostInr: pass1.totalCostInr + pass2.callLog.costInr,
-        },
-      });
+        { allowedStatuses: ['COMPLETED'] },
+      );
       // Sprint DV5 — persist the drafted Rx + clinical orders (the
       // interaction-check runs server-side inside the helper).
       await persistDraftedOrders(sessionId, session.psychologistId, medications, clinicalOrders);
@@ -339,7 +369,6 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       source: 'pass2BeforePersistence',
     });
     const pass2RiskFlags = pass2Body.riskFlags;
-    await persistCallLog(pass2.callLog);
     recordGeminiCall({
       pass: pass2.callLog.pass,
       status: pass2.callLog.status,
@@ -354,51 +383,65 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     const pass2Cost = new Prisma.Decimal(pass2.callLog.costInr);
 
     const riskSeverity = mapRiskSeverity(pass2RiskFlags.severity);
-    await prisma.noteDraft.update({
-      where: { id: draft.id },
-      data: {
-        // Sprint 19 — Pass 2 output body is either TherapyNoteV1 or
-        // IntakeNoteV1 depending on session.kind. NoteDraft.content
-        // is opaque JSON; the UI branches on session.kind to render
-        // the correct view.
-        content: pass2Body as unknown as Prisma.InputJsonValue,
-        riskSeverity,
-        status: 'COMPLETED',
-        totalCostInr: pass1Cost.plus(pass2Cost),
-      },
-    });
+    // PASS_2_THERAPY_DRAFT
+    await withActiveSessionPhiWrite(
+      prisma,
+      sessionId,
+      session.psychologistId,
+      async (tx) => {
+        await persistCallLog(pass2.callLog, tx);
+        await tx.noteDraft.update({
+          where: { id: draft.id },
+          data: {
+            content: pass2Body as unknown as Prisma.InputJsonValue,
+            riskSeverity,
+            status: 'COMPLETED',
+            totalCostInr: pass1Cost.plus(pass2Cost),
+          },
+        });
 
-    await writeAudit({
-      actorType: 'SYSTEM',
-      action: 'NOTE_DRAFT_CREATED',
-      targetType: 'NoteDraft',
-      targetId: draft.id,
-      metadata: {
-        sessionId,
-        pass1Source: pass1.source,
-        pass1SegmentCount: pass1.segmentCount,
-        pass1CostInr: pass1.totalCostInr,
-        pass2CostInr: pass2.callLog.costInr,
-        totalCostInr: pass1.totalCostInr + pass2.callLog.costInr,
-        riskSeverity,
-      },
-    });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'NOTE_DRAFT_CREATED',
+            targetType: 'NoteDraft',
+            targetId: draft.id,
+            metadata: {
+              sessionId,
+              pass1Source: pass1.source,
+              pass1SegmentCount: pass1.segmentCount,
+              pass1CostInr: pass1.totalCostInr,
+              pass2CostInr: pass2.callLog.costInr,
+              totalCostInr: pass1.totalCostInr + pass2.callLog.costInr,
+              riskSeverity,
+            },
+          },
+          tx,
+        );
 
+        if (riskSeverity === 'HIGH' || riskSeverity === 'CRITICAL') {
+          await writeAudit(
+            {
+              actorType: 'SYSTEM',
+              action: 'CRISIS_FLAG_RAISED',
+              targetType: 'Session',
+              targetId: sessionId,
+              metadata: {
+                severity: riskSeverity,
+                indicators: pass2RiskFlags.indicators,
+                details: pass2RiskFlags.details ?? null,
+                psychologistId: session.psychologistId,
+                clientId: session.clientId,
+              },
+            },
+            tx,
+          );
+        }
+      },
+      { allowedStatuses: ['COMPLETED'] },
+    );
     if (riskSeverity === 'HIGH' || riskSeverity === 'CRITICAL') {
       recordCrisisFlag(riskSeverity);
-      await writeAudit({
-        actorType: 'SYSTEM',
-        action: 'CRISIS_FLAG_RAISED',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: {
-          severity: riskSeverity,
-          indicators: pass2RiskFlags.indicators,
-          details: pass2RiskFlags.details ?? null,
-          psychologistId: session.psychologistId,
-          clientId: session.clientId,
-        },
-      });
     }
 
     // Pass 3 — Clinical Analysis. Best-effort: a Pass 3 failure does
@@ -425,44 +468,10 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     return { draftId: draft.id, status: 'COMPLETED', pendingClinicalAnalysisArgs };
   } catch (e) {
     const message = (e as Error).message;
-    await prisma.noteDraft.update({
-      where: { id: draft.id },
-      // compact: a Zod dump embeds `received` values — clinical content —
-      // and errorMessage is a plaintext column. Codes + paths only at rest.
-      data: { status: 'FAILED', errorMessage: compactPassError(message) },
-    });
     if (e instanceof CostCircuitOpenError) {
       recordCostCircuitTrip(e.meta.scope);
-      await writeAudit({
-        actorType: 'SYSTEM',
-        action: 'COST_CIRCUIT_TRIPPED',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: {
-          scope: e.meta.scope,
-          capInr: e.meta.capInr,
-          currentInr: e.meta.currentInr,
-          projectedInr: e.meta.projectedInr,
-          psychologistId: session.psychologistId,
-          clientId: session.clientId,
-        },
-      });
-      await prisma.geminiCallLog.create({
-        data: {
-          sessionId,
-          pass: 'PASS_1_TRANSCRIBE_AND_ANALYSE',
-          model: 'circuit-open',
-          region: 'n/a',
-          promptVersion: 'n/a',
-          inputTokens: 0,
-          outputTokens: 0,
-          costInr: 0,
-          latencyMs: 0,
-          status: 'CIRCUIT_OPEN',
-          errorMessage: message,
-        },
-      });
     }
+    await markDraftFailed(sessionId, session.psychologistId, draft.id, message, e);
     return { draftId: draft.id, status: 'FAILED', errorMessage: message };
   }
 }
@@ -722,7 +731,13 @@ async function runLegacyWholeSessionPass1(args: {
     pass1.output.affectFeatures = [];
     throw error;
   }
-  await persistCallLog(pass1.callLog);
+  await withActiveSessionPhiWrite(
+    prisma,
+    args.sessionId,
+    args.psychologistId,
+    (tx) => persistCallLog(pass1.callLog, tx),
+    { allowedStatuses: ['COMPLETED'] },
+  );
   recordGeminiCall({
     pass: pass1.callLog.pass,
     status: pass1.callLog.status,
@@ -758,8 +773,11 @@ async function runLegacyWholeSessionPass1(args: {
   };
 }
 
-async function persistCallLog(log: GeminiCallLogData): Promise<void> {
-  await prisma.geminiCallLog.create({
+async function persistCallLog(
+  log: GeminiCallLogData,
+  db: Pick<Prisma.TransactionClient, 'geminiCallLog'> = prisma,
+): Promise<void> {
+  await db.geminiCallLog.create({
     data: {
       ...(log.sessionId !== undefined && { sessionId: log.sessionId }),
       pass: log.pass,
@@ -771,9 +789,69 @@ async function persistCallLog(log: GeminiCallLogData): Promise<void> {
       costInr: new Prisma.Decimal(log.costInr),
       latencyMs: log.latencyMs,
       status: log.status,
-      ...(log.errorMessage !== undefined && { errorMessage: log.errorMessage }),
+      ...(log.errorMessage !== undefined && { errorMessage: compactPassError(log.errorMessage) }),
     },
   });
+}
+
+async function markDraftFailed(
+  sessionId: string,
+  psychologistId: string,
+  draftId: string,
+  message: string,
+  cause?: unknown,
+): Promise<void> {
+  try {
+    await withActiveSessionPhiWrite(
+      prisma,
+      sessionId,
+      psychologistId,
+      async (tx) => {
+        await tx.noteDraft.update({
+          where: { id: draftId },
+          data: { status: 'FAILED', errorMessage: compactPassError(message) },
+        });
+        if (cause instanceof CostCircuitOpenError) {
+          await writeAudit(
+            {
+              actorType: 'SYSTEM',
+              action: 'COST_CIRCUIT_TRIPPED',
+              targetType: 'Session',
+              targetId: sessionId,
+              metadata: {
+                scope: cause.meta.scope,
+                capInr: cause.meta.capInr,
+                currentInr: cause.meta.currentInr,
+                projectedInr: cause.meta.projectedInr,
+                psychologistId,
+              },
+            },
+            tx,
+          );
+          await tx.geminiCallLog.create({
+            data: {
+              sessionId,
+              pass: 'PASS_1_TRANSCRIBE_AND_ANALYSE',
+              model: 'circuit-open',
+              region: 'n/a',
+              promptVersion: 'n/a',
+              inputTokens: 0,
+              outputTokens: 0,
+              costInr: 0,
+              latencyMs: 0,
+              status: 'CIRCUIT_OPEN',
+              errorMessage: compactPassError(message),
+            },
+          });
+        }
+      },
+      { allowedStatuses: ['COMPLETED'] },
+    );
+  } catch (error) {
+    if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
+    // Erasure won the Client lock. Its terminal state is authoritative and no
+    // post-erasure FAILED marker or error detail may be written.
+  }
 }
 
 function mapRiskSeverity(severity: Pass1Output extends never ? never : string): PrismaRiskSeverity {
@@ -833,24 +911,31 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
     psychologistId: args.psychologistId,
     source: 'runClinicalAnalysis',
   });
-  // Upsert the report row in PENDING so the UI can poll for it
-  // (matches NoteDraft IN_PROGRESS pattern).
-  const report = await prisma.clinicalReport.upsert({
-    where: { sessionId: args.sessionId },
-    update: {
-      status: 'PENDING',
-      errorMessage: null,
-      // Preserve confirmations across retries; a re-run shouldn't
-      // erase the therapist's accept/reject decisions.
+  // PASS_3_REPORT_PENDING — scheduled helpers independently recheck erasure,
+  // ownership, client linkage and Session state before creating their marker.
+  const report = await withActiveSessionPhiWrite(
+    prisma,
+    args.sessionId,
+    args.psychologistId,
+    async (tx, lockedSession) => {
+      if (lockedSession.clientId !== args.clientId) throw new ClientPhiWriteForbiddenError();
+      return tx.clinicalReport.upsert({
+        where: { sessionId: args.sessionId },
+        update: {
+          status: 'PENDING',
+          errorMessage: null,
+        },
+        create: {
+          sessionId: args.sessionId,
+          clientId: args.clientId,
+          psychologistId: args.psychologistId,
+          status: 'PENDING',
+          confirmations: PENDING_SECTION_CONFIRMATIONS as unknown as Prisma.InputJsonValue,
+        },
+      });
     },
-    create: {
-      sessionId: args.sessionId,
-      clientId: args.clientId,
-      psychologistId: args.psychologistId,
-      status: 'PENDING',
-      confirmations: PENDING_SECTION_CONFIRMATIONS as unknown as Prisma.InputJsonValue,
-    },
-  });
+    { allowedStatuses: ['COMPLETED'] },
+  );
 
   try {
     // Cost-guard pre-check. Estimate ~ Pass 2 input + report output;
@@ -944,7 +1029,6 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
       psychologistId: args.psychologistId,
       source: 'clinicalAnalysisBeforePersistence',
     });
-    await persistCallLog(pass3.callLog);
     recordGeminiCall({
       pass: pass3.callLog.pass,
       status: pass3.callLog.status,
@@ -957,10 +1041,6 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
       inr: pass3.callLog.costInr,
     });
 
-    // Sprint 19 — Pass 3 output is a discriminated union. INTAKE
-    // sessions produce InitialAssessmentBriefV1; TREATMENT/REVIEW
-    // produce ClinicalReportV1. ClinicalReport.body stores either
-    // opaquely; the UI branches on session.kind to render.
     const pass3Body =
       pass3.output.kind === 'INTAKE'
         ? pass3.output.initialAssessmentBrief
@@ -974,65 +1054,87 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
         ? pass3.output.initialAssessmentBrief.crisisFlags.length
         : pass3.output.clinicalReport.crisisFlags.length;
 
-    await prisma.clinicalReport.update({
-      where: { id: report.id },
-      data: {
-        status: 'COMPLETED',
-        body: pass3Body as unknown as Prisma.InputJsonValue,
-        totalCostInr: new Prisma.Decimal(pass3.callLog.costInr),
+    // PASS_3_REPORT_COMPLETED + PASS_3_ASSESSMENT_ITEMS
+    await withActiveSessionPhiWrite(
+      prisma,
+      args.sessionId,
+      args.psychologistId,
+      async (tx, lockedSession) => {
+        if (lockedSession.clientId !== args.clientId) throw new ClientPhiWriteForbiddenError();
+        await persistCallLog(pass3.callLog, tx);
+        await tx.clinicalReport.update({
+          where: { id: report.id },
+          data: {
+            status: 'COMPLETED',
+            body: pass3Body as unknown as Prisma.InputJsonValue,
+            totalCostInr: new Prisma.Decimal(pass3.callLog.costInr),
+          },
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'CLINICAL_REPORT_GENERATED',
+            targetType: 'ClinicalReport',
+            targetId: report.id,
+            metadata: {
+              sessionId: args.sessionId,
+              clientId: args.clientId,
+              psychologistId: args.psychologistId,
+              kind: pass3.output.kind,
+              diagnosisCandidateCount: candidateCount,
+              crisisFlagCount: crisisCount,
+              costInr: pass3.callLog.costInr,
+            },
+          },
+          tx,
+        );
+        try {
+          await reconcileAssessmentItems(
+            {
+              clientId: args.clientId,
+              psychologistId: args.psychologistId,
+              sourceSessionId: args.sessionId,
+              pass3Body,
+              kind: pass3.output.kind,
+            },
+            tx,
+          );
+        } catch (error) {
+          console.error(
+            `[assessment-items] reconcile failed for session ${args.sessionId}: ${(error as Error).message}`,
+          );
+        }
       },
-    });
-
-    await writeAudit({
-      actorType: 'SYSTEM',
-      action: 'CLINICAL_REPORT_GENERATED',
-      targetType: 'ClinicalReport',
-      targetId: report.id,
-      metadata: {
-        sessionId: args.sessionId,
-        clientId: args.clientId,
-        psychologistId: args.psychologistId,
-        kind: pass3.output.kind,
-        diagnosisCandidateCount: candidateCount,
-        crisisFlagCount: crisisCount,
-        costInr: pass3.callLog.costInr,
-      },
-    });
-
-    // Sprint 22 — reconcile the brief's diagnostic gaps into the
-    // running differential (persistent AssessmentItems). Best-effort:
-    // a reconcile failure must not fail the clinical analysis.
-    try {
-      await reconcileAssessmentItems({
-        clientId: args.clientId,
-        psychologistId: args.psychologistId,
-        sourceSessionId: args.sessionId,
-        pass3Body,
-        kind: pass3.output.kind,
-      });
-    } catch (e) {
-      console.error(
-        `[assessment-items] reconcile failed for session ${args.sessionId}: ${(e as Error).message}`,
-      );
-    }
+      { allowedStatuses: ['COMPLETED'] },
+    );
   } catch (e) {
     const message = (e as Error).message;
-    await prisma.clinicalReport
-      .update({
-        where: { id: report.id },
-        // compact: the Sajina incident persisted the client's name a dozen
-        // times inside a raw ZodError dump. Codes + paths only at rest.
-        data: { status: 'FAILED', errorMessage: compactPassError(message) },
-      })
-      .catch(() => {
-        // Swallow — primary failure already logged below.
-      });
+    try {
+      // PASS_3_REPORT_FAILED
+      await withActiveSessionPhiWrite(
+        prisma,
+        args.sessionId,
+        args.psychologistId,
+        async (tx, lockedSession) => {
+          if (lockedSession.clientId !== args.clientId) throw new ClientPhiWriteForbiddenError();
+          await tx.clinicalReport.update({
+            where: { id: report.id },
+            data: { status: 'FAILED', errorMessage: compactPassError(message) },
+          });
+        },
+        { allowedStatuses: ['COMPLETED'] },
+      );
+    } catch (writeError) {
+      if (!(writeError instanceof ClientPhiWriteForbiddenError)) {
+        console.error(
+          `[clinical-analysis] failed to persist failure state for session ${args.sessionId}: ${(writeError as Error).message}`,
+        );
+      }
+    }
     if (e instanceof CostCircuitOpenError) {
       recordCostCircuitTrip(e.meta.scope);
     }
     console.error(`[clinical-analysis] sessionId=${args.sessionId} failed: ${message}`);
-    // Non-fatal: do NOT re-throw. Pass 3 failure must not unwind
-    // Pass 1/2 success.
   }
 }
 
@@ -1060,63 +1162,75 @@ export async function persistDraftedOrders(
     psychologistId,
     source: 'persistDraftedOrders',
   });
-  if (medications.length > 0) {
-    // DOC-3 — cross-visit interaction check. Include the patient's confirmed
-    // active meds from PRIOR encounters, not just today's draft, so warfarin
-    // from a past visit + ibuprofen drafted today flags. We pass the drafted
-    // drugs FIRST, then the prior meds, and keep only the drafted slice — so
-    // each drafted order carries its interactions with the standing regimen,
-    // while pre-existing prior↔prior pairs (already on the patient, not
-    // introduced today) don't spam every order.
-    const draftedDrugs = medications.map((m) => m.drug);
-    const clientId = await clientIdForSession(sessionId);
-    const priorMeds = clientId
+  if (medications.length === 0 && clinicalOrders.length === 0) return;
+
+  const draftedDrugs = medications.map((m) => m.drug);
+  const clientId = await clientIdForSession(sessionId);
+  const priorMeds =
+    medications.length > 0 && clientId
       ? await fetchActiveMedications(clientId, { excludeSessionId: sessionId })
       : [];
-    const warningsByDrug = interactionWarningsByDrug([...draftedDrugs, ...priorMeds]).slice(
-      0,
-      draftedDrugs.length,
-    );
-    await prisma.medicationOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
-    await prisma.medicationOrder.createMany({
-      data: medications.map((m, i) => ({
-        sessionId,
-        psychologistId,
-        content: {
-          ...m,
-          interactionWarnings: warningsByDrug[i] ?? [],
-        } as unknown as Prisma.InputJsonValue,
-      })),
-    });
-    await writeAudit({
-      actorType: 'SYSTEM',
-      action: 'MEDICATION_ORDER_DRAFTED',
-      targetType: 'Session',
-      targetId: sessionId,
-      metadata: {
-        sessionId,
-        count: medications.length,
-        interactionCount: warningsByDrug.filter((w) => w.length > 0).length,
-      },
-    });
-  }
-  if (clinicalOrders.length > 0) {
-    await prisma.clinicalOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
-    await prisma.clinicalOrder.createMany({
-      data: clinicalOrders.map((o) => ({
-        sessionId,
-        psychologistId,
-        content: o as unknown as Prisma.InputJsonValue,
-      })),
-    });
-    await writeAudit({
-      actorType: 'SYSTEM',
-      action: 'CLINICAL_ORDER_DRAFTED',
-      targetType: 'Session',
-      targetId: sessionId,
-      metadata: { sessionId, count: clinicalOrders.length },
-    });
-  }
+  const warningsByDrug = interactionWarningsByDrug([...draftedDrugs, ...priorMeds]).slice(
+    0,
+    draftedDrugs.length,
+  );
+
+  // PASS_2_DRAFTED_ORDERS
+  await withActiveSessionPhiWrite(
+    prisma,
+    sessionId,
+    psychologistId,
+    async (tx) => {
+      if (medications.length > 0) {
+        await tx.medicationOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+        await tx.medicationOrder.createMany({
+          data: medications.map((medication, index) => ({
+            sessionId,
+            psychologistId,
+            content: {
+              ...medication,
+              interactionWarnings: warningsByDrug[index] ?? [],
+            } as unknown as Prisma.InputJsonValue,
+          })),
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'MEDICATION_ORDER_DRAFTED',
+            targetType: 'Session',
+            targetId: sessionId,
+            metadata: {
+              sessionId,
+              count: medications.length,
+              interactionCount: warningsByDrug.filter((warnings) => warnings.length > 0).length,
+            },
+          },
+          tx,
+        );
+      }
+      if (clinicalOrders.length > 0) {
+        await tx.clinicalOrder.deleteMany({ where: { sessionId, status: 'DRAFT' } });
+        await tx.clinicalOrder.createMany({
+          data: clinicalOrders.map((order) => ({
+            sessionId,
+            psychologistId,
+            content: order as unknown as Prisma.InputJsonValue,
+          })),
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'CLINICAL_ORDER_DRAFTED',
+            targetType: 'Session',
+            targetId: sessionId,
+            metadata: { sessionId, count: clinicalOrders.length },
+          },
+          tx,
+        );
+      }
+    },
+    { allowedStatuses: ['COMPLETED'] },
+  );
 }
 
 /**
@@ -1175,15 +1289,28 @@ export async function persistVitalReadings(
     psychologistId,
     source: 'persistVitalReadings',
   });
-  await prisma.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
-  await prisma.clinicalReading.createMany({ data: rows });
-  await writeAudit({
-    actorType: 'SYSTEM',
-    action: 'CLINICAL_READING_RECORDED',
-    targetType: 'Session',
-    targetId: sessionId,
-    metadata: { sessionId, clientId, source: 'NOTE_VITALS', count: rows.length },
-  });
+  // PASS_2_VITAL_READINGS
+  await withActiveSessionPhiWrite(
+    prisma,
+    sessionId,
+    psychologistId,
+    async (tx, lockedSession) => {
+      if (lockedSession.clientId !== clientId) throw new ClientPhiWriteForbiddenError();
+      await tx.clinicalReading.deleteMany({ where: { sessionId, source: 'NOTE_VITALS' } });
+      await tx.clinicalReading.createMany({ data: rows });
+      await writeAudit(
+        {
+          actorType: 'SYSTEM',
+          action: 'CLINICAL_READING_RECORDED',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: { sessionId, clientId, source: 'NOTE_VITALS', count: rows.length },
+        },
+        tx,
+      );
+    },
+    { allowedStatuses: ['COMPLETED'] },
+  );
 }
 
 // ============================================================================
@@ -1209,15 +1336,23 @@ export async function runDifferential(args: DifferentialArgs): Promise<void> {
     psychologistId: args.psychologistId,
     source: 'runDifferential',
   });
-  await prisma.differential.upsert({
-    where: { sessionId: args.sessionId },
-    update: { status: 'IN_PROGRESS', errorMessage: null },
-    create: {
-      sessionId: args.sessionId,
-      psychologistId: args.psychologistId,
-      status: 'IN_PROGRESS',
-    },
-  });
+  // PASS_9_DIFFERENTIAL_PENDING
+  await withActiveSessionPhiWrite(
+    prisma,
+    args.sessionId,
+    args.psychologistId,
+    (tx) =>
+      tx.differential.upsert({
+        where: { sessionId: args.sessionId },
+        update: { status: 'IN_PROGRESS', errorMessage: null },
+        create: {
+          sessionId: args.sessionId,
+          psychologistId: args.psychologistId,
+          status: 'IN_PROGRESS',
+        },
+      }),
+    { allowedStatuses: ['COMPLETED'] },
+  );
 
   try {
     const estimate = computeCostInr(
@@ -1249,7 +1384,6 @@ export async function runDifferential(args: DifferentialArgs): Promise<void> {
       psychologistId: args.psychologistId,
       source: 'differentialBeforePersistence',
     });
-    await persistCallLog(result.callLog);
     recordGeminiCall({
       pass: result.callLog.pass,
       status: result.callLog.status,
@@ -1262,28 +1396,40 @@ export async function runDifferential(args: DifferentialArgs): Promise<void> {
       inr: result.callLog.costInr,
     });
 
-    await prisma.differential.update({
-      where: { sessionId: args.sessionId },
-      data: {
-        status: 'COMPLETED',
-        body: result.output.differential as unknown as Prisma.InputJsonValue,
-        errorMessage: null,
+    // PASS_9_DIFFERENTIAL_COMPLETED
+    await withActiveSessionPhiWrite(
+      prisma,
+      args.sessionId,
+      args.psychologistId,
+      async (tx) => {
+        await persistCallLog(result.callLog, tx);
+        await tx.differential.update({
+          where: { sessionId: args.sessionId },
+          data: {
+            status: 'COMPLETED',
+            body: result.output.differential as unknown as Prisma.InputJsonValue,
+            errorMessage: null,
+          },
+        });
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: args.psychologistId,
+            action: 'DIFFERENTIAL_GENERATED',
+            targetType: 'Session',
+            targetId: args.sessionId,
+            metadata: {
+              sessionId: args.sessionId,
+              candidateCount: result.output.differential.candidates.length,
+              codingNudgeCount: result.output.differential.codingNudges.length,
+              costInr: result.callLog.costInr,
+            },
+          },
+          tx,
+        );
       },
-    });
-
-    await writeAudit({
-      actorType: 'PSYCHOLOGIST',
-      actorPsychologistId: args.psychologistId,
-      action: 'DIFFERENTIAL_GENERATED',
-      targetType: 'Session',
-      targetId: args.sessionId,
-      metadata: {
-        sessionId: args.sessionId,
-        candidateCount: result.output.differential.candidates.length,
-        codingNudgeCount: result.output.differential.codingNudges.length,
-        costInr: result.callLog.costInr,
-      },
-    });
+      { allowedStatuses: ['COMPLETED'] },
+    );
   } catch (e) {
     const message = (e as Error).message;
     // The raw failure (often a multi-KB ZodError dump) goes to the logs;
@@ -1295,14 +1441,27 @@ export async function runDifferential(args: DifferentialArgs): Promise<void> {
       : message.length > 300
         ? `${message.slice(0, 297)}…`
         : message;
-    await prisma.differential
-      .update({
-        where: { sessionId: args.sessionId },
-        data: { status: 'FAILED', errorMessage: friendly },
-      })
-      .catch(() => {
-        /* primary failure logged below */
-      });
+    try {
+      // PASS_9_DIFFERENTIAL_FAILED
+      await withActiveSessionPhiWrite(
+        prisma,
+        args.sessionId,
+        args.psychologistId,
+        async (tx) => {
+          await tx.differential.update({
+            where: { sessionId: args.sessionId },
+            data: { status: 'FAILED', errorMessage: friendly },
+          });
+        },
+        { allowedStatuses: ['COMPLETED'] },
+      );
+    } catch (writeError) {
+      if (!(writeError instanceof ClientPhiWriteForbiddenError)) {
+        console.error(
+          `[differential] failed to persist failure state for session ${args.sessionId}: ${(writeError as Error).message}`,
+        );
+      }
+    }
     if (e instanceof CostCircuitOpenError) {
       recordCostCircuitTrip(e.meta.scope);
     }

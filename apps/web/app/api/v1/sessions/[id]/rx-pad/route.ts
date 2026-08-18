@@ -13,6 +13,7 @@ import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,6 +86,7 @@ export async function PATCH(
       { status: 409 },
     );
   }
+  const draftId = session.noteDraft.id;
 
   let pad: RxPadDraft = parsePad(session.noteDraft.rxPad) ?? { version: 'V1' };
   for (const op of parsed.value.ops) {
@@ -93,28 +95,34 @@ export async function PATCH(
   // Server-owned warnings: recompute across the whole pad after the edits.
   pad = withSafetyWarnings(pad);
 
-  await prisma.noteDraft.update({
-    where: { id: session.noteDraft.id },
-    data: { rxPad: pad as unknown as Prisma.InputJsonValue },
-  });
-
-  const baseMetadata = auditMetadataFromRequest(req);
-  for (const op of parsed.value.ops) {
-    await writeAudit({
-      actorType: 'PSYCHOLOGIST',
-      actorPsychologistId: auth.value.psychologistId,
-      action: 'RX_PAD_EDITED',
-      targetType: 'NoteDraft',
-      targetId: session.noteDraft.id,
-      metadata: {
-        ...baseMetadata,
-        sessionId,
-        op: op.op,
-        ...('source' in op ? { source: op.source } : {}),
-        item: itemLabel(op),
-      },
+  await prisma.$transaction(async (tx) => {
+    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+    await tx.noteDraft.update({
+      where: { id: draftId },
+      data: { rxPad: pad as unknown as Prisma.InputJsonValue },
     });
-  }
+
+    const baseMetadata = auditMetadataFromRequest(req);
+    for (const op of parsed.value.ops) {
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'RX_PAD_EDITED',
+          targetType: 'NoteDraft',
+          targetId: draftId,
+          metadata: {
+            ...baseMetadata,
+            sessionId,
+            op: op.op,
+            ...('source' in op ? { source: op.source } : {}),
+            item: itemLabel(op),
+          },
+        },
+        tx,
+      );
+    }
+  });
 
   const body: RxPadResponse = { rxPad: pad, signed: false };
   return NextResponse.json(body);

@@ -4,7 +4,7 @@ import { Prisma, type DsrErasureStatus } from '@prisma/client';
 import { z } from 'zod';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
-import { migrationPrisma } from '@/lib/prisma-migration';
+import { getMigrationPrisma } from '@/lib/prisma-migration';
 import { parseJson } from '@/lib/validate';
 
 export const runtime = 'nodejs';
@@ -50,7 +50,7 @@ export async function PATCH(
   try {
     // This transaction intentionally uses the migration owner. Runtime cannot
     // execute the owner-controlled signed-note erasure function.
-    await migrationPrisma.$transaction(async (tx) => {
+    await getMigrationPrisma().$transaction(async (tx) => {
       const rows = await tx.$queryRaw<LockedErasure[]>`
         SELECT r."id", r."status", r."clientId", c."psychologistId"
         FROM "client_erasure_requests" r
@@ -74,12 +74,9 @@ export async function PATCH(
 
       if (body.value.status === 'FULFILLED') {
         const clientId = locked.clientId;
-        // SECURITY DEFINER function owns the only narrowly-scoped exception to
-        // append-only signature history and redacts content/rxPad/signPayload.
-        await tx.$executeRaw`
-          SELECT redact_client_signed_note_phi(${id}, ${auth.value.psychologistId})
-        `;
-
+        // Mark the terminal state while the shared Client lock is held and
+        // before redaction. Later PHI writers acquire this lock and fail their
+        // deletedAt recheck; earlier writers must commit before this proceeds.
         await tx.client.update({
           where: { id: clientId },
           data: {
@@ -90,6 +87,11 @@ export async function PATCH(
             presentingConcerns: null,
           },
         });
+        // SECURITY DEFINER function owns the only narrowly-scoped exception to
+        // append-only signature history and redacts content/rxPad/signPayload.
+        await tx.$executeRaw`
+          SELECT redact_client_signed_note_phi(${id}, ${auth.value.psychologistId})
+        `;
         const sessions = await tx.session.findMany({
           where: { clientId },
           select: { id: true },

@@ -18,7 +18,8 @@ function typescriptFiles(root: string): string[] {
 }
 
 describe('therapy-note database integrity boundary', () => {
-  const migrationPath = 'prisma/migrations/20260818080000_signed_note_integrity/migration.sql';
+  const migrationPath =
+    'prisma/migrations/20260913000000_signed_note_integrity_runtime_role/migration.sql';
 
   it('rejects direct TherapyNote.content updates without an explicit signing or erasure transaction context', () => {
     const migration = source(migrationPath);
@@ -30,7 +31,7 @@ describe('therapy-note database integrity boundary', () => {
   it('allows the only audited content writers to set a transaction-local context', () => {
     const sign = source('apps/web/app/api/v1/sessions/[id]/sign/route.ts');
     const erasure = source(
-      'prisma/migrations/20260818100000_dpdp_signed_note_erasure/migration.sql',
+      'prisma/migrations/20260914000000_dpdp_signed_note_erasure/migration.sql',
     );
     expect(sign).toContain("set_config('app.therapy_note_write_context', 'signing', true)");
     expect(erasure).toContain("set_config('app.therapy_note_write_context', 'erasure', true)");
@@ -72,8 +73,8 @@ describe('DPDP erasure decision integrity', () => {
   it('uses the scoped owner function and hashes resolution notes in audits', () => {
     const route = source('apps/web/app/api/v1/admin/erasure/[id]/route.ts');
     expect(route).toContain('redact_client_signed_note_phi');
-    expect(route).toContain("import { migrationPrisma } from '@/lib/prisma-migration'");
-    expect(route).toContain('migrationPrisma.$transaction');
+    expect(route).toContain("import { getMigrationPrisma } from '@/lib/prisma-migration'");
+    expect(route).toContain('getMigrationPrisma().$transaction');
     expect(route).toContain('resolutionNotesHashHex');
     expect(route).not.toMatch(
       /metadata:[\s\S]{0,500}resolutionNotes:\s*body\.value\.resolutionNotes/,
@@ -104,7 +105,8 @@ describe('signed-note correction concurrency boundary', () => {
 });
 
 describe('signature-history least privilege', () => {
-  const migrationPath = 'prisma/migrations/20260818080000_signed_note_integrity/migration.sql';
+  const migrationPath =
+    'prisma/migrations/20260913000000_signed_note_integrity_runtime_role/migration.sql';
 
   it('revokes destructive privileges from PUBLIC and grants runtime only SELECT and INSERT', () => {
     const migration = source(migrationPath);
@@ -163,7 +165,7 @@ describe('signature-history least privilege', () => {
 
   it('provides an owner-only, transaction-scoped DPDP erasure path for every signed PHI field', () => {
     const migration = source(
-      'prisma/migrations/20260818100000_dpdp_signed_note_erasure/migration.sql',
+      'prisma/migrations/20260914000000_dpdp_signed_note_erasure/migration.sql',
     );
     expect(migration).toContain('redact_client_signed_note_phi');
     expect(migration).toContain(

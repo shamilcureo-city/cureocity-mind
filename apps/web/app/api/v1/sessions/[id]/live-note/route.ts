@@ -23,6 +23,7 @@ import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
@@ -137,24 +138,25 @@ export async function POST(
       );
     }
     const tWrite = tTranscript.length > 0 ? { transcriptEncrypted: tTranscriptEncrypted } : {};
-    const tDraft = await prisma.noteDraft.upsert({
-      where: { sessionId },
-      update: {
-        status: 'COMPLETED',
-        content: tnote as unknown as Prisma.InputJsonValue,
-        riskSeverity: 'NONE',
-        errorMessage: null,
-        ...tWrite,
-      },
-      create: {
-        sessionId,
-        status: 'COMPLETED',
-        content: tnote as unknown as Prisma.InputJsonValue,
-        riskSeverity: 'NONE',
-        // The presence marker is encrypted too — ciphertext presence is what
-        // the NoteDraft presence checks read.
-        transcriptEncrypted: tTranscriptEncrypted,
-      },
+    const tDraft = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      return tx.noteDraft.upsert({
+        where: { sessionId },
+        update: {
+          status: 'COMPLETED',
+          content: tnote as unknown as Prisma.InputJsonValue,
+          riskSeverity: 'NONE',
+          errorMessage: null,
+          ...tWrite,
+        },
+        create: {
+          sessionId,
+          status: 'COMPLETED',
+          content: tnote as unknown as Prisma.InputJsonValue,
+          riskSeverity: 'NONE',
+          transcriptEncrypted: tTranscriptEncrypted,
+        },
+      });
     });
     await writeAudit({
       actorType: 'PSYCHOLOGIST',
@@ -285,26 +287,27 @@ export async function POST(
 
   // Persist the note as a COMPLETED draft. The doctor signs it from the
   // encounter workspace — that signature is the attestation.
-  const draft = await prisma.noteDraft.upsert({
-    where: { sessionId },
-    update: {
-      status: 'COMPLETED',
-      content: note as unknown as Prisma.InputJsonValue,
-      riskSeverity: 'NONE',
-      errorMessage: null,
-      ...transcriptWrite,
-      ...(rxPad !== undefined && { rxPad }),
-    },
-    create: {
-      sessionId,
-      status: 'COMPLETED',
-      content: note as unknown as Prisma.InputJsonValue,
-      riskSeverity: 'NONE',
-      // The presence marker for a transcript-less consult is encrypted too —
-      // ciphertext presence is what the NoteDraft presence checks read.
-      transcriptEncrypted,
-      ...(rxPad !== undefined && { rxPad }),
-    },
+  const draft = await prisma.$transaction(async (tx) => {
+    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+    return tx.noteDraft.upsert({
+      where: { sessionId },
+      update: {
+        status: 'COMPLETED',
+        content: note as unknown as Prisma.InputJsonValue,
+        riskSeverity: 'NONE',
+        errorMessage: null,
+        ...transcriptWrite,
+        ...(rxPad !== undefined && { rxPad }),
+      },
+      create: {
+        sessionId,
+        status: 'COMPLETED',
+        content: note as unknown as Prisma.InputJsonValue,
+        riskSeverity: 'NONE',
+        transcriptEncrypted,
+        ...(rxPad !== undefined && { rxPad }),
+      },
+    });
   });
 
   await writeAudit({

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
 
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   }
 
   const updated = await prisma.$transaction(async (tx) => {
+    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
     const row = await tx.session.update({
       where: { id: sessionId },
       data: { status: 'COMPLETED', endedAt: new Date() },

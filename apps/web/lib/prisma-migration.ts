@@ -30,9 +30,14 @@ function buildMigrationPrisma(): PrismaClient {
   });
 }
 
-/** Owner connection reserved for narrowly scoped migration-owned operations. */
-export const migrationPrisma = globalForMigrationPrisma.migrationPrisma ?? buildMigrationPrisma();
-
-if (process.env['NODE_ENV'] !== 'production') {
-  globalForMigrationPrisma.migrationPrisma = migrationPrisma;
+/**
+ * Lazily resolve the owner connection only for a privileged operation. Merely
+ * importing a route during `next build` must not require database credentials.
+ */
+export function getMigrationPrisma(): PrismaClient {
+  const client = globalForMigrationPrisma.migrationPrisma ?? buildMigrationPrisma();
+  if (process.env['NODE_ENV'] !== 'production') {
+    globalForMigrationPrisma.migrationPrisma = client;
+  }
+  return client;
 }

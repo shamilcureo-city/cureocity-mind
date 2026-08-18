@@ -233,7 +233,7 @@ describe('regulated boundary coverage', () => {
 
   it('makes signature history replay-safe, reconstructable, and append-only including truncate', () => {
     const migration = source(
-      '../../prisma/migrations/20260818050000_note_signature_versions/migration.sql',
+      '../../prisma/migrations/20260912000000_note_signature_versions/migration.sql',
     );
     expect(migration).toContain('"signPayload" TEXT');
     expect(migration).toContain("conrelid = 'note_signature_versions'::regclass");

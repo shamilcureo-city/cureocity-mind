@@ -9,6 +9,7 @@ import {
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { toNoteDraft } from '@/lib/mappers';
 import { resolveNoteTranscript } from '@/lib/note-transcript';
 import { parseJson } from '@/lib/validate';
@@ -144,6 +145,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
   }
 
   await prisma.$transaction(async (tx) => {
+    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
     await tx.noteDraft.update({
       where: { id: session.noteDraft!.id },
       data: { content: validated as unknown as object },

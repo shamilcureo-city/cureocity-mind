@@ -7,6 +7,9 @@ const mocks = vi.hoisted(() => ({
   segmentUpdate: vi.fn(),
   segmentUpdateMany: vi.fn(),
   callLogCreate: vi.fn(),
+  transaction: vi.fn(),
+  queryRaw: vi.fn(),
+  sessionFind: vi.fn(),
   pass1: vi.fn(),
   assertAuthority: vi.fn(),
   writeAudit: vi.fn(),
@@ -14,6 +17,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./prisma', () => ({
   prisma: {
+    $transaction: mocks.transaction,
+    $queryRaw: mocks.queryRaw,
+    session: { findUnique: mocks.sessionFind },
     audioChunk: { findUnique: mocks.audioFind },
     transcriptSegment: {
       findUnique: mocks.segmentFind,
@@ -50,6 +56,25 @@ let retainedAudio: Buffer;
 let modelAudio: Buffer | undefined;
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.queryRaw.mockResolvedValue([{ id: 'client-1', psychologistId: 'psy-1' }]);
+  mocks.sessionFind.mockResolvedValue({
+    id: 'session-1',
+    clientId: 'client-1',
+    psychologistId: 'psy-1',
+    status: 'IN_PROGRESS',
+  });
+  mocks.transaction.mockImplementation(async (callback) =>
+    callback({
+      $queryRaw: mocks.queryRaw,
+      session: { findUnique: mocks.sessionFind },
+      transcriptSegment: {
+        create: mocks.segmentCreate,
+        update: mocks.segmentUpdate,
+        updateMany: mocks.segmentUpdateMany,
+      },
+      geminiCallLog: { create: mocks.callLogCreate },
+    }),
+  );
   modelAudio = undefined;
   retainedAudio = Buffer.from([1, 2, 3, 4]);
   mocks.audioFind.mockResolvedValue({
