@@ -6,6 +6,10 @@ import { signLiveToken } from '@/lib/live-token';
 import { fetchActiveMedications, fetchAllergies } from '@/lib/patient-context';
 import { withdrawalRefusalMessage, withdrawnScribeConsents } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -148,47 +152,53 @@ export async function POST(
       })),
       notes: 'Standing consents re-acknowledged at live consult start',
     };
-    await prisma.$transaction(async (tx) => {
-      await tx.session.update({
-        where: { id: sessionId },
-        data: {
-          status: 'IN_PROGRESS',
-          startedAt: new Date(),
-          // DS11.3 — record the capture pipeline on the row.
-          captureMode: 'LIVE',
-          ...(needsSnapshot && { consentSnapshot: snapshot }),
-        },
-      });
-      if (needsSnapshot) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        await conditionalSessionTransition(tx, {
+          sessionId,
+          expectedStatus: 'SCHEDULED',
+          data: {
+            status: 'IN_PROGRESS',
+            startedAt: new Date(),
+            captureMode: 'LIVE',
+            ...(needsSnapshot && { consentSnapshot: snapshot }),
+          },
+        });
+        if (needsSnapshot) {
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'SESSION_CONSENT_RECORDED',
+              targetType: 'Session',
+              targetId: sessionId,
+              metadata: {
+                ...auditMetadataFromRequest(req),
+                scopes: [...LIVE_CONSENT_SCOPES],
+                scriptVersion: 'v1.0',
+                source: 'LIVE',
+              },
+            },
+            tx,
+          );
+        }
         await writeAudit(
           {
             actorType: 'PSYCHOLOGIST',
             actorPsychologistId: auth.value.psychologistId,
-            action: 'SESSION_CONSENT_RECORDED',
+            action: 'SESSION_STARTED',
             targetType: 'Session',
             targetId: sessionId,
-            metadata: {
-              ...auditMetadataFromRequest(req),
-              scopes: [...LIVE_CONSENT_SCOPES],
-              scriptVersion: 'v1.0',
-              source: 'LIVE',
-            },
+            metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
           },
           tx,
         );
-      }
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'SESSION_STARTED',
-          targetType: 'Session',
-          targetId: sessionId,
-          metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
-        },
-        tx,
-      );
-    });
+      });
+    } catch (error) {
+      const response = sessionConcurrentModificationResponse(error);
+      if (response) return response;
+      throw error;
+    }
   }
 
   const { token, expiresInSec } = signLiveToken({

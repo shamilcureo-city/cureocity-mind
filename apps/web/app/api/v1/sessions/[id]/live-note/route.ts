@@ -29,6 +29,10 @@ import {
   withActiveSessionPhiWrite,
 } from '@/lib/phi-write-lock';
 import type { Prisma } from '@prisma/client';
+import {
+  finalizeLiveSession,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -142,57 +146,67 @@ export async function POST(
       );
     }
     const tWrite = tTranscript.length > 0 ? { transcriptEncrypted: tTranscriptEncrypted } : {};
-    const tDraft = await prisma.$transaction(async (tx) => {
-      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-      return tx.noteDraft.upsert({
-        where: { sessionId },
-        update: {
-          status: 'COMPLETED',
-          content: tnote as unknown as Prisma.InputJsonValue,
-          riskSeverity: 'NONE',
-          errorMessage: null,
-          ...tWrite,
-        },
-        create: {
+    let tDraft;
+    try {
+      tDraft = await prisma.$transaction(async (tx) => {
+        await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+        return finalizeLiveSession(tx, {
           sessionId,
-          status: 'COMPLETED',
-          content: tnote as unknown as Prisma.InputJsonValue,
-          riskSeverity: 'NONE',
-          transcriptEncrypted: tTranscriptEncrypted,
-        },
-      });
-    });
-    await writeAudit({
-      actorType: 'PSYCHOLOGIST',
-      actorPsychologistId: auth.value.psychologistId,
-      action: 'NOTE_DRAFT_CREATED',
-      targetType: 'NoteDraft',
-      targetId: tDraft.id,
-      metadata: {
-        sessionId,
-        source: 'LIVE',
-        kind: parsedT.value.kind,
-        ...auditMetadataFromRequest(req),
-      },
-    });
-    if (session.status !== 'COMPLETED') {
-      await prisma.$transaction(async (tx) => {
-        await tx.session.update({
-          where: { id: sessionId },
-          data: { status: 'COMPLETED', endedAt: new Date() },
-        });
-        await writeAudit(
-          {
-            actorType: 'PSYCHOLOGIST',
-            actorPsychologistId: auth.value.psychologistId,
-            action: 'SESSION_ENDED',
-            targetType: 'Session',
-            targetId: sessionId,
-            metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+          endedAt: new Date(),
+          persistDraft: async () => {
+            const draft = await tx.noteDraft.upsert({
+              where: { sessionId },
+              update: {
+                status: 'COMPLETED',
+                content: tnote as unknown as Prisma.InputJsonValue,
+                riskSeverity: 'NONE',
+                errorMessage: null,
+                ...tWrite,
+              },
+              create: {
+                sessionId,
+                status: 'COMPLETED',
+                content: tnote as unknown as Prisma.InputJsonValue,
+                riskSeverity: 'NONE',
+                transcriptEncrypted: tTranscriptEncrypted,
+              },
+            });
+            await writeAudit(
+              {
+                actorType: 'PSYCHOLOGIST',
+                actorPsychologistId: auth.value.psychologistId,
+                action: 'NOTE_DRAFT_CREATED',
+                targetType: 'NoteDraft',
+                targetId: draft.id,
+                metadata: {
+                  sessionId,
+                  source: 'LIVE',
+                  kind: parsedT.value.kind,
+                  ...auditMetadataFromRequest(req),
+                },
+              },
+              tx,
+            );
+            return draft;
           },
-          tx,
-        );
+          writeLifecycleAudit: () =>
+            writeAudit(
+              {
+                actorType: 'PSYCHOLOGIST',
+                actorPsychologistId: auth.value.psychologistId,
+                action: 'SESSION_ENDED',
+                targetType: 'Session',
+                targetId: sessionId,
+                metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+              },
+              tx,
+            ),
+        });
       });
+    } catch (error) {
+      const response = sessionConcurrentModificationResponse(error);
+      if (response) return response;
+      throw error;
     }
     // The batch path schedules Pass 3 (the copilot reading) in generate-note's
     // after(); this branch never did, so every live session landed on a board
@@ -289,67 +303,70 @@ export async function POST(
   // marker.
   const transcriptWrite = transcript.length > 0 ? { transcriptEncrypted } : {};
 
-  // Persist the note as a COMPLETED draft. The doctor signs it from the
-  // encounter workspace — that signature is the attestation.
-  const draft = await prisma.$transaction(async (tx) => {
-    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-    return tx.noteDraft.upsert({
-      where: { sessionId },
-      update: {
-        status: 'COMPLETED',
-        content: note as unknown as Prisma.InputJsonValue,
-        riskSeverity: 'NONE',
-        errorMessage: null,
-        ...transcriptWrite,
-        ...(rxPad !== undefined && { rxPad }),
-      },
-      create: {
+  let draft;
+  try {
+    draft = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      return finalizeLiveSession(tx, {
         sessionId,
-        status: 'COMPLETED',
-        content: note as unknown as Prisma.InputJsonValue,
-        riskSeverity: 'NONE',
-        transcriptEncrypted,
-        ...(rxPad !== undefined && { rxPad }),
-      },
-    });
-  });
-
-  await writeAudit({
-    actorType: 'PSYCHOLOGIST',
-    actorPsychologistId: auth.value.psychologistId,
-    action: 'ENCOUNTER_NOTE_DRAFTED',
-    targetType: 'NoteDraft',
-    targetId: draft.id,
-    metadata: {
-      sessionId,
-      source: 'LIVE',
-      medicationCount: medications.length,
-      orderCount: orders.length,
-      ...auditMetadataFromRequest(req),
-    },
-  });
-
-  // DS11.1 — the live consult is over: mark the session COMPLETED so the
-  // clinic queue shows DONE and the sign route (requires COMPLETED)
-  // accepts the note. Batch parity with POST /sessions/:id/end.
-  if (session.status !== 'COMPLETED') {
-    await prisma.$transaction(async (tx) => {
-      await tx.session.update({
-        where: { id: sessionId },
-        data: { status: 'COMPLETED', endedAt: new Date() },
-      });
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'SESSION_ENDED',
-          targetType: 'Session',
-          targetId: sessionId,
-          metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+        endedAt: new Date(),
+        persistDraft: async () => {
+          const persisted = await tx.noteDraft.upsert({
+            where: { sessionId },
+            update: {
+              status: 'COMPLETED',
+              content: note as unknown as Prisma.InputJsonValue,
+              riskSeverity: 'NONE',
+              errorMessage: null,
+              ...transcriptWrite,
+              ...(rxPad !== undefined && { rxPad }),
+            },
+            create: {
+              sessionId,
+              status: 'COMPLETED',
+              content: note as unknown as Prisma.InputJsonValue,
+              riskSeverity: 'NONE',
+              transcriptEncrypted,
+              ...(rxPad !== undefined && { rxPad }),
+            },
+          });
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'ENCOUNTER_NOTE_DRAFTED',
+              targetType: 'NoteDraft',
+              targetId: persisted.id,
+              metadata: {
+                sessionId,
+                source: 'LIVE',
+                medicationCount: medications.length,
+                orderCount: orders.length,
+                ...auditMetadataFromRequest(req),
+              },
+            },
+            tx,
+          );
+          return persisted;
         },
-        tx,
-      );
+        writeLifecycleAudit: () =>
+          writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'SESSION_ENDED',
+              targetType: 'Session',
+              targetId: sessionId,
+              metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+            },
+            tx,
+          ),
+      });
     });
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
   }
 
   // Reuse the batch helpers: draft the Rx + clinical orders (interaction-

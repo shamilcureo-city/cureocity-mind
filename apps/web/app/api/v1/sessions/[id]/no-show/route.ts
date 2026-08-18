@@ -6,6 +6,10 @@ import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
 import { parseJson } from '@/lib/validate';
+import {
+  conditionalSessionTransition,
+  sessionConcurrentModificationResponse,
+} from '@/lib/session-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,28 +41,36 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   const dto = await parseJson(req, SessionNoShowInputSchema);
   if (!dto.ok) return dto.response;
 
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.session.update({
-      where: { id: sessionId },
-      data: { status: 'NO_SHOW' },
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_NO_SHOW',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          clientId: existing.clientId,
-          scheduledAt: existing.scheduledAt.toISOString(),
-          ...(dto.value.note && { note: dto.value.note }),
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      const row = await conditionalSessionTransition(tx, {
+        sessionId,
+        expectedStatus: 'SCHEDULED',
+        data: { status: 'NO_SHOW' },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'SESSION_NO_SHOW',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            clientId: existing.clientId,
+            scheduledAt: existing.scheduledAt.toISOString(),
+            ...(dto.value.note && { note: dto.value.note }),
+          },
         },
-      },
-      tx,
-    );
-    return row;
-  });
+        tx,
+      );
+      return row;
+    });
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
   return NextResponse.json(toSession(updated));
 }
