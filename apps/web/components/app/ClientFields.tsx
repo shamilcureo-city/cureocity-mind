@@ -154,7 +154,9 @@ export function ClientFields({
                   <Select
                     id={id('modality')}
                     value={value.preferredModality}
-                    onChange={(e) => set('preferredModality', e.target.value as ClientDraftModality)}
+                    onChange={(e) =>
+                      set('preferredModality', e.target.value as ClientDraftModality)
+                    }
                   >
                     <option value="">—</option>
                     <option value="CBT">CBT</option>
@@ -193,7 +195,8 @@ export function ClientFields({
                 onChange={(v) => set('spokenLanguages', v)}
               />
               <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                A transcription hint. Pick more than one for code-mixed speakers (Manglish: ml + en).
+                A transcription hint. Pick more than one for code-mixed speakers (Manglish: ml +
+                en).
               </p>
             </div>
 

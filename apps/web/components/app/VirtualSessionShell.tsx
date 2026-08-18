@@ -264,9 +264,9 @@ export function VirtualSessionShell({
         <Card className="border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
           <strong className="block">The call has ended — the recording is still running.</strong>
           <p className="mt-1">
-            Finish with <strong>End session</strong> below: that uploads the audio and generates
-            the note. If the call dropped by mistake, Rejoin above — the recording carries on
-            through the gap.
+            Finish with <strong>End session</strong> below: that uploads the audio and generates the
+            note. If the call dropped by mistake, Rejoin above — the recording carries on through
+            the gap.
           </p>
         </Card>
       )}

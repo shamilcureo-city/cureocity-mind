@@ -7,8 +7,7 @@ type Tone = 'default' | 'accent' | 'warn' | 'muted';
 const tones: Record<Tone, string> = {
   default:
     'bg-[linear-gradient(180deg,#fff,var(--color-surface-soft))] text-[var(--color-ink-2)] shadow-[inset_0_1px_0_#fff,0_4px_10px_-8px_rgba(35,45,95,0.4)]',
-  accent:
-    'u-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_6px_14px_-8px_rgba(11,12,16,0.55)]',
+  accent: 'u-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_6px_14px_-8px_rgba(11,12,16,0.55)]',
   warn: 'bg-[var(--color-warn-soft)] text-[var(--color-warn)] shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]',
   muted: 'bg-white/80 text-[var(--color-ink-3)] border border-white/90 shadow-[var(--sh-raise)]',
 };

@@ -107,46 +107,48 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const briefIsStale =
     cachedBrief !== null && cachedBriefRow?.lastSessionId !== (lastCompleted?.id ?? null);
 
-  const [assignments, openCrises, agreementRows, formulationRow, diagnosisRows] = await Promise.all([
-    prisma.exerciseAssignment.findMany({
-      where: { clientId },
-      orderBy: { assignedAt: 'desc' },
-      take: 5,
-      select: {
-        id: true,
-        status: true,
-        assignedAt: true,
-        completedAt: true,
-        dueAt: true,
-        exerciseId: true,
-        customDescription: true,
-        therapistNote: true,
-      },
-    }),
-    fetchOpenCrises(clientId),
-    // SL2 — "last time you both agreed": the previous completed session's
-    // agreements, read back so follow-up can be marked at prepare time.
-    lastCompleted
-      ? prisma.sessionAgreement.findMany({
-          where: { sessionId: lastCompleted.id },
-          orderBy: { createdAt: 'asc' },
-          take: 8,
-        })
-      : Promise.resolve([]),
-    prisma.caseFormulation.findFirst({
-      where: { clientId, supersededAt: null },
-      orderBy: { version: 'desc' },
-      select: { version: true, body: true },
-    }),
-    // TE2 — active confirmed diagnoses, primary first, for the Record
-    // screen's "where the case stands" glance.
-    prisma.clientDiagnosis.findMany({
-      where: { clientId, supersededAt: null },
-      orderBy: [{ isPrimary: 'desc' }, { confidence: 'desc' }],
-      take: 6,
-      select: { icd11Code: true, icd11Label: true, isPrimary: true },
-    }),
-  ]);
+  const [assignments, openCrises, agreementRows, formulationRow, diagnosisRows] = await Promise.all(
+    [
+      prisma.exerciseAssignment.findMany({
+        where: { clientId },
+        orderBy: { assignedAt: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          status: true,
+          assignedAt: true,
+          completedAt: true,
+          dueAt: true,
+          exerciseId: true,
+          customDescription: true,
+          therapistNote: true,
+        },
+      }),
+      fetchOpenCrises(clientId),
+      // SL2 — "last time you both agreed": the previous completed session's
+      // agreements, read back so follow-up can be marked at prepare time.
+      lastCompleted
+        ? prisma.sessionAgreement.findMany({
+            where: { sessionId: lastCompleted.id },
+            orderBy: { createdAt: 'asc' },
+            take: 8,
+          })
+        : Promise.resolve([]),
+      prisma.caseFormulation.findFirst({
+        where: { clientId, supersededAt: null },
+        orderBy: { version: 'desc' },
+        select: { version: true, body: true },
+      }),
+      // TE2 — active confirmed diagnoses, primary first, for the Record
+      // screen's "where the case stands" glance.
+      prisma.clientDiagnosis.findMany({
+        where: { clientId, supersededAt: null },
+        orderBy: [{ isPrimary: 'desc' }, { confidence: 'desc' }],
+        take: 6,
+        select: { icd11Code: true, icd11Label: true, isPrimary: true },
+      }),
+    ],
+  );
 
   const homework: PrepareHomeworkEntry[] = assignments.map((a) => ({
     id: a.id,

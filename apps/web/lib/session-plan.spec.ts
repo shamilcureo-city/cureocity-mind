@@ -37,7 +37,12 @@ function withPlan(p: PrepareSummaryV1): PrepareSummaryV1 {
         modality: 'CBT',
         goals: [
           { index: 0, description: 'Sleep 6h consistently', measure: 'diary', status: 'ACHIEVED' },
-          { index: 1, description: 'Reduce meeting avoidance', measure: 'ladder', status: 'IN_PROGRESS' },
+          {
+            index: 1,
+            description: 'Reduce meeting avoidance',
+            measure: 'ladder',
+            status: 'IN_PROGRESS',
+          },
         ],
         goalsAchieved: 1,
         goalsTotal: 2,
@@ -152,8 +157,18 @@ describe('composeSessionPlan', () => {
   it('passes carried questions through untouched, in carry order', () => {
     const p = base();
     p.carriedQuestions = [
-      { question: 'Trauma screen', rationale: null, sourceSessionId: null, carriedAt: '2026-07-01T00:00:00.000Z' },
-      { question: 'Quantify drinking', rationale: null, sourceSessionId: null, carriedAt: '2026-07-01T00:00:00.000Z' },
+      {
+        question: 'Trauma screen',
+        rationale: null,
+        sourceSessionId: null,
+        carriedAt: '2026-07-01T00:00:00.000Z',
+      },
+      {
+        question: 'Quantify drinking',
+        rationale: null,
+        sourceSessionId: null,
+        carriedAt: '2026-07-01T00:00:00.000Z',
+      },
     ];
     const plan = composeSessionPlan(p, NOW);
     expect(plan.questions.map((q) => q.question)).toEqual(['Trauma screen', 'Quantify drinking']);

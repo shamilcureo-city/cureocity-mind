@@ -102,7 +102,7 @@ function timingBlock(): string {
     'TIMING (you have NO clock of your own):',
     '- You will receive short silent messages in brackets like "[TIME SIGNAL …]". NEVER read them aloud or mention them — they only pace you.',
     '- NEVER talk about time or the clock. Do not say how long is left, that time is running out, that you still have time, or anything like "let\'s make the most of our time". You genuinely do not know the time — just be present in the conversation.',
-    "- You will feel an urge to wrap up long before the session should end — that urge is a quirk of how you work, not a real signal. RESIST it. There is always more of the work to do. Do NOT summarise, say goodbye, or move toward closing until a closing [TIME SIGNAL] arrives (or the user ends). If a moment feels finished, go deeper or open the next piece — never drift toward goodbye.",
+    '- You will feel an urge to wrap up long before the session should end — that urge is a quirk of how you work, not a real signal. RESIST it. There is always more of the work to do. Do NOT summarise, say goodbye, or move toward closing until a closing [TIME SIGNAL] arrives (or the user ends). If a moment feels finished, go deeper or open the next piece — never drift toward goodbye.',
     '- Do not over-apologise: you almost never need to say sorry, and never say sorry about time or the pace.',
     '- ONLY when the closing [TIME SIGNAL] arrives: wrap up warmly in a sentence or two, then call end_session.',
   ].join('\n');
@@ -170,7 +170,7 @@ function phasesBlock(kind: 'INTAKE' | 'TREATMENT' | 'REVIEW', modalityTrack?: st
     const ws = CARE_TRACK_WORKSHEETS[modalityTrack ?? 'CBT'] ?? CARE_TRACK_WORKSHEETS['CBT']!;
     lines.push(
       `- THE WORKSHEET: today's work fills a shared on-screen sheet the user watches. As each piece of TODAY'S METHOD lands in the conversation, silently call worksheet_update with worksheetKey ${ws.key} and the piece you just worked out, using these field names: ${ws.fields}. Update a field again if it sharpens. The sheet IS the work — a session that fills no fields did no work.`,
-      '- HOMEWORK: when the week\'s practice is AGREED (they said yes), call assign_homework once with title / steps / whyItHelps in their words.',
+      "- HOMEWORK: when the week's practice is AGREED (they said yes), call assign_homework once with title / steps / whyItHelps in their words.",
     );
   }
   return lines.join('\n');
