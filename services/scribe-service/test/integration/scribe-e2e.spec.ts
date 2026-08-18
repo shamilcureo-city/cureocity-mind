@@ -163,11 +163,14 @@ describe.skipIf(SKIP)('scribe-service E2E (mock Gemini, in-memory storage, inlin
     expect(end.status).toBe(200);
     expect(end.body.status).toBe('COMPLETED');
 
-    // 6. Fetch note draft — should be COMPLETED with a TherapyNoteV1 inside
+    // 6. Fetch note draft — should be COMPLETED with a TherapyNoteV1 inside.
+    // The scaffold intentionally has no KMS wiring and must not expose either
+    // plaintext or ciphertext transcript data through its API.
     const draft = await request(server).get(`/api/v1/sessions/${sessionId}/note-draft`);
     expect(draft.status).toBe(200);
     expect(draft.body.status).toBe('COMPLETED');
-    expect(draft.body.transcript).toContain('mock transcript');
+    expect(draft.body.transcript).toBeNull();
+    expect(draft.body).not.toHaveProperty('transcriptEncrypted');
     expect(draft.body.content).toMatchObject({
       version: 'V1',
       modality: 'CBT',
