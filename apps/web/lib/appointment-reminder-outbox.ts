@@ -265,6 +265,7 @@ export async function beginAppointmentReminderSubmission(
       id: delivery.id,
       appointmentId: delivery.appointmentId,
       scheduledStartAt: delivery.scheduledStartAt,
+      kind: delivery.kind,
       status: 'DISPATCHING',
       leaseExpiresAt: delivery.leaseExpiresAt,
     },

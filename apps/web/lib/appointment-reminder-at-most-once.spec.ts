@@ -150,6 +150,7 @@ describe('at-most-once submission state machine', () => {
         id: 'delivery-patient',
         appointmentId: 'appt-1',
         scheduledStartAt: START,
+        kind: 'H2',
         status: 'DISPATCHING',
         leaseExpiresAt: LEASE_END,
       },
