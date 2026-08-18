@@ -4,6 +4,10 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { sendAppointmentClosedEmail } from '@/lib/appointment-email';
+import {
+  appointmentConcurrentModificationResponse,
+  conditionalAppointmentTransition,
+} from '@/lib/appointment-transition';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -31,20 +35,30 @@ export async function POST(
     return NextResponse.json({ error: `Already ${appt.status.toLowerCase()}.` }, { status: 409 });
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.appointment.update({ where: { id }, data: { status: 'DECLINED' } });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'APPOINTMENT_DECLINED',
-        targetType: 'Appointment',
-        targetId: id,
-        metadata: {},
-      },
-      tx,
-    );
-  });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await conditionalAppointmentTransition(tx, {
+        appointmentId: id,
+        expectedStatus: 'REQUESTED',
+        data: { status: 'DECLINED' },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'APPOINTMENT_DECLINED',
+          targetType: 'Appointment',
+          targetId: id,
+          metadata: {},
+        },
+        tx,
+      );
+    });
+  } catch (error) {
+    const response = appointmentConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
   // MK8 — the courtesy close, off the request path (email-only for now).
   after(() => sendAppointmentClosedEmail(auth.value.psychologistId, id, appt.startAt));
 

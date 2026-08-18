@@ -25,7 +25,13 @@ function makeDeps(opts?: {
     .mockResolvedValue(
       opts?.activeConsent === undefined ? { id: 'ccon11111111111111111111a' } : opts.activeConsent,
     );
-  const consentUpdate = vi.fn();
+  const consentFindFirstInTransaction = vi
+    .fn()
+    .mockResolvedValue(
+      opts?.activeConsent === undefined ? { id: 'ccon11111111111111111111a' } : opts.activeConsent,
+    );
+  const consentUpdateMany = vi.fn().mockResolvedValue({ count: 2 });
+  const clientRowLock = vi.fn().mockResolvedValue([{ id: CLIENT }]);
   const erasureFindFirst = vi
     .fn()
     .mockResolvedValue(opts?.openErasure === undefined ? null : opts.openErasure);
@@ -69,11 +75,12 @@ function makeDeps(opts?: {
 
   const txClient = {
     client: { update: clientUpdate },
-    consent: { update: consentUpdate },
+    consent: { findFirst: consentFindFirstInTransaction, updateMany: consentUpdateMany },
     clientNomination: { create: nominationCreate, updateMany: nominationUpdateMany },
     clientErasureRequest: { create: erasureCreate },
     clientGrievance: { create: grievanceCreate },
     auditLog: { create: vi.fn() },
+    $queryRaw: clientRowLock,
   };
   const transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(txClient));
 
@@ -95,7 +102,9 @@ function makeDeps(opts?: {
     clientFindUnique,
     clientUpdate,
     consentFindFirst,
-    consentUpdate,
+    consentFindFirstInTransaction,
+    consentUpdateMany,
+    clientRowLock,
     erasureFindFirst,
     nominationCreate,
     nominationUpdateMany,
@@ -233,8 +242,14 @@ describe('DsrService.withdrawConsent', () => {
     const deps = makeDeps();
     const svc = new DsrService(deps.prisma, deps.audit);
     await svc.withdrawConsent(CLIENT, { scope: 'CROSS_BORDER_PROCESSING' }, {});
-    expect(deps.consentUpdate).toHaveBeenCalledWith({
-      where: { id: 'ccon11111111111111111111a' },
+    expect(deps.consentUpdateMany).toHaveBeenCalledWith({
+      where: {
+        clientId: CLIENT,
+        scope: 'CROSS_BORDER_PROCESSING',
+        status: 'GRANTED',
+        withdrawnAt: null,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+      },
       data: { status: 'WITHDRAWN', withdrawnAt: expect.any(Date) },
     });
     // Two audit rows fired — DSR-specific + the standard one used by
@@ -255,7 +270,7 @@ describe('DsrService.withdrawConsent', () => {
 
     await svc.withdrawConsent(CLIENT, { scope: 'AUDIO_RECORDING' }, {});
 
-    expect(deps.consentFindFirst).toHaveBeenCalledWith({
+    expect(deps.consentFindFirstInTransaction).toHaveBeenCalledWith({
       where: {
         clientId: CLIENT,
         scope: 'AUDIO_RECORDING',
@@ -265,6 +280,29 @@ describe('DsrService.withdrawConsent', () => {
       },
       orderBy: { grantedAt: 'desc' },
     });
+  });
+
+  it('locks the client before selecting and withdrawing every duplicate active grant', async () => {
+    const deps = makeDeps();
+    const svc = new DsrService(deps.prisma, deps.audit);
+
+    await svc.withdrawConsent(CLIENT, { scope: 'AUDIO_RECORDING' }, {});
+
+    expect(deps.consentFindFirst).not.toHaveBeenCalled();
+    expect(deps.clientRowLock).toHaveBeenCalledOnce();
+    expect(deps.clientRowLock.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.consentFindFirstInTransaction.mock.invocationCallOrder[0],
+    );
+    expect(deps.consentFindFirstInTransaction.mock.invocationCallOrder[0]).toBeLessThan(
+      deps.consentUpdateMany.mock.invocationCallOrder[0],
+    );
+    expect(deps.audit.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'DSR_CONSENT_WITHDRAWN',
+        metadata: expect.objectContaining({ withdrawnGrantCount: 2 }),
+      }),
+      expect.anything(),
+    );
   });
 
   it('400s when no active consent exists for that scope', async () => {

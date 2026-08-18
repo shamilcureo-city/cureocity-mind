@@ -72,8 +72,30 @@ describe('session lifecycle route concurrency architecture', () => {
   it('conditionally cancels a linked scheduled session and maps a lost race to 409', () => {
     const source = route('public/appointments/[id]/cancel');
 
+    expect(source).toContain('conditionalAppointmentTransition(');
+    expect(source).toContain('cancelled.sessionId');
     expect(source).toContain('conditionalSessionTransition(');
     expect(source).toContain("expectedStatus: 'SCHEDULED'");
     expect(source).toContain('sessionConcurrentModificationResponse(error)');
+    expect(source).toContain('appointmentConcurrentModificationResponse(error)');
+  });
+
+  it.each(['appointments/[id]/confirm', 'appointments/[id]/decline'])(
+    'claims the requested appointment in %s and maps a lost race to 409',
+    (path) => {
+      const source = route(path);
+      expect(source).toContain('conditionalAppointmentTransition(');
+      expect(source).toContain("expectedStatus: 'REQUESTED'");
+      expect(source).toContain('appointmentConcurrentModificationResponse(error)');
+    },
+  );
+
+  it('claims confirmation before creating any client or session side effects', () => {
+    const source = route('appointments/[id]/confirm');
+    const claim = source.indexOf('conditionalAppointmentTransition(');
+
+    expect(claim).toBeGreaterThan(-1);
+    expect(claim).toBeLessThan(source.indexOf('tx.client.create('));
+    expect(claim).toBeLessThan(source.indexOf('tx.session.create('));
   });
 });

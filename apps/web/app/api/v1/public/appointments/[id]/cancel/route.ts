@@ -4,6 +4,10 @@ import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { verifyAppointmentSig } from '@/lib/appointment-links';
 import {
+  appointmentConcurrentModificationResponse,
+  conditionalAppointmentTransition,
+} from '@/lib/appointment-transition';
+import {
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
@@ -31,7 +35,7 @@ export async function POST(
 
   const appt = await prisma.appointment.findUnique({
     where: { id },
-    select: { status: true, sessionId: true, psychologistId: true, startAt: true },
+    select: { status: true, psychologistId: true, startAt: true },
   });
   if (!appt) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (appt.status === 'CANCELLED') {
@@ -44,10 +48,14 @@ export async function POST(
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.appointment.update({ where: { id }, data: { status: 'CANCELLED' } });
-      if (appt.sessionId) {
+      const cancelled = await conditionalAppointmentTransition(tx, {
+        appointmentId: id,
+        expectedStatus: appt.status,
+        data: { status: 'CANCELLED' },
+      });
+      if (cancelled.sessionId) {
         await conditionalSessionTransition(tx, {
-          sessionId: appt.sessionId,
+          sessionId: cancelled.sessionId,
           expectedStatus: 'SCHEDULED',
           data: { status: 'CANCELLED' },
         });
@@ -61,7 +69,7 @@ export async function POST(
           metadata: {
             psychologistId: appt.psychologistId,
             startAt: appt.startAt.toISOString(),
-            sessionId: appt.sessionId,
+            sessionId: cancelled.sessionId,
             via: 'patient-link',
           },
         },
@@ -69,7 +77,9 @@ export async function POST(
       );
     });
   } catch (error) {
-    const response = sessionConcurrentModificationResponse(error);
+    const response =
+      appointmentConcurrentModificationResponse(error) ??
+      sessionConcurrentModificationResponse(error);
     if (response) return response;
     throw error;
   }

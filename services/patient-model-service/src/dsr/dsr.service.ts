@@ -12,6 +12,7 @@ import type {
   DsrNomination,
   DsrNominationInput,
 } from '@cureocity/contracts';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
@@ -260,27 +261,31 @@ export class DsrService {
     auditMeta: AuditMetadata,
   ): Promise<void> {
     const now = new Date();
-    const active = await this.prisma.consent.findFirst({
-      where: {
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "clients" WHERE "id" = ${clientId} FOR UPDATE`,
+      );
+      const currentGrantWhere = {
         clientId,
         scope: dto.scope,
-        status: 'GRANTED',
+        status: 'GRANTED' as const,
         withdrawnAt: null,
         OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-      },
-      orderBy: { grantedAt: 'desc' },
-    });
-    if (!active) {
-      throw new BadRequestException(
-        `No active consent for scope ${dto.scope} — nothing to withdraw`,
-      );
-    }
-    const reasonHashHex = dto.reason
-      ? createHash('sha256').update(dto.reason).digest('hex')
-      : undefined;
-    await this.prisma.$transaction(async (tx) => {
-      await tx.consent.update({
-        where: { id: active.id },
+      };
+      const active = await tx.consent.findFirst({
+        where: currentGrantWhere,
+        orderBy: { grantedAt: 'desc' },
+      });
+      if (!active) {
+        throw new BadRequestException(
+          `No active consent for scope ${dto.scope} — nothing to withdraw`,
+        );
+      }
+      const reasonHashHex = dto.reason
+        ? createHash('sha256').update(dto.reason).digest('hex')
+        : undefined;
+      const withdrawn = await tx.consent.updateMany({
+        where: currentGrantWhere,
         data: { status: 'WITHDRAWN', withdrawnAt: now },
       });
       await this.audit.log(
@@ -293,6 +298,7 @@ export class DsrService {
             ...auditMeta,
             clientId,
             scope: dto.scope,
+            withdrawnGrantCount: withdrawn.count,
             ...(reasonHashHex && { reasonHashHex }),
           },
         },
@@ -306,7 +312,13 @@ export class DsrService {
           action: 'CONSENT_WITHDRAWN',
           targetType: 'Consent',
           targetId: active.id,
-          metadata: { ...auditMeta, clientId, scope: dto.scope, viaDsr: true },
+          metadata: {
+            ...auditMeta,
+            clientId,
+            scope: dto.scope,
+            viaDsr: true,
+            withdrawnGrantCount: withdrawn.count,
+          },
         },
         tx,
       );
