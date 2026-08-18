@@ -39,7 +39,7 @@ import {
 } from './transcribe-segment';
 import { compactPassError } from './pass-error';
 import { hasTranscript } from './note-transcript';
-import { assertAuditedSessionCapabilities } from './capabilities';
+import { assertAuditedSessionCapabilities, getEffectiveCapabilities } from './capabilities';
 import { requiredMedicalCapabilities } from './regulated-actions';
 
 /**
@@ -245,6 +245,18 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // differential is DV6). Must branch BEFORE the therapy union arms.
     if (pass2.output.kind === 'MEDICAL') {
       const encounterNote = pass2.output.encounterNote;
+      // Optional model suggestions are independently capability-scoped. Refresh
+      // current grants after Pass 2, immediately before any regulated write;
+      // missing optional authority suppresses that suggestion without turning a
+      // successful documentation run into an access-denied failure.
+      const effective = await getEffectiveCapabilities(session.psychologistId);
+      const medications = effective.capabilities.has('PRESCRIPTION_DRAFTING')
+        ? pass2.output.medications
+        : [];
+      const clinicalOrders = effective.capabilities.has('CLINICAL_ORDERS')
+        ? pass2.output.orders
+        : [];
+      const vitals = effective.capabilities.has('CHRONIC_CARE') ? encounterNote.vitals : undefined;
       await persistCallLog(pass2.callLog);
       recordGeminiCall({
         pass: pass2.callLog.pass,
@@ -281,12 +293,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       });
       // Sprint DV5 — persist the drafted Rx + clinical orders (the
       // interaction-check runs server-side inside the helper).
-      await persistDraftedOrders(
-        sessionId,
-        session.psychologistId,
-        pass2.output.medications,
-        pass2.output.orders,
-      );
+      await persistDraftedOrders(sessionId, session.psychologistId, medications, clinicalOrders);
       // Sprint DV7 — capture the note's vitals into the chronic-reading
       // time series so the per-patient control trajectory builds itself.
       await persistVitalReadings(
@@ -294,7 +301,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         session.clientId,
         session.psychologistId,
         session.scheduledAt,
-        encounterNote.vitals,
+        vitals,
       );
       return { draftId: draft.id, status: 'COMPLETED' };
     }
@@ -1066,7 +1073,7 @@ export async function persistVitalReadings(
   clientId: string,
   psychologistId: string,
   takenAt: Date,
-  vitals: MedicalEncounterNoteV1['vitals'],
+  vitals: MedicalEncounterNoteV1['vitals'] | undefined,
 ): Promise<void> {
   if (!vitals) return;
   const rows: {

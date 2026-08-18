@@ -495,8 +495,7 @@ export class LiveSession {
     // the browser can render a 🗣 quote-chip back to the transcript.
     for (const command of parseVoiceCommands(this.cumulativeTranscript())) {
       if (this.seenCommands.has(command.raw)) continue;
-      if (command.kind === 'ADD_MEDICATION' && !this.has('PRESCRIPTION_DRAFTING')) continue;
-      if (command.kind === 'ORDER_TEST' && !this.has('CLINICAL_ORDERS')) continue;
+      if (!this.canEmitCommand(command)) continue;
       this.seenCommands.add(command.raw);
       const anchored =
         command.kind === 'ADD_MEDICATION' || command.kind === 'ORDER_TEST'
@@ -1198,6 +1197,21 @@ export class LiveSession {
       orders: this.latestOrders,
       ...(this.has('PRESCRIPTION_DRAFTING') ? { rxPad: this.assembleRx() } : {}),
     });
+  }
+
+  private canEmitCommand(command: VoiceCommand): boolean {
+    switch (command.kind) {
+      case 'ADD_MEDICATION':
+        return this.has('PRESCRIPTION_DRAFTING');
+      case 'ORDER_TEST':
+        return this.has('CLINICAL_ORDERS');
+      case 'SHOW_DATA':
+        return this.has('CHRONIC_CARE');
+      case 'NEXT_PATIENT':
+        return false;
+      default:
+        return false;
+    }
   }
 
   private has(capability: PractitionerCapability): boolean {
