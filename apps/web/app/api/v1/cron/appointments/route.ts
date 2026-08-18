@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { writeAudit } from '@/lib/audit';
 import { sendAppointmentClosedEmail, sendAppointmentReminderEmails } from '@/lib/appointment-email';
 import {
+  claimAppointmentReminder,
   ConditionalAppointmentTransitionError,
   conditionalAppointmentTransition,
 } from '@/lib/appointment-transition';
@@ -90,11 +91,35 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       take: 200,
     });
     for (const appt of due) {
-      await prisma.appointment.update({
-        where: { id: appt.id },
-        data: { [column]: now },
-      });
-      await sendAppointmentReminderEmails(appt.psychologistId, appt.id, appt.startAt, hours);
+      const claimed = await prisma.$transaction((tx) =>
+        claimAppointmentReminder(tx, {
+          appointmentId: appt.id,
+          column,
+          claimedAt: now,
+        }),
+      );
+      if (!claimed) continue;
+
+      // Delivery is intentionally at-most-once: the committed claim remains if
+      // the provider fails, because clearing it could duplicate a partially sent
+      // therapist/patient pair. The failure audit is the manual-recovery record.
+      try {
+        await sendAppointmentReminderEmails(appt.psychologistId, appt.id, appt.startAt, hours);
+      } catch (error) {
+        await writeAudit({
+          actorType: 'SYSTEM',
+          action: 'NOTIFICATION_DISPATCHED',
+          targetType: 'Appointment',
+          targetId: appt.id,
+          metadata: {
+            psychologistId: appt.psychologistId,
+            windowHours: hours,
+            deliveryStatus: 'FAILED',
+            error: error instanceof Error ? error.message : 'Unknown reminder delivery error',
+          },
+        });
+        continue;
+      }
       await writeAudit({
         actorType: 'SYSTEM',
         action: 'APPOINTMENT_REMINDER_SENT',

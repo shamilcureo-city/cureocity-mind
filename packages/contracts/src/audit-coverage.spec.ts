@@ -68,10 +68,6 @@ const KNOWN_UNWIRED_ACTIONS = new Set<string>([
   'DSR_ACCESS_REQUESTED',
   // DSR_ERASURE_FULFILLED is now wired by the admin erasure-queue
   // PATCH route (apps/web/app/api/v1/admin/erasure/[id]).
-  // NOTIFICATION_DISPATCHED is reserved for the Sprint 10 fan-out
-  // worker that pushes reminder notifications on a schedule. The
-  // immediate-send path used in PR 4 doesn't emit it.
-  'NOTIFICATION_DISPATCHED',
   // PSYCHOLOGIST_UPDATED is now wired by Sprint 18's
   // PATCH /api/v1/psychologists/me self-service profile editor.
   // CLIENT_SOFT_DELETED is now emitted by the admin erasure-queue

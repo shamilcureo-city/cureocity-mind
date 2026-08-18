@@ -150,6 +150,42 @@ describe('session lifecycle route concurrency architecture', () => {
     );
   });
 
+  it('transactionally claims each reminder before dispatch and skips lost races', () => {
+    const source = route('cron/appointments');
+    const loop = source.indexOf('for (const appt of due)');
+    const transaction = source.indexOf('await prisma.$transaction(', loop);
+    const claim = source.indexOf('claimAppointmentReminder(', transaction);
+    const skip = source.indexOf('if (!claimed) continue;', claim);
+    const dispatch = source.indexOf('sendAppointmentReminderEmails(', skip);
+
+    expect(loop).toBeGreaterThan(-1);
+    expect(transaction).toBeGreaterThan(loop);
+    expect(claim).toBeGreaterThan(transaction);
+    expect(skip).toBeGreaterThan(claim);
+    expect(dispatch).toBeGreaterThan(skip);
+    expect(source).not.toContain('prisma.appointment.update({');
+  });
+
+  it('keeps the 24-hour and 2-hour reminder claims on separate markers', () => {
+    const source = route('cron/appointments');
+
+    expect(source).toContain("['reminded24At', 24]");
+    expect(source).toContain("['reminded2At', 2]");
+    expect(source).toContain('column,');
+  });
+
+  it('retains a failed delivery claim and audits the failure instead of retrying inline', () => {
+    const source = route('cron/appointments');
+    const claim = source.indexOf('claimAppointmentReminder(');
+    const dispatch = source.indexOf('sendAppointmentReminderEmails(', claim);
+    const failedAudit = source.indexOf("deliveryStatus: 'FAILED'", dispatch);
+
+    expect(claim).toBeGreaterThan(-1);
+    expect(dispatch).toBeGreaterThan(claim);
+    expect(failedAudit).toBeGreaterThan(dispatch);
+    expect(source).not.toContain('data: { [column]: null }');
+  });
+
   it('claims confirmation before creating any client or session side effects', () => {
     const source = route('appointments/[id]/confirm');
     const claim = source.indexOf('conditionalAppointmentTransition(');
