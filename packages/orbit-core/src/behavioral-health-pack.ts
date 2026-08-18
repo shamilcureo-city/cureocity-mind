@@ -50,17 +50,17 @@ export const BEHAVIORAL_HEALTH_PACK = Object.freeze({
     {
       id: 'recording-consent',
       description: 'A consent snapshot is required before encounter capture starts.',
-      enforcedAt: 'ENCOUNTER_START',
+      declarationCheckpoint: 'ENCOUNTER_START',
     },
     {
       id: 'crisis-signal-review',
       description: 'Detected crisis signals must remain visible for clinician review.',
-      enforcedAt: 'DRAFT_GENERATION',
+      declarationCheckpoint: 'DRAFT_GENERATION',
     },
     {
       id: 'clinician-note-confirmation',
       description: 'Generated clinical documents remain drafts until clinician confirmation.',
-      enforcedAt: 'CLINICIAN_CONFIRMATION',
+      declarationCheckpoint: 'CLINICIAN_CONFIRMATION',
     },
   ],
 } satisfies WorkflowPackDefinition);

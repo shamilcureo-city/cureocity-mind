@@ -93,6 +93,84 @@ describe('ORBIT legacy compatibility adapters', () => {
     });
   });
 
+  it('preserves unknown profession when a doctor vertical has no medical registration', () => {
+    const legacy = PsychologistSchema.parse({
+      id: 'cpsyddddddddddddddddddddd',
+      firebaseUid: 'firebase-4',
+      email: 'unverified-doctor@example.com',
+      fullName: 'Dev Shah',
+      phone: '+919****3212',
+      rciNumber: 'LEGACY-PLACEHOLDER',
+      rciVerifiedAt: null,
+      status: 'PENDING_VERIFICATION',
+      role: 'THERAPIST',
+      vertical: 'DOCTOR',
+      medicalRegNumber: null,
+      specialty: null,
+      headline: null,
+      bio: null,
+      photoUrl: null,
+      specialties: [],
+      languages: ['English'],
+      modalities: [],
+      yearsOfExperience: 0,
+      locationCity: null,
+      locationProvince: null,
+      sessionFeeInr: null,
+      isAcceptingNewClients: false,
+      defaultOutputLanguage: 'en',
+      defaultModality: null,
+      backupEmail: null,
+      onboardingCompletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    expect(mapPsychologistToPractitioner(legacy)).toMatchObject({
+      profession: null,
+      registrationNumber: null,
+    });
+  });
+
+  it('preserves unknown profession when a therapist vertical has no verified evidence', () => {
+    const legacy = PsychologistSchema.parse({
+      id: 'cpsyttttttttttttttttttttt',
+      firebaseUid: 'firebase-5',
+      email: 'unverified-therapist@example.com',
+      fullName: 'Asha Rao',
+      phone: '+919****3213',
+      rciNumber: 'LEGACY-PLACEHOLDER',
+      rciVerifiedAt: null,
+      status: 'PENDING_VERIFICATION',
+      role: 'THERAPIST',
+      vertical: 'THERAPIST',
+      medicalRegNumber: null,
+      specialty: null,
+      headline: null,
+      bio: null,
+      photoUrl: null,
+      specialties: [],
+      languages: ['English'],
+      modalities: [],
+      yearsOfExperience: 0,
+      locationCity: null,
+      locationProvince: null,
+      sessionFeeInr: null,
+      isAcceptingNewClients: false,
+      defaultOutputLanguage: 'en',
+      defaultModality: null,
+      backupEmail: null,
+      onboardingCompletedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    expect(mapPsychologistToPractitioner(legacy)).toMatchObject({
+      profession: null,
+      registrationNumber: null,
+    });
+  });
+
   it('maps a client to one patient record and does not alias language arrays', () => {
     const legacy = ClientSchema.parse({
       id: 'cclient11111111111111111x',

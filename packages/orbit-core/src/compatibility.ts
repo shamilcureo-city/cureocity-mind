@@ -9,21 +9,24 @@ import {
   type Practitioner,
 } from './domain';
 
-/**
- * Maps the legacy vertical to a profession for the transition period only.
- * It must never be used as a regulated authorization decision.
- */
+/** Maps only explicit legacy professional evidence; a product vertical is not a profession. */
 export function mapPsychologistToPractitioner(row: Psychologist): Practitioner {
   const doctor = row.vertical === 'DOCTOR';
+  const registrationNumber = doctor
+    ? row.medicalRegNumber
+    : row.rciVerifiedAt
+      ? row.rciNumber
+      : null;
   return {
     id: practitionerId(row.id),
     firebaseUid: row.firebaseUid,
     fullName: row.fullName,
     email: row.email,
     phone: row.phone,
-    profession: row.profession ?? (doctor ? 'PHYSICIAN' : 'PSYCHOLOGIST'),
+    profession:
+      row.profession ?? (registrationNumber ? (doctor ? 'PHYSICIAN' : 'PSYCHOLOGIST') : null),
     legacyVertical: row.vertical,
-    registrationNumber: doctor ? (row.medicalRegNumber ?? '') : row.rciNumber,
+    registrationNumber,
     specialty: row.specialty,
     status: row.status,
     createdAt: row.createdAt,

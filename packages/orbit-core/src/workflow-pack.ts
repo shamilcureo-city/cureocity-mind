@@ -19,7 +19,8 @@ export interface WorkflowPackPanel {
 export interface WorkflowPackSafetyPolicy {
   id: string;
   description: string;
-  enforcedAt: 'ENCOUNTER_START' | 'DRAFT_GENERATION' | 'CLINICIAN_CONFIRMATION';
+  /** Declarative manifest checkpoint; runtime adapters must implement and verify enforcement. */
+  declarationCheckpoint: 'ENCOUNTER_START' | 'DRAFT_GENERATION' | 'CLINICIAN_CONFIRMATION';
 }
 
 export interface WorkflowPackIntegration {

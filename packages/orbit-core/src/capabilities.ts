@@ -31,7 +31,7 @@ export interface ResolveCapabilitiesInput {
 }
 
 export interface EffectiveCapabilitySet {
-  profession: PractitionerProfession;
+  profession: PractitionerProfession | null;
   capabilities: ReadonlySet<PractitionerCapability>;
   verifiedCredentialKinds: ReadonlySet<PractitionerCredentialKind>;
 }
@@ -56,11 +56,14 @@ export function resolveEffectiveCapabilities(
 
   const verifiedCredentialKinds = new Set<PractitionerCredentialKind>();
   for (const credential of input.credentials) {
+    const verifiedAt = credential.verifiedAt ? new Date(credential.verifiedAt) : null;
     const expiresAt = credential.expiresAt ? new Date(credential.expiresAt) : null;
     if (
       credential.status === 'VERIFIED' &&
       credential.jurisdiction === 'IN' &&
-      credential.verifiedAt !== null &&
+      verifiedAt !== null &&
+      Number.isFinite(verifiedAt.getTime()) &&
+      verifiedAt.getTime() <= now.getTime() &&
       (!expiresAt || expiresAt.getTime() > now.getTime())
     ) {
       verifiedCredentialKinds.add(credential.kind);
@@ -78,11 +81,11 @@ export function resolveEffectiveCapabilities(
 
   const behavioral = capabilities.has('BEHAVIORAL_HEALTH_DOCUMENTATION');
   const medical = capabilities.has('MEDICAL_DOCUMENTATION');
-  let profession: PractitionerProfession;
+  let profession: PractitionerProfession | null = null;
   if (input.configuredProfession) profession = input.configuredProfession;
   else if (behavioral && medical && hasMedicalCredential) profession = 'PSYCHIATRIST';
-  else if (medical || input.legacyVertical === 'DOCTOR') profession = 'PHYSICIAN';
-  else profession = verifiedCredentialKinds.has('RCI_REGISTRATION') ? 'PSYCHOLOGIST' : 'COUNSELLOR';
+  else if (hasMedicalCredential) profession = 'PHYSICIAN';
+  else if (verifiedCredentialKinds.has('RCI_REGISTRATION')) profession = 'PSYCHOLOGIST';
 
   return { profession, capabilities, verifiedCredentialKinds };
 }

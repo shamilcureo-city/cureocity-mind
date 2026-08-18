@@ -21,6 +21,16 @@ describe('effective ORBIT capability resolution', () => {
     expect(result.capabilities.has('PRESCRIPTION_SIGNING')).toBe(false);
   });
 
+  it('does not infer a profession from a legacy doctor vertical alone', () => {
+    const result = resolveEffectiveCapabilities({
+      legacyVertical: 'DOCTOR',
+      grants: [active('MEDICAL_DOCUMENTATION')],
+      credentials: [],
+    });
+
+    expect(result.profession).toBeNull();
+  });
+
   it('grants prescription signing only with an active verified medical credential', () => {
     const result = resolveEffectiveCapabilities({
       legacyVertical: 'DOCTOR',
@@ -75,6 +85,44 @@ describe('effective ORBIT capability resolution', () => {
         },
       ],
     });
+    expect(result.capabilities.has('PRESCRIPTION_SIGNING')).toBe(false);
+  });
+
+  it('rejects a credential with a malformed verification timestamp', () => {
+    const result = resolveEffectiveCapabilities({
+      legacyVertical: 'DOCTOR',
+      grants: [active('PRESCRIPTION_DRAFTING')],
+      credentials: [
+        {
+          kind: 'NMC_REGISTRATION',
+          status: 'VERIFIED',
+          jurisdiction: 'IN',
+          verifiedAt: 'not-a-date',
+          expiresAt: null,
+        },
+      ],
+      now: new Date('2026-08-12T00:00:00.000Z'),
+    });
+
+    expect(result.capabilities.has('PRESCRIPTION_SIGNING')).toBe(false);
+  });
+
+  it('rejects a credential verified in the future', () => {
+    const result = resolveEffectiveCapabilities({
+      legacyVertical: 'DOCTOR',
+      grants: [active('PRESCRIPTION_DRAFTING')],
+      credentials: [
+        {
+          kind: 'NMC_REGISTRATION',
+          status: 'VERIFIED',
+          jurisdiction: 'IN',
+          verifiedAt: '2026-08-13T00:00:00.000Z',
+          expiresAt: null,
+        },
+      ],
+      now: new Date('2026-08-12T00:00:00.000Z'),
+    });
+
     expect(result.capabilities.has('PRESCRIPTION_SIGNING')).toBe(false);
   });
 

@@ -59,4 +59,14 @@ describe('ORBIT capability contracts', () => {
     expect(effective.capabilities).toContain('BEHAVIORAL_HEALTH_DOCUMENTATION');
     expect(effective.capabilities).toContain('MEDICAL_DOCUMENTATION');
   });
+
+  it('represents profession as unknown when no professional evidence exists', () => {
+    const effective = EffectiveCapabilitiesSchema.parse({
+      profession: null,
+      capabilities: ['MEDICAL_DOCUMENTATION'],
+      verifiedCredentialKinds: [],
+    });
+
+    expect(effective.profession).toBeNull();
+  });
 });

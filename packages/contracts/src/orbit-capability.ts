@@ -75,7 +75,7 @@ export const PractitionerCapabilityGrantSchema = z.object({
 });
 
 export const EffectiveCapabilitiesSchema = z.object({
-  profession: PractitionerProfessionSchema,
+  profession: PractitionerProfessionSchema.nullable(),
   capabilities: z.array(PractitionerCapabilitySchema),
   verifiedCredentialKinds: z.array(PractitionerCredentialKindSchema),
 });

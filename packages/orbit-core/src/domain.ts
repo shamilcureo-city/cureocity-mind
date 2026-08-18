@@ -33,9 +33,9 @@ export interface Practitioner {
   fullName: string;
   email: string;
   phone: string;
-  profession: PractitionerProfession;
+  profession: PractitionerProfession | null;
   legacyVertical: PractitionerVertical;
-  registrationNumber: string;
+  registrationNumber: string | null;
   specialty: string | null;
   status: 'PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED' | 'OFFBOARDED';
   createdAt: string;

@@ -67,23 +67,23 @@ export const MEDICAL_CARE_PACK = Object.freeze({
     {
       id: 'encounter-consent',
       description: 'A consent snapshot is required before live or recorded capture starts.',
-      enforcedAt: 'ENCOUNTER_START',
+      declarationCheckpoint: 'ENCOUNTER_START',
     },
     {
       id: 'differential-is-advisory',
       description:
         'Generated differential reasoning remains advisory until clinician confirmation.',
-      enforcedAt: 'CLINICIAN_CONFIRMATION',
+      declarationCheckpoint: 'CLINICIAN_CONFIRMATION',
     },
     {
       id: 'prescription-signing-authority',
       description: 'Medication drafting never implies authority to sign a prescription.',
-      enforcedAt: 'CLINICIAN_CONFIRMATION',
+      declarationCheckpoint: 'CLINICIAN_CONFIRMATION',
     },
     {
       id: 'external-export-confirmation',
       description: 'FHIR export and ABDM push require explicit clinician confirmation.',
-      enforcedAt: 'CLINICIAN_CONFIRMATION',
+      declarationCheckpoint: 'CLINICIAN_CONFIRMATION',
     },
   ],
 } satisfies WorkflowPackDefinition);

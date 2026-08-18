@@ -17,6 +17,13 @@ describe('Behavioral Health workflow pack', () => {
     expect(BEHAVIORAL_HEALTH_PACK.safetyPolicies).toHaveLength(3);
   });
 
+  it('labels safety policy checkpoints as declarative metadata', () => {
+    const policy = BEHAVIORAL_HEALTH_PACK.safetyPolicies[0];
+
+    expect(policy).toHaveProperty('declarationCheckpoint', 'ENCOUNTER_START');
+    expect(policy).not.toHaveProperty('enforcedAt');
+  });
+
   it('activates only with behavioral documentation authority', () => {
     expect(activeWorkflowPacks(['MEDICAL_DOCUMENTATION'], [BEHAVIORAL_HEALTH_PACK])).toEqual([]);
     expect(
