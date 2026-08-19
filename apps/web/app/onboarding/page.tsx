@@ -1,12 +1,19 @@
+import type { Metadata } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
 import { Container } from '@/components/ui/Container';
 import { OnboardingForm } from '@/components/app/OnboardingForm';
 import { requirePagePsychologist } from '@/lib/auth-page';
-import { productFromHost } from '@/lib/product';
+import { practitionerProductCopy, productFromHost } from '@/lib/product';
 
 export const dynamic = 'force-dynamic';
+
+export async function generateMetadata(): Promise<Metadata> {
+  const product = productFromHost((await headers()).get('host'));
+  const copy = practitionerProductCopy(product);
+  return { title: copy.metadataTitle, description: copy.metadataDescription };
+}
 
 /**
  * Sprint 31 — onboarding gate.
@@ -27,6 +34,7 @@ export default async function OnboardingPage() {
 
   const host = (await headers()).get('host');
   const product = productFromHost(host);
+  const copy = practitionerProductCopy(product);
   const presetVertical = host && host.split(':')[0] === product.host ? product.vertical : null;
 
   return (
@@ -36,10 +44,8 @@ export default async function OnboardingPage() {
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
             Welcome
           </p>
-          <h1 className="mt-2 font-serif text-4xl leading-tight">Set up your practice.</h1>
-          <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-            A few details before you can record your first session. Takes less than a minute.
-          </p>
+          <h1 className="mt-2 font-serif text-4xl leading-tight">{copy.onboardingTitle}</h1>
+          <p className="mt-3 text-sm text-[var(--color-ink-2)]">{copy.onboardingDescription}</p>
 
           <Card className="mt-8 p-7">
             <OnboardingForm phone={me.phone} presetVertical={presetVertical} />

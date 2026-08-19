@@ -1,3 +1,6 @@
+import type { Metadata } from 'next';
+import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { AuthedFetchProvider } from '@/components/app/AuthedFetchProvider';
 import { MobileNav } from '@/components/app/MobileNav';
@@ -7,10 +10,17 @@ import { WelcomeOverlay } from '@/components/app/WelcomeOverlay';
 import { LEARN_TOPICS, LEARN_GROUPS } from '@/lib/learn-content';
 import { CLINICAL_GLOSSARY, type GlossaryEntry } from '@/lib/clinical-glossary';
 import { currentPsychologist } from '@/lib/auth-page';
-import { isAuthBypassed } from '@/lib/auth-server';
+import { isAuthBypassed, sessionCookieDomain } from '@/lib/auth-server';
 import { getEntitlement } from '@/lib/billing';
+import { practitionerHostRedirect, practitionerProductCopy, productFromHost } from '@/lib/product';
 
 export const dynamic = 'force-dynamic';
+
+export async function generateMetadata(): Promise<Metadata> {
+  const product = productFromHost((await headers()).get('host'));
+  const copy = practitionerProductCopy(product);
+  return { title: copy.metadataTitle, description: copy.metadataDescription };
+}
 
 /**
  * Authenticated scribe shell. Sidebar on md+, bottom tab bar on
@@ -26,6 +36,11 @@ export const dynamic = 'force-dynamic';
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const psy = await currentPsychologist();
+  const host = (await headers()).get('host');
+  if (psy) {
+    const canonicalUrl = practitionerHostRedirect(host, psy.vertical, sessionCookieDomain());
+    if (canonicalUrl) redirect(canonicalUrl);
+  }
   let usage: PlanUsage | null = null;
   if (psy) {
     const ent = await getEntitlement(psy.id);
