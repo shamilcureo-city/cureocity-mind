@@ -22,6 +22,7 @@ import {
 import { Container } from '@/components/ui/Container';
 import { Button } from '@/components/ui/Button';
 import { Label, Input, FieldError } from '@/components/ui/Field';
+import { usePractitionerProduct } from '@/components/app/PractitionerProductProvider';
 
 const RECAPTCHA_ELEMENT_ID = 'recaptcha-anchor';
 
@@ -72,6 +73,7 @@ function LoginPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get('next') ?? '/app';
+  const { copy } = usePractitionerProduct();
 
   const [method, setMethod] = useState<Method>('google');
   const [stage, setStage] = useState<Stage>('pick');
@@ -353,31 +355,15 @@ function LoginPageInner() {
                 </svg>
               </span>
               <span className="font-serif text-lg tracking-tight">
-                Cureocity <em className="italic text-[var(--color-accent)]">Mind</em>
+                Cureocity <em className="italic text-[var(--color-accent)]">{copy.brandSuffix}</em>
               </span>
             </Link>
             <h1 className="mt-10 font-serif text-5xl leading-[1.1] tracking-tight text-[var(--color-ink)]">
-              Get your evenings back.
+              {copy.headline}
             </h1>
-            <p className="mt-4 max-w-md text-base text-[var(--color-ink-2)]">
-              The clinical co-pilot that writes your notes and tracks your clients’ progress while
-              you focus on the work.
-            </p>
+            <p className="mt-4 max-w-md text-base text-[var(--color-ink-2)]">{copy.description}</p>
             <ul className="mt-10 space-y-4 text-sm text-[var(--color-ink-2)]">
-              {[
-                {
-                  title: 'AI scribe in your sessions',
-                  body: 'SOAP + intake notes auto-drafted from the recording. You modify, accept, sign.',
-                },
-                {
-                  title: 'Built for Indian practice',
-                  body: 'Manglish, Hinglish, Tanglish — code-mix-first transcription that other tools choke on.',
-                },
-                {
-                  title: 'Encrypted + audited end-to-end',
-                  body: 'In-region AI for DPDP. Cryptographic sign-off on every note. Audit log on every action.',
-                },
-              ].map((item) => (
+              {copy.features.map((item) => (
                 <li key={item.title} className="flex items-start gap-3">
                   <span
                     aria-hidden
@@ -398,9 +384,7 @@ function LoginPageInner() {
                 </li>
               ))}
             </ul>
-            <p className="mt-12 text-xs text-[var(--color-ink-3)]">
-              Trusted by therapists across Bangalore, Mumbai, Kochi, and Delhi.
-            </p>
+            <p className="mt-12 text-xs text-[var(--color-ink-3)]">{copy.proof}</p>
           </section>
 
           {/* Right rail — sign-in card */}
@@ -422,7 +406,7 @@ function LoginPageInner() {
                 </svg>
               </span>
               <span className="font-serif text-base tracking-tight">
-                Cureocity <em className="italic text-[var(--color-accent)]">Mind</em>
+                Cureocity <em className="italic text-[var(--color-accent)]">{copy.brandSuffix}</em>
               </span>
             </div>
 
@@ -617,7 +601,7 @@ function LoginPageInner() {
                 {!isFirebaseConfigured() && (
                   <p className="mt-5 rounded-xl bg-[var(--color-warn-soft)] px-3 py-2 text-xs text-[var(--color-warn)]">
                     Demo mode — Firebase isn’t configured. Any sign-in lands on the seeded demo
-                    therapist.
+                    practitioner.
                   </p>
                 )}
               </>
@@ -677,7 +661,7 @@ function LoginPageInner() {
                 <div>
                   <h2 className="font-serif text-2xl">You’re almost in</h2>
                   <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                    Cureocity Mind is in invite-only pilot. Enter the code you were given.
+                    {copy.inviteProductName} is in invite-only pilot. Enter the code you were given.
                   </p>
                 </div>
                 <div>
@@ -735,7 +719,7 @@ function LoginPageInner() {
                 Privacy Policy
               </a>
               . We never sell your data; we share it only with the service providers needed to run
-              Cureocity Mind.
+              {copy.inviteProductName}.
             </p>
 
             <div id={RECAPTCHA_ELEMENT_ID} />
