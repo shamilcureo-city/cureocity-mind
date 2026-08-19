@@ -718,7 +718,7 @@ function LoginPageInner() {
               <a href="/privacy" className="underline hover:text-[var(--color-ink-2)]">
                 Privacy Policy
               </a>
-              . We never sell your data; we share it only with the service providers needed to run
+              . We never sell your data; we share it only with the service providers needed to run{' '}
               {copy.inviteProductName}.
             </p>
 
