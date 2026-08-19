@@ -18,6 +18,7 @@ describe('product-aware practitioner shell architecture', () => {
     expect(login).toContain('copy.features');
     expect(login).toContain('copy.proof');
     expect(login).toContain('copy.inviteProductName');
+    expect(login).toContain("needed to run{' '}\n              {copy.inviteProductName}");
   });
 
   it('brands onboarding from the request host', () => {
