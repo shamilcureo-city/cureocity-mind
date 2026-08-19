@@ -14,6 +14,11 @@ import { isPilotInviteRequired, redeemInviteCode } from '@/lib/invite';
 import { redeemReferralAtSignup } from '@/lib/referral';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import {
+  bootstrapAdminRecoveryData,
+  bootstrapAdminSignupData,
+  isBootstrapAdminEmail,
+} from '@/lib/bootstrap-admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,30 +52,16 @@ const CreateSessionInputSchema = z.object({
 class InviteRejectedError extends Error {}
 
 /**
- * Sprint 56 ops — auto-grant ADMIN to a new signup whose email is in the
- * comma-separated BOOTSTRAP_ADMIN_EMAILS env. Solves the chicken-and-egg
- * where the first real account (post-bypass) provisions as THERAPIST and
- * can't reach the /console operator surface without manual SQL. Case-insensitive match;
- * empty/unset env = nobody is auto-promoted.
- */
-function isBootstrapAdminEmail(email: string | undefined): boolean {
-  if (!email) return false;
-  const allow = (process.env['BOOTSTRAP_ADMIN_EMAILS'] ?? '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  return allow.includes(email.trim().toLowerCase());
-}
-
-/**
  * POST /api/v1/auth/session — exchange a Firebase id token (from the
  * phone-OTP login) for an httpOnly session cookie, auto-provisioning
  * a Psychologist row on first sign-in.
  *
  * This IS the signup flow: a brand-new verified phone number gets a
  * PENDING_VERIFICATION Psychologist with placeholder unique fields
- * (email / RCI number), completed later in Settings → Account. The
- * provision is audited as PSYCHOLOGIST_REGISTERED.
+ * (email / RCI number), completed later in Settings → Account. The sole
+ * exception is an env-allowlisted bootstrap admin, which must be ACTIVE to
+ * avoid locking the first operator out. Provisioning is audited as
+ * PSYCHOLOGIST_REGISTERED.
  *
  * Server pages + every same-origin fetch from client components ride
  * on the cookie — no Bearer-token plumbing in the UI.
@@ -94,7 +85,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const input = await parseJson(req, CreateSessionInputSchema);
   if (!input.ok) return input.response;
 
-  let decoded: { uid: string; phone_number?: string; name?: string; email?: string };
+  let decoded: {
+    uid: string;
+    phone_number?: string;
+    name?: string;
+    email?: string;
+    email_verified?: boolean;
+  };
   try {
     decoded = await auth.verifyIdToken(input.value.idToken);
   } catch {
@@ -103,7 +100,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let psy = await prisma.psychologist.findUnique({
     where: { firebaseUid: decoded.uid },
-    select: { id: true, deletedAt: true },
+    select: { id: true, deletedAt: true, email: true, role: true, status: true },
   });
   let registered = false;
   let linked = false;
@@ -122,7 +119,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!psy && decoded.phone_number) {
     const byPhone = await prisma.psychologist.findUnique({
       where: { phone: decoded.phone_number },
-      select: { id: true, deletedAt: true, firebaseUid: true },
+      select: {
+        id: true,
+        deletedAt: true,
+        firebaseUid: true,
+        email: true,
+        role: true,
+        status: true,
+      },
     });
     if (byPhone && byPhone.deletedAt === null) {
       await prisma.$transaction(async (tx) => {
@@ -147,8 +151,61 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           tx,
         );
       });
-      psy = { id: byPhone.id, deletedAt: byPhone.deletedAt };
+      psy = {
+        id: byPhone.id,
+        deletedAt: byPhone.deletedAt,
+        email: byPhone.email,
+        role: byPhone.role,
+        status: byPhone.status,
+      };
       linked = true;
+    }
+  }
+
+  // Existing bootstrap admins created before lifecycle enforcement received
+  // ADMIN but retained the schema default PENDING_VERIFICATION, locking the
+  // only operator out of the console. Recover that exact historical state on
+  // a newly verified sign-in. Explicit suspension/offboarding and non-admin
+  // accounts are never overridden; the conditional update also closes races.
+  if (psy) {
+    const existing = psy;
+    const recovery = bootstrapAdminRecoveryData(
+      decoded.email,
+      decoded.email_verified === true,
+      existing,
+    );
+    if (recovery) {
+      const recovered = await prisma.$transaction(async (tx) => {
+        const changed = await tx.psychologist.updateMany({
+          where: {
+            id: existing.id,
+            email: existing.email,
+            role: 'ADMIN',
+            status: 'PENDING_VERIFICATION',
+            deletedAt: null,
+          },
+          data: recovery,
+        });
+        if (changed.count === 1) {
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: existing.id,
+              action: 'ADMIN_ACCOUNT_STATUS_CHANGED',
+              targetType: 'Psychologist',
+              targetId: existing.id,
+              metadata: {
+                before: 'PENDING_VERIFICATION',
+                after: 'ACTIVE',
+                reason: 'bootstrap-admin-activation-recovery',
+              },
+            },
+            tx,
+          );
+        }
+        return changed.count === 1;
+      });
+      if (recovered) psy = { ...existing, status: 'ACTIVE' };
     }
   }
 
@@ -164,7 +221,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           const redeemed = await redeemInviteCode(tx, input.value.inviteCode ?? '');
           if (!redeemed.ok) throw new InviteRejectedError(redeemed.reason);
         }
-        const bootstrapAdmin = isBootstrapAdminEmail(decoded.email);
+        const bootstrapAdmin =
+          decoded.email_verified === true && isBootstrapAdminEmail(decoded.email);
         const row = await tx.psychologist.create({
           data: {
             firebaseUid: decoded.uid,
@@ -172,8 +230,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             email: decoded.email ?? `${decoded.uid}@unclaimed.cureocity.app`,
             phone: decoded.phone_number ?? `pending:${decoded.uid}`,
             rciNumber: `PENDING-${decoded.uid}`,
-            // Sprint 56 ops — auto-admin for bootstrap emails (env-gated).
-            ...(bootstrapAdmin && { role: 'ADMIN' as const }),
+            // Bootstrap operators must be usable immediately; normal
+            // practitioners still retain the schema's pending default.
+            ...bootstrapAdminSignupData(decoded.email, decoded.email_verified === true),
             // Sprint 56 — only persist if at least one field is set, so a
             // bare {} doesn't drown the signal in the funnel dashboard.
             acquisitionUtm:
@@ -181,7 +240,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
                 ? input.value.acquisitionUtm
                 : undefined,
           },
-          select: { id: true, deletedAt: true, fullName: true },
+          select: {
+            id: true,
+            deletedAt: true,
+            fullName: true,
+            email: true,
+            role: true,
+            status: true,
+          },
         });
         await writeAudit(
           {
