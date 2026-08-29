@@ -9,67 +9,7 @@ import {
   type PractitionerVertical,
 } from '@cureocity/contracts';
 import { OrbitLogo } from '@/components/ui/OrbitLogo';
-
-interface NavItem {
-  href: string;
-  label: string;
-  icon:
-    | 'dashboard'
-    | 'today'
-    | 'record'
-    | 'clients'
-    | 'templates'
-    | 'assistant'
-    | 'learn'
-    | 'me'
-    | 'search'
-    | 'clinic'
-    | 'insights'
-    | 'marketing';
-}
-
-// Sprint TS3 — the primary nav is the daily work spine, trimmed to 6 (was 9).
-// Today is the agenda + post-login landing; Record is the walk-in / dictation
-// / upload capture entry; Clients, Search, Templates, Learn round it out. The
-// power / occasional surfaces (Dashboard triage, Assistant, My practice) move
-// to the muted SECONDARY group below so they stay reachable without crowding
-// the spine. Grouping is intentionally easy to re-tune with screenshots.
-const PRIMARY: NavItem[] = [
-  // Sprint 45 — Today: the screen a therapist opens each morning, and the
-  // calendar-driven entry point into the live scribe (TS3-F1).
-  { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app/encounters/new', label: 'New encounter', icon: 'record' },
-  { href: '/app/clients', label: 'Patients', icon: 'clients' },
-  { href: '/app/search', label: 'Search', icon: 'search' },
-  { href: '/app/templates', label: 'Templates', icon: 'templates' },
-  { href: '/app/learn', label: 'Learn', icon: 'learn' },
-];
-
-// Sprint TS3 — the "More" group: reachable, de-emphasised. Dashboard is the
-// practice-wide triage hub ("what needs me across my whole caseload"); the
-// Practice Assistant and My-practice stats are occasional lookups, not part
-// of the record-a-session spine.
-const SECONDARY: NavItem[] = [
-  { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
-  { href: '/app/practice-assistant', label: 'ORBIT Assistant', icon: 'assistant' },
-  { href: '/app/me', label: 'My practice', icon: 'me' },
-  // Marketing V1 — public page + appointment inbox.
-  { href: '/app/marketing', label: 'Marketing', icon: 'marketing' },
-];
-
-// Sprint DV2 — doctor nav. The doctor's home is the patient roster
-// (/app/patients, isolated from the therapy clients pages). The
-// therapy-shaped Today/Record surfaces are dropped until the doctor
-// encounter workspace lands (DV3/DV4). See docs/DOCTOR_VERTICAL.md.
-const DOCTOR_PRIMARY: NavItem[] = [
-  // Sprint DS7 — the OPD queue is the doctor's landing page (per-consult
-  // activation is the binding constraint). Patients roster sits below it.
-  { href: '/app/clinic', label: 'Clinic', icon: 'clinic' },
-  { href: '/app/patients', label: 'Patients', icon: 'clients' },
-  // Sprint DS9 — the end-of-clinic evidence view (pilot metrics).
-  { href: '/app/insights', label: 'Insights', icon: 'insights' },
-  { href: '/app/learn', label: 'Learn', icon: 'learn' },
-];
+import { practitionerNavigation } from '@/lib/practitioner-navigation';
 
 export interface PlanUsage {
   /// Sessions recorded against the free pilot allowance.
@@ -92,10 +32,7 @@ interface SidebarProps {
 
 export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) {
   const path = usePathname() ?? '/app';
-  const items = vertical === 'DOCTOR' ? DOCTOR_PRIMARY : PRIMARY;
-  // Sprint TS3 — the therapist "More" group. Doctors already have a 4-item
-  // spine, so no secondary section for them.
-  const secondary = vertical === 'DOCTOR' ? [] : SECONDARY;
+  const { primary: items, secondary } = practitionerNavigation(vertical, 'desktop');
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-white/70 bg-white/55 backdrop-blur-xl md:flex print:!hidden">
       <div className="px-6 py-6">
