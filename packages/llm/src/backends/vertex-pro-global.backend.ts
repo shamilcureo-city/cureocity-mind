@@ -141,7 +141,10 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
         ? Pass2OutputSchema.parse(buildMedicalOutput(parsed))
         : isIntake
           ? Pass2OutputSchema.parse({ kind: 'INTAKE', intakeNote: parsed })
-          : Pass2OutputSchema.parse({ kind: input.kind, therapyNote: parsed });
+          : Pass2OutputSchema.parse({
+              kind: input.kind,
+              therapyNote: normaliseTherapyNoteOutput(parsed),
+            });
 
       const usage = res.usageMetadata;
       const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
@@ -222,6 +225,21 @@ function isTransientVertexError(e: unknown): boolean {
   return /DEADLINE_EXCEEDED|UNAVAILABLE|INTERNAL|timeout|ETIMEDOUT|ECONNRESET|EAI_AGAIN|fetch failed/i.test(
     message,
   );
+}
+
+/**
+ * Gemini may serialize an optional object as JSON null. At this provider
+ * boundary, treat null exactly like omission while leaving every other invalid
+ * type for the authoritative schema to reject.
+ */
+function normaliseTherapyNoteOutput(parsed: unknown): unknown {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
+
+  const note = parsed as Record<string, unknown>;
+  if (note['modalitySpecific'] !== null) return parsed;
+
+  const { modalitySpecific: _omitted, ...withoutNullOptionalField } = note;
+  return withoutNullOptionalField;
 }
 
 function buildUserMessage(input: Pass2Input): string {
