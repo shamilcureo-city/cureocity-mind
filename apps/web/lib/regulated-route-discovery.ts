@@ -11,7 +11,7 @@ const EXPORTED_HANDLER = /export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE
 const REEXPORTED_HANDLER =
   /export\s*\{\s*(GET|POST|PUT|PATCH|DELETE)(?:\s+as\s+(GET|POST|PUT|PATCH|DELETE))?\s*\}\s*from\s*['"][^'"]+['"]\s*;?/g;
 const REGULATED_MARKER =
-  /therapyNote|noteDraft|medicalEncounterNote|clinicalReport|transcript|safetyPlan|treatmentWorkflow|modalityState|instrumentResponse|clinicalReading|medicationOrder|clinicalOrder|assessmentItem|clientDiagnosis|problemListItem|affectFeatures|preSessionBrief|decryptClientField|renderToBuffer|modelRouter|generateContent|persistVitalReadings|computeClientJourney|delegateSessionRoute|run(?:ClinicalAnalysis|Differential|NoteGeneration)/i;
+  /therapyNote|noteDraft|mindSessionCloseoutState|medicalEncounterNote|clinicalReport|transcript|safetyPlan|treatmentWorkflow|modalityState|instrumentResponse|clinicalReading|medicationOrder|clinicalOrder|assessmentItem|clientDiagnosis|problemListItem|affectFeatures|preSessionBrief|decryptClientField|renderToBuffer|modelRouter|generateContent|persistVitalReadings|computeClientJourney|delegateSessionRoute|run(?:ClinicalAnalysis|Differential|NoteGeneration)/i;
 const GUARD = /require(?:PsychologistId|Capability|AnyCapability)\s*\(/;
 const PROTECTED_OPERATION =
   /prisma\.|parseJson\s*\(|parseQuery\s*\(|decryptClientField\s*\(|renderToBuffer\s*\(|modelRouter\s*\(|generateContent\s*\(|computeClientJourney\s*\(|(?:enqueue|schedule|queue)[A-Z\w]*\s*\(/i;

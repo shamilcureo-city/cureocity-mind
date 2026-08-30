@@ -5,7 +5,9 @@ import type { TodayAttentionItem } from '@/lib/today-priority';
 const labels: Record<TodayAttentionItem['kind'], string> = {
   ACTIVE_SESSION: 'Active session',
   FUTURE_SESSION: 'Next session',
-  NOTE_REVIEW: 'Note ready to review',
+  NOTE_NEEDS_ATTENTION: 'Needs attention',
+  NOTE_REVIEW: 'Ready to review',
+  NOTE_GENERATING: 'Generating',
   CLIENT_RESPONSE: 'Client response',
   OVERDUE_WORK: 'Overdue',
 };

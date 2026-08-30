@@ -91,6 +91,9 @@ export const DPDP_ERASURE_MANIFEST = {
   TreatmentGoalProgress: clinicalDelete('delete goal-progress artifacts before treatment plans'),
   CaseFormulation: clinicalDelete('delete formulation body and provenance'),
   SessionAgreement: clinicalDelete('delete carried agreement text and follow-up'),
+  MindSessionCloseoutState: clinicalDelete(
+    'delete Mind-only closeout decisions and follow-up linkage with the session',
+  ),
   TreatmentEpisode: clinicalDelete('delete episode outcome and close reason'),
   AssessmentItem: clinicalDelete('delete assessment question, rationale and resolution'),
   PatientShare: clinicalDelete('delete snapshots, recipient, token and provider/error details'),

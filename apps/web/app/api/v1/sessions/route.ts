@@ -4,7 +4,7 @@ import {
   planTierLabel,
   selectReusableSession,
 } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { getEntitlement, isBillingEnforced } from '@/lib/billing';
 import { prisma } from '@/lib/prisma';
@@ -38,6 +38,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!auth.ok) return auth.response;
   const dto = await parseJson(req, CreateSessionInputSchema);
   if (!dto.ok) return dto.response;
+  if (dto.value.sourceSessionId && auth.value.user.vertical === 'DOCTOR') {
+    return NextResponse.json({ error: 'Source session not found' }, { status: 404 });
+  }
+  if (dto.value.sourceSessionId) {
+    const mindAuth = await requireCapability(req, 'BEHAVIORAL_HEALTH_DOCUMENTATION', auth);
+    if (!mindAuth.ok) return mindAuth.response;
+  }
 
   const client = await prisma.client.findUnique({ where: { id: dto.value.clientId } });
   if (!client || client.deletedAt !== null) {
@@ -45,6 +52,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (client.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+  }
+
+  const sourceSession = dto.value.sourceSessionId
+    ? await prisma.session.findFirst({
+        where: {
+          id: dto.value.sourceSessionId,
+          clientId: dto.value.clientId,
+          psychologistId: auth.value.psychologistId,
+          status: 'COMPLETED',
+        },
+        select: { id: true, mindCloseout: { select: { followUpSessionId: true } } },
+      })
+    : null;
+  if (dto.value.sourceSessionId && !sourceSession) {
+    return NextResponse.json({ error: 'Source session not found' }, { status: 404 });
+  }
+  if (sourceSession?.mindCloseout?.followUpSessionId) {
+    const existingFollowUp = await prisma.session.findUnique({
+      where: { id: sourceSession.mindCloseout.followUpSessionId },
+    });
+    if (existingFollowUp) return NextResponse.json(toSession(existingFollowUp), { status: 200 });
   }
 
   // Sprint TS3 (F1) — "start now" reuse. When the therapist is starting a
@@ -178,7 +206,23 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     defaults.kind === 'INTAKE' ? null : (defaultTemplate?.id ?? DEFAULT_BUILTIN_TEMPLATE_ID);
 
   const scheduledAt = new Date(dto.value.scheduledAt);
+  if (sourceSession && scheduledAt.getTime() <= Date.now()) {
+    return NextResponse.json(
+      { error: 'Follow-up must be scheduled in the future' },
+      { status: 400 },
+    );
+  }
   const created = await prisma.$transaction(async (tx) => {
+    if (sourceSession) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sourceSession.id}))`;
+      const linked = await tx.mindSessionCloseoutState.findUnique({
+        where: { sessionId: sourceSession.id },
+        select: { followUpSessionId: true },
+      });
+      if (linked?.followUpSessionId) {
+        return tx.session.findUniqueOrThrow({ where: { id: linked.followUpSessionId } });
+      }
+    }
     // Sprint DS7 — doctor encounters join the clinic queue with a
     // today-scoped OPD token; therapist sessions carry none.
     const tokenNumber = isDoctor
@@ -200,6 +244,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         ...(tokenNumber !== null && { tokenNumber }),
       },
     });
+    if (sourceSession) {
+      await tx.mindSessionCloseoutState.upsert({
+        where: { sessionId: sourceSession.id },
+        create: { sessionId: sourceSession.id, followUpSessionId: row.id },
+        update: { followUpSessionId: row.id, followUpSkippedAt: null },
+      });
+    }
     await writeAudit(
       {
         actorType: 'PSYCHOLOGIST',

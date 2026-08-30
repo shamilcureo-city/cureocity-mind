@@ -1,7 +1,9 @@
 export type TodayAttentionKind =
   | 'ACTIVE_SESSION'
   | 'FUTURE_SESSION'
+  | 'NOTE_NEEDS_ATTENTION'
   | 'NOTE_REVIEW'
+  | 'NOTE_GENERATING'
   | 'CLIENT_RESPONSE'
   | 'OVERDUE_WORK';
 
@@ -18,9 +20,11 @@ export interface TodayAttentionItem {
 const rank: Record<TodayAttentionKind, number> = {
   ACTIVE_SESSION: 0,
   FUTURE_SESSION: 1,
-  NOTE_REVIEW: 2,
-  CLIENT_RESPONSE: 3,
-  OVERDUE_WORK: 4,
+  NOTE_NEEDS_ATTENTION: 2,
+  NOTE_REVIEW: 3,
+  NOTE_GENERATING: 4,
+  CLIENT_RESPONSE: 5,
+  OVERDUE_WORK: 6,
 };
 
 export function prioritizeTodayItems(

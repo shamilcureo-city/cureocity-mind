@@ -28,7 +28,6 @@ import { Button } from '../ui/Button';
 import { PassErrorDetail } from './PassErrorDetail';
 import { describePassError } from '@/lib/pass-error';
 import { isSuggestionApplied } from '@/lib/formulation-applied';
-import { postSignNote } from '@/lib/sign-note';
 import { Card } from '../ui/Card';
 import { PlanEditor } from './PlanEditor';
 import { ShareModal } from './ShareModal';
@@ -179,8 +178,7 @@ export function CopilotDecisionBoard({
 
   // The decisions + wrap card render from SERVER props; when the reading
   // lands via the poll (not via a click), those must catch up too — without
-  // this, a healed note left "Sign and close" greyed out until a manual
-  // reload (JA-C·heal).
+  // the Review & Close status refreshes on return.
   const lastReportStatusRef = useRef<string | null>(initialReport?.status ?? null);
 
   const applyResponse = useCallback(
@@ -432,16 +430,6 @@ export function CopilotDecisionBoard({
     router.refresh();
   }, [report, router]);
 
-  const finishReview = useCallback(async (): Promise<void> => {
-    if (!report) throw new Error('No report to finish.');
-    const res = await fetch(`/api/v1/clinical-reports/${report.id}/finish-review`, {
-      method: 'POST',
-    });
-    const payload = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
-    router.refresh();
-  }, [report, router]);
-
   // ----- pre-reading states -----
 
   const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=progress`;
@@ -559,14 +547,6 @@ export function CopilotDecisionBoard({
       }
     />
   );
-
-  // Tolerant wrapper: signing stamps the review as finished, but a session can
-  // be signed from the Notes tab with no report row at all — never let the
-  // stamp turn a successful signature into an error.
-  const finishReviewQuietly = async (): Promise<void> => {
-    if (!report) return;
-    await finishReview().catch(() => {});
-  };
 
   return (
     <div className="space-y-5">
@@ -712,7 +692,6 @@ export function CopilotDecisionBoard({
                 measuresHref={measuresHref}
                 recommendedInstruments={data.recommendedInstruments}
                 closeout={closeout}
-                onFinishReview={finishReviewQuietly}
               />
             </div>
 
@@ -2391,17 +2370,9 @@ const ADMINISTERABLE: { key: string; label: string }[] = [
 ];
 
 // ============================================================================
-// Step 5 — Wrap up & sign. The board's terminal card and the session's ONE
-// ceremony: the deterministic checklist of the five decisions, the session's
-// agreements (in the client's words), the one-tap alliance read, then "Sign
-// and close" — the same note signature the Notes tab offers (WebAuthn-stepped
-// via postSignNote), which also stamps the review as finished. It is a
-// checkpoint, not a lock: every decision above stays revisable after.
-//
-// This card absorbed the old "Close the loop" sub-tab. Its unique moments
-// (agreements, alliance, the signature) live here; its duplicated ones (note
-// excerpt, measure rows, crisis restatement) were deleted — each of those
-// facts already has exactly one home on this board.
+// Step 5 — Wrap up decisions. The board remains the place to resolve
+// clinical suggestions, agreements, and alliance. The authoritative signature
+// ceremony lives only in Review & Close; this card links there when unfinished.
 // ============================================================================
 
 const ALLIANCE_OPTIONS: { key: AllianceRating; label: string; hint: string }[] = [
@@ -2422,7 +2393,6 @@ function WrapUpSignStep({
   measuresHref,
   recommendedInstruments,
   closeout,
-  onFinishReview,
 }: {
   sessionId: string;
   clientId: string;
@@ -2434,10 +2404,7 @@ function WrapUpSignStep({
   measuresHref: string;
   recommendedInstruments: string[];
   closeout: CloseoutData;
-  onFinishReview: () => Promise<void>;
 }) {
-  const router = useRouter();
-
   // ----- agreements (in the client's words; next session's Prepare reads these)
   const [agreements, setAgreements] = useState<SessionAgreementDto[]>(closeout.agreements);
   const [agreementText, setAgreementText] = useState('');
@@ -2502,51 +2469,8 @@ function WrapUpSignStep({
     }
   };
 
-  // ----- the signature
-  const [signed, setSigned] = useState(closeout.signed);
-  const [signing, setSigning] = useState(false);
-  const [signError, setSignError] = useState<string | null>(null);
-  // REQUIRE_WEBAUTHN_SIGNING refused the sign because no passkey is
-  // enrolled — rendered with the enrolment path, not as a plain error wall.
-  const [needsPasskey, setNeedsPasskey] = useState<string | null>(null);
+  const signed = closeout.signed;
   const [shareOpen, setShareOpen] = useState(false);
-
-  const triggerSign = async (): Promise<void> => {
-    if (!closeout.noteContent) return;
-    setSigning(true);
-    setSignError(null);
-    setNeedsPasskey(null);
-    try {
-      const note = closeout.noteContent;
-      const signedAt = new Date().toISOString();
-      const res = await postSignNote(sessionId, {
-        note,
-        draftContent: note,
-        edits: [],
-        signedAt,
-        rxPad: null,
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        if (res.status === 403) {
-          setNeedsPasskey(body.error ?? 'Signing requires a registered passkey on this account.');
-          return;
-        }
-        throw new Error(body.error ?? `Sign failed (${res.status})`);
-      }
-      const signedNote = (await res.json()) as { signedAt: string };
-      setSigned({ signedAt: signedNote.signedAt, signerName: '' });
-      // One ceremony: the signature also stamps the review as finished
-      // (reviewedAt + COPILOT_REVIEW_FINISHED). Best-effort by design — a
-      // failed stamp must never read as a failed signature.
-      await onFinishReview();
-      router.refresh();
-    } catch (e) {
-      setSignError((e as Error).message);
-    } finally {
-      setSigning(false);
-    }
-  };
 
   const hasBaseline = record.instruments.some((i) =>
     ADMINISTERABLE.some((a) => a.key === i.instrumentKey),
@@ -2605,9 +2529,9 @@ function WrapUpSignStep({
           5
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[15.5px] font-semibold">Wrap up &amp; sign</p>
+          <p className="text-[15.5px] font-semibold">Wrap up decisions</p>
           <p className="mb-3 mt-0.5 text-xs text-[var(--color-ink-3)]">
-            One signature finishes the session — decisions stay revisable after.
+            Resolve the clinical decisions here, then finish once in Review &amp; Close.
           </p>
 
           <div className="space-y-1.5">
@@ -2775,56 +2699,24 @@ function WrapUpSignStep({
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  onClick={() => void triggerSign()}
-                  disabled={!closeout.noteReady || signing}
+                <Link
+                  href={`/app/sessions/${sessionId}`}
+                  className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--color-accent)] px-5 text-sm font-semibold text-white"
                 >
-                  {signing ? 'Signing…' : 'Sign and close'}
-                </Button>
+                  Continue to Review &amp; Close
+                </Link>
                 <span className="max-w-md text-[11px] text-[var(--color-ink-3)]">
-                  {closeout.noteReady ? (
-                    <>
-                      Signing covers the note; everything above saved as you went.{' '}
-                      <Link
-                        href={`/app/sessions/${sessionId}`}
-                        className="font-medium text-[var(--color-accent)] hover:underline"
-                      >
-                        Read or edit the full note →
-                      </Link>
-                    </>
-                  ) : (
-                    <>
-                      Signing needs the note — generate it on the{' '}
-                      <Link
-                        href={`/app/sessions/${sessionId}`}
-                        className="font-medium text-[var(--color-accent)] hover:underline"
-                      >
-                        Notes tab
-                      </Link>{' '}
-                      first.
-                    </>
-                  )}
+                  {closeout.noteReady
+                    ? 'Review the note and use the one completion checklist there.'
+                    : 'The note is still being prepared; Review & Close will update automatically.'}
                 </span>
               </div>
             )}
             {reviewedAt && !signed && (
               <p className="mt-2 text-[11px] text-[var(--color-ink-3)]">
-                Review finished {formatDate(reviewedAt)} — signing closes the session itself.
+                Clinical suggestions reviewed {formatDate(reviewedAt)}.
               </p>
             )}
-            {needsPasskey && (
-              <div className="mt-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
-                {needsPasskey}{' '}
-                <Link
-                  href="/app/settings/security"
-                  className="font-semibold underline underline-offset-2"
-                >
-                  Set up a passkey →
-                </Link>{' '}
-                then come back here and sign — everything above is already saved.
-              </div>
-            )}
-            {signError && <p className="mt-2 text-xs text-[var(--color-warn)]">{signError}</p>}
           </div>
         </div>
       </div>

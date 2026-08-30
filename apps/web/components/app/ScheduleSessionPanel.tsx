@@ -8,7 +8,7 @@ import { Button } from '../ui/Button';
 import { Input, Label, Select, FieldError } from '../ui/Field';
 import { UpgradeModal } from './UpgradeModal';
 
-interface ClientOption {
+export interface ClientOption {
   id: string;
   fullName: string;
   preferredModality: string | null;
@@ -16,6 +16,12 @@ interface ClientOption {
 
 interface Props {
   clients: ClientOption[];
+  initialClientId?: string;
+  initialDate?: string;
+  initialTime?: string;
+  closeoutMode?: boolean;
+  sourceSessionId?: string;
+  followUpState?: 'PENDING' | 'COMPLETE' | 'SKIPPED';
 }
 
 /**
@@ -29,18 +35,60 @@ interface Props {
  * calendar. The future Booking model (public lead inbox) lives in
  * Sprint 49's scope.
  */
-export function ScheduleSessionPanel({ clients }: Props) {
+export function ScheduleSessionPanel({
+  clients,
+  initialClientId,
+  initialDate,
+  initialTime,
+  closeoutMode = false,
+  sourceSessionId,
+  followUpState = 'PENDING',
+}: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const [outcome, setOutcome] = useState<'scheduled' | 'skipped' | null>(
+    followUpState === 'COMPLETE' ? 'scheduled' : followUpState === 'SKIPPED' ? 'skipped' : null,
+  );
+  const triggerLabel =
+    outcome === 'scheduled'
+      ? 'Follow-up scheduled'
+      : closeoutMode
+        ? 'Schedule next session'
+        : 'Schedule session';
 
   return (
     <>
-      <Button onClick={() => setOpen(true)}>+ Schedule session</Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={() => setOpen(true)} disabled={outcome === 'scheduled'}>
+          {outcome === 'skipped' ? 'Change follow-up' : triggerLabel}
+        </Button>
+        {outcome === 'skipped' && (
+          <span className="text-xs text-[var(--color-ink-3)]">Follow-up intentionally skipped</span>
+        )}
+      </div>
       {open && (
         <ScheduleModal
           clients={clients}
+          initialClientId={initialClientId}
+          initialDate={initialDate}
+          initialTime={initialTime}
+          closeoutMode={closeoutMode}
+          sourceSessionId={sourceSessionId}
+          onSkip={async () => {
+            if (!sourceSessionId) return;
+            const res = await fetch(`/api/v1/sessions/${sourceSessionId}/mind-closeout`, {
+              method: 'PATCH',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ step: 'followUp', outcome: 'SKIPPED' }),
+            });
+            if (!res.ok) return;
+            setOutcome('skipped');
+            setOpen(false);
+            router.refresh();
+          }}
           onClose={() => setOpen(false)}
           onScheduled={() => {
+            setOutcome('scheduled');
             setOpen(false);
             router.refresh();
           }}
@@ -52,18 +100,30 @@ export function ScheduleSessionPanel({ clients }: Props) {
 
 function ScheduleModal({
   clients,
+  initialClientId,
+  initialDate,
+  initialTime,
+  closeoutMode,
+  sourceSessionId,
+  onSkip,
   onClose,
   onScheduled,
 }: {
   clients: ClientOption[];
+  initialClientId?: string;
+  initialDate?: string;
+  initialTime?: string;
+  closeoutMode: boolean;
+  sourceSessionId?: string;
+  onSkip: () => void;
   onClose: () => void;
   onScheduled: () => void;
 }) {
   const tomorrow = useMemo(() => seedTomorrow(), []);
-  const [clientId, setClientId] = useState(clients[0]?.id ?? '');
+  const [clientId, setClientId] = useState(initialClientId ?? clients[0]?.id ?? '');
   const [query, setQuery] = useState('');
-  const [date, setDate] = useState(tomorrow.date);
-  const [time, setTime] = useState('10:00');
+  const [date, setDate] = useState(initialDate ?? tomorrow.date);
+  const [time, setTime] = useState(initialTime ?? '10:00');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Sprint 53 — trial cap modal trigger; Sprint 56 — paid-cap variant too.
@@ -86,10 +146,13 @@ function ScheduleModal({
       if (!clientId) throw new Error('Pick a client.');
       const scheduledAt = combineToIso(date, time);
       if (!scheduledAt) throw new Error('Pick a valid date and time.');
+      if (new Date(scheduledAt).getTime() <= Date.now()) {
+        throw new Error('Follow-up must be scheduled in the future.');
+      }
       const res = await fetch('/api/v1/sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ clientId, scheduledAt }),
+        body: JSON.stringify({ clientId, scheduledAt, sourceSessionId }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as {
@@ -128,7 +191,7 @@ function ScheduleModal({
       <Card className="max-h-[90vh] w-full max-w-lg overflow-y-auto p-6">
         <header className="mb-4 flex items-baseline justify-between gap-3">
           <h2 id="schedule-title" className="font-serif text-xl">
-            Schedule session
+            {closeoutMode ? 'Schedule next session' : 'Schedule session'}
           </h2>
           <button
             type="button"
@@ -138,6 +201,12 @@ function ScheduleModal({
             cancel
           </button>
         </header>
+        {closeoutMode && (
+          <p className="mb-4 rounded-xl bg-[var(--color-surface-soft)] px-4 py-3 text-sm text-[var(--color-ink-2)]">
+            Suggested cadence: one week at the same time. Edit the date or time below if another
+            cadence fits better.
+          </p>
+        )}
         {clients.length === 0 ? (
           <p className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4 text-sm text-[var(--color-ink-2)]">
             No active clients yet. Add one from <strong>Clients</strong> first.
@@ -197,7 +266,12 @@ function ScheduleModal({
               </div>
             </div>
             <FieldError message={error} />
-            <div className="flex justify-end gap-2 border-t border-[var(--color-line-soft)] pt-4">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-line-soft)] pt-4">
+              {closeoutMode && (
+                <Button type="button" variant="secondary" onClick={onSkip} disabled={submitting}>
+                  Skip follow-up
+                </Button>
+              )}
               <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
                 Cancel
               </Button>

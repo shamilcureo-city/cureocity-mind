@@ -55,10 +55,15 @@ describe('product-aware practitioner shell architecture', () => {
     expect(form).not.toContain("router.replace('/app')");
   });
 
-  it('surfaces only completed note drafts as ready for review on Today', () => {
+  it('labels every unsigned note-processing state explicitly on Today', () => {
     const today = read('app/app/today/page.tsx');
 
-    expect(today).toContain("noteDraft: { status: 'COMPLETED' }");
+    expect(today).toContain(
+      "noteDraft: { status: { in: ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED'] } }",
+    );
+    expect(today).toContain('noteProcessingJourney(session.noteDraft!.status)');
+    expect(today).toContain("journey.state === 'READY_TO_REVIEW'");
+    expect(today).not.toMatch(/noteDraft: \{ status: \{ in:[\s\S]{0,500}take: 12/);
     expect(today).not.toContain("status: 'COMPLETED',\n        therapyNote: null,");
   });
 

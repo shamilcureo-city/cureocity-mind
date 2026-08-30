@@ -1,6 +1,6 @@
 import type { SessionStatus } from '@prisma/client';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import type {
   NoteDraft,
   SessionKind,
@@ -16,6 +16,7 @@ import type { CopilotSubKey } from '@/components/app/AICopilotSubTabs';
 import { ClientTab } from '@/components/app/ClientTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
+import { MindSessionCloseout } from '@/components/app/MindSessionCloseout';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs, type TabKey } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
@@ -31,6 +32,7 @@ import { languageNames } from '@/lib/language-names';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 import { resolveNoteTranscript } from '@/lib/note-transcript';
+import { deriveMindSessionCloseout } from '@/lib/mind-session-closeout';
 
 export const dynamic = 'force-dynamic';
 
@@ -105,6 +107,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   // redirect). `findFirst` with psychologistId makes cross-tenant / unauth URL
   // probing return 404.
   const therapist = await requireOnboardedPsychologist();
+  if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
 
   const { id } = await params;
   const { tab: rawTab, sub: rawSub } = await searchParams;
@@ -124,6 +127,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         select: {
           fullNameEncrypted: true,
           preferredLanguage: true,
+          preferredModality: true,
           contactPhoneEncrypted: true,
           contactEmailEncrypted: true,
           isDemo: true,
@@ -202,6 +206,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientHasContactPhone={!!pii.contactPhone}
             clientHasContactEmail={!!pii.contactEmail}
             clientName={pii.fullName}
+            clientPreferredModality={session.client.preferredModality}
+            sessionAt={session.scheduledAt}
             noteLanguage={session.language}
             clientPreferredLanguage={session.client.preferredLanguage}
             noteTemplateId={session.noteTemplateId}
@@ -253,6 +259,8 @@ async function NotesTabPanel({
   clientHasContactPhone,
   clientHasContactEmail,
   clientName,
+  clientPreferredModality,
+  sessionAt,
   noteLanguage,
   clientPreferredLanguage,
   noteTemplateId,
@@ -267,19 +275,28 @@ async function NotesTabPanel({
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
   clientName: string;
+  clientPreferredModality: string | null;
+  sessionAt: Date;
   noteLanguage: string;
   clientPreferredLanguage: string;
   noteTemplateId: string | null;
   caseThread: CaseThread | null;
   signerName: string;
 }) {
-  const [draftRow, signedRow] = await Promise.all([
-    prisma.noteDraft.findUnique({ where: { sessionId } }),
-    prisma.therapyNote.findUnique({
-      where: { sessionId },
-      include: { edits: { orderBy: { createdAt: 'asc' } } },
-    }),
-  ]);
+  const [draftRow, signedRow, closeoutState, agreementCount, nextQuestionCount, shareCount] =
+    await Promise.all([
+      prisma.noteDraft.findUnique({ where: { sessionId } }),
+      prisma.therapyNote.findUnique({
+        where: { sessionId },
+        include: { edits: { orderBy: { createdAt: 'asc' } } },
+      }),
+      prisma.mindSessionCloseoutState.findUnique({ where: { sessionId } }),
+      prisma.sessionAgreement.count({ where: { sessionId } }),
+      prisma.assessmentItem.count({ where: { sourceSessionId: sessionId } }),
+      prisma.patientShare.count({
+        where: { sessionId, status: { in: ['SENT', 'OPENED'] } },
+      }),
+    ]);
 
   const draft: NoteDraft | null = draftRow
     ? toNoteDraft(draftRow, await resolveNoteTranscript(psychologistId, draftRow))
@@ -306,37 +323,61 @@ async function NotesTabPanel({
       }
     : null;
 
+  const closeout = deriveMindSessionCloseout({
+    draftStatus: draftRow?.status ?? null,
+    noteSigned: signedRow?.locked === true,
+    suggestionsResolved: closeoutState?.clinicalSuggestionsResolvedAt != null,
+    suggestionsSkipped: closeoutState?.clinicalSuggestionsSkippedAt != null,
+    agreementsCaptured: agreementCount > 0,
+    agreementsSkipped: closeoutState?.agreementsSkippedAt != null,
+    nextQuestionsSelected: nextQuestionCount > 0,
+    nextQuestionsSkipped: closeoutState?.nextQuestionsSkippedAt != null,
+    shared: shareCount > 0,
+    shareSkipped: closeoutState?.shareSkippedAt != null,
+    followUpScheduled: closeoutState?.followUpSessionId != null,
+    followUpSkipped: closeoutState?.followUpSkippedAt != null,
+    legacySession: closeoutState?.legacyImported === true,
+  });
+
   return (
-    <div className="space-y-6">
-      {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
-      {caseThread && caseThread.measures.length > 0 && (
-        <MeasuresTrend measures={caseThread.measures} />
-      )}
-      {caseThread && (
-        <SessionProblemTags
+    <MindSessionCloseout
+      sessionId={sessionId}
+      closeout={closeout}
+      client={{ id: clientId, fullName: clientName, preferredModality: clientPreferredModality }}
+      sessionAt={sessionAt}
+      sessionCompleted={sessionStatus === 'COMPLETED'}
+    >
+      <div className="space-y-6">
+        {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
+        {caseThread && caseThread.measures.length > 0 && (
+          <MeasuresTrend measures={caseThread.measures} />
+        )}
+        {caseThread && (
+          <SessionProblemTags
+            sessionId={sessionId}
+            active={caseThread.sessionProblems.active}
+            initialTaggedIds={caseThread.sessionProblems.taggedIds}
+          />
+        )}
+        <NotesTab
           sessionId={sessionId}
-          active={caseThread.sessionProblems.active}
-          initialTaggedIds={caseThread.sessionProblems.taggedIds}
+          sessionStatus={sessionStatus}
+          sessionKind={sessionKind}
+          initialDraft={draft}
+          initialNote={signedNote}
+          noteLocked={signedRow?.locked ?? true}
+          clientId={clientId}
+          clientHasContactPhone={clientHasContactPhone}
+          clientHasContactEmail={clientHasContactEmail}
+          llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
+          clientName={clientName}
+          noteLanguage={noteLanguage}
+          clientPreferredLanguage={clientPreferredLanguage}
+          noteTemplateId={noteTemplateId}
+          signerName={signerName}
         />
-      )}
-      <NotesTab
-        sessionId={sessionId}
-        sessionStatus={sessionStatus}
-        sessionKind={sessionKind}
-        initialDraft={draft}
-        initialNote={signedNote}
-        noteLocked={signedRow?.locked ?? true}
-        clientId={clientId}
-        clientHasContactPhone={clientHasContactPhone}
-        clientHasContactEmail={clientHasContactEmail}
-        llmBackend={process.env['LLM_BACKEND'] ?? 'mock'}
-        clientName={clientName}
-        noteLanguage={noteLanguage}
-        clientPreferredLanguage={clientPreferredLanguage}
-        noteTemplateId={noteTemplateId}
-        signerName={signerName}
-      />
-    </div>
+      </div>
+    </MindSessionCloseout>
   );
 }
 
