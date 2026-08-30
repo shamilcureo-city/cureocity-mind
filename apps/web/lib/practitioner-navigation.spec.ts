@@ -20,8 +20,12 @@ describe('practitioner navigation', () => {
       { href: '/app/clients', label: 'Clients' },
       { href: '/app/search', label: 'Search' },
     ]);
-    expect([...desktop.primary, ...desktop.secondary, ...mobile.primary, ...mobile.secondary])
-      .not.toEqual(expect.arrayContaining([expect.objectContaining({ href: '/app/patients' })]));
+    expect([
+      ...desktop.primary,
+      ...desktop.secondary,
+      ...mobile.primary,
+      ...mobile.secondary,
+    ]).not.toEqual(expect.arrayContaining([expect.objectContaining({ href: '/app/patients' })]));
   });
 
   it('returns Scribe vocabulary and never exposes Mind routes for doctors', () => {
