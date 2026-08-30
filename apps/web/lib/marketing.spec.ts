@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   computeSlots,
@@ -117,5 +119,29 @@ describe('slugify', () => {
     expect(slugify('Dr. Priya Nair')).toBe('priya-nair');
     expect(slugify("Anjali D'Souza")).toBe('anjali-d-souza');
     expect(slugify('  ')).toBe('therapist');
+  });
+});
+
+describe('Mind pilot acquisition journey', () => {
+  const webRoot = join(import.meta.dirname, '..');
+  const read = (path: string) => readFileSync(join(webRoot, path), 'utf8');
+
+  it('presents application and member paths without self-serve or invite dead ends', () => {
+    const landing = read('app/page.tsx');
+    const nav = read('components/landing/LandingNav.tsx');
+    const login = read('app/login/page.tsx');
+    const onboarding = read('app/onboarding/page.tsx');
+    const form = read('components/app/OnboardingForm.tsx');
+
+    expect(landing).toContain('Apply to join the pilot');
+    expect(landing).not.toContain('Start free — no card');
+    expect(nav).toContain('Apply to join the pilot');
+    expect(nav).toContain('Sign in');
+    expect(login).toContain('Request pilot access');
+    expect(login).toContain('copy.acquisition.helpHref');
+    expect(onboarding).toContain('initialFullName={me.fullName}');
+    expect(onboarding).toContain('initialEmail={me.email}');
+    expect(form).toContain("useState(initialFullName ?? '')");
+    expect(form).toContain("useState(initialEmail ?? '')");
   });
 });

@@ -9,6 +9,7 @@ import { flushPendingWithRetries } from '@cureocity/audio';
 import { useSessionRecorder, type CaptureSource } from '@/lib/audio/use-session-recorder';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import { InRoomDirection } from './InRoomDirection';
+import { coordinateMindSessionStart } from '@/lib/mind-session-start';
 
 const MODE_LABEL: Record<CaptureSource, string> = {
   mic: 'In-person',
@@ -41,6 +42,9 @@ interface Props {
    * room) can guard navigation that would silently abandon it.
    */
   onActiveChange?: (active: boolean) => void;
+  selectedDeviceId?: string;
+  /** Mind-only: lifecycle starts only after the recorder reports active capture. */
+  authorizeMindAfterCaptureActive?: boolean;
 }
 
 export function LiveRecorder({
@@ -53,11 +57,14 @@ export function LiveRecorder({
   onFinished,
   reviewHref,
   onActiveChange,
+  selectedDeviceId,
+  authorizeMindAfterCaptureActive = false,
 }: Props) {
   const router = useRouter();
   const recorder = useSessionRecorder({
     sessionId,
     source,
+    ...(selectedDeviceId ? { selectedDeviceId } : {}),
     ...(externalStream && { externalStream }),
   });
   useWakeLock(recorder.state === 'recording');
@@ -65,11 +72,18 @@ export function LiveRecorder({
   const [elapsedMs, setElapsedMs] = useState(0);
   const [ending, setEnding] = useState(false);
   const [endError, setEndError] = useState<string | null>(null);
+  const [captureAuthorizationError, setCaptureAuthorizationError] = useState<string | null>(null);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [finalStage, setFinalStage] = useState<
+    'stopping' | 'saving-transcript' | 'generating-note' | 'ready' | null
+  >(null);
   // FLOW-2 — how many chunks are still uploading while we hold "End", and
   // whether the queue never drained (→ ask the therapist to confirm an
   // incomplete note rather than silently building one from partial audio).
   const [uploadingLeft, setUploadingLeft] = useState<number | null>(null);
   const [incompleteLeft, setIncompleteLeft] = useState(0);
+  const [captureAuthorized, setCaptureAuthorized] = useState(!authorizeMindAfterCaptureActive);
+  const authorizationStartedRef = useRef(false);
 
   // Auto-start when this panel mounts. The pre-record wizard has already
   // moved the session into IN_PROGRESS, so the user expects to be live
@@ -77,6 +91,47 @@ export function LiveRecorder({
   useEffect(() => {
     if (recorder.state === 'idle') void recorder.start();
   }, []);
+
+  useEffect(() => {
+    if (!authorizeMindAfterCaptureActive || captureAuthorized || recorder.state !== 'recording')
+      return;
+    if (authorizationStartedRef.current) return;
+    authorizationStartedRef.current = true;
+    void coordinateMindSessionStart(
+      { clientId: clientId ?? '', sessionId, captureMode: 'BATCH' },
+      {
+        selectOrReuseSession: async () => ({ id: sessionId, status: 'SCHEDULED' }),
+        resolveConsent: async () => ({ sessionId, snapshotRecorded: true }),
+        runPreflight: async () => ({ ready: true }),
+        activateCapture: async () => ({ active: true }),
+        authorizeCapture: async () => {
+          const response = await fetch(`/api/v1/sessions/${sessionId}/start`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ captureMode: 'BATCH' }),
+          });
+          if (!response.ok) {
+            const body = (await response.json().catch(() => ({}))) as { error?: string };
+            throw new Error(body.error ?? `Could not start session (${response.status}).`);
+          }
+        },
+      },
+    )
+      .then(() => {
+        setCaptureAuthorized(true);
+        setCaptureAuthorizationError(null);
+      })
+      .catch((reason: unknown) => {
+        setCaptureAuthorizationError((reason as Error).message);
+        void recorder.stop();
+      });
+  }, [authorizeMindAfterCaptureActive, captureAuthorized, clientId, recorder.state, sessionId]);
+
+  function retryCaptureAuthorization(): void {
+    authorizationStartedRef.current = false;
+    setCaptureAuthorizationError(null);
+    void recorder.start();
+  }
 
   // VS1 — report whether a recording is in flight (anything between start and
   // a clean end), so the embedding surface can guard navigation. The unmount
@@ -112,8 +167,10 @@ export function LiveRecorder({
     setEndError(null);
     setIncompleteLeft(0);
     setEnding(true);
+    setFinalStage('stopping');
     try {
       await recorder.stop();
+      setFinalStage('saving-transcript');
 
       // Hold until the tail of the recording is safely on the server. On
       // clinic Wi-Fi the last chunks often land seconds after stop(); ending
@@ -141,6 +198,7 @@ export function LiveRecorder({
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `End failed (${res.status})`);
       }
+      setFinalStage('generating-note');
       // Kick off note generation; don't block the redirect. The session
       // detail page polls the draft status, so the user immediately sees
       // "Generating note…" and watches it flip to COMPLETED.
@@ -225,9 +283,36 @@ export function LiveRecorder({
           {recorder.error ?? 'The recorder hit an error.'}
         </div>
       )}
+      {captureAuthorizationError && (
+        <div className="mx-6 mb-4 rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-4 py-3 text-sm text-[var(--color-warn)]">
+          <p>
+            Capture stopped safely before the session was marked in progress:{' '}
+            {captureAuthorizationError}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button
+              onClick={retryCaptureAuthorization}
+              disabled={recorder.state === 'finishing' || recorder.state === 'preparing'}
+            >
+              Retry start
+            </Button>
+            <Button variant="secondary" onClick={() => router.push('/app/today')}>
+              Return to Today
+            </Button>
+          </div>
+        </div>
+      )}
       {endError && (
         <div className="mx-6 mb-4 rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-4 py-3 text-sm text-[var(--color-warn)]">
-          Could not end session: {endError}
+          <p>Could not finish the session: {endError}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <Button onClick={() => void endSession(true)} disabled={ending}>
+              Retry finalization
+            </Button>
+            <Button variant="secondary" onClick={() => router.push('/app/today')}>
+              Return to Today
+            </Button>
+          </div>
         </div>
       )}
 
@@ -270,14 +355,48 @@ export function LiveRecorder({
           would be as wrong there as it was on the confirm screen. */}
       {clientId && source !== 'dictation' && <InRoomDirection clientId={clientId} />}
 
-      <div className="flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] bg-white px-6 py-4">
+      {endConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="End session?"
+        >
+          <Card className="w-full max-w-md p-6">
+            <h2 className="font-serif text-xl">End this session?</h2>
+            <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+              Recording will stop, finish uploading, and save before note generation begins.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setEndConfirmOpen(false)}>
+                Keep recording
+              </Button>
+              <Button
+                onClick={() => {
+                  setEndConfirmOpen(false);
+                  void endSession(false);
+                }}
+              >
+                End &amp; save
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      <div className="sticky bottom-0 z-20 flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] bg-white/95 px-6 py-4 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur">
         <p className="text-xs text-[var(--color-ink-3)]">
-          Session is auto-saved every chunk. If your browser refreshes, recording resumes from the
-          next chunk.
+          {finalStage === 'stopping'
+            ? 'Stopping capture…'
+            : finalStage === 'saving-transcript'
+              ? 'Saving transcript…'
+              : finalStage === 'generating-note'
+                ? 'Generating note… You may safely return to Today.'
+                : 'Session is auto-saved every chunk. If your browser refreshes, recording resumes from the next chunk.'}
         </p>
         <Button
-          onClick={() => void endSession(false)}
-          disabled={ending || isPreparing || recorder.state === 'finishing'}
+          onClick={() => setEndConfirmOpen(true)}
+          disabled={ending || isPreparing || recorder.state === 'finishing' || !captureAuthorized}
           className="bg-[var(--color-warn)] hover:bg-[#a25b30]"
         >
           {uploadingLeft !== null && uploadingLeft > 0

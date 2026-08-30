@@ -17,6 +17,10 @@ export interface RecordReady {
   kind: SessionKind;
   modality: SessionModality | null;
   source: CaptureSource;
+  /** Device proven by preflight; capture must use this exact microphone. */
+  selectedDeviceId?: string;
+  /** Mind batch capture posts /start only after the recorder is active. */
+  startAfterCaptureActive?: boolean;
 }
 
 /** Consent script version baked into per-session ack rows. */

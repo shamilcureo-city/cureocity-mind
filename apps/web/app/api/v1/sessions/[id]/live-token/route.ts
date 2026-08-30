@@ -13,6 +13,7 @@ import {
 import { prisma } from '@/lib/prisma';
 import {
   assertLiveTokenSessionStatus,
+  captureActivationTransitionData,
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
@@ -96,26 +97,32 @@ export async function POST(
         await assertValidScribeConsent(current.consentSnapshot, session.clientId, tx);
 
         if (current.status === 'SCHEDULED') {
-          await conditionalSessionTransition(tx, {
-            sessionId,
-            expectedStatus: 'SCHEDULED',
-            data: {
-              status: 'IN_PROGRESS',
-              startedAt: new Date(),
-              captureMode: 'LIVE',
-            },
-          });
-          await writeAudit(
-            {
-              actorType: 'PSYCHOLOGIST',
-              actorPsychologistId: auth.value.psychologistId,
-              action: 'SESSION_STARTED',
-              targetType: 'Session',
-              targetId: sessionId,
-              metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
-            },
-            tx,
+          // Scribe keeps its established token-is-start contract. Mind mints a
+          // preflight token without changing lifecycle state; its browser posts
+          // /start only after the microphone worklet is actively capturing.
+          const transition = captureActivationTransitionData(
+            session.psychologist.vertical,
+            'LIVE',
+            false,
           );
+          if (transition) {
+            await conditionalSessionTransition(tx, {
+              sessionId,
+              expectedStatus: 'SCHEDULED',
+              data: transition,
+            });
+            await writeAudit(
+              {
+                actorType: 'PSYCHOLOGIST',
+                actorPsychologistId: auth.value.psychologistId,
+                action: 'SESSION_STARTED',
+                targetType: 'Session',
+                targetId: sessionId,
+                metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+              },
+              tx,
+            );
+          }
         }
 
         return signLiveToken({

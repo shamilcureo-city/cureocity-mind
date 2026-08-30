@@ -91,7 +91,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
         <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
       </div>
       <HelpButton topics={helpTopics} words={helpWords} />
-      <WelcomeOverlay serverSeen={psy?.hasSeenWelcome ?? true} />
+      {psy?.vertical === 'DOCTOR' && <WelcomeOverlay serverSeen={psy.hasSeenWelcome} />}
     </div>
   );
 }

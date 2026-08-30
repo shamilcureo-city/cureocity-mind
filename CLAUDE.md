@@ -26,10 +26,19 @@ of 2026-07 the one app serves **three products split by domain** —
 Care's landing is live but its **sign-ups stay gated behind a waitlist**
 until its launch blockers clear. See
 **[`docs/THREE_PRODUCTS.md`](docs/THREE_PRODUCTS.md)** (the split),
-**[`docs/AI_COUNSELING.md`](docs/AI_COUNSELING.md)** and
+**[`docs/MIND_SCRIBE_ROUTE_MATRIX.md`](docs/MIND_SCRIBE_ROUTE_MATRIX.md)**
+(the authenticated Mind/Scribe route, vocabulary, and change-ownership
+contract), **[`docs/AI_COUNSELING.md`](docs/AI_COUNSELING.md)** and
 **[`docs/CARE_GROWTH_SYSTEM.md`](docs/CARE_GROWTH_SYSTEM.md)** (Care), and
 **[`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md)** (what's
 live vs pending).
+
+A shared file is not automatically a shared journey. Public branding is
+host-selected, while authenticated behavior is selected by the stored
+`Psychologist.vertical`. Any Mind-only change to login, onboarding, the app
+layout, practitioner navigation, or shared session/client routes must preserve
+Scribe's Clinic, Patients, encounter, prescription, and Review & Sign behavior
+and add an explicit vertical-boundary regression test.
 
 **Therapist — psychology co-pilot.** The therapist records a session in
 the browser; five Gemini passes (§3) produce a transcript, a SOAP note (or

@@ -8,6 +8,8 @@ export type LiveStreamState = 'idle' | 'preparing' | 'streaming' | 'error';
 export interface LiveStreamOptions {
   /** Called with each decimated 16 kHz s16le PCM frame as it's captured. */
   onFrame: (pcm: Uint8Array) => void;
+  /** Exact microphone selected and proven by Mind preflight. */
+  selectedDeviceId?: string;
 }
 
 export interface LiveStreamHandle {
@@ -64,6 +66,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
           channelCount: 1,
           echoCancellation: true,
           noiseSuppression: true,
+          ...(opts.selectedDeviceId ? { deviceId: { exact: opts.selectedDeviceId } } : {}),
         },
       });
       streamRef.current = stream;
@@ -96,8 +99,9 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
       setError((e as Error).message);
       setState('error');
       await teardown();
+      throw e;
     }
-  }, [teardown]);
+  }, [opts.selectedDeviceId, teardown]);
 
   const stop = useCallback(async (): Promise<void> => {
     workletRef.current?.port.postMessage({ type: 'stop' });

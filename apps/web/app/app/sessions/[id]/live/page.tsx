@@ -21,7 +21,7 @@ export default async function TherapistLivePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ flash?: string }>;
+  searchParams: Promise<{ flash?: string; mic?: string }>;
 }) {
   const therapist = await requireOnboardedPsychologist();
   if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
@@ -104,12 +104,14 @@ export default async function TherapistLivePage({
     <Container className="py-8">
       <TherapistLiveSession
         sessionId={session.id}
+        sessionStatus={session.status as 'SCHEDULED' | 'IN_PROGRESS'}
         clientId={session.clientId}
         kind={session.kind}
         modality={session.modality}
         language={session.language}
         clientName={clientName}
         autoStart={sp.flash === '1'}
+        selectedDeviceId={sp.mic}
         carriedQuestions={carriedQuestions}
         priorRisk={priorRisk}
       />

@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { CreateClientInputSchema } from '@cureocity/contracts';
 import {
   buildCreateClientBody,
+  createClientDraft,
   EMPTY_CLIENT_DRAFT,
   isClientDraftReady,
+  validateCreateClientForVertical,
   type ClientDraft,
 } from './client-draft';
 
@@ -95,5 +97,67 @@ describe('buildCreateClientBody', () => {
     expect(buildCreateClientBody(draft({ preferredLanguage: 'en' }))).not.toHaveProperty(
       'preferredLanguage',
     );
+  });
+});
+
+describe('administrative creation versus today’s capture confirmation', () => {
+  it('starts Mind administrative drafts without pretending today’s consent was confirmed', () => {
+    expect(createClientDraft('THERAPIST', 'ADMINISTRATIVE')).toMatchObject({
+      audioOk: false,
+      noteOk: false,
+      crossBorderOk: false,
+    });
+    expect(createClientDraft('DOCTOR', 'ADMINISTRATIVE')).toMatchObject({
+      audioOk: true,
+      noteOk: true,
+      crossBorderOk: true,
+    });
+  });
+
+  it('allows Mind to create a minimal administrative client without phone or recording confirmation', () => {
+    const minimal = draft({
+      contactPhone: '',
+      audioOk: false,
+      noteOk: false,
+      crossBorderOk: false,
+    });
+    expect(isClientDraftReady(minimal, { vertical: 'THERAPIST', purpose: 'ADMINISTRATIVE' })).toBe(
+      true,
+    );
+    expect(buildCreateClientBody(minimal)).toEqual({ fullName: 'Ananya R', consents: [] });
+  });
+
+  it('preserves Doctor patient creation requirements', () => {
+    const minimal = draft({
+      contactPhone: '',
+      audioOk: false,
+      noteOk: false,
+      crossBorderOk: false,
+    });
+    expect(isClientDraftReady(minimal, { vertical: 'DOCTOR', purpose: 'ADMINISTRATIVE' })).toBe(
+      false,
+    );
+  });
+
+  it('requires contact only when scheduling or sharing needs it', () => {
+    const noContact = draft({ contactPhone: '' });
+    expect(isClientDraftReady(noContact, { vertical: 'THERAPIST', purpose: 'SCHEDULING' })).toBe(
+      false,
+    );
+    expect(
+      isClientDraftReady(noContact, { vertical: 'THERAPIST', purpose: 'ADMINISTRATIVE' }),
+    ).toBe(true);
+  });
+
+  it('enforces the preserved Doctor requirements at the API boundary', () => {
+    const minimal = { fullName: 'Patient', consents: [] };
+    expect(validateCreateClientForVertical(minimal, 'THERAPIST')).toBeNull();
+    expect(validateCreateClientForVertical(minimal, 'DOCTOR')).toMatch(/phone/i);
+    expect(
+      validateCreateClientForVertical(
+        { fullName: 'Patient', contactPhone: '+919****3210', consents: [] },
+        'DOCTOR',
+      ),
+    ).toMatch(/consent/i);
   });
 });

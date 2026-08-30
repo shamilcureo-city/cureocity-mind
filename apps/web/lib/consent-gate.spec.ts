@@ -3,6 +3,7 @@ import {
   assertValidScribeConsent,
   consentAuthorizationResponse,
   ConsentAuthorizationError,
+  requiresTodaySessionConfirmation,
   withClientConsentLock,
 } from './consent-gate';
 
@@ -26,6 +27,12 @@ const validGrant = (scope: string) => ({
 });
 
 describe('client consent mutation boundary', () => {
+  it('distinguishes standing grants from today’s explicit session confirmation', () => {
+    expect(requiresTodaySessionConfirmation('SCHEDULED', false)).toBe(true);
+    expect(requiresTodaySessionConfirmation('SCHEDULED', true)).toBe(false);
+    expect(requiresTodaySessionConfirmation('IN_PROGRESS', false)).toBe(false);
+  });
+
   it('fails closed when the session snapshot is missing a required scribe scope', async () => {
     const db = consentDb([]);
 

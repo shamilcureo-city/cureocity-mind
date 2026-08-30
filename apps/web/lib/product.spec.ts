@@ -23,8 +23,23 @@ describe('practitioner product presentation', () => {
     expect(copy.brandSuffix).toBe('Mind');
     expect(copy.metadataTitle).toContain('Cureocity Mind');
     expect(copy.description).toContain('clients');
-    expect(copy.proof).toContain('therapists');
+    expect(copy.proof).toBe('Built with practising therapists for the Cureocity Mind pilot.');
     expect(copy.onboardingTitle).toContain('practice');
+  });
+
+  it('keeps Mind pilot acquisition explicit and independent from Scribe', () => {
+    const mind = practitionerProductCopy(PRODUCTS.mind);
+    const scribe = practitionerProductCopy(PRODUCTS.scribe);
+
+    expect(mind.acquisition).toEqual({
+      primaryCta: 'Apply to join the pilot',
+      memberCta: 'Sign in',
+      eligibility: 'For practising therapists and counsellors in India',
+      pricing: 'Free through the pilot; pricing will be announced before it ends',
+      helpHref: 'mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot%20access',
+    });
+    expect(scribe.acquisition.primaryCta).not.toBe(mind.acquisition.primaryCta);
+    expect(scribe.onboardingDescription).toContain('patient encounter');
   });
 });
 

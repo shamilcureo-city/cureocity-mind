@@ -22,10 +22,8 @@ describe('CreateClientInputSchema', () => {
     expect(CreateClientInputSchema.parse(valid)).toMatchObject({ fullName: 'Arjun Rao' });
   });
 
-  it('rejects when consents are empty', () => {
-    expect(() => CreateClientInputSchema.parse({ ...valid, consents: [] })).toThrow(
-      /at least one/i,
-    );
+  it('accepts an empty consent list for administrative creation', () => {
+    expect(CreateClientInputSchema.parse({ ...valid, consents: [] }).consents).toEqual([]);
   });
 
   it('rejects non-Indian phone numbers', () => {
@@ -47,6 +45,13 @@ describe('CreateClientInputSchema', () => {
     const { contactEmail: _omitted, ...rest } = valid;
     void _omitted;
     expect(() => CreateClientInputSchema.parse(rest)).not.toThrow();
+  });
+
+  it('accepts a name-only administrative Mind client without capture consent', () => {
+    expect(CreateClientInputSchema.parse({ fullName: 'Ananya R', consents: [] })).toEqual({
+      fullName: 'Ananya R',
+      consents: [],
+    });
   });
 
   it('accepts preferredLanguage = "ml" and "en"', () => {

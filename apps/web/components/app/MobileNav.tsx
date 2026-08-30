@@ -5,46 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { type PractitionerVertical } from '@cureocity/contracts';
 import { Glyph } from '@/components/app/Sidebar';
+import { practitionerNavigation } from '@/lib/practitioner-navigation';
 import { useModalA11y } from '@/lib/use-modal-a11y';
-
-// Sprint 45 — Today is the morning landing screen on phones too. Mobile
-// is capped at 5 grid cols. Sprint TS3 kept the bar to the primary spine;
-// AUD2 — the fifth slot is now "More": before it, Settings, My practice
-// and SIGN OUT were unreachable on the exact device the pilot is
-// optimised for (the sidebar is hidden md:flex and no drawer existed).
-const ITEMS: {
-  href: string;
-  label: string;
-  icon: 'today' | 'record' | 'clients' | 'search' | 'templates' | 'clinic' | 'insights' | 'cog';
-}[] = [
-  { href: '/app/today', label: 'Today', icon: 'today' },
-  { href: '/app/encounters/new', label: 'Encounter', icon: 'record' },
-  { href: '/app/clients', label: 'Patients', icon: 'clients' },
-  { href: '/app/search', label: 'Search', icon: 'search' },
-];
-
-// AUD2 — everything that used to be desktop-only, one tap away.
-const MORE_ITEMS: {
-  href: string;
-  label: string;
-  icon: 'templates' | 'dashboard' | 'assistant' | 'me' | 'learn' | 'cog' | 'help';
-}[] = [
-  { href: '/app/templates', label: 'Templates', icon: 'templates' },
-  { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
-  { href: '/app/practice-assistant', label: 'ORBIT Assistant', icon: 'assistant' },
-  { href: '/app/me', label: 'My practice', icon: 'me' },
-  { href: '/app/learn', label: 'Learn', icon: 'learn' },
-  { href: '/app/settings', label: 'Settings', icon: 'cog' },
-];
-
-// Sprint DV2 — doctor bottom bar: the patient roster + settings. See
-// docs/DOCTOR_VERTICAL.md. Sprint DS7 — Clinic (the OPD queue) leads.
-const DOCTOR_ITEMS: typeof ITEMS = [
-  { href: '/app/clinic', label: 'Clinic', icon: 'clinic' },
-  { href: '/app/patients', label: 'Patients', icon: 'clients' },
-  { href: '/app/insights', label: 'Insights', icon: 'insights' },
-  { href: '/app/settings', label: 'Settings', icon: 'cog' },
-];
 
 /**
  * Bottom tab bar for phones. The desktop sidebar is `hidden md:flex`,
@@ -60,9 +22,9 @@ const DOCTOR_ITEMS: typeof ITEMS = [
 export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerVertical }) {
   const path = usePathname() ?? '/app';
   const [moreOpen, setMoreOpen] = useState(false);
-  const isDoctor = vertical === 'DOCTOR';
-  const items = isDoctor ? DOCTOR_ITEMS : ITEMS;
-  const cols = isDoctor ? items.length : items.length + 1;
+  const { primary: items, secondary } = practitionerNavigation(vertical, 'mobile');
+  const hasMore = secondary.length > 0;
+  const cols = items.length + (hasMore ? 1 : 0);
 
   // Close the sheet on navigation; NEXT7 — the shared hook adds Escape,
   // focus trapping and focus restore.
@@ -88,7 +50,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
             className="u-glass absolute inset-x-0 bottom-14 rounded-t-2xl p-3 pb-4"
           >
             <ul className="grid grid-cols-3 gap-1.5">
-              {MORE_ITEMS.map((item) => (
+              {secondary.map((item) => (
                 <li key={item.href}>
                   <Link
                     href={item.href}
@@ -139,7 +101,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
               </li>
             );
           })}
-          {!isDoctor && (
+          {hasMore && (
             <li>
               <button
                 type="button"

@@ -48,7 +48,12 @@ export default async function OnboardingPage() {
           <p className="mt-3 text-sm text-[var(--color-ink-2)]">{copy.onboardingDescription}</p>
 
           <Card className="mt-8 p-7">
-            <OnboardingForm phone={me.phone} presetVertical={presetVertical} />
+            <OnboardingForm
+              phone={me.phone}
+              presetVertical={presetVertical}
+              initialFullName={me.fullName}
+              initialEmail={me.email}
+            />
           </Card>
         </div>
       </Container>

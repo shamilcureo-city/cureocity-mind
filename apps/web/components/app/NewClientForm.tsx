@@ -8,7 +8,7 @@ import { ClientFields } from './ClientFields';
 import { readApiError } from './record-types';
 import {
   buildCreateClientBody,
-  EMPTY_CLIENT_DRAFT,
+  createClientDraft,
   isClientDraftReady,
   type ClientDraft,
 } from '@/lib/client-draft';
@@ -40,10 +40,12 @@ interface Props {
  * pre-filling the therapist's usual approach would be clinically wrong.
  */
 export function NewClientForm({ onCancel, onCreated }: Props) {
-  const [draft, setDraft] = useState<ClientDraft>(EMPTY_CLIENT_DRAFT);
+  const [draft, setDraft] = useState<ClientDraft>(() =>
+    createClientDraft('THERAPIST', 'ADMINISTRATIVE'),
+  );
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const ready = isClientDraftReady(draft);
+  const ready = isClientDraftReady(draft, { vertical: 'THERAPIST', purpose: 'ADMINISTRATIVE' });
 
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
@@ -84,7 +86,13 @@ export function NewClientForm({ onCancel, onCreated }: Props) {
       </p>
 
       <form onSubmit={submit} className="mt-6 space-y-6">
-        <ClientFields value={draft} onChange={setDraft} idPrefix="nc" autoFocusName />
+        <ClientFields
+          value={draft}
+          onChange={setDraft}
+          purpose="ADMINISTRATIVE"
+          idPrefix="nc"
+          autoFocusName
+        />
 
         <FieldError message={error} />
 

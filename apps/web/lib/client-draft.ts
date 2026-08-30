@@ -40,14 +40,41 @@ export const EMPTY_CLIENT_DRAFT: ClientDraft = {
   preferredModality: '',
   preferredLanguage: 'en',
   spokenLanguages: [],
-  // Pre-ticked because the therapist is confirming a conversation they just
-  // had, not granting consent themselves — but each is untickable, so an
-  // unticked box genuinely blocks creation.
+  // Legacy capture and Doctor creation defaults remain pre-ticked. Mind's
+  // administrative surfaces use createClientDraft() so they do not imply that
+  // today's recording conversation already happened.
   audioOk: true,
   noteOk: true,
   crossBorderOk: true,
   retentionExtended: false,
 };
+
+export function createClientDraft(
+  vertical: 'THERAPIST' | 'DOCTOR',
+  purpose: 'ADMINISTRATIVE' | 'CAPTURE',
+): ClientDraft {
+  if (vertical === 'THERAPIST' && purpose === 'ADMINISTRATIVE') {
+    return {
+      ...EMPTY_CLIENT_DRAFT,
+      audioOk: false,
+      noteOk: false,
+      crossBorderOk: false,
+    };
+  }
+  return { ...EMPTY_CLIENT_DRAFT };
+}
+
+/** Preserve Scribe's create requirements after the shared schema is relaxed for Mind. */
+export function validateCreateClientForVertical(
+  input: { fullName?: string; contactPhone?: string; consents: unknown[] },
+  vertical: 'THERAPIST' | 'DOCTOR',
+): string | null {
+  if (vertical !== 'DOCTOR') return null;
+  if (!input.contactPhone) return 'A phone number is required when creating a patient.';
+  if (input.consents.length === 0)
+    return 'At least one consent is required when creating a patient.';
+  return null;
+}
 
 /**
  * All three scribe consents are required — not just audio + note.
@@ -58,14 +85,23 @@ export const EMPTY_CLIENT_DRAFT: ClientDraft = {
  * optional, which happily created a client the therapist then could not record
  * until something else re-asked. Requiring it here closes that trap.
  */
-export function isClientDraftReady(d: ClientDraft): boolean {
-  return (
-    d.fullName.trim().length > 0 &&
-    isValidIndianPhone(d.contactPhone) &&
-    d.audioOk &&
-    d.noteOk &&
-    d.crossBorderOk
-  );
+export interface ClientDraftReadinessContext {
+  vertical: 'THERAPIST' | 'DOCTOR';
+  purpose: 'ADMINISTRATIVE' | 'SCHEDULING' | 'SHARING' | 'CAPTURE';
+}
+
+/**
+ * The legacy/default rule remains strict for callers that are about to capture.
+ * Mind administrative creation is intentionally lighter: today's consent is
+ * confirmed later, against the actual session, in the unified preflight.
+ */
+export function isClientDraftReady(
+  d: ClientDraft,
+  context: ClientDraftReadinessContext = { vertical: 'THERAPIST', purpose: 'CAPTURE' },
+): boolean {
+  if (d.fullName.trim().length === 0) return false;
+  if (context.vertical === 'THERAPIST' && context.purpose === 'ADMINISTRATIVE') return true;
+  return isValidIndianPhone(d.contactPhone) && d.audioOk && d.noteOk && d.crossBorderOk;
 }
 
 /** The `POST /api/v1/clients` body. Optional fields are omitted, not sent empty. */
@@ -80,9 +116,9 @@ export function buildCreateClientBody(d: ClientDraft): Record<string, unknown> {
 
   const body: Record<string, unknown> = {
     fullName: d.fullName.trim(),
-    contactPhone: normaliseIndianPhone(d.contactPhone),
     consents,
   };
+  if (d.contactPhone.trim()) body['contactPhone'] = normaliseIndianPhone(d.contactPhone);
   if (d.contactEmail.trim()) body['contactEmail'] = d.contactEmail.trim();
   if (d.dateOfBirth) body['dateOfBirth'] = d.dateOfBirth;
   if (d.presentingConcerns.trim()) body['presentingConcerns'] = d.presentingConcerns.trim();

@@ -15,6 +15,8 @@ interface Props {
   /// user signed up on (scribe → DOCTOR, mind → THERAPIST). Presets the
   /// choice (still changeable); null keeps the explicit must-pick flow.
   presetVertical?: 'THERAPIST' | 'DOCTOR' | null;
+  initialFullName?: string | null;
+  initialEmail?: string | null;
 }
 
 const LANGUAGES: { value: string; label: string }[] = [
@@ -40,11 +42,16 @@ const COUNTRY_CODES = [
  * signup); a real OTP-verified phone stays read-only and is changed via
  * the recovery flow.
  */
-export function OnboardingForm({ phone, presetVertical = null }: Props) {
+export function OnboardingForm({
+  phone,
+  presetVertical = null,
+  initialFullName = null,
+  initialEmail = null,
+}: Props) {
   const router = useRouter();
   const phoneIsPlaceholder = phone.startsWith('pending:');
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState(initialFullName ?? '');
+  const [email, setEmail] = useState(initialEmail ?? '');
   const [vertical, setVertical] = useState<'THERAPIST' | 'DOCTOR'>(presetVertical ?? 'THERAPIST');
   // The vertical drives which registration fields show and how the account is
   // provisioned, so make the therapist confirm the choice explicitly rather
@@ -122,7 +129,7 @@ export function OnboardingForm({ phone, presetVertical = null }: Props) {
         throw new Error(errBody?.error ?? `Could not save (${res.status}).`);
       }
       setSaved(true);
-      router.replace('/app');
+      router.replace(vertical === 'DOCTOR' ? '/app/clinic' : '/app/today');
       router.refresh();
     } catch (e) {
       setError((e as Error).message);

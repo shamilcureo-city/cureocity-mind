@@ -37,4 +37,46 @@ describe('product-aware practitioner shell architecture', () => {
     );
     expect(appLayout).toContain('redirect(canonicalUrl)');
   });
+
+  it('uses Today as the single canonical Mind home while preserving the doctor Clinic', () => {
+    const app = read('app/app/page.tsx');
+    const today = read('app/app/today/page.tsx');
+
+    expect(app).toContain("redirect('/app/today')");
+    expect(app).not.toContain('<RecordingShell');
+    expect(today).toContain("therapist.vertical === 'DOCTOR'");
+    expect(today).toContain("redirect('/app/clinic')");
+  });
+
+  it('finishes onboarding on the canonical home for the selected vertical', () => {
+    const form = read('components/app/OnboardingForm.tsx');
+
+    expect(form).toContain("vertical === 'DOCTOR' ? '/app/clinic' : '/app/today'");
+    expect(form).not.toContain("router.replace('/app')");
+  });
+
+  it('surfaces only completed note drafts as ready for review on Today', () => {
+    const today = read('app/app/today/page.tsx');
+
+    expect(today).toContain("noteDraft: { status: 'COMPLETED' }");
+    expect(today).not.toContain("status: 'COMPLETED',\n        therapyNote: null,");
+  });
+
+  it('surfaces operational work on Today instead of duplicating it in Analytics', () => {
+    const today = read('app/app/today/page.tsx');
+    const dashboard = read('app/app/dashboard/page.tsx');
+
+    expect(today).toContain('<TodayAttentionQueue items={attentionItems} />');
+    expect(dashboard).not.toContain('<FirstRunChecklist');
+    expect(dashboard).not.toContain('<UpNextSection');
+  });
+
+  it('puts first-run choices on Today before empty scheduling surfaces', () => {
+    const today = read('app/app/today/page.tsx');
+    const layout = read('app/app/layout.tsx');
+
+    expect(today).toContain('<FirstRunChecklist psychologistId={therapist.id} />');
+    expect(today.indexOf('<FirstRunChecklist')).toBeLessThan(today.lastIndexOf('{hero ?'));
+    expect(layout).toContain("psy?.vertical === 'DOCTOR' && <WelcomeOverlay");
+  });
 });

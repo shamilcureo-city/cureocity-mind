@@ -56,8 +56,8 @@ export default function LandingPage() {
       </noscript>
 
       <div className="annc">
-        Now piloting with the first therapist cohort in Kerala —{' '}
-        <b>free through the pilot, no card →</b>
+        Applications are open for the first therapist cohort in Kerala —{' '}
+        <b>selected pilot members join free, no card →</b>
       </div>
 
       <LandingNav />
@@ -102,9 +102,13 @@ function Hero() {
         English, हिन्दी, മലയാളം, or the code-mix your clients actually speak.
       </p>
       <div className="hero-ctas rv in" style={d(220)}>
-        <Link href="/login" className="btn primary" style={{ textDecoration: 'none' }}>
-          Start free — no card
-        </Link>
+        <a
+          href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot%20access"
+          className="btn primary"
+          style={{ textDecoration: 'none' }}
+        >
+          Apply to join the pilot
+        </a>
         <WatchItWork />
       </div>
       <div className="hero-neg rv in" style={d(320)}>
@@ -953,11 +957,11 @@ function Pilot() {
             </div>
           </div>
           <Link
-            href="/login"
+            href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot%20access"
             className="btn primary rv"
             style={{ ...d(260), marginTop: 28, textDecoration: 'none' }}
           >
-            Join the pilot cohort →
+            Apply to join the pilot →
           </Link>
         </div>
       </div>
@@ -1024,13 +1028,13 @@ function FinalCta() {
         a roleplay counts.
       </p>
       <div className="hero-ctas" style={{ marginTop: 36 }}>
-        <Link
-          href="/login"
+        <a
+          href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot%20access"
           className="btn inv"
           style={{ padding: '16px 36px', fontSize: 16, textDecoration: 'none' }}
         >
-          Start free — no card
-        </Link>
+          Apply to join the pilot
+        </a>
         <a
           href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot"
           className="btn line"

@@ -7,6 +7,7 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { PreparePanel } from './PreparePanel';
 import { RescheduleModal } from './RescheduleModal';
+import { mindStartEntryHref } from '@/lib/mind-session-start';
 
 export interface TodaySessionCardProps {
   session: {
@@ -73,13 +74,23 @@ export function TodaySessionCard({
   // record-only goes to the batch flow (which reuses THIS booked session).
   const startOptions = {
     LIVE: {
-      href: `/app/sessions/${session.id}/live?flash=1`,
+      href: mindStartEntryHref({
+        source: 'TODAY',
+        clientId: session.clientId,
+        sessionId: session.id,
+        captureMode: 'LIVE',
+      }),
       primaryLabel: '● Start session',
       menuLabel: '🎙 Live scribe',
       menuDesc: 'Transcript, note and copilot build as you talk.',
     },
     BATCH: {
-      href: `/app?record=${session.clientId}`,
+      href: mindStartEntryHref({
+        source: 'TODAY',
+        clientId: session.clientId,
+        sessionId: session.id,
+        captureMode: 'BATCH',
+      }),
       primaryLabel: '⏺ Start recording',
       menuLabel: '⏺ Record only',
       menuDesc: 'Just records — the note generates when you finish.',
