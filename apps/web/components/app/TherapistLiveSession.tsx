@@ -38,6 +38,15 @@ import {
 } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
+import {
+  clearRecoveryDraftAfterDurableSave,
+  hasUniqueUnsavedContent,
+  loadRecoveryDraft,
+  saveRecoveryDraft,
+  shouldResumeRecovery,
+} from '@/lib/live-recovery-draft';
+import { transcriptDownload } from '@/lib/mind-session-finalization';
+import { coordinateMindSessionStart } from '@/lib/mind-session-start';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { GatewayMockBanner } from './GatewayMockBanner';
@@ -49,6 +58,7 @@ type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'erro
 
 interface Props {
   sessionId: string;
+  sessionStatus?: 'SCHEDULED' | 'IN_PROGRESS';
   /** AUD2 — for the batch-fallback deep link when the gateway drops. */
   clientId?: string | null;
   kind: SessionKind;
@@ -62,6 +72,7 @@ interface Props {
   carriedQuestions?: TherapyCarriedQuestion[];
   priorRisk?: boolean;
   plannedMinutes?: number | null;
+  selectedDeviceId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +210,7 @@ function fmtClock(ms: number): string {
 
 export function TherapistLiveSession({
   sessionId,
+  sessionStatus = 'SCHEDULED',
   clientId = null,
   kind,
   modality,
@@ -208,6 +220,7 @@ export function TherapistLiveSession({
   carriedQuestions = [],
   priorRisk = false,
   plannedMinutes = null,
+  selectedDeviceId,
 }: Props) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>('idle');
@@ -240,6 +253,11 @@ export function TherapistLiveSession({
   // scribe. Rendered with the real reason + the path to capture consent,
   // instead of the gateway's generic "could not be authorized".
   const [consentBlocked, setConsentBlocked] = useState<string | null>(null);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [recoveryRestored, setRecoveryRestored] = useState(false);
+  const [finalStage, setFinalStage] = useState<
+    'stopping' | 'saving-transcript' | 'generating-note' | 'ready' | null
+  >(null);
 
   // AUD2 — keep the phone screen awake while listening. The batch recorder
   // always did this; the live scribe losing the screen ~30s in put the mic
@@ -299,6 +317,7 @@ export function TherapistLiveSession({
   const meterRef = useRef<MeterSummary | null>(null);
   const meteredRef = useRef(false);
   const finalHandledRef = useRef(false);
+  const lifecycleStartedRef = useRef(sessionStatus === 'IN_PROGRESS');
   const convoRef = useRef<HTMLDivElement | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Live mirror of the utterance list — long-lived closures (ws.onmessage,
@@ -307,6 +326,58 @@ export function TherapistLiveSession({
   useEffect(() => {
     utterancesRef.current = utterances;
   }, [utterances]);
+
+  // Restore browser-held words before any retry can start. The recovery copy
+  // is refreshed on every utterance and remains until the server acknowledges
+  // the final durable note/transcript write.
+  useEffect(() => {
+    const recovered = loadRecoveryDraft(window.localStorage, sessionId);
+    if (!recovered || recovered.utterances.length === 0) return;
+    const restored = recovered.utterances as Utterance[];
+    utterancesRef.current = restored;
+    setUtterances(restored);
+    setRecoveryRestored(true);
+  }, [sessionId]);
+  useEffect(() => {
+    if (utterances.length === 0) return;
+    saveRecoveryDraft(window.localStorage, {
+      version: 1,
+      sessionId,
+      savedAt: new Date().toISOString(),
+      utterances,
+      transcript: buildTranscript(utterances),
+      captureMode: 'LIVE',
+      durable: false,
+    });
+  }, [sessionId, utterances]);
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      const draft = loadRecoveryDraft(window.localStorage, sessionId);
+      if (!hasUniqueUnsavedContent(draft)) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const onDocumentClick = (event: MouseEvent) => {
+      const anchor = (event.target as Element | null)?.closest('a[href]');
+      if (!anchor) return;
+      const draft = loadRecoveryDraft(window.localStorage, sessionId);
+      if (!hasUniqueUnsavedContent(draft)) return;
+      if (
+        window.confirm(
+          'This session has transcript content that is not saved on the server yet. Leave anyway?',
+        )
+      )
+        return;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('click', onDocumentClick, true);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('click', onDocumentClick, true);
+    };
+  }, [sessionId]);
   // The final payload, kept so a failed save can be retried verbatim.
   const finalPayloadRef = useRef<{
     kind: SessionKind;
@@ -315,6 +386,7 @@ export function TherapistLiveSession({
   } | null>(null);
 
   const stream = useLiveStream({
+    ...(selectedDeviceId ? { selectedDeviceId } : {}),
     onFrame: (pcm) => {
       const ws = wsRef.current;
       if (ws && ws.readyState === ws.OPEN) ws.send(pcm);
@@ -355,7 +427,7 @@ export function TherapistLiveSession({
   useEffect(() => {
     if (autoStart && !autoStartedRef.current && phase === 'idle') {
       autoStartedRef.current = true;
-      void start();
+      void start({ resume: utterancesRef.current.length > 0 });
     }
   }, [autoStart, phase]);
 
@@ -419,6 +491,7 @@ export function TherapistLiveSession({
     finalPayloadRef.current = { kind: finalKind, note: finalNote, transcript };
     setSaveFailed(null);
     setSaving(true);
+    setFinalStage('saving-transcript');
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
         method: 'POST',
@@ -437,6 +510,8 @@ export function TherapistLiveSession({
         throw new Error(body.error ?? `The server refused the note (HTTP ${res.status}).`);
       }
       if (meterRef.current) void persistMeter(meterRef.current);
+      setFinalStage('ready');
+      clearRecoveryDraftAfterDurableSave(window.localStorage, sessionId, true);
       // The note is a COMPLETED NoteDraft now. Land on the copilot board —
       // review + sign live there, and no generation wait stands in the way.
       router.push(`/app/sessions/${sessionId}?tab=copilot`);
@@ -455,11 +530,45 @@ export function TherapistLiveSession({
     void persistAndFinish(p.kind, p.note, p.transcript);
   }
 
+  async function copyHeldTranscript(): Promise<void> {
+    const transcript =
+      finalPayloadRef.current?.transcript ?? buildTranscript(utterancesRef.current);
+    await navigator.clipboard.writeText(transcript);
+  }
+
+  function downloadHeldTranscript(): void {
+    const transcript =
+      finalPayloadRef.current?.transcript ?? buildTranscript(utterancesRef.current);
+    const file = transcriptDownload(sessionId, transcript);
+    const url = URL.createObjectURL(new Blob([file.content], { type: file.mimeType }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = file.filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function continueAsBatch(): void {
+    const transcript = buildTranscript(utterancesRef.current);
+    if (transcript) {
+      saveRecoveryDraft(window.localStorage, {
+        version: 1,
+        sessionId,
+        savedAt: new Date().toISOString(),
+        utterances: utterancesRef.current,
+        transcript,
+        captureMode: 'BATCH',
+        durable: false,
+      });
+    }
+    if (clientId) router.push(`/app?record=${clientId}&session=${sessionId}&capture=BATCH`);
+  }
+
   async function start(opts: { resume?: boolean } = {}): Promise<void> {
     // Reconnect path: the browser still holds the transcript — keep it on
     // screen and replay it to the gateway (`resume`) so the consult continues
     // from the whole session, not just what it hears after the drop.
-    const resume = opts.resume === true && utterancesRef.current.length > 0;
+    const resume = shouldResumeRecovery(utterancesRef.current.length, opts.resume === true);
     setError(null);
     setNoteFailed(false);
     setConnectionLost(false);
@@ -519,35 +628,68 @@ export function TherapistLiveSession({
     wsRef.current = ws;
 
     ws.onopen = () => {
-      const replay = resume ? utterancesRef.current : [];
-      ws.send(
-        JSON.stringify({
-          type: 'start',
-          sessionId,
-          ...(token ? { token } : {}),
-          vertical: 'THERAPIST',
-          kind,
-          modality,
-          therapyContext: {
-            carriedQuestions,
-            priorRisk,
-            plannedMinutes: plannedMinutes ?? null,
+      void coordinateMindSessionStart(
+        { clientId: clientId ?? '', sessionId, captureMode: 'LIVE' },
+        {
+          selectOrReuseSession: async () => ({
+            id: sessionId,
+            status: lifecycleStartedRef.current ? 'IN_PROGRESS' : 'SCHEDULED',
+          }),
+          // Scheduled pages can reach this point only through the same-session
+          // preflight; live-token above also verified the durable snapshot.
+          resolveConsent: async () => ({ sessionId, snapshotRecorded: true }),
+          runPreflight: async () => ({ ready: true }),
+          activateCapture: async () => {
+            try {
+              await stream.start();
+              return { active: true as const };
+            } catch (reason) {
+              return { active: false as const, reason: (reason as Error).message };
+            }
           },
-          // The gateway re-seeds its transcript + reasoning state from the
-          // replayed tail, so the final note covers the WHOLE session.
-          ...(replay.length > 0 ? { resume: { utterances: replay } } : {}),
-        }),
-      );
-      // Replay plan items the therapist resolved before the connection existed,
-      // so the gateway's store doesn't re-suggest them.
-      for (const id of resolvedRef.current) {
-        ws.send(JSON.stringify({ type: 'dismiss', questionId: id }));
-      }
-      void stream.start().catch((e: Error) => {
-        setError(`Microphone unavailable: ${e.message}. Tap Start to try again.`);
-        setPhase('idle');
-        ws.close();
-      });
+          authorizeCapture: async () => {
+            const response = await fetch(`/api/v1/sessions/${sessionId}/start`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ captureMode: 'LIVE' }),
+            });
+            if (!response.ok) {
+              const body = (await response.json().catch(() => ({}))) as { error?: string };
+              throw new Error(body.error ?? `Could not mark capture active (${response.status}).`);
+            }
+            lifecycleStartedRef.current = true;
+          },
+        },
+      )
+        .then(() => {
+          const replay = resume ? utterancesRef.current : [];
+          ws.send(
+            JSON.stringify({
+              type: 'start',
+              sessionId,
+              ...(token ? { token } : {}),
+              vertical: 'THERAPIST',
+              kind,
+              modality,
+              therapyContext: {
+                carriedQuestions,
+                priorRisk,
+                plannedMinutes: plannedMinutes ?? null,
+              },
+              // The gateway re-seeds its transcript + reasoning state from the
+              // replayed tail, so the final note covers the WHOLE session.
+              ...(replay.length > 0 ? { resume: { utterances: replay } } : {}),
+            }),
+          );
+          for (const id of resolvedRef.current) {
+            ws.send(JSON.stringify({ type: 'dismiss', questionId: id }));
+          }
+        })
+        .catch((reason: unknown) => {
+          setError(`Microphone unavailable: ${(reason as Error).message}. Tap Start to try again.`);
+          setPhase('idle');
+          ws.close();
+        });
     };
 
     ws.onerror = () => {
@@ -588,8 +730,10 @@ export function TherapistLiveSession({
       switch (event.type) {
         case 'status':
           if (event.state === 'listening') setPhase('listening');
-          else if (event.state === 'finalizing') setPhase('finalizing');
-          else if (event.state === 'done') {
+          else if (event.state === 'finalizing') {
+            setPhase('finalizing');
+            setFinalStage('generating-note');
+          } else if (event.state === 'done') {
             setPhase('done');
             // The gateway always sends `done` after a therapyFinal. If we get
             // here without one, no note was generated (Pass 2 empty/blocked) —
@@ -635,6 +779,13 @@ export function TherapistLiveSession({
 
   function end(): void {
     if (phase !== 'listening') return;
+    setEndConfirmOpen(true);
+  }
+
+  function confirmEnd(): void {
+    if (phase !== 'listening') return;
+    setEndConfirmOpen(false);
+    setFinalStage('stopping');
     setPhase('finalizing');
     void stream.stop();
     wsRef.current?.send(JSON.stringify({ type: 'stop' }));
@@ -710,7 +861,7 @@ export function TherapistLiveSession({
   return (
     <div className="space-y-4">
       <GatewayMockBanner />
-      <header className="flex flex-wrap items-start justify-between gap-3">
+      <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)]/95 px-3 py-2 shadow-sm backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
         <div>
           <h1 className="font-serif text-2xl">{clientName || 'Live session'}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -741,10 +892,56 @@ export function TherapistLiveSession({
           )}
           {phase === 'listening' && <Button onClick={end}>End session</Button>}
           {(phase === 'finalizing' || saving) && (
-            <span className="text-sm text-[var(--color-ink-3)]">Finishing the note…</span>
+            <span className="text-sm text-[var(--color-ink-3)]">
+              {finalStage === 'stopping'
+                ? 'Stopping capture…'
+                : finalStage === 'saving-transcript'
+                  ? 'Saving transcript…'
+                  : finalStage === 'ready'
+                    ? 'Ready to review'
+                    : 'Generating note…'}
+            </span>
           )}
         </div>
       </header>
+
+      {recoveryRestored && (
+        <Card className="border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3 text-sm">
+          Restored the transcript held by this browser. Reconnect continues the same session without
+          clearing those words.
+        </Card>
+      )}
+
+      {endConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="End session?"
+        >
+          <Card className="w-full max-w-md p-6">
+            <h2 className="font-serif text-xl">End this session?</h2>
+            <p className="mt-2 text-sm text-[var(--color-ink-2)]">
+              Capture will stop and the transcript will be saved before the note is generated.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setEndConfirmOpen(false)}>
+                Keep recording
+              </Button>
+              <Button onClick={confirmEnd}>End &amp; save</Button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {finalStage === 'generating-note' && !saveFailed && (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
+          <span>The transcript is held safely. Note generation continues on the server.</span>
+          <Button variant="secondary" onClick={() => router.push('/app/today')}>
+            Return to Today
+          </Button>
+        </Card>
+      )}
 
       {error && (
         <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">
@@ -780,7 +977,10 @@ export function TherapistLiveSession({
                 Capture consent &amp; start
               </Button>
             )}
-            <Button variant="secondary" onClick={() => void start()}>
+            <Button
+              variant="secondary"
+              onClick={() => void start({ resume: utterances.length > 0 })}
+            >
               Try again
             </Button>
           </div>
@@ -797,7 +997,16 @@ export function TherapistLiveSession({
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={retrySave} disabled={saving}>
-              {saving ? 'Saving…' : 'Retry save'}
+              {saving ? 'Saving…' : 'Retry finalization'}
+            </Button>
+            <Button variant="secondary" onClick={() => void copyHeldTranscript()}>
+              Copy transcript
+            </Button>
+            <Button variant="secondary" onClick={downloadHeldTranscript}>
+              Save transcript
+            </Button>
+            <Button variant="secondary" onClick={() => router.push('/app/today')}>
+              Return to Today
             </Button>
           </div>
         </Card>
@@ -815,8 +1024,8 @@ export function TherapistLiveSession({
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={() => void start({ resume: true })}>Reconnect</Button>
             {clientId && (
-              <Button variant="secondary" onClick={() => router.push(`/app?record=${clientId}`)}>
-                Continue as recording
+              <Button variant="secondary" onClick={continueAsBatch}>
+                Continue as recording (transcript preserved)
               </Button>
             )}
             <Button
@@ -838,7 +1047,15 @@ export function TherapistLiveSession({
             open the session to record or write the note there.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => void start()}>Try again</Button>
+            <Button onClick={() => void start({ resume: utterances.length > 0 })}>
+              Retry finalization
+            </Button>
+            <Button variant="secondary" onClick={downloadHeldTranscript}>
+              Save transcript
+            </Button>
+            <Button variant="secondary" onClick={() => router.push('/app/today')}>
+              Return to Today
+            </Button>
             <Button
               variant="secondary"
               onClick={() => router.push(`/app/sessions/${sessionId}?tab=copilot`)}
@@ -855,7 +1072,9 @@ export function TherapistLiveSession({
             <p className="mb-4 text-sm text-[var(--color-ink-2)]">
               The conversation and note build in real time as you talk.
             </p>
-            <Button onClick={() => void start()}>Start session</Button>
+            <Button onClick={() => void start({ resume: utterances.length > 0 })}>
+              Start session
+            </Button>
           </Card>
 
           {/* TS5.4 — the session plan is visible BEFORE recording starts:

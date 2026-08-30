@@ -32,11 +32,12 @@ interface SidebarProps {
 
 export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) {
   const path = usePathname() ?? '/app';
+  const homeHref = vertical === 'DOCTOR' ? '/app/clinic' : '/app/today';
   const { primary: items, secondary } = practitionerNavigation(vertical, 'desktop');
   return (
     <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-white/70 bg-white/55 backdrop-blur-xl md:flex print:!hidden">
       <div className="px-6 py-6">
-        <OrbitLogo href="/app" />
+        <OrbitLogo href={homeHref} />
       </div>
 
       <nav className="px-3" aria-label="Primary">

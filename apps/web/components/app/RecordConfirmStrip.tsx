@@ -18,6 +18,7 @@ import { glossary } from '../../lib/clinical-glossary';
 import { type RecordReady, SCRIPT_VERSION } from './record-types';
 import { UpgradeModal } from './UpgradeModal';
 import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
+import { MindSessionPreflight } from './MindSessionPreflight';
 
 type ConfirmMode = 'live-capture' | 'dictation' | 'upload';
 
@@ -42,6 +43,7 @@ interface Props {
    * started toward a dead video surface.
    */
   videoEnabled?: boolean;
+  expectedSessionId?: string | null;
   onCancel: () => void;
   onReady: (result: RecordReady) => void;
 }
@@ -137,6 +139,7 @@ export function RecordConfirmStrip({
   mode = 'live-capture',
   defaultCapture = 'LIVE',
   videoEnabled = true,
+  expectedSessionId = null,
   onCancel,
   onReady,
 }: Props) {
@@ -173,6 +176,9 @@ export function RecordConfirmStrip({
 
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [preflightReady, setPreflightReady] = useState(false);
+  const [confirmedToday, setConfirmedToday] = useState(false);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
     setDisplaySupported(isDisplayCaptureSupported());
@@ -263,6 +269,11 @@ export function RecordConfirmStrip({
         modality: SessionModality | null;
         status?: string;
       };
+      if (expectedSessionId && sessionRow.id !== expectedSessionId) {
+        throw new Error(
+          'The booked session changed while preflight was open. Return to Today and try again.',
+        );
+      }
 
       // TS3 (F1) fix — the create call may have REUSED an already-started
       // session (e.g. a live consult begun earlier today). Consent + /start
@@ -306,7 +317,8 @@ export function RecordConfirmStrip({
       // on the batch recorder — the live stream is mic-only for now.
       const useLiveScribe = mode === 'live-capture' && method === 'mic' && capture === 'live';
       if (useLiveScribe) {
-        router.push(`/app/sessions/${sessionRow.id}/live?flash=1`);
+        const mic = selectedDeviceId ? `&mic=${encodeURIComponent(selectedDeviceId)}` : '';
+        router.push(`/app/sessions/${sessionRow.id}/live?flash=1${mic}`);
         return;
       }
 
@@ -327,7 +339,9 @@ export function RecordConfirmStrip({
         return;
       }
 
-      if (!alreadyStarted) {
+      const startAfterCaptureActive =
+        mode === 'live-capture' && (method === 'mic' || method === 'display');
+      if (!alreadyStarted && !startAfterCaptureActive) {
         const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
         if (!startRes.ok) {
           const body = (await startRes.json().catch(() => ({}))) as { error?: string };
@@ -342,6 +356,8 @@ export function RecordConfirmStrip({
         kind: sessionRow.kind,
         modality: sessionRow.modality,
         source: method as CaptureSource,
+        ...(selectedDeviceId ? { selectedDeviceId } : {}),
+        ...(startAfterCaptureActive ? { startAfterCaptureActive: true } : {}),
       });
     } catch (err) {
       setSubmitError((err as Error).message);
@@ -350,8 +366,14 @@ export function RecordConfirmStrip({
     }
   }
 
+  const needsDevicePreflight = mode === 'live-capture' && method === 'mic';
   const ready =
-    !!defaults && !loading && !loadError && Object.values(missingRequired).every(Boolean);
+    !!defaults &&
+    !loading &&
+    !loadError &&
+    confirmedToday &&
+    Object.values(missingRequired).every(Boolean) &&
+    (!needsDevicePreflight || preflightReady);
 
   // Build the kind-aware chip line ("Treatment session · CBT · English").
   // INTAKE intentionally omits the modality chip.
@@ -437,6 +459,27 @@ export function RecordConfirmStrip({
               </div>
             </div>
           )}
+
+          <div className="mt-6 rounded-xl border border-[var(--color-line-soft)] p-3">
+            <CheckboxRow
+              id="rcs-today-confirmation"
+              checked={confirmedToday}
+              onChange={setConfirmedToday}
+              label="The client confirmed recording and AI note processing for today’s session"
+              description="Required for this session. This is separate from their standing processing preference."
+            />
+          </div>
+
+          <MindSessionPreflight
+            enabled={
+              confirmedToday &&
+              needsDevicePreflight &&
+              Object.values(missingRequired).every(Boolean)
+            }
+            liveServiceRequired={method === 'mic' && capture === 'live'}
+            onReadyChange={setPreflightReady}
+            onSelectedDeviceIdChange={setSelectedDeviceId}
+          />
 
           {/* Required-but-not-yet-granted consents (rare — new client
               flow handles the common case). */}

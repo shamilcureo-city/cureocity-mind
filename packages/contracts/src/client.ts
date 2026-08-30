@@ -34,7 +34,7 @@ export type SessionKind = z.infer<typeof SessionKindSchema>;
 
 export const CreateClientInputSchema = z.object({
   fullName: z.string().min(1).max(200),
-  contactPhone: IndianPhoneSchema,
+  contactPhone: IndianPhoneSchema.optional(),
   contactEmail: z.string().email().optional(),
   dateOfBirth: IsoDateSchema.optional(),
   presentingConcerns: z.string().max(2000).optional(),
@@ -74,10 +74,7 @@ export const CreateClientInputSchema = z.object({
    * never present as "no known allergies".
    */
   allergies: z.array(z.string().min(1).max(120)).max(30).optional(),
-  consents: z
-    .array(ConsentInputSchema)
-    .min(1, 'At least one consent (typically AUDIO_RECORDING) is required when creating a client')
-    .max(8),
+  consents: z.array(ConsentInputSchema).max(8),
 });
 
 export const UpdateClientInputSchema = z

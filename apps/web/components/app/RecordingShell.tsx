@@ -16,6 +16,8 @@ interface Props {
   /** TS6 — deep link (`/app?record=<clientId>`): open the confirm strip for
    *  this client directly (the Today card's record / resume-batch path). */
   initialClientId?: string | null;
+  initialSessionId?: string | null;
+  initialCapture?: 'LIVE' | 'BATCH' | null;
   /** TS6 — the therapist's preferred in-person capture (live vs batch). */
   defaultCapture?: 'LIVE' | 'BATCH';
   /** VS1 — server-computed livekitConfigured(); gates the Virtual option. */
@@ -67,6 +69,8 @@ const INTENT_MODE: Record<Intent, ConfirmMode> = {
 export function RecordingShell({
   clients,
   initialClientId = null,
+  initialSessionId = null,
+  initialCapture = null,
   defaultCapture,
   videoEnabled = true,
 }: Props) {
@@ -159,7 +163,8 @@ export function RecordingShell({
         clientId={shell.client.id}
         clientName={shell.client.fullName}
         mode={mode}
-        defaultCapture={defaultCapture ?? 'LIVE'}
+        defaultCapture={initialCapture ?? defaultCapture ?? 'LIVE'}
+        expectedSessionId={initialSessionId}
         videoEnabled={videoEnabled}
         onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
         onReady={(ready) => handleReady(ready, mode)}
@@ -175,6 +180,8 @@ export function RecordingShell({
         clientName={shell.ready.clientName}
         modality={shell.ready.modality}
         source={shell.ready.source}
+        selectedDeviceId={shell.ready.selectedDeviceId}
+        authorizeMindAfterCaptureActive={shell.ready.startAfterCaptureActive === true}
         onFinished={handleFinished}
       />
     );

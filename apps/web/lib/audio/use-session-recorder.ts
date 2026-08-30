@@ -25,6 +25,8 @@ export interface RecorderOptions {
    *  VS1's virtual room passes a WebAudio mix of the therapist's mic and the
    *  client's incoming call audio, so BOTH voices reach the note cleanly. */
   source: CaptureSource;
+  /** Exact microphone selected and proven by Mind preflight. */
+  selectedDeviceId?: string;
   /** Required when source is 'external'; ignored otherwise. */
   externalStream?: MediaStream;
   /** Returns a Firebase ID token, or null to use the dev-bypass header. */
@@ -129,7 +131,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     try {
       await requestPersistentStorage();
 
-      const stream = await acquireStream(opts.source, opts.externalStream);
+      const stream = await acquireStream(opts.source, opts.externalStream, opts.selectedDeviceId);
       streamRef.current = stream;
 
       const ctx = new AudioContext({ sampleRate: 48_000 });
@@ -215,7 +217,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
       setState('error');
       await teardown();
     }
-  }, [opts.sessionId, opts.source, opts.getAuthToken, base]);
+  }, [opts.sessionId, opts.source, opts.getAuthToken, opts.selectedDeviceId, base]);
 
   const stopInternal = useCallback(async (): Promise<void> => {
     setState('finishing');
@@ -324,6 +326,7 @@ export function isDisplayCaptureSupported(): boolean {
 async function acquireStream(
   source: CaptureSource,
   externalStream?: MediaStream,
+  selectedDeviceId?: string,
 ): Promise<MediaStream> {
   if (source === 'external') {
     if (!externalStream || externalStream.getAudioTracks().length === 0) {
@@ -358,6 +361,7 @@ async function acquireStream(
       channelCount: 1,
       echoCancellation: true,
       noiseSuppression: true,
+      ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
     },
   });
 }

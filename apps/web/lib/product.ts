@@ -35,6 +35,13 @@ export interface PractitionerProductCopy {
   onboardingTitle: string;
   onboardingDescription: string;
   inviteProductName: string;
+  acquisition: {
+    primaryCta: string;
+    memberCta: string;
+    eligibility: string;
+    pricing: string;
+    helpHref: string;
+  };
   features: Array<{ title: string; body: string }>;
 }
 
@@ -134,6 +141,13 @@ export function practitionerProductCopy(product: Product): PractitionerProductCo
       onboardingDescription:
         'A few details before your first patient encounter. Takes less than a minute.',
       inviteProductName: 'Cureocity Scribe',
+      acquisition: {
+        primaryCta: 'Request Scribe pilot access',
+        memberCta: 'Sign in',
+        eligibility: 'For registered doctors and selected Indian clinics',
+        pricing: 'Pilot terms are shared directly with selected clinics',
+        helpHref: 'mailto:shamil@cureo.city?subject=Cureocity%20Scribe%20pilot%20access',
+      },
       features: [
         {
           title: 'Live note and Rx draft',
@@ -159,11 +173,18 @@ export function practitionerProductCopy(product: Product): PractitionerProductCo
     headline: 'Your attention stays in the room.',
     description:
       'The clinical copilot that writes your notes and tracks your clients’ progress while you focus on the work.',
-    proof: 'Trusted by therapists across Bangalore, Mumbai, Kochi, and Delhi.',
+    proof: 'Built with practising therapists for the Cureocity Mind pilot.',
     onboardingTitle: 'Set up your practice.',
     onboardingDescription:
-      'A few details before you can record your first session. Takes less than a minute.',
+      'A few details for the Mind pilot before you meet your first client. Takes less than a minute.',
     inviteProductName: 'Cureocity Mind',
+    acquisition: {
+      primaryCta: 'Apply to join the pilot',
+      memberCta: 'Sign in',
+      eligibility: 'For practising therapists and counsellors in India',
+      pricing: 'Free through the pilot; pricing will be announced before it ends',
+      helpHref: 'mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot%20access',
+    },
     features: [
       {
         title: 'AI scribe in your sessions',

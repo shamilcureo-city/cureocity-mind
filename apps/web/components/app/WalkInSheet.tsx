@@ -3,10 +3,9 @@
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { BillingEntitlement } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
-import { UpgradeModal } from './UpgradeModal';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { mindStartEntryHref } from '@/lib/mind-session-start';
 
 export interface WalkInClient {
   id: string;
@@ -37,12 +36,7 @@ export function WalkInSheet({ clients, recentClientIds, defaultCapture }: Props)
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [upgradePrompt, setUpgradePrompt] = useState<{
-    variant: 'TRIAL_CAP' | 'PLAN_CAP';
-    entitlement: BillingEntitlement;
-  } | null>(null);
+
   const sheetRef = useRef<HTMLDivElement>(null);
   useModalA11y(open, sheetRef, () => setOpen(false));
 
@@ -58,51 +52,13 @@ export function WalkInSheet({ clients, recentClientIds, defaultCapture }: Props)
   }, [clients, query, recent]);
 
   async function pick(clientId: string): Promise<void> {
-    if (busyId) return;
-    setError(null);
-    if (defaultCapture === 'BATCH') {
-      // The record flow owns session creation, consent recovery and the
-      // billing gate — just take the client there.
-      router.push(`/app?record=${clientId}`);
-      return;
-    }
-    setBusyId(clientId);
-    try {
-      const res = await fetch('/api/v1/sessions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          scheduledAt: new Date().toISOString(),
-          startNow: true,
-        }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as {
-          error?: string;
-          code?: string;
-          entitlement?: BillingEntitlement;
-        };
-        if (
-          res.status === 402 &&
-          (body.code === 'TRIAL_CAP_REACHED' || body.code === 'PLAN_CAP_REACHED') &&
-          body.entitlement
-        ) {
-          setUpgradePrompt({
-            variant: body.code === 'TRIAL_CAP_REACHED' ? 'TRIAL_CAP' : 'PLAN_CAP',
-            entitlement: body.entitlement,
-          });
-          return;
-        }
-        throw new Error(body.error ?? `Could not start (${res.status})`);
-      }
-      const session = (await res.json()) as { id: string };
-      router.push(`/app/sessions/${session.id}/live?flash=1`);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBusyId(null);
-    }
+    router.push(
+      mindStartEntryHref({
+        source: 'WALK_IN',
+        clientId,
+        captureMode: defaultCapture,
+      }),
+    );
   }
 
   return (
@@ -135,11 +91,7 @@ export function WalkInSheet({ clients, recentClientIds, defaultCapture }: Props)
               placeholder="Search clients…"
               className="mt-3 w-full rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-3 py-2.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
             />
-            {error && (
-              <p className="mt-2 text-xs text-[var(--color-warn)]" role="alert">
-                {error}
-              </p>
-            )}
+
             <ul className="mt-2 divide-y divide-[var(--color-line-soft)]">
               {list.length === 0 && (
                 <li className="py-6 text-center text-sm text-[var(--color-ink-3)]">
@@ -151,7 +103,6 @@ export function WalkInSheet({ clients, recentClientIds, defaultCapture }: Props)
                   <button
                     type="button"
                     onClick={() => void pick(c.id)}
-                    disabled={busyId !== null}
                     className="flex w-full items-center justify-between gap-3 px-1 py-3 text-left hover:bg-[var(--color-surface-soft)]"
                   >
                     <span className="flex items-center gap-2.5">
@@ -168,11 +119,7 @@ export function WalkInSheet({ clients, recentClientIds, defaultCapture }: Props)
                       )}
                     </span>
                     <span className="text-xs font-medium text-[var(--color-accent)]">
-                      {busyId === c.id
-                        ? 'Starting…'
-                        : defaultCapture === 'LIVE'
-                          ? '▸ live'
-                          : '▸ record'}
+                      ▸ preflight
                     </span>
                   </button>
                 </li>
@@ -186,15 +133,6 @@ export function WalkInSheet({ clients, recentClientIds, defaultCapture }: Props)
             </Link>
           </div>
         </div>
-      )}
-
-      {upgradePrompt && (
-        <UpgradeModal
-          open
-          onClose={() => setUpgradePrompt(null)}
-          variant={upgradePrompt.variant}
-          entitlement={upgradePrompt.entitlement}
-        />
       )}
     </>
   );

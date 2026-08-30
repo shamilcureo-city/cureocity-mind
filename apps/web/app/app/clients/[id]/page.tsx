@@ -17,6 +17,7 @@ import { JourneyError } from '@/lib/journey';
 import { resolveClientPii } from '@/lib/client-pii';
 import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
+import { mindStartEntryHref } from '@/lib/mind-session-start';
 
 export const dynamic = 'force-dynamic';
 
@@ -160,6 +161,18 @@ export default async function ClientDetailPage({ params }: PageProps) {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {therapist.vertical === 'THERAPIST' && (
+                <Link
+                  href={mindStartEntryHref({
+                    source: 'CLIENT',
+                    clientId: client.id,
+                    captureMode: 'LIVE',
+                  })}
+                  className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+                >
+                  Start session
+                </Link>
+              )}
               <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
               {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
               {client.isDemo && <DemoClientButton demoClientId={client.id} variant="inline" />}

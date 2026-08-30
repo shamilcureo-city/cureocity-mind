@@ -1,37 +1,15 @@
 import Link from 'next/link';
 import { Card } from '@/components/ui/Card';
 import { DemoClientButton } from '@/components/app/DemoClientButton';
+import { buildFirstRunJourney, hasCompletedRoleplaySession } from '@/lib/first-run-journey';
 import { prisma } from '@/lib/prisma';
 
 interface Props {
   psychologistId: string;
 }
 
-interface Step {
-  label: string;
-  done: boolean;
-  hint: string;
-  href?: string;
-  /** When set, render this slot in place of the default "Go →" link. */
-  customCta?: 'demo';
-  /** Existing demo client id, used by the demo CTA. */
-  demoClientId?: string | null;
-}
-
-/**
- * Sprint 31 — first-run "what to try next" checklist on /app.
- *
- * Renders only while at least one core-loop milestone is unmet, then
- * disappears for good. State is derived live from the DB so it's
- * accurate whether the therapist did things from this device or
- * another, and there's no flag to persist or invalidate. Profile
- * completion is implicit by the time `/app` renders (the onboarding
- * gate guarantees it), so the four steps below are the next loops.
- */
 export async function FirstRunChecklist({ psychologistId }: Props) {
-  // Sprint 48 — the showcase "Example" client must not check off the
-  // user's own getting-started steps; the demo arc is its own thing.
-  const [clients, sessions, signedNotes, shares, demoClient] = await Promise.all([
+  const [realClients, realSessions, reviewedNotes, demoClient] = await Promise.all([
     prisma.client.count({ where: { psychologistId, deletedAt: null, isDemo: false } }),
     prisma.session.count({
       where: { psychologistId, status: 'COMPLETED', client: { isDemo: false } },
@@ -39,108 +17,106 @@ export async function FirstRunChecklist({ psychologistId }: Props) {
     prisma.therapyNote.count({
       where: { session: { psychologistId, client: { isDemo: false } } },
     }),
-    prisma.patientShare.count({ where: { psychologistId, client: { isDemo: false } } }),
     prisma.client.findFirst({
       where: { psychologistId, isDemo: true, deletedAt: null },
-      select: { id: true },
+      select: { id: true, createdAt: true },
     }),
   ]);
+  const completedDemoSessions = demoClient
+    ? await prisma.session.findMany({
+        where: { psychologistId, clientId: demoClient.id, status: 'COMPLETED' },
+        select: { scheduledAt: true },
+      })
+    : [];
 
-  const steps: Step[] = [
-    {
-      label: 'Explore the example client',
-      done: demoClient !== null,
-      hint: 'Seed a fully-arced demo client (signed intake, 5 sessions, PHQ-9 trend, progress report) to see the full co-pilot in one click.',
-      customCta: 'demo',
-      demoClientId: demoClient?.id ?? null,
-    },
-    {
-      label: 'Add your first client',
-      done: clients > 0,
-      hint: 'Their record holds sessions, instruments, and shares.',
-      href: '/app/clients',
-    },
-    {
-      label: 'Record your first session',
-      done: sessions > 0,
-      // UI truth pass — six example-client sessions sit right below this
-      // card while it says "not done". Say why, or it reads as a bug.
-      hint: 'Pick a client above and tap Start. (Example-client sessions don’t count.)',
-    },
-    {
-      label: 'Sign your first note',
-      done: signedNotes > 0,
-      hint: 'Review the SOAP draft, then Sign off. (The example notes don’t count.)',
-    },
-    {
-      label: 'Share a note with your client',
-      done: shares > 0,
-      hint: 'WhatsApp or email — they read it on the patient portal.',
-    },
-  ];
-
-  const doneCount = steps.filter((s) => s.done).length;
-  if (doneCount === steps.length) return null;
+  const journey = buildFirstRunJourney({
+    hasExampleClient: demoClient !== null,
+    hasRealClient: realClients > 0,
+    hasCompletedRoleplay:
+      demoClient !== null &&
+      hasCompletedRoleplaySession(
+        demoClient.createdAt,
+        completedDemoSessions.map(({ scheduledAt }) => scheduledAt),
+      ),
+    hasCompletedRealSession: realSessions > 0,
+    hasReviewedRealNote: reviewedNotes > 0,
+  });
+  if (journey.complete) return null;
 
   return (
-    <Card className="mt-10 p-6">
-      <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]">
-            Getting started
-          </p>
-          <h2 className="mt-1 font-serif text-xl">
-            {doneCount} of {steps.length} done
-          </h2>
-        </div>
-        <p className="text-xs text-[var(--color-ink-3)]">
-          This card hides itself once you finish the loop.
-        </p>
-      </header>
+    <Card className="mt-6 border-[var(--color-accent)]/30 p-6">
+      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-accent)]">
+        Choose how to start
+      </p>
+      <h2 className="mt-1 font-serif text-2xl">Get value before your first busy day</h2>
+      <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+        Pick one path now. You can try the others whenever you like.
+      </p>
 
-      <ul className="mt-5 space-y-2">
-        {steps.map((s) => (
-          <li
-            key={s.label}
-            className={`flex items-start gap-3 rounded-xl border px-4 py-3 text-sm transition-colors ${
-              s.done
-                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]/40'
-                : 'border-[var(--color-line)] bg-white'
-            }`}
+      <div className="mt-5 grid gap-3 md:grid-cols-3">
+        {journey.choices.map((choice) => (
+          <div
+            key={choice.id}
+            className="flex flex-col rounded-2xl border border-[var(--color-line)] bg-white p-4"
           >
-            <span
-              aria-hidden
-              className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] ${
-                s.done
-                  ? 'bg-[var(--color-accent)] text-white'
-                  : 'border border-[var(--color-line)] bg-white text-[var(--color-ink-3)]'
-              }`}
-            >
-              {s.done ? '✓' : ''}
-            </span>
-            <div className="flex-1">
-              <p
-                className={`font-medium ${
-                  s.done ? 'text-[var(--color-ink-3)] line-through' : 'text-[var(--color-ink)]'
-                }`}
-              >
-                {s.label}
-              </p>
-              <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">{s.hint}</p>
-            </div>
-            {s.customCta === 'demo' ? (
-              <DemoClientButton demoClientId={s.demoClientId ?? null} variant="cta" />
-            ) : s.href && !s.done ? (
+            <p className="font-medium text-[var(--color-ink)]">
+              {choice.done ? '✓ ' : ''}
+              {choice.label}
+            </p>
+            <p className="mt-1 flex-1 text-xs text-[var(--color-ink-3)]">{choice.description}</p>
+            {choice.id === 'example' ? (
+              <div className="mt-4">
+                <DemoClientButton demoClientId={demoClient?.id ?? null} variant="cta" />
+              </div>
+            ) : choice.id === 'roleplay' && !demoClient ? (
+              <div className="mt-4">
+                <DemoClientButton demoClientId={null} variant="cta" />
+              </div>
+            ) : (
               <Link
-                href={s.href}
-                className="self-center text-xs font-medium text-[var(--color-accent)] hover:underline"
+                href={
+                  choice.id === 'roleplay' && demoClient && !choice.done
+                    ? `/app/encounters/new?record=${demoClient.id}&roleplay=1`
+                    : choice.href
+                }
+                className="mt-4 text-xs font-semibold text-[var(--color-accent)] hover:underline"
               >
-                Go →
+                {choice.ctaLabel} →
               </Link>
-            ) : null}
-          </li>
+            )}
+          </div>
         ))}
-      </ul>
+      </div>
+
+      <div className="mt-6 border-t border-[var(--color-line-soft)] pt-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+          Your first real workflow
+        </p>
+        <ul className="mt-2 space-y-2">
+          {journey.steps.map((step) => (
+            <li
+              key={step.id}
+              className="flex items-center gap-3 rounded-xl bg-white px-4 py-3 text-sm"
+            >
+              <span aria-hidden>{step.done ? '✓' : '○'}</span>
+              <div className="min-w-0 flex-1">
+                <p className={step.done ? 'text-[var(--color-ink-3)] line-through' : 'font-medium'}>
+                  {step.label}
+                </p>
+                <p className="text-xs text-[var(--color-ink-3)]">{step.description}</p>
+              </div>
+              {!step.done ? (
+                <Link
+                  href={step.href}
+                  className="shrink-0 text-xs font-semibold text-[var(--color-accent)] hover:underline"
+                >
+                  {step.ctaLabel} →
+                </Link>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </div>
     </Card>
   );
 }

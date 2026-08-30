@@ -73,7 +73,7 @@ function LoginPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const next = search.get('next') ?? '/app';
-  const { copy } = usePractitionerProduct();
+  const { product, copy } = usePractitionerProduct();
 
   const [method, setMethod] = useState<Method>('google');
   const [stage, setStage] = useState<Stage>('pick');
@@ -413,10 +413,12 @@ function LoginPageInner() {
             {stage === 'pick' && (
               <>
                 <h2 className="font-serif text-2xl text-[var(--color-ink)]">
-                  Sign in to your practice
+                  {product.key === 'mind' ? 'Member sign in' : 'Sign in to your practice'}
                 </h2>
                 <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                  New here? Continue with Google or create an email account — we’ll set you up.
+                  {product.key === 'mind'
+                    ? `${copy.acquisition.eligibility}. ${copy.acquisition.pricing}.`
+                    : 'New here? Continue with Google or create an email account — we’ll set you up.'}
                 </p>
 
                 {/* Google primary */}
@@ -685,6 +687,20 @@ function LoginPageInner() {
                   {busy ? 'Checking…' : 'Join the pilot'}
                 </Button>
                 <FieldError message={error} />
+                <div className="flex flex-wrap justify-center gap-3 text-xs">
+                  <a
+                    href={copy.acquisition.helpHref}
+                    className="font-medium text-[var(--color-accent)] underline"
+                  >
+                    Request pilot access
+                  </a>
+                  <a
+                    href="mailto:support@cureo.city"
+                    className="text-[var(--color-ink-3)] underline"
+                  >
+                    Get help
+                  </a>
+                </div>
                 <button
                   type="button"
                   onClick={startOver}

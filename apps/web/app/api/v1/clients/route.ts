@@ -11,6 +11,7 @@ import { toClient } from '@/lib/mappers';
 import { encryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson, parseQuery } from '@/lib/validate';
 import { markLegacyPatientResponse } from '@/lib/patient-compatibility';
+import { validateCreateClientForVertical } from '@/lib/client-draft';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,6 +74,16 @@ async function legacyClientPOST(req: NextRequest): Promise<NextResponse> {
   const body = await parseJson(req, CreateClientInputSchema);
   if (!body.ok) return body.response;
 
+  const practitioner = await prisma.psychologist.findUnique({
+    where: { id: auth.value.psychologistId },
+    select: { vertical: true },
+  });
+  const verticalError = validateCreateClientForVertical(
+    body.value,
+    practitioner?.vertical ?? 'THERAPIST',
+  );
+  if (verticalError) return NextResponse.json({ error: verticalError }, { status: 400 });
+
   const auditMeta = auditMetadataFromRequest(req);
   const now = new Date();
 
@@ -80,10 +91,9 @@ async function legacyClientPOST(req: NextRequest): Promise<NextResponse> {
   // is hoisted outside the transaction because it may auto-provision a
   // PsychologistTenantKey row + KMS-wrap a fresh DEK; doing that inside
   // the client-create tx would extend the lock window unnecessarily.
-  const contactPhoneEncrypted = await encryptForTenant(
-    auth.value.psychologistId,
-    body.value.contactPhone,
-  );
+  const contactPhoneEncrypted = body.value.contactPhone
+    ? await encryptForTenant(auth.value.psychologistId, body.value.contactPhone)
+    : null;
   const contactEmailEncrypted = body.value.contactEmail
     ? await encryptForTenant(auth.value.psychologistId, body.value.contactEmail)
     : null;

@@ -27,6 +27,8 @@ interface Props {
   onChange: (next: ClientDraft) => void;
   /** Doctors have no therapy modality. */
   isDoctor?: boolean;
+  /** Administrative Mind creation defers today's capture consent to preflight. */
+  purpose?: 'ADMINISTRATIVE' | 'CAPTURE';
   idPrefix?: string;
   autoFocusName?: boolean;
 }
@@ -35,6 +37,7 @@ export function ClientFields({
   value,
   onChange,
   isDoctor = false,
+  purpose = 'CAPTURE',
   idPrefix = 'cf',
   autoFocusName,
 }: Props) {
@@ -69,43 +72,50 @@ export function ClientFields({
           id={id('phone')}
           value={value.contactPhone}
           onChange={(v) => set('contactPhone', v)}
-          required
+          required={isDoctor || purpose === 'CAPTURE'}
         />
       </div>
 
-      <div>
-        <Label>Consent (confirm they&apos;ve agreed before you start)</Label>
-        <div className="mt-2 space-y-2">
-          <CheckboxRow
-            id={id('audio')}
-            checked={value.audioOk}
-            onChange={(v) => set('audioOk', v)}
-            label="Audio recording — they've agreed"
-            description="We record this session so the AI can draft a note."
-          />
-          <CheckboxRow
-            id={id('note')}
-            checked={value.noteOk}
-            onChange={(v) => set('noteOk', v)}
-            label="AI note generation — they've agreed"
-            description="An AI processes the recording into a draft you'll review."
-          />
-          <CheckboxRow
-            id={id('xborder')}
-            checked={value.crossBorderOk}
-            onChange={(v) => set('crossBorderOk', v)}
-            label="Note analysis outside India — they've agreed"
-            description="The transcript (never the audio) may be analysed on a global model. Required — recording is blocked without it."
-          />
-          <CheckboxRow
-            id={id('retention')}
-            checked={value.retentionExtended}
-            onChange={(v) => set('retentionExtended', v)}
-            label="Keep data beyond 30 days"
-            description="Optional. Audio is deleted after 30 days unless they agreed otherwise."
-          />
+      {isDoctor || purpose === 'CAPTURE' ? (
+        <div>
+          <Label>Today&apos;s recording confirmation</Label>
+          <div className="mt-2 space-y-2">
+            <CheckboxRow
+              id={id('audio')}
+              checked={value.audioOk}
+              onChange={(v) => set('audioOk', v)}
+              label="Audio recording — they've agreed"
+              description="We record this session so the AI can draft a note."
+            />
+            <CheckboxRow
+              id={id('note')}
+              checked={value.noteOk}
+              onChange={(v) => set('noteOk', v)}
+              label="AI note generation — they've agreed"
+              description="An AI processes the recording into a draft you'll review."
+            />
+            <CheckboxRow
+              id={id('xborder')}
+              checked={value.crossBorderOk}
+              onChange={(v) => set('crossBorderOk', v)}
+              label="Note analysis outside India — they've agreed"
+              description="The transcript (never the audio) may be analysed on a global model. Required — recording is blocked without it."
+            />
+            <CheckboxRow
+              id={id('retention')}
+              checked={value.retentionExtended}
+              onChange={(v) => set('retentionExtended', v)}
+              label="Keep data beyond 30 days"
+              description="Optional. Audio is deleted after 30 days unless they agreed otherwise."
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-4 py-3 text-sm text-[var(--color-ink-2)]">
+          Recording consent is confirmed separately for each session before capture starts. Creating
+          this client does not claim they agreed today.
+        </div>
+      )}
 
       <div className="rounded-2xl border border-[var(--color-line-soft)]">
         <button

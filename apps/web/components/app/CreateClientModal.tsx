@@ -11,7 +11,7 @@ import { useModalA11y } from '@/lib/use-modal-a11y';
 import { subjectNounFor } from '@/lib/vertical';
 import {
   buildCreateClientBody,
-  EMPTY_CLIENT_DRAFT,
+  createClientDraft,
   isClientDraftReady,
   type ClientDraft,
 } from '@/lib/client-draft';
@@ -46,12 +46,14 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
   const router = useRouter();
   const isDoctor = vertical === 'DOCTOR';
   const noun = subjectNounFor(vertical).singular;
-  const [draft, setDraft] = useState<ClientDraft>(EMPTY_CLIENT_DRAFT);
+  const [draft, setDraft] = useState<ClientDraft>(() =>
+    createClientDraft(vertical, 'ADMINISTRATIVE'),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalA11y(open, dialogRef, onClose);
-  const ready = isClientDraftReady(draft);
+  const ready = isClientDraftReady(draft, { vertical, purpose: 'ADMINISTRATIVE' });
 
   if (!open) return null;
 
@@ -101,6 +103,7 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
             value={draft}
             onChange={setDraft}
             isDoctor={isDoctor}
+            purpose="ADMINISTRATIVE"
             idPrefix="cc"
             autoFocusName
           />

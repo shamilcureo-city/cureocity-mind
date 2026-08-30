@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 
 /**
  * Landing v9.3 — the sticky glass pill header + mobile hamburger menu.
- * Anchor links scroll the landing sections; Sign in / Start free go to /login.
+ * Anchor links scroll the landing sections; Sign in / Apply to join the pilot go to /login.
  */
 
 const LINKS = [
@@ -82,9 +82,13 @@ export function LandingNav() {
           >
             Sign in
           </Link>
-          <Link href="/login" className="btn primary sm" style={{ textDecoration: 'none' }}>
-            Start free
-          </Link>
+          <a
+            href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot%20access"
+            className="btn primary sm"
+            style={{ textDecoration: 'none' }}
+          >
+            Apply to join the pilot
+          </a>
           <button
             className="burger"
             aria-label={open ? 'Close menu' : 'Open menu'}
@@ -115,9 +119,13 @@ export function LandingNav() {
           For doctors — Cureocity Scribe
         </a>
         <div className="mm-cta">
-          <Link href="/login" className="btn primary" style={{ flex: 1, textDecoration: 'none' }}>
-            Start free
-          </Link>
+          <a
+            href="mailto:shamil@cureo.city?subject=Cureocity%20Mind%20pilot%20access"
+            className="btn primary"
+            style={{ flex: 1, textDecoration: 'none' }}
+          >
+            Apply to join the pilot
+          </a>
           <Link href="/login" className="btn secondary" style={{ flex: 1, textDecoration: 'none' }}>
             Sign in
           </Link>

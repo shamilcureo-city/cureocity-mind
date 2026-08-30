@@ -5,7 +5,6 @@ import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { ButtonLink } from '@/components/ui/Button';
-import { FirstRunChecklist } from '@/components/app/FirstRunChecklist';
 import { PrivacyModeToggle } from '@/components/app/PrivacyModeToggle';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import {
@@ -51,14 +50,12 @@ export default async function DashboardPage() {
       </header>
 
       {data.isEmpty ? (
-        <EmptyState psychologistId={therapist.id} />
+        <EmptyState />
       ) : (
         <>
-          <AttentionSection attention={data.attention} />
           <MetricStrip metrics={data.metrics} />
           <CaseloadPulseSection pulse={data.caseloadPulse} hasDemoClient={data.hasDemoClient} />
-          <div className="mt-8 grid gap-6 lg:grid-cols-2">
-            <UpNextSection upNext={data.upNext} />
+          <div className="mt-8">
             <RecentSection groups={data.recentSessions} hasDemoClient={data.hasDemoClient} />
           </div>
           <QuickActions />
@@ -85,7 +82,7 @@ function headline(data: DashboardData): string {
 // HERO — Needs your attention.
 // ---------------------------------------------------------------------------
 
-function AttentionSection({ attention }: { attention: AttentionData }) {
+function _AttentionSection({ attention }: { attention: AttentionData }) {
   const { crises, deteriorating, unsignedNotes, measuresDue, totals } = attention;
   const allClear =
     totals.crises === 0 &&
@@ -422,7 +419,7 @@ function CaseloadPulseSection({
 // Up next + recent.
 // ---------------------------------------------------------------------------
 
-function UpNextSection({ upNext }: { upNext: UpNextSession[] }) {
+function _UpNextSection({ upNext }: { upNext: UpNextSession[] }) {
   return (
     <section aria-label="Up next">
       <div className="mb-3 flex items-center justify-between">
@@ -540,28 +537,20 @@ function QuickActions() {
 // Empty / first-run.
 // ---------------------------------------------------------------------------
 
-function EmptyState({ psychologistId }: { psychologistId: string }) {
+function EmptyState() {
   return (
-    <>
-      <Card className="p-10 text-center">
-        <p className="font-serif text-2xl">Welcome to your command center</p>
-        <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Once you record sessions and add clients, this is where the day&rsquo;s priorities surface
-          — crises, notes to sign, outcomes drifting off track, and your caseload at a glance.
-        </p>
-        <div className="mt-5 flex flex-wrap justify-center gap-2">
-          <ButtonLink href="/app" variant="primary">
-            Record your first session
-          </ButtonLink>
-          <ButtonLink href="/app/clients" variant="secondary">
-            Add a client
-          </ButtonLink>
-        </div>
-      </Card>
-      <div className="mt-8">
-        <FirstRunChecklist psychologistId={psychologistId} />
+    <Card className="p-10 text-center">
+      <p className="font-serif text-2xl">Analytics begin with your first real session</p>
+      <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
+        Today guides your next action. This page stays focused on caseload trends and practice
+        performance once you have real activity.
+      </p>
+      <div className="mt-5 flex flex-wrap justify-center gap-2">
+        <ButtonLink href="/app/today" variant="primary">
+          Go to Today
+        </ButtonLink>
       </div>
-    </>
+    </Card>
   );
 }
 

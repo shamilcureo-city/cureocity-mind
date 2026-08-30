@@ -55,6 +55,14 @@ export const SCRIBE_CONSENT_SCOPES = [
 
 export type ScribeConsentScope = (typeof SCRIBE_CONSENT_SCOPES)[number];
 
+/** Standing preference never substitutes for today's scheduled-session ack. */
+export function requiresTodaySessionConfirmation(
+  status: 'SCHEDULED' | 'IN_PROGRESS',
+  confirmedToday: boolean,
+): boolean {
+  return status === 'SCHEDULED' && !confirmedToday;
+}
+
 /**
  * Fail-closed capture authorization shared by batch start, live start, and
  * live reconnect. Callers must hold the client consent lock while awaiting

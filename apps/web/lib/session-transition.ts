@@ -25,6 +25,31 @@ export function assertLiveTokenSessionStatus(status: SessionStatus): void {
   }
 }
 
+export function shouldAdvanceSessionDuringLiveToken(
+  vertical: 'THERAPIST' | 'DOCTOR',
+  status: SessionStatus,
+): boolean {
+  return vertical === 'DOCTOR' && status === 'SCHEDULED';
+}
+
+/**
+ * Doctors retain their existing token-is-start behavior. Mind waits for the
+ * browser to report active capture, so permission/device failures never make a
+ * scheduled session look in progress.
+ */
+export function captureActivationTransitionData(
+  vertical: 'THERAPIST' | 'DOCTOR',
+  captureMode: 'LIVE' | 'BATCH',
+  captureActive: boolean,
+): { status: 'IN_PROGRESS'; startedAt: Date; captureMode: 'LIVE' | null } | null {
+  if (vertical === 'THERAPIST' && !captureActive) return null;
+  return {
+    status: 'IN_PROGRESS',
+    startedAt: new Date(),
+    captureMode: captureMode === 'LIVE' ? 'LIVE' : null,
+  };
+}
+
 export async function conditionalSessionTransition(
   tx: Prisma.TransactionClient,
   input: {

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   assertLiveTokenSessionStatus,
+  captureActivationTransitionData,
   conditionalSessionTransition,
   finalizeLiveSession,
   sessionConcurrentModificationResponse,
+  shouldAdvanceSessionDuringLiveToken,
 } from './session-transition';
 
 function transaction(count: number) {
@@ -33,6 +35,25 @@ function stateTransaction(status: string) {
 }
 
 describe('conditional Session lifecycle transition', () => {
+  it('builds a Mind lifecycle transition only after capture activation', () => {
+    expect(captureActivationTransitionData('THERAPIST', 'LIVE', false)).toBeNull();
+    expect(captureActivationTransitionData('THERAPIST', 'LIVE', true)).toMatchObject({
+      status: 'IN_PROGRESS',
+      captureMode: 'LIVE',
+    });
+    expect(captureActivationTransitionData('THERAPIST', 'BATCH', true)).toMatchObject({
+      status: 'IN_PROGRESS',
+      captureMode: null,
+    });
+  });
+
+  it('preserves the Doctor live-token transition contract', () => {
+    expect(captureActivationTransitionData('DOCTOR', 'LIVE', false)).toMatchObject({
+      status: 'IN_PROGRESS',
+      captureMode: 'LIVE',
+    });
+  });
+
   it('updates only the expected current status and returns the transitioned row', async () => {
     const tx = transaction(1);
     const startedAt = new Date('2026-08-18T10:00:00Z');
@@ -122,6 +143,12 @@ describe('conditional Session lifecycle transition', () => {
       expect(() => assertLiveTokenSessionStatus(status)).not.toThrow();
     },
   );
+
+  it('keeps Doctor live-token start unchanged but defers Mind lifecycle until capture is active', () => {
+    expect(shouldAdvanceSessionDuringLiveToken('DOCTOR', 'SCHEDULED')).toBe(true);
+    expect(shouldAdvanceSessionDuringLiveToken('THERAPIST', 'SCHEDULED')).toBe(false);
+    expect(shouldAdvanceSessionDuringLiveToken('DOCTOR', 'IN_PROGRESS')).toBe(false);
+  });
 
   it.each(['COMPLETED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULED'] as const)(
     'rejects live-token authorization for terminal state %s with a stable code',

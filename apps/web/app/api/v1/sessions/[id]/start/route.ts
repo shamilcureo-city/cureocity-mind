@@ -42,7 +42,11 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   // body; therapist callers send none and captureMode stays null.
   const body = (await req.json().catch(() => null)) as { captureMode?: string } | null;
   const captureMode =
-    body?.captureMode === 'DICTATE' || body?.captureMode === 'UPLOAD' ? body.captureMode : null;
+    body?.captureMode === 'LIVE' ||
+    body?.captureMode === 'DICTATE' ||
+    body?.captureMode === 'UPLOAD'
+      ? body.captureMode
+      : null;
 
   let updated;
   try {

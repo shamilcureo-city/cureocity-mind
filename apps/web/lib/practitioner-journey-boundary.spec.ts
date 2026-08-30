@@ -3,6 +3,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import * as ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 import { canonicalPractitionerProduct, productFromHost } from './product';
+import { practitionerVocabulary } from './practitioner-vocabulary';
 
 const webRoot = join(import.meta.dirname, '..');
 const repoRoot = join(webRoot, '..', '..');
@@ -90,7 +91,8 @@ describe('Mind and Scribe practitioner journey boundary', () => {
       'app/app/patients/[id]/encounters/[sessionId]/live/page.tsx',
     ];
 
-    for (const path of doctorPages) expect(hasCall(parsedWeb(path), 'requireOnboardedDoctor')).toBe(true);
+    for (const path of doctorPages)
+      expect(hasCall(parsedWeb(path), 'requireOnboardedDoctor')).toBe(true);
     expect(hasJsxTag(parsedWeb(doctorPages[2]!), 'DoctorEncounterPanel')).toBe(true);
     expect(hasJsxTag(parsedWeb(doctorPages[3]!), 'LiveEncounterFlow')).toBe(true);
   });
@@ -109,12 +111,21 @@ describe('Mind and Scribe practitioner journey boundary', () => {
   });
 
   it('keeps the therapy capture entry from becoming the doctor home', () => {
-    const record = parsedWeb('app/app/page.tsx');
+    const app = parsedWeb('app/app/page.tsx');
+    const capture = parsedWeb('app/app/encounters/new/page.tsx');
 
-    expect(hasCall(record, 'redirect')).toBe(true);
-    expect(hasJsxTag(record, 'RecordingShell')).toBe(true);
-    expect(record.getText()).toContain("therapist.vertical === 'DOCTOR'");
-    expect(record.getText()).toContain("redirect('/app/clinic')");
+    expect(app.getText()).toContain("redirect('/app/today')");
+    expect(app.getText()).toContain("redirect('/app/clinic')");
+    expect(hasJsxTag(capture, 'RecordingShell')).toBe(true);
+    expect(capture.getText()).toContain("therapist.vertical === 'DOCTOR'");
+    expect(capture.getText()).toContain("redirect('/app/clinic')");
+  });
+
+  it('makes the shared logo destination vertical-aware', () => {
+    const sidebar = readWeb('components/app/Sidebar.tsx');
+
+    expect(sidebar).toContain("vertical === 'DOCTOR' ? '/app/clinic' : '/app/today'");
+    expect(sidebar).toContain('<OrbitLogo href={homeHref} />');
   });
 
   it('keeps the documented route inventory exactly synchronized with page files', () => {
@@ -124,7 +135,7 @@ describe('Mind and Scribe practitioner journey boundary', () => {
       ?.split('## Visible vocabulary')[0];
     expect(inventory).toBeDefined();
 
-    const documented = [...(inventory ?? '').matchAll(/^\| `([^`]+)` \|/gm)]
+    const documented = [...(inventory ?? '').matchAll(/^\| `([^`]+)`\s+\|/gm)]
       .map((match) => match[1]!)
       .sort();
     expect(documented).toEqual(currentAppPageRoutes());
@@ -137,5 +148,22 @@ describe('Mind and Scribe practitioner journey boundary', () => {
     expect(matrix).toContain('## Pull-request acceptance gate');
     expect(matrix).toContain('Review & Close');
     expect(matrix).toContain('Review & Sign');
+  });
+
+  it('keeps visible Mind and Scribe vocabulary explicitly separated', () => {
+    expect(practitionerVocabulary('THERAPIST')).toEqual({
+      people: 'Clients',
+      work: 'Sessions',
+      home: 'Today',
+      start: 'Start session',
+      completion: 'Review & Close',
+    });
+    expect(practitionerVocabulary('DOCTOR')).toEqual({
+      people: 'Patients',
+      work: 'Encounters',
+      home: 'Clinic',
+      start: 'Start encounter',
+      completion: 'Review & Sign',
+    });
   });
 });

@@ -1,8 +1,11 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { CARE_ENGINE_CONSTANTS } from '@cureocity/clinical';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { TodaySessionCard } from '@/components/app/TodaySessionCard';
+import { TodayAttentionQueue } from '@/components/app/TodayAttentionQueue';
+import { FirstRunChecklist } from '@/components/app/FirstRunChecklist';
 import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
 import { WalkInSheet } from '@/components/app/WalkInSheet';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
@@ -13,6 +16,7 @@ import {
   formatIstTime as formatTime,
 } from '@/lib/ist';
 import { decryptClientField } from '@/lib/client-pii';
+import { prioritizeTodayItems, type TodayAttentionItem } from '@/lib/today-priority';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -33,6 +37,7 @@ export const dynamic = 'force-dynamic';
  */
 export default async function TodayPage() {
   const therapist = await requireOnboardedPsychologist();
+  if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
   // TS6 — the therapist's preferred capture picks the Start button's primary
   // action (LIVE unless they chose a batch-first preference).
   const defaultCapture: 'LIVE' | 'BATCH' =
@@ -40,7 +45,17 @@ export default async function TodayPage() {
 
   const { startOfToday, endOfToday, startOfTomorrow, lookAheadEnd } = computeDayBoundaries();
 
-  const [rawTodayRows, rawUpcomingRows, rawClients] = await Promise.all([
+  const now = new Date();
+  const responseCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const [
+    rawTodayRows,
+    rawUpcomingRows,
+    rawClients,
+    rawAttentionSessions,
+    rawNotesReady,
+    rawClientResponses,
+    rawOverdueAssignments,
+  ] = await Promise.all([
     prisma.session.findMany({
       where: {
         psychologistId: therapist.id,
@@ -76,6 +91,72 @@ export default async function TodayPage() {
       orderBy: { createdAt: 'asc' },
       select: { id: true, fullNameEncrypted: true, preferredModality: true },
     }),
+    prisma.session.findMany({
+      where: {
+        psychologistId: therapist.id,
+        status: { in: ['IN_PROGRESS', 'SCHEDULED'] },
+        client: { deletedAt: null },
+      },
+      orderBy: { scheduledAt: 'asc' },
+      take: 12,
+      select: {
+        id: true,
+        status: true,
+        scheduledAt: true,
+        clientId: true,
+        client: { select: { fullNameEncrypted: true } },
+      },
+    }),
+    prisma.session.findMany({
+      where: {
+        psychologistId: therapist.id,
+        status: 'COMPLETED',
+        noteDraft: { status: 'COMPLETED' },
+        therapyNote: null,
+        client: { deletedAt: null },
+      },
+      orderBy: { endedAt: 'asc' },
+      take: 5,
+      select: {
+        id: true,
+        endedAt: true,
+        clientId: true,
+        client: { select: { fullNameEncrypted: true } },
+      },
+    }),
+    prisma.instrumentResponse.findMany({
+      where: {
+        psychologistId: therapist.id,
+        administrationMode: 'SELF',
+        administeredAt: { gte: responseCutoff },
+        client: { deletedAt: null },
+      },
+      orderBy: { administeredAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        instrumentKey: true,
+        administeredAt: true,
+        clientId: true,
+        client: { select: { fullNameEncrypted: true } },
+      },
+    }),
+    prisma.exerciseAssignment.findMany({
+      where: {
+        psychologistId: therapist.id,
+        status: { in: ['PENDING', 'IN_PROGRESS'] },
+        dueAt: { lt: now },
+        client: { deletedAt: null },
+      },
+      orderBy: { dueAt: 'asc' },
+      take: 5,
+      select: {
+        id: true,
+        dueAt: true,
+        clientId: true,
+        client: { select: { fullNameEncrypted: true } },
+      },
+    }),
   ]);
 
   // Read cutover — decrypt the client name into each row before the sync
@@ -100,8 +181,72 @@ export default async function TodayPage() {
     ).then((list) => list.sort((a, b) => a.fullName.localeCompare(b.fullName))),
   ]);
 
+  const attentionItems: TodayAttentionItem[] = prioritizeTodayItems(
+    await Promise.all([
+      ...[
+        rawAttentionSessions.find((session) => session.status === 'IN_PROGRESS'),
+        rawAttentionSessions.find(
+          (session) => session.status === 'SCHEDULED' && session.scheduledAt >= now,
+        ),
+      ]
+        .filter((session): session is NonNullable<typeof session> => session !== undefined)
+        .map(async (session) => ({
+          id: session.id,
+          kind: (session.status === 'IN_PROGRESS'
+            ? 'ACTIVE_SESSION'
+            : 'FUTURE_SESSION') as TodayAttentionItem['kind'],
+          occurredAt: session.scheduledAt.toISOString(),
+          title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
+          href:
+            session.status === 'IN_PROGRESS'
+              ? `/app/sessions/${session.id}/live`
+              : `/app/sessions/${session.id}`,
+          ctaLabel: session.status === 'IN_PROGRESS' ? 'Resume session' : 'Prepare for session',
+        })),
+      ...rawNotesReady.map(async (session) => ({
+        id: session.id,
+        kind: 'NOTE_REVIEW' as const,
+        occurredAt: (session.endedAt ?? now).toISOString(),
+        title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
+        href: `/app/sessions/${session.id}`,
+        ctaLabel: 'Review note',
+      })),
+      ...rawClientResponses.map(async (response) => ({
+        id: response.id,
+        kind: 'CLIENT_RESPONSE' as const,
+        occurredAt: response.administeredAt.toISOString(),
+        title: await decryptClientField(therapist.id, response.client.fullNameEncrypted),
+        detail: `${response.instrumentKey} self-check-in completed`,
+        href: `/app/clients/${response.clientId}#journey`,
+        ctaLabel: 'Review response',
+      })),
+      ...rawAttentionSessions
+        .filter((session) => session.status === 'SCHEDULED' && session.scheduledAt < now)
+        .slice(0, 3)
+        .map(async (session) => ({
+          id: session.id,
+          kind: 'OVERDUE_WORK' as const,
+          occurredAt: session.scheduledAt.toISOString(),
+          title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
+          detail: 'Scheduled session still unresolved',
+          href: `/app/sessions/${session.id}`,
+          ctaLabel: 'Resolve session',
+        })),
+      ...rawOverdueAssignments.map(async (assignment) => ({
+        id: assignment.id,
+        kind: 'OVERDUE_WORK' as const,
+        occurredAt: (assignment.dueAt ?? now).toISOString(),
+        title: await decryptClientField(therapist.id, assignment.client.fullNameEncrypted),
+        detail: 'Exercise follow-up is overdue',
+        href: `/app/clients/${assignment.clientId}#journey`,
+        ctaLabel: 'Review exercise',
+      })),
+    ]),
+    now,
+  ).slice(0, 12);
+
   const nowAndUpcoming = todayRows.filter(
-    (s) => s.status === 'SCHEDULED' || s.status === 'IN_PROGRESS',
+    (s) => s.status === 'IN_PROGRESS' || (s.status === 'SCHEDULED' && s.scheduledAt >= now),
   );
   const doneToday = todayRows.filter((s) => s.status === 'COMPLETED');
   const otherToday = todayRows.filter(
@@ -165,6 +310,9 @@ export default async function TodayPage() {
           <ScheduleSessionPanel clients={clients} />
         </div>
       </header>
+
+      <FirstRunChecklist psychologistId={therapist.id} />
+      <TodayAttentionQueue items={attentionItems} />
 
       {hero ? (
         <section className="mt-6">
