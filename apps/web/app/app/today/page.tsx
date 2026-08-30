@@ -17,6 +17,7 @@ import {
 } from '@/lib/ist';
 import { decryptClientField } from '@/lib/client-pii';
 import { prioritizeTodayItems, type TodayAttentionItem } from '@/lib/today-priority';
+import { noteProcessingJourney } from '@/lib/note-processing-journey';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -52,7 +53,7 @@ export default async function TodayPage() {
     rawUpcomingRows,
     rawClients,
     rawAttentionSessions,
-    rawNotesReady,
+    rawNoteWork,
     rawClientResponses,
     rawOverdueAssignments,
   ] = await Promise.all([
@@ -111,16 +112,16 @@ export default async function TodayPage() {
       where: {
         psychologistId: therapist.id,
         status: 'COMPLETED',
-        noteDraft: { status: 'COMPLETED' },
-        therapyNote: null,
+        noteDraft: { status: { in: ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'FAILED'] } },
+        OR: [{ therapyNote: null }, { therapyNote: { is: { locked: false } } }],
         client: { deletedAt: null },
       },
       orderBy: { endedAt: 'asc' },
-      take: 5,
       select: {
         id: true,
         endedAt: true,
         clientId: true,
+        noteDraft: { select: { status: true } },
         client: { select: { fullNameEncrypted: true } },
       },
     }),
@@ -203,14 +204,23 @@ export default async function TodayPage() {
               : `/app/sessions/${session.id}`,
           ctaLabel: session.status === 'IN_PROGRESS' ? 'Resume session' : 'Prepare for session',
         })),
-      ...rawNotesReady.map(async (session) => ({
-        id: session.id,
-        kind: 'NOTE_REVIEW' as const,
-        occurredAt: (session.endedAt ?? now).toISOString(),
-        title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
-        href: `/app/sessions/${session.id}`,
-        ctaLabel: 'Review note',
-      })),
+      ...rawNoteWork.map(async (session) => {
+        const journey = noteProcessingJourney(session.noteDraft!.status);
+        return {
+          id: session.id,
+          kind: journey.queueKind,
+          occurredAt: (session.endedAt ?? now).toISOString(),
+          title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
+          detail: journey.message,
+          href: `/app/sessions/${session.id}`,
+          ctaLabel:
+            journey.state === 'NEEDS_ATTENTION'
+              ? 'Resume generation'
+              : journey.state === 'READY_TO_REVIEW'
+                ? 'Review & Close'
+                : 'View progress',
+        };
+      }),
       ...rawClientResponses.map(async (response) => ({
         id: response.id,
         kind: 'CLIENT_RESPONSE' as const,

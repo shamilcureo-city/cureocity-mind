@@ -76,7 +76,14 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   ),
 
   // Clinical documentation artifacts and disclosures.
+  policy('api/v1/sessions', ['POST'], ['VERTICAL_DOCUMENTATION'], 'write'),
   policy('api/v1/sessions/[id]', ['GET'], ['VERTICAL_DOCUMENTATION'], 'disclosure'),
+  policy(
+    'api/v1/sessions/[id]/mind-closeout',
+    ['PATCH'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION', 'CLINICAL_ANALYSIS'],
+    'write',
+  ),
   policy(
     'api/v1/sessions/[id]/therapy-note',
     ['GET'],

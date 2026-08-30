@@ -27,4 +27,18 @@ describe('Today attention priority', () => {
 
     expect(result.map(({ id }) => id)).toEqual(['next-session', 'old-overdue']);
   });
+
+  it('puts note failures before ready and generating notes', () => {
+    const now = new Date('2026-08-30T08:00:00.000Z');
+    const result = prioritizeTodayItems(
+      [
+        item('generating', 'NOTE_GENERATING', '2026-08-30T06:00:00.000Z'),
+        item('ready', 'NOTE_REVIEW', '2026-08-30T07:00:00.000Z'),
+        item('failed', 'NOTE_NEEDS_ATTENTION', '2026-08-30T08:00:00.000Z'),
+      ],
+      now,
+    );
+
+    expect(result.map(({ id }) => id)).toEqual(['failed', 'ready', 'generating']);
+  });
 });

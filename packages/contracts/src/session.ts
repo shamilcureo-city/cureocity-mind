@@ -18,6 +18,9 @@ export const CreateSessionInputSchema = z.object({
   /// was dead UI and every note generated in English.
   language: ClinicalLocaleSchema.optional(),
   scheduledAt: IsoDateTimeSchema,
+  /// Mind closeout source. When present, the create route atomically records
+  /// this new session as the source session's one follow-up.
+  sourceSessionId: CuidSchema.optional(),
   /// Sprint TS3 (F1) — the therapist is starting a session NOW (from the
   /// Record home / Today "Start session"), not booking a future slot. When
   /// true the create route reuses an existing SCHEDULED/IN_PROGRESS session

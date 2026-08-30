@@ -24,6 +24,7 @@ export const AuditActionSchema = z.enum([
   // the undo is its own audited transition back to SCHEDULED.
   'SESSION_NO_SHOW_UNDONE',
   'SESSION_RESCHEDULED',
+  'MIND_CLOSEOUT_DECISION_RECORDED',
   'AUDIO_CHUNK_UPLOADED',
   // Sprint 57 — transcribe-on-arrival.
   'TRANSCRIPT_SEGMENT_TRANSCRIBED',

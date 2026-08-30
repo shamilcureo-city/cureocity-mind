@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type {
   IntakeNoteV1,
@@ -131,6 +132,7 @@ export function NotesTab({
   noteTemplateId,
   signerName,
 }: Props) {
+  const router = useRouter();
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
   // notes use IntakeNoteV1, which doesn't yet have a sign DTO or edit
   // surface. Render-only for v1.
@@ -340,13 +342,14 @@ export function NotesTab({
       }
       const signed = (await res.json()) as TherapyNote;
       setPhase({ kind: 'signed', note: signed });
+      router.refresh();
     } catch (e) {
       setSignError((e as Error).message);
       setPendingShare(false);
     } finally {
       setSigning(false);
     }
-  }, [phase, sessionId]);
+  }, [phase, router, sessionId]);
 
   // Share from an unsigned draft: sign first, then open the share modal once
   // the sign lands (the share snapshot is built from the signed note).
@@ -645,6 +648,7 @@ export function NotesTab({
       return (
         <>
           <MockBackendBanner llmBackend={llmBackend} />
+          <CloseoutReceipt clientId={clientId} />
           <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
             <Card className="p-7">
               <NoteToolbar
@@ -713,6 +717,7 @@ export function NotesTab({
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
+        <CloseoutReceipt clientId={clientId} />
         <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
           <Card className="p-7">
             <NoteToolbar
@@ -986,6 +991,29 @@ export function NotesTab({
   );
 }
 
+function CloseoutReceipt({ clientId }: { clientId: string }) {
+  return (
+    <Card className="mb-6 border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-5">
+      <p className="font-serif text-xl">Note signed</p>
+      <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+        The signed note is saved. Complete any remaining Review &amp; Close decisions, continue with
+        today’s work, or return to this client.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-3 text-sm font-medium">
+        <Link href="/app/today" className="text-[var(--color-accent)] hover:underline">
+          Return to Today →
+        </Link>
+        <Link
+          href={`/app/clients/${clientId}`}
+          className="text-[var(--color-accent)] hover:underline"
+        >
+          Open client →
+        </Link>
+      </div>
+    </Card>
+  );
+}
+
 function GeneratingState({
   draft,
   slow,
@@ -1011,7 +1039,15 @@ function GeneratingState({
             <span className="inline-block animate-pulse">●</span> Writing your note…
           </p>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            Turning the recording into a clear, written note. This usually takes 10–30 seconds.
+            Turning the recording into a clear, written note. This usually takes 10–30 seconds. Your
+            recording is saved, so you may safely return to{' '}
+            <Link
+              href="/app/today"
+              className="font-medium text-[var(--color-accent)] hover:underline"
+            >
+              Today
+            </Link>{' '}
+            while this continues.
           </p>
         </div>
         <Badge tone="warn">{draft.status.replace(/_/g, ' ').toLowerCase()}</Badge>

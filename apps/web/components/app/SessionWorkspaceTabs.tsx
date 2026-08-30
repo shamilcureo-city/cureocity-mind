@@ -71,7 +71,10 @@ export function SessionWorkspaceTabs({
 
 function tabsForKind(kind: SessionKind): TabSpec[] {
   const base: TabSpec[] = [
-    { key: 'notes', label: kind === 'INTAKE' ? 'Intake Note' : 'Notes' },
+    {
+      key: 'notes',
+      label: kind === 'INTAKE' ? 'Review intake & close' : 'Review & Close',
+    },
     { key: 'copilot', label: 'AI Copilot' },
     // PC1 — the psychologist's own clinical document: the copilot proposes,
     // only what they add appears here. See PlanOfCareTab.

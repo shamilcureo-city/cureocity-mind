@@ -1010,8 +1010,8 @@ model Session {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client              Client               @relation(fields: [clientId], references: [id])
-  psychologist        Psychologist         @relation(fields: [psychologistId], references: [id])
+  client              Client                    @relation(fields: [clientId], references: [id])
+  psychologist        Psychologist              @relation(fields: [psychologistId], references: [id])
   audioChunks         AudioChunk[]
   transcriptSegments  TranscriptSegment[]
   geminiCallLogs      GeminiCallLog[]
@@ -1034,6 +1034,8 @@ model Session {
   problemLinks        SessionProblemLink[]
   // The Session Loop (SL1) — "what we agreed", in the client's words.
   agreements          SessionAgreement[]
+  mindCloseout        MindSessionCloseoutState?
+  sourceMindCloseout  MindSessionCloseoutState? @relation("MindCloseoutFollowUp")
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -1049,6 +1051,27 @@ model Session {
 // Body lives in S3/MinIO under s3Key; this row is metadata only.
 // Sprint 2 PR 2.
 // ============================================================================
+
+model MindSessionCloseoutState {
+  sessionId String @id
+
+  clinicalSuggestionsResolvedAt DateTime?
+  clinicalSuggestionsSkippedAt  DateTime?
+  agreementsSkippedAt           DateTime?
+  nextQuestionsSkippedAt        DateTime?
+  shareSkippedAt                DateTime?
+  followUpSkippedAt             DateTime?
+  followUpSessionId             String?   @unique
+  legacyImported                Boolean   @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  session         Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  followUpSession Session? @relation("MindCloseoutFollowUp", fields: [followUpSessionId], references: [id], onDelete: SetNull)
+
+  @@map("mind_session_closeout_states")
+}
 
 model AudioChunk {
   id         String @id @default(cuid())
@@ -2825,6 +2848,7 @@ enum AuditAction {
   // TS7.5 — the audited undo back to SCHEDULED.
   SESSION_NO_SHOW_UNDONE
   SESSION_RESCHEDULED
+  MIND_CLOSEOUT_DECISION_RECORDED
 
   // Audio + notes (scribe-service, Sprint 2)
   AUDIO_CHUNK_UPLOADED
