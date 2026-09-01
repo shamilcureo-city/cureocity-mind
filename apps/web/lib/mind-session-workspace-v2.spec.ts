@@ -8,7 +8,7 @@ const read = (path: string) => readFileSync(join(root, path), 'utf8');
 describe('Mind session workspace v2', () => {
   it('exposes only four session-owned tabs', () => {
     const tabs = read('components/app/SessionWorkspaceTabs.tsx');
-    for (const label of ['Session review', 'Note', 'Transcript', 'Session details']) {
+    for (const label of ['Session review', 'Note', 'Transcript', 'More']) {
       expect(tabs).toContain(`label: '${label}'`);
     }
     expect(tabs).not.toContain("label: 'AI Copilot'");
@@ -42,8 +42,9 @@ describe('Mind session workspace v2', () => {
   it('redirects old session-local bookmarks to canonical tabs', () => {
     const page = read('app/app/sessions/[id]/page.tsx');
     expect(page).toContain(
-      "rawTab === 'copilot' && (!rawSub || ['session', 'close', 'review'].includes(rawSub))",
+      "rawTab === 'copilot' && (!rawSub || ['session', 'review'].includes(rawSub))",
     );
+    expect(page).toContain("rawTab === 'copilot' && rawSub === 'close'");
     expect(page).toContain('redirect(`/app/sessions/${id}`)');
     expect(page).toContain("rawTab === 'clinical-brief'");
     expect(page).toContain("rawTab === 'notes'");

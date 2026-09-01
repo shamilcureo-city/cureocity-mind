@@ -18,7 +18,7 @@ const TABS: TabSpec[] = [
   { key: 'review', label: 'Session review' },
   { key: 'note', label: 'Note' },
   { key: 'transcript', label: 'Transcript' },
-  { key: 'details', label: 'Session details' },
+  { key: 'details', label: 'More' },
 ];
 
 /** Mind keeps longitudinal care on the client and visit evidence on the session. */

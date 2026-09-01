@@ -40,6 +40,9 @@ export async function GET(
 ): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
+  if (auth.value.user.vertical !== 'THERAPIST') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   const { id: clientId } = await params;
   const query = parseQuery(req.url, GeneratePreSessionBriefQuerySchema);
   if (!query.ok) return query.response;
