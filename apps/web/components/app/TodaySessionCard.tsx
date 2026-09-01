@@ -319,7 +319,7 @@ export function TodaySessionCard({
             // TS7.4 — measurement debt is visible where the day happens; the
             // link lands on the Journey card's one-tap send.
             <Link
-              href={`/app/clients/${session.clientId}#care-measures`}
+              href={`/app/clients/${session.clientId}/journey#measure-${dueMeasure.toLowerCase().replace('-', '')}`}
               className="rounded-full bg-[var(--color-warn-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-warn)] hover:underline"
             >
               {dueMeasure} due ▸
@@ -401,7 +401,7 @@ export function TodaySessionCard({
               // TS7.2 — the unsigned-note debt stays visible all day; the
               // link lands on the workspace where the Sign & send bar waits.
               <Link
-                href={`/app/sessions/${session.id}`}
+                href={`/app/sessions/${session.id}?tab=note`}
                 className="rounded-full border border-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
               >
                 Sign ▸

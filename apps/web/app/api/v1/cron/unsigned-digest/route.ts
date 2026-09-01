@@ -81,7 +81,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           `You have ${entry.count} completed ${plural} with a generated note that is still unsigned after ${STALE_AFTER_HOURS} hours.`,
           'An unsigned note is not yet part of the clinical record — a two-minute review closes it.',
           '',
-          `Start with the oldest: ${appUrl}/app/sessions/${entry.oldestSessionId}`,
+          `Start with the oldest: ${appUrl}/app/sessions/${entry.oldestSessionId}?tab=note`,
           '',
           '— Cureocity Mind',
         ].join('\n'),

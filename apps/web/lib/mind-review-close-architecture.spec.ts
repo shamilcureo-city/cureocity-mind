@@ -13,7 +13,7 @@ describe('Mind Review & Close architecture', () => {
 
     expect(page).toContain('<MindSessionCloseout');
     expect(page).toContain('deriveMindSessionCloseout');
-    expect(tabs).toContain("label: kind === 'INTAKE' ? 'Review intake & close' : 'Review & Close'");
+    expect(tabs).toContain("{ key: 'note', label: 'Note' }");
     expect(closeout).toContain('Open full session record');
   });
 
@@ -102,8 +102,8 @@ describe('Mind Review & Close architecture', () => {
     const page = read('app/app/sessions/[id]/page.tsx');
     const doctor = read('components/app/DoctorEncounterPanel.tsx');
 
-    expect(page).toContain("close: 'session'");
-    expect(page).toContain("review: 'session'");
+    expect(page).toContain("raw === 'notes' || raw === 'reflection'");
+    expect(page).toContain("rawTab === 'copilot' && rawSub === 'progress'");
     expect(page).toContain("therapist.vertical === 'DOCTOR'");
     expect(page).toContain("redirect('/app/clinic')");
     expect(doctor).toContain('<ReviewAndSign');

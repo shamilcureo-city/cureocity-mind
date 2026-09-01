@@ -73,6 +73,8 @@ export const PrepareSummaryV1Schema = z.object({
    * `briefIsStale`).
    */
   cachedBrief: PreSessionBriefV1Schema.nullable(),
+  /** Persisted generation time of cachedBrief; null when no brief exists. */
+  briefGeneratedAt: IsoDateTimeSchema.nullable().default(null),
   /**
    * True when the cached brief's `lastSessionId` no longer points at
    * the latest completed session — i.e. the brief is from before the

@@ -24,7 +24,7 @@ interface Props {
    * assessment ledger above; shown here so the two never read as the same list. */
   carried: CarriedQuestion[];
   /** Link to the Review sub-tab where carried questions are chosen. */
-  reviewHref: string;
+  reviewHref: string | null;
 }
 
 const RANK_META: Record<CareQuestionRank, { label: string; chip: string }> = {
@@ -83,7 +83,7 @@ export function CareNextSessionPanel({ questions, cadence, clientId, carried, re
 
       {/* The assessment ledger — the engine's ranked list of what's still
           OPEN (durable AssessmentItems). Not the therapist's carry-picks. */}
-      <div className="mt-5">
+      <div id="care-questions" className="mt-5 scroll-mt-24">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
             Still open to establish
@@ -144,7 +144,7 @@ function CarriedForBrief({
   reviewHref,
 }: {
   carried: CarriedQuestion[];
-  reviewHref: string;
+  reviewHref: string | null;
 }) {
   return (
     <div className="mt-6 border-t border-[var(--color-line-soft)] pt-4">
@@ -152,12 +152,18 @@ function CarriedForBrief({
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
           Carried for the opening brief
         </p>
-        <Link
-          href={reviewHref}
-          className="text-xs font-medium text-[var(--color-accent)] hover:underline"
-        >
-          {carried.length > 0 ? 'Change on Review →' : 'Pick on Review →'}
-        </Link>
+        {reviewHref ? (
+          <Link
+            href={reviewHref}
+            className="text-xs font-medium text-[var(--color-accent)] hover:underline"
+          >
+            {carried.length > 0 ? 'Change on Review →' : 'Pick on Review →'}
+          </Link>
+        ) : (
+          <span className="text-xs text-[var(--color-ink-3)]">
+            Available after the first completed session
+          </span>
+        )}
       </div>
 
       {carried.length === 0 ? (

@@ -12,6 +12,7 @@ import {
   type PlanOfCareData,
   type PocOutcome,
 } from '@/components/app/PlanOfCareSheet';
+import { PlanToolsDisclosure } from '@/components/app/PlanToolsDisclosure';
 import { ConceptualMapTab } from '@/components/app/ConceptualMapTab';
 import { DiagnosisHistoryCard } from '@/components/app/DiagnosisHistoryCard';
 import { FormulationCard, type FormulationCardData } from '@/components/app/FormulationCard';
@@ -24,14 +25,14 @@ import { isSuggestionApplied } from '@/lib/formulation-applied';
 import { prisma } from '@/lib/prisma';
 
 interface Props {
-  sessionId: string;
+  sessionId: string | null;
   clientId: string;
   psychologistId: string;
   clientName: string;
   clientHasContactPhone: boolean;
   clientHasContactEmail: boolean;
   preferredLanguage: string;
-  sessionKind: SessionKind;
+  sessionKind?: SessionKind;
 }
 
 const LIBRARY_THERAPIES: string[] = [
@@ -60,7 +61,7 @@ const INSTRUMENT_LABEL: Record<string, string> = { PHQ9: 'PHQ-9', GAD7: 'GAD-7' 
  * (scripts, formulation editor, diagnosis history, conceptual map, phase
  * tracker) that used to be the copilot's Plan sub.
  */
-export async function PlanOfCareTab({
+export async function ClientPlanOfCareContent({
   sessionId,
   clientId,
   psychologistId,
@@ -385,10 +386,7 @@ export async function PlanOfCareTab({
 
       {/* id lets the sheet's per-section "Edit" actions open + scroll to the
           right tool (formulation, diagnosis history) without leaving the tab. */}
-      <details
-        id="poc-tools"
-        className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-4 print:hidden"
-      >
+      <PlanToolsDisclosure>
         <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
           Tools — scripts, formulation editor, diagnosis history, conceptual map
         </summary>
@@ -412,7 +410,9 @@ export async function PlanOfCareTab({
             <WorkflowSection clientId={clientId} />
           </details>
         </div>
-      </details>
+      </PlanToolsDisclosure>
     </div>
   );
 }
+
+export const PlanOfCareTab = ClientPlanOfCareContent;

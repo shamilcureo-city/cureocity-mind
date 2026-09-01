@@ -110,7 +110,7 @@ export default async function NotesDuePage() {
                   {g.rows.map((r) => (
                     <li key={r.id}>
                       <Link
-                        href={`/app/sessions/${r.id}`}
+                        href={`/app/sessions/${r.id}?tab=note`}
                         className="flex items-center justify-between gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
                       >
                         <div className="min-w-0">

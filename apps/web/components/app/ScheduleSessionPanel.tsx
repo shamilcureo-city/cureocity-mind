@@ -22,6 +22,7 @@ interface Props {
   closeoutMode?: boolean;
   sourceSessionId?: string;
   followUpState?: 'PENDING' | 'COMPLETE' | 'SKIPPED';
+  triggerLabelOverride?: string;
 }
 
 /**
@@ -43,6 +44,7 @@ export function ScheduleSessionPanel({
   closeoutMode = false,
   sourceSessionId,
   followUpState = 'PENDING',
+  triggerLabelOverride,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -50,11 +52,12 @@ export function ScheduleSessionPanel({
     followUpState === 'COMPLETE' ? 'scheduled' : followUpState === 'SKIPPED' ? 'skipped' : null,
   );
   const triggerLabel =
-    outcome === 'scheduled'
+    triggerLabelOverride ??
+    (outcome === 'scheduled'
       ? 'Follow-up scheduled'
       : closeoutMode
         ? 'Schedule next session'
-        : 'Schedule session';
+        : 'Schedule session');
 
   return (
     <>

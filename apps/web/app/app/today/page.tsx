@@ -212,7 +212,7 @@ export default async function TodayPage() {
           occurredAt: (session.endedAt ?? now).toISOString(),
           title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
           detail: journey.message,
-          href: `/app/sessions/${session.id}`,
+          href: `/app/sessions/${session.id}?tab=note`,
           ctaLabel:
             journey.state === 'NEEDS_ATTENTION'
               ? 'Resume generation'
@@ -227,7 +227,7 @@ export default async function TodayPage() {
         occurredAt: response.administeredAt.toISOString(),
         title: await decryptClientField(therapist.id, response.client.fullNameEncrypted),
         detail: `${response.instrumentKey} self-check-in completed`,
-        href: `/app/clients/${response.clientId}#journey`,
+        href: `/app/clients/${response.clientId}/journey#measure-${response.instrumentKey.toLowerCase()}`,
         ctaLabel: 'Review response',
       })),
       ...rawAttentionSessions
@@ -248,7 +248,7 @@ export default async function TodayPage() {
         occurredAt: (assignment.dueAt ?? now).toISOString(),
         title: await decryptClientField(therapist.id, assignment.client.fullNameEncrypted),
         detail: 'Exercise follow-up is overdue',
-        href: `/app/clients/${assignment.clientId}#journey`,
+        href: `/app/clients/${assignment.clientId}/journey`,
         ctaLabel: 'Review exercise',
       })),
     ]),

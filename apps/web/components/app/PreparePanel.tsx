@@ -8,6 +8,7 @@ import type {
   SessionAgreementDto,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { preparationFreshness } from '@/lib/preparation-freshness';
 import { DiagnosisChips, QuestionsChecklist } from './SessionDirection';
 
 /**
@@ -112,115 +113,180 @@ function PrepareBody({
   onGenerate: () => void | Promise<void>;
   generating: boolean;
 }) {
-  const { cachedBrief, briefIsStale, journey, homework, openCrises, lastCompletedSessionId } = data;
+  const { cachedBrief, briefIsStale, journey, homework, openCrises } = data;
+  const freshness = preparationFreshness(data.briefGeneratedAt, briefIsStale);
+
   return (
     <div className="space-y-4 text-sm">
-      {openCrises.length > 0 && (
-        <div className="rounded-xl border-2 border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-xs text-[var(--color-warn)]">
-          <strong>Open crisis flag(s) — start with a safety check:</strong>
-          <ul className="mt-1 list-disc pl-5">
-            {openCrises.map((c) => (
-              <li key={c.kind}>
-                {c.kind.replace(/_/g, ' ')} · {c.severity} · last seen{' '}
-                {new Date(c.lastSeenAt).toLocaleDateString('en-IN', {
-                  month: 'short',
-                  day: 'numeric',
-                })}
+      <section aria-labelledby="prepare-safety">
+        <p
+          id="prepare-safety"
+          className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+        >
+          Safety
+        </p>
+        {openCrises.length > 0 ? (
+          <div className="mt-1.5 rounded-xl border-2 border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-xs text-[var(--color-warn)]">
+            <strong>Open crisis flag(s) — start with a safety check:</strong>
+            <ul className="mt-1 list-disc pl-5">
+              {openCrises.map((crisis) => (
+                <li key={crisis.kind}>
+                  {crisis.kind.replace(/_/g, ' ')} · {crisis.severity} · last seen{' '}
+                  {new Date(crisis.lastSeenAt).toLocaleDateString('en-IN', {
+                    month: 'short',
+                    day: 'numeric',
+                  })}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-[var(--color-ink-3)]">No open high-risk crisis flag.</p>
+        )}
+      </section>
+
+      <section aria-labelledby="prepare-change">
+        <p
+          id="prepare-change"
+          className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+        >
+          What changed
+        </p>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-2)]">
+          {cachedBrief?.lastSessionRecap || 'No prior session recap yet.'}
+        </p>
+        <div className="mt-2 flex flex-wrap items-baseline gap-2">
+          {journey.instrumentChanges.map((change) => (
+            <span
+              key={change.instrumentKey}
+              className="rounded-full bg-[var(--color-surface)] px-3 py-0.5 text-xs text-[var(--color-ink-2)]"
+            >
+              {instrumentLabel(change.instrumentKey)} {change.baselineScore}→{change.latestScore} ·{' '}
+              {verdictChip(change.verdict)}
+            </span>
+          ))}
+          {journey.instrumentChanges.length === 0 && (
+            <span className="text-xs text-[var(--color-ink-3)]">
+              No repeated outcome measure yet.
+            </span>
+          )}
+        </div>
+      </section>
+
+      <section aria-labelledby="prepare-decisions">
+        <p
+          id="prepare-decisions"
+          className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+        >
+          Decisions already made
+        </p>
+        <div className="mt-2 space-y-3">
+          {data.lastAgreements.length > 0 && <AgreementsThread agreements={data.lastAgreements} />}
+          {data.formulationSnapshot && (
+            <div className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+              <p className="text-xs font-medium">Formulation v{data.formulationSnapshot.version}</p>
+              {data.formulationSnapshot.headline && (
+                <p className="mt-1 text-xs text-[var(--color-ink-2)]">
+                  {data.formulationSnapshot.headline}
+                </p>
+              )}
+              {data.formulationSnapshot.cycleLine && (
+                <p className="mt-1 text-[11px] text-[var(--color-ink-3)]">
+                  {data.formulationSnapshot.cycleLine}
+                </p>
+              )}
+            </div>
+          )}
+          <DiagnosisChips diagnoses={data.confirmedDiagnoses} />
+          <div className="flex flex-wrap items-baseline gap-2">
+            <Badge tone="muted">{journey.stage.replace(/_/g, ' ').toLowerCase()}</Badge>
+            {journey.activePlan && (
+              <span className="text-xs text-[var(--color-ink-3)]">
+                Plan v{journey.activePlan.version} · {journey.activePlan.goalsAchieved}/
+                {journey.activePlan.goalsTotal} goals
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="prepare-questions">
+        <p
+          id="prepare-questions"
+          className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+        >
+          Questions to carry
+        </p>
+        <QuestionsChecklist questions={data.carriedQuestions} />
+      </section>
+
+      <section aria-labelledby="prepare-homework">
+        <p
+          id="prepare-homework"
+          className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+        >
+          Homework follow-up
+        </p>
+        {homework.length > 0 ? (
+          <ul className="mt-1 space-y-1 text-xs text-[var(--color-ink-2)]">
+            {homework.slice(0, 3).map((item) => (
+              <li key={item.id} className="flex items-baseline gap-2">
+                <Badge tone={homeworkTone(item.status)}>{item.status.toLowerCase()}</Badge>
+                <span className="truncate">{item.description}</span>
               </li>
             ))}
           </ul>
-        </div>
-      )}
-
-      {/* SL2 — the thread: what was agreed last session, marked at a glance
-          before the client walks in. Follow-up persists to the agreement row
-          (the Close surface's counterpart). */}
-      {data.lastAgreements.length > 0 && <AgreementsThread agreements={data.lastAgreements} />}
-
-      {data.formulationSnapshot && (
-        <section className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
-          <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Formulation v{data.formulationSnapshot.version}
-          </p>
-          {data.formulationSnapshot.headline && (
-            <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-2)]">
-              {data.formulationSnapshot.headline}
-            </p>
-          )}
-          {data.formulationSnapshot.cycleLine && (
-            <p className="mt-1 text-[11px] text-[var(--color-ink-3)]">
-              {data.formulationSnapshot.cycleLine}
-            </p>
-          )}
-        </section>
-      )}
-
-      {/* TE2 — what we decided this is. Previously the prepare view showed the
-          plan and the scores but never the diagnoses behind them. */}
-      <DiagnosisChips diagnoses={data.confirmedDiagnoses} />
-
-      <section className="flex flex-wrap items-baseline gap-2">
-        <Badge tone="muted">{journey.stage.replace(/_/g, ' ').toLowerCase()}</Badge>
-        {journey.activePlan && (
-          <span className="text-xs text-[var(--color-ink-3)]">
-            Plan v{journey.activePlan.version} · {journey.activePlan.goalsAchieved}/
-            {journey.activePlan.goalsTotal} goals
-          </span>
+        ) : (
+          <p className="mt-1 text-xs text-[var(--color-ink-3)]">No recent homework to follow up.</p>
         )}
-        {journey.instrumentChanges.map((c) => (
-          <span
-            key={c.instrumentKey}
-            className="rounded-full bg-[var(--color-surface)] px-3 py-0.5 text-xs text-[var(--color-ink-2)]"
-          >
-            {instrumentLabel(c.instrumentKey)} {c.baselineScore}→{c.latestScore} ·{' '}
-            {verdictChip(c.verdict)}
-          </span>
-        ))}
       </section>
 
-      {journey.nextBestAction && (
-        <section className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
-          <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Next best action
-          </p>
-          <p className="mt-1 font-medium text-[var(--color-ink)]">{journey.nextBestAction.title}</p>
-          <p className="mt-0.5 text-xs text-[var(--color-ink-2)]">
-            {journey.nextBestAction.detail}
-          </p>
-          {journey.nextBestAction.ctaHref && (
-            <Link
-              href={journey.nextBestAction.ctaHref}
-              className="mt-2 inline-block text-xs font-medium text-[var(--color-accent)] hover:underline"
-            >
-              {journey.nextBestAction.ctaLabel ?? 'Open'} →
-            </Link>
-          )}
-        </section>
-      )}
-
-      <section>
-        <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
-          <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Pre-session brief
+      <section aria-labelledby="prepare-direction">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p
+            id="prepare-direction"
+            className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
+          >
+            Suggested direction
           </p>
           <div className="flex items-center gap-2">
-            {cachedBrief && briefIsStale && (
-              <span className="text-[10px] uppercase tracking-wide text-[var(--color-warn)]">
-                Stale — from before last session
-              </span>
-            )}
+            <span
+              className={
+                freshness.tone === 'stale'
+                  ? 'text-[10px] font-medium text-[var(--color-warn)]'
+                  : 'text-[10px] text-[var(--color-ink-3)]'
+              }
+            >
+              {freshness.label}
+            </span>
             <button
               type="button"
               onClick={onGenerate}
               disabled={generating}
               className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-medium text-[var(--color-ink-2)] hover:text-[var(--color-ink)] disabled:opacity-60"
             >
-              {generating ? 'Generating…' : cachedBrief ? 'Regenerate' : 'Generate fresh brief'}
+              {generating ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
         </div>
+        {journey.nextBestAction && (
+          <div className="mt-2 rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+            <p className="font-medium text-[var(--color-ink)]">{journey.nextBestAction.title}</p>
+            <p className="mt-0.5 text-xs text-[var(--color-ink-2)]">
+              {journey.nextBestAction.detail}
+            </p>
+            {journey.nextBestAction.ctaHref && (
+              <Link
+                href={journey.nextBestAction.ctaHref}
+                className="mt-2 inline-block text-xs font-medium text-[var(--color-accent)] hover:underline"
+              >
+                {journey.nextBestAction.ctaLabel ?? 'Open'} →
+              </Link>
+            )}
+          </div>
+        )}
         {cachedBrief ? (
-          <div className="space-y-2 rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+          <div className="mt-2 space-y-2 rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
             <p className="font-serif text-[var(--color-ink)]">{cachedBrief.contextLine}</p>
             <p className="text-xs leading-relaxed text-[var(--color-ink-2)]">
               {cachedBrief.todaysFocus}
@@ -232,45 +298,12 @@ function PrepareBody({
             )}
           </div>
         ) : (
-          <p className="text-xs text-[var(--color-ink-3)]">
-            No cached brief yet. Generate one to see context for today&apos;s session.
+          <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+            Refresh to generate a grounded pre-session brief.
           </p>
         )}
+        <TodayIntent clientId={data.clientId} />
       </section>
-
-      {/* TE2 — the questions carried from the last review. They already fed
-          the brief's digest and seed the live copilot; this is the first
-          surface that lets the therapist actually tick them off. */}
-      <QuestionsChecklist questions={data.carriedQuestions} />
-
-      {homework.length > 0 && (
-        <section>
-          <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Recent homework
-          </p>
-          <ul className="mt-1 space-y-1 text-xs text-[var(--color-ink-2)]">
-            {homework.slice(0, 3).map((h) => (
-              <li key={h.id} className="flex items-baseline gap-2">
-                <Badge tone={homeworkTone(h.status)}>{h.status.toLowerCase()}</Badge>
-                <span className="truncate">{h.description}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <TodayIntent clientId={data.clientId} />
-
-      {lastCompletedSessionId && (
-        <div className="border-t border-[var(--color-line-soft)] pt-3">
-          <Link
-            href={`/app/sessions/${lastCompletedSessionId}?tab=copilot`}
-            className="text-xs font-medium text-[var(--color-accent)] hover:underline"
-          >
-            Open last session&apos;s copilot →
-          </Link>
-        </div>
-      )}
     </div>
   );
 }

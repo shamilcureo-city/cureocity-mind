@@ -137,7 +137,7 @@ function _AttentionSection({ attention }: { attention: AttentionData }) {
             {deteriorating.map((d, i) => (
               <AttentionRow
                 key={`${d.clientId}-${d.instrumentKey}-${i}`}
-                href={`/app/clients/${d.clientId}#instruments`}
+                href={`/app/clients/${d.clientId}/journey#measure-${d.instrumentKey.toLowerCase()}`}
                 name={d.clientName}
                 meta={`${d.instrumentKey} worsened by ${Math.abs(d.delta)} pt${Math.abs(d.delta) === 1 ? '' : 's'}`}
                 tone="warn"
@@ -152,7 +152,7 @@ function _AttentionSection({ attention }: { attention: AttentionData }) {
             {unsignedNotes.map((n) => (
               <AttentionRow
                 key={n.sessionId}
-                href={`/app/sessions/${n.sessionId}`}
+                href={`/app/sessions/${n.sessionId}?tab=note`}
                 name={n.clientName}
                 meta={
                   n.sessionEndedAt
@@ -170,7 +170,7 @@ function _AttentionSection({ attention }: { attention: AttentionData }) {
             {measuresDue.map((m, i) => (
               <AttentionRow
                 key={`${m.clientId}-${i}`}
-                href={`/app/clients/${m.clientId}#instruments`}
+                href={`/app/clients/${m.clientId}/journey#measure-phq9`}
                 name={m.clientName}
                 meta={
                   m.reason === 'REVIEW_DUE'

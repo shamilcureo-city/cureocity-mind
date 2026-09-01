@@ -266,8 +266,9 @@ export function CareMeasurePanel({
             const isActive = activeKey === m.instrumentKey;
             return (
               <li
+                id={`measure-${m.instrumentKey.toLowerCase()}`}
                 key={m.instrumentKey}
-                className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4"
+                className="scroll-mt-24 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-2">

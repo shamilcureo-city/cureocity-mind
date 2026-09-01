@@ -56,7 +56,7 @@ export function MindSessionCloseout({
             </p>
           </div>
           <Link
-            href={`/app/sessions/${sessionId}?tab=copilot&sub=session`}
+            href={`/app/sessions/${sessionId}`}
             className="text-sm font-medium text-[var(--color-accent)] hover:underline"
           >
             Open full session record →

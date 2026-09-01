@@ -36,7 +36,7 @@ export function WhereWeLeftOff({
       </div>
 
       <Link
-        href={`/app/sessions/${p.lastSession.id}?tab=notes`}
+        href={`/app/sessions/${p.lastSession.id}?tab=note`}
         className="group mt-3 -mx-3 block rounded-xl border border-transparent px-3 py-2 transition-colors hover:border-[var(--color-line-soft)] hover:bg-[var(--color-surface-soft)]"
       >
         <div className="flex items-center justify-between gap-2">
