@@ -36,6 +36,7 @@ interface Props {
   preferredLanguage: string;
   sessionKind: SessionKind;
   sub: CopilotSubKey;
+  showSubTabs?: boolean;
 }
 
 /**
@@ -69,10 +70,11 @@ export async function AICopilotTab({
   preferredLanguage,
   sessionKind,
   sub,
+  showSubTabs = true,
 }: Props) {
   return (
     <div className="space-y-6">
-      <AICopilotSubTabs sessionId={sessionId} active={sub} />
+      {showSubTabs && <AICopilotSubTabs sessionId={sessionId} active={sub} />}
       {sub === 'session' && (
         <SessionSub
           sessionId={sessionId}
@@ -86,7 +88,7 @@ export async function AICopilotTab({
         />
       )}
       {sub === 'progress' && (
-        <JourneySub
+        <ClientJourneyContent
           sessionId={sessionId}
           clientId={clientId}
           psychologistId={psychologistId}
@@ -308,7 +310,7 @@ async function SessionSub({
  *      questions + the AI brief's unique fields (its crisis banner and
  *      score list are deliberately not rendered — they have homes above).
  */
-async function JourneySub({
+export async function ClientJourneyContent({
   sessionId,
   clientId,
   psychologistId,
@@ -316,7 +318,7 @@ async function JourneySub({
   clientHasContactPhone,
   clientHasContactEmail,
 }: {
-  sessionId: string;
+  sessionId: string | null;
   clientId: string;
   psychologistId: string;
   clientName: string;
@@ -342,7 +344,7 @@ async function JourneySub({
   ]);
 
   const carried = z.array(CarriedQuestionSchema).safeParse(clientRow?.carriedQuestions);
-  const reviewHref = `/app/sessions/${sessionId}?tab=copilot&sub=session`;
+  const reviewHref = sessionId ? `/app/sessions/${sessionId}` : null;
 
   if (!care) {
     return (
@@ -368,7 +370,7 @@ async function JourneySub({
         clientName={clientName}
         clientHasContactPhone={clientHasContactPhone}
         clientHasContactEmail={clientHasContactEmail}
-        planHref={`/app/sessions/${sessionId}?tab=copilot&sub=plan`}
+        planHref={`/app/clients/${clientId}/plan`}
       />
 
       <CareMeasurePanel

@@ -242,7 +242,7 @@ function deriveNextBestAction(input: {
   instrumentChanges: InstrumentChange[];
   dischargeReady: boolean;
 }): NextBestAction | null {
-  const instrumentsAnchor = `/app/clients/${input.clientId}#instruments`;
+  const instrumentsAnchor = `/app/clients/${input.clientId}/journey#measure-phq9`;
 
   // 1. No sessions yet — record the intake.
   if (input.completedCount === 0) {
@@ -293,9 +293,7 @@ function deriveNextBestAction(input: {
     // Sprint 52 → TSC-V2 — link the "not improving" action to the Case
     // Consult, now in the Journey page's "story so far" section. That's
     // the exact "I'm stuck" moment the consult was built for.
-    const consultHref = input.lastCompletedSessionId
-      ? `/app/sessions/${input.lastCompletedSessionId}?tab=copilot&sub=progress`
-      : null;
+    const consultHref = `/app/clients/${input.clientId}/journey#care-consult`;
     return {
       kind: 'REVIEW_PLAN_NOT_IMPROVING',
       tone: 'warn',

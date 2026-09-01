@@ -59,8 +59,8 @@ export interface PocOutcome {
 
 export interface PlanOfCareData {
   clientId: string;
-  /** Used to link section 4 back to the copilot's plan editor (?tab=copilot). */
-  sessionId: string;
+  /** Optional source session for legacy/session-owned callers. */
+  sessionId: string | null;
   clientName: string;
   clientSince: string | null;
   hasContactPhone: boolean;
@@ -367,7 +367,7 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
             std="SMART · each objective measured"
             action={
               <SectionLink
-                href={`/app/sessions/${data.sessionId}?tab=copilot`}
+                href={`/app/clients/${data.clientId}/plan#poc-tools`}
                 label="Edit plan"
                 hint="Change the goals, measures or interventions — opens the plan editor in AI Copilot. Edits create a new plan version; nothing is overwritten."
               />
@@ -428,7 +428,7 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
             std="reliable change per Jacobson–Truax"
             action={
               <SectionLink
-                href={`/app/sessions/${data.sessionId}?tab=copilot`}
+                href={`/app/clients/${data.clientId}/journey#measure-phq9`}
                 label="Record scores"
                 hint="Administer or record PHQ-9 / GAD-7 — opens measures in AI Copilot. Verdicts recompute automatically."
               />
@@ -564,7 +564,7 @@ export function PlanOfCareSheet({ data }: { data: PlanOfCareData }) {
             std="episode of care, not open-ended"
             action={
               <SectionLink
-                href={`/app/sessions/${data.sessionId}?tab=copilot`}
+                href={`/app/clients/${data.clientId}/journey`}
                 label="Review episode"
                 hint="Review progress or start discharge — opens the care board in AI Copilot."
               />

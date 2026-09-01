@@ -43,7 +43,7 @@ export function VirtualSessionShell({
   modality: string | null;
 }) {
   const router = useRouter();
-  const workspaceHref = `/app/sessions/${sessionId}?tab=copilot`;
+  const workspaceHref = `/app/sessions/${sessionId}`;
 
   const [joinUrl, setJoinUrl] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);

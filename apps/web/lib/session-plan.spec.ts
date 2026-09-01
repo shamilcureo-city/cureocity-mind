@@ -9,6 +9,7 @@ function base(): PrepareSummaryV1 {
     version: 'V1',
     clientId: 'c1',
     cachedBrief: null,
+    briefGeneratedAt: null,
     briefIsStale: false,
     journey: {
       stage: 'ACTIVE_TREATMENT',

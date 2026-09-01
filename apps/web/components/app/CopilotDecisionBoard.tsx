@@ -432,7 +432,7 @@ export function CopilotDecisionBoard({
 
   // ----- pre-reading states -----
 
-  const measuresHref = `/app/sessions/${sessionId}?tab=copilot&sub=progress`;
+  const measuresHref = `/app/clients/${clientId}/journey#measure-phq9`;
   const readingNoun = isIntake ? 'initial assessment' : 'clinical brief';
 
   if (status === null || (status === 'COMPLETED' && !data)) {
@@ -628,6 +628,7 @@ export function CopilotDecisionBoard({
 
               <ImpressionStep
                 sessionId={sessionId}
+                clientId={clientId}
                 isIntake={isIntake}
                 impression={data.impression}
                 fullFormulation={data.fullFormulation}
@@ -672,7 +673,7 @@ export function CopilotDecisionBoard({
                 therapies={data.therapies}
                 confirmation={confirmations?.plan ?? null}
                 recordPlan={record.plan}
-                planHref={`/app/sessions/${sessionId}?tab=plan-of-care`}
+                planHref={`/app/clients/${clientId}/plan`}
                 onAccept={() => patchSection('plan', { action: 'accept' })}
                 onModify={(edits, reason) =>
                   patchSection('plan', { action: 'modify', reason, edits })
@@ -952,6 +953,7 @@ function SafetyStep({
 
 function ImpressionStep({
   sessionId,
+  clientId,
   isIntake,
   impression,
   fullFormulation,
@@ -965,6 +967,7 @@ function ImpressionStep({
   onAcceptIntake,
 }: {
   sessionId: string;
+  clientId: string;
   isIntake: boolean;
   impression: string;
   fullFormulation: string | null;
@@ -1373,7 +1376,7 @@ function ImpressionStep({
             <p className="mt-2 text-xs text-[var(--color-ink-3)]">
               ✓ {fAccepted.size} accepted — the formulation versioned on the{' '}
               <Link
-                href={`/app/sessions/${sessionId}?tab=plan-of-care`}
+                href={`/app/clients/${clientId}/plan`}
                 className="font-medium text-[var(--color-accent)] hover:underline"
               >
                 Plan of care tab
@@ -1730,7 +1733,7 @@ function AskNextStep({
         Ticked questions seed the next pre-session brief. The full open-questions ledger lives on
         the{' '}
         <Link
-          href={`/app/sessions/${sessionId}?tab=copilot&sub=progress`}
+          href={`/app/clients/${clientId}/journey#care-questions`}
           className="font-medium text-[var(--color-accent)] hover:underline"
         >
           Progress tab
@@ -2679,7 +2682,7 @@ function WrapUpSignStep({
                 <b>Note re-opened for editing.</b> The earlier signature is superseded until you
                 re-sign — finish the edit and sign again on the{' '}
                 <Link
-                  href={`/app/sessions/${sessionId}`}
+                  href={`/app/sessions/${sessionId}?tab=note`}
                   className="font-semibold underline underline-offset-2"
                 >
                   Notes tab →
@@ -2700,7 +2703,7 @@ function WrapUpSignStep({
             ) : (
               <div className="flex flex-wrap items-center gap-3">
                 <Link
-                  href={`/app/sessions/${sessionId}`}
+                  href={`/app/sessions/${sessionId}?tab=note`}
                   className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--color-accent)] px-5 text-sm font-semibold text-white"
                 >
                   Continue to Review &amp; Close

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -11,9 +11,12 @@ import { DataRightsCard } from '@/components/app/DataRightsCard';
 import { LetterComposer } from '@/components/app/LetterComposer';
 import { ProblemList } from '@/components/app/ProblemList';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
+import { ClientWorkspaceNav } from '@/components/app/ClientWorkspaceNav';
+import { PreparePanel } from '@/components/app/PreparePanel';
+import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
-import { JourneyError } from '@/lib/journey';
+import { JourneyError, computeClientJourney } from '@/lib/journey';
 import { resolveClientPii } from '@/lib/client-pii';
 import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
@@ -45,6 +48,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
   const { id } = await params;
 
   const therapist = await requireOnboardedPsychologist();
+  if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
 
   const client = await prisma.client.findFirst({
     where: { id, psychologistId: therapist.id, deletedAt: null },
@@ -64,11 +68,23 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
   if (!client) notFound();
   const pii = await resolveClientPii(client);
-
-  // Latest completed session — the journey (Progress) surface lives on the
-  // session workspace, so that's where the header's journey link points.
-  const latestCompletedSessionId =
-    client.sessions.find((s) => s.status === 'COMPLETED')?.id ?? null;
+  const [journey, activeHomework] = await Promise.all([
+    computeClientJourney(client.id, therapist.id),
+    prisma.exerciseAssignment.findMany({
+      where: { clientId: client.id, status: { in: ['PENDING', 'IN_PROGRESS'] } },
+      orderBy: [{ dueAt: 'asc' }, { createdAt: 'desc' }],
+      take: 3,
+      select: {
+        id: true,
+        exerciseId: true,
+        customDescription: true,
+        status: true,
+        dueAt: true,
+      },
+    }),
+  ]);
+  const latestCompletedSession = client.sessions.find((session) => session.status === 'COMPLETED');
+  const latestChange = latestCompletedSession?.scheduledAt ?? client.updatedAt;
 
   // Built only for the page-level crisis banner — the one clinical
   // signal that stays on the lean record for safety.
@@ -135,6 +151,78 @@ export default async function ClientDetailPage({ params }: PageProps) {
 
       {/* Safety: active crisis flags surface even on the lean record. */}
       <PageCrisisBanner briefing={briefing} />
+
+      <div className="mt-4">
+        <ClientWorkspaceNav clientId={client.id} />
+      </div>
+
+      <Card className="mt-5 p-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Stage</p>
+            <p className="mt-1 font-medium text-[var(--color-ink)]">
+              {journey.stage.replace(/_/g, ' ').toLowerCase()}
+            </p>
+          </section>
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Latest change
+            </p>
+            <p className="mt-1 text-sm text-[var(--color-ink)]">{formatDateTime(latestChange)}</p>
+            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+              {journey.instrumentChanges[0]
+                ? `${journey.instrumentChanges[0].instrumentKey} ${journey.instrumentChanges[0].baselineScore}→${journey.instrumentChanges[0].latestScore}`
+                : 'No outcome change recorded yet'}
+            </p>
+          </section>
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Homework</p>
+            <p className="mt-1 text-sm text-[var(--color-ink)]">
+              {activeHomework.length > 0
+                ? `${activeHomework.length} active assignment${activeHomework.length === 1 ? '' : 's'}`
+                : 'Nothing active'}
+            </p>
+          </section>
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Next action</p>
+            <p className="mt-1 text-sm font-medium text-[var(--color-ink)]">
+              {journey.nextBestAction?.title ?? 'Continue care'}
+            </p>
+          </section>
+        </div>
+        <div className="mt-5 flex flex-wrap items-center gap-2">
+          <a
+            href="#prepare"
+            className="rounded-full border border-[var(--color-line)] px-4 py-2 text-sm font-medium text-[var(--color-ink)]"
+          >
+            Prepare
+          </a>
+          <Link
+            href={mindStartEntryHref({
+              source: 'CLIENT',
+              clientId: client.id,
+              captureMode: 'LIVE',
+            })}
+            className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+          >
+            Start session
+          </Link>
+          <ScheduleSessionPanel
+            clients={[
+              {
+                id: client.id,
+                fullName: pii.fullName,
+                preferredModality: client.preferredModality,
+              },
+            ]}
+            initialClientId={client.id}
+            triggerLabelOverride="Schedule follow-up"
+          />
+        </div>
+        <div id="prepare">
+          <PreparePanel clientId={client.id} defaultOpen />
+        </div>
+      </Card>
 
       <div className="mt-4">
         <Card className="p-7">
@@ -262,17 +350,12 @@ export default async function ClientDetailPage({ params }: PageProps) {
                 {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
               </p>
             </div>
-            {/* UI truth pass — the journey (arc, measures, next session) had no
-                entry point from the client page; it was only reachable through
-                a session's copilot tab. Link it from the latest session. */}
-            {latestCompletedSessionId && (
-              <Link
-                href={`/app/sessions/${latestCompletedSessionId}?tab=copilot&sub=progress`}
-                className="rounded-full border border-[var(--color-line)] px-3.5 py-1.5 text-xs font-medium text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]"
-              >
-                View journey &amp; progress →
-              </Link>
-            )}
+            <Link
+              href={`/app/clients/${client.id}/journey`}
+              className="rounded-full border border-[var(--color-line)] px-3.5 py-1.5 text-xs font-medium text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]"
+            >
+              View journey &amp; outcomes →
+            </Link>
           </header>
           {client.sessions.length === 0 ? (
             <div className="px-5 py-8 text-center">

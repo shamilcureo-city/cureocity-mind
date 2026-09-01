@@ -83,7 +83,11 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   // "Open last session's copilot" link and the brief-staleness check.
   const lastCompleted = await prisma.session.findFirst({
     where: { clientId, status: 'COMPLETED' },
-    orderBy: { endedAt: 'desc' },
+    orderBy: [
+      { endedAt: { sort: 'desc', nulls: 'last' } },
+      { scheduledAt: 'desc' },
+      { id: 'desc' },
+    ],
     select: { id: true },
   });
 
@@ -98,7 +102,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
       language: client.preferredLanguage,
     },
     orderBy: { createdAt: 'desc' },
-    select: { body: true, lastSessionId: true },
+    select: { body: true, lastSessionId: true, createdAt: true },
   });
   const briefParsed = cachedBriefRow?.body
     ? PreSessionBriefV1Schema.safeParse(cachedBriefRow.body)
@@ -193,6 +197,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     version: 'V1',
     clientId,
     cachedBrief,
+    briefGeneratedAt: cachedBrief !== null ? cachedBriefRow!.createdAt.toISOString() : null,
     briefIsStale,
     journey: {
       stage: journey.stage,

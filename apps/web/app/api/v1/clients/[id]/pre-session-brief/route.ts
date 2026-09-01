@@ -68,7 +68,11 @@ export async function GET(
   // Identify the most recent COMPLETED session for cache-key purposes.
   const lastSession = await prisma.session.findFirst({
     where: { clientId, status: 'COMPLETED' },
-    orderBy: { endedAt: 'desc' },
+    orderBy: [
+      { endedAt: { sort: 'desc', nulls: 'last' } },
+      { scheduledAt: 'desc' },
+      { id: 'desc' },
+    ],
     select: {
       id: true,
       noteDraft: { select: { content: true } },

@@ -11,9 +11,6 @@ import type {
 import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
 import { AICopilotTab } from '@/components/app/AICopilotTab';
-import { PlanOfCareTab } from '@/components/app/PlanOfCareTab';
-import type { CopilotSubKey } from '@/components/app/AICopilotSubTabs';
-import { ClientTab } from '@/components/app/ClientTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
 import { MindSessionCloseout } from '@/components/app/MindSessionCloseout';
@@ -41,63 +38,15 @@ interface PageProps {
   searchParams: Promise<{ tab?: string; sub?: string }>;
 }
 
-const VALID_TABS: ReadonlySet<TabKey> = new Set([
-  'notes',
-  'copilot',
-  'plan-of-care',
-  'transcript',
-  'session-info',
-  'client',
-]);
+const VALID_TABS: ReadonlySet<TabKey> = new Set(['review', 'note', 'transcript', 'details']);
 
-const VALID_SUBS: ReadonlySet<CopilotSubKey> = new Set(['session', 'progress']);
-
-// Sub-key history: R1 renamed session→review + journey→progress, SL1 added
-// 'close', and the CP merge collapsed close+review into ONE 'session' board.
-// PC1 moved the plan out of the copilot entirely — the old
-// 'plan'/'formulation' subs land on the Plan of care tab (handled in
-// SessionPage below, since they cross a tab boundary).
-const LEGACY_SUB_MAP: Record<string, CopilotSubKey> = {
-  close: 'session',
-  review: 'session',
-  journey: 'progress',
-  measures: 'progress',
-  briefing: 'progress',
-};
-
-/**
- * Sprint 28 — top-level tab parser.
- *
- * Accepts the 5-key bar (notes / copilot / transcript / session-info
- * / client). Legacy keys (clinical-brief, mindmap, reflection) fold
- * to the AI Copilot's "This session" sub-tab so old bookmarks keep
- * working.
- */
-function parseTab(raw: string | undefined): { tab: TabKey; subOverride: CopilotSubKey | null } {
-  if (!raw) return { tab: 'notes', subOverride: null };
-  if ((VALID_TABS as ReadonlySet<string>).has(raw)) {
-    return { tab: raw as TabKey, subOverride: null };
-  }
-  // Mindmap now lives on Transcript, reflection on Notes (R1 relocation),
-  // but old bookmarks for the clinical brief still land on the Review board.
-  if (raw === 'clinical-brief') {
-    return { tab: 'copilot', subOverride: 'session' };
-  }
-  if (raw === 'mindmap') {
-    return { tab: 'transcript', subOverride: null };
-  }
-  if (raw === 'reflection') {
-    return { tab: 'notes', subOverride: null };
-  }
-  return { tab: 'notes', subOverride: null };
-}
-
-function parseSub(raw: string | undefined): CopilotSubKey | null {
-  if (raw && (VALID_SUBS as ReadonlySet<string>).has(raw)) {
-    return raw as CopilotSubKey;
-  }
-  if (raw && raw in LEGACY_SUB_MAP) return LEGACY_SUB_MAP[raw]!;
-  return raw ? 'session' : null;
+function parseTab(raw: string | undefined): TabKey {
+  if (!raw) return 'review';
+  if ((VALID_TABS as ReadonlySet<string>).has(raw)) return raw as TabKey;
+  if (raw === 'notes' || raw === 'reflection') return 'note';
+  if (raw === 'session-info') return 'details';
+  if (raw === 'mindmap') return 'transcript';
+  return 'review';
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
@@ -111,14 +60,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
 
   const { id } = await params;
   const { tab: rawTab, sub: rawSub } = await searchParams;
-  let { tab, subOverride } = parseTab(rawTab);
-  // PC1 — the copilot's old 'plan'/'formulation' subs became the Plan of
-  // care tab; old bookmarks cross the tab boundary here.
-  if (tab === 'copilot' && (rawSub === 'plan' || rawSub === 'formulation')) {
-    tab = 'plan-of-care';
-    subOverride = null;
-  }
-  const explicitSub = subOverride ?? parseSub(rawSub);
+  const tab = parseTab(rawTab);
 
   const session = await prisma.session.findFirst({
     where: { id, psychologistId: therapist.id },
@@ -136,15 +78,33 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
     },
   });
   if (!session) notFound();
+  if (
+    rawTab === 'plan-of-care' ||
+    (rawTab === 'copilot' && ['plan', 'formulation'].includes(rawSub ?? ''))
+  ) {
+    redirect(`/app/clients/${session.clientId}/plan`);
+  }
+  if (rawTab === 'client') redirect(`/app/clients/${session.clientId}`);
+  if (rawTab === 'copilot' && rawSub === 'progress') {
+    redirect(`/app/clients/${session.clientId}/journey`);
+  }
+  if (rawTab === 'copilot' && ['journey', 'measures', 'briefing'].includes(rawSub ?? '')) {
+    redirect(`/app/clients/${session.clientId}/journey`);
+  }
+  if (rawTab === 'copilot' && (!rawSub || ['session', 'close', 'review'].includes(rawSub))) {
+    redirect(`/app/sessions/${id}`);
+  }
+  if (rawTab === 'clinical-brief') redirect(`/app/sessions/${id}`);
+  if (rawTab === 'notes' || rawTab === 'reflection') {
+    redirect(`/app/sessions/${id}?tab=note`);
+  }
+  if (rawTab === 'session-info') redirect(`/app/sessions/${id}?tab=details`);
+  if (rawTab === 'mindmap') redirect(`/app/sessions/${id}?tab=transcript`);
+
   const pii = await resolveClientPii({ ...session.client, psychologistId: session.psychologistId });
 
   const sessionKind: SessionKind = session.kind;
   const isIntake = sessionKind === 'INTAKE';
-
-  // CP merge: ONE Session board serves review + close-out + sign, so there is
-  // nothing to pick between — the default is simply 'session'. (SL1's
-  // signed-state query to choose between two sub-tabs went with the merge.)
-  const sub: CopilotSubKey = explicitSub ?? 'session';
 
   // Sprint 73 — case thread: where this document sits in the client's
   // arc + what carried over. Defensive: a compose failure must never
@@ -196,7 +156,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       </div>
 
       <div className="mt-6">
-        {tab === 'notes' && (
+        {tab === 'note' && (
           <NotesTabPanel
             sessionId={id}
             psychologistId={session.psychologistId}
@@ -215,7 +175,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             signerName={therapist.fullName}
           />
         )}
-        {tab === 'copilot' && (
+        {tab === 'review' && (
           <AICopilotTab
             sessionId={id}
             clientId={session.clientId}
@@ -225,26 +185,14 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             clientHasContactEmail={!!pii.contactEmail}
             preferredLanguage={session.client.preferredLanguage}
             sessionKind={sessionKind}
-            sub={sub}
+            sub="session"
+            showSubTabs={false}
           />
         )}
-        {tab === 'plan-of-care' && (
-          <PlanOfCareTab
-            sessionId={id}
-            clientId={session.clientId}
-            psychologistId={session.psychologistId}
-            clientName={pii.fullName}
-            clientHasContactPhone={!!pii.contactPhone}
-            clientHasContactEmail={!!pii.contactEmail}
-            preferredLanguage={session.client.preferredLanguage}
-            sessionKind={sessionKind}
-          />
-        )}
-        {tab === 'client' && <ClientTabPanel clientId={session.clientId} sessionId={id} />}
         {tab === 'transcript' && (
           <TranscriptTabPanel sessionId={id} psychologistId={therapist.id} />
         )}
-        {tab === 'session-info' && <SessionInfoTabPanel sessionId={id} />}
+        {tab === 'details' && <SessionInfoTabPanel sessionId={id} />}
       </div>
     </Container>
   );
@@ -378,61 +326,6 @@ async function NotesTabPanel({
         />
       </div>
     </MindSessionCloseout>
-  );
-}
-
-async function ClientTabPanel({ clientId, sessionId }: { clientId: string; sessionId: string }) {
-  const client = await prisma.client.findUnique({
-    where: { id: clientId },
-    select: {
-      psychologistId: true,
-      fullNameEncrypted: true,
-      contactPhoneEncrypted: true,
-      contactEmailEncrypted: true,
-      dateOfBirth: true,
-      presentingConcerns: true,
-      preferredModality: true,
-    },
-  });
-  if (!client) {
-    return <p className="text-sm text-[var(--color-ink-2)]">Client record not found.</p>;
-  }
-  // PII read cutover — prefer the encrypted columns (plaintext fallback).
-  const pii = await resolveClientPii(client);
-
-  const [pastSessionCount, lastSession] = await Promise.all([
-    prisma.session.count({
-      where: {
-        clientId,
-        status: 'COMPLETED',
-        id: { not: sessionId },
-      },
-    }),
-    prisma.session.findFirst({
-      where: {
-        clientId,
-        status: 'COMPLETED',
-        id: { not: sessionId },
-      },
-      orderBy: { scheduledAt: 'desc' },
-      select: { scheduledAt: true },
-    }),
-  ]);
-
-  return (
-    <ClientTab
-      data={{
-        id: clientId,
-        fullName: pii.fullName,
-        contactPhone: pii.contactPhone,
-        contactEmail: pii.contactEmail,
-        dateOfBirth: client.dateOfBirth,
-        presentingConcerns: client.presentingConcerns,
-        preferredModality: client.preferredModality,
-        pastSessionCount,
-        lastSessionAt: lastSession?.scheduledAt ?? null,
-      }}
-    />
   );
 }
 

@@ -514,7 +514,7 @@ export function TherapistLiveSession({
       clearRecoveryDraftAfterDurableSave(window.localStorage, sessionId, true);
       // The note is a COMPLETED NoteDraft now. Land on the copilot board —
       // review + sign live there, and no generation wait stands in the way.
-      router.push(`/app/sessions/${sessionId}?tab=copilot`);
+      router.push(`/app/sessions/${sessionId}`);
       router.refresh();
     } catch (e) {
       finalHandledRef.current = false; // retry stays possible
@@ -956,10 +956,7 @@ export function TherapistLiveSession({
                   Record the classic way
                 </Button>
               )}
-              <Button
-                variant="secondary"
-                onClick={() => router.push(`/app/sessions/${sessionId}?tab=copilot`)}
-              >
+              <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
                 Open session
               </Button>
             </div>
@@ -1028,10 +1025,7 @@ export function TherapistLiveSession({
                 Continue as recording (transcript preserved)
               </Button>
             )}
-            <Button
-              variant="secondary"
-              onClick={() => router.push(`/app/sessions/${sessionId}?tab=copilot`)}
-            >
+            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
               Open session
             </Button>
           </div>
@@ -1056,10 +1050,7 @@ export function TherapistLiveSession({
             <Button variant="secondary" onClick={() => router.push('/app/today')}>
               Return to Today
             </Button>
-            <Button
-              variant="secondary"
-              onClick={() => router.push(`/app/sessions/${sessionId}?tab=copilot`)}
-            >
+            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
               Open session
             </Button>
           </div>

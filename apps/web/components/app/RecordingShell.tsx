@@ -103,7 +103,7 @@ export function RecordingShell({
     if (sessionId) {
       // Land on the copilot board, not Notes — the review work lives there and
       // the flat tab bar gives no sequencing cue that it is waiting.
-      router.push(`/app/sessions/${sessionId}?tab=copilot`);
+      router.push(`/app/sessions/${sessionId}`);
     } else {
       router.refresh();
     }

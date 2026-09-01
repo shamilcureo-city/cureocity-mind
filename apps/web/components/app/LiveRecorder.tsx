@@ -215,7 +215,7 @@ export function LiveRecorder({
       }).catch(() => {
         /* swallow — the polling UI surfaces real failures */
       });
-      router.push(reviewHref ?? `/app/sessions/${sessionId}?tab=copilot`);
+      router.push(reviewHref ?? `/app/sessions/${sessionId}`);
       onFinished();
     } catch (e) {
       setEndError((e as Error).message);
