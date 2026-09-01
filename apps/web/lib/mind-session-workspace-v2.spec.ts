@@ -79,9 +79,7 @@ describe('Mind session workspace v2', () => {
     expect(dashboard).toContain('href={`/app/sessions/${n.sessionId}?tab=note`}');
     expect(notesDue).toContain('href={`/app/sessions/${r.id}?tab=note`}');
     expect(todayPage).toContain('href: `/app/sessions/${session.id}?tab=note`');
-    expect(unsignedDigest).toContain(
-      '${appUrl}/app/sessions/${entry.oldestSessionId}?tab=note',
-    );
+    expect(unsignedDigest).toContain('${appUrl}/app/sessions/${entry.oldestSessionId}?tab=note');
   });
 
   it('does not emit the superseded Notes tab URL from current Mind source', () => {
