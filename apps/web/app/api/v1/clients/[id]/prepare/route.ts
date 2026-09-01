@@ -51,6 +51,9 @@ interface RouteContext {
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
+  if (auth.value.user.vertical !== 'THERAPIST') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
   const { id: clientId } = await ctx.params;
 
   const client = await prisma.client.findUnique({

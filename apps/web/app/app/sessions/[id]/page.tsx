@@ -91,8 +91,11 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   if (rawTab === 'copilot' && ['journey', 'measures', 'briefing'].includes(rawSub ?? '')) {
     redirect(`/app/clients/${session.clientId}/journey`);
   }
-  if (rawTab === 'copilot' && (!rawSub || ['session', 'close', 'review'].includes(rawSub))) {
+  if (rawTab === 'copilot' && (!rawSub || ['session', 'review'].includes(rawSub))) {
     redirect(`/app/sessions/${id}`);
+  }
+  if (rawTab === 'copilot' && rawSub === 'close') {
+    redirect(`/app/sessions/${id}?tab=note`);
   }
   if (rawTab === 'clinical-brief') redirect(`/app/sessions/${id}`);
   if (rawTab === 'notes' || rawTab === 'reflection') {
