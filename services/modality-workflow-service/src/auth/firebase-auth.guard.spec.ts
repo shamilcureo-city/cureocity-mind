@@ -5,6 +5,10 @@ import { FirebaseAuthGuard } from './firebase-auth.guard';
 import type { FirebaseAdminApp } from './firebase-admin.provider';
 import type { PrismaService } from '../prisma/prisma.service';
 
+vi.mock('firebase-admin/auth', () => ({
+  getAuth: (app: { auth: () => unknown }) => app.auth(),
+}));
+
 function makeExecutionContext(req: Record<string, unknown>): ExecutionContext {
   return {
     switchToHttp: () => ({

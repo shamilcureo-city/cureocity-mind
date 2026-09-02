@@ -9,9 +9,11 @@ import {
 } from '@cureocity/contracts';
 import { INSTRUMENTS, InstrumentScoringError, scoreInstrument } from '@cureocity/clinical';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
-import { sendCrisisAlert } from '@/lib/crisis-alert';
+import { processCrisisAlertOutbox } from '@/lib/crisis-alert-outbox';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
+import { lockShareFamily } from '@/lib/share-family-lock';
+import { isUsableResendAncestorStatus } from '@/lib/sprint5-final-behavior';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,6 +50,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     where: { shareToken: tokenParse.data },
     select: {
       id: true,
+      shareBatchId: true,
+      sessionId: true,
       clientId: true,
       psychologistId: true,
       artefactType: true,
@@ -64,6 +68,9 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   }
   if (share.expiresAt.getTime() < Date.now()) {
     return NextResponse.json({ error: 'This check-in link has expired.' }, { status: 410 });
+  }
+  if (!['SENT', 'OPENED'].includes(share.status)) {
+    return NextResponse.json({ error: 'Check-in not found' }, { status: 404 });
   }
 
   const snapParse = InstrumentCheckinSnapshotSchema.safeParse(share.snapshot);
@@ -102,117 +109,193 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   const now = new Date();
   const meta = auditMetadataFromRequest(req);
 
-  await prisma.$transaction(async (tx) => {
-    const row = await tx.instrumentResponse.create({
-      data: {
-        clientId: share.clientId,
-        psychologistId: share.psychologistId,
-        instrumentKey: def.key,
-        language,
-        responses: body.value.responses as unknown as Prisma.InputJsonValue,
-        score: scored.score,
-        severity: scored.severityKey,
-        // CLIN-1 — persist the safety bit on the record, not just the
-        // audit log, so a remote suicidality endorsement is queryable by
-        // the crisis pathway + the therapist alert below.
-        riskFlagged: scored.riskFlagged,
-        administeredAt: now,
-        // No clinician administered it; attribute to the owning
-        // therapist (who sent it) but mark the mode SELF.
-        administeredByPsychologistId: share.psychologistId,
-        administrationMode: 'SELF',
-      },
-    });
-
-    // Mark the share completed so re-opening shows a thank-you, not a
-    // blank form, and the in-session "already sent" UI can tell.
-    const completedSnapshot = { ...snapshot, completed: true, completedAt: now.toISOString() };
-    await tx.patientShare.update({
-      where: { id: share.id },
-      data: {
-        snapshot: completedSnapshot as unknown as Prisma.InputJsonValue,
-        ...(share.status === 'SENT' ? { status: 'OPENED', openedAt: now } : {}),
-      },
-    });
-
-    await writeAudit(
-      {
-        actorType: 'CLIENT',
-        action: 'PATIENT_CHECKIN_SUBMITTED',
-        targetType: 'InstrumentResponse',
-        targetId: row.id,
-        metadata: {
-          ...meta,
+  const committed = await prisma
+    .$transaction(async (tx) => {
+      await lockShareFamily(tx, share);
+      const current = await tx.patientShare.findUnique({
+        where: { id: share.id },
+        select: { snapshot: true, status: true, expiresAt: true, resendOfId: true },
+      });
+      const currentSnapshot = InstrumentCheckinSnapshotSchema.safeParse(current?.snapshot);
+      if (!current || !['SENT', 'OPENED'].includes(current.status)) {
+        throw new CheckinWithdrawnError();
+      }
+      if (!(await activeShareAncestors(tx, current.resendOfId))) {
+        throw new CheckinWithdrawnError();
+      }
+      if (current.expiresAt <= now || !currentSnapshot.success || currentSnapshot.data.completed) {
+        throw new CheckinReplayError();
+      }
+      const siblings = await tx.patientShare.findMany({
+        where: {
+          ...(share.shareBatchId ? { shareBatchId: share.shareBatchId } : { id: share.id }),
+          status: { in: ['SENT', 'OPENED'] },
+        },
+        select: { id: true, snapshot: true, status: true },
+      });
+      if (
+        siblings.some((sibling) => {
+          const parsed = InstrumentCheckinSnapshotSchema.safeParse(sibling.snapshot);
+          return parsed.success && parsed.data.completed;
+        })
+      )
+        throw new CheckinReplayError();
+      const row = await tx.instrumentResponse.create({
+        data: {
           clientId: share.clientId,
           psychologistId: share.psychologistId,
+          sessionId: share.sessionId,
+          sourcePatientShareId: share.id,
+          sourceShareBatchId: share.shareBatchId ?? share.id,
           instrumentKey: def.key,
+          language,
+          responses: body.value.responses as unknown as Prisma.InputJsonValue,
           score: scored.score,
           severity: scored.severityKey,
+          // CLIN-1 — persist the safety bit on the record, not just the
+          // audit log, so a remote suicidality endorsement is queryable by
+          // the crisis pathway + the therapist alert below.
           riskFlagged: scored.riskFlagged,
+          administeredAt: now,
+          // No clinician administered it; attribute to the owning
+          // therapist (who sent it) but mark the mode SELF.
+          administeredByPsychologistId: share.psychologistId,
+          administrationMode: 'SELF',
         },
-      },
-      tx,
-    );
+      });
 
-    // Safety net — a self-harm endorsement on a remote check-in must
-    // reach the therapist's crisis pathway, not sit silently in a trend.
-    if (scored.riskFlagged) {
+      // Mark the share completed so re-opening shows a thank-you, not a
+      // blank form, and the in-session "already sent" UI can tell.
+      for (const sibling of siblings) {
+        if (sibling.status === 'REVOKED') continue;
+        const siblingSnapshot = InstrumentCheckinSnapshotSchema.safeParse(sibling.snapshot);
+        if (!siblingSnapshot.success) continue;
+        const changed = await tx.patientShare.updateMany({
+          where: { id: sibling.id, status: { in: ['SENT', 'OPENED'] } },
+          data: {
+            snapshot: {
+              ...siblingSnapshot.data,
+              completed: true,
+              completedAt: now.toISOString(),
+            } as unknown as Prisma.InputJsonValue,
+            ...(sibling.id === share.id && sibling.status === 'SENT'
+              ? { status: 'OPENED', openedAt: now }
+              : {}),
+          },
+        });
+        if (sibling.id === share.id && changed.count !== 1) throw new CheckinWithdrawnError();
+      }
+
       await writeAudit(
         {
           actorType: 'CLIENT',
-          action: 'CRISIS_FLAG_RAISED',
+          action: 'PATIENT_CHECKIN_SUBMITTED',
           targetType: 'InstrumentResponse',
           targetId: row.id,
           metadata: {
             ...meta,
             clientId: share.clientId,
             psychologistId: share.psychologistId,
-            source: 'self_checkin',
-            instrumentKey: def.key,
-            score: scored.score,
+            outcome: 'recorded',
           },
         },
         tx,
       );
-    }
-  });
 
-  // CLIN-1 — actively reach the owning therapist. The crisis flag is
-  // persisted + surfaced in the Prepare panel / brief above; this closes the
-  // "never actively reaches the therapist" gap so they don't learn of it only
-  // at the next scheduled session. Best-effort + PII-minimal: it must never
-  // fail the client's submission, and the email names nothing sensitive.
-  if (scored.riskFlagged && share.psychologist.email) {
-    try {
-      const clientRecordUrl = `${req.nextUrl.origin}/app/clients/${share.clientId}`;
-      const alert = await sendCrisisAlert({
-        to: share.psychologist.email,
-        therapistName: share.psychologist.fullName || 'there',
-        clientRecordUrl,
-      });
-      await writeAudit({
-        actorType: 'SYSTEM',
-        action: 'THERAPIST_CRISIS_ALERTED',
-        targetType: 'Psychologist',
-        targetId: share.psychologistId,
-        metadata: {
-          clientId: share.clientId,
-          psychologistId: share.psychologistId,
-          source: 'self_checkin',
-          instrumentKey: def.key,
-          channel: 'email',
-          outcome: alert.outcome,
-        },
-      });
-    } catch (e) {
-      // A down alert channel must not break the client's check-in.
-      console.error(
-        `[checkin] crisis alert failed for psychologist=${share.psychologistId}: ${(e as Error).message}`,
-      );
-    }
+      // Safety net — a self-harm endorsement on a remote check-in must
+      // reach the therapist's crisis pathway, not sit silently in a trend.
+      if (scored.riskFlagged) {
+        await writeAudit(
+          {
+            actorType: 'CLIENT',
+            action: 'CRISIS_FLAG_RAISED',
+            targetType: 'InstrumentResponse',
+            targetId: row.id,
+            metadata: {
+              ...meta,
+              clientId: share.clientId,
+              psychologistId: share.psychologistId,
+              source: 'self_checkin',
+              outcome: 'raised',
+            },
+          },
+          tx,
+        );
+      }
+      let alertAttemptId: string | null = null;
+      if (scored.riskFlagged) {
+        const alertAttempt = await tx.crisisAlertAttempt.create({
+          data: {
+            instrumentResponseId: row.id,
+            psychologistId: share.psychologistId,
+            clientId: share.clientId,
+          },
+          select: { id: true },
+        });
+        alertAttemptId = alertAttempt.id;
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'THERAPIST_CRISIS_ALERTED',
+            targetType: 'CrisisAlertAttempt',
+            targetId: alertAttempt.id,
+            metadata: {
+              clientId: share.clientId,
+              psychologistId: share.psychologistId,
+              source: 'self_checkin',
+              channel: 'email',
+              outcome: 'intent_recorded',
+            },
+          },
+          tx,
+        );
+      }
+      return { alertAttemptId };
+    })
+    .catch((error: unknown) => {
+      if (error instanceof CheckinReplayError) return false;
+      if (error instanceof CheckinWithdrawnError) return 'WITHDRAWN' as const;
+      throw error;
+    });
+  if (committed === 'WITHDRAWN') {
+    return NextResponse.json({ error: 'Check-in not found' }, { status: 404 });
+  }
+  if (!committed) {
+    return NextResponse.json(
+      { error: 'This check-in has already been submitted.' },
+      { status: 409 },
+    );
+  }
+
+  const alertAttemptId = typeof committed === 'object' ? committed.alertAttemptId : null;
+  if (alertAttemptId) {
+    // Best-effort low-latency kick only. The cron/worker owns durability and
+    // will independently claim any PENDING attempt after request termination.
+    void processCrisisAlertOutbox({ ids: [alertAttemptId], limit: 1 }).catch(() => {
+      console.error('[checkin] CRISIS_ALERT_OUTBOX_KICK_FAILED');
+    });
   }
 
   // Minimal response — no score / severity echoed back to the client.
   // riskFlagged lets the portal keep crisis resources on the thank-you.
   return NextResponse.json({ ok: true, riskFlagged: scored.riskFlagged });
+}
+
+class CheckinReplayError extends Error {}
+class CheckinWithdrawnError extends Error {}
+
+async function activeShareAncestors(
+  tx: Prisma.TransactionClient,
+  parentId: string | null,
+): Promise<boolean> {
+  let cursor = parentId;
+  while (cursor) {
+    const parent = await tx.patientShare.findUnique({
+      where: { id: cursor },
+      select: { status: true, resendOfId: true },
+    });
+    if (!parent || !isUsableResendAncestorStatus(parent.status)) return false;
+    cursor = parent.resendOfId;
+  }
+  return true;
 }

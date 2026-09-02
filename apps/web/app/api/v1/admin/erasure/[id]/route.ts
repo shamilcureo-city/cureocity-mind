@@ -4,7 +4,7 @@ import type { DsrErasureStatus } from '@prisma/client';
 import { z } from 'zod';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
-import { eraseClientPhi } from '@/lib/dpdp-erasure';
+import { eraseClientPhi, ShareSubmissionInProgressError } from '@/lib/dpdp-erasure';
 import { getMigrationPrisma } from '@/lib/prisma-migration';
 import { parseJson } from '@/lib/validate';
 
@@ -163,6 +163,9 @@ export async function PATCH(
       }
     });
   } catch (error) {
+    if (error instanceof ShareSubmissionInProgressError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     if (error instanceof ErasureHttpError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }

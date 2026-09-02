@@ -30,7 +30,8 @@ export class PuppeteerPdfRenderer implements IPdfRenderer, OnModuleDestroy {
     const browser = await this.getBrowser();
     const page = await browser.newPage();
     try {
-      await page.setContent(input.html, { waitUntil: 'networkidle0' });
+      await page.setContent(input.html, { waitUntil: 'domcontentloaded' });
+      await page.waitForNetworkIdle();
       const pdf = await page.pdf({
         format: input.format ?? 'A4',
         printBackground: true,

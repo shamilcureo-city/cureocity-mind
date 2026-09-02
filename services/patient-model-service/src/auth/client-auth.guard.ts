@@ -8,6 +8,7 @@ import {
   createParamDecorator,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getAuth } from 'firebase-admin/auth';
 import type { Request } from 'express';
 import { FIREBASE_ADMIN, type FirebaseAdminApp } from './firebase-admin.provider';
 import { PrismaService } from '../prisma/prisma.service';
@@ -71,7 +72,7 @@ export class ClientAuthGuard implements CanActivate {
     const token = header.substring('Bearer '.length);
 
     try {
-      const decoded = await this.firebase.auth().verifyIdToken(token);
+      const decoded = await getAuth(this.firebase).verifyIdToken(token);
       const client = await this.prisma.client.findUnique({
         where: { clientFirebaseUid: decoded.uid },
       });

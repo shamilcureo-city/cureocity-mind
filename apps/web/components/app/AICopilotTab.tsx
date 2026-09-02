@@ -25,6 +25,7 @@ import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
 import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
 import { JourneyError } from '@/lib/journey';
 import { prisma } from '@/lib/prisma';
+import { loadOptionalCapabilityData } from '@/lib/mind-page-capabilities';
 
 interface Props {
   sessionId: string;
@@ -37,6 +38,8 @@ interface Props {
   sessionKind: SessionKind;
   sub: CopilotSubKey;
   showSubTabs?: boolean;
+  canUseMeasures: boolean;
+  canShare: boolean;
 }
 
 /**
@@ -71,6 +74,8 @@ export async function AICopilotTab({
   sessionKind,
   sub,
   showSubTabs = true,
+  canUseMeasures,
+  canShare,
 }: Props) {
   return (
     <div className="space-y-6">
@@ -85,6 +90,8 @@ export async function AICopilotTab({
           clientHasContactEmail={clientHasContactEmail}
           preferredLanguage={preferredLanguage}
           sessionKind={sessionKind}
+          canUseMeasures={canUseMeasures}
+          canShare={canShare}
         />
       )}
       {sub === 'progress' && (
@@ -120,6 +127,8 @@ async function SessionSub({
   clientHasContactEmail,
   preferredLanguage,
   sessionKind,
+  canUseMeasures,
+  canShare,
 }: {
   sessionId: string;
   clientId: string;
@@ -129,6 +138,8 @@ async function SessionSub({
   clientHasContactEmail: boolean;
   preferredLanguage: string;
   sessionKind: SessionKind;
+  canUseMeasures: boolean;
+  canShare: boolean;
 }) {
   const isIntake = sessionKind === 'INTAKE';
   const [
@@ -168,12 +179,18 @@ async function SessionSub({
       orderBy: { version: 'desc' },
       select: { version: true, body: true, confirmedAt: true },
     }),
-    prisma.instrumentResponse.findMany({
-      where: { clientId },
-      orderBy: { administeredAt: 'desc' },
-      take: 6,
-      select: { instrumentKey: true, score: true, severity: true, administeredAt: true },
-    }),
+    loadOptionalCapabilityData(
+      canUseMeasures ? new Set(['MEASUREMENT_BASED_CARE'] as const) : new Set(),
+      'MEASUREMENT_BASED_CARE',
+      () =>
+        prisma.instrumentResponse.findMany({
+          where: { clientId },
+          orderBy: { administeredAt: 'desc' },
+          take: 6,
+          select: { instrumentKey: true, score: true, severity: true, administeredAt: true },
+        }),
+      [],
+    ),
     prisma.safetyPlan.findFirst({
       where: { clientId, supersededAt: null },
       select: { confirmedAt: true },
@@ -271,6 +288,8 @@ async function SessionSub({
         reviewedAt={reportRow?.reviewedAt?.toISOString() ?? null}
         record={record}
         closeout={closeout}
+        canShare={canShare}
+        canUseMeasures={canUseMeasures}
       />
       {/* The mindmap moved out of the decision flow (R1): it's a view of the
           note (→ Transcript). Left here as a quiet link so the Session board

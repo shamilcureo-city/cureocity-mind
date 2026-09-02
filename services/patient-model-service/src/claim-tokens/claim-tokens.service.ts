@@ -24,9 +24,7 @@ const TOKEN_BYTES = 16; // 22 base64url chars after stripping padding
  * Three operations:
  *   - issue(): therapist-authenticated, generates a single-use token for one
  *     of their clients. Returns the token (rendered as QR by the therapist
- *     UI). Multiple unredeemed tokens may exist for one client — useful when
- *     the first one expired or was lost; redeeming any valid one fulfils
- *     the pairing.
+ *     UI). Issuing a replacement explicitly supersedes the prior active token.
  *   - preview(): unauthenticated lookup so the client's PWA can show
  *     "Pair as Riya, with Dr. Sharma" before asking for OTP. Doesn't reveal
  *     contact phone / email — just first name + therapist full name.
@@ -67,6 +65,10 @@ export class ClaimTokensService {
     const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
 
     const row = await this.prisma.$transaction(async (tx) => {
+      await tx.clientClaimToken.updateMany({
+        where: { clientId, redeemedAt: null, supersededAt: null },
+        data: { supersededAt: new Date() },
+      });
       const created = await tx.clientClaimToken.create({
         data: {
           clientId,
@@ -119,6 +121,7 @@ export class ClaimTokensService {
       psychologistFullName: row.client.psychologist.fullName,
       expiresAt: row.expiresAt.toISOString(),
       redeemed: row.redeemedAt !== null,
+      superseded: row.supersededAt !== null,
     };
   }
 
@@ -142,6 +145,9 @@ export class ClaimTokensService {
     });
     if (!row) throw new NotFoundException('Claim token not found');
     if (row.expiresAt <= new Date()) throw new BadRequestException('Claim token has expired');
+    if (row.supersededAt !== null) {
+      throw new ConflictException('Claim token has been superseded');
+    }
 
     // Idempotency: same uid re-redeeming returns the same result.
     if (row.redeemedAt && row.redeemedByFirebaseUid === firebaseUid) {
@@ -170,16 +176,19 @@ export class ClaimTokensService {
           data: { clientFirebaseUid: firebaseUid },
         });
       }
-      const updated = await tx.clientClaimToken.update({
-        where: { id: row.id },
+      const redeemed = await tx.clientClaimToken.updateMany({
+        where: { id: row.id, redeemedAt: null, supersededAt: null },
         data: { redeemedAt, redeemedByFirebaseUid: firebaseUid },
       });
+      if (redeemed.count !== 1) {
+        throw new ConflictException('Claim token is no longer available');
+      }
       await this.audit.log(
         {
           actorType: 'CLIENT',
           action: 'CLIENT_CLAIM_TOKEN_REDEEMED',
           targetType: 'ClientClaimToken',
-          targetId: updated.id,
+          targetId: row.id,
           metadata: { ...auditMeta, clientId: row.clientId, firebaseUid },
         },
         tx,
@@ -190,11 +199,11 @@ export class ClaimTokensService {
           action: 'CLIENT_FIREBASE_LINKED',
           targetType: 'Client',
           targetId: row.clientId,
-          metadata: { ...auditMeta, firebaseUid, tokenId: updated.id },
+          metadata: { ...auditMeta, firebaseUid, tokenId: row.id },
         },
         tx,
       );
-      return updated;
+      return row;
     });
 
     this.logger.log(

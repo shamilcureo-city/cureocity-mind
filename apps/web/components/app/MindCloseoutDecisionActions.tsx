@@ -10,9 +10,10 @@ type DecisionStep = 'clinicalSuggestions' | 'agreements' | 'nextSessionQuestions
 interface Props {
   sessionId: string;
   steps: MindSessionCloseout['steps'];
+  canShare: boolean;
 }
 
-export function MindCloseoutDecisionActions({ sessionId, steps }: Props) {
+export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +44,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps }: Props) {
     !pending('clinicalSuggestions') &&
     !pending('agreements') &&
     !pending('nextSessionQuestions') &&
-    !pending('shared')
+    (!canShare || !pending('shared'))
   ) {
     return null;
   }
@@ -93,7 +94,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps }: Props) {
           </Button>
         </DecisionRow>
       )}
-      {pending('shared') && (
+      {canShare && pending('shared') && (
         <DecisionRow label="Client sharing">
           <Button
             type="button"

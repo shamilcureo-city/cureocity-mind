@@ -30,6 +30,8 @@ import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
 import { resolveNoteTranscript } from '@/lib/note-transcript';
 import { deriveMindSessionCloseout } from '@/lib/mind-session-closeout';
+import { getEffectiveCapabilities } from '@/lib/capabilities';
+import { canOpenMindPage, loadOptionalCapabilityData } from '@/lib/mind-page-capabilities';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,6 +59,11 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   // probing return 404.
   const therapist = await requireOnboardedPsychologist();
   if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
+  const effective = await getEffectiveCapabilities(therapist.id);
+  if (!canOpenMindPage('session', effective.capabilities)) notFound();
+  const canShare = effective.capabilities.has('PATIENT_SHARING');
+  const canUseMeasures = effective.capabilities.has('MEASUREMENT_BASED_CARE');
+  const canUseWorkflows = effective.capabilities.has('THERAPY_WORKFLOWS');
 
   const { id } = await params;
   const { tab: rawTab, sub: rawSub } = await searchParams;
@@ -112,12 +119,13 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   // Sprint 73 — case thread: where this document sits in the client's
   // arc + what carried over. Defensive: a compose failure must never
   // break the page (the note itself is the point), so we fall back to null.
-  const caseThread: CaseThread | null = await computeCaseThread(id, session.psychologistId).catch(
-    (e) => {
-      if (e instanceof CaseThreadError) return null;
-      throw e;
-    },
-  );
+  const caseThread: CaseThread | null = await computeCaseThread(id, session.psychologistId, {
+    includeMeasures: canUseMeasures,
+    includeWorkflows: canUseWorkflows,
+  }).catch((e) => {
+    if (e instanceof CaseThreadError) return null;
+    throw e;
+  });
 
   return (
     <Container className="py-8">
@@ -176,6 +184,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             noteTemplateId={session.noteTemplateId}
             caseThread={caseThread}
             signerName={therapist.fullName}
+            canShare={canShare}
+            canUseWorkflows={canUseWorkflows}
           />
         )}
         {tab === 'review' && (
@@ -190,6 +200,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             sessionKind={sessionKind}
             sub="session"
             showSubTabs={false}
+            canUseMeasures={canUseMeasures}
+            canShare={canShare}
           />
         )}
         {tab === 'transcript' && (
@@ -217,6 +229,8 @@ async function NotesTabPanel({
   noteTemplateId,
   caseThread,
   signerName,
+  canShare,
+  canUseWorkflows,
 }: {
   sessionId: string;
   psychologistId: string;
@@ -233,8 +247,10 @@ async function NotesTabPanel({
   noteTemplateId: string | null;
   caseThread: CaseThread | null;
   signerName: string;
+  canShare: boolean;
+  canUseWorkflows: boolean;
 }) {
-  const [draftRow, signedRow, closeoutState, agreementCount, nextQuestionCount, shareCount] =
+  const [draftRow, signedRow, closeoutState, agreementCount, nextQuestionCount, shareRows] =
     await Promise.all([
       prisma.noteDraft.findUnique({ where: { sessionId } }),
       prisma.therapyNote.findUnique({
@@ -244,9 +260,31 @@ async function NotesTabPanel({
       prisma.mindSessionCloseoutState.findUnique({ where: { sessionId } }),
       prisma.sessionAgreement.count({ where: { sessionId } }),
       prisma.assessmentItem.count({ where: { sourceSessionId: sessionId } }),
-      prisma.patientShare.count({
-        where: { sessionId, status: { in: ['SENT', 'OPENED'] } },
-      }),
+      loadOptionalCapabilityData(
+        canShare ? new Set(['PATIENT_SHARING'] as const) : new Set(),
+        'PATIENT_SHARING',
+        () =>
+          prisma.patientShare.findMany({
+            where: { sessionId, psychologistId },
+            orderBy: { createdAt: 'desc' },
+            select: {
+              id: true,
+              subject: true,
+              artefactType: true,
+              channel: true,
+              status: true,
+              createdAt: true,
+              sentAt: true,
+              openedAt: true,
+              revokedAt: true,
+              expiresAt: true,
+              refreshRequestedAt: true,
+              errorCode: true,
+              verifiedNonDeliveryAt: true,
+            },
+          }),
+        [],
+      ),
     ]);
 
   const draft: NoteDraft | null = draftRow
@@ -283,7 +321,7 @@ async function NotesTabPanel({
     agreementsSkipped: closeoutState?.agreementsSkippedAt != null,
     nextQuestionsSelected: nextQuestionCount > 0,
     nextQuestionsSkipped: closeoutState?.nextQuestionsSkippedAt != null,
-    shared: shareCount > 0,
+    shared: shareRows.some((share) => share.status === 'SENT' || share.status === 'OPENED'),
     shareSkipped: closeoutState?.shareSkippedAt != null,
     followUpScheduled: closeoutState?.followUpSessionId != null,
     followUpSkipped: closeoutState?.followUpSkippedAt != null,
@@ -297,13 +335,24 @@ async function NotesTabPanel({
       client={{ id: clientId, fullName: clientName, preferredModality: clientPreferredModality }}
       sessionAt={sessionAt}
       sessionCompleted={sessionStatus === 'COMPLETED'}
+      canShare={canShare}
+      receipts={shareRows.map((share) => ({
+        ...share,
+        createdAt: share.createdAt.toISOString(),
+        sentAt: share.sentAt?.toISOString() ?? null,
+        openedAt: share.openedAt?.toISOString() ?? null,
+        revokedAt: share.revokedAt?.toISOString() ?? null,
+        verifiedNonDeliveryAt: share.verifiedNonDeliveryAt?.toISOString() ?? null,
+        expiresAt: share.expiresAt.toISOString(),
+        refreshRequestedAt: share.refreshRequestedAt?.toISOString() ?? null,
+      }))}
     >
       <div className="space-y-6">
         {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
         {caseThread && caseThread.measures.length > 0 && (
           <MeasuresTrend measures={caseThread.measures} />
         )}
-        {caseThread && (
+        {canUseWorkflows && caseThread && (
           <SessionProblemTags
             sessionId={sessionId}
             active={caseThread.sessionProblems.active}
@@ -326,6 +375,7 @@ async function NotesTabPanel({
           clientPreferredLanguage={clientPreferredLanguage}
           noteTemplateId={noteTemplateId}
           signerName={signerName}
+          canShare={canShare}
         />
       </div>
     </MindSessionCloseout>

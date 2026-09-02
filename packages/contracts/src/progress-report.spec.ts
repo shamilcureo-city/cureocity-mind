@@ -107,6 +107,7 @@ describe('PROGRESS_REPORT plumbing (Sprint 20)', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: 'cabcdefghijklmnopqrstuvwx',
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['WHATSAPP'],
         artefact: {
           artefactType: 'PROGRESS_REPORT',

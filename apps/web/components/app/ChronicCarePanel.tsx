@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChronicTrajectorySchema,
   type ChronicMeasureKey,
@@ -10,6 +10,7 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Input, Label } from '../ui/Field';
+import { buildShareDeliveryInput } from '../../lib/share-delivery-input';
 
 /**
  * Sprint DV7 — the chronic-disease panel on the doctor patient page (the
@@ -32,6 +33,7 @@ export function ChronicCarePanel({ clientId }: { clientId: string }) {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const shareIdempotencyKey = useRef(globalThis.crypto.randomUUID());
 
   const load = useCallback(async () => {
     const res = await fetch(`/api/v1/clients/${clientId}/chronic`);
@@ -53,11 +55,14 @@ export function ChronicCarePanel({ clientId }: { clientId: string }) {
       const res = await fetch('/api/v1/share', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          channels: ['PORTAL_LINK'],
-          artefact: { artefactType: 'CHRONIC_PROGRESS_REPORT', clientId },
-        }),
+        body: JSON.stringify(
+          buildShareDeliveryInput({
+            clientId,
+            channels: ['PORTAL_LINK'],
+            idempotencyKey: shareIdempotencyKey.current,
+            artefact: { artefactType: 'CHRONIC_PROGRESS_REPORT', clientId },
+          }),
+        ),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };

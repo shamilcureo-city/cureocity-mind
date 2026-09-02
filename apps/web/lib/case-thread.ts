@@ -116,6 +116,7 @@ export interface CaseThread {
 export async function computeCaseThread(
   sessionId: string,
   psychologistId: string,
+  options: { includeMeasures?: boolean; includeWorkflows?: boolean } = {},
 ): Promise<CaseThread> {
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -152,23 +153,29 @@ export async function computeCaseThread(
         orderBy: { confirmedAt: 'desc' },
         select: { icd11Code: true, icd11Label: true },
       }),
-      prisma.problemListItem.findMany({
-        where: { clientId, status: 'ACTIVE' },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-        select: { id: true, title: true },
-      }),
+      options.includeWorkflows === false
+        ? Promise.resolve([])
+        : prisma.problemListItem.findMany({
+            where: { clientId, status: 'ACTIVE' },
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: { id: true, title: true },
+          }),
       // PHQ-9 / GAD-7 series for the score-trend sparkline on the note.
-      prisma.instrumentResponse.findMany({
-        where: { clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
-        orderBy: { administeredAt: 'asc' },
-        select: { instrumentKey: true, score: true, administeredAt: true },
-      }),
+      options.includeMeasures === false
+        ? Promise.resolve([])
+        : prisma.instrumentResponse.findMany({
+            where: { clientId, instrumentKey: { in: TRACKED_INSTRUMENTS } },
+            orderBy: { administeredAt: 'asc' },
+            select: { instrumentKey: true, score: true, administeredAt: true },
+          }),
       // Problems this session is already tagged as having worked on.
-      prisma.sessionProblemLink.findMany({
-        where: { sessionId },
-        select: { problemListItemId: true },
-      }),
+      options.includeWorkflows === false
+        ? Promise.resolve([])
+        : prisma.sessionProblemLink.findMany({
+            where: { sessionId },
+            select: { problemListItemId: true },
+          }),
     ]);
 
   const measures = buildMeasures(instrumentRows);

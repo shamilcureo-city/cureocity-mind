@@ -7,6 +7,8 @@ import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, FieldError } from '../ui/Field';
 import { UpgradeModal } from './UpgradeModal';
+import { CreateClientModal } from './CreateClientModal';
+import { addCreatedClientOption } from '@/lib/schedule-client-options';
 
 export interface ClientOption {
   id: string;
@@ -123,7 +125,9 @@ function ScheduleModal({
   onScheduled: () => void;
 }) {
   const tomorrow = useMemo(() => seedTomorrow(), []);
+  const [clientOptions, setClientOptions] = useState(clients);
   const [clientId, setClientId] = useState(initialClientId ?? clients[0]?.id ?? '');
+  const [creatingClient, setCreatingClient] = useState(false);
   const [query, setQuery] = useState('');
   const [date, setDate] = useState(initialDate ?? tomorrow.date);
   const [time, setTime] = useState(initialTime ?? '10:00');
@@ -137,9 +141,9 @@ function ScheduleModal({
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return clients.slice(0, 30);
-    return clients.filter((c) => c.fullName.toLowerCase().includes(q)).slice(0, 30);
-  }, [clients, query]);
+    if (!q) return clientOptions.slice(0, 30);
+    return clientOptions.filter((c) => c.fullName.toLowerCase().includes(q)).slice(0, 30);
+  }, [clientOptions, query]);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -210,10 +214,15 @@ function ScheduleModal({
             cadence fits better.
           </p>
         )}
-        {clients.length === 0 ? (
-          <p className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4 text-sm text-[var(--color-ink-2)]">
-            No active clients yet. Add one from <strong>Clients</strong> first.
-          </p>
+        {clientOptions.length === 0 ? (
+          <div className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4">
+            <p className="text-sm text-[var(--color-ink-2)]">
+              No active clients yet. Add a client here, then schedule without leaving Today.
+            </p>
+            <Button className="mt-3" type="button" onClick={() => setCreatingClient(true)}>
+              Add a client
+            </Button>
+          </div>
         ) : (
           <form onSubmit={submit} className="space-y-4">
             <div>
@@ -245,6 +254,13 @@ function ScheduleModal({
                   ))
                 )}
               </Select>
+              <button
+                type="button"
+                onClick={() => setCreatingClient(true)}
+                className="mt-2 text-xs font-medium text-[var(--color-accent)] hover:underline"
+              >
+                + Add a client
+              </button>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
@@ -293,6 +309,17 @@ function ScheduleModal({
           entitlement={upgradePrompt.entitlement}
         />
       )}
+      <CreateClientModal
+        open={creatingClient}
+        onClose={() => setCreatingClient(false)}
+        redirectOnCreated={false}
+        vertical="THERAPIST"
+        onCreated={(created) => {
+          setClientOptions((current) => addCreatedClientOption(current, created));
+          setClientId(created.id);
+          setCreatingClient(false);
+        }}
+      />
     </div>
   );
 }

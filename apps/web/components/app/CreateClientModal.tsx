@@ -19,7 +19,8 @@ import {
 interface Props {
   open: boolean;
   onClose: () => void;
-  onCreated?: (clientId: string) => void;
+  onCreated?: (client: { id: string; fullName: string; preferredModality: string | null }) => void;
+  redirectOnCreated?: boolean;
   /// Sprint DV2 — controls vocabulary (client vs patient), the
   /// post-create redirect (/app/clients vs /app/patients), and whether
   /// the therapy "preferred modality" field shows. Defaults THERAPIST.
@@ -42,7 +43,13 @@ interface Props {
  * On success, navigates to the new client's detail page so the therapist can
  * immediately start a session or record a workflow.
  */
-export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAPIST' }: Props) {
+export function CreateClientModal({
+  open,
+  onClose,
+  onCreated,
+  redirectOnCreated = true,
+  vertical = 'THERAPIST',
+}: Props) {
   const router = useRouter();
   const isDoctor = vertical === 'DOCTOR';
   const noun = subjectNounFor(vertical).singular;
@@ -69,9 +76,15 @@ export function CreateClientModal({ open, onClose, onCreated, vertical = 'THERAP
         body: JSON.stringify(buildCreateClientBody(draft)),
       });
       if (!res.ok) throw new Error(await readApiError(res, `Create ${noun} failed`));
-      const created = (await res.json()) as { id: string };
-      onCreated?.(created.id);
-      router.push(`/app/${isDoctor ? 'patients' : 'clients'}/${created.id}`);
+      const created = (await res.json()) as {
+        id: string;
+        fullName: string;
+        preferredModality: string | null;
+      };
+      onCreated?.(created);
+      if (redirectOnCreated) {
+        router.push(`/app/${isDoctor ? 'patients' : 'clients'}/${created.id}`);
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {

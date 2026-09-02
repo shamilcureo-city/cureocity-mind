@@ -91,7 +91,14 @@ describe('real regulated route boundary behavior', () => {
       expect(responses.map((response) => response.status)).toEqual(Array(8).fill(403));
       expect(mocks.audit).toHaveBeenCalledTimes(8);
       expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
-      expect(mocks.clientFindUnique).not.toHaveBeenCalled();
+      expect(mocks.clientFindUnique).toHaveBeenCalledTimes(8);
+      expect(mocks.clientFindUnique.mock.calls).toSatisfy((calls: unknown[][]) =>
+        calls.every(
+          ([query]) =>
+            (query as { where?: { clientFirebaseUid?: string } }).where?.clientFirebaseUid ===
+            'dev-firebase-uid-priya',
+        ),
+      );
       expect(mocks.safetyPlanFindFirst).not.toHaveBeenCalled();
       expect(mocks.computeClientJourney).not.toHaveBeenCalled();
     },

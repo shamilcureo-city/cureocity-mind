@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { enforceSameOriginMutation } from '@/lib/same-origin-mutation';
 import type {
   PractitionerCapability,
   PractitionerCredentialKind,
@@ -107,6 +108,40 @@ export interface AuthenticatedClient {
 
 type Resolved<T> = { ok: true; value: T } | { ok: false; response: NextResponse };
 
+type FirebaseRole = 'PRACTITIONER' | 'CLIENT' | 'NONE' | 'AMBIGUOUS';
+
+async function firebaseRole(uid: string): Promise<FirebaseRole> {
+  const [practitioner, client] = await Promise.all([
+    prisma.psychologist.findUnique({ where: { firebaseUid: uid }, select: { id: true } }),
+    prisma.client.findUnique({ where: { clientFirebaseUid: uid }, select: { id: true } }),
+  ]);
+  if (practitioner && client) return 'AMBIGUOUS';
+  if (practitioner) return 'PRACTITIONER';
+  if (client) return 'CLIENT';
+  return 'NONE';
+}
+
+export async function assertExclusiveFirebaseRole(
+  uid: string,
+  expected: Exclude<FirebaseRole, 'NONE' | 'AMBIGUOUS'>,
+): Promise<Resolved<true>> {
+  const role = await firebaseRole(uid);
+  if (role === 'AMBIGUOUS' || (role !== 'NONE' && role !== expected)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'Firebase identity has an invalid account role' },
+        { status: 403 },
+      ),
+    };
+  }
+  return { ok: true, value: true };
+}
+
+export async function assertUidAvailableForPractitioner(uid: string): Promise<Resolved<true>> {
+  return assertExclusiveFirebaseRole(uid, 'PRACTITIONER');
+}
+
 async function auditCapabilityDenials(
   req: NextRequest,
   psychologistId: string,
@@ -178,6 +213,12 @@ export async function verifyWithRetry<T>(verify: () => Promise<T>): Promise<T> {
 }
 
 async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>> {
+  // Cookie credentials are ambient. Enforce the browser origin boundary in
+  // the shared identity resolver so every practitioner, admin, capability,
+  // client, and uid-only cookie path receives the same protection. Explicit
+  // bearer clients remain exempt inside enforceSameOriginMutation.
+  const crossSite = enforceSameOriginMutation(req);
+  if (crossSite) return { ok: false, response: crossSite };
   if (isAuthBypassed()) {
     return { ok: true, value: DEV_BYPASS_FIREBASE_UID };
   }
@@ -238,6 +279,8 @@ async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>
 export async function resolvePsychologist(req: NextRequest): Promise<Resolved<AuthenticatedUser>> {
   const uidRes = await verifyRequestIdentity(req);
   if (!uidRes.ok) return uidRes;
+  const exclusive = await assertExclusiveFirebaseRole(uidRes.value, 'PRACTITIONER');
+  if (!exclusive.ok) return exclusive;
   const psy = await prisma.psychologist.findUnique({
     where: { firebaseUid: uidRes.value },
     select: { id: true, role: true, vertical: true, deletedAt: true, status: true },
@@ -375,6 +418,8 @@ export async function requireAdmin(
 
 export async function resolveClient(req: NextRequest): Promise<Resolved<AuthenticatedClient>> {
   if (isAuthBypassed()) {
+    const exclusive = await assertExclusiveFirebaseRole(DEV_BYPASS_CLIENT_FIREBASE_UID, 'CLIENT');
+    if (!exclusive.ok) return exclusive;
     const client = await prisma.client.findUnique({
       where: { clientFirebaseUid: DEV_BYPASS_CLIENT_FIREBASE_UID },
       select: { id: true, deletedAt: true, status: true },
@@ -395,6 +440,8 @@ export async function resolveClient(req: NextRequest): Promise<Resolved<Authenti
   }
   const uidRes = await verifyRequestIdentity(req);
   if (!uidRes.ok) return uidRes;
+  const exclusive = await assertExclusiveFirebaseRole(uidRes.value, 'CLIENT');
+  if (!exclusive.ok) return exclusive;
   const client = await prisma.client.findUnique({
     where: { clientFirebaseUid: uidRes.value },
     select: { id: true, deletedAt: true, status: true },
@@ -423,6 +470,39 @@ export async function resolveClient(req: NextRequest): Promise<Resolved<Authenti
  */
 export async function resolveFirebaseUidOnly(req: NextRequest): Promise<Resolved<string>> {
   return verifyRequestIdentity(req);
+}
+
+export async function resolveFirebaseClaimIdentity(
+  req: NextRequest,
+): Promise<Resolved<{ firebaseUid: string; phoneNumber: string | null }>> {
+  const auth = firebaseAuth();
+  if (!auth) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'Authentication is not configured on this deployment' },
+        { status: 503 },
+      ),
+    };
+  }
+  const header = req.headers.get('authorization');
+  if (!header?.startsWith('Bearer ')) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Missing Bearer token' }, { status: 401 }),
+    };
+  }
+  try {
+    const decoded = await verifyWithRetry(() =>
+      auth.verifyIdToken(header.substring('Bearer '.length)),
+    );
+    return {
+      ok: true,
+      value: { firebaseUid: decoded.uid, phoneNumber: decoded.phone_number ?? null },
+    };
+  } catch {
+    return { ok: false, response: NextResponse.json({ error: 'Invalid token' }, { status: 401 }) };
+  }
 }
 
 /** The seeded therapist identity used when bypass is engaged. */

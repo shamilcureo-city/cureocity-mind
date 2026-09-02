@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
+import { lockClientShareDispatch } from './share-dispatch-safety';
+import { activeShareSubmissionWhere } from './sprint5-final-behavior';
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -66,6 +68,17 @@ export async function eraseClientPhi(
 ): Promise<void> {
   const { clientId, erasureRequestId, psychologistId, now } = args;
 
+  await lockClientShareDispatch(tx, clientId);
+  const submissionInFlight = await tx.patientShare.findFirst({
+    where: {
+      clientId,
+      psychologistId,
+      ...activeShareSubmissionWhere(now),
+    },
+    select: { id: true },
+  });
+  if (submissionInFlight) throw new ShareSubmissionInProgressError();
+
   // Terminal marker first while the caller holds FOR UPDATE on this Client.
   await tx.client.update({
     where: { id: clientId },
@@ -92,6 +105,12 @@ export async function eraseClientPhi(
 
   const sessions = await tx.session.findMany({ where: { clientId }, select: { id: true } });
   const sessionIds = sessions.map(({ id }) => id);
+  // Closeout rows are retained as non-PHI workflow proof with their required
+  // Session parents. The patient-authored narrative is not part of that proof.
+  await tx.mindSessionCloseoutState.updateMany({
+    where: { sessionId: { in: sessionIds } },
+    data: { patientTakeaway: null },
+  });
   const notes = await tx.therapyNote.findMany({
     where: { sessionId: { in: sessionIds } },
     select: { id: true },
@@ -136,6 +155,7 @@ export async function eraseClientPhi(
   await tx.modalityTransition.deleteMany({ where: { state: { clientId } } });
   await tx.emdrTarget.deleteMany({ where: { state: { clientId } } });
 
+  await tx.crisisAlertAttempt.deleteMany({ where: { clientId } });
   await tx.patientShare.deleteMany({ where: { clientId } });
   await tx.therapyScript.deleteMany({ where: { clientId } });
   await tx.preSessionBrief.deleteMany({ where: { clientId } });
@@ -234,4 +254,10 @@ export async function eraseClientPhi(
       sessionId: null,
     },
   });
+}
+
+export class ShareSubmissionInProgressError extends Error {
+  constructor() {
+    super('Client erasure is blocked while provider submission is in progress.');
+  }
 }

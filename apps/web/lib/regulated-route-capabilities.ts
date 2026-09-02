@@ -85,6 +85,18 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     'write',
   ),
   policy(
+    'api/v1/sessions/[id]/mind-share-options',
+    ['GET'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION', 'PATIENT_SHARING'],
+    'disclosure',
+  ),
+  policy(
+    'api/v1/sessions/[id]/patient-takeaway',
+    ['PUT'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION', 'PATIENT_SHARING'],
+    'write',
+  ),
+  policy(
     'api/v1/sessions/[id]/therapy-note',
     ['GET'],
     ['BEHAVIORAL_HEALTH_DOCUMENTATION'],
@@ -231,7 +243,9 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   // Patient disclosure/share surfaces.
   policy('api/v1/share', ['POST'], ['PATIENT_SHARING'], 'write'),
   policy('api/v1/share/config', ['GET'], ['PATIENT_SHARING'], 'read'),
+  policy('api/v1/shares/[id]/resend', ['POST'], ['PATIENT_SHARING'], 'write'),
   policy('api/v1/shares/[id]/revoke', ['POST'], ['PATIENT_SHARING'], 'write'),
+  policy('api/v1/clients/[id]/claim-token', ['POST'], ['PATIENT_SHARING'], 'write'),
   policy('api/v1/clients/[id]/shares', ['GET'], ['PATIENT_SHARING'], 'disclosure'),
   policy('api/v1/clients/[id]/letters', ['POST'], ['PATIENT_SHARING'], 'write'),
   policy('api/v1/clients/[id]/letters/[letterId]/pdf', ['GET'], ['PATIENT_SHARING'], 'disclosure'),

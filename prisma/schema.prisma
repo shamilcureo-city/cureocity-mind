@@ -831,10 +831,12 @@ model ClientClaimToken {
 
   redeemedAt            DateTime?
   redeemedByFirebaseUid String?
+  supersededAt          DateTime?
 
   client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@index([clientId, expiresAt])
+  @@index([clientId, redeemedAt, supersededAt])
   @@map("client_claim_tokens")
 }
 
@@ -1010,32 +1012,33 @@ model Session {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client              Client                    @relation(fields: [clientId], references: [id])
-  psychologist        Psychologist              @relation(fields: [psychologistId], references: [id])
-  audioChunks         AudioChunk[]
-  transcriptSegments  TranscriptSegment[]
-  geminiCallLogs      GeminiCallLog[]
-  noteDraft           NoteDraft?
-  therapyNote         TherapyNote?
-  clinicalReport      ClinicalReport?
-  treatmentPlans      TreatmentPlan[]
-  clientDiagnoses     ClientDiagnosis[]
-  patientShares       PatientShare[]
-  instrumentResponses InstrumentResponse[]
-  safetyPlans         SafetyPlan[]
+  client                    Client                    @relation(fields: [clientId], references: [id])
+  psychologist              Psychologist              @relation(fields: [psychologistId], references: [id])
+  audioChunks               AudioChunk[]
+  transcriptSegments        TranscriptSegment[]
+  geminiCallLogs            GeminiCallLog[]
+  noteDraft                 NoteDraft?
+  therapyNote               TherapyNote?
+  clinicalReport            ClinicalReport?
+  treatmentPlans            TreatmentPlan[]
+  clientDiagnoses           ClientDiagnosis[]
+  patientShares             PatientShare[]
+  sourceExerciseAssignments ExerciseAssignment[]      @relation("ExerciseAssignmentSourceSession")
+  instrumentResponses       InstrumentResponse[]
+  safetyPlans               SafetyPlan[]
   // Doctor vertical — Sprint DV5. Drafted/confirmed Rx + clinical orders.
-  medicationOrders    MedicationOrder[]
-  clinicalOrders      ClinicalOrder[]
+  medicationOrders          MedicationOrder[]
+  clinicalOrders            ClinicalOrder[]
   // Doctor vertical — Sprint DV6. Differential diagnosis (reasoning copilot).
-  differential        Differential?
+  differential              Differential?
   // Doctor vertical — Sprint DV7. Chronic-disease readings captured here.
-  clinicalReadings    ClinicalReading[]
+  clinicalReadings          ClinicalReading[]
   // Sprint 73 — problems this session worked on (session↔problem tags).
-  problemLinks        SessionProblemLink[]
+  problemLinks              SessionProblemLink[]
   // The Session Loop (SL1) — "what we agreed", in the client's words.
-  agreements          SessionAgreement[]
-  mindCloseout        MindSessionCloseoutState?
-  sourceMindCloseout  MindSessionCloseoutState? @relation("MindCloseoutFollowUp")
+  agreements                SessionAgreement[]
+  mindCloseout              MindSessionCloseoutState?
+  sourceMindCloseout        MindSessionCloseoutState? @relation("MindCloseoutFollowUp")
 
   @@index([clientId, status])
   @@index([psychologistId, scheduledAt])
@@ -1060,6 +1063,7 @@ model MindSessionCloseoutState {
   agreementsSkippedAt           DateTime?
   nextQuestionsSkippedAt        DateTime?
   shareSkippedAt                DateTime?
+  patientTakeaway               String?   @db.Text
   followUpSkippedAt             DateTime?
   followUpSessionId             String?   @unique
   legacyImported                Boolean   @default(false)
@@ -2105,6 +2109,8 @@ enum PatientShareArtefactType {
   AFTER_VISIT_SUMMARY // Sprint DV3 — doctor after-visit summary
   CHRONIC_PROGRESS_REPORT // Sprint DV7 — doctor chronic-disease progress report
   RX_PAD // Sprint DS5-fu — doctor prescription pad (signed Rx, confirmed meds)
+  HOMEWORK // Mind explicit patient-safe homework assignment
+  SESSION_TAKEAWAY // Mind concise patient-facing session outcome
 }
 
 /// Sprint 47 — how an InstrumentResponse was administered.
@@ -2129,10 +2135,25 @@ enum PatientShareStatus {
 }
 
 model PatientShare {
-  id             String  @id @default(cuid())
-  clientId       String
-  psychologistId String
-  sessionId      String?
+  id                     String    @id @default(cuid())
+  clientId               String
+  psychologistId         String
+  sessionId              String?
+  /// Idempotency key: one resend attempt may be created from each failed receipt.
+  resendOfId             String?   @unique
+  /// Groups channel fan-out rows into one logical patient action.
+  shareBatchId           String?
+  /// Caller-level request identity and exact normalized payload digest.
+  requestIdempotencyKey  String?
+  requestPayloadHash     String?
+  /// Durable dispatch claim. A fresh lease means another request is sending;
+  /// an expired started lease is ambiguous and must never be auto-retried.
+  dispatchStartedAt      DateTime?
+  dispatchLeaseExpiresAt DateTime?
+  dispatchLeaseOwner     String?
+  dispatchLeaseVersion   Int       @default(0)
+  /// Set only by an explicit provider reconciliation proving no submission.
+  verifiedNonDeliveryAt  DateTime?
 
   artefactType PatientShareArtefactType
   artefactId   String
@@ -2154,9 +2175,18 @@ model PatientShare {
   /// Short title used in the channel message + portal page.
   subject String
 
-  /// Contact at send time — phone for WhatsApp, email for email.
-  /// PORTAL_LINK rows have null toContact.
+  /// Legacy plaintext contact. New writes leave this null and use the tenant-
+  /// encrypted, channel-specific immutable envelope below.
   toContact String?
+
+  /// Legacy plaintext envelope retained only for migration compatibility.
+  recipientEnvelope          Json?
+  /// Tenant-envelope encrypted JSON V1 containing only channel, that channel's
+  /// destination, and frozen first name. Required by resend/fanout replay.
+  recipientEnvelopeEncrypted String? @db.Text
+  /// Frozen clinician-authored delivery text, encrypted independently so every
+  /// resend reproduces the exact approved message.
+  therapistMessageEncrypted  String? @db.Text
 
   /// Provider message id, e.g. "wati:abc123", "sendgrid:xyz789".
   providerMessageId String?
@@ -2174,7 +2204,10 @@ model PatientShare {
 
   /// SHARE-1 — set when the therapist revokes the link (status → REVOKED).
   /// From this point the portal refuses to render the artefact.
-  revokedAt DateTime?
+  revokedAt           DateTime?
+  /// Generic, rate-limited expired-link recovery activity.
+  refreshRequestedAt  DateTime?
+  refreshRequestCount Int       @default(0)
 
   /// Token expiry. Defaults to 30 days from creation in the route.
   expiresAt DateTime
@@ -2182,15 +2215,64 @@ model PatientShare {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
-  session      Session?     @relation(fields: [sessionId], references: [id])
+  client                      Client               @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist                Psychologist         @relation(fields: [psychologistId], references: [id])
+  session                     Session?             @relation(fields: [sessionId], references: [id])
+  instrumentResponses         InstrumentResponse[] @relation("InstrumentResponseSourceShare")
+  responseExerciseAssignments ExerciseAssignment[] @relation("ExerciseAssignmentResponseShare")
 
+  @@unique([psychologistId, requestIdempotencyKey, channel])
   @@index([clientId, createdAt])
   @@index([psychologistId, createdAt])
   @@index([status, createdAt])
   @@index([sessionId])
+  @@index([shareBatchId])
   @@map("patient_shares")
+}
+
+/// Durable rolling-hour fanout reservation. Created under the same therapist
+/// advisory lock as the cap read and removed after all PatientShare rows exist.
+model ShareRateReservation {
+  id             String   @id @default(cuid())
+  psychologistId String
+  shareBatchId   String   @unique
+  fanout         Int
+  ownerToken     String   @unique
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([psychologistId, createdAt])
+  @@map("share_rate_reservations")
+}
+
+enum CrisisAlertAttemptStatus {
+  PENDING
+  SUBMISSION_STARTED
+  SENT
+  FAILED
+  UNKNOWN
+}
+
+/// Durable, PHI-minimal dispatch receipt for remote check-in crisis alerts.
+model CrisisAlertAttempt {
+  id                   String                   @id @default(cuid())
+  instrumentResponseId String                   @unique
+  psychologistId       String
+  clientId             String
+  status               CrisisAlertAttemptStatus @default(PENDING)
+  leaseOwner           String?
+  leaseExpiresAt       DateTime?
+  attemptCount         Int                      @default(0)
+  submissionStartedAt  DateTime?
+  completedAt          DateTime?
+  providerMessageId    String?
+  errorCode            String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  @@index([status, createdAt])
+  @@index([psychologistId, createdAt])
+  @@map("crisis_alert_attempts")
 }
 
 model TherapyScript {
@@ -2348,10 +2430,13 @@ model ClientConceptualMap {
 // ============================================================================
 
 model InstrumentResponse {
-  id             String  @id @default(cuid())
-  clientId       String
-  psychologistId String
-  sessionId      String?
+  id                   String  @id @default(cuid())
+  clientId             String
+  psychologistId       String
+  sessionId            String?
+  /// Durable provenance for remote self-check-ins.
+  sourcePatientShareId String?
+  sourceShareBatchId   String?
 
   /// Stable identifier from packages/clinical/src/instruments,
   /// e.g. "PHQ9" | "GAD7" | "WHODAS2_12".
@@ -2392,12 +2477,15 @@ model InstrumentResponse {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
-  session      Session?     @relation(fields: [sessionId], references: [id])
+  client             Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist       Psychologist  @relation(fields: [psychologistId], references: [id])
+  session            Session?      @relation(fields: [sessionId], references: [id])
+  sourcePatientShare PatientShare? @relation("InstrumentResponseSourceShare", fields: [sourcePatientShareId], references: [id], onDelete: SetNull)
 
   @@index([clientId, instrumentKey, administeredAt])
   @@index([psychologistId, createdAt])
+  @@index([sourcePatientShareId])
+  @@index([sourceShareBatchId])
   @@map("instrument_responses")
 }
 
@@ -2463,6 +2551,7 @@ enum ExerciseAssignmentStatus {
 enum ExerciseAssignmentSource {
   CATALOG
   THERAPY_SCRIPT
+  CUSTOM
 }
 
 model ExerciseAssignment {
@@ -2481,14 +2570,22 @@ model ExerciseAssignment {
   source                ExerciseAssignmentSource @default(CATALOG)
   customDescription     String?                  @db.Text
   sourceTherapyScriptId String?
+  sourceSessionId       String?
+  idempotencyKey        String?                  @unique
 
-  assignedAt DateTime  @default(now())
-  dueAt      DateTime?
+  assignedAt      DateTime             @default(now())
+  dueAt           DateTime?
+  frequency       String?
+  deliveryChannel PatientShareChannel?
 
-  status      ExerciseAssignmentStatus @default(PENDING)
-  completedAt DateTime?
+  status               ExerciseAssignmentStatus @default(PENDING)
+  completedAt          DateTime?
   // Structured per the exercise's responseSchema.
-  response    Json?
+  response             Json?
+  /// Immutable timestamp and accepted portal-share provenance for the first response.
+  respondedAt          DateTime?
+  responseShareId      String?
+  responseShareBatchId String?
 
   // Free-text note from therapist when assigning.
   therapistNote String? @db.Text
@@ -2496,12 +2593,16 @@ model ExerciseAssignment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  psychologist Psychologist @relation(fields: [psychologistId], references: [id])
+  client        Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist  Psychologist  @relation(fields: [psychologistId], references: [id])
+  sourceSession Session?      @relation("ExerciseAssignmentSourceSession", fields: [sourceSessionId], references: [id], onDelete: SetNull)
+  responseShare PatientShare? @relation("ExerciseAssignmentResponseShare", fields: [responseShareId], references: [id], onDelete: SetNull)
 
   @@index([clientId, status])
   @@index([psychologistId, assignedAt])
   @@index([clientId, exerciseId, assignedAt])
+  @@index([sourceSessionId])
+  @@index([responseShareId])
   @@map("exercise_assignments")
 }
 
@@ -2963,6 +3064,7 @@ enum AuditAction {
   PATIENT_PORTAL_OPENED
   // SHARE-1 — therapist revoked a shared link.
   PATIENT_SHARE_REVOKED
+  PATIENT_SHARE_REFRESH_REQUESTED
   // CLIN-1 — immediate therapist alert on a remote self-check-in safety flag.
   THERAPIST_CRISIS_ALERTED
 

@@ -43,9 +43,9 @@ describe('one freshness-aware preparation journey', () => {
     expect(route).toContain("{ endedAt: { sort: 'desc', nulls: 'last' } }");
     expect(route).toContain("{ scheduledAt: 'desc' }");
     expect(route).toContain("{ id: 'desc' }");
-    expect(route).toContain(
-      'briefGeneratedAt: cachedBrief !== null ? cachedBriefRow!.createdAt.toISOString() : null',
-    );
+    expect(route).toContain('briefGeneratedAt:');
+    expect(route).toContain('canDiscloseWholeBrief && cachedBrief !== null');
+    expect(route).toContain('cachedBriefRow!.createdAt.toISOString()');
     expect(existsSync(join(root, 'lib/preparation-freshness.ts'))).toBe(true);
     expect(freshness).toContain('Generated ');
     expect(freshness).toContain('Stale');

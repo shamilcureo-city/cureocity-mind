@@ -12,7 +12,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./auth-server', () => ({ requirePsychologistId: mocks.requirePsychologistId }));
 vi.mock('./validate', () => ({ parseJson: mocks.parseJson }));
-vi.mock('./dpdp-erasure', () => ({ eraseClientPhi: mocks.eraseClientPhi }));
+vi.mock('./dpdp-erasure', () => ({
+  eraseClientPhi: mocks.eraseClientPhi,
+  ShareSubmissionInProgressError: class ShareSubmissionInProgressError extends Error {},
+}));
 vi.mock('./audit', () => ({
   auditMetadataFromRequest: () => ({ requestId: 'request-1' }),
   writeAudit: mocks.writeAudit,

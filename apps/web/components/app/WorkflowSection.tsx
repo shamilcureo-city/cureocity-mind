@@ -6,6 +6,8 @@ import type {
   ExerciseAssignment,
   ModalityStateWithHistory,
 } from '@cureocity/contracts';
+import { hasSuccessfulDelivery } from '@/lib/share-receipts';
+import { buildShareDeliveryInput } from '@/lib/share-delivery-input';
 import { Badge } from '../ui/Badge';
 import { CreateWorkflowForm } from './CreateWorkflowForm';
 import { EmdrPanel } from './EmdrPanel';
@@ -26,6 +28,7 @@ interface PrescribedExercisesResponse {
 
 interface Props {
   clientId: string;
+  sessionId?: string | null;
   scribeBase?: string;
 }
 
@@ -35,7 +38,7 @@ interface Props {
  * AI advancement suggestion + prescribed exercises when the workflow
  * is in CBT mode. All endpoints introduced in Sprint 3b.
  */
-export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
+export function WorkflowSection({ clientId, sessionId, scribeBase = '/api/v1' }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [workflow, setWorkflow] = useState<ModalityStateWithHistory | null>(null);
@@ -44,6 +47,16 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
   const [activeAssignments, setActiveAssignments] = useState<ExerciseAssignment[]>([]);
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [transitionPending, setTransitionPending] = useState(false);
+  const [homeworkTask, setHomeworkTask] = useState('');
+  const [homeworkFrequency, setHomeworkFrequency] = useState('');
+  const [homeworkDueAt, setHomeworkDueAt] = useState('');
+  const [homeworkIdempotencyKey, setHomeworkIdempotencyKey] = useState(() =>
+    globalThis.crypto.randomUUID(),
+  );
+  const [homeworkChannel, setHomeworkChannel] = useState<'WHATSAPP' | 'EMAIL' | 'PORTAL_LINK'>(
+    'PORTAL_LINK',
+  );
+  const [homeworkNote, setHomeworkNote] = useState('');
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -131,7 +144,11 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         const res = await fetch(`${scribeBase}/assignments`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ clientId, exerciseId }),
+          body: JSON.stringify({
+            clientId,
+            exerciseId,
+            ...(sessionId && { sourceSessionId: sessionId }),
+          }),
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -145,8 +162,68 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
         setAssigningId(null);
       }
     },
-    [clientId, scribeBase],
+    [clientId, sessionId, scribeBase],
   );
+
+  const assignCustomHomework = useCallback(async () => {
+    setAssigningId('CUSTOM');
+    setError(null);
+    try {
+      const response = await fetch(`${scribeBase}/assignments`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clientId,
+          ...(sessionId && { sourceSessionId: sessionId }),
+          idempotencyKey: homeworkIdempotencyKey,
+          task: homeworkTask,
+          ...(homeworkFrequency && { frequency: homeworkFrequency }),
+          ...(homeworkDueAt && { dueAt: new Date(homeworkDueAt).toISOString() }),
+          deliveryChannel: homeworkChannel,
+          ...(homeworkNote && { therapistNote: homeworkNote }),
+        }),
+      });
+      if (!response.ok) throw new Error('Could not assign homework');
+      const created = (await response.json()) as ExerciseAssignment;
+      setActiveAssignments((current) => [created, ...current]);
+      const delivery = await fetch(`${scribeBase}/share`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(
+          buildShareDeliveryInput({
+            clientId,
+            channels: [homeworkChannel],
+            idempotencyKey: homeworkIdempotencyKey,
+            artefact: { artefactType: 'HOMEWORK', assignmentId: created.id },
+          }),
+        ),
+      });
+      const deliveryBody = (await delivery.json().catch(() => ({}))) as {
+        results?: { status: import('@cureocity/contracts').PatientShareStatus }[];
+      };
+      if (!delivery.ok || !hasSuccessfulDelivery(deliveryBody.results ?? []))
+        throw new Error('Homework was saved, but delivery failed. Use Shared items to resend.');
+      setHomeworkTask('');
+      setHomeworkFrequency('');
+      setHomeworkDueAt('');
+      setHomeworkNote('');
+      setHomeworkIdempotencyKey(globalThis.crypto.randomUUID());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setAssigningId(null);
+    }
+  }, [
+    clientId,
+    homeworkChannel,
+    homeworkDueAt,
+    homeworkFrequency,
+    homeworkIdempotencyKey,
+    homeworkNote,
+    homeworkTask,
+    scribeBase,
+    sessionId,
+  ]);
 
   const cancelAssignment = useCallback(
     async (assignmentId: string) => {
@@ -327,6 +404,59 @@ export function WorkflowSection({ clientId, scribeBase = '/api/v1' }: Props) {
           )}
         </div>
       )}
+
+      <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
+        <h4 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+          Assign homework
+        </h4>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <input
+            value={homeworkTask}
+            onChange={(e) => setHomeworkTask(e.target.value)}
+            placeholder="Task"
+            className="rounded-xl border p-3 text-sm sm:col-span-2"
+          />
+          <input
+            value={homeworkFrequency}
+            onChange={(e) => setHomeworkFrequency(e.target.value)}
+            placeholder="Frequency (for example, daily)"
+            className="rounded-xl border p-3 text-sm"
+          />
+          <input
+            value={homeworkDueAt}
+            onChange={(e) => setHomeworkDueAt(e.target.value)}
+            type="date"
+            className="rounded-xl border p-3 text-sm"
+          />
+          <select
+            value={homeworkChannel}
+            onChange={(e) => setHomeworkChannel(e.target.value as typeof homeworkChannel)}
+            className="rounded-xl border p-3 text-sm"
+          >
+            <option value="PORTAL_LINK">Portal link</option>
+            <option value="WHATSAPP">WhatsApp</option>
+            <option value="EMAIL">Email</option>
+          </select>
+          <input
+            value={homeworkNote}
+            onChange={(e) => setHomeworkNote(e.target.value)}
+            placeholder="Optional note"
+            className="rounded-xl border p-3 text-sm"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => void assignCustomHomework()}
+          disabled={
+            !homeworkTask.trim() ||
+            (!homeworkFrequency.trim() && !homeworkDueAt) ||
+            assigningId === 'CUSTOM'
+          }
+          className="mt-3 rounded-full bg-[var(--color-ink)] px-4 py-2 text-sm text-white disabled:opacity-40"
+        >
+          {assigningId === 'CUSTOM' ? 'Assigning…' : 'Assign homework'}
+        </button>
+      </div>
 
       {activeAssignments.length > 0 && (
         <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">

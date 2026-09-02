@@ -58,6 +58,8 @@ export const PatientShareArtefactTypeSchema = z.enum([
   /// (TherapyNote.rxPad — confirmed medications only; pending/AI-suggested
   /// rows never reach the patient).
   'RX_PAD',
+  'HOMEWORK',
+  'SESSION_TAKEAWAY',
 ]);
 export type PatientShareArtefactType = z.infer<typeof PatientShareArtefactTypeSchema>;
 
@@ -130,6 +132,25 @@ export const TherapyScriptSnapshotSchema = z.object({
   homeworkCompletedAt: IsoDateTimeSchema.nullable().default(null),
 });
 export type TherapyScriptSnapshot = z.infer<typeof TherapyScriptSnapshotSchema>;
+
+export const HomeworkSnapshotSchema = z.object({
+  kind: z.literal('HOMEWORK'),
+  assignmentId: CuidSchema,
+  task: z.string().min(1).max(2000),
+  frequency: z.string().max(200).nullable(),
+  dueAt: IsoDateTimeSchema.nullable(),
+  therapistNote: z.string().max(2000).nullable(),
+  responseOutcome: z.enum(['DONE', 'PARTLY', 'NOT_YET']).nullable().default(null),
+  responseReflection: z.string().max(2000).nullable().default(null),
+  respondedAt: IsoDateTimeSchema.nullable().default(null),
+});
+export type HomeworkSnapshot = z.infer<typeof HomeworkSnapshotSchema>;
+
+export const SessionTakeawaySnapshotSchema = z.object({
+  kind: z.literal('SESSION_TAKEAWAY'),
+  summary: z.string().trim().min(1).max(2000),
+});
+export type SessionTakeawaySnapshot = z.infer<typeof SessionTakeawaySnapshotSchema>;
 
 export const TreatmentPlanSnapshotSchema = z.object({
   kind: z.literal('TREATMENT_PLAN'),
@@ -327,6 +348,8 @@ export const PatientShareSnapshotSchema = z.discriminatedUnion('kind', [
   SignedNoteSnapshotSchema,
   ReflectionQuestionsSnapshotSchema,
   TherapyScriptSnapshotSchema,
+  HomeworkSnapshotSchema,
+  SessionTakeawaySnapshotSchema,
   TreatmentPlanSnapshotSchema,
   ProgressReportSnapshotSchema,
   InstrumentCheckinSnapshotSchema,
@@ -357,9 +380,9 @@ export const PatientShareSchema = z.object({
   toContact: z.string().nullable(),
   providerMessageId: z.string().nullable(),
   errorCode: z.string().nullable(),
-  errorDetail: z.string().nullable(),
   sentAt: IsoDateTimeSchema.nullable(),
   openedAt: IsoDateTimeSchema.nullable(),
+  revokedAt: IsoDateTimeSchema.nullable().default(null),
   expiresAt: IsoDateTimeSchema,
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,
@@ -416,9 +439,21 @@ export const ShareTherapyScriptInputSchema = z.object({
 export const HomeworkDoneInputSchema = z.object({});
 export type HomeworkDoneInput = z.infer<typeof HomeworkDoneInputSchema>;
 
+export const ShareHomeworkInputSchema = z.object({
+  artefactType: z.literal('HOMEWORK'),
+  assignmentId: CuidSchema,
+  sessionId: CuidSchema.optional(),
+});
+
+export const ShareSessionTakeawayInputSchema = z.object({
+  artefactType: z.literal('SESSION_TAKEAWAY'),
+  sessionId: CuidSchema,
+});
+
 export const ShareTreatmentPlanInputSchema = z.object({
   artefactType: z.literal('TREATMENT_PLAN'),
   treatmentPlanId: CuidSchema,
+  sessionId: CuidSchema.optional(),
 });
 
 /// Sprint 20 — Progress report is derived from cumulative client state
@@ -436,6 +471,7 @@ export const ShareInstrumentCheckinInputSchema = z.object({
   artefactType: z.literal('INSTRUMENT_CHECKIN'),
   clientId: CuidSchema,
   instrumentKey: InstrumentKeySchema,
+  sessionId: CuidSchema.optional(),
 });
 
 /// Sprint DV3 — share a doctor after-visit summary. sessionId is the
@@ -466,6 +502,8 @@ export const ShareArtefactRefSchema = z.discriminatedUnion('artefactType', [
   ShareSignedNoteInputSchema,
   ShareReflectionQuestionsInputSchema,
   ShareTherapyScriptInputSchema,
+  ShareHomeworkInputSchema,
+  ShareSessionTakeawayInputSchema,
   ShareTreatmentPlanInputSchema,
   ShareProgressReportInputSchema,
   ShareInstrumentCheckinInputSchema,
@@ -500,6 +538,10 @@ export const ShareInputSchema = z
      * anything. The real send is a second call with preview omitted/false.
      */
     preview: z.boolean().optional(),
+    /** Authenticated encrypted immutable snapshot returned by preview. */
+    previewConfirmation: z.string().min(32).max(200_000).optional(),
+    /** Optional caller-stable identity. Legacy delivery callers receive a server-generated identity. */
+    idempotencyKey: z.string().uuid().optional(),
   })
   .strict();
 export type ShareInput = z.infer<typeof ShareInputSchema>;
@@ -512,6 +554,9 @@ export const SharePreviewResponseSchema = z.object({
   preview: z.literal(true),
   language: ClinicalLocaleSchema,
   snapshot: PatientShareSnapshotSchema,
+  snapshotDigest: z.string().regex(/^[a-f0-9]{64}$/),
+  snapshotVersion: z.literal(1),
+  previewConfirmation: z.string(),
 });
 export type SharePreviewResponse = z.infer<typeof SharePreviewResponseSchema>;
 
@@ -521,7 +566,6 @@ export const ShareResultEntrySchema = z.object({
   status: PatientShareStatusSchema,
   portalUrl: z.string(),
   errorCode: z.string().nullable(),
-  errorDetail: z.string().nullable(),
 });
 export type ShareResultEntry = z.infer<typeof ShareResultEntrySchema>;
 

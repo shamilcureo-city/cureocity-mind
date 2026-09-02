@@ -72,6 +72,8 @@ export interface WhatsAppRequest {
   templateParams: string[];
   /** Optional media URL (e.g. a treatment-plan PDF stored in S3). */
   mediaUrl?: string;
+  /** Stable logical-delivery key; forwarded when the provider supports deduplication. */
+  idempotencyKey?: string;
 }
 
 export interface IMessagingPort {

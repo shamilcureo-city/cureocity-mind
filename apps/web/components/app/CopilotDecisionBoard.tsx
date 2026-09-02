@@ -123,6 +123,8 @@ interface Props {
   reviewedAt: string | null;
   record: CaseRecordSnapshot;
   closeout: CloseoutData;
+  canShare: boolean;
+  canUseMeasures: boolean;
 }
 
 /** The kind-normalised AI reading the five steps render from. */
@@ -158,6 +160,8 @@ export function CopilotDecisionBoard({
   reviewedAt,
   record,
   closeout,
+  canShare,
+  canUseMeasures,
 }: Props) {
   const router = useRouter();
   const isIntake = sessionKind === 'INTAKE';
@@ -693,6 +697,8 @@ export function CopilotDecisionBoard({
                 measuresHref={measuresHref}
                 recommendedInstruments={data.recommendedInstruments}
                 closeout={closeout}
+                canShare={canShare}
+                canUseMeasures={canUseMeasures}
               />
             </div>
 
@@ -2396,6 +2402,8 @@ function WrapUpSignStep({
   measuresHref,
   recommendedInstruments,
   closeout,
+  canShare,
+  canUseMeasures,
 }: {
   sessionId: string;
   clientId: string;
@@ -2407,6 +2415,8 @@ function WrapUpSignStep({
   measuresHref: string;
   recommendedInstruments: string[];
   closeout: CloseoutData;
+  canShare: boolean;
+  canUseMeasures: boolean;
 }) {
   // ----- agreements (in the client's words; next session's Prepare reads these)
   const [agreements, setAgreements] = useState<SessionAgreementDto[]>(closeout.agreements);
@@ -2513,14 +2523,18 @@ function WrapUpSignStep({
           ? 'draft v1 in step 4'
           : 'not accepted',
     },
-    {
-      label: 'Measures',
-      done: hasBaseline,
-      detail: hasBaseline
-        ? 'on file'
-        : `administer now${otherRecommendations.length > 0 ? ` · also suggested: ${otherRecommendations.join(', ')}` : ''}`,
-      href: hasBaseline ? undefined : measuresHref,
-    },
+    ...(canUseMeasures
+      ? [
+          {
+            label: 'Measures',
+            done: hasBaseline,
+            detail: hasBaseline
+              ? 'on file'
+              : `administer now${otherRecommendations.length > 0 ? ` · also suggested: ${otherRecommendations.join(', ')}` : ''}`,
+            href: hasBaseline ? undefined : measuresHref,
+          },
+        ]
+      : []),
   ];
 
   const firstName = closeout.clientName.split(' ')[0] ?? closeout.clientName;
@@ -2695,7 +2709,7 @@ function WrapUpSignStep({
                   {signed.signerName ? ` — signed by ${signed.signerName}` : ''} ·{' '}
                   {formatDate(signed.signedAt)}
                 </DoneChip>
-                <Act onClick={() => setShareOpen(true)}>Share with {firstName}…</Act>
+                {canShare && <Act onClick={() => setShareOpen(true)}>Share with {firstName}…</Act>}
                 <span className="text-[11px] text-[var(--color-ink-3)]">
                   Decisions above stay revisable — a change after signing is versioned.
                 </span>
@@ -2724,20 +2738,23 @@ function WrapUpSignStep({
         </div>
       </div>
 
-      <ShareModal
-        open={shareOpen}
-        onClose={() => setShareOpen(false)}
-        clientId={clientId}
-        hasContactPhone={closeout.hasContactPhone}
-        hasContactEmail={closeout.hasContactEmail}
-        artefact={
-          isIntake
-            ? { artefactType: 'SIGNED_INTAKE_NOTE', sessionId }
-            : { artefactType: 'SIGNED_NOTE', sessionId }
-        }
-        artefactLabel={isIntake ? 'Signed intake summary' : 'Session summary'}
-        defaultLanguage={closeout.preferredLanguage}
-      />
+      {canShare && (
+        <ShareModal
+          open={shareOpen}
+          onClose={() => setShareOpen(false)}
+          clientId={clientId}
+          hasContactPhone={closeout.hasContactPhone}
+          hasContactEmail={closeout.hasContactEmail}
+          artefact={
+            isIntake
+              ? { artefactType: 'SIGNED_INTAKE_NOTE', sessionId }
+              : { artefactType: 'SIGNED_NOTE', sessionId }
+          }
+          artefactLabel={isIntake ? 'Signed intake summary' : 'Session summary'}
+          defaultLanguage={closeout.preferredLanguage}
+          mindSessionId={sessionId}
+        />
+      )}
     </Card>
   );
 }

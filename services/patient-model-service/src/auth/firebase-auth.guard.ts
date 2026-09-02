@@ -7,6 +7,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getAuth } from 'firebase-admin/auth';
 import type { Request } from 'express';
 import { FIREBASE_ADMIN, FirebaseAdminApp } from './firebase-admin.provider';
 import { PrismaService } from '../prisma/prisma.service';
@@ -56,7 +57,7 @@ export class FirebaseAuthGuard implements CanActivate {
     const token = header.substring('Bearer '.length);
 
     try {
-      const decoded = await this.firebase.auth().verifyIdToken(token);
+      const decoded = await getAuth(this.firebase).verifyIdToken(token);
       const psy = await this.prisma.psychologist.findUnique({
         where: { firebaseUid: decoded.uid },
         select: { id: true, role: true },

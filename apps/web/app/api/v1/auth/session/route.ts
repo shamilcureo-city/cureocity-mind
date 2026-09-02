@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import {
   SESSION_COOKIE_MAX_AGE_MS,
   SESSION_COOKIE_NAME,
+  assertUidAvailableForPractitioner,
   isAuthBypassed,
   sessionCookieDomain,
 } from '@/lib/auth-server';
@@ -45,6 +46,7 @@ const CreateSessionInputSchema = z.object({
 
 /** Thrown inside the signup tx to roll it back with a user-facing reason. */
 class InviteRejectedError extends Error {}
+class FirebaseRoleConflictError extends Error {}
 
 /**
  * Sprint 56 ops — auto-grant ADMIN to a new signup whose email is in the
@@ -76,6 +78,13 @@ function isBootstrapAdminEmail(email: string | undefined): boolean {
  * on the cookie — no Bearer-token plumbing in the UI.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  // Session exchange accepts ambient browser login only after affirmative
+  // first-party signals. The Firebase token in the body is attacker-controlled
+  // until verified, so this boundary must run before parsing it or minting a
+  // cookie. There is intentionally no unauthenticated non-browser exception.
+  const originFailure = validateSessionCreationOrigin(req);
+  if (originFailure) return originFailure;
+
   // Demo/dev bypass: no cookie needed — the guards resolve the seeded
   // fixture on every request. Report success so the login page's flow
   // is identical in both modes.
@@ -101,6 +110,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }
 
+  const exclusiveRole = await assertUidAvailableForPractitioner(decoded.uid);
+  if (!exclusiveRole.ok) return exclusiveRole.response;
+
   let psy = await prisma.psychologist.findUnique({
     where: { firebaseUid: decoded.uid },
     select: { id: true, deletedAt: true },
@@ -125,7 +137,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       select: { id: true, deletedAt: true, firebaseUid: true },
     });
     if (byPhone && byPhone.deletedAt === null) {
-      await prisma.$transaction(async (tx) => {
+      const relinked = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`firebase-role:${decoded.uid}`}))`;
+        const clientRole = await tx.client.findUnique({
+          where: { clientFirebaseUid: decoded.uid },
+          select: { id: true },
+        });
+        if (clientRole) return false;
         await tx.psychologist.update({
           where: { id: byPhone.id },
           data: { firebaseUid: decoded.uid },
@@ -137,16 +155,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             action: 'PSYCHOLOGIST_UPDATED',
             targetType: 'Psychologist',
             targetId: byPhone.id,
-            metadata: {
-              event: 'firebase-uid-relinked-via-phone-otp',
-              phone: decoded.phone_number,
-              previousFirebaseUid: byPhone.firebaseUid,
-              newFirebaseUid: decoded.uid,
-            },
+            metadata: { event: 'firebase-uid-relinked-via-phone-otp' },
           },
           tx,
         );
+        return true;
       });
+      if (!relinked) {
+        return NextResponse.json(
+          { error: 'Firebase identity is already a client' },
+          { status: 403 },
+        );
+      }
       psy = { id: byPhone.id, deletedAt: byPhone.deletedAt };
       linked = true;
     }
@@ -160,6 +180,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const inviteRequired = isPilotInviteRequired();
     try {
       const created = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`firebase-role:${decoded.uid}`}))`;
+        const clientRole = await tx.client.findUnique({
+          where: { clientFirebaseUid: decoded.uid },
+          select: { id: true },
+        });
+        if (clientRole) throw new FirebaseRoleConflictError();
         if (inviteRequired) {
           const redeemed = await redeemInviteCode(tx, input.value.inviteCode ?? '');
           if (!redeemed.ok) throw new InviteRejectedError(redeemed.reason);
@@ -246,6 +272,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       psy = created;
       registered = true;
     } catch (e) {
+      if (e instanceof FirebaseRoleConflictError) {
+        return NextResponse.json(
+          { error: 'Firebase identity is already a client' },
+          { status: 403 },
+        );
+      }
       if (e instanceof InviteRejectedError) {
         return NextResponse.json({ error: e.message, code: 'INVITE_REQUIRED' }, { status: 403 });
       }
@@ -296,6 +328,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     maxAge: SESSION_COOKIE_MAX_AGE_MS / 1000,
   });
   return res;
+}
+
+function validateSessionCreationOrigin(req: NextRequest): NextResponse | null {
+  const origin = req.headers.get('origin');
+  const fetchSite = req.headers.get('sec-fetch-site');
+  const mediaType = req.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
+  let requestOrigin: string;
+  try {
+    requestOrigin = new URL(req.url).origin;
+  } catch {
+    return sessionCreationDenied();
+  }
+  if (origin !== requestOrigin || fetchSite !== 'same-origin' || mediaType !== 'application/json') {
+    return sessionCreationDenied();
+  }
+  return null;
+}
+
+function sessionCreationDenied(): NextResponse {
+  return NextResponse.json(
+    { error: 'Session creation requires a same-origin browser request' },
+    { status: 403, headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }
 
 /** DELETE /api/v1/auth/session — sign out (clear the cookie). */
