@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { eraseClientPhi } from './dpdp-erasure';
 
 const calls: string[] = [];
+let activeShareSubmission = false;
+const patientShareFindFirstArgs: unknown[] = [];
 
 function model(name: string) {
   return new Proxy(
@@ -14,6 +16,10 @@ function model(name: string) {
           if (name === 'therapyNote' && operation === 'findMany') return [];
           if (name === 'audioChunk' && operation === 'findMany') return [];
           if (name === 'clientErasureRequest' && operation === 'findMany') return [];
+          if (name === 'patientShare' && operation === 'findFirst') {
+            patientShareFindFirstArgs.push(args);
+            return activeShareSubmission ? { id: 'share-submitting' } : null;
+          }
           if (name === 'appointment' && operation === 'updateMany') {
             appointmentUpdates.push(args);
           }
@@ -57,6 +63,8 @@ describe('DPDP appointment erasure invariant', () => {
   beforeEach(() => {
     calls.length = 0;
     appointmentUpdates.length = 0;
+    activeShareSubmission = false;
+    patientShareFindFirstArgs.length = 0;
   });
 
   it('makes linked appointments non-enqueueable before deleting reminder outbox rows', async () => {
@@ -86,5 +94,41 @@ describe('DPDP appointment erasure invariant', () => {
     expect(calls.lastIndexOf('appointment.updateMany')).toBeGreaterThan(
       calls.indexOf('reminders.delete'),
     );
+  });
+
+  it('refuses to erase client PHI while an external share submission is in flight', async () => {
+    activeShareSubmission = true;
+
+    await expect(
+      eraseClientPhi(tx as never, {
+        clientId: 'client-1',
+        erasureRequestId: 'erasure-1',
+        psychologistId: 'psy-1',
+        now: new Date('2026-08-18T10:00:00.000Z'),
+      }),
+    ).rejects.toThrow('Client erasure is blocked while provider submission is in progress.');
+
+    expect(calls).not.toContain('client.update');
+    expect(calls).not.toContain('patientShare.deleteMany');
+  });
+
+  it('does not treat an expired or missing dispatch lease as an active submission', async () => {
+    const now = new Date('2026-08-18T10:00:00.000Z');
+
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now,
+    });
+
+    expect(patientShareFindFirstArgs[0]).toMatchObject({
+      where: {
+        status: 'PENDING',
+        dispatchStartedAt: { not: null },
+        dispatchLeaseExpiresAt: { gt: now },
+      },
+    });
+    expect(calls).toContain('client.update');
   });
 });

@@ -189,10 +189,6 @@ export function TherapyLibrary({
               ? {
                   artefactType: 'THERAPY_SCRIPT',
                   therapyScriptId: shareTarget.therapyScriptId,
-                  // Sprint 51 — opt into the homework loop: the share
-                  // route auto-persists the script's homework as an
-                  // ExerciseAssignment so the client can mark it done.
-                  assignHomework: true,
                 }
               : {
                   artefactType: 'TREATMENT_PLAN',
@@ -298,7 +294,7 @@ function ScriptPlayer({ script, source, onRefresh, refreshing, onShare }: Script
           <Button variant="secondary" onClick={() => void onRefresh()} disabled={refreshing}>
             {refreshing ? 'Regenerating…' : 'Regenerate'}
           </Button>
-          <Button onClick={onShare}>Send to patient</Button>
+          <Button onClick={onShare}>Share script with patient</Button>
         </div>
       </header>
 

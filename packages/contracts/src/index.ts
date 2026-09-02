@@ -3,6 +3,7 @@ export * from './psychologist';
 export * from './admin';
 export * from './consent';
 export * from './client';
+export * from './client-care-home';
 export * from './briefing';
 export * from './audit';
 export * from './session';

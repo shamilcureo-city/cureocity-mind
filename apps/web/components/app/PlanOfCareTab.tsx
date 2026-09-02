@@ -407,7 +407,7 @@ export async function ClientPlanOfCareContent({
             <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
               Phase advancement tracker (CBT / EMDR) — optional
             </summary>
-            <WorkflowSection clientId={clientId} />
+            <WorkflowSection clientId={clientId} sessionId={sessionId} />
           </details>
         </div>
       </PlanToolsDisclosure>

@@ -4,7 +4,7 @@
   "private": true,
   "description": "Ambient therapy scribe for Indian psychologists practising CBT and EMDR",
   "engines": {
-    "node": ">=22.0.0",
+    "node": ">=22.12.0",
     "pnpm": ">=10.0.0"
   },
   "packageManager": "pnpm@10.33.0",
@@ -28,6 +28,7 @@
     "db:studio": "prisma studio",
     "db:validate": "prisma validate && prisma format --check",
     "db:check-migrations": "node --test scripts/check-migration-idempotency.test.mjs scripts/prepare-fresh-ci-migrations.test.mjs && node scripts/check-migration-idempotency.mjs",
+    "smoke:prod-dependencies": "node scripts/production-dependency-smoke.mjs",
     "eval:reasoning": "pnpm --filter @cureocity/llm eval:reasoning",
     "eval:asr": "pnpm --filter @cureocity/llm eval:asr",
     "eval:note": "pnpm --filter @cureocity/llm eval:note"
@@ -39,7 +40,7 @@
     "@eslint/js": "^9.16.0",
     "@types/node": "^22.10.1",
     "eslint": "^9.16.0",
-    "nx": "^20.2.0",
+    "nx": "23.1.2",
     "prettier": "^3.4.2",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",
@@ -59,26 +60,31 @@
       "@firebase/util",
       "@nestjs/core",
       "protobufjs",
-      "@swc/core"
+      "@swc/core",
+      "puppeteer",
+      "sharp"
     ],
     "//overrides": "Patch-level security floors for vulnerable transitives. Major lines stay narrowly selected so unrelated dependency APIs are untouched.",
+    "//uuidOverrides": "gaxios 6 and teeny-request 9 use only the stable CommonJS uuid.v4 API; the production dependency smoke exercises both normal and multipart HTTP paths with uuid 11.1.1 until Google Cloud Storage adopts patched parent lines.",
     "overrides": {
       "axios@1": "1.18.0",
+      "browserslist@4": "4.28.7",
       "brace-expansion@1": "1.1.18",
       "brace-expansion@2": "2.1.4",
       "fast-uri@3": "3.1.5",
       "form-data": "4.0.6",
+      "gaxios@6>uuid": "11.1.1",
       "ip-address@10": "10.3.1",
       "js-yaml@3": "3.15.1",
       "lodash@4": "4.18.1",
       "minimatch@9": "9.0.7",
       "multer@2": "2.2.0",
       "nanoid@3": "3.3.18",
-      "postcss@8": "8.5.18",
-      "protobufjs@7": "7.6.3",
+      "postcss@8": "8.5.23",
+      "protobufjs@7": "7.6.5",
+      "teeny-request@9>uuid": "11.1.1",
       "tmp@0.2": "0.2.7",
-      "vite@5.4.21": "6.4.3",
-      "vitest@2": "3.2.6",
+      "tsx@4>esbuild": "0.28.1",
       "websocket-driver@0.7": "0.7.5"
     }
   }

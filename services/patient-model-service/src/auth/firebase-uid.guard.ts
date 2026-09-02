@@ -8,6 +8,7 @@ import {
   createParamDecorator,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { getAuth } from 'firebase-admin/auth';
 import type { Request } from 'express';
 import { FIREBASE_ADMIN, FirebaseAdminApp } from './firebase-admin.provider';
 
@@ -51,7 +52,7 @@ export class FirebaseUidGuard implements CanActivate {
     }
     const token = header.substring('Bearer '.length);
     try {
-      const decoded = await this.firebase.auth().verifyIdToken(token);
+      const decoded = await getAuth(this.firebase).verifyIdToken(token);
       req.firebaseUidPayload = { uid: decoded.uid };
       return true;
     } catch (e) {

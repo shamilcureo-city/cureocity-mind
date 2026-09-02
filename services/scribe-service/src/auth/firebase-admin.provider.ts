@@ -1,10 +1,10 @@
 import { Logger, Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
+import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 
 export const FIREBASE_ADMIN = Symbol('FIREBASE_ADMIN');
 
-export type FirebaseAdminApp = admin.app.App | null;
+export type FirebaseAdminApp = App | null;
 
 /**
  * Returns a Firebase Admin app when service-account creds are configured.
@@ -27,10 +27,11 @@ export const firebaseAdminProvider: Provider = {
       return null;
     }
 
-    if (admin.apps.length > 0) return admin.apps[0]!;
+    const apps = getApps();
+    if (apps.length > 0) return apps[0]!;
 
-    const app = admin.initializeApp({
-      credential: admin.credential.cert({ projectId, clientEmail, privateKey }),
+    const app = initializeApp({
+      credential: cert({ projectId, clientEmail, privateKey }),
     });
     logger.log(`Firebase Admin initialised for project ${projectId}`);
     return app;

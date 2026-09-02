@@ -35,6 +35,9 @@ export const PrepareHomeworkEntrySchema = z.object({
   assignedAt: IsoDateTimeSchema,
   completedAt: IsoDateTimeSchema.nullable(),
   dueAt: IsoDateTimeSchema.nullable(),
+  outcome: z.enum(['DONE', 'PARTLY', 'NOT_YET']).nullable().optional(),
+  reflection: z.string().nullable().optional(),
+  overdue: z.boolean().optional(),
 });
 export type PrepareHomeworkEntry = z.infer<typeof PrepareHomeworkEntrySchema>;
 

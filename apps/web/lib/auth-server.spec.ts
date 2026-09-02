@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => ({
-  firebaseAuth: vi.fn(() => null),
+  firebaseAuth: vi.fn<() => unknown>(() => null),
   getEffectiveCapabilities: vi.fn(),
   psychologistFindUnique: vi.fn(),
+  clientFindUnique: vi.fn(),
   writeAudit: vi.fn(),
 }));
 
 vi.mock('./firebase-admin', () => ({ firebaseAuth: mocks.firebaseAuth }));
 vi.mock('./prisma', () => ({
-  prisma: { psychologist: { findUnique: mocks.psychologistFindUnique } },
+  prisma: {
+    psychologist: { findUnique: mocks.psychologistFindUnique },
+    client: { findUnique: mocks.clientFindUnique },
+  },
 }));
 vi.mock('./capabilities', () => ({
   getEffectiveCapabilities: mocks.getEffectiveCapabilities,
@@ -23,14 +28,19 @@ vi.mock('./audit', () => ({
 
 import {
   isAuthBypassed,
+  requireAdmin,
   requireCapability,
   requirePsychologistId,
+  resolveClient,
   resolvePsychologist,
 } from './auth-server';
 
 const originalEnv = { ...process.env };
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.clientFindUnique.mockResolvedValue(null);
+});
 afterEach(() => {
   process.env = { ...originalEnv };
 });
@@ -73,6 +83,39 @@ describe('authentication bypass boundary', () => {
 });
 
 describe('practitioner state boundary', () => {
+  it('rejects a legacy UID linked to both practitioner and client roles', async () => {
+    process.env = { ...originalEnv, NODE_ENV: 'test', AUTH_BYPASS: 'true' };
+    mocks.psychologistFindUnique.mockResolvedValue({
+      id: 'psy-1',
+      role: 'THERAPIST',
+      vertical: 'THERAPIST',
+      deletedAt: null,
+      status: 'ACTIVE',
+    });
+    mocks.clientFindUnique.mockResolvedValue({ id: 'client-1' });
+
+    const resolved = await resolvePsychologist(
+      new Request('https://example.test/api/v1/sessions') as never,
+    );
+
+    expect(resolved.ok).toBe(false);
+    if (!resolved.ok) expect(resolved.response.status).toBe(403);
+    expect(mocks.getEffectiveCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('rejects a client resolver UID also linked to a practitioner', async () => {
+    process.env = { ...originalEnv, NODE_ENV: 'test', AUTH_BYPASS: 'true' };
+    mocks.psychologistFindUnique.mockResolvedValue({ id: 'psy-1' });
+    mocks.clientFindUnique.mockResolvedValue({ id: 'client-1' });
+
+    const resolved = await resolveClient(
+      new Request('https://example.test/api/v1/p/home') as never,
+    );
+
+    expect(resolved.ok).toBe(false);
+    if (!resolved.ok) expect(resolved.response.status).toBe(403);
+  });
+
   it.each([
     { status: 'PENDING_VERIFICATION', deletedAt: null },
     { status: 'SUSPENDED', deletedAt: null },
@@ -212,5 +255,85 @@ describe('capability denial', () => {
     if (!auth.ok) expect(auth.response.status).toBe(403);
     expect(mocks.getEffectiveCapabilities).toHaveBeenCalledWith('psy-1');
     expect(mocks.writeAudit).toHaveBeenCalledOnce();
+  });
+});
+
+describe('cookie-authenticated mutation origin boundary', () => {
+  const activePractitioner = {
+    id: 'psy-1',
+    role: 'ADMIN',
+    vertical: 'THERAPIST',
+    deletedAt: null,
+    status: 'ACTIVE',
+  };
+  const grants = {
+    profession: 'CLINICAL_PSYCHOLOGIST',
+    capabilities: new Set(['THERAPY_WORKFLOWS']),
+    verifiedCredentialKinds: new Set(),
+  };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv, NODE_ENV: 'test', AUTH_BYPASS: 'false' };
+    mocks.firebaseAuth.mockReturnValue({
+      verifySessionCookie: vi.fn(async () => ({ uid: 'uid-cookie' })),
+      verifyIdToken: vi.fn(async () => ({ uid: 'uid-bearer' })),
+    });
+    mocks.psychologistFindUnique.mockResolvedValue(activePractitioner);
+    mocks.clientFindUnique.mockResolvedValue(null);
+    mocks.getEffectiveCapabilities.mockResolvedValue(grants);
+  });
+
+  it('rejects a sibling-origin practitioner clinical mutation before resolving grants', async () => {
+    const req = new NextRequest('https://mind.cureocity.in/api/v1/assignments', {
+      method: 'POST',
+      headers: {
+        cookie: '__session=session-cookie',
+        origin: 'https://admin.cureocity.in',
+        'sec-fetch-site': 'same-site',
+      },
+    });
+
+    const auth = await requireCapability(req, 'THERAPY_WORKFLOWS');
+
+    expect(auth.ok).toBe(false);
+    if (!auth.ok) expect(auth.response.status).toBe(403);
+    expect(mocks.psychologistFindUnique).not.toHaveBeenCalled();
+    expect(mocks.getEffectiveCapabilities).not.toHaveBeenCalled();
+  });
+
+  it('rejects an admin cookie mutation when browser origin signals are absent', async () => {
+    const req = new NextRequest('https://admin.cureocity.in/api/v1/admin/invite-codes', {
+      method: 'POST',
+      headers: { cookie: '__session=session-cookie' },
+    });
+
+    const auth = await requireAdmin(req);
+
+    expect(auth.ok).toBe(false);
+    if (!auth.ok) expect(auth.response.status).toBe(403);
+    expect(mocks.psychologistFindUnique).not.toHaveBeenCalled();
+  });
+
+  it('accepts a same-origin cookie mutation and bearer mutation without browser signals', async () => {
+    const cookie = await requireCapability(
+      new NextRequest('https://mind.cureocity.in/api/v1/assignments', {
+        method: 'POST',
+        headers: {
+          cookie: '__session=session-cookie',
+          origin: 'https://mind.cureocity.in',
+          'sec-fetch-site': 'same-origin',
+        },
+      }),
+      'THERAPY_WORKFLOWS',
+    );
+    const bearer = await requireAdmin(
+      new NextRequest('https://admin.cureocity.in/api/v1/admin/invite-codes', {
+        method: 'POST',
+        headers: { authorization: 'Bearer server-token' },
+      }),
+    );
+
+    expect(cookie.ok).toBe(true);
+    expect(bearer.ok).toBe(true);
   });
 });

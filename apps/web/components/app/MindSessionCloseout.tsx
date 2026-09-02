@@ -3,6 +3,7 @@ import type { MindSessionCloseout } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { ScheduleSessionPanel } from './ScheduleSessionPanel';
 import { MindCloseoutDecisionActions } from './MindCloseoutDecisionActions';
+import { ShareReceiptList, type ShareReceiptView } from './ShareReceiptList';
 import { suggestFollowUp } from '../../lib/follow-up-suggestion';
 
 interface Props {
@@ -15,6 +16,8 @@ interface Props {
   };
   sessionAt: Date;
   sessionCompleted: boolean;
+  canShare: boolean;
+  receipts: ShareReceiptView[];
   children: React.ReactNode;
 }
 
@@ -35,6 +38,8 @@ export function MindSessionCloseout({
   client,
   sessionAt,
   sessionCompleted,
+  canShare,
+  receipts,
   children,
 }: Props) {
   if (!sessionCompleted) return <>{children}</>;
@@ -63,24 +68,49 @@ export function MindSessionCloseout({
           </Link>
         </div>
         <ol className="mt-5 grid gap-2 sm:grid-cols-2">
-          {Object.entries(closeout.steps).map(([key, state]) => (
-            <li
-              key={key}
-              className="flex items-center gap-2 rounded-xl border border-[var(--color-line-soft)] px-3 py-2 text-sm"
-            >
-              <span aria-hidden="true">
-                {state === 'COMPLETE' ? '✓' : state === 'SKIPPED' ? '–' : '○'}
-              </span>
-              <span>{labels[key as keyof MindSessionCloseout['steps']]}</span>
-              <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-                {state.toLowerCase()}
-              </span>
-            </li>
-          ))}
+          {Object.entries(closeout.steps)
+            .filter(([key]) => canShare || key !== 'shared')
+            .map(([key, state]) => (
+              <li
+                key={key}
+                className="flex items-center gap-2 rounded-xl border border-[var(--color-line-soft)] px-3 py-2 text-sm"
+              >
+                <span aria-hidden="true">
+                  {state === 'COMPLETE' ? '✓' : state === 'SKIPPED' ? '–' : '○'}
+                </span>
+                <span>{labels[key as keyof MindSessionCloseout['steps']]}</span>
+                <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+                  {state.toLowerCase()}
+                </span>
+              </li>
+            ))}
         </ol>
-        <MindCloseoutDecisionActions sessionId={sessionId} steps={closeout.steps} />
+        <MindCloseoutDecisionActions
+          sessionId={sessionId}
+          steps={closeout.steps}
+          canShare={canShare}
+        />
       </Card>
       {children}
+      {canShare && receipts.length > 0 && (
+        <Card className="overflow-hidden">
+          <div className="border-b border-[var(--color-line-soft)] p-5">
+            <h3 className="font-serif text-xl">Sharing receipts</h3>
+            <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+              Persistent delivery attempts for this session.
+            </p>
+          </div>
+          <ShareReceiptList receipts={receipts} />
+          <p className="px-5 pb-5 text-sm">
+            <Link
+              href={`/app/clients/${client.id}/shared`}
+              className="text-[var(--color-accent)] hover:underline"
+            >
+              View complete client sharing history →
+            </Link>
+          </p>
+        </Card>
+      )}
       <Card className="p-6">
         <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
           Follow-up

@@ -45,6 +45,7 @@ export class WatiBackend implements IMessagingPort {
           Authorization: `Bearer ${this.opts.bearerToken}`,
           'Content-Type': 'application/json',
           Accept: 'application/json',
+          ...(req.idempotencyKey && { 'Idempotency-Key': req.idempotencyKey }),
         },
         body: JSON.stringify(body),
       });

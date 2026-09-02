@@ -11,7 +11,6 @@ import {
   IntakeNoteV1Schema,
   type MedicalEncounterNoteV1,
   MedicalEncounterNoteV1Schema,
-  MedicationOrderV1Schema,
   RxPadV1Schema,
   type ClinicalTreatmentPlan,
   ClinicalTreatmentPlanSchema,
@@ -22,6 +21,10 @@ import type { ChronicMeasureKey, ChronicMeasureTrajectory } from '@cureocity/con
 import { ProgressReportError, buildProgressReport } from './progress-report';
 import { buildChronicTrajectory } from './chronic-trajectory';
 import { prisma } from './prisma';
+import {
+  homeworkShareSessionMatches,
+  validateOptionalShareSession,
+} from './sprint5-final-behavior';
 
 /**
  * Sprint 15 — Snapshot builders.
@@ -80,12 +83,21 @@ async function dispatchSnapshot(args: BuildArgs): Promise<SnapshotResult | null>
       return buildReflectionQuestions(args, args.ref.sessionId, args.ref.questions);
     case 'THERAPY_SCRIPT':
       return buildTherapyScript(args, args.ref.therapyScriptId);
+    case 'HOMEWORK':
+      return buildHomework(args, args.ref.assignmentId, args.ref.sessionId);
+    case 'SESSION_TAKEAWAY':
+      return buildSessionTakeaway(args, args.ref.sessionId);
     case 'TREATMENT_PLAN':
-      return buildTreatmentPlan(args, args.ref.treatmentPlanId);
+      return buildTreatmentPlan(args, args.ref.treatmentPlanId, args.ref.sessionId);
     case 'PROGRESS_REPORT':
       return buildProgressReportSnapshot(args, args.ref.clientId);
     case 'INSTRUMENT_CHECKIN':
-      return buildInstrumentCheckin(args, args.ref.clientId, args.ref.instrumentKey);
+      return buildInstrumentCheckin(
+        args,
+        args.ref.clientId,
+        args.ref.instrumentKey,
+        args.ref.sessionId,
+      );
     case 'SIGNED_INTAKE_NOTE':
       return buildSignedIntakeNote(args, args.ref.sessionId);
     case 'AFTER_VISIT_SUMMARY':
@@ -131,13 +143,13 @@ async function buildRxPad(
       clientId: true,
       psychologistId: true,
       scheduledAt: true,
-      therapyNote: { select: { rxPad: true } },
+      therapyNote: { select: { rxPad: true, locked: true } },
     },
   });
   if (!session || session.psychologistId !== psychologistId || session.clientId !== clientId) {
     return null;
   }
-  if (!session.therapyNote) {
+  if (!session.therapyNote?.locked) {
     throw new SnapshotBuildError('Cannot share a prescription before the note is signed.');
   }
   if (session.therapyNote.rxPad == null) {
@@ -208,13 +220,13 @@ async function buildAfterVisitSummary(
       clientId: true,
       psychologistId: true,
       scheduledAt: true,
-      therapyNote: { select: { content: true } },
+      therapyNote: { select: { content: true, rxPad: true, locked: true } },
     },
   });
   if (!session || session.psychologistId !== psychologistId || session.clientId !== clientId) {
     return null;
   }
-  if (!session.therapyNote) {
+  if (!session.therapyNote?.locked) {
     throw new SnapshotBuildError(
       'Cannot share an after-visit summary before the encounter note is signed.',
     );
@@ -226,28 +238,25 @@ async function buildAfterVisitSummary(
   const note: MedicalEncounterNoteV1 = parsed.data;
   const cc = stripBracketTag(note.chiefComplaint).trim();
 
-  // Sprint DV5 — confirmed Rx, in plain language. Only CONFIRMED orders
-  // reach the patient; drafts the doctor never confirmed are excluded.
-  const medRows = await prisma.medicationOrder.findMany({
-    where: { sessionId, status: 'CONFIRMED' },
-    orderBy: { createdAt: 'asc' },
-  });
-  const medications = medRows
-    .map((row) => {
-      const med = MedicationOrderV1Schema.safeParse(row.content);
-      if (!med.success) return null;
-      const m = med.data;
-      const parts = [
-        stripBracketTag(m.drug).trim(),
-        m.strength,
-        m.dose,
-        m.frequency,
-        m.durationDays ? `for ${m.durationDays} days` : null,
-      ].filter((p): p is string => !!p && p.length > 0);
-      const line = parts.join(' · ');
-      return m.instructions ? `${line} (${stripBracketTag(m.instructions).trim()})` : line;
-    })
-    .filter((l): l is string => l !== null && l.length > 0);
+  // Medication content is copied from the RxPad frozen into the signed note.
+  // Mutable medication_order rows remain workflow state and can never rewrite
+  // a later patient snapshot after signature.
+  const parsedPad = RxPadV1Schema.safeParse(session.therapyNote.rxPad);
+  const medications = parsedPad.success
+    ? parsedPad.data.meds
+        .filter((m) => m.status === 'confirmed')
+        .map((m) => {
+          const parts = [
+            stripBracketTag(m.drug).trim(),
+            m.strength,
+            m.dose,
+            m.frequency,
+            m.durationDays ? `for ${m.durationDays} days` : null,
+          ].filter((part): part is string => !!part && part.length > 0);
+          return parts.join(' · ');
+        })
+        .filter((line) => line.length > 0)
+    : [];
 
   const snapshot: PatientShareSnapshot = {
     kind: 'AFTER_VISIT_SUMMARY',
@@ -350,6 +359,7 @@ async function buildInstrumentCheckin(
   { clientId, psychologistId, language }: BuildArgs,
   refClientId: string,
   instrumentKey: InstrumentKey,
+  sessionId?: string,
 ): Promise<SnapshotResult | null> {
   if (refClientId !== clientId) {
     throw new SnapshotBuildError('Check-in clientId does not match the request clientId.');
@@ -361,6 +371,7 @@ async function buildInstrumentCheckin(
   if (!client || client.psychologistId !== psychologistId || client.deletedAt !== null) {
     return null;
   }
+  if (!(await optionalShareSessionIsOwned(sessionId, clientId, psychologistId))) return null;
   const def = INSTRUMENTS[instrumentKey];
   if (!def) {
     throw new SnapshotBuildError(`Unknown instrument: ${instrumentKey}`);
@@ -380,7 +391,7 @@ async function buildInstrumentCheckin(
       completedAt: null,
     },
     subject: 'A quick check-in before our next session',
-    sessionId: null,
+    sessionId: sessionId ?? null,
   };
 }
 
@@ -395,13 +406,13 @@ async function buildSignedNote(
       clientId: true,
       psychologistId: true,
       scheduledAt: true,
-      therapyNote: { select: { content: true } },
+      therapyNote: { select: { content: true, locked: true } },
     },
   });
   if (!session || session.psychologistId !== psychologistId || session.clientId !== clientId) {
     return null;
   }
-  if (!session.therapyNote) {
+  if (!session.therapyNote?.locked) {
     throw new SnapshotBuildError('Cannot share an unsigned note. Sign the note first.');
   }
   const parsed = TherapyNoteV1Schema.safeParse(session.therapyNote.content);
@@ -430,6 +441,40 @@ async function buildSignedNote(
   };
 }
 
+async function buildSessionTakeaway(
+  { clientId, psychologistId }: BuildArgs,
+  sessionId: string,
+): Promise<SnapshotResult | null> {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      clientId: true,
+      psychologistId: true,
+      kind: true,
+      mindCloseout: { select: { patientTakeaway: true } },
+      therapyNote: { select: { locked: true } },
+    },
+  });
+  if (!session || session.clientId !== clientId || session.psychologistId !== psychologistId) {
+    return null;
+  }
+  if (!session.therapyNote?.locked) {
+    throw new SnapshotBuildError('Cannot share a takeaway from an unsigned note.');
+  }
+  const safe = stripBracketTag(session.mindCloseout?.patientTakeaway ?? '')
+    .trim()
+    .slice(0, 2000);
+  if (!safe) {
+    throw new SnapshotBuildError('Write and confirm a patient-facing takeaway before sharing.');
+  }
+  return {
+    snapshot: { kind: 'SESSION_TAKEAWAY', summary: safe },
+    subject: 'Your session takeaway',
+    sessionId: session.id,
+  };
+}
+
 /**
  * Sprint 49 — Signed intake note snapshot.
  *
@@ -453,7 +498,7 @@ async function buildSignedIntakeNote(
       psychologistId: true,
       kind: true,
       scheduledAt: true,
-      therapyNote: { select: { content: true } },
+      therapyNote: { select: { content: true, locked: true } },
     },
   });
   if (!session || session.psychologistId !== psychologistId || session.clientId !== clientId) {
@@ -464,7 +509,7 @@ async function buildSignedIntakeNote(
       'SIGNED_INTAKE_NOTE artefact can only be built from an INTAKE session.',
     );
   }
-  if (!session.therapyNote) {
+  if (!session.therapyNote?.locked) {
     throw new SnapshotBuildError('Cannot share an unsigned intake note. Sign the note first.');
   }
   const parsed = IntakeNoteV1Schema.safeParse(session.therapyNote.content);
@@ -567,9 +612,58 @@ async function buildTherapyScript(
   };
 }
 
+async function buildHomework(
+  args: BuildArgs,
+  assignmentId: string,
+  sessionId?: string,
+): Promise<SnapshotResult | null> {
+  const assignment = await prisma.exerciseAssignment.findFirst({
+    where: {
+      id: assignmentId,
+      clientId: args.clientId,
+      psychologistId: args.psychologistId,
+    },
+    select: {
+      id: true,
+      customDescription: true,
+      exerciseId: true,
+      frequency: true,
+      dueAt: true,
+      therapistNote: true,
+      sourceSessionId: true,
+    },
+  });
+  if (!assignment) return null;
+  if (!homeworkShareSessionMatches(sessionId, assignment.sourceSessionId)) return null;
+  if (sessionId) {
+    const owned = await prisma.session.count({
+      where: { id: sessionId, clientId: args.clientId, psychologistId: args.psychologistId },
+    });
+    if (owned !== 1) return null;
+  }
+  const task = assignment.customDescription?.trim() || assignment.exerciseId;
+  if (!task) throw new SnapshotBuildError('Homework has no patient-safe task.');
+  return {
+    snapshot: {
+      kind: 'HOMEWORK',
+      assignmentId: assignment.id,
+      task,
+      frequency: assignment.frequency,
+      dueAt: assignment.dueAt?.toISOString() ?? null,
+      therapistNote: assignment.therapistNote,
+      responseOutcome: null,
+      responseReflection: null,
+      respondedAt: null,
+    },
+    subject: 'Homework',
+    sessionId: sessionId ?? assignment.sourceSessionId ?? null,
+  };
+}
+
 async function buildTreatmentPlan(
   { clientId, psychologistId }: BuildArgs,
   treatmentPlanId: string,
+  sessionId?: string,
 ): Promise<SnapshotResult | null> {
   const row = await prisma.treatmentPlan.findUnique({
     where: { id: treatmentPlanId },
@@ -585,6 +679,7 @@ async function buildTreatmentPlan(
   if (!row || row.psychologistId !== psychologistId || row.clientId !== clientId) {
     return null;
   }
+  if (!(await optionalShareSessionIsOwned(sessionId, clientId, psychologistId))) return null;
   if (row.supersededAt !== null) {
     throw new SnapshotBuildError(
       'This treatment plan has been superseded by a newer version. Share the active plan instead.',
@@ -604,7 +699,7 @@ async function buildTreatmentPlan(
       expectedDurationSessions: plan.expectedDurationSessions,
     },
     subject: `Your treatment plan · v${row.version}`,
-    sessionId: null,
+    sessionId: sessionId ?? null,
   };
 }
 
@@ -674,4 +769,17 @@ function splitLines(s: string): string[] {
     .split(/[\n;]+/)
     .map((x) => x.trim())
     .filter((x) => x.length > 0);
+}
+
+async function optionalShareSessionIsOwned(
+  sessionId: string | undefined,
+  clientId: string,
+  psychologistId: string,
+): Promise<boolean> {
+  if (!sessionId) return true;
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: { id: true, clientId: true, psychologistId: true },
+  });
+  return validateOptionalShareSession(sessionId, session ?? undefined, clientId, psychologistId);
 }

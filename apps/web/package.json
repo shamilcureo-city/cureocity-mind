@@ -24,22 +24,23 @@
     "@google/genai": "^2.8.0",
     "@neondatabase/serverless": "^0.10.4",
     "@opentelemetry/api": "^1.9.0",
-    "@opentelemetry/exporter-metrics-otlp-http": "^0.57.2",
-    "@opentelemetry/resources": "^1.30.0",
-    "@opentelemetry/sdk-metrics": "^1.30.0",
+    "@opentelemetry/exporter-metrics-otlp-http": "0.220.0",
+    "@opentelemetry/resources": "2.9.0",
+    "@opentelemetry/sdk-metrics": "2.9.0",
     "@opentelemetry/semantic-conventions": "^1.28.0",
     "@prisma/adapter-neon": "^5.22.0",
     "@prisma/client": "^5.22.0",
     "@react-pdf/renderer": "^4.5.1",
     "@sentry/nextjs": "^10.58.0",
     "firebase": "^11.0.2",
-    "firebase-admin": "^13.0.2",
+    "firebase-admin": "^14.3.0",
     "livekit-client": "^2.21.0",
     "livekit-server-sdk": "^2.17.0",
-    "next": "^15.5.21",
+    "next": "15.5.24",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sharp": "0.35.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -53,7 +54,7 @@
     "postcss": "^8.5.1",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.8",
+    "vitest": "3.2.6",
     "ws": "^8.18.0"
   }
 }

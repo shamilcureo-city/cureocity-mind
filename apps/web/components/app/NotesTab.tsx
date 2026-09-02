@@ -86,6 +86,7 @@ interface Props {
   /// legal attestation line. In V1 the signer is always the owning
   /// therapist, so the page passes their name down.
   signerName: string;
+  canShare: boolean;
 }
 
 type Phase =
@@ -131,6 +132,7 @@ export function NotesTab({
   clientPreferredLanguage,
   noteTemplateId,
   signerName,
+  canShare,
 }: Props) {
   const router = useRouter();
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
@@ -656,7 +658,7 @@ export function NotesTab({
                 clientName={clientName}
                 noteText={intakeNoteToText(signedIntake)}
                 signed
-                onShare={() => setShareOpen(true)}
+                {...(canShare ? { onShare: () => setShareOpen(true) } : {})}
                 leftControls={
                   <>
                     <TemplatePicker
@@ -682,16 +684,19 @@ export function NotesTab({
                 signedBy={signerName}
                 verbosity={verbosity}
               />
-              <ShareModal
-                open={shareOpen}
-                onClose={() => setShareOpen(false)}
-                clientId={clientId}
-                hasContactPhone={clientHasContactPhone}
-                hasContactEmail={clientHasContactEmail}
-                artefact={{ artefactType: 'SIGNED_INTAKE_NOTE', sessionId }}
-                artefactLabel="Signed intake note"
-                defaultLanguage={clientPreferredLanguage}
-              />
+              {canShare && (
+                <ShareModal
+                  open={shareOpen}
+                  onClose={() => setShareOpen(false)}
+                  clientId={clientId}
+                  hasContactPhone={clientHasContactPhone}
+                  hasContactEmail={clientHasContactEmail}
+                  artefact={{ artefactType: 'SIGNED_INTAKE_NOTE', sessionId }}
+                  artefactLabel="Signed intake note"
+                  defaultLanguage={clientPreferredLanguage}
+                  mindSessionId={sessionId}
+                />
+              )}
               <RevisionPanel sessionId={sessionId} onUnlock={unlockNote} unlocking={unlocking} />
               <NoteFooter
                 costInr={initialDraft?.totalCostInr ?? '—'}
@@ -725,7 +730,7 @@ export function NotesTab({
               clientName={clientName}
               noteText={therapyNoteToText(treatmentContent)}
               signed
-              onShare={() => setShareOpen(true)}
+              {...(canShare ? { onShare: () => setShareOpen(true) } : {})}
               leftControls={
                 <>
                   <TemplatePicker
@@ -752,16 +757,19 @@ export function NotesTab({
               signedBy={signerName}
               verbosity={verbosity}
             />
-            <ShareModal
-              open={shareOpen}
-              onClose={() => setShareOpen(false)}
-              clientId={clientId}
-              hasContactPhone={clientHasContactPhone}
-              hasContactEmail={clientHasContactEmail}
-              artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
-              artefactLabel="Signed session note"
-              defaultLanguage={clientPreferredLanguage}
-            />
+            {canShare && (
+              <ShareModal
+                open={shareOpen}
+                onClose={() => setShareOpen(false)}
+                clientId={clientId}
+                hasContactPhone={clientHasContactPhone}
+                hasContactEmail={clientHasContactEmail}
+                artefact={{ artefactType: 'SIGNED_NOTE', sessionId }}
+                artefactLabel="Signed session note"
+                defaultLanguage={clientPreferredLanguage}
+                mindSessionId={sessionId}
+              />
+            )}
             <RevisionPanel sessionId={sessionId} onUnlock={unlockNote} unlocking={unlocking} />
             <NoteFooter
               costInr={initialDraft?.totalCostInr ?? '—'}
@@ -797,7 +805,7 @@ export function NotesTab({
               clientName={clientName}
               noteText={intakeNoteToText(intakeNote)}
               signed={false}
-              onShare={editing ? undefined : signAndShare}
+              {...(canShare && !editing ? { onShare: signAndShare } : {})}
               leftControls={
                 <>
                   {/* Templates are opt-in for intake — the standard
@@ -875,7 +883,7 @@ export function NotesTab({
             }
           />
         </div>
-        {!editing && (
+        {canShare && !editing && (
           <SignAndSendBar
             signing={signing}
             reopened={reopened}
@@ -902,7 +910,7 @@ export function NotesTab({
             clientName={clientName}
             noteText={therapyNoteToText(note)}
             signed={false}
-            onShare={editing ? undefined : signAndShare}
+            {...(canShare && !editing ? { onShare: signAndShare } : {})}
             leftControls={
               <>
                 {/* Template / Re-generate re-draft from audio, which would
@@ -977,7 +985,7 @@ export function NotesTab({
           }
         />
       </div>
-      {!editing && (
+      {canShare && !editing && (
         <SignAndSendBar
           signing={signing}
           reopened={reopened}

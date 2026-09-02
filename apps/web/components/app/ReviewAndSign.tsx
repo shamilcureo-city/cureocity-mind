@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import type { MedicalEncounterNoteV1, RxPadDraft } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -12,6 +12,7 @@ import { EncounterDifferentialPanel } from './EncounterDifferentialPanel';
 import { EncounterOrdersPanel } from './EncounterOrdersPanel';
 import { EncounterInteropPanel } from './EncounterInteropPanel';
 import { postSignNote } from '../../lib/sign-note';
+import { buildShareDeliveryInput } from '../../lib/share-delivery-input';
 
 /**
  * Sprint DS11.2 — the ONE review-and-sign surface.
@@ -62,6 +63,8 @@ export function ReviewAndSign({
   const [signedRxPad, setSignedRxPad] = useState<RxPadDraft | null>(null);
   const [rxShareUrl, setRxShareUrl] = useState<string | null>(null);
   const [rxSharing, setRxSharing] = useState(false);
+  const avsIdempotencyKey = useRef(globalThis.crypto.randomUUID());
+  const rxIdempotencyKey = useRef(globalThis.crypto.randomUUID());
   // Batch B — prescription-safety gate. `hard` = a drug that conflicts with a
   // recorded allergy (overridable with a recorded reason); `soft` = med rows
   // still awaiting a confirm tap (cleared by confirming or removing them).
@@ -140,11 +143,14 @@ export function ReviewAndSign({
       const res = await fetch('/api/v1/share', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          channels: ['PORTAL_LINK'],
-          artefact: { artefactType: 'AFTER_VISIT_SUMMARY', sessionId },
-        }),
+        body: JSON.stringify(
+          buildShareDeliveryInput({
+            clientId,
+            channels: ['PORTAL_LINK'],
+            idempotencyKey: avsIdempotencyKey.current,
+            artefact: { artefactType: 'AFTER_VISIT_SUMMARY', sessionId },
+          }),
+        ),
       });
       if (!res.ok) throw new Error(await errorOf(res, 'Could not create the summary'));
       const data = (await res.json()) as { results: { portalUrl: string }[] };
@@ -165,11 +171,14 @@ export function ReviewAndSign({
       const res = await fetch('/api/v1/share', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          channels: ['PORTAL_LINK'],
-          artefact: { artefactType: 'RX_PAD', sessionId },
-        }),
+        body: JSON.stringify(
+          buildShareDeliveryInput({
+            clientId,
+            channels: ['PORTAL_LINK'],
+            idempotencyKey: rxIdempotencyKey.current,
+            artefact: { artefactType: 'RX_PAD', sessionId },
+          }),
+        ),
       });
       if (!res.ok) throw new Error(await errorOf(res, 'Could not create the prescription'));
       const data = (await res.json()) as { results: { portalUrl: string }[] };

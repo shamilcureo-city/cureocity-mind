@@ -16,17 +16,66 @@ export type ExerciseAssignmentStatus = z.infer<typeof ExerciseAssignmentStatusSc
  * persists its `homework` field as a row the client can mark COMPLETED
  * on the portal. Defaults CATALOG so every legacy row reads sensibly.
  */
-export const ExerciseAssignmentSourceSchema = z.enum(['CATALOG', 'THERAPY_SCRIPT']);
+export const ExerciseAssignmentSourceSchema = z.enum(['CATALOG', 'THERAPY_SCRIPT', 'CUSTOM']);
 export type ExerciseAssignmentSource = z.infer<typeof ExerciseAssignmentSourceSchema>;
 
-export const CreateExerciseAssignmentInputSchema = z.object({
-  clientId: CuidSchema,
-  /** Stable id from @cureocity/clinical catalog (cbt_* or emdr_*). */
-  exerciseId: z.string().regex(/^(cbt|emdr)_[a-z0-9_]+$/),
-  dueAt: IsoDateTimeSchema.optional(),
-  therapistNote: z.string().max(2000).optional(),
-});
+export const CreateExerciseAssignmentInputSchema = z
+  .object({
+    clientId: CuidSchema,
+    sourceSessionId: CuidSchema.optional(),
+    idempotencyKey: z.string().uuid().optional(),
+    /** Legacy catalog assignment. */
+    exerciseId: z
+      .string()
+      .regex(/^(cbt|emdr)_[a-z0-9_]+$/)
+      .optional(),
+    /** Explicit therapist-authored homework. Never inferred from an agreement. */
+    task: z.string().trim().min(1).max(2000).optional(),
+    frequency: z.string().trim().min(1).max(200).optional(),
+    dueAt: IsoDateTimeSchema.optional(),
+    deliveryChannel: z.enum(['WHATSAPP', 'EMAIL', 'PORTAL_LINK']).optional(),
+    therapistNote: z.string().max(2000).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.exerciseId && value.task) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['exerciseId'],
+        message: 'exerciseId and task are mutually exclusive',
+      });
+    }
+    if (!value.exerciseId && !value.task) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['task'], message: 'task is required' });
+    }
+    if (value.task && !value.idempotencyKey) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['idempotencyKey'],
+        message: 'idempotency key is required for custom homework',
+      });
+    }
+    if (value.task && !value.frequency && !value.dueAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['frequency'],
+        message: 'frequency or due date is required',
+      });
+    }
+    if (value.task && !value.deliveryChannel) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['deliveryChannel'],
+        message: 'delivery channel is required',
+      });
+    }
+  });
 export type CreateExerciseAssignmentInput = z.infer<typeof CreateExerciseAssignmentInputSchema>;
+
+export const HomeworkResponseInputSchema = z.object({
+  outcome: z.enum(['DONE', 'PARTLY', 'NOT_YET']),
+  reflection: z.string().trim().max(2000).optional(),
+});
+export type HomeworkResponseInput = z.infer<typeof HomeworkResponseInputSchema>;
 
 export const RecordCompletionInputSchema = z.object({
   /** Structured per the exercise's responseSchema; opaque here. */
@@ -51,11 +100,17 @@ export const ExerciseAssignmentSchema = z.object({
   customDescription: z.string().nullable().default(null),
   /** Sprint 51 — FK to the source TherapyScript for dedupe + provenance. */
   sourceTherapyScriptId: CuidSchema.nullable().default(null),
+  sourceSessionId: CuidSchema.nullable().default(null),
   assignedAt: IsoDateTimeSchema,
   dueAt: IsoDateTimeSchema.nullable(),
+  frequency: z.string().nullable().default(null),
+  deliveryChannel: z.enum(['WHATSAPP', 'EMAIL', 'PORTAL_LINK']).nullable().default(null),
   status: ExerciseAssignmentStatusSchema,
   completedAt: IsoDateTimeSchema.nullable(),
   response: z.record(z.unknown()).nullable(),
+  respondedAt: IsoDateTimeSchema.nullable().default(null),
+  responseShareId: CuidSchema.nullable().default(null),
+  responseShareBatchId: z.string().min(1).nullable().default(null),
   therapistNote: z.string().nullable(),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema,

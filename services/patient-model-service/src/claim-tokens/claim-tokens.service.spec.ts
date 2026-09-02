@@ -45,18 +45,14 @@ function makeDeps(opts?: {
       issuedAt: new Date(),
       redeemedAt: null,
       redeemedByFirebaseUid: null,
+      supersededAt: null,
     }));
-  const tokenUpdate =
-    opts?.tokenUpdate ??
-    vi.fn().mockImplementation(async ({ where, data }) => ({
-      id: where.id ?? TOKEN_ID,
-      ...data,
-    }));
+  const tokenUpdate = opts?.tokenUpdate ?? vi.fn().mockResolvedValue({ count: 1 });
   const clientUpdate = opts?.clientUpdate ?? vi.fn();
 
   const txClient = {
     client: { update: clientUpdate },
-    clientClaimToken: { create: tokenCreate, update: tokenUpdate },
+    clientClaimToken: { create: tokenCreate, updateMany: tokenUpdate },
     auditLog: { create: vi.fn() },
   };
   const transaction = vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => fn(txClient));
@@ -98,6 +94,10 @@ describe('ClaimTokensService.issue', () => {
         psychologistId: PSY_ID,
         token: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
       }),
+    });
+    expect(deps.tokenUpdate).toHaveBeenCalledWith({
+      where: { clientId: CLIENT_ID, redeemedAt: null, supersededAt: null },
+      data: { supersededAt: expect.any(Date) },
     });
     expect(deps.audit.log).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -157,6 +157,7 @@ describe('ClaimTokensService.preview', () => {
         id: TOKEN_ID,
         expiresAt: inFuture(7),
         redeemedAt: null,
+        supersededAt: null,
         client: {
           fullNameEncrypted: 'Arjun Mehta',
           psychologist: { fullName: 'Dr. Priya Menon' },
@@ -178,6 +179,7 @@ describe('ClaimTokensService.preview', () => {
         id: TOKEN_ID,
         expiresAt: inFuture(7),
         redeemedAt: inPast(0.5),
+        supersededAt: null,
         client: {
           fullNameEncrypted: 'Arjun Mehta',
           psychologist: { fullName: 'Dr. Priya Menon' },
@@ -204,6 +206,7 @@ describe('ClaimTokensService.preview', () => {
         id: TOKEN_ID,
         expiresAt: inPast(1),
         redeemedAt: null,
+        supersededAt: null,
         client: {
           fullNameEncrypted: 'Arjun Mehta',
           psychologist: { fullName: 'Dr. Priya Menon' },
@@ -224,6 +227,7 @@ describe('ClaimTokensService.redeem', () => {
       expiresAt: Date;
       redeemedAt: Date | null;
       redeemedByFirebaseUid: string | null;
+      supersededAt: Date | null;
       clientFirebaseUid: string | null;
     }>,
   ) {
@@ -233,6 +237,7 @@ describe('ClaimTokensService.redeem', () => {
       expiresAt: overrides?.expiresAt ?? inFuture(7),
       redeemedAt: overrides?.redeemedAt ?? null,
       redeemedByFirebaseUid: overrides?.redeemedByFirebaseUid ?? null,
+      supersededAt: overrides?.supersededAt ?? null,
       client: {
         id: CLIENT_ID,
         fullNameEncrypted: 'Arjun Mehta',
@@ -257,7 +262,7 @@ describe('ClaimTokensService.redeem', () => {
       data: { clientFirebaseUid: FIREBASE_UID },
     });
     expect(deps.tokenUpdate).toHaveBeenCalledWith({
-      where: { id: TOKEN_ID },
+      where: { id: TOKEN_ID, redeemedAt: null, supersededAt: null },
       data: { redeemedAt: expect.any(Date), redeemedByFirebaseUid: FIREBASE_UID },
     });
     expect(deps.audit.log).toHaveBeenCalledWith(
@@ -304,6 +309,19 @@ describe('ClaimTokensService.redeem', () => {
     await expect(svc.redeem(VALID_TOKEN, FIREBASE_UID, {})).rejects.toBeInstanceOf(
       ConflictException,
     );
+  });
+
+  it('rejects 409 when the token was superseded', async () => {
+    const deps = makeDeps({
+      tokenFindUnique: vi.fn().mockResolvedValue(tokenRow({ supersededAt: inPast(0.1) })),
+    });
+    const svc = new ClaimTokensService(deps.prisma, deps.audit);
+
+    await expect(svc.redeem(VALID_TOKEN, FIREBASE_UID, {})).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(deps.clientUpdate).not.toHaveBeenCalled();
+    expect(deps.tokenUpdate).not.toHaveBeenCalled();
   });
 
   it('rejects 409 when client is bound to a different uid (race / re-pair attempt)', async () => {

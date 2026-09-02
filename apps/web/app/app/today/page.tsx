@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
+import { Prisma } from '@prisma/client';
 import { CARE_ENGINE_CONSTANTS } from '@cureocity/clinical';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
@@ -19,6 +20,12 @@ import { decryptClientField } from '@/lib/client-pii';
 import { prioritizeTodayItems, type TodayAttentionItem } from '@/lib/today-priority';
 import { noteProcessingJourney } from '@/lib/note-processing-journey';
 import { prisma } from '@/lib/prisma';
+import { getEffectiveCapabilities } from '@/lib/capabilities';
+import { dedupeLatestShareActivity } from '@/lib/client-care-home-dedupe';
+import { homeworkResponseDetail } from '@/lib/mind-care-loop';
+import { dedupeTodayCrossSource } from '@/lib/today-cross-source-dedupe';
+import { selectAuthoritativeTodayHero } from '@/lib/today-hero';
+import { canOpenMindPage, loadOptionalCapabilityData } from '@/lib/mind-page-capabilities';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +46,8 @@ export const dynamic = 'force-dynamic';
 export default async function TodayPage() {
   const therapist = await requireOnboardedPsychologist();
   if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
+  const effective = await getEffectiveCapabilities(therapist.id);
+  if (!canOpenMindPage('today', effective.capabilities)) notFound();
   // TS6 — the therapist's preferred capture picks the Start button's primary
   // action (LIVE unless they chose a batch-first preference).
   const defaultCapture: 'LIVE' | 'BATCH' =
@@ -52,10 +61,16 @@ export default async function TodayPage() {
     rawTodayRows,
     rawUpcomingRows,
     rawClients,
+    rawActiveSession,
+    rawNextFutureSession,
     rawAttentionSessions,
     rawNoteWork,
     rawClientResponses,
     rawOverdueAssignments,
+    rawRefreshRequests,
+    rawCompletedHomework,
+    rawShareActivity,
+    rawFailedShareActivity,
   ] = await Promise.all([
     prisma.session.findMany({
       where: {
@@ -92,6 +107,25 @@ export default async function TodayPage() {
       orderBy: { createdAt: 'asc' },
       select: { id: true, fullNameEncrypted: true, preferredModality: true },
     }),
+    prisma.session.findFirst({
+      where: {
+        psychologistId: therapist.id,
+        status: 'IN_PROGRESS',
+        client: { deletedAt: null },
+      },
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      select: sessionSelect,
+    }),
+    prisma.session.findFirst({
+      where: {
+        psychologistId: therapist.id,
+        status: 'SCHEDULED',
+        scheduledAt: { gte: now },
+        client: { deletedAt: null },
+      },
+      orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+      select: sessionSelect,
+    }),
     prisma.session.findMany({
       where: {
         psychologistId: therapist.id,
@@ -125,39 +159,152 @@ export default async function TodayPage() {
         client: { select: { fullNameEncrypted: true } },
       },
     }),
-    prisma.instrumentResponse.findMany({
-      where: {
-        psychologistId: therapist.id,
-        administrationMode: 'SELF',
-        administeredAt: { gte: responseCutoff },
-        client: { deletedAt: null },
-      },
-      orderBy: { administeredAt: 'desc' },
-      take: 5,
-      select: {
-        id: true,
-        instrumentKey: true,
-        administeredAt: true,
-        clientId: true,
-        client: { select: { fullNameEncrypted: true } },
-      },
-    }),
-    prisma.exerciseAssignment.findMany({
-      where: {
-        psychologistId: therapist.id,
-        status: { in: ['PENDING', 'IN_PROGRESS'] },
-        dueAt: { lt: now },
-        client: { deletedAt: null },
-      },
-      orderBy: { dueAt: 'asc' },
-      take: 5,
-      select: {
-        id: true,
-        dueAt: true,
-        clientId: true,
-        client: { select: { fullNameEncrypted: true } },
-      },
-    }),
+    loadOptionalCapabilityData(
+      effective.capabilities,
+      'MEASUREMENT_BASED_CARE',
+      () =>
+        prisma.instrumentResponse.findMany({
+          where: {
+            psychologistId: therapist.id,
+            administrationMode: 'SELF',
+            administeredAt: { gte: responseCutoff },
+            client: { deletedAt: null },
+          },
+          orderBy: { administeredAt: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            instrumentKey: true,
+            administeredAt: true,
+            sourcePatientShareId: true,
+            sourceShareBatchId: true,
+            clientId: true,
+            client: { select: { fullNameEncrypted: true } },
+          },
+        }),
+      [],
+    ),
+    loadOptionalCapabilityData(
+      effective.capabilities,
+      'THERAPY_WORKFLOWS',
+      () =>
+        prisma.exerciseAssignment.findMany({
+          where: {
+            psychologistId: therapist.id,
+            status: { in: ['PENDING', 'IN_PROGRESS'] },
+            dueAt: { lt: now },
+            client: { deletedAt: null },
+          },
+          orderBy: { dueAt: 'asc' },
+          take: 5,
+          select: {
+            id: true,
+            dueAt: true,
+            clientId: true,
+            client: { select: { fullNameEncrypted: true } },
+          },
+        }),
+      [],
+    ),
+    loadOptionalCapabilityData(
+      effective.capabilities,
+      'PATIENT_SHARING',
+      () =>
+        prisma.patientShare.findMany({
+          where: {
+            psychologistId: therapist.id,
+            refreshRequestedAt: { gte: responseCutoff },
+            client: { deletedAt: null },
+          },
+          orderBy: { refreshRequestedAt: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            clientId: true,
+            refreshRequestedAt: true,
+            client: { select: { fullNameEncrypted: true } },
+          },
+        }),
+      [],
+    ),
+    loadOptionalCapabilityData(
+      effective.capabilities,
+      'THERAPY_WORKFLOWS',
+      () =>
+        prisma.exerciseAssignment.findMany({
+          where: {
+            psychologistId: therapist.id,
+            respondedAt: { gte: responseCutoff },
+            NOT: { response: { equals: Prisma.DbNull } },
+            client: { deletedAt: null },
+          },
+          orderBy: { updatedAt: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            clientId: true,
+            completedAt: true,
+            respondedAt: true,
+            responseShareId: true,
+            responseShareBatchId: true,
+            updatedAt: true,
+            response: true,
+            client: { select: { fullNameEncrypted: true } },
+          },
+        }),
+      [],
+    ),
+    loadOptionalCapabilityData(
+      effective.capabilities,
+      'PATIENT_SHARING',
+      () =>
+        prisma.patientShare.findMany({
+          where: {
+            psychologistId: therapist.id,
+            client: { deletedAt: null },
+            openedAt: { gte: responseCutoff },
+          },
+          orderBy: [{ openedAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+          // At most three channel rows belong to one fanout. Over-fetch before
+          // deduping so one batch cannot crowd seven other client events out.
+          take: 24,
+          select: {
+            id: true,
+            shareBatchId: true,
+            clientId: true,
+            status: true,
+            createdAt: true,
+            openedAt: true,
+            client: { select: { fullNameEncrypted: true } },
+          },
+        }),
+      [],
+    ),
+    loadOptionalCapabilityData(
+      effective.capabilities,
+      'PATIENT_SHARING',
+      () =>
+        prisma.patientShare.findMany({
+          where: {
+            psychologistId: therapist.id,
+            client: { deletedAt: null },
+            createdAt: { gte: responseCutoff },
+            status: { in: ['TRANSIENT_FAILURE', 'PERMANENT_FAILURE'] },
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 24,
+          select: {
+            id: true,
+            shareBatchId: true,
+            clientId: true,
+            status: true,
+            createdAt: true,
+            openedAt: true,
+            client: { select: { fullNameEncrypted: true } },
+          },
+        }),
+      [],
+    ),
   ]);
 
   // Read cutover — decrypt the client name into each row before the sync
@@ -171,7 +318,7 @@ export default async function TodayPage() {
       fullName: await decryptClientField(therapist.id, s.client.fullNameEncrypted),
     },
   });
-  const [todayRows, upcomingRows, clients] = await Promise.all([
+  const [todayRows, upcomingRows, clients, activeSession, nextFutureSession] = await Promise.all([
     Promise.all(rawTodayRows.map(decSessionName)),
     Promise.all(rawUpcomingRows.map(decSessionName)),
     Promise.all(
@@ -180,78 +327,127 @@ export default async function TodayPage() {
         fullName: await decryptClientField(therapist.id, c.fullNameEncrypted),
       })),
     ).then((list) => list.sort((a, b) => a.fullName.localeCompare(b.fullName))),
+    rawActiveSession ? decSessionName(rawActiveSession) : null,
+    rawNextFutureSession ? decSessionName(rawNextFutureSession) : null,
   ]);
 
   const attentionItems: TodayAttentionItem[] = prioritizeTodayItems(
-    await Promise.all([
-      ...[
-        rawAttentionSessions.find((session) => session.status === 'IN_PROGRESS'),
-        rawAttentionSessions.find(
-          (session) => session.status === 'SCHEDULED' && session.scheduledAt >= now,
+    dedupeTodayCrossSource(
+      await Promise.all([
+        ...[rawActiveSession, rawNextFutureSession]
+          .filter((session): session is NonNullable<typeof session> => session !== null)
+          .map(async (session) => ({
+            id: session.id,
+            kind: (session.status === 'IN_PROGRESS'
+              ? 'ACTIVE_SESSION'
+              : 'FUTURE_SESSION') as TodayAttentionItem['kind'],
+            occurredAt: session.scheduledAt.toISOString(),
+            title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
+            href:
+              session.status === 'IN_PROGRESS'
+                ? `/app/sessions/${session.id}/live`
+                : `/app/sessions/${session.id}`,
+            ctaLabel: session.status === 'IN_PROGRESS' ? 'Resume session' : 'Prepare for session',
+          })),
+        ...rawNoteWork.map(async (session) => {
+          const journey = noteProcessingJourney(session.noteDraft!.status);
+          return {
+            id: session.id,
+            kind: journey.queueKind,
+            occurredAt: (session.endedAt ?? now).toISOString(),
+            title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
+            detail: journey.message,
+            href: `/app/sessions/${session.id}?tab=note`,
+            ctaLabel:
+              journey.state === 'NEEDS_ATTENTION'
+                ? 'Resume generation'
+                : journey.state === 'READY_TO_REVIEW'
+                  ? 'Review & Close'
+                  : 'View progress',
+          };
+        }),
+        ...rawClientResponses.map(async (response) => ({
+          id: `checkin:${response.id}`,
+          clientId: response.clientId,
+          event: 'CHECKIN_RESPONSE' as const,
+          sourceShareId: response.sourcePatientShareId ?? undefined,
+          sourceShareBatchId: response.sourceShareBatchId ?? undefined,
+          kind: 'CLIENT_RESPONSE' as const,
+          occurredAt: response.administeredAt.toISOString(),
+          title: await decryptClientField(therapist.id, response.client.fullNameEncrypted),
+          detail: `${response.instrumentKey} self-check-in completed`,
+          href: `/app/clients/${response.clientId}/journey#measure-${response.instrumentKey.toLowerCase()}`,
+          ctaLabel: 'Review response',
+        })),
+        ...rawRefreshRequests.map(async (share) => ({
+          id: `refresh:${share.id}`,
+          kind: 'CLIENT_RESPONSE' as const,
+          occurredAt: share.refreshRequestedAt!.toISOString(),
+          title: await decryptClientField(therapist.id, share.client.fullNameEncrypted),
+          detail: 'Client requested a fresh private link',
+          href: `/app/clients/${share.clientId}/shared`,
+          ctaLabel: 'Review shared items',
+        })),
+        ...rawCompletedHomework.map(async (assignment) => ({
+          id: `homework:${assignment.id}`,
+          clientId: assignment.clientId,
+          assignmentId: assignment.id,
+          sourceShareId: assignment.responseShareId ?? undefined,
+          sourceShareBatchId: assignment.responseShareBatchId ?? undefined,
+          event: 'HOMEWORK_RESPONSE' as const,
+          kind: 'CLIENT_RESPONSE' as const,
+          occurredAt: assignment.respondedAt!.toISOString(),
+          responseRecordedAt: assignment.respondedAt!.toISOString(),
+          title: await decryptClientField(therapist.id, assignment.client.fullNameEncrypted),
+          detail: homeworkResponseDetail(assignment.response),
+          href: `/app/clients/${assignment.clientId}/shared`,
+          ctaLabel: 'Review homework',
+        })),
+        ...dedupeLatestShareActivity([...rawShareActivity, ...rawFailedShareActivity], 8).map(
+          async (share) => ({
+            id: `share:${share.id}`,
+            clientId: share.clientId,
+            shareId: share.id,
+            shareBatchId: share.shareBatchId ?? undefined,
+            event: share.hasFailure ? ('SHARE_FAILURE' as const) : ('SHARE_OPEN' as const),
+            kind: 'CLIENT_RESPONSE' as const,
+            occurredAt: (share.openedAt ?? share.createdAt).toISOString(),
+            title: await decryptClientField(therapist.id, share.client.fullNameEncrypted),
+            detail: share.hasFailure
+              ? share.hasOpened
+                ? 'Shared item opened; another delivery channel failed'
+                : 'Shared-item delivery failed'
+              : 'Client opened a shared item',
+            href: `/app/clients/${share.clientId}/shared`,
+            ctaLabel: 'Review shared items',
+          }),
         ),
-      ]
-        .filter((session): session is NonNullable<typeof session> => session !== undefined)
-        .map(async (session) => ({
-          id: session.id,
-          kind: (session.status === 'IN_PROGRESS'
-            ? 'ACTIVE_SESSION'
-            : 'FUTURE_SESSION') as TodayAttentionItem['kind'],
-          occurredAt: session.scheduledAt.toISOString(),
-          title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
-          href:
-            session.status === 'IN_PROGRESS'
-              ? `/app/sessions/${session.id}/live`
-              : `/app/sessions/${session.id}`,
-          ctaLabel: session.status === 'IN_PROGRESS' ? 'Resume session' : 'Prepare for session',
-        })),
-      ...rawNoteWork.map(async (session) => {
-        const journey = noteProcessingJourney(session.noteDraft!.status);
-        return {
-          id: session.id,
-          kind: journey.queueKind,
-          occurredAt: (session.endedAt ?? now).toISOString(),
-          title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
-          detail: journey.message,
-          href: `/app/sessions/${session.id}?tab=note`,
-          ctaLabel:
-            journey.state === 'NEEDS_ATTENTION'
-              ? 'Resume generation'
-              : journey.state === 'READY_TO_REVIEW'
-                ? 'Review & Close'
-                : 'View progress',
-        };
-      }),
-      ...rawClientResponses.map(async (response) => ({
-        id: response.id,
-        kind: 'CLIENT_RESPONSE' as const,
-        occurredAt: response.administeredAt.toISOString(),
-        title: await decryptClientField(therapist.id, response.client.fullNameEncrypted),
-        detail: `${response.instrumentKey} self-check-in completed`,
-        href: `/app/clients/${response.clientId}/journey#measure-${response.instrumentKey.toLowerCase()}`,
-        ctaLabel: 'Review response',
-      })),
-      ...rawAttentionSessions
-        .filter((session) => session.status === 'SCHEDULED' && session.scheduledAt < now)
-        .slice(0, 3)
-        .map(async (session) => ({
-          id: session.id,
+        ...rawAttentionSessions
+          .filter((session) => session.status === 'SCHEDULED' && session.scheduledAt < now)
+          .slice(0, 3)
+          .map(async (session) => ({
+            id: session.id,
+            kind: 'OVERDUE_WORK' as const,
+            occurredAt: session.scheduledAt.toISOString(),
+            title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
+            detail: 'Scheduled session still unresolved',
+            href: `/app/sessions/${session.id}`,
+            ctaLabel: 'Resolve session',
+          })),
+        ...rawOverdueAssignments.map(async (assignment) => ({
+          id: assignment.id,
+          clientId: assignment.clientId,
+          assignmentId: assignment.id,
+          event: 'HOMEWORK_OVERDUE' as const,
           kind: 'OVERDUE_WORK' as const,
-          occurredAt: session.scheduledAt.toISOString(),
-          title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
-          detail: 'Scheduled session still unresolved',
-          href: `/app/sessions/${session.id}`,
-          ctaLabel: 'Resolve session',
+          occurredAt: (assignment.dueAt ?? now).toISOString(),
+          title: await decryptClientField(therapist.id, assignment.client.fullNameEncrypted),
+          detail: 'Exercise follow-up is overdue',
+          href: `/app/clients/${assignment.clientId}/journey`,
+          ctaLabel: 'Review exercise',
         })),
-      ...rawOverdueAssignments.map(async (assignment) => ({
-        id: assignment.id,
-        kind: 'OVERDUE_WORK' as const,
-        occurredAt: (assignment.dueAt ?? now).toISOString(),
-        title: await decryptClientField(therapist.id, assignment.client.fullNameEncrypted),
-        detail: 'Exercise follow-up is overdue',
-        href: `/app/clients/${assignment.clientId}/journey`,
-        ctaLabel: 'Review exercise',
-      })),
-    ]),
+      ]),
+    ),
     now,
   ).slice(0, 12);
 
@@ -263,13 +459,13 @@ export default async function TodayPage() {
     (s) => s.status === 'NO_SHOW' || s.status === 'CANCELLED' || s.status === 'RESCHEDULED',
   );
 
-  // TS7.2 — at any moment exactly one session matters: the in-progress one,
-  // else the next scheduled. It gets the hero treatment; everything else on
-  // the day becomes one quiet, time-ordered timeline.
-  const hero = nowAndUpcoming[0] ?? null;
-  const restOfDay = [...nowAndUpcoming.slice(1), ...doneToday, ...otherToday].sort(
-    (a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime(),
-  );
+  // TS7.2 — at any moment exactly one session matters: the authoritative
+  // in-progress one, else the authoritative next scheduled session. It may
+  // sit outside today's display boundary, so do not derive it from todayRows.
+  const { hero } = selectAuthoritativeTodayHero(activeSession, nextFutureSession, todayRows);
+  const restOfDay = [...nowAndUpcoming, ...doneToday, ...otherToday]
+    .filter((session) => session.id !== hero?.id)
+    .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
 
   // Recents for the walk-in sheet: whoever is on today's board or in the
   // look-ahead is likely the person standing in the room.
@@ -281,7 +477,7 @@ export default async function TodayPage() {
   // authoritative state and the one-tap send. One grouped query, no N+1.
   const todayClientIds = [...new Set(todayRows.map((s) => s.clientId))];
   const dueByClient = new Map<string, string>();
-  if (todayClientIds.length > 0) {
+  if (effective.capabilities.has('MEASUREMENT_BASED_CARE') && todayClientIds.length > 0) {
     const latestScores = await prisma.instrumentResponse.groupBy({
       by: ['clientId', 'instrumentKey'],
       where: { clientId: { in: todayClientIds } },

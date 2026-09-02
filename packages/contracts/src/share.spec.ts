@@ -84,6 +84,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: [],
         artefact: { artefactType: 'SIGNED_NOTE', sessionId: cuid },
       }).success,
@@ -94,6 +95,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['WHATSAPP'],
         artefact: { artefactType: 'SIGNED_NOTE', sessionId: cuid },
       }).success,
@@ -104,6 +106,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['EMAIL', 'PORTAL_LINK'],
         therapistMessage: 'Sit with these between sessions.',
         artefact: {
@@ -119,6 +122,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['WHATSAPP'],
         artefact: {
           artefactType: 'REFLECTION_QUESTIONS',
@@ -133,6 +137,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['PORTAL_LINK'],
         artefact: { artefactType: 'THERAPY_SCRIPT', therapyScriptId: cuid },
       }).success,
@@ -143,6 +148,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['WHATSAPP', 'EMAIL'],
         artefact: { artefactType: 'TREATMENT_PLAN', treatmentPlanId: cuid },
       }).success,
@@ -153,6 +159,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['WHATSAPP'],
         artefact: { artefactType: 'SIGNED_NOTE', sessionId: cuid },
         rogueField: 'should fail',
@@ -164,6 +171,7 @@ describe('ShareInputSchema', () => {
     expect(
       ShareInputSchema.safeParse({
         clientId: cuid,
+        idempotencyKey: '123e4567-e89b-42d3-a456-426614174000',
         channels: ['WHATSAPP', 'EMAIL', 'PORTAL_LINK', 'WHATSAPP'],
         artefact: { artefactType: 'SIGNED_NOTE', sessionId: cuid },
       }).success,

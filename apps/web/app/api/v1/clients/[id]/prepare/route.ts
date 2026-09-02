@@ -8,10 +8,12 @@ import {
   type SessionAgreementDto,
 } from '@cureocity/contracts';
 import { z } from 'zod';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
+import { getEffectiveCapabilities } from '@/lib/capabilities';
 import { fetchOpenCrises } from '@/lib/crisis-flags';
 import { computeClientJourney, JourneyError } from '@/lib/journey';
+import { privateJson, privateResponse } from '@/lib/private-response';
 import { prisma } from '@/lib/prisma';
 
 /** TE2 — stored `Client.carriedQuestions` JSON, parsed defensively. */
@@ -49,12 +51,19 @@ interface RouteContext {
  * 'today-prepare'` — no new audit action needed.
  */
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
-  if (!auth.ok) return auth.response;
+  const auth = await requireCapability(req, 'CLINICAL_ANALYSIS');
+  if (!auth.ok) return privateResponse(auth.response);
   if (auth.value.user.vertical !== 'THERAPIST') {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    return privateJson({ error: 'Not found' }, { status: 404 });
   }
   const { id: clientId } = await ctx.params;
+  const effective = await getEffectiveCapabilities(auth.value.psychologistId);
+  const hasCapability = (capability: Parameters<typeof effective.capabilities.has>[0]) =>
+    effective.capabilities.has(capability);
+  if (!hasCapability('THERAPY_WORKFLOWS'))
+    return privateJson({ error: 'Not found' }, { status: 404 });
+  const canDiscloseWholeBrief =
+    hasCapability('MEASUREMENT_BASED_CARE') && hasCapability('SAFETY_PLANNING');
 
   const client = await prisma.client.findUnique({
     where: { id: clientId },
@@ -66,10 +75,10 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     },
   });
   if (!client || client.deletedAt !== null) {
-    return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    return privateJson({ error: 'Client not found' }, { status: 404 });
   }
   if (client.psychologistId !== auth.value.psychologistId) {
-    return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    return privateJson({ error: 'Client not found' }, { status: 404 });
   }
 
   let journey;
@@ -77,7 +86,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     journey = await computeClientJourney(clientId, auth.value.psychologistId);
   } catch (e) {
     if (e instanceof JourneyError) {
-      return NextResponse.json({ error: e.message }, { status: 404 });
+      return privateJson({ error: e.message }, { status: 404 });
     }
     throw e;
   }
@@ -116,25 +125,28 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
 
   const [assignments, openCrises, agreementRows, formulationRow, diagnosisRows] = await Promise.all(
     [
-      prisma.exerciseAssignment.findMany({
-        where: { clientId },
-        orderBy: { assignedAt: 'desc' },
-        take: 5,
-        select: {
-          id: true,
-          status: true,
-          assignedAt: true,
-          completedAt: true,
-          dueAt: true,
-          exerciseId: true,
-          customDescription: true,
-          therapistNote: true,
-        },
-      }),
-      fetchOpenCrises(clientId),
+      hasCapability('THERAPY_WORKFLOWS')
+        ? prisma.exerciseAssignment.findMany({
+            where: { clientId },
+            orderBy: { assignedAt: 'desc' },
+            take: 5,
+            select: {
+              id: true,
+              status: true,
+              assignedAt: true,
+              completedAt: true,
+              dueAt: true,
+              exerciseId: true,
+              customDescription: true,
+              therapistNote: true,
+              response: true,
+            },
+          })
+        : Promise.resolve([]),
+      hasCapability('SAFETY_PLANNING') ? fetchOpenCrises(clientId) : Promise.resolve([]),
       // SL2 — "last time you both agreed": the previous completed session's
       // agreements, read back so follow-up can be marked at prepare time.
-      lastCompleted
+      lastCompleted && hasCapability('THERAPY_WORKFLOWS')
         ? prisma.sessionAgreement.findMany({
             where: { sessionId: lastCompleted.id },
             orderBy: { createdAt: 'asc' },
@@ -157,18 +169,27 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     ],
   );
 
-  const homework: PrepareHomeworkEntry[] = assignments.map((a) => ({
-    id: a.id,
-    // Sprint 51 — script-sourced rows have customDescription;
-    // catalog rows fall back to the therapist's note or the catalog
-    // id stem so the panel always renders something readable.
-    description:
-      a.customDescription?.trim() || a.therapistNote?.trim() || a.exerciseId || 'Homework',
-    status: a.status,
-    assignedAt: a.assignedAt.toISOString(),
-    completedAt: a.completedAt?.toISOString() ?? null,
-    dueAt: a.dueAt?.toISOString() ?? null,
-  }));
+  const homework: PrepareHomeworkEntry[] = assignments.map((a) => {
+    const response = a.response as {
+      outcome?: 'DONE' | 'PARTLY' | 'NOT_YET';
+      reflection?: string | null;
+    } | null;
+    return {
+      id: a.id,
+      // Sprint 51 — script-sourced rows have customDescription;
+      // catalog rows fall back to the therapist's note or the catalog
+      // id stem so the panel always renders something readable.
+      description:
+        a.customDescription?.trim() || a.therapistNote?.trim() || a.exerciseId || 'Homework',
+      status: a.status,
+      assignedAt: a.assignedAt.toISOString(),
+      completedAt: a.completedAt?.toISOString() ?? null,
+      dueAt: a.dueAt?.toISOString() ?? null,
+      outcome: response?.outcome ?? null,
+      reflection: response?.reflection ?? null,
+      overdue: a.status !== 'COMPLETED' && a.dueAt !== null && a.dueAt.getTime() < Date.now(),
+    };
+  });
 
   const lastAgreements: SessionAgreementDto[] = agreementRows.map((r) => ({
     id: r.id,
@@ -199,14 +220,17 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const summary: PrepareSummaryV1 = {
     version: 'V1',
     clientId,
-    cachedBrief,
-    briefGeneratedAt: cachedBrief !== null ? cachedBriefRow!.createdAt.toISOString() : null,
-    briefIsStale,
+    cachedBrief: canDiscloseWholeBrief ? cachedBrief : null,
+    briefGeneratedAt:
+      canDiscloseWholeBrief && cachedBrief !== null
+        ? cachedBriefRow!.createdAt.toISOString()
+        : null,
+    briefIsStale: canDiscloseWholeBrief ? briefIsStale : false,
     journey: {
       stage: journey.stage,
       activePlan: journey.activePlan,
-      instrumentChanges: journey.instrumentChanges,
-      nextBestAction: journey.nextBestAction,
+      instrumentChanges: hasCapability('MEASUREMENT_BASED_CARE') ? journey.instrumentChanges : [],
+      nextBestAction: canDiscloseWholeBrief ? journey.nextBestAction : null,
     },
     homework,
     openCrises,
@@ -236,12 +260,11 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
       surface: 'today-prepare',
       hasCachedBrief: cachedBrief !== null,
       briefIsStale,
-      openCrisisCount: openCrises.length,
-      homeworkCount: homework.length,
+      outcome: 'viewed',
     },
   });
 
-  return NextResponse.json(summary);
+  return privateJson(summary);
 }
 
 /** First sentence of the narrative (or the first ~140 chars), for the glance line. */

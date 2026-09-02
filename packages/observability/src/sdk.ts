@@ -2,7 +2,7 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { Resource } from '@opentelemetry/resources';
+import { resourceFromAttributes } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
 
 /**
@@ -50,7 +50,7 @@ export function initObservability(opts: ObservabilityOptions): ObservabilityHand
     opts.prometheusPort ??
     (process.env['OTEL_PROMETHEUS_PORT'] ? Number(process.env['OTEL_PROMETHEUS_PORT']) : undefined);
 
-  const resource = new Resource({
+  const resource = resourceFromAttributes({
     [ATTR_SERVICE_NAME]: opts.serviceName,
     [ATTR_SERVICE_VERSION]: opts.serviceVersion ?? '0.0.0',
   });

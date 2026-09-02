@@ -71,13 +71,26 @@ export async function sendCrisisAlert(opts: {
   to: string;
   therapistName: string;
   clientRecordUrl: string;
+  idempotencyKey?: string;
 }): Promise<CrisisAlertResult> {
+  const production =
+    process.env['NODE_ENV'] === 'production' || process.env['VERCEL_ENV'] === 'production';
+  if (
+    production &&
+    (!process.env['SENDGRID_API_KEY']?.trim() || !process.env['SENDGRID_FROM_EMAIL']?.trim())
+  ) {
+    return { outcome: 'permanent_failure', errorCode: 'CRISIS_EMAIL_NOT_CONFIGURED' };
+  }
   const port = client();
+  if (production && port instanceof NoopBackend) {
+    return { outcome: 'permanent_failure', errorCode: 'CRISIS_EMAIL_BACKEND_UNAVAILABLE' };
+  }
   const res = await port.sendEmail({
     to: opts.to,
     subject: SUBJECT,
     textBody: TEXT(opts.therapistName, opts.clientRecordUrl),
     htmlBody: HTML(opts.therapistName, opts.clientRecordUrl),
+    ...(opts.idempotencyKey && { idempotencyKey: opts.idempotencyKey }),
   });
   const out: CrisisAlertResult = { outcome: res.outcome };
   if (res.providerMessageId !== undefined) out.providerMessageId = res.providerMessageId;

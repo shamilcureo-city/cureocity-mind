@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   CareMeasure,
@@ -15,6 +15,8 @@ import { Card } from '../ui/Card';
 import { AffectCard } from './AffectCard';
 import { ShareModal } from './ShareModal';
 import { severityLabel, phq9Plain, gad7Plain } from '../../lib/instrument-plain-language';
+import { buildShareDeliveryInput } from '../../lib/share-delivery-input';
+import { isDeliveredShareStatus } from '../../lib/sprint5-final-behavior';
 
 interface CatalogItem {
   id: string;
@@ -86,6 +88,7 @@ export function CareMeasurePanel({
   const [sendingKey, setSendingKey] = useState<string | null>(null);
   const [sentMsg, setSentMsg] = useState<Record<string, string>>({});
   const [sendError, setSendError] = useState<string | null>(null);
+  const shareIdempotencyKeys = useRef(new Map<string, string>());
   const [fallbackShare, setFallbackShare] = useState<{
     instrumentKey: 'PHQ9' | 'GAD7';
     label: string;
@@ -120,21 +123,27 @@ export function CareMeasurePanel({
     }
     setSendingKey(instrumentKey);
     try {
+      const idempotencyKey =
+        shareIdempotencyKeys.current.get(instrumentKey) ?? globalThis.crypto.randomUUID();
+      shareIdempotencyKeys.current.set(instrumentKey, idempotencyKey);
       const res = await fetch('/api/v1/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
-          channels,
-          artefact: { artefactType: 'INSTRUMENT_CHECKIN', clientId, instrumentKey },
-        }),
+        body: JSON.stringify(
+          buildShareDeliveryInput({
+            clientId,
+            channels,
+            idempotencyKey,
+            artefact: { artefactType: 'INSTRUMENT_CHECKIN', clientId, instrumentKey },
+          }),
+        ),
       });
       const data = (await res.json().catch(() => ({}))) as {
         results?: { channel: string; status: string }[];
         error?: string;
       };
       if (!res.ok) throw new Error(data.error ?? `Send failed (${res.status})`);
-      const delivered = (data.results ?? []).filter((r) => r.status !== 'FAILED');
+      const delivered = (data.results ?? []).filter((r) => isDeliveredShareStatus(r.status));
       if (delivered.length === 0) {
         throw new Error('Nothing was delivered — pick a channel instead.');
       }

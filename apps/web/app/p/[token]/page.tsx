@@ -9,9 +9,12 @@ import {
 import { hotlinesForCrisisKind } from '@cureocity/clinical';
 import { CheckinForm } from '@/components/portal/CheckinForm';
 import { HomeworkDoneButton } from '@/components/portal/HomeworkDoneButton';
+import { RequestFreshLinkButton } from '@/components/portal/RequestFreshLinkButton';
 import { writeAudit } from '@/lib/audit';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
+import { mindJourneyFlagEnabledFromEnv } from '@/lib/mind-journey-flags';
+import { lockShareFamily } from '@/lib/share-family-lock';
 import { WATERMARK_TAGLINE, watermarkUrl } from '@/lib/watermark';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +27,7 @@ export const runtime = 'nodejs';
 export const metadata: Metadata = {
   title: 'A private page for you',
   robots: { index: false, follow: false, nocache: true },
+  referrer: 'no-referrer',
 };
 
 interface PageProps {
@@ -54,70 +58,79 @@ export default async function PortalPage({ params }: PageProps) {
   }
   const token = tokenParse.data;
 
-  const row = await prisma.patientShare.findUnique({
+  const candidate = await prisma.patientShare.findUnique({
     where: { shareToken: token },
-    select: {
-      id: true,
-      clientId: true,
-      psychologistId: true,
-      subject: true,
-      snapshot: true,
-      language: true,
-      openedAt: true,
-      expiresAt: true,
-      status: true,
-      client: { select: { fullNameEncrypted: true } },
-      psychologist: { select: { fullName: true } },
-    },
+    select: { id: true, shareBatchId: true },
   });
-  if (!row) notFound();
-  // Read cutover — the share row carries psychologistId, so the portal can
-  // decrypt the client's name for the greeting.
-  const clientFullName = await decryptClientField(row.psychologistId, row.client.fullNameEncrypted);
-
-  const now = new Date();
-  const expired = row.expiresAt.getTime() < now.getTime();
-  // SHARE-1 — a revoked link is dead: don't render the artefact and don't
-  // audit an open. Folded into the same not-available gate as expiry.
-  const revoked = row.status === 'REVOKED';
-  const unavailable = expired || revoked;
-
-  const snapshotParse = PatientShareSnapshotSchema.safeParse(row.snapshot);
-  const snapshot: PatientShareSnapshot | null = snapshotParse.success ? snapshotParse.data : null;
-
-  // Best-effort metadata from headers — same shape as auditMetadataFromRequest
-  // but without access to NextRequest in the page component.
+  if (!candidate) notFound();
   const hdrs = await headers();
   const ip =
     hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ?? hdrs.get('x-real-ip') ?? undefined;
   const userAgent = hdrs.get('user-agent') ?? undefined;
-
-  if (!unavailable) {
-    // First open sets openedAt + flips status; later opens still audit.
-    const isFirstOpen = row.openedAt === null;
-    if (isFirstOpen) {
-      await prisma.patientShare.update({
-        where: { id: row.id },
-        data: {
-          openedAt: now,
-          ...(row.status === 'SENT' ? { status: 'OPENED' } : {}),
+  const now = new Date();
+  const row = await prisma
+    .$transaction(async (tx) => {
+      await lockShareFamily(tx, candidate);
+      const current = await tx.patientShare.findUnique({
+        where: { id: candidate.id },
+        select: {
+          id: true,
+          clientId: true,
+          psychologistId: true,
+          subject: true,
+          snapshot: true,
+          language: true,
+          openedAt: true,
+          expiresAt: true,
+          status: true,
+          client: { select: { fullNameEncrypted: true } },
+          psychologist: { select: { fullName: true, vertical: true } },
         },
       });
-    }
-    await writeAudit({
-      actorType: 'CLIENT',
-      action: 'PATIENT_PORTAL_OPENED',
-      targetType: 'PatientShare',
-      targetId: row.id,
-      metadata: {
-        ...(ip !== undefined && { ip }),
-        ...(userAgent !== undefined && { userAgent }),
-        clientId: row.clientId,
-        psychologistId: row.psychologistId,
-        repeat: !isFirstOpen,
-      },
+      if (!current || current.expiresAt < now || !['SENT', 'OPENED'].includes(current.status))
+        throw new PortalUnavailableError();
+      const isFirstOpen = current.openedAt === null && current.status === 'SENT';
+      if (isFirstOpen) {
+        const opened = await tx.patientShare.updateMany({
+          where: { id: current.id, status: 'SENT' },
+          data: { openedAt: now, status: 'OPENED' },
+        });
+        if (opened.count !== 1) throw new PortalUnavailableError();
+      }
+      await writeAudit(
+        {
+          actorType: 'CLIENT',
+          action: 'PATIENT_PORTAL_OPENED',
+          targetType: 'PatientShare',
+          targetId: current.id,
+          metadata: {
+            ...(ip !== undefined && { ip }),
+            ...(userAgent !== undefined && { userAgent }),
+            clientId: current.clientId,
+            psychologistId: current.psychologistId,
+            repeat: !isFirstOpen,
+          },
+        },
+        tx,
+      );
+      return current;
+    })
+    .catch((error: unknown) => {
+      if (error instanceof PortalUnavailableError) return null;
+      throw error;
     });
-  }
+  if (!row) return <UnavailablePortal token={token} />;
+  const clientFullName = await decryptClientField(row.psychologistId, row.client.fullNameEncrypted);
+
+  const snapshotParse = PatientShareSnapshotSchema.safeParse(row.snapshot);
+  const snapshot: PatientShareSnapshot | null = snapshotParse.success ? snapshotParse.data : null;
+
+  const mindCareLink =
+    row.psychologist.vertical === 'THERAPIST' &&
+    snapshot?.kind !== 'AFTER_VISIT_SUMMARY' &&
+    snapshot?.kind !== 'CHRONIC_PROGRESS_REPORT' &&
+    snapshot?.kind !== 'RX_PAD' &&
+    mindJourneyFlagEnabledFromEnv('clientCareLoop', row.psychologist.vertical);
 
   return (
     <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-12">
@@ -128,14 +141,7 @@ export default async function PortalPage({ params }: PageProps) {
         <h1 className="mt-1 font-serif text-2xl">{row.subject}</h1>
       </header>
 
-      {unavailable ? (
-        <section className="mt-8 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
-          <p className="font-medium text-[var(--color-ink)]">
-            {revoked ? 'This link is no longer available.' : 'This link has expired.'}
-          </p>
-          <p className="mt-2">Ask {row.psychologist.fullName} to share a fresh link with you.</p>
-        </section>
-      ) : snapshot ? (
+      {snapshot ? (
         <section className="mt-8">
           <SnapshotView
             snapshot={snapshot}
@@ -150,6 +156,13 @@ export default async function PortalPage({ params }: PageProps) {
       )}
 
       <footer className="mt-10 border-t border-[var(--color-line-soft)] pt-5 text-xs text-[var(--color-ink-3)]">
+        {mindCareLink && (
+          <p className="mb-3">
+            <a href="/p/home" className="font-medium text-[var(--color-accent)] hover:underline">
+              Back to your care
+            </a>
+          </p>
+        )}
         <p>This page is private to you. Cureocity Mind does not share it with anyone else.</p>
         <p className="mt-3">
           <a
@@ -165,6 +178,22 @@ export default async function PortalPage({ params }: PageProps) {
           </a>
         </p>
       </footer>
+    </main>
+  );
+}
+
+class PortalUnavailableError extends Error {}
+
+function UnavailablePortal({ token }: { token: string }) {
+  return (
+    <main className="mx-auto max-w-2xl px-4 py-12">
+      <section className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6 text-sm text-[var(--color-ink-2)]">
+        <h1 className="font-serif text-2xl text-[var(--color-ink)]">
+          This private link is unavailable
+        </h1>
+        <p className="mt-2">Request a new link and the care team will see a generic request.</p>
+        <RequestFreshLinkButton token={token} />
+      </section>
     </main>
   );
 }
@@ -200,6 +229,22 @@ function SnapshotView({
               </a>
             </p>
           )}
+        </article>
+      );
+    case 'SESSION_TAKEAWAY':
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, here is what to carry forward from our session.
+          </p>
+          <section className="rounded-2xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-5">
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-accent)]">
+              Your takeaway
+            </h2>
+            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-ink)]">
+              {snapshot.summary}
+            </p>
+          </section>
         </article>
       );
     case 'REFLECTION_QUESTIONS':
@@ -269,6 +314,35 @@ function SnapshotView({
                 )}
                 . Your therapist will see it before your next session.
               </p>
+            )}
+          </section>
+        </article>
+      );
+    case 'HOMEWORK':
+      return (
+        <article className="space-y-5">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Hi {clientFirstName}, here is what to practise before your next session.
+          </p>
+          <section className="rounded-xl border-2 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-4">
+            <h2 className="text-xs uppercase tracking-wide text-[var(--color-accent)]">Homework</h2>
+            <p className="mt-2 text-sm text-[var(--color-ink)]">{snapshot.task}</p>
+            {snapshot.frequency && <p className="mt-2 text-xs">Frequency: {snapshot.frequency}</p>}
+            {snapshot.dueAt && (
+              <p className="mt-1 text-xs">
+                Due {new Date(snapshot.dueAt).toLocaleDateString('en-IN')}
+              </p>
+            )}
+            {snapshot.therapistNote && (
+              <p className="mt-2 text-xs italic">{snapshot.therapistNote}</p>
+            )}
+            {snapshot.responseOutcome ? (
+              <p className="mt-3 rounded-xl bg-white/40 p-3 text-sm text-[var(--color-ink-2)]">
+                Response saved: {snapshot.responseOutcome.toLowerCase().replace('_', ' ')}
+                {snapshot.responseReflection ? ` — ${snapshot.responseReflection}` : ''}
+              </p>
+            ) : (
+              <HomeworkDoneButton token={token} />
             )}
           </section>
         </article>

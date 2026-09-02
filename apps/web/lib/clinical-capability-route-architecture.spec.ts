@@ -41,6 +41,10 @@ describe('regulated boundary coverage', () => {
         path.includes('/api/v1/internal/') ||
         path.includes('/api/v1/cron/') ||
         path.includes('/api/v1/care/') ||
+        // Client-authenticated claim redemption is governed by a verified
+        // Firebase phone identity plus a single-use bearer claim, not a
+        // practitioner capability.
+        path.includes('/api/v1/claim-tokens/') ||
         path.includes('/api/v1/p/') ||
         path.includes('/api/v1/billing/') ||
         path.includes('/api/v1/psychologists/me/marketing/') ||

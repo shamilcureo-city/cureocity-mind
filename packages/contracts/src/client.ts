@@ -195,6 +195,7 @@ export const ClaimTokenPreviewSchema = z.object({
   psychologistFullName: z.string(),
   expiresAt: IsoDateTimeSchema,
   redeemed: z.boolean(),
+  superseded: z.boolean(),
 });
 export type ClaimTokenPreview = z.infer<typeof ClaimTokenPreviewSchema>;
 

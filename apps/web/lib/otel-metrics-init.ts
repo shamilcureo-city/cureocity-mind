@@ -42,7 +42,7 @@ export async function initOtelMetrics(): Promise<void> {
   });
 
   const provider = new sdk.MeterProvider({
-    resource: new resources.Resource({
+    resource: resources.resourceFromAttributes({
       [semconv.ATTR_SERVICE_NAME]: 'cureocity-web',
       [semconv.ATTR_SERVICE_VERSION]: process.env['VERCEL_GIT_COMMIT_SHA'] ?? '0.0.0',
     }),
