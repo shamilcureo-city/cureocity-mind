@@ -12,6 +12,7 @@ const adminRequire = createRequire(webRequire.resolve('firebase-admin'));
 const storageRequire = createRequire(adminRequire.resolve('@google-cloud/storage'));
 
 const { initializeApp, deleteApp } = webRequire('firebase-admin/app');
+const { getAuth } = webRequire('firebase-admin/auth');
 const { getStorage } = webRequire('firebase-admin/storage');
 const { Gaxios } = storageRequire('gaxios');
 const { teenyRequest } = storageRequire('teeny-request');
@@ -68,6 +69,7 @@ const firebaseApp = initializeApp(
 );
 
 try {
+  assert.equal(getAuth(firebaseApp).app.name, 'production-dependency-smoke');
   assert.equal(getStorage(firebaseApp).bucket().name, 'dependency-smoke.example');
 
   const gaxiosUuid = resolvedUuid('gaxios');

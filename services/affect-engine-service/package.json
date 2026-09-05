@@ -20,7 +20,7 @@
     "@nestjs/core": "11.1.18",
     "@nestjs/platform-express": "11.1.18",
     "@prisma/client": "^5.22.0",
-    "firebase-admin": "^14.3.0",
+    "firebase-admin": "13.10.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "zod": "^3.24.1"
