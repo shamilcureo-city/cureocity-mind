@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PractitionerCapability } from '@cureocity/contracts';
+import type { PractitionerCapability, RiskSeverity, SessionKind } from '@cureocity/contracts';
 
 const mocks = vi.hoisted(() => {
   const fn = () => vi.fn();
@@ -26,6 +26,8 @@ const mocks = vi.hoisted(() => {
     assertAuditedSessionCapabilities: fn(),
     assertCurrentScribeAuthority: fn(),
     writeAudit: fn(),
+    ensureEnglishNote: fn(),
+    recordCrisisFlag: fn(),
   };
 });
 
@@ -82,11 +84,11 @@ vi.mock('./transcribe-segment', () => ({
   ]),
   transcribeChunkInline: vi.fn(),
 }));
-vi.mock('./ensure-english-note', () => ({ ensureEnglishNote: vi.fn() }));
+vi.mock('./ensure-english-note', () => ({ ensureEnglishNote: mocks.ensureEnglishNote }));
 vi.mock('@cureocity/observability/metrics', () => ({
   recordCostCircuitTrip: vi.fn(),
   recordCostInr: vi.fn(),
-  recordCrisisFlag: vi.fn(),
+  recordCrisisFlag: mocks.recordCrisisFlag,
   recordGeminiCall: vi.fn(),
 }));
 
@@ -162,6 +164,8 @@ beforeEach(() => {
   mocks.clinicalReadingDeleteMany.mockResolvedValue({ count: 0 });
   mocks.clinicalReadingCreateMany.mockResolvedValue({ count: 2 });
   mocks.assertAuditedSessionCapabilities.mockResolvedValue('psy-1');
+  mocks.writeAudit.mockResolvedValue(undefined);
+  mocks.ensureEnglishNote.mockImplementation(async (note) => note);
   mocks.assertCurrentScribeAuthority.mockResolvedValue({
     psychologistId: 'psy-1',
     clientId: 'client-1',
@@ -240,6 +244,14 @@ describe('runNoteGeneration medical optional-output authorization', () => {
     expect(mocks.writeAudit).not.toHaveBeenCalledWith(
       expect.objectContaining({ action: 'CAPABILITY_ACCESS_DENIED' }),
     );
+    expect(mocks.noteDraftUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ riskSeverity: 'NONE' }) }),
+    );
+    expect(mocks.recordCrisisFlag).not.toHaveBeenCalled();
+    expect(mocks.writeAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'CRISIS_FLAG_RAISED' }),
+      expect.anything(),
+    );
   });
 
   it('persists only medication drafts for prescription-only authority', async () => {
@@ -270,5 +282,97 @@ describe('runNoteGeneration medical optional-output authorization', () => {
     expect(mocks.medicationCreateMany).not.toHaveBeenCalled();
     expect(mocks.clinicalOrderCreateMany).not.toHaveBeenCalled();
     expect(mocks.clinicalReadingCreateMany).toHaveBeenCalledOnce();
+  });
+});
+
+function setTherapyOutput(kind: SessionKind, severity: RiskSeverity) {
+  mocks.sessionFindUnique.mockResolvedValue({
+    ...SESSION,
+    kind,
+    psychologist: { vertical: 'THERAPIST' },
+  });
+  const note = {
+    riskFlags: { severity, indicators: ['synthetic indicator'], details: 'synthetic detail' },
+  };
+  mocks.pass2.mockResolvedValue({
+    output: kind === 'INTAKE' ? { kind, intakeNote: note } : { kind, therapyNote: note },
+    callLog: callLog('PASS_2_GENERATE_NOTE'),
+  });
+}
+
+describe.each(['INTAKE', 'TREATMENT', 'REVIEW'] as const)('batch %s note risk parity', (kind) => {
+  it.each([
+    ['none', 'NONE'],
+    ['low', 'LOW'],
+    ['medium', 'MEDIUM'],
+    ['high', 'HIGH'],
+    ['critical', 'CRITICAL'],
+  ] as const)(
+    'persists %s as %s with the existing crisis audit/metric behavior',
+    async (severity, stored) => {
+      setTherapyOutput(kind, severity);
+      await expect(runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION'])).resolves.toMatchObject({
+        status: 'COMPLETED',
+      });
+      expect(mocks.noteDraftUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ riskSeverity: stored, status: 'COMPLETED' }),
+        }),
+      );
+      const crisis = mocks.writeAudit.mock.calls.filter(
+        ([entry]) => entry.action === 'CRISIS_FLAG_RAISED',
+      );
+      if (severity === 'high' || severity === 'critical') {
+        expect(crisis).toHaveLength(1);
+        expect(crisis[0]?.[0]).toMatchObject({
+          actorType: 'SYSTEM',
+          targetType: 'Session',
+          targetId: 'session-1',
+          metadata: {
+            severity: stored,
+            indicators: ['synthetic indicator'],
+            details: 'synthetic detail',
+            psychologistId: 'psy-1',
+            clientId: 'client-1',
+          },
+        });
+        expect(crisis[0]?.[1]).toEqual(expect.objectContaining({ noteDraft: expect.anything() }));
+        expect(mocks.recordCrisisFlag).toHaveBeenCalledExactlyOnceWith(stored);
+      } else {
+        expect(crisis).toEqual([]);
+        expect(mocks.recordCrisisFlag).not.toHaveBeenCalled();
+      }
+      expect(mocks.medicationCreateMany).not.toHaveBeenCalled();
+      expect(mocks.clinicalReadingCreateMany).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe('batch therapy risk boundaries', () => {
+  it('does not repeat a crisis audit/metric when a completed note is requested again', async () => {
+    setTherapyOutput('TREATMENT', 'critical');
+    await runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION']);
+    mocks.noteDraftFindUnique.mockResolvedValue({
+      id: 'draft-1',
+      status: 'COMPLETED',
+      transcriptEncrypted: 'encrypted',
+    });
+    await runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION']);
+    expect(mocks.pass2).toHaveBeenCalledOnce();
+    expect(mocks.recordCrisisFlag).toHaveBeenCalledExactlyOnceWith('CRITICAL');
+    expect(
+      mocks.writeAudit.mock.calls.filter(([entry]) => entry.action === 'CRISIS_FLAG_RAISED'),
+    ).toHaveLength(1);
+  });
+
+  it('does not emit a crisis metric when the transactional crisis audit fails', async () => {
+    setTherapyOutput('TREATMENT', 'high');
+    mocks.writeAudit.mockImplementation(async (entry) => {
+      if (entry.action === 'CRISIS_FLAG_RAISED') throw new Error('audit unavailable');
+    });
+    await expect(runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION'])).resolves.toMatchObject({
+      status: 'FAILED',
+    });
+    expect(mocks.recordCrisisFlag).not.toHaveBeenCalled();
   });
 });

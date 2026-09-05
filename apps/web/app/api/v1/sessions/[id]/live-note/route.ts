@@ -12,6 +12,7 @@ import {
 import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { ensureEnglishNote } from '@/lib/ensure-english-note';
+import { mapRiskSeverity, recordCommittedNoteRisk, writeNoteRiskAudit } from '@/lib/note-risk';
 import {
   persistDraftedOrders,
   persistVitalReadings,
@@ -146,6 +147,7 @@ export async function POST(
       );
     }
     const tWrite = tTranscript.length > 0 ? { transcriptEncrypted: tTranscriptEncrypted } : {};
+    const riskSeverity = mapRiskSeverity(tnote.riskFlags.severity);
     let tDraft;
     try {
       tDraft = await prisma.$transaction(async (tx) => {
@@ -159,7 +161,7 @@ export async function POST(
               update: {
                 status: 'COMPLETED',
                 content: tnote as unknown as Prisma.InputJsonValue,
-                riskSeverity: 'NONE',
+                riskSeverity,
                 errorMessage: null,
                 ...tWrite,
               },
@@ -167,7 +169,7 @@ export async function POST(
                 sessionId,
                 status: 'COMPLETED',
                 content: tnote as unknown as Prisma.InputJsonValue,
-                riskSeverity: 'NONE',
+                riskSeverity,
                 transcriptEncrypted: tTranscriptEncrypted,
               },
             });
@@ -182,8 +184,18 @@ export async function POST(
                   sessionId,
                   source: 'LIVE',
                   kind: parsedT.value.kind,
+                  riskSeverity,
                   ...auditMetadataFromRequest(req),
                 },
+              },
+              tx,
+            );
+            await writeNoteRiskAudit(
+              {
+                sessionId,
+                psychologistId: auth.value.psychologistId,
+                clientId: session.clientId,
+                riskFlags: tnote.riskFlags,
               },
               tx,
             );
@@ -208,6 +220,9 @@ export async function POST(
       if (response) return response;
       throw error;
     }
+    // The conditional live transition rejects replay before persistence. Emit
+    // only after commit, never on an encryption/audit failure or lost transition.
+    recordCommittedNoteRisk(riskSeverity);
     // The batch path schedules Pass 3 (the copilot reading) in generate-note's
     // after(); this branch never did, so every live session landed on a board
     // whose "generated automatically" promise was false — the therapist had to

@@ -1,4 +1,4 @@
-import { Prisma, type NoteRiskSeverity as PrismaRiskSeverity } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import {
   computeCostInr,
   estimateAudioInputTokens,
@@ -18,7 +18,6 @@ import { interactionWarningsByDrug } from '@cureocity/clinical';
 import {
   recordCostCircuitTrip,
   recordCostInr,
-  recordCrisisFlag,
   recordGeminiCall,
 } from '@cureocity/observability/metrics';
 import { reconcileAssessmentItems } from './assessment-items';
@@ -29,6 +28,7 @@ import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { clientIdForSession, fetchActiveMedications } from './patient-context';
 import { encryptForTenant } from './tenant-crypto';
 import { ensureEnglishNote } from './ensure-english-note';
+import { mapRiskSeverity, recordCommittedNoteRisk, writeNoteRiskAudit } from './note-risk';
 import { modelRouter } from './llm';
 import { prisma } from './prisma';
 import {
@@ -419,30 +419,19 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
           tx,
         );
 
-        if (riskSeverity === 'HIGH' || riskSeverity === 'CRITICAL') {
-          await writeAudit(
-            {
-              actorType: 'SYSTEM',
-              action: 'CRISIS_FLAG_RAISED',
-              targetType: 'Session',
-              targetId: sessionId,
-              metadata: {
-                severity: riskSeverity,
-                indicators: pass2RiskFlags.indicators,
-                details: pass2RiskFlags.details ?? null,
-                psychologistId: session.psychologistId,
-                clientId: session.clientId,
-              },
-            },
-            tx,
-          );
-        }
+        await writeNoteRiskAudit(
+          {
+            sessionId,
+            psychologistId: session.psychologistId,
+            clientId: session.clientId,
+            riskFlags: pass2RiskFlags,
+          },
+          tx,
+        );
       },
       { allowedStatuses: ['COMPLETED'] },
     );
-    if (riskSeverity === 'HIGH' || riskSeverity === 'CRITICAL') {
-      recordCrisisFlag(riskSeverity);
-    }
+    recordCommittedNoteRisk(riskSeverity);
 
     // Pass 3 — Clinical Analysis. Best-effort: a Pass 3 failure does
     // NOT fail note generation. Sprint 13 ran it inline; Sprint 19
@@ -851,21 +840,6 @@ async function markDraftFailed(
     if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
     // Erasure won the Client lock. Its terminal state is authoritative and no
     // post-erasure FAILED marker or error detail may be written.
-  }
-}
-
-function mapRiskSeverity(severity: Pass1Output extends never ? never : string): PrismaRiskSeverity {
-  switch (severity) {
-    case 'critical':
-      return 'CRITICAL';
-    case 'high':
-      return 'HIGH';
-    case 'medium':
-      return 'MEDIUM';
-    case 'low':
-      return 'LOW';
-    default:
-      return 'NONE';
   }
 }
 
