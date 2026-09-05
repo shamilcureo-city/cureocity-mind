@@ -34,12 +34,12 @@ const THERAPIST_DESKTOP: PractitionerNavigation = {
     { href: '/app/encounters/new', label: 'Start session', icon: 'record' },
     { href: '/app/clients', label: 'Clients', icon: 'clients' },
     { href: '/app/search', label: 'Search', icon: 'search' },
-    { href: '/app/templates', label: 'Templates', icon: 'templates' },
-    { href: '/app/learn', label: 'Learn', icon: 'learn' },
   ],
   secondary: [
+    { href: '/app/templates', label: 'Note templates', icon: 'templates' },
+    { href: '/app/learn', label: 'Learning library', icon: 'learn' },
     { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
-    { href: '/app/practice-assistant', label: 'ORBIT Assistant', icon: 'assistant' },
+    { href: '/app/practice-assistant', label: 'Mind assistant', icon: 'assistant' },
     { href: '/app/me', label: 'My practice', icon: 'me' },
     { href: '/app/marketing', label: 'Marketing', icon: 'marketing' },
   ],
@@ -55,9 +55,10 @@ const THERAPIST_MOBILE: PractitionerNavigation = {
   secondary: [
     { href: '/app/templates', label: 'Templates', icon: 'templates' },
     { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
-    { href: '/app/practice-assistant', label: 'ORBIT Assistant', icon: 'assistant' },
+    { href: '/app/practice-assistant', label: 'Mind assistant', icon: 'assistant' },
     { href: '/app/me', label: 'My practice', icon: 'me' },
     { href: '/app/learn', label: 'Learn', icon: 'learn' },
+    { href: '/app/marketing', label: 'Marketing', icon: 'marketing' },
     { href: '/app/settings', label: 'Settings', icon: 'cog' },
   ],
 };

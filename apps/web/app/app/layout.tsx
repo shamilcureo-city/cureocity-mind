@@ -13,6 +13,7 @@ import { currentPsychologist } from '@/lib/auth-page';
 import { isAuthBypassed, sessionCookieDomain } from '@/lib/auth-server';
 import { getEntitlement } from '@/lib/billing';
 import { practitionerHostRedirect, practitionerProductCopy, productFromHost } from '@/lib/product';
+import './mind-workspace.css';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,7 +73,15 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   });
 
   return (
-    <div className="app-wash relative flex min-h-screen flex-col">
+    <div
+      className={`app-wash relative flex min-h-screen flex-col ${psy?.vertical === 'THERAPIST' ? 'mind-workspace-shell' : ''}`}
+      data-product={psy?.vertical === 'THERAPIST' ? 'mind' : 'scribe'}
+    >
+      {psy?.vertical === 'THERAPIST' && (
+        <a className="mind-skip-link" href="#mind-main-content">
+          Skip to workspace
+        </a>
+      )}
       <AuthedFetchProvider />
       {showBypassBanner && (
         <div className="bg-[var(--color-warn-soft)] px-4 py-2 text-center text-xs text-[var(--color-warn)]">
@@ -87,7 +96,12 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       )}
       <div className="flex flex-1">
         <Sidebar usage={usage} vertical={psy?.vertical ?? 'THERAPIST'} />
-        <div className="flex flex-1 flex-col pb-16 md:pb-0">{children}</div>
+        <div
+          id="mind-main-content"
+          className="mind-content flex min-w-0 flex-1 flex-col pb-16 md:pb-0"
+        >
+          {children}
+        </div>
         <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
       </div>
       <HelpButton topics={helpTopics} words={helpWords} />

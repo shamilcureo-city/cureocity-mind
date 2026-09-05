@@ -2,8 +2,10 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { MindSessionCloseout } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
+import styles from './MindSessionReview.module.css';
 
 type DecisionStep = 'clinicalSuggestions' | 'agreements' | 'nextSessionQuestions' | 'shared';
 
@@ -46,51 +48,67 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
     !pending('nextSessionQuestions') &&
     (!canShare || !pending('shared'))
   ) {
-    return null;
+    return (
+      <p className="mt-4 text-sm text-[var(--color-accent)]">Your care decisions are saved.</p>
+    );
   }
 
   return (
-    <div className="mt-4 space-y-3 border-t border-[var(--color-line-soft)] pt-4">
+    <div className="mt-4 space-y-4">
       {pending('clinicalSuggestions') && (
         <DecisionRow label="Clinical suggestions">
+          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+            Review suggestions
+          </Link>
           <Button
             type="button"
+            size="sm"
+            variant="secondary"
             onClick={() => void decide('clinicalSuggestions', 'COMPLETE')}
             disabled={busy !== null}
           >
-            Mark resolved
+            Reviewed
           </Button>
           <Button
             type="button"
+            size="sm"
             variant="secondary"
             onClick={() => void decide('clinicalSuggestions', 'SKIPPED')}
             disabled={busy !== null}
           >
-            Skip
+            Not needed today
           </Button>
         </DecisionRow>
       )}
       {pending('agreements') && (
         <DecisionRow label="Agreements or homework">
+          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+            Add what you agreed
+          </Link>
           <Button
             type="button"
+            size="sm"
             variant="secondary"
             onClick={() => void decide('agreements', 'SKIPPED')}
             disabled={busy !== null}
           >
-            Intentionally skip
+            None this session
           </Button>
         </DecisionRow>
       )}
       {pending('nextSessionQuestions') && (
         <DecisionRow label="Next-session questions">
+          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+            Choose questions
+          </Link>
           <Button
             type="button"
+            size="sm"
             variant="secondary"
             onClick={() => void decide('nextSessionQuestions', 'SKIPPED')}
             disabled={busy !== null}
           >
-            Intentionally skip
+            None to carry forward
           </Button>
         </DecisionRow>
       )}
@@ -98,6 +116,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
         <DecisionRow label="Client sharing">
           <Button
             type="button"
+            size="sm"
             variant="secondary"
             onClick={() => void decide('shared', 'SKIPPED')}
             disabled={busy !== null}
@@ -106,16 +125,25 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
           </Button>
         </DecisionRow>
       )}
-      {error && <p className="text-sm text-[var(--color-danger)]">{error}</p>}
+      {busy && (
+        <p role="status" className="text-xs text-[var(--color-ink-3)]">
+          Saving your decision…
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="text-sm text-[var(--color-danger)]">
+          {error}
+        </p>
+      )}
     </div>
   );
 }
 
 function DecisionRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-      <span className="text-[var(--color-ink-2)]">{label}</span>
-      <div className="flex flex-wrap gap-2">{children}</div>
+    <div className="space-y-2 border-t border-[var(--color-line-soft)] pt-3 text-sm">
+      <span className="font-medium text-[var(--color-ink)]">{label}</span>
+      <div className="flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }

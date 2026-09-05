@@ -6,6 +6,12 @@ architecture, `docs/THREE_PRODUCTS.md`.
 
 ---
 
+## 2026-09-05 — Mind psychologist workspace (local implementation)
+
+Mind now has a scoped paper-and-violet shell, a focused Today workspace with truthful documentation progress, note-first Review & Close, Quiet/Guided live modes and clinician-reviewed step-by-step draft guides. Session guides are promoted into Plan of care and can be reused during live sessions with capability and current-context filtering. Scribe's doctor journey remains separate.
+
+Therapist live-note finalization now preserves actual risk severity and transactional crisis audit effects. Therapy-script generation uses explicit POST; GET is read-only cache access. A development-only fictional-data preview supports visual verification without recording or patient writes. See `docs/MIND_PSYCHOLOGIST_WORKSPACE.md` for scope, verification and clinical-release limitations. No deployment is implied by this entry.
+
 ## 2026-07-22 — Operator console moved OUT of the practitioner app
 
 The super-admin console is now a **standalone surface at `/console`**, no

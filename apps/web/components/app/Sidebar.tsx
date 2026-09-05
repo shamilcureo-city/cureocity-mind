@@ -34,13 +34,36 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
   const path = usePathname() ?? '/app';
   const homeHref = vertical === 'DOCTOR' ? '/app/clinic' : '/app/today';
   const { primary: items, secondary } = practitionerNavigation(vertical, 'desktop');
+  const isMind = vertical === 'THERAPIST';
   return (
-    <aside className="hidden h-screen w-64 shrink-0 flex-col border-r border-white/70 bg-white/55 backdrop-blur-xl md:flex print:!hidden">
+    <aside
+      className={`hidden h-screen w-64 shrink-0 flex-col border-r border-white/70 bg-white/55 backdrop-blur-xl md:flex print:!hidden ${isMind ? 'mind-sidebar' : ''}`}
+    >
       <div className="px-6 py-6">
-        <OrbitLogo href={homeHref} />
+        {isMind ? (
+          <Link href={homeHref} className="mind-brand" aria-label="Cureocity Mind — Today">
+            <span className="mind-brand-mark" aria-hidden="true">
+              <svg width="27" height="27" viewBox="0 0 32 32" fill="none">
+                <path
+                  d="M7 24V12a5 5 0 0 1 9-3 5 5 0 0 1 9 3v12M16 9v12"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                />
+                <circle cx="25" cy="24" r="2.5" fill="#f2d79a" />
+              </svg>
+            </span>
+            <span>
+              <span className="mind-brand-name">Mind</span>
+              <span className="mind-brand-byline">by cureocity</span>
+            </span>
+          </Link>
+        ) : (
+          <OrbitLogo href={homeHref} />
+        )}
       </div>
 
-      <nav className="px-3" aria-label="Primary">
+      <nav className={isMind ? 'mind-navigation' : 'px-3'} aria-label="Primary">
         <ul className="space-y-1">
           {items.map((item) => {
             const active = item.href === '/app' ? path === '/app' : path.startsWith(item.href);
@@ -48,7 +71,7 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
               <li key={item.href}>
                 <Link
                   href={item.href}
-                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
+                  className={`${isMind ? 'mind-nav-link' : ''} flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                     active
                       ? 'border border-white/90 bg-white font-medium text-[var(--color-ink)] shadow-[var(--sh-raise)]'
                       : 'border border-transparent text-[var(--color-ink-2)] hover:bg-white/70 hover:text-[var(--color-ink)]'
@@ -64,10 +87,8 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
         </ul>
 
         {secondary.length > 0 && (
-          <>
-            <p className="mt-6 px-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-3)]">
-              More
-            </p>
+          <details open={secondary.some((item) => path.startsWith(item.href)) || undefined}>
+            <summary>Practice & resources</summary>
             <ul className="mt-1 space-y-1">
               {secondary.map((item) => {
                 const active = path.startsWith(item.href);
@@ -75,7 +96,7 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
                   <li key={item.href}>
                     <Link
                       href={item.href}
-                      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
+                      className={`${isMind ? 'mind-nav-link' : ''} flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 ${
                         active
                           ? 'border border-white/90 bg-white font-medium text-[var(--color-ink)] shadow-[var(--sh-raise)]'
                           : 'border border-transparent text-[var(--color-ink-3)] hover:bg-white/70 hover:text-[var(--color-ink)]'
@@ -89,19 +110,27 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
                 );
               })}
             </ul>
-          </>
+          </details>
         )}
       </nav>
 
+      {isMind && (
+        <div className="mind-nav-note">
+          <strong>A little more room to care.</strong>
+          <br />
+          Your notes, your case understanding, your next thoughtful step.
+        </div>
+      )}
+
       <div className="mt-auto px-4 pb-6">
-        <PlanWidget usage={usage} />
+        <PlanWidget usage={usage} isMind={isMind} />
         <FooterLinks />
       </div>
     </aside>
   );
 }
 
-function PlanWidget({ usage }: { usage: PlanUsage | null }) {
+function PlanWidget({ usage, isMind }: { usage: PlanUsage | null; isMind: boolean }) {
   if (!usage) return null;
   const isPaid = usage.plan !== undefined && isPaidPlan(usage.plan);
   if (isPaid && usage.paidThroughAt) {
@@ -121,11 +150,14 @@ function PlanWidget({ usage }: { usage: PlanUsage | null }) {
             Plan
           </Link>
         </div>
-        <p className="mt-2 text-xs text-[var(--color-ink-3)]">Renews {renewsOn}</p>
+        <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+          {isMind ? 'Access until' : 'Renews'} {renewsOn}
+        </p>
       </div>
     );
   }
-  const pct = Math.min(100, Math.round((usage.used / usage.cap) * 100));
+  const pct =
+    usage.cap > 0 ? Math.min(100, Math.max(0, Math.round((usage.used / usage.cap) * 100))) : 0;
   return (
     <div className="u-glass rounded-2xl p-4">
       <div className="flex items-center justify-between">

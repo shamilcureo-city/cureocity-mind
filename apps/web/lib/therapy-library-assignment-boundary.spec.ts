@@ -9,7 +9,7 @@ describe('Therapy Library assignment boundary', () => {
     const library = read('components/app/TherapyLibrary.tsx');
     const workflow = read('components/app/WorkflowSection.tsx');
 
-    expect(library).toContain('Share script with patient');
+    expect(library).toContain('Review client sharing');
     expect(library).not.toContain('assignHomework: true');
     expect(workflow).toContain('Assign homework');
     for (const field of ['homeworkTask', 'homeworkFrequency', 'homeworkDueAt', 'homeworkNote']) {

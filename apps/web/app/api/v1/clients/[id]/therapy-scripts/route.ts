@@ -8,19 +8,21 @@ import {
   GenerateTherapyScriptQuerySchema,
 } from '@cureocity/contracts';
 import { recordCostInr, recordGeminiCall } from '@cureocity/observability/metrics';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { toTherapyScript } from '@/lib/clinical-mappers';
 import { modelRouter } from '@/lib/llm';
 import { prisma } from '@/lib/prisma';
 import { parseQuery } from '@/lib/validate';
+import { ClientPhiWriteForbiddenError, lockActiveClient } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 /**
- * GET /api/v1/clients/[id]/therapy-scripts?therapy=X[&language=Y][&refresh=1]
+ * GET /api/v1/clients/[id]/therapy-scripts?therapy=X[&language=Y]
+ * POST /api/v1/clients/[id]/therapy-scripts?therapy=X[&language=Y][&refresh=1]
  *
  * Returns a Pass 4 TherapyScriptV1 for the named therapy, grounded
  * in the client's current primary diagnosis + active treatment plan
@@ -29,15 +31,23 @@ export const maxDuration = 60;
  * re-view under the same context returns the cached row, no second
  * Vertex bill.
  *
- * Pass refresh=1 to force a fresh generation even if a cached row
- * exists.
+ * GET reads the current cache only; prefetching never starts AI generation.
+ * POST generates on a miss. Pass refresh=1 on POST to replace a cached script.
  */
-export async function GET(
+async function handleTherapyScript(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
+  allowGeneration: boolean,
 ): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
+  // This is Mind's guided therapy surface, never a doctor encounter tool.
+  // Resolve the practitioner boundary before looking up any client context.
+  if (auth.value.user.vertical !== 'THERAPIST') {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+  const workflowAuth = await requireCapability(req, 'THERAPY_WORKFLOWS', auth);
+  if (!workflowAuth.ok) return workflowAuth.response;
   const { id: clientId } = await params;
 
   const query = parseQuery(req.url, GenerateTherapyScriptQuerySchema);
@@ -48,12 +58,13 @@ export async function GET(
     select: {
       id: true,
       psychologistId: true,
+      deletedAt: true,
       preferredLanguage: true,
       spokenLanguages: true,
       presentingConcerns: true,
     },
   });
-  if (!client || client.psychologistId !== auth.value.psychologistId) {
+  if (!client || client.deletedAt !== null || client.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
 
@@ -75,15 +86,25 @@ export async function GET(
   // session)".
   const [primaryDx, activePlan, lastSession] = await Promise.all([
     prisma.clientDiagnosis.findFirst({
-      where: { clientId, isPrimary: true, supersededAt: null },
+      where: {
+        clientId,
+        psychologistId: auth.value.psychologistId,
+        isPrimary: true,
+        supersededAt: null,
+      },
       orderBy: { confirmedAt: 'desc' },
     }),
     prisma.treatmentPlan.findFirst({
-      where: { clientId, supersededAt: null },
+      where: { clientId, psychologistId: auth.value.psychologistId, supersededAt: null },
       orderBy: { version: 'desc' },
     }),
     prisma.session.findFirst({
-      where: { clientId, status: 'COMPLETED', endedAt: { not: null } },
+      where: {
+        clientId,
+        psychologistId: auth.value.psychologistId,
+        status: 'COMPLETED',
+        endedAt: { not: null },
+      },
       orderBy: { endedAt: 'desc' },
       select: {
         id: true,
@@ -114,12 +135,12 @@ export async function GET(
     lastSummary,
   });
 
-  // Cache hit fast path — unless refresh=true.
-  if (!query.value.refresh) {
+  // GET remains a read even when a caller sends the legacy refresh parameter.
+  if (!allowGeneration || !query.value.refresh) {
     const cached = await prisma.therapyScript.findUnique({
       where: { clientId_cacheKey: { clientId, cacheKey } },
     });
-    if (cached) {
+    if (cached && cached.psychologistId === auth.value.psychologistId) {
       await writeAudit({
         actorType: 'PSYCHOLOGIST',
         actorPsychologistId: auth.value.psychologistId,
@@ -137,6 +158,20 @@ export async function GET(
       return NextResponse.json({ script: toTherapyScript(cached), source: 'cache' });
     }
   }
+
+  if (!allowGeneration) {
+    return NextResponse.json(
+      {
+        error: 'No saved script is available for this context. Use POST to generate one.',
+        code: 'THERAPY_SCRIPT_NOT_CACHED',
+      },
+      { status: 404 },
+    );
+  }
+
+  // Context loading may take time; recheck the execution capability before AI.
+  const generationAuth = await requireCapability(req, 'THERAPY_WORKFLOWS', auth);
+  if (!generationAuth.ok) return generationAuth.response;
 
   // Generate fresh.
   const router = modelRouter();
@@ -170,80 +205,108 @@ export async function GET(
     inr: pass4.callLog.costInr,
   });
 
-  await prisma.geminiCallLog.create({
-    data: {
-      sessionId: null,
-      pass: pass4.callLog.pass,
-      model: pass4.callLog.model,
-      region: pass4.callLog.region,
-      promptVersion: pass4.callLog.promptVersion,
-      inputTokens: pass4.callLog.inputTokens,
-      outputTokens: pass4.callLog.outputTokens,
-      costInr: new Prisma.Decimal(pass4.callLog.costInr),
-      latencyMs: pass4.callLog.latencyMs,
-      status: pass4.callLog.status,
-      ...(pass4.callLog.errorMessage !== undefined && {
-        errorMessage: pass4.callLog.errorMessage,
-      }),
-    },
-  });
+  // No database lock spans the model call. A late revocation or erasure must
+  // prevent the generated clinical content from being persisted afterwards.
+  const persistenceAuth = await requireCapability(req, 'THERAPY_WORKFLOWS', auth);
+  if (!persistenceAuth.ok) return persistenceAuth.response;
+  let row;
+  try {
+    row = await prisma.$transaction(async (tx) => {
+      await lockActiveClient(tx, clientId, auth.value.psychologistId);
+      await tx.geminiCallLog.create({
+        data: {
+          sessionId: null,
+          pass: pass4.callLog.pass,
+          model: pass4.callLog.model,
+          region: pass4.callLog.region,
+          promptVersion: pass4.callLog.promptVersion,
+          inputTokens: pass4.callLog.inputTokens,
+          outputTokens: pass4.callLog.outputTokens,
+          costInr: new Prisma.Decimal(pass4.callLog.costInr),
+          latencyMs: pass4.callLog.latencyMs,
+          status: pass4.callLog.status,
+          ...(pass4.callLog.errorMessage !== undefined && {
+            errorMessage: pass4.callLog.errorMessage,
+          }),
+        },
+      });
 
-  const row = await prisma.therapyScript.upsert({
-    where: { clientId_cacheKey: { clientId, cacheKey } },
-    update: {
-      body: pass4.output.therapyScript as unknown as Prisma.InputJsonValue,
-      therapyName: query.value.therapy,
-      language,
-      ...(activePlan && { sourceTreatmentPlanId: activePlan.id }),
-      ...(primaryDx && { sourcePrimaryDiagnosisId: primaryDx.id }),
-      totalCostInr: new Prisma.Decimal(pass4.callLog.costInr),
-    },
-    create: {
-      clientId,
-      psychologistId: auth.value.psychologistId,
-      therapyName: query.value.therapy,
-      language,
-      cacheKey,
-      body: pass4.output.therapyScript as unknown as Prisma.InputJsonValue,
-      ...(activePlan && { sourceTreatmentPlanId: activePlan.id }),
-      ...(primaryDx && { sourcePrimaryDiagnosisId: primaryDx.id }),
-      totalCostInr: new Prisma.Decimal(pass4.callLog.costInr),
-    },
-  });
+      const generated = await tx.therapyScript.upsert({
+        where: {
+          clientId_cacheKey: { clientId, cacheKey },
+          psychologistId: auth.value.psychologistId,
+        },
+        update: {
+          body: pass4.output.therapyScript as unknown as Prisma.InputJsonValue,
+          therapyName: query.value.therapy,
+          language,
+          ...(activePlan && { sourceTreatmentPlanId: activePlan.id }),
+          ...(primaryDx && { sourcePrimaryDiagnosisId: primaryDx.id }),
+          totalCostInr: new Prisma.Decimal(pass4.callLog.costInr),
+        },
+        create: {
+          clientId,
+          psychologistId: auth.value.psychologistId,
+          therapyName: query.value.therapy,
+          language,
+          cacheKey,
+          body: pass4.output.therapyScript as unknown as Prisma.InputJsonValue,
+          ...(activePlan && { sourceTreatmentPlanId: activePlan.id }),
+          ...(primaryDx && { sourcePrimaryDiagnosisId: primaryDx.id }),
+          totalCostInr: new Prisma.Decimal(pass4.callLog.costInr),
+        },
+      });
 
-  await writeAudit({
-    actorType: 'PSYCHOLOGIST',
-    actorPsychologistId: auth.value.psychologistId,
-    action: 'THERAPY_SCRIPT_GENERATED',
-    targetType: 'TherapyScript',
-    targetId: row.id,
-    metadata: {
-      ...auditMetadataFromRequest(req),
-      clientId,
-      therapyName: query.value.therapy,
-      language,
-      cacheKey,
-      sourceTreatmentPlanId: activePlan?.id ?? null,
-      sourcePrimaryDiagnosisId: primaryDx?.id ?? null,
-      costInr: pass4.callLog.costInr,
-    },
-  });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'THERAPY_SCRIPT_GENERATED',
+          targetType: 'TherapyScript',
+          targetId: generated.id,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            clientId,
+            therapyName: query.value.therapy,
+            language,
+            cacheKey,
+            sourceTreatmentPlanId: activePlan?.id ?? null,
+            sourcePrimaryDiagnosisId: primaryDx?.id ?? null,
+            costInr: pass4.callLog.costInr,
+          },
+        },
+        tx,
+      );
+      return generated;
+    });
+  } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError) {
+      return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    }
+    throw error;
+  }
 
   return NextResponse.json({ script: toTherapyScript(row), source: 'fresh' });
 }
 
-/**
- * GET /api/v1/clients/[id]/therapy-scripts/recommendations
- *
- * Returns the list of therapy names recommended by the active
- * ClinicalReport's `recommendedTherapies` — surfaced as the Therapy
- * Library landing list. Falls back to an empty list if there's no
- * report yet.
- *
- * This is its own export below — Next.js route files share the
- * params shape, so we expose a second handler via a separate route
- * directory.
- */
+function privateResponse(response: NextResponse): NextResponse {
+  response.headers.set('Cache-Control', 'private, no-store');
+  return response;
+}
+
+export async function GET(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  return privateResponse(await handleTherapyScript(req, ctx, false));
+}
+
+export async function POST(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  return privateResponse(await handleTherapyScript(req, ctx, true));
+}
 
 // ============================================================================
 // Helpers.

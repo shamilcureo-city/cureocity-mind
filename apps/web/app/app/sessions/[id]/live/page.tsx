@@ -4,8 +4,11 @@ import { CarriedQuestionSchema, type TherapyCarriedQuestion } from '@cureocity/c
 import { Container } from '@/components/ui/Container';
 import { TherapistLiveSession } from '@/components/app/TherapistLiveSession';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
+import { getEffectiveCapabilities } from '@/lib/capabilities';
 import { decryptClientField } from '@/lib/client-pii';
 import { fetchOpenCrises } from '@/lib/crisis-flags';
+import { loadPreparedMindGuides } from '@/lib/load-prepared-mind-guides';
+import { canOpenMindPage, loadOptionalCapabilityData } from '@/lib/mind-page-capabilities';
 import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +28,9 @@ export default async function TherapistLivePage({
 }) {
   const therapist = await requireOnboardedPsychologist();
   if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
+  if (therapist.vertical !== 'THERAPIST') notFound();
+  const { capabilities } = await getEffectiveCapabilities(therapist.id);
+  if (!canOpenMindPage('session', capabilities)) notFound();
   const { id } = await params;
   const sp = await searchParams;
 
@@ -38,10 +44,23 @@ export default async function TherapistLivePage({
       modality: true,
       language: true,
       status: true,
-      client: { select: { fullNameEncrypted: true, carriedQuestions: true } },
+      client: {
+        select: {
+          psychologistId: true,
+          deletedAt: true,
+          fullNameEncrypted: true,
+          carriedQuestions: true,
+        },
+      },
     },
   });
-  if (!session || session.psychologistId !== therapist.id) notFound();
+  if (
+    !session ||
+    session.psychologistId !== therapist.id ||
+    session.client.psychologistId !== therapist.id ||
+    session.client.deletedAt !== null
+  )
+    notFound();
   // A completed session has nothing left to record — send to the workspace.
   if (session.status === 'COMPLETED') redirect(`/app/sessions/${id}`);
 
@@ -66,12 +85,26 @@ export default async function TherapistLivePage({
     DIAGNOSTIC_CRITERION: 2,
     INSTRUMENT: 3,
   };
-  const openItems = await prisma.assessmentItem.findMany({
-    where: { clientId: session.clientId, status: 'OPEN' },
-    orderBy: { createdAt: 'asc' },
-    take: 40,
-    select: { kind: true, question: true, rationale: true },
-  });
+  const [openItems, preparedGuides] = await Promise.all([
+    loadOptionalCapabilityData(
+      capabilities,
+      'CLINICAL_ANALYSIS',
+      () =>
+        prisma.assessmentItem.findMany({
+          where: { clientId: session.clientId, psychologistId: therapist.id, status: 'OPEN' },
+          orderBy: { createdAt: 'asc' },
+          take: 40,
+          select: { kind: true, question: true, rationale: true },
+        }),
+      [],
+    ),
+    loadPreparedMindGuides({
+      clientId: session.clientId,
+      psychologistId: therapist.id,
+      vertical: therapist.vertical,
+      capabilities,
+    }),
+  ]);
   const rankedItems: TherapyCarriedQuestion[] = openItems
     .map((i, idx) => ({ i, idx }))
     .sort((a, b) => (KIND_RANK[a.i.kind] ?? 9) - (KIND_RANK[b.i.kind] ?? 9) || a.idx - b.idx)
@@ -114,6 +147,7 @@ export default async function TherapistLivePage({
         selectedDeviceId={sp.mic}
         carriedQuestions={carriedQuestions}
         priorRisk={priorRisk}
+        preparedGuides={preparedGuides}
       />
     </Container>
   );

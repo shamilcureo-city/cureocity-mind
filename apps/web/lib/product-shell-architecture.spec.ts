@@ -69,19 +69,24 @@ describe('product-aware practitioner shell architecture', () => {
 
   it('surfaces operational work on Today instead of duplicating it in Analytics', () => {
     const today = read('app/app/today/page.tsx');
+    const workspace = read('components/app/MindTodayWorkspace.tsx');
     const dashboard = read('app/app/dashboard/page.tsx');
 
-    expect(today).toContain('<TodayAttentionQueue items={attentionItems} />');
+    expect(today).toContain('<MindTodayWorkspace');
+    expect(today).toContain('attentionItems={attentionItems}');
+    expect(workspace).toContain('<TodayAttentionQueue items={attentionItems} />');
     expect(dashboard).not.toContain('<FirstRunChecklist');
     expect(dashboard).not.toContain('<UpNextSection');
   });
 
   it('puts first-run choices on Today before empty scheduling surfaces', () => {
     const today = read('app/app/today/page.tsx');
+    const workspace = read('components/app/MindTodayWorkspace.tsx');
     const layout = read('app/app/layout.tsx');
 
     expect(today).toContain('<FirstRunChecklist psychologistId={therapist.id} />');
-    expect(today.indexOf('<FirstRunChecklist')).toBeLessThan(today.lastIndexOf('{hero ?'));
+    expect(today).toContain('firstRun={<FirstRunChecklist psychologistId={therapist.id} />}');
+    expect(workspace.indexOf('{firstRun}')).toBeLessThan(workspace.lastIndexOf('{hero ?'));
     expect(layout).toContain("psy?.vertical === 'DOCTOR' && <WelcomeOverlay");
   });
 });

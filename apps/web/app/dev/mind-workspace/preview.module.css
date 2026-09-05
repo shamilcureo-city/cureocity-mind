@@ -1,0 +1,195 @@
+.preview {
+  min-height: 100vh;
+}
+.banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem 1rem;
+  padding: 0.7rem 1rem;
+  background: var(--color-ink);
+  color: white;
+  font-size: 0.75rem;
+}
+.banner span {
+  color: #e9e5fb;
+}
+.shell {
+  display: flex;
+  min-height: calc(100vh - 42px);
+}
+.content {
+  flex: 1;
+  min-width: 0;
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--color-line);
+  background: white;
+}
+.controls p {
+  max-width: 50ch;
+  color: var(--color-ink-2);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+.switches {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-radius: 0.85rem;
+  background: var(--color-surface-soft);
+  padding: 0.25rem;
+}
+.switches button {
+  min-height: 2.6rem;
+  padding: 0.4rem 1rem;
+  border-radius: 0.6rem;
+  color: var(--color-ink-2);
+  font-size: 0.8rem;
+}
+.switches button[aria-pressed='true'] {
+  background: var(--color-accent);
+  color: white;
+}
+.panel {
+  display: grid;
+  gap: 1.5rem;
+  padding-block: 2rem;
+}
+.brief {
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--color-line);
+  border-radius: 1rem;
+  background: white;
+}
+.brief h3 {
+  color: var(--color-ink);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.brief p {
+  margin-top: 0.65rem;
+  color: var(--color-ink-2);
+  line-height: 1.7;
+  font-size: 0.85rem;
+}
+.brief dl {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+.brief dt {
+  font-size: 0.7rem;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.brief dd {
+  margin-top: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--color-ink);
+  line-height: 1.6;
+}
+.exampleLabel {
+  font-size: 0.7rem;
+  color: var(--color-ink-3);
+  line-height: 1.6;
+}
+.subtle {
+  color: var(--color-ink-2);
+  font-size: 0.85rem;
+  line-height: 1.7;
+  margin-top: 0.65rem;
+}
+.liveGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 1.5rem;
+}
+.transcript {
+  padding: 1.5rem;
+}
+.transcript h2,
+.review h2 {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+}
+.transcript > div {
+  margin-top: 1.3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-line-soft);
+}
+.transcript span {
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.transcript p {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  line-height: 1.75;
+  color: var(--color-ink-2);
+}
+.noMic {
+  color: var(--color-ink-3);
+  font-size: 0.75rem;
+}
+.review {
+  padding: 2rem;
+}
+.review > p {
+  max-width: 70ch;
+  margin-top: 0.6rem;
+  color: var(--color-ink-2);
+  font-size: 0.85rem;
+  line-height: 1.7;
+}
+.reviewColumns {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 2rem;
+  margin-top: 2rem;
+}
+.reviewColumns h3 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+.reviewColumns p,
+.reviewColumns ol {
+  margin-top: 1rem;
+  color: var(--color-ink-2);
+  line-height: 1.8;
+  font-size: 0.9rem;
+}
+.reviewColumns ol {
+  list-style: decimal;
+  padding-left: 1.3rem;
+  margin-bottom: 1.5rem;
+}
+@media (max-width: 960px) {
+  .liveGrid,
+  .reviewColumns {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .controls {
+    padding: 0.75rem 1rem;
+  }
+  .switches button {
+    padding-inline: 0.85rem;
+  }
+  .panel {
+    padding-block: 1.25rem;
+  }
+  .review {
+    padding: 1.25rem;
+  }
+}

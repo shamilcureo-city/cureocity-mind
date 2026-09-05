@@ -1,21 +1,13 @@
-import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { Prisma } from '@prisma/client';
 import { CARE_ENGINE_CONSTANTS } from '@cureocity/clinical';
-import { Container } from '@/components/ui/Container';
-import { Card } from '@/components/ui/Card';
-import { TodaySessionCard } from '@/components/app/TodaySessionCard';
-import { TodayAttentionQueue } from '@/components/app/TodayAttentionQueue';
+import { MindTodayWorkspace } from '@/components/app/MindTodayWorkspace';
+import { buildMindTodayProgress, isFinalizedMindNote } from '@/components/app/MindTodayProgress';
 import { FirstRunChecklist } from '@/components/app/FirstRunChecklist';
 import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
 import { WalkInSheet } from '@/components/app/WalkInSheet';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
-import {
-  computeDayBoundaries,
-  formatDayHeader,
-  formatDayShort,
-  formatIstTime as formatTime,
-} from '@/lib/ist';
+import { computeDayBoundaries, formatDayHeader } from '@/lib/ist';
 import { decryptClientField } from '@/lib/client-pii';
 import { prioritizeTodayItems, type TodayAttentionItem } from '@/lib/today-priority';
 import { noteProcessingJourney } from '@/lib/note-processing-journey';
@@ -331,7 +323,7 @@ export default async function TodayPage() {
     rawNextFutureSession ? decSessionName(rawNextFutureSession) : null,
   ]);
 
-  const attentionItems: TodayAttentionItem[] = prioritizeTodayItems(
+  const queuedAttentionItems: TodayAttentionItem[] = prioritizeTodayItems(
     dedupeTodayCrossSource(
       await Promise.all([
         ...[rawActiveSession, rawNextFutureSession]
@@ -449,23 +441,22 @@ export default async function TodayPage() {
       ]),
     ),
     now,
-  ).slice(0, 12);
-
-  const nowAndUpcoming = todayRows.filter(
-    (s) => s.status === 'IN_PROGRESS' || (s.status === 'SCHEDULED' && s.scheduledAt >= now),
-  );
-  const doneToday = todayRows.filter((s) => s.status === 'COMPLETED');
-  const otherToday = todayRows.filter(
-    (s) => s.status === 'NO_SHOW' || s.status === 'CANCELLED' || s.status === 'RESCHEDULED',
   );
 
   // TS7.2 — at any moment exactly one session matters: the authoritative
   // in-progress one, else the authoritative next scheduled session. It may
   // sit outside today's display boundary, so do not derive it from todayRows.
   const { hero } = selectAuthoritativeTodayHero(activeSession, nextFutureSession, todayRows);
-  const restOfDay = [...nowAndUpcoming, ...doneToday, ...otherToday]
+  const restOfDay = todayRows
     .filter((session) => session.id !== hero?.id)
     .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
+  // The authoritative session has one home. All other returned work remains
+  // visible; in particular, note failures cannot fall behind a display limit.
+  const attentionItems = queuedAttentionItems.filter(
+    (item) =>
+      !(item.id === hero?.id && (item.kind === 'ACTIVE_SESSION' || item.kind === 'FUTURE_SESSION')),
+  );
+  const progress = buildMindTodayProgress(todayRows);
 
   // Recents for the walk-in sheet: whoever is on today's board or in the
   // look-ahead is likely the person standing in the room.
@@ -494,105 +485,29 @@ export default async function TodayPage() {
   }
 
   return (
-    <Container className="py-10">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
-            Today · {formatDayHeader(startOfToday)}
-          </p>
-          <h1 className="mt-1 font-serif text-3xl">
-            {hero ? 'Up next' : doneToday.length > 0 ? 'All done for today' : 'Your day'}
-          </h1>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {summary(nowAndUpcoming.length, doneToday.length)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <MindTodayWorkspace
+      dateLabel={formatDayHeader(startOfToday)}
+      hero={hero ? toCardProps(hero) : null}
+      agenda={restOfDay.map((session) => ({
+        session: toCardProps(session),
+        dueMeasure: dueByClient.get(session.clientId) ?? null,
+      }))}
+      upcoming={upcomingRows.filter((session) => session.id !== hero?.id).map(toCardProps)}
+      attentionItems={attentionItems}
+      defaultCapture={defaultCapture}
+      progress={progress}
+      firstRun={<FirstRunChecklist psychologistId={therapist.id} />}
+      actions={
+        <>
           <WalkInSheet
             clients={clients.map((c) => ({ id: c.id, fullName: c.fullName }))}
             recentClientIds={recentClientIds}
             defaultCapture={defaultCapture}
           />
           <ScheduleSessionPanel clients={clients} />
-        </div>
-      </header>
-
-      <FirstRunChecklist psychologistId={therapist.id} />
-      <TodayAttentionQueue items={attentionItems} />
-
-      {hero ? (
-        <section className="mt-6">
-          <TodaySessionCard
-            session={toCardProps(hero)}
-            defaultCapture={defaultCapture}
-            variant="hero"
-          />
-        </section>
-      ) : (
-        <Card className="mt-6 p-8 text-center text-sm text-[var(--color-ink-2)]">
-          {todayRows.length === 0
-            ? 'Nothing scheduled today. Book a slot with Schedule session, or start a Walk-in.'
-            : 'No more sessions scheduled today — the timeline below shows how the day went.'}
-        </Card>
-      )}
-
-      {restOfDay.length > 0 && (
-        <section className="mt-8">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-            Rest of today
-          </h2>
-          <ul className="space-y-2">
-            {restOfDay.map((s) => (
-              <li key={s.id}>
-                <TodaySessionCard
-                  session={toCardProps(s)}
-                  defaultCapture={defaultCapture}
-                  variant="row"
-                  dueMeasure={dueByClient.get(s.clientId) ?? null}
-                />
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
-      <section className="mt-10">
-        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-          Looking ahead — next 3 days
-        </h2>
-        {upcomingRows.length === 0 ? (
-          <Card className="p-6 text-sm text-[var(--color-ink-3)]">
-            Nothing on the books yet.{' '}
-            <Link href="/app/clients" className="text-[var(--color-accent)] hover:underline">
-              Open a client
-            </Link>{' '}
-            to schedule a follow-up.
-          </Card>
-        ) : (
-          <Card className="overflow-hidden">
-            <ul className="divide-y divide-[var(--color-line-soft)]">
-              {upcomingRows.map((s) => (
-                <li key={s.id}>
-                  <Link
-                    href={`/app/sessions/${s.id}`}
-                    className="grid grid-cols-[1fr_1.2fr_1fr_auto] items-baseline gap-3 px-5 py-3 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
-                  >
-                    <span className="font-medium text-[var(--color-ink)]">
-                      {formatDayShort(s.scheduledAt)}
-                    </span>
-                    <span className="text-[var(--color-ink-2)]">{s.client.fullName}</span>
-                    <span className="text-xs text-[var(--color-ink-3)]">{s.modality ?? '—'}</span>
-                    <span className="text-xs text-[var(--color-ink-3)]">
-                      {formatTime(s.scheduledAt)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        )}
-      </section>
-    </Container>
+        </>
+      }
+    />
   );
 }
 
@@ -610,7 +525,7 @@ const sessionSelect = {
   clientId: true,
   client: { select: { id: true, fullNameEncrypted: true, isDemo: true } },
   noteDraft: { select: { status: true } },
-  therapyNote: { select: { id: true } },
+  therapyNote: { select: { id: true, locked: true, signedAt: true } },
 } as const;
 
 function toCardProps(row: {
@@ -623,7 +538,7 @@ function toCardProps(row: {
   clientId: string;
   client: { fullName: string; isDemo: boolean };
   noteDraft: { status: string } | null;
-  therapyNote: { id: string } | null;
+  therapyNote: { id: string; locked: boolean; signedAt: Date } | null;
 }) {
   return {
     id: row.id,
@@ -640,20 +555,8 @@ function toCardProps(row: {
     clientId: row.clientId,
     clientName: row.client.fullName,
     clientIsDemo: row.client.isDemo,
-    hasSignedNote: row.therapyNote !== null,
+    hasSignedNote: isFinalizedMindNote(row.therapyNote),
     draftStatus: row.noteDraft?.status ?? null,
     captureMode: row.captureMode,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Summary line (IST date helpers now live in @/lib/ist).
-// ---------------------------------------------------------------------------
-
-function summary(upcoming: number, done: number): string {
-  if (upcoming === 0 && done === 0) return 'No sessions on the calendar.';
-  const parts: string[] = [];
-  if (upcoming > 0) parts.push(`${upcoming} session${upcoming === 1 ? '' : 's'} coming up`);
-  if (done > 0) parts.push(`${done} done`);
-  return parts.join(' · ');
 }

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { SessionKind } from '@cureocity/contracts';
+import styles from './MindSessionReview.module.css';
 
 export type TabKey = 'review' | 'note' | 'transcript' | 'details';
 
@@ -15,34 +16,24 @@ interface Props {
 }
 
 const TABS: TabSpec[] = [
-  { key: 'review', label: 'Session review' },
-  { key: 'note', label: 'Note' },
+  { key: 'note', label: 'Review & close' },
+  { key: 'review', label: 'Clinical context' },
   { key: 'transcript', label: 'Transcript' },
-  { key: 'details', label: 'More' },
+  { key: 'details', label: 'Session details' },
 ];
 
 /** Mind keeps longitudinal care on the client and visit evidence on the session. */
-export function SessionWorkspaceTabs({ sessionId, active = 'review' }: Props) {
+export function SessionWorkspaceTabs({ sessionId, active = 'note' }: Props) {
   return (
-    <nav
-      className="flex flex-wrap items-center gap-1 border-b border-[var(--color-line-soft)]"
-      aria-label="Session sections"
-    >
+    <nav className={styles.tabs} aria-label="Session sections">
       {TABS.map((tab) => {
         const activeTab = tab.key === active;
-        const href =
-          tab.key === 'review'
-            ? `/app/sessions/${sessionId}`
-            : `/app/sessions/${sessionId}?tab=${tab.key}`;
+        const href = `/app/sessions/${sessionId}?tab=${tab.key}`;
         return (
           <Link
             key={tab.key}
             href={href}
-            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2.5 text-sm transition-colors ${
-              activeTab
-                ? 'border-[var(--color-ink)] font-medium text-[var(--color-ink)]'
-                : 'border-transparent text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
-            }`}
+            className={styles.tab}
             aria-current={activeTab ? 'page' : undefined}
           >
             {tab.label}

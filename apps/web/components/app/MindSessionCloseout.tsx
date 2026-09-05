@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import type { MindSessionCloseout } from '@cureocity/contracts';
-import { Card } from '../ui/Card';
 import { ScheduleSessionPanel } from './ScheduleSessionPanel';
 import { MindCloseoutDecisionActions } from './MindCloseoutDecisionActions';
 import { ShareReceiptList, type ShareReceiptView } from './ShareReceiptList';
 import { suggestFollowUp } from '../../lib/follow-up-suggestion';
+import styles from './MindSessionReview.module.css';
 
 interface Props {
   sessionId: string;
@@ -17,20 +17,11 @@ interface Props {
   sessionAt: Date;
   sessionCompleted: boolean;
   canShare: boolean;
+  agreementCount?: number;
+  selectedQuestionCount?: number;
   receipts: ShareReceiptView[];
   children: React.ReactNode;
 }
-
-const labels: Record<keyof MindSessionCloseout['steps'], string> = {
-  noteGenerated: 'Note generated',
-  noteReviewed: 'Note reviewed',
-  clinicalSuggestions: 'Clinical suggestions resolved or skipped',
-  agreements: 'Agreements or homework captured or skipped',
-  nextSessionQuestions: 'Next-session questions selected or skipped',
-  signed: 'Note signed',
-  shared: 'Shared or intentionally not shared',
-  followUp: 'Follow-up scheduled or intentionally skipped',
-};
 
 export function MindSessionCloseout({
   sessionId,
@@ -39,96 +30,116 @@ export function MindSessionCloseout({
   sessionAt,
   sessionCompleted,
   canShare,
+  agreementCount = 0,
+  selectedQuestionCount = 0,
   receipts,
   children,
 }: Props) {
   if (!sessionCompleted) return <>{children}</>;
   const suggestedFollowUp = suggestFollowUp(sessionAt);
+  const signed = closeout.steps.signed === 'COMPLETE';
+  const complete = Object.entries(closeout.steps)
+    .filter(([key]) => canShare || key !== 'shared')
+    .every(([, state]) => state !== 'PENDING');
   return (
     <section className="space-y-6" aria-labelledby="mind-closeout-title">
-      <Card className="border-t-[3px] border-t-[var(--color-accent)] p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-accent)]">
-              Mind session completion
-            </p>
-            <h2 id="mind-closeout-title" className="mt-1 font-serif text-2xl">
-              Review &amp; Close
-            </h2>
-            <p className="mt-1 max-w-2xl text-sm text-[var(--color-ink-2)]">
-              Review the note once, resolve or deliberately skip each care decision, then sign and
-              choose what happens next.
-            </p>
-          </div>
-          <Link
-            href={`/app/sessions/${sessionId}`}
-            className="text-sm font-medium text-[var(--color-accent)] hover:underline"
-          >
-            Open full session record →
-          </Link>
+      <div className={styles.noteLead}>
+        <div>
+          <h2 id="mind-closeout-title">Review &amp; Close</h2>
+          <p>
+            {signed
+              ? 'Your signed note is saved. Its signature does not send anything to the client.'
+              : 'Make the note yours, sign when it is accurate, then choose the next steps below.'}
+          </p>
         </div>
-        <ol className="mt-5 grid gap-2 sm:grid-cols-2">
-          {Object.entries(closeout.steps)
-            .filter(([key]) => canShare || key !== 'shared')
-            .map(([key, state]) => (
-              <li
-                key={key}
-                className="flex items-center gap-2 rounded-xl border border-[var(--color-line-soft)] px-3 py-2 text-sm"
-              >
-                <span aria-hidden="true">
-                  {state === 'COMPLETE' ? '✓' : state === 'SKIPPED' ? '–' : '○'}
-                </span>
-                <span>{labels[key as keyof MindSessionCloseout['steps']]}</span>
-                <span className="ml-auto text-[10px] font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-                  {state.toLowerCase()}
-                </span>
-              </li>
-            ))}
-        </ol>
-        <MindCloseoutDecisionActions
-          sessionId={sessionId}
-          steps={closeout.steps}
-          canShare={canShare}
-        />
-      </Card>
+        <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+          Consult the clinical context
+        </Link>
+      </div>
       {children}
-      {canShare && receipts.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="border-b border-[var(--color-line-soft)] p-5">
-            <h3 className="font-serif text-xl">Sharing receipts</h3>
-            <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-              Persistent delivery attempts for this session.
+      <div className={styles.finish} id="session-next-steps">
+        <h2 className={styles.finishTitle}>
+          {complete ? 'Ready for the next chapter.' : 'What should happen next?'}
+        </h2>
+        <p className={styles.finishIntro}>
+          {complete
+            ? 'The note is signed and your next-step decisions are saved. You can return to Today.'
+            : 'Keep what matters from this session. Choose an action when it is useful, or record that it is not needed today.'}
+        </p>
+        <div className={styles.evidence} aria-label="Saved session decisions">
+          <span>{signed ? 'Note signed' : 'Signature pending'}</span>
+          <span>
+            {agreementCount} {agreementCount === 1 ? 'agreement saved' : 'agreements saved'}
+          </span>
+          <span>
+            {selectedQuestionCount}{' '}
+            {selectedQuestionCount === 1 ? 'question selected' : 'questions selected'} from this
+            session
+          </span>
+        </div>
+        <div className={styles.finishGrid}>
+          <section className={styles.finishSection} aria-labelledby="care-decisions-title">
+            <h3 id="care-decisions-title">Carry the care forward</h3>
+            <p>Clinical suggestions stay separate from your decisions until you review them.</p>
+            <MindCloseoutDecisionActions
+              sessionId={sessionId}
+              steps={closeout.steps}
+              canShare={canShare}
+            />
+          </section>
+          <section className={styles.finishSection} aria-labelledby="follow-up-title">
+            <h3 id="follow-up-title">The next appointment</h3>
+            <p className="mb-4">
+              One week at the same time is suggested. Change it to suit your care plan, or record
+              that a follow-up is not needed.
             </p>
-          </div>
+            <ScheduleSessionPanel
+              clients={[client]}
+              initialClientId={client.id}
+              initialDate={suggestedFollowUp.date}
+              initialTime={suggestedFollowUp.time}
+              closeoutMode
+              sourceSessionId={sessionId}
+              followUpState={closeout.steps.followUp}
+            />
+          </section>
+        </div>
+        {canShare && (
+          <p className={`${styles.finishIntro} mt-5`}>
+            {closeout.steps.shared === 'SKIPPED'
+              ? 'You chose not to share from this session.'
+              : closeout.steps.shared === 'COMPLETE'
+                ? 'Sharing is recorded. Check the receipts below for each link or message and whether it was opened.'
+                : 'After signing, use the note’s share action to preview what the client will receive.'}{' '}
+            Copying a note does not sign or send it. Creating a link does not confirm delivery.
+          </p>
+        )}
+        {complete && (
+          <p className="mt-5">
+            <Link href="/app/today" className={styles.contextLink}>
+              Return to Today
+            </Link>
+          </p>
+        )}
+      </div>
+      {canShare && receipts.length > 0 && (
+        <details className={styles.disclosure}>
+          <summary>Sharing receipts ({receipts.length})</summary>
+          <p className="px-5 pt-4 text-sm text-[var(--color-ink-2)]">
+            Saved links, sending attempts and opened records are shown separately. A sent message is
+            not confirmation that the client read it.
+          </p>
           <ShareReceiptList receipts={receipts} />
           <p className="px-5 pb-5 text-sm">
             <Link
               href={`/app/clients/${client.id}/shared`}
               className="text-[var(--color-accent)] hover:underline"
             >
-              View complete client sharing history →
+              View the client’s sharing history
             </Link>
           </p>
-        </Card>
+        </details>
       )}
-      <Card className="p-6">
-        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
-          Follow-up
-        </p>
-        <h3 className="mt-1 font-serif text-xl">Schedule what happens next</h3>
-        <p className="mb-4 mt-1 text-sm text-[var(--color-ink-2)]">
-          We suggested one week at the same time. You can edit it or explicitly skip this step.
-        </p>
-        <ScheduleSessionPanel
-          clients={[client]}
-          initialClientId={client.id}
-          initialDate={suggestedFollowUp.date}
-          initialTime={suggestedFollowUp.time}
-          closeoutMode
-          sourceSessionId={sessionId}
-          followUpState={closeout.steps.followUp}
-        />
-      </Card>
     </section>
   );
 }

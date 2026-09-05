@@ -58,7 +58,7 @@ export function NoteToolbar({
 
       <div className="flex items-center gap-1.5">
         <Link
-          href={`/app/sessions/${sessionId}`}
+          href={`/app/sessions/${sessionId}?tab=review`}
           className={ICON_BTN}
           title="Review diagnosis"
           aria-label="Review diagnosis"

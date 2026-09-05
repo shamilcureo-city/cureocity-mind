@@ -1,0 +1,284 @@
+/* Mind's psychologist workspace. All rules are scoped: Scribe and Care keep
+   their existing visual system. Clinical status colours remain semantic. */
+.mind-workspace-shell {
+  --color-bg: #f4f5fc;
+  --color-surface: #fff;
+  --color-surface-soft: #f0eef9;
+  --color-ink: #232339;
+  --color-ink-2: #5e5e74;
+  --color-ink-3: #717187;
+  --color-line: #dcdbea;
+  --color-line-soft: #e9e7f2;
+  --color-accent: #6659c9;
+  --color-accent-hover: #5143ab;
+  --color-accent-soft: #e9e5fb;
+  --color-accent-bright: #8174df;
+  --color-data: #6659c9;
+  --color-good: #22734c;
+  --color-good-soft: #d8eddf;
+  --color-warn: #815600;
+  --color-warn-soft: #fff4d9;
+  --color-warn-bg: #fff4d9;
+  --color-warn-border: #e4ca8b;
+  --mind-honey: #f2d79a;
+  --mind-mint: #d8eddf;
+  --grad-ink: linear-gradient(155deg, #786bd6, #5b4dba);
+  --sh-glass: 0 6px 24px -18px rgb(45 35 95 / 22%);
+  --sh-glass-lg: 0 14px 40px -22px rgb(45 35 95 / 22%);
+  --sh-raise: 0 3px 10px -7px rgb(45 35 95 / 28%);
+  --sh-3d: 0 4px 0 -1px #493d96, 0 8px 16px -10px rgb(65 49 145 / 45%);
+  --sh-3d-hover: 0 4px 0 -1px #493d96, 0 12px 20px -10px rgb(65 49 145 / 40%);
+  --sh-3d-press: 0 1px 0 #493d96;
+  color: var(--color-ink);
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.mind-workspace-shell .u-glass {
+  background: var(--color-surface);
+  border-color: var(--color-line-soft);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Both the original glass recipe and this paper default are unlayered, so
+   Tailwind's layered semantic utilities cannot override them. Restore explicit
+   clinical/recovery tones on Mind Cards only; never recolour Doctor surfaces.
+   Use background (not just background-color) to remove the old glass gradient. */
+.mind-workspace-shell .u-glass.bg-red-50 {
+  background: var(--color-red-50, #fef2f2);
+}
+.mind-workspace-shell .u-glass.bg-amber-50 {
+  background: var(--color-amber-50, #fffbeb);
+}
+.mind-workspace-shell .u-glass.border-red-200 {
+  border-color: var(--color-red-200, #fecaca);
+}
+.mind-workspace-shell .u-glass.border-red-300 {
+  border-color: var(--color-red-300, #fca5a5);
+}
+.mind-workspace-shell .u-glass.border-amber-300 {
+  border-color: var(--color-amber-300, #fcd34d);
+}
+
+/* Token-based clinical warnings and recovery notices use the same Card. */
+.mind-workspace-shell .u-glass[class~='bg-[var(--color-crit-soft,#fbe4e0)]'] {
+  background: var(--color-crit-soft, #fbe4e0);
+}
+.mind-workspace-shell .u-glass[class~='bg-[var(--color-warn-bg)]'] {
+  background: var(--color-warn-bg);
+}
+.mind-workspace-shell .u-glass[class~='bg-[var(--color-warn-soft)]'] {
+  background: var(--color-warn-soft);
+}
+.mind-workspace-shell .u-glass[class~='border-[var(--color-warn)]'] {
+  border-color: var(--color-warn);
+}
+.mind-workspace-shell .u-glass[class~='border-[var(--color-warn-border)]'] {
+  border-color: var(--color-warn-border);
+}
+.mind-workspace-shell .u-glass[class~='bg-[var(--color-accent-soft)]'] {
+  background: var(--color-accent-soft);
+}
+.mind-workspace-shell .u-glass[class~='border-[var(--color-accent)]'] {
+  border-color: var(--color-accent);
+}
+
+.mind-workspace-shell :where(button, a, summary, input, textarea, select):focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+.mind-workspace-shell .mind-skip-link {
+  position: fixed;
+  z-index: 100;
+  top: 8px;
+  left: 16px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: var(--color-ink);
+  color: white;
+  transform: translateY(-160%);
+}
+.mind-workspace-shell .mind-skip-link:focus {
+  transform: translateY(0);
+}
+.mind-workspace-shell .mind-content {
+  min-width: 0;
+}
+
+.mind-workspace-shell .mind-sidebar {
+  position: sticky;
+  top: 0;
+  width: 236px;
+  border-right: 1px solid var(--color-line-soft);
+  background: #fbfaff;
+  backdrop-filter: none;
+  overflow-y: auto;
+}
+.mind-workspace-shell .mind-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-ink);
+  text-decoration: none;
+}
+.mind-workspace-shell .mind-brand-mark {
+  display: grid;
+  place-items: center;
+  height: 43px;
+  width: 43px;
+  border-radius: 15px 15px 15px 5px;
+  background: var(--color-accent);
+  color: #fff;
+  box-shadow: 0 4px 0 #d7d1f2;
+}
+.mind-workspace-shell .mind-brand-name {
+  font-family: var(--font-serif);
+  font-size: 29px;
+  line-height: 1;
+  letter-spacing: -1px;
+}
+.mind-workspace-shell .mind-brand-byline {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+}
+.mind-workspace-shell .mind-navigation {
+  padding: 0 16px;
+}
+.mind-workspace-shell .mind-nav-link {
+  min-height: 46px;
+  border-radius: 12px;
+  border-color: transparent;
+  padding: 11px 14px;
+  font-size: 13px;
+  box-shadow: none;
+}
+.mind-workspace-shell .mind-nav-link[aria-current='page'] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+  font-weight: 650;
+}
+.mind-workspace-shell .mind-nav-link:hover {
+  background: var(--color-surface-soft);
+}
+.mind-workspace-shell .mind-navigation details {
+  margin-top: 25px;
+}
+.mind-workspace-shell .mind-navigation summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  color: var(--color-ink-2);
+  font-size: 12px;
+}
+.mind-workspace-shell .mind-nav-note {
+  margin: 28px 20px 18px;
+  padding: 17px 16px;
+  border-left: 3px solid var(--mind-honey);
+  background: #f4f1e9;
+  border-radius: 0 12px 12px 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+.mind-workspace-shell .mind-nav-note strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+.mind-workspace-shell .mind-mobile-nav {
+  background: #fbfaff;
+  border-color: var(--color-line);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.mind-workspace-shell .mind-mobile-nav a[aria-current='page'] {
+  background: var(--color-accent-soft);
+  border-radius: 14px 14px 0 0;
+}
+.mind-workspace-shell .mind-live-header {
+  padding: 20px 24px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 24px;
+  background: var(--color-surface);
+}
+.mind-workspace-shell .mind-live-header h1 {
+  font-size: clamp(25px, 3vw, 36px);
+}
+.mind-workspace-shell .mind-live-modes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--color-line);
+  padding: 7px 0 20px;
+}
+.mind-workspace-shell .mind-mode-picker {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--color-line-soft);
+  padding: 4px;
+  border-radius: 14px;
+}
+.mind-workspace-shell .mind-mode-picker button {
+  border-radius: 11px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+.mind-workspace-shell .mind-mode-picker button[aria-pressed='true'] {
+  background: var(--color-surface);
+  color: var(--color-accent-hover);
+  font-weight: 600;
+  box-shadow: var(--sh-raise);
+}
+.mind-workspace-shell .mind-capture-note {
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.mind-workspace-shell .mind-live-safety {
+  margin-bottom: 16px;
+}
+.mind-workspace-shell .mind-quiet-conversation {
+  display: none;
+}
+.mind-workspace-shell .mind-quiet-rail {
+  grid-column: 1 / -1;
+}
+.mind-workspace-shell .mind-review-link {
+  color: var(--color-accent);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (max-width: 767px) {
+  .mind-workspace-shell .mind-content {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  }
+  .mind-workspace-shell .mind-live-header {
+    padding: 16px;
+    border-radius: 18px;
+  }
+  .mind-workspace-shell .mind-live-modes {
+    align-items: stretch;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mind-workspace-shell *,
+  .mind-workspace-shell *::before,
+  .mind-workspace-shell *::after {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+@media print {
+  .mind-workspace-shell {
+    background: #fff;
+  }
+  .mind-workspace-shell .mind-live-modes {
+    display: none;
+  }
+}

@@ -25,6 +25,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   LiveGatewayEventSchema,
   type IntakeNoteV1,
@@ -47,10 +48,15 @@ import {
 } from '@/lib/live-recovery-draft';
 import { transcriptDownload } from '@/lib/mind-session-finalization';
 import { coordinateMindSessionStart } from '@/lib/mind-session-start';
+import {
+  markCopilotSuggestionShown,
+  type DisclosedCopilotSuggestion,
+} from '@/lib/therapy-copilot-disclosure';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { GatewayMockBanner } from './GatewayMockBanner';
 import { TherapyCopilotRail } from './TherapyCopilotRail';
+import { MindTherapyGuide, type PreparedMindGuide } from './MindTherapyGuide';
 
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
@@ -73,6 +79,7 @@ interface Props {
   priorRisk?: boolean;
   plannedMinutes?: number | null;
   selectedDeviceId?: string;
+  preparedGuides?: PreparedMindGuide[];
 }
 
 // ---------------------------------------------------------------------------
@@ -221,8 +228,12 @@ export function TherapistLiveSession({
   priorRisk = false,
   plannedMinutes = null,
   selectedDeviceId,
+  preparedGuides = [],
 }: Props) {
   const router = useRouter();
+  const [workspaceMode, setWorkspaceMode] = useState<'quiet' | 'guided'>('quiet');
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [guideId, setGuideId] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [utterances, setUtterances] = useState<Utterance[]>([]);
   const [note, setNote] = useState<Record<string, unknown>>({});
@@ -431,27 +442,15 @@ export function TherapistLiveSession({
     }
   }, [autoStart, phase]);
 
-  // Sprint TS5 — record a "shown" audit the first time each copilot card
-  // appears, so the pilot dataset captures shown → acted/dismissed. The
-  // deterministic SI re-check is excluded (it's not a model suggestion).
-  const shownIdsRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!copilot) return;
-    const items: { id: string; kind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP'; label: string }[] = [
-      ...copilot.riskWatch
-        .filter((r) => r.source !== 'CARRIED_RISK')
-        .map((r) => ({ id: r.id, kind: 'RED_FLAG' as const, label: r.label })),
-      ...copilot.askNext
-        .filter((a) => a.source === 'LIVE')
-        .map((a) => ({ id: a.id, kind: 'ASK_NEXT' as const, label: a.question })),
-      ...copilot.threads.map((t) => ({ id: t.id, kind: 'GAP' as const, label: t.topic })),
-    ];
-    for (const it of items) {
-      if (shownIdsRef.current.has(it.id)) continue;
-      shownIdsRef.current.add(it.id);
-      relaySuggestion('shown', it.id, it.kind, it.label);
+  // The rail reports disclosure, not model receipt: Quiet/collapsed cards
+  // cannot inflate shown counts. Keep the existing once-per-session semantics.
+  const shownIdsRef = useRef({ sessionId, ids: new Set<string>() });
+  function reportShownCopilot(items: DisclosedCopilotSuggestion[]): void {
+    for (const item of items) {
+      if (!markCopilotSuggestionShown(shownIdsRef.current, sessionId, item.id)) continue;
+      relaySuggestion('shown', item.id, item.kind, item.label);
     }
-  }, [copilot]);
+  }
 
   function buildTranscript(items: Utterance[]): string {
     return [...items]
@@ -857,11 +856,14 @@ export function TherapistLiveSession({
   const ss = String(elapsed % 60).padStart(2, '0');
   const updatedAgo =
     noteUpdatedAt !== null ? Math.max(0, Math.round((Date.now() - noteUpdatedAt) / 1000)) : null;
+  const selectedGuide = preparedGuides.find((guide) => guide.id === guideId);
+  const hasGuide = workspaceMode === 'guided' && selectedGuide !== undefined;
+  const showConversation = showTranscript && phase !== 'idle';
 
   return (
     <div className="space-y-4">
       <GatewayMockBanner />
-      <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface)]/95 px-3 py-2 shadow-sm backdrop-blur md:static md:mx-0 md:border-0 md:bg-transparent md:p-0 md:shadow-none">
+      <header className="mind-live-header sticky top-0 z-30 flex flex-wrap items-start justify-between gap-3 bg-[var(--color-surface)]/95 backdrop-blur md:static">
         <div>
           <h1 className="font-serif text-2xl">{clientName || 'Live session'}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -904,6 +906,116 @@ export function TherapistLiveSession({
           )}
         </div>
       </header>
+
+      <div className="mind-live-modes">
+        <div>
+          <div className="mind-mode-picker" role="group" aria-label="Live workspace mode">
+            <button
+              type="button"
+              aria-pressed={workspaceMode === 'quiet'}
+              onClick={() => setWorkspaceMode('quiet')}
+            >
+              Quiet focus
+            </button>
+            <button
+              type="button"
+              aria-pressed={workspaceMode === 'guided'}
+              onClick={() => setWorkspaceMode('guided')}
+            >
+              Guided session
+            </button>
+          </div>
+          <p className="mind-capture-note mt-2">
+            {workspaceMode === 'quiet'
+              ? 'Stay with the client. Your note builds alongside you.'
+              : 'Your questions, your chosen guide. Change direction whenever you need.'}
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-expanded={showTranscript}
+          onClick={() => setShowTranscript((value) => !value)}
+        >
+          {showTranscript ? 'Hide transcript' : 'Show transcript'}
+        </Button>
+      </div>
+
+      {workspaceMode === 'guided' && preparedGuides.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-4">
+          <label className="text-sm font-medium" htmlFor={`guide-${sessionId}`}>
+            Previously prepared guide
+          </label>
+          <select
+            id={`guide-${sessionId}`}
+            value={guideId}
+            onChange={(event) => setGuideId(event.target.value)}
+            className="max-w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2 text-sm"
+          >
+            <option value="">Choose a guide to review</option>
+            {preparedGuides.map((guide) => (
+              <option key={guide.id} value={guide.id}>
+                {guide.body.therapyName} ·{' '}
+                {new Date(guide.updatedAt).toLocaleDateString('en-IN', {
+                  timeZone: 'Asia/Kolkata',
+                  month: 'short',
+                  day: 'numeric',
+                })}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-[var(--color-ink-2)]">
+            Recheck the draft against today’s case. Opening it does not confirm a plan or
+            intervention.
+          </p>
+        </div>
+      )}
+
+      {workspaceMode === 'guided' && preparedGuides.length === 0 && (
+        <Card className="p-4 text-sm text-[var(--color-ink-2)]">
+          <p>
+            No prepared guide is available for this session. You can use the questions below and
+            continue your own assessment.
+          </p>
+          {phase === 'idle' && clientId && (
+            <p className="mt-2">
+              <Link
+                className="font-medium text-[var(--color-accent)] underline"
+                href={`/app/clients/${clientId}/plan#session-guides`}
+              >
+                Prepare a guide from the client’s plan before recording
+              </Link>
+            </p>
+          )}
+        </Card>
+      )}
+
+      {workspaceMode === 'quiet' &&
+        selectedGuide &&
+        selectedGuide.body.riskWatchpoints.length > 0 && (
+          <section
+            className="rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]"
+            aria-label="Selected guide watchpoints"
+          >
+            <h2 className="font-semibold">
+              Selected guide watchpoints · {selectedGuide.body.therapyName}
+            </h2>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {selectedGuide.body.riskWatchpoints.map((cue, index) => (
+                <li key={index}>{cue}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+      {risk && (
+        <Card
+          className={`mind-live-safety p-4 text-sm ${risk.severity === 'critical' || risk.severity === 'high' ? 'border-red-300 bg-red-50 text-red-800' : 'border-amber-300 bg-amber-50 text-amber-800'}`}
+        >
+          <strong>Safety concern in the draft · {risk.severity}</strong>
+          <p className="mt-1">{risk.text}</p>
+        </Card>
+      )}
 
       {recoveryRestored && (
         <Card className="border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3 text-sm">
@@ -1057,33 +1169,31 @@ export function TherapistLiveSession({
         </Card>
       )}
 
-      {phase === 'idle' && (
-        <div className="space-y-4">
-          <Card className="p-8 text-center">
-            <p className="mb-4 text-sm text-[var(--color-ink-2)]">
-              The conversation and note build in real time as you talk.
-            </p>
-            <Button onClick={() => void start({ resume: utterances.length > 0 })}>
-              Start session
-            </Button>
-          </Card>
-
-          {/* TS5.4 — the session plan is visible BEFORE recording starts:
-              the carried questions + the copilot's ranked open questions,
-              plus the prior-risk re-check. Same cards as the live rail. */}
-          {effectiveCopilot &&
-            (effectiveCopilot.askNext.length > 0 || effectiveCopilot.riskWatch.length > 0) && (
-              <div className="mx-auto max-w-xl">
-                <TherapyCopilotRail reasoning={effectiveCopilot} onResolve={resolveCopilot} />
-              </div>
-            )}
-        </div>
+      {/* Safety stays ahead of the guide in both modes, at every recording phase. */}
+      {effectiveCopilot && (
+        <TherapyCopilotRail
+          reasoning={effectiveCopilot}
+          onResolve={resolveCopilot}
+          onShown={reportShownCopilot}
+          mode={workspaceMode}
+        />
       )}
 
-      {phase !== 'idle' && (
-        <div className="grid items-start gap-4 lg:grid-cols-12">
-          {/* ============ Conversation ============ */}
-          <Card className="p-4 lg:col-span-7">
+      {/* One stable guide instance: starting/stopping capture must not discard its review state. */}
+      <div className="grid items-start gap-4 lg:grid-cols-12">
+        {/* ============ Conversation ============ */}
+        <div
+          className={`space-y-4 lg:col-span-7 ${!showConversation && !hasGuide ? 'hidden' : ''}`}
+        >
+          {selectedGuide && (
+            <div hidden={workspaceMode !== 'guided'}>
+              <MindTherapyGuide
+                key={selectedGuide.id + selectedGuide.updatedAt}
+                script={selectedGuide.body}
+              />
+            </div>
+          )}
+          <Card className={`p-4 ${showConversation ? '' : 'hidden'}`}>
             <div className="flex items-baseline justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
                 Conversation
@@ -1155,140 +1265,140 @@ export function TherapistLiveSession({
               )}
             </div>
           </Card>
-
-          {/* ============ Right rail ============ */}
-          <div className="space-y-4 lg:col-span-5">
-            {/* Sprint TS5 → TS5.4 — the live copilot. Renders from the FIRST
-                moment: the seeded session plan (carried + copilot questions,
-                prior-risk re-check) until the gateway's first reasoning
-                snapshot replaces it. A Pass-2 note-level risk still escalates
-                the fallback card when there is no plan at all. */}
-            {effectiveCopilot ? (
-              <TherapyCopilotRail reasoning={effectiveCopilot} onResolve={resolveCopilot} />
-            ) : risk ? (
-              <Card
-                className={`p-4 text-sm ${
-                  risk.severity === 'critical' || risk.severity === 'high'
-                    ? 'border-red-300 bg-red-50 text-red-800'
-                    : 'border-amber-300 bg-amber-50 text-amber-800'
-                }`}
-              >
-                <strong className="uppercase tracking-wide">Safety · {risk.severity}</strong>
-                <p className="mt-1">{risk.text}</p>
-              </Card>
-            ) : (
-              <Card className="flex items-start gap-2.5 p-4">
-                <span className="mt-1.5 h-2 w-2 flex-none rounded-full bg-[var(--color-accent)]" />
-                <div>
-                  <p className="text-sm font-medium text-[var(--color-ink)]">
-                    Copilot — warming up
-                  </p>
-                  <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
-                    Risk cues, questions to ask, and unexplored threads appear here as you talk.
-                  </p>
-                </div>
-              </Card>
-            )}
-
-            {/* What to explore — intake coverage (B5) */}
-            {kind === 'INTAKE' && (
-              <Card className="p-4">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                  What to explore
-                </h2>
-                <div className="mt-2.5 flex flex-wrap gap-1.5">
-                  {coverage.map((c) => (
-                    <span
-                      key={c.label}
-                      className={`rounded-full border px-2.5 py-0.5 text-xs ${
-                        c.done
-                          ? 'border-[#d8e6de] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-                          : 'border-[var(--color-line)] text-[var(--color-ink-3)]'
-                      }`}
-                    >
-                      {c.done ? '✓' : '○'} {c.label}
-                    </span>
-                  ))}
-                </div>
-                <p className="mt-2 text-xs text-[var(--color-ink-3)]">
-                  Read from the note as it builds — cover the open circles before you wrap up.
-                </p>
-              </Card>
-            )}
-
-            {/* Live note */}
-            <Card className="p-4">
-              <div className="flex items-center gap-2">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                  Live note
-                </h2>
-                <span className="flex-1" />
-                <span className="text-xs text-[var(--color-ink-3)]">
-                  {refreshingNote
-                    ? 'Updating…'
-                    : updatedAgo !== null
-                      ? `Updated ${updatedAgo}s ago`
-                      : 'Writing…'}
-                </span>
-                {phase === 'listening' && (
-                  <button
-                    type="button"
-                    onClick={updateNoteNow}
-                    disabled={refreshingNote}
-                    className="rounded-full border border-[var(--color-line)] px-2.5 py-0.5 text-xs font-semibold text-[var(--color-accent)] disabled:opacity-50"
-                  >
-                    Update now
-                  </button>
-                )}
-              </div>
-
-              <div className="mt-3 flex max-h-[52vh] flex-col gap-3.5 overflow-y-auto">
-                {sections.map((s) => (
-                  <div key={s.label}>
-                    <div className="text-[10.5px] font-bold uppercase tracking-wide text-[var(--color-accent)]">
-                      {s.label}
-                    </div>
-                    {s.value.trim() ? (
-                      <p className="mt-0.5 whitespace-pre-line text-sm text-[var(--color-ink)]">
-                        {s.value}
-                      </p>
-                    ) : (
-                      <div className="mt-1.5 space-y-1.5">
-                        <div className="h-2.5 animate-pulse rounded bg-[var(--color-line-soft)]" />
-                        <div className="h-2.5 w-3/5 animate-pulse rounded bg-[var(--color-line-soft)]" />
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {filledCount === 0 && (
-                  <p className="text-xs italic text-[var(--color-ink-3)]">
-                    Fills in as the session gives it material…
-                  </p>
-                )}
-              </div>
-
-              {topics.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--color-line-soft)] pt-3">
-                  {topics.map((t) => (
-                    <span
-                      key={t}
-                      className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]"
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-            {meterRef.current && (
-              <p className="pr-1 text-right text-xs tabular-nums text-[var(--color-ink-3)]">
-                ₹{meterRef.current.costInr.toFixed(2)} this session
-              </p>
-            )}
-          </div>
         </div>
-      )}
+
+        {/* ============ Right rail ============ */}
+        <div
+          className={`space-y-4 ${!showConversation && !hasGuide ? 'lg:col-span-12' : 'lg:col-span-5'}`}
+        >
+          {phase === 'idle' ? (
+            <Card className="p-8 text-center">
+              <p className="mb-4 text-sm text-[var(--color-ink-2)]">
+                The conversation and note build in real time as you talk. Recording starts only when
+                you choose.
+              </p>
+              <Button onClick={() => void start({ resume: utterances.length > 0 })}>
+                Start session
+              </Button>
+            </Card>
+          ) : (
+            <>
+              {!effectiveCopilot && (
+                <Card className="flex items-start gap-2.5 p-4">
+                  <span className="mt-1.5 h-2 w-2 flex-none rounded-full bg-[var(--color-accent)]" />
+                  <div>
+                    <p className="text-sm font-medium text-[var(--color-ink)]">
+                      Session companion — waiting for context
+                    </p>
+                    <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
+                      No live guidance yet. Continue your own assessment; the absence of an alert is
+                      not a safety assessment.
+                    </p>
+                  </div>
+                </Card>
+              )}
+
+              {/* What to explore — intake coverage (B5) */}
+              {kind === 'INTAKE' && (
+                <Card className="p-4">
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                    What to explore
+                  </h2>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {coverage.map((c) => (
+                      <span
+                        key={c.label}
+                        className={`rounded-full border px-2.5 py-0.5 text-xs ${
+                          c.done
+                            ? 'border-[#d8e6de] bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                            : 'border-[var(--color-line)] text-[var(--color-ink-3)]'
+                        }`}
+                      >
+                        {c.done ? '✓' : '○'} {c.label}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+                    Draft coverage, not a completed assessment. Explore what is appropriate; never
+                    fill a field just to complete the list.
+                  </p>
+                </Card>
+              )}
+
+              {/* Live note */}
+              <Card className="p-4">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                    Live note
+                  </h2>
+                  <span className="flex-1" />
+                  <span className="text-xs text-[var(--color-ink-3)]">
+                    {refreshingNote
+                      ? 'Updating…'
+                      : updatedAgo !== null
+                        ? `Updated ${updatedAgo}s ago`
+                        : 'Writing…'}
+                  </span>
+                  {phase === 'listening' && (
+                    <button
+                      type="button"
+                      onClick={updateNoteNow}
+                      disabled={refreshingNote}
+                      className="rounded-full border border-[var(--color-line)] px-2.5 py-0.5 text-xs font-semibold text-[var(--color-accent)] disabled:opacity-50"
+                    >
+                      Update now
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-3 flex max-h-[52vh] flex-col gap-3.5 overflow-y-auto">
+                  {sections.map((s) => (
+                    <div key={s.label}>
+                      <div className="text-[10.5px] font-bold uppercase tracking-wide text-[var(--color-accent)]">
+                        {s.label}
+                      </div>
+                      {s.value.trim() ? (
+                        <p className="mt-0.5 whitespace-pre-line text-sm text-[var(--color-ink)]">
+                          {s.value}
+                        </p>
+                      ) : (
+                        <div className="mt-1.5 space-y-1.5">
+                          <div className="h-2.5 animate-pulse rounded bg-[var(--color-line-soft)]" />
+                          <div className="h-2.5 w-3/5 animate-pulse rounded bg-[var(--color-line-soft)]" />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {filledCount === 0 && (
+                    <p className="text-xs italic text-[var(--color-ink-3)]">
+                      Fills in as the session gives it material…
+                    </p>
+                  )}
+                </div>
+
+                {topics.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--color-line-soft)] pt-3">
+                    {topics.map((t) => (
+                      <span
+                        key={t}
+                        className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]"
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {meterRef.current && (
+                <p className="pr-1 text-right text-xs tabular-nums text-[var(--color-ink-3)]">
+                  ₹{meterRef.current.costInr.toFixed(2)} this session
+                </p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

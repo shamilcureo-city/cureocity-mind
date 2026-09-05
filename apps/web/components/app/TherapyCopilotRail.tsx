@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback, useEffect, useRef } from 'react';
 import type {
   TherapyAskNextItem,
   TherapyReasoningV1,
@@ -7,6 +8,11 @@ import type {
   TherapyThreadItem,
 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
+import { liveCopilotVisibleCounts } from '@/lib/mind-guidance';
+import {
+  disclosedCopilotSuggestions,
+  type DisclosedCopilotSuggestion,
+} from '@/lib/therapy-copilot-disclosure';
 
 /**
  * Sprint TS5 → TS5.4 — the live therapy copilot rail.
@@ -24,8 +30,12 @@ import { Card } from '../ui/Card';
 export function TherapyCopilotRail({
   reasoning,
   onResolve,
+  onShown,
+  mode = 'guided',
 }: {
   reasoning: TherapyReasoningV1;
+  mode?: 'quiet' | 'guided';
+  onShown?: (items: DisclosedCopilotSuggestion[]) => void;
   onResolve: (
     id: string,
     kind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
@@ -39,13 +49,25 @@ export function TherapyCopilotRail({
   const planned = askNext.filter((a) => a.source === 'CARRIED');
   const live = askNext.filter((a) => a.source !== 'CARRIED');
   const nothing = riskWatch.length === 0 && askNext.length === 0 && threads.length === 0;
+  const visible = liveCopilotVisibleCounts(mode, planned.length, live.length, threads.length);
+  const liveDetailsRef = useRef<HTMLDetailsElement>(null);
+  const threadDetailsRef = useRef<HTMLDetailsElement>(null);
+  const reportShown = useCallback(() => {
+    if (!onShown) return;
+    // Read native disclosure state, so updates while open and removed/remounted
+    // details use what is actually disclosed, not stale expansion state.
+    const items = disclosedCopilotSuggestions(reasoning, mode, {
+      live: liveDetailsRef.current?.open ?? false,
+      threads: threadDetailsRef.current?.open ?? false,
+    });
+    if (items.length > 0) onShown(items);
+  }, [reasoning, mode, onShown]);
+  useEffect(reportShown, [reportShown]);
 
   return (
     <Card className="overflow-hidden border-t-[3px] border-t-[#d9c9a3] p-0">
       <div className="flex items-center gap-2 px-4 pb-2 pt-3.5">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-          Copilot
-        </h2>
+        <h2 className="text-sm font-semibold text-[var(--color-ink)]">Session companion</h2>
         <span className="rounded-full border border-[#e7d9b0] bg-[#f6efdc] px-2 py-px text-[10px] font-bold tracking-[0.08em] text-[#8a7434]">
           AI
         </span>
@@ -62,33 +84,75 @@ export function TherapyCopilotRail({
         </RailSection>
       )}
 
-      {planned.length > 0 && (
+      {mode === 'guided' && planned.length > 0 && (
         <RailSection title={`Session plan · ${planned.length} to ask`}>
-          {planned.map((a) => (
+          {planned.slice(0, visible.planned).map((a) => (
             <AskCard key={a.id} item={a} onResolve={onResolve} />
           ))}
+          {planned.length > visible.planned && (
+            <details className="pt-2 text-xs">
+              <summary className="cursor-pointer text-[var(--color-accent)]">
+                {planned.length - visible.planned} more prepared questions
+              </summary>
+              <div className="mt-3 space-y-2">
+                {planned.slice(visible.planned).map((a) => (
+                  <AskCard key={a.id} item={a} onResolve={onResolve} />
+                ))}
+              </div>
+            </details>
+          )}
         </RailSection>
       )}
 
-      {live.length > 0 && (
+      {mode === 'guided' && live.length > 0 && (
         <RailSection title="Heard live — ask next">
-          {live.map((a) => (
+          {live.slice(0, visible.live).map((a) => (
             <AskCard key={a.id} item={a} onResolve={onResolve} />
           ))}
+          {live.length > visible.live && (
+            <details ref={liveDetailsRef} onToggle={reportShown} className="pt-2 text-xs">
+              <summary className="cursor-pointer text-[var(--color-accent)]">
+                {live.length - visible.live} more live suggestions
+              </summary>
+              <div className="mt-3 space-y-2">
+                {live.slice(visible.live).map((a) => (
+                  <AskCard key={a.id} item={a} onResolve={onResolve} />
+                ))}
+              </div>
+            </details>
+          )}
         </RailSection>
       )}
 
-      {threads.length > 0 && (
+      {mode === 'guided' && threads.length > 0 && (
         <RailSection title="Threads not followed">
-          {threads.map((t) => (
+          {threads.slice(0, visible.threads).map((t) => (
             <ThreadCard key={t.id} item={t} onResolve={onResolve} />
           ))}
+          {threads.length > visible.threads && (
+            <details ref={threadDetailsRef} onToggle={reportShown} className="pt-2 text-xs">
+              <summary className="cursor-pointer text-[var(--color-accent)]">
+                {threads.length - visible.threads} more threads
+              </summary>
+              <div className="mt-3 space-y-2">
+                {threads.slice(visible.threads).map((t) => (
+                  <ThreadCard key={t.id} item={t} onResolve={onResolve} />
+                ))}
+              </div>
+            </details>
+          )}
         </RailSection>
       )}
 
-      {nothing && (
+      {mode === 'quiet' && (
+        <p className="px-4 pb-4 text-xs leading-relaxed text-[var(--color-ink-2)]">
+          Quiet mode keeps ordinary suggestions out of the way. Safety concerns remain visible.
+          Switch to Guided when you want questions and context.
+        </p>
+      )}
+      {nothing && mode === 'guided' && (
         <div className="px-4 pb-3 text-[13px] text-[var(--color-ink-3)]">
-          Listening — nothing needs your attention right now.
+          No live suggestions yet. Continue your own assessment and conversation.
         </div>
       )}
 
