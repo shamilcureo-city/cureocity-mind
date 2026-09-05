@@ -9,11 +9,13 @@ import type {
   TherapyNoteV1,
 } from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
-import { Badge } from '@/components/ui/Badge';
 import { AICopilotTab } from '@/components/app/AICopilotTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
 import { MindSessionCloseout } from '@/components/app/MindSessionCloseout';
+import { MindSessionReviewHeader } from '@/components/app/MindSessionReviewHeader';
+import { selectedQuestionsForSession } from '@/components/app/MindSessionCloseoutEvidence';
+import styles from '@/components/app/MindSessionReview.module.css';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
 import { SessionWorkspaceTabs, type TabKey } from '@/components/app/SessionWorkspaceTabs';
 import { TranscriptTab } from '@/components/app/TranscriptTab';
@@ -43,12 +45,12 @@ interface PageProps {
 const VALID_TABS: ReadonlySet<TabKey> = new Set(['review', 'note', 'transcript', 'details']);
 
 function parseTab(raw: string | undefined): TabKey {
-  if (!raw) return 'review';
+  if (!raw) return 'note';
   if ((VALID_TABS as ReadonlySet<string>).has(raw)) return raw as TabKey;
   if (raw === 'notes' || raw === 'reflection') return 'note';
   if (raw === 'session-info') return 'details';
   if (raw === 'mindmap') return 'transcript';
-  return 'review';
+  return 'note';
 }
 
 export default async function SessionPage({ params, searchParams }: PageProps) {
@@ -99,12 +101,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
     redirect(`/app/clients/${session.clientId}/journey`);
   }
   if (rawTab === 'copilot' && (!rawSub || ['session', 'review'].includes(rawSub))) {
-    redirect(`/app/sessions/${id}`);
+    redirect(`/app/sessions/${id}?tab=review`);
   }
   if (rawTab === 'copilot' && rawSub === 'close') {
     redirect(`/app/sessions/${id}?tab=note`);
   }
-  if (rawTab === 'clinical-brief') redirect(`/app/sessions/${id}`);
+  if (rawTab === 'clinical-brief') redirect(`/app/sessions/${id}?tab=review`);
   if (rawTab === 'notes' || rawTab === 'reflection') {
     redirect(`/app/sessions/${id}?tab=note`);
   }
@@ -114,7 +116,6 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   const pii = await resolveClientPii({ ...session.client, psychologistId: session.psychologistId });
 
   const sessionKind: SessionKind = session.kind;
-  const isIntake = sessionKind === 'INTAKE';
 
   // Sprint 73 — case thread: where this document sits in the client's
   // arc + what carried over. Defensive: a compose failure must never
@@ -139,30 +140,16 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         {caseThread && <CaseThreadNav position={caseThread.position} />}
       </div>
 
-      <header className="mt-4 flex flex-wrap items-end justify-between gap-3 print:hidden">
-        <div>
-          <h1 className="flex flex-wrap items-center gap-3 font-serif text-3xl">
-            {pii.fullName}
-            {session.client.isDemo && <Badge tone="warn">Example</Badge>}
-          </h1>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            {session.modality ?? session.kind} · {formatIstDateTime(session.scheduledAt)}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {isIntake && <Badge tone="accent">intake session</Badge>}
-          {session.spokenLanguages.length > 0 && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface)] px-3 py-1 text-xs text-[var(--color-ink-2)]">
-              Spoken: {languageNames(session.spokenLanguages)}
-            </span>
-          )}
-          <Badge tone={statusTone(session.status)}>
-            {session.status.replace(/_/g, ' ').toLowerCase()}
-          </Badge>
-        </div>
-      </header>
+      <MindSessionReviewHeader
+        clientName={pii.fullName}
+        sessionDate={formatIstDateTime(session.scheduledAt)}
+        sessionKind={sessionKind}
+        status={session.status}
+        isDemo={session.client.isDemo}
+        spokenLanguageLabel={languageNames(session.spokenLanguages)}
+      />
 
-      <div className="mt-8 print:hidden">
+      <div className="print:hidden">
         <SessionWorkspaceTabs sessionId={id} active={tab} sessionKind={sessionKind} />
       </div>
 
@@ -189,20 +176,34 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
           />
         )}
         {tab === 'review' && (
-          <AICopilotTab
-            sessionId={id}
-            clientId={session.clientId}
-            psychologistId={session.psychologistId}
-            clientName={pii.fullName}
-            clientHasContactPhone={!!pii.contactPhone}
-            clientHasContactEmail={!!pii.contactEmail}
-            preferredLanguage={session.client.preferredLanguage}
-            sessionKind={sessionKind}
-            sub="session"
-            showSubTabs={false}
-            canUseMeasures={canUseMeasures}
-            canShare={canShare}
-          />
+          <section>
+            <div className={styles.sectionIntro}>
+              <div>
+                <h2>Clinical context</h2>
+                <p>
+                  Review the evidence, keep useful suggestions and choose what carries into the next
+                  session.
+                </p>
+              </div>
+              <Link className={styles.contextLink} href={`/app/sessions/${id}?tab=note`}>
+                Return to your note
+              </Link>
+            </div>
+            <AICopilotTab
+              sessionId={id}
+              clientId={session.clientId}
+              psychologistId={session.psychologistId}
+              clientName={pii.fullName}
+              clientHasContactPhone={!!pii.contactPhone}
+              clientHasContactEmail={!!pii.contactEmail}
+              preferredLanguage={session.client.preferredLanguage}
+              sessionKind={sessionKind}
+              sub="session"
+              showSubTabs={false}
+              canUseMeasures={canUseMeasures}
+              canShare={canShare}
+            />
+          </section>
         )}
         {tab === 'transcript' && (
           <TranscriptTabPanel sessionId={id} psychologistId={therapist.id} />
@@ -250,7 +251,7 @@ async function NotesTabPanel({
   canShare: boolean;
   canUseWorkflows: boolean;
 }) {
-  const [draftRow, signedRow, closeoutState, agreementCount, nextQuestionCount, shareRows] =
+  const [draftRow, signedRow, closeoutState, agreementCount, clientQuestionState, shareRows] =
     await Promise.all([
       prisma.noteDraft.findUnique({ where: { sessionId } }),
       prisma.therapyNote.findUnique({
@@ -259,7 +260,10 @@ async function NotesTabPanel({
       }),
       prisma.mindSessionCloseoutState.findUnique({ where: { sessionId } }),
       prisma.sessionAgreement.count({ where: { sessionId } }),
-      prisma.assessmentItem.count({ where: { sourceSessionId: sessionId } }),
+      prisma.client.findFirst({
+        where: { id: clientId, psychologistId },
+        select: { carriedQuestions: true },
+      }),
       loadOptionalCapabilityData(
         canShare ? new Set(['PATIENT_SHARING'] as const) : new Set(),
         'PATIENT_SHARING',
@@ -312,6 +316,10 @@ async function NotesTabPanel({
       }
     : null;
 
+  const selectedQuestions = selectedQuestionsForSession(
+    clientQuestionState?.carriedQuestions,
+    sessionId,
+  );
   const closeout = deriveMindSessionCloseout({
     draftStatus: draftRow?.status ?? null,
     noteSigned: signedRow?.locked === true,
@@ -319,7 +327,7 @@ async function NotesTabPanel({
     suggestionsSkipped: closeoutState?.clinicalSuggestionsSkippedAt != null,
     agreementsCaptured: agreementCount > 0,
     agreementsSkipped: closeoutState?.agreementsSkippedAt != null,
-    nextQuestionsSelected: nextQuestionCount > 0,
+    nextQuestionsSelected: selectedQuestions.length > 0,
     nextQuestionsSkipped: closeoutState?.nextQuestionsSkippedAt != null,
     shared: shareRows.some((share) => share.status === 'SENT' || share.status === 'OPENED'),
     shareSkipped: closeoutState?.shareSkippedAt != null,
@@ -336,6 +344,8 @@ async function NotesTabPanel({
       sessionAt={sessionAt}
       sessionCompleted={sessionStatus === 'COMPLETED'}
       canShare={canShare}
+      agreementCount={agreementCount}
+      selectedQuestionCount={selectedQuestions.length}
       receipts={shareRows.map((share) => ({
         ...share,
         createdAt: share.createdAt.toISOString(),
@@ -348,17 +358,6 @@ async function NotesTabPanel({
       }))}
     >
       <div className="space-y-6">
-        {caseThread && <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />}
-        {caseThread && caseThread.measures.length > 0 && (
-          <MeasuresTrend measures={caseThread.measures} />
-        )}
-        {canUseWorkflows && caseThread && (
-          <SessionProblemTags
-            sessionId={sessionId}
-            active={caseThread.sessionProblems.active}
-            initialTaggedIds={caseThread.sessionProblems.taggedIds}
-          />
-        )}
         <NotesTab
           sessionId={sessionId}
           sessionStatus={sessionStatus}
@@ -376,7 +375,24 @@ async function NotesTabPanel({
           noteTemplateId={noteTemplateId}
           signerName={signerName}
           canShare={canShare}
+          focusedReview
         />
+        {caseThread && (
+          <details className={styles.disclosure}>
+            <summary>Previous session, measures and focus areas</summary>
+            <div className={`${styles.disclosureBody} space-y-5`}>
+              <WhereWeLeftOff thread={caseThread} currentKind={sessionKind} />
+              {caseThread.measures.length > 0 && <MeasuresTrend measures={caseThread.measures} />}
+              {canUseWorkflows && (
+                <SessionProblemTags
+                  sessionId={sessionId}
+                  active={caseThread.sessionProblems.active}
+                  initialTaggedIds={caseThread.sessionProblems.taggedIds}
+                />
+              )}
+            </div>
+          </details>
+        )}
       </div>
     </MindSessionCloseout>
   );
@@ -521,11 +537,4 @@ async function SessionInfoTabPanel({ sessionId }: { sessionId: string }) {
       }}
     />
   );
-}
-
-function statusTone(status: string): 'accent' | 'warn' | 'muted' | 'default' {
-  if (status === 'COMPLETED') return 'accent';
-  if (status === 'IN_PROGRESS') return 'warn';
-  if (status === 'CANCELLED' || status === 'NO_SHOW') return 'muted';
-  return 'default';
 }

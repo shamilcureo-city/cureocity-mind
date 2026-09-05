@@ -81,7 +81,7 @@ export function MobileNav({ vertical = 'THERAPIST' }: { vertical?: PractitionerV
 
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-white/80 bg-white/70 shadow-[0_-12px_30px_-22px_rgba(35,45,95,0.5)] backdrop-blur-xl md:hidden print:!hidden"
+        className={`fixed inset-x-0 bottom-0 z-40 border-t border-white/80 bg-white/70 shadow-[0_-12px_30px_-22px_rgba(35,45,95,0.5)] backdrop-blur-xl md:hidden print:!hidden ${vertical === 'THERAPIST' ? 'mind-mobile-nav' : ''}`}
       >
         <ul className="grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {items.map((item) => {

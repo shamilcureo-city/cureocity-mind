@@ -36,6 +36,7 @@ import { AdvancementBanner } from './AdvancementBanner';
 import { MockBackendBanner } from './MockBackendBanner';
 import { RevisionPanel } from './RevisionPanel';
 import { ShareModal } from './ShareModal';
+import { MindSessionNoteTools } from './MindSessionNoteTools';
 import { HelpNote, InlineExplainer } from './EduHeading';
 import { glossary } from '../../lib/clinical-glossary';
 import { NoteReadiness } from './NoteReadiness';
@@ -87,6 +88,8 @@ interface Props {
   /// therapist, so the page passes their name down.
   signerName: string;
   canShare: boolean;
+  /** Mind's focused finish uses one signing action, then optional sharing. */
+  focusedReview?: boolean;
 }
 
 type Phase =
@@ -133,6 +136,7 @@ export function NotesTab({
   noteTemplateId,
   signerName,
   canShare,
+  focusedReview = false,
 }: Props) {
   const router = useRouter();
   // Sign-off + AI modify-panel + share are TherapyNote-shaped. INTAKE
@@ -650,15 +654,15 @@ export function NotesTab({
       return (
         <>
           <MockBackendBanner llmBackend={llmBackend} />
-          <CloseoutReceipt clientId={clientId} />
-          <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+          {!focusedReview && <CloseoutReceipt clientId={clientId} />}
+          <div className={focusedReview ? 'space-y-5' : 'grid gap-6 lg:grid-cols-[1.6fr_1fr]'}>
             <Card className="p-7">
               <NoteToolbar
                 sessionId={sessionId}
                 clientName={clientName}
                 noteText={intakeNoteToText(signedIntake)}
                 signed
-                {...(canShare ? { onShare: () => setShareOpen(true) } : {})}
+                {...(canShare && !focusedReview ? { onShare: () => setShareOpen(true) } : {})}
                 leftControls={
                   <>
                     <TemplatePicker
@@ -684,6 +688,9 @@ export function NotesTab({
                 signedBy={signerName}
                 verbosity={verbosity}
               />
+              {canShare && focusedReview && (
+                <FocusedShareAction onShare={() => setShareOpen(true)} />
+              )}
               {canShare && (
                 <ShareModal
                   open={shareOpen}
@@ -706,12 +713,14 @@ export function NotesTab({
               />
               <NoteReviewPanel sessionId={sessionId} />
             </Card>
-            <ModifyPanel
-              disabled={true}
-              sessionId={sessionId}
-              clientName={clientName}
-              templateLabel={aiDocLabel}
-            />
+            <MindSessionNoteTools focused={focusedReview} signed>
+              <ModifyPanel
+                disabled={true}
+                sessionId={sessionId}
+                clientName={clientName}
+                templateLabel={aiDocLabel}
+              />
+            </MindSessionNoteTools>
           </div>
         </>
       );
@@ -722,15 +731,15 @@ export function NotesTab({
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
-        <CloseoutReceipt clientId={clientId} />
-        <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        {!focusedReview && <CloseoutReceipt clientId={clientId} />}
+        <div className={focusedReview ? 'space-y-5' : 'grid gap-6 lg:grid-cols-[1.6fr_1fr]'}>
           <Card className="p-7">
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
               noteText={therapyNoteToText(treatmentContent)}
               signed
-              {...(canShare ? { onShare: () => setShareOpen(true) } : {})}
+              {...(canShare && !focusedReview ? { onShare: () => setShareOpen(true) } : {})}
               leftControls={
                 <>
                   <TemplatePicker
@@ -757,6 +766,7 @@ export function NotesTab({
               signedBy={signerName}
               verbosity={verbosity}
             />
+            {canShare && focusedReview && <FocusedShareAction onShare={() => setShareOpen(true)} />}
             {canShare && (
               <ShareModal
                 open={shareOpen}
@@ -779,12 +789,14 @@ export function NotesTab({
             />
             <NoteReviewPanel sessionId={sessionId} />
           </Card>
-          <ModifyPanel
-            disabled={true}
-            sessionId={sessionId}
-            clientName={clientName}
-            templateLabel={aiDocLabel}
-          />
+          <MindSessionNoteTools focused={focusedReview} signed>
+            <ModifyPanel
+              disabled={true}
+              sessionId={sessionId}
+              clientName={clientName}
+              templateLabel={aiDocLabel}
+            />
+          </MindSessionNoteTools>
         </div>
       </>
     );
@@ -798,14 +810,14 @@ export function NotesTab({
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
-        <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+        <div className={focusedReview ? 'space-y-5' : 'grid gap-6 lg:grid-cols-[1.6fr_1fr]'}>
           <Card className="p-7">
             <NoteToolbar
               sessionId={sessionId}
               clientName={clientName}
               noteText={intakeNoteToText(intakeNote)}
               signed={false}
-              {...(canShare && !editing ? { onShare: signAndShare } : {})}
+              {...(canShare && !editing && !focusedReview ? { onShare: signAndShare } : {})}
               leftControls={
                 <>
                   {/* Templates are opt-in for intake — the standard
@@ -856,6 +868,7 @@ export function NotesTab({
                 />
                 <NoteReadiness items={checkIntakeNoteReadiness(intakeNote)} />
                 <NoteActions
+                  showSign={!focusedReview}
                   signing={signing}
                   generating={generating}
                   translating={translating}
@@ -868,23 +881,26 @@ export function NotesTab({
               </>
             )}
           </Card>
-          <ModifyPanel
-            disabled={false}
-            busy={translating || editing}
-            sessionId={sessionId}
-            clientName={clientName}
-            templateLabel={aiDocLabel}
-            onModified={(next) =>
-              setPhase({
-                kind: 'completed',
-                draft: { ...phase.draft, content: next as NoteDraft['content'] },
-                reopened,
-              })
-            }
-          />
+          <MindSessionNoteTools focused={focusedReview} signed={false}>
+            <ModifyPanel
+              disabled={false}
+              busy={translating || editing}
+              sessionId={sessionId}
+              clientName={clientName}
+              templateLabel={aiDocLabel}
+              onModified={(next) =>
+                setPhase({
+                  kind: 'completed',
+                  draft: { ...phase.draft, content: next as NoteDraft['content'] },
+                  reopened,
+                })
+              }
+            />
+          </MindSessionNoteTools>
         </div>
-        {canShare && !editing && (
+        {(focusedReview || canShare) && !editing && (
           <SignAndSendBar
+            focusedReview={focusedReview}
             signing={signing}
             reopened={reopened}
             riskSeverity={intakeNote.riskFlags?.severity ?? null}
@@ -903,14 +919,14 @@ export function NotesTab({
   return (
     <>
       <MockBackendBanner llmBackend={llmBackend} />
-      <div className="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
+      <div className={focusedReview ? 'space-y-5' : 'grid gap-6 lg:grid-cols-[1.6fr_1fr]'}>
         <Card className="p-7">
           <NoteToolbar
             sessionId={sessionId}
             clientName={clientName}
             noteText={therapyNoteToText(note)}
             signed={false}
-            {...(canShare && !editing ? { onShare: signAndShare } : {})}
+            {...(canShare && !editing && !focusedReview ? { onShare: signAndShare } : {})}
             leftControls={
               <>
                 {/* Template / Re-generate re-draft from audio, which would
@@ -958,6 +974,7 @@ export function NotesTab({
               />
               <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
               <NoteActions
+                showSign={!focusedReview}
                 signing={signing}
                 generating={generating}
                 translating={translating}
@@ -970,23 +987,26 @@ export function NotesTab({
             </>
           )}
         </Card>
-        <ModifyPanel
-          disabled={false}
-          busy={translating || editing}
-          sessionId={sessionId}
-          clientName={clientName}
-          templateLabel={aiDocLabel}
-          onModified={(next) =>
-            setPhase({
-              kind: 'completed',
-              draft: { ...phase.draft, content: next as NoteDraft['content'] },
-              reopened,
-            })
-          }
-        />
+        <MindSessionNoteTools focused={focusedReview} signed={false}>
+          <ModifyPanel
+            disabled={false}
+            busy={translating || editing}
+            sessionId={sessionId}
+            clientName={clientName}
+            templateLabel={aiDocLabel}
+            onModified={(next) =>
+              setPhase({
+                kind: 'completed',
+                draft: { ...phase.draft, content: next as NoteDraft['content'] },
+                reopened,
+              })
+            }
+          />
+        </MindSessionNoteTools>
       </div>
-      {canShare && !editing && (
+      {(focusedReview || canShare) && !editing && (
         <SignAndSendBar
+          focusedReview={focusedReview}
           signing={signing}
           reopened={reopened}
           riskSeverity={note.riskFlags?.severity ?? null}
@@ -996,6 +1016,24 @@ export function NotesTab({
         />
       )}
     </>
+  );
+}
+
+function FocusedShareAction({ onShare }: { onShare: () => void }) {
+  return (
+    <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-[var(--color-accent-soft)] p-4 print:hidden">
+      <div>
+        <p className="text-sm font-medium text-[var(--color-ink)]">
+          A client version, only if you choose
+        </p>
+        <p className="mt-1 text-xs text-[var(--color-ink-2)]">
+          Preview the content and choose how to share it. Nothing is sent by signing.
+        </p>
+      </div>
+      <Button variant="secondary" onClick={onShare}>
+        Choose what to share
+      </Button>
+    </div>
   );
 }
 
@@ -1118,6 +1156,7 @@ function GeneratingState({
  * Sits above the phone tab bar (bottom-16) and clear of it on desktop.
  */
 function SignAndSendBar({
+  focusedReview = false,
   signing,
   reopened,
   riskSeverity,
@@ -1125,6 +1164,7 @@ function SignAndSendBar({
   onSignAndSend,
   onSignOnly,
 }: {
+  focusedReview?: boolean;
   signing: boolean;
   reopened: boolean;
   riskSeverity: string | null;
@@ -1144,18 +1184,35 @@ function SignAndSendBar({
               ? `⚠ Risk flagged (${riskSeverity}) — review before signing`
               : 'Risk: none flagged'}
           </span>
-          <button
-            type="button"
-            onClick={onSignOnly}
-            disabled={signing}
-            className="text-xs text-[var(--color-ink-2)] underline-offset-2 hover:underline"
-          >
-            {reopened ? 'Sign & re-lock' : 'Sign without sending'}
-          </button>
+          {!focusedReview && (
+            <button
+              type="button"
+              onClick={onSignOnly}
+              disabled={signing}
+              className="text-xs text-[var(--color-ink-2)] underline-offset-2 hover:underline"
+            >
+              {reopened ? 'Sign & re-lock' : 'Sign without sending'}
+            </button>
+          )}
         </div>
-        <Button onClick={onSignAndSend} disabled={signing} className="w-full text-base">
-          {signing ? 'Signing…' : reopened ? 'Sign & re-lock ▸' : 'Sign & send ▸'}
+        <Button
+          onClick={focusedReview ? onSignOnly : onSignAndSend}
+          disabled={signing}
+          className="w-full text-base"
+        >
+          {signing
+            ? 'Signing…'
+            : reopened
+              ? 'Sign & re-lock'
+              : focusedReview
+                ? 'Sign this note'
+                : 'Sign & send'}
         </Button>
+        {focusedReview && (
+          <p className="mt-2 text-center text-xs text-[var(--color-ink-2)]">
+            Signing saves your clinical record. Sharing is a separate choice.
+          </p>
+        )}
         {signError && (
           <p className="mt-2 px-1 text-xs text-[var(--color-warn)]" role="alert">
             {signError}
@@ -1167,6 +1224,7 @@ function SignAndSendBar({
 }
 
 function NoteActions({
+  showSign = true,
   signing,
   generating,
   translating,
@@ -1176,6 +1234,7 @@ function NoteActions({
   onEdit,
   onRegenerate,
 }: {
+  showSign?: boolean;
   signing: boolean;
   generating: boolean;
   translating: boolean;
@@ -1188,9 +1247,11 @@ function NoteActions({
   return (
     <>
       <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
-        <Button onClick={onSign} disabled={signing}>
-          {signing ? 'Signing…' : reopened ? 'Sign & re-lock' : 'Sign off'}
-        </Button>
+        {showSign && (
+          <Button onClick={onSign} disabled={signing}>
+            {signing ? 'Signing…' : reopened ? 'Sign & re-lock' : 'Sign off'}
+          </Button>
+        )}
         <Button variant="secondary" onClick={onEdit} disabled={translating}>
           Edit note
         </Button>
@@ -1199,7 +1260,9 @@ function NoteActions({
             Re-generate
           </Button>
         )}
-        {signError && <span className="text-sm text-[var(--color-warn)]">{signError}</span>}
+        {showSign && signError && (
+          <span className="text-sm text-[var(--color-warn)]">{signError}</span>
+        )}
       </div>
       {reopened ? (
         <p className="mt-3 text-xs text-[var(--color-ink-3)]">
@@ -1493,7 +1556,7 @@ function ModifyPanel({
           </div>
         </form>
         <p className="mt-3 text-center text-[11px] text-[var(--color-ink-3)]">
-          The AI only rewrites — it won’t invent clinical content. Severity + modality are
+          Review every AI edit against the session before signing. Risk severity and modality are
           preserved.
         </p>
       </div>

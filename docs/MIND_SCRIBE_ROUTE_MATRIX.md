@@ -4,6 +4,8 @@
 
 Cureocity Mind and Cureocity Scribe are separate practitioner products on one platform. They share infrastructure and selected implementation helpers, but their user journeys are owned independently.
 
+The September 2026 Mind workspace keeps these route owners. The default session note view owns Review & Close; `?tab=review` opens supporting clinical context. Session guides live in the client's Plan of care and can be opened during a live session. The scoped Mind visual system and development-only preview are documented in [Mind psychologist workspace](MIND_PSYCHOLOGIST_WORKSPACE.md).
+
 - **Mind:** `mind.cureocity.in`, `PractitionerVertical = THERAPIST`
 - **Scribe:** `scribe.cureocity.in`, `PractitionerVertical = DOCTOR`
 - **Care:** `care.cureocity.in`, separate D2C identity; outside this matrix

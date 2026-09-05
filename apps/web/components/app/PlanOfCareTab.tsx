@@ -23,6 +23,7 @@ import { formatIstDate } from '@/lib/ist';
 import { computeClientJourney, JourneyError } from '@/lib/journey';
 import { isSuggestionApplied } from '@/lib/formulation-applied';
 import { prisma } from '@/lib/prisma';
+import { getEffectiveCapabilities } from '@/lib/capabilities';
 
 interface Props {
   sessionId: string | null;
@@ -70,6 +71,7 @@ export async function ClientPlanOfCareContent({
   clientHasContactEmail,
   preferredLanguage,
 }: Props) {
+  const { capabilities } = await getEffectiveCapabilities(psychologistId);
   const [
     therapist,
     client,
@@ -384,14 +386,8 @@ export async function ClientPlanOfCareContent({
     <div className="space-y-6">
       <PlanOfCareSheet data={data} />
 
-      {/* id lets the sheet's per-section "Edit" actions open + scroll to the
-          right tool (formulation, diagnosis history) without leaving the tab. */}
-      <PlanToolsDisclosure>
-        <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
-          Tools — scripts, formulation editor, diagnosis history, conceptual map
-        </summary>
-        <div className="mt-4 space-y-6">
-          <FormulationCard data={formulationCard} />
+      {capabilities.has('THERAPY_WORKFLOWS') && (
+        <section id="session-guides" aria-label="Prepare a session guide">
           <TherapyLibrary
             clientId={clientId}
             recommendedTherapies={recommendedTherapies}
@@ -400,7 +396,19 @@ export async function ClientPlanOfCareContent({
             activeTreatmentPlanId={activePlan?.id ?? null}
             clientHasContactPhone={clientHasContactPhone}
             clientHasContactEmail={clientHasContactEmail}
+            canShare={capabilities.has('PATIENT_SHARING')}
           />
+        </section>
+      )}
+
+      {/* id lets the sheet's per-section "Edit" actions open + scroll to the
+          right tool (formulation, diagnosis history) without leaving the tab. */}
+      <PlanToolsDisclosure>
+        <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
+          More tools — formulation editor, diagnosis history, conceptual map
+        </summary>
+        <div className="mt-4 space-y-6">
+          <FormulationCard data={formulationCard} />
           {allDiagnoses.length > 0 && <DiagnosisHistoryCard diagnoses={allDiagnoses} />}
           <ConceptualMapTab clientId={clientId} />
           <details className="rounded-2xl border border-[var(--color-line-soft)] bg-white p-4">

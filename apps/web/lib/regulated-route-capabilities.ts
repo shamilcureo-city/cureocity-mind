@@ -203,7 +203,7 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     'write',
   ),
   policy('api/v1/clients/[id]/workflow', ['GET'], ['THERAPY_WORKFLOWS'], 'read'),
-  policy('api/v1/clients/[id]/therapy-scripts', ['GET'], ['THERAPY_WORKFLOWS'], 'disclosure'),
+  policy('api/v1/clients/[id]/therapy-scripts', ['GET', 'POST'], ['THERAPY_WORKFLOWS'], 'write'),
   policy('api/v1/clients/[id]/assignments', ['GET'], ['THERAPY_WORKFLOWS'], 'read'),
   policy('api/v1/assignments', ['POST'], ['THERAPY_WORKFLOWS'], 'write'),
   policy('api/v1/assignments/[id]', ['PATCH'], ['THERAPY_WORKFLOWS'], 'write'),

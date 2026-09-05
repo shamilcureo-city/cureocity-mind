@@ -11,8 +11,6 @@ describe('practitioner navigation', () => {
       { href: '/app/encounters/new', label: 'Start session' },
       { href: '/app/clients', label: 'Clients' },
       { href: '/app/search', label: 'Search' },
-      { href: '/app/templates', label: 'Templates' },
-      { href: '/app/learn', label: 'Learn' },
     ]);
     expect(mobile.primary.map(({ href, label }) => ({ href, label }))).toEqual([
       { href: '/app/today', label: 'Today' },
@@ -20,6 +18,14 @@ describe('practitioner navigation', () => {
       { href: '/app/clients', label: 'Clients' },
       { href: '/app/search', label: 'Search' },
     ]);
+    expect(desktop.secondary).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ href: '/app/templates' }),
+        expect.objectContaining({ href: '/app/learn' }),
+        expect.objectContaining({ href: '/app/practice-assistant', label: 'Mind assistant' }),
+      ]),
+    );
+    expect(mobile.secondary).toContainEqual(expect.objectContaining({ href: '/app/marketing' }));
     expect([
       ...desktop.primary,
       ...desktop.secondary,

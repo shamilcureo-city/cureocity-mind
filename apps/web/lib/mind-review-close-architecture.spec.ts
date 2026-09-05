@@ -13,8 +13,13 @@ describe('Mind Review & Close architecture', () => {
 
     expect(page).toContain('<MindSessionCloseout');
     expect(page).toContain('deriveMindSessionCloseout');
-    expect(tabs).toContain("{ key: 'note', label: 'Note' }");
-    expect(closeout).toContain('Open full session record');
+    expect(tabs).toContain("{ key: 'note', label: 'Review & close' }");
+    expect(tabs).toContain("{ key: 'review', label: 'Clinical context' }");
+    // The note is now the primary surface; the clinical record remains reachable
+    // as secondary context, not a second signing or closeout ceremony.
+    expect(closeout.indexOf('{children}', closeout.indexOf('return ('))).toBeLessThan(
+      closeout.indexOf('id="session-next-steps"'),
+    );
   });
 
   it('keeps signing in Review & Close instead of duplicating it in Copilot', () => {

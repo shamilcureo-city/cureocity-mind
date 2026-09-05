@@ -1,0 +1,324 @@
+.guide {
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: 22px;
+  background: var(--color-surface);
+}
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 24px;
+  border-bottom: 1px solid var(--color-line-soft);
+}
+.eyebrow {
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+.title {
+  font-family: var(--font-serif);
+  font-size: clamp(23px, 3vw, 30px);
+  letter-spacing: -0.8px;
+  margin-top: 5px;
+}
+.meta {
+  margin-top: 8px;
+  color: var(--color-ink-2);
+  font-size: 12px;
+}
+.modes {
+  display: flex;
+  gap: 3px;
+  border: 1px solid var(--color-line);
+  padding: 4px;
+  border-radius: 12px;
+}
+.modes button {
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--color-ink-2);
+  font-size: 12px;
+}
+.modes button[aria-pressed='true'] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+  font-weight: 600;
+}
+.reviewGate {
+  padding: 24px;
+  background: var(--color-accent-soft);
+}
+.reviewGate[data-reviewed='true'] {
+  padding-block: 12px;
+  background: var(--color-surface-soft);
+}
+.reviewGate h3 {
+  font-family: var(--font-serif);
+  font-size: 23px;
+}
+.reviewGate p {
+  max-width: 65ch;
+  margin: 9px 0 18px;
+  color: var(--color-ink-2);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.reviewGate label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.reviewGate input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  flex: none;
+  accent-color: var(--color-accent);
+}
+.watch {
+  margin: 20px 24px 0;
+  padding: 15px 18px;
+  border: 1px solid var(--color-warn-border);
+  border-radius: 12px;
+  background: var(--color-warn-bg);
+  color: var(--color-warn);
+  font-size: 13px;
+}
+.watch ul {
+  margin: 7px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+  line-height: 1.7;
+}
+.journey {
+  display: grid;
+  grid-template-columns: 205px minmax(0, 1fr);
+}
+.path {
+  padding: 24px 14px;
+  background: #faf9fe;
+  border-right: 1px solid var(--color-line-soft);
+}
+.path ol {
+  display: grid;
+  gap: 7px;
+}
+.path button {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  width: 100%;
+  padding: 10px;
+  color: var(--color-ink-2);
+  text-align: left;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.path button[aria-current='step'] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-hover);
+  font-weight: 600;
+}
+.path button:hover {
+  background: var(--color-surface-soft);
+}
+.node {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 1px solid var(--color-line);
+  border-radius: 50%;
+  color: var(--color-ink-2);
+  background: white;
+  font-size: 11px;
+}
+.nodeDone {
+  background: var(--color-good-soft);
+  border-color: #afd7be;
+  color: var(--color-good);
+}
+.path button[aria-current='step'] .node {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+.stepBody {
+  min-width: 0;
+  padding: 28px;
+}
+.stepBody h3 {
+  font-family: var(--font-serif);
+  font-size: 25px;
+  letter-spacing: -0.5px;
+  margin-top: 7px;
+}
+.prompt {
+  margin-top: 24px;
+  padding: 20px 22px;
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-surface-soft);
+  border-radius: 0 12px 12px 0;
+  font-size: 16px;
+  line-height: 1.8;
+  white-space: pre-line;
+}
+.label {
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.listen {
+  margin-top: 23px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.listen p {
+  margin-top: 5px;
+  color: var(--color-ink-2);
+}
+.details {
+  margin-top: 23px;
+  border-top: 1px solid var(--color-line-soft);
+  padding-top: 18px;
+  font-size: 13px;
+}
+.details summary {
+  cursor: pointer;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+.branch {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--color-line-soft);
+  line-height: 1.7;
+}
+.branch p {
+  margin-top: 5px;
+  color: var(--color-ink-2);
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-line-soft);
+}
+.controls div {
+  display: flex;
+  gap: 8px;
+}
+.progress {
+  padding: 18px 24px;
+  border-top: 1px solid var(--color-line-soft);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--color-ink-2);
+}
+.progressTrack {
+  height: 5px;
+  flex: 1;
+  max-width: 140px;
+  border-radius: 5px;
+  background: var(--color-line-soft);
+  overflow: hidden;
+}
+.progressTrack span {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 0.25s ease;
+}
+.completion {
+  margin: 0 24px 20px;
+  padding: 15px 18px;
+  border-radius: 12px;
+  background: var(--color-good-soft);
+  color: var(--color-good);
+  font-size: 13px;
+}
+.footnote {
+  padding: 0 24px 22px;
+  color: var(--color-ink-2);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.overview {
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+.overview section {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--color-line-soft);
+}
+.overview h3 {
+  font-family: var(--font-serif);
+  font-size: 22px;
+}
+.overview p {
+  white-space: pre-line;
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--color-ink-2);
+  line-height: 1.8;
+}
+.adaptation {
+  padding: 0 24px 20px;
+  font-size: 13px;
+}
+.adaptation summary {
+  cursor: pointer;
+  color: var(--color-accent);
+}
+.adaptation ul {
+  list-style: disc;
+  padding-left: 20px;
+  margin-top: 10px;
+  line-height: 1.8;
+  color: var(--color-ink-2);
+}
+@media (max-width: 700px) {
+  .journey {
+    grid-template-columns: 1fr;
+  }
+  .path {
+    padding: 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .path ol {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 3px;
+  }
+  .path button {
+    font-size: 11px;
+    padding: 7px;
+  }
+  .stepBody {
+    padding: 21px;
+  }
+  .prompt {
+    padding: 16px;
+    font-size: 15px;
+  }
+  .header {
+    padding: 21px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .progressTrack span {
+    transition: none;
+  }
+}

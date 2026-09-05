@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
@@ -8,6 +8,7 @@ import { Badge } from '../ui/Badge';
 import { PreparePanel } from './PreparePanel';
 import { RescheduleModal } from './RescheduleModal';
 import { mindStartEntryHref } from '@/lib/mind-session-start';
+import styles from './MindTodayStudio.module.css';
 
 export interface TodaySessionCardProps {
   session: {
@@ -36,6 +37,8 @@ export interface TodaySessionCardProps {
   /** TS7.4 — an instrument (e.g. "GAD-7") whose re-measure is overdue for
    *  this client; renders a chip linking to the Journey measure card. */
   dueMeasure?: string | null;
+  /** Optional supplied brief; the normal page uses the real preparation panel. */
+  preparation?: ReactNode;
 }
 
 /**
@@ -51,6 +54,7 @@ export function TodaySessionCard({
   defaultCapture = 'LIVE',
   variant = 'row',
   dueMeasure = null,
+  preparation,
 }: TodaySessionCardProps) {
   const router = useRouter();
   const [busy, setBusy] = useState<'no-show' | 'undo' | null>(null);
@@ -80,8 +84,8 @@ export function TodaySessionCard({
         sessionId: session.id,
         captureMode: 'LIVE',
       }),
-      primaryLabel: '● Start session',
-      menuLabel: '🎙 Live scribe',
+      primaryLabel: 'Start session',
+      menuLabel: 'Live scribe',
       menuDesc: 'Transcript, note and copilot build as you talk.',
     },
     BATCH: {
@@ -91,8 +95,8 @@ export function TodaySessionCard({
         sessionId: session.id,
         captureMode: 'BATCH',
       }),
-      primaryLabel: '⏺ Start recording',
-      menuLabel: '⏺ Record only',
+      primaryLabel: 'Start recording',
+      menuLabel: 'Record only',
       menuDesc: 'Just records — the note generates when you finish.',
     },
   } as const;
@@ -174,33 +178,46 @@ export function TodaySessionCard({
   if (variant === 'hero') {
     return (
       <>
-        <Card className="border-[var(--color-accent)]/40 p-5 shadow-[0_8px_24px_rgba(45,95,77,0.10)]">
-          <div className="flex items-baseline justify-between gap-3">
-            <Link
-              href={`/app/clients/${session.clientId}`}
-              className="font-serif text-2xl font-medium text-[var(--color-ink)] hover:text-[var(--color-accent)]"
-            >
-              {session.clientName}
-            </Link>
-            <span className="font-mono text-base tabular-nums text-[var(--color-ink)]">
+        <Card className={styles.hero}>
+          <div className={styles.heroHeader}>
+            <div className={styles.clientIdentity}>
+              <span className={styles.avatar} aria-hidden="true">
+                {session.clientName.trim().charAt(0) || 'C'}
+              </span>
+              <div className="min-w-0">
+                <Link href={`/app/clients/${session.clientId}`} className={styles.clientName}>
+                  {session.clientName}
+                </Link>
+                <p className={styles.sessionMeta}>
+                  <span>{session.kind.toLowerCase()}</span>
+                  {session.modality && <span>{session.modality}</span>}
+                  {session.clientIsDemo && <Badge tone="warn">Example</Badge>}
+                </p>
+              </div>
+            </div>
+            <time className={styles.time} dateTime={session.scheduledAt}>
               {formatTime(session.scheduledAt)}
-            </span>
+              <small>
+                {new Date(session.scheduledAt).toLocaleDateString('en-IN', {
+                  day: 'numeric',
+                  month: 'short',
+                  timeZone: 'Asia/Kolkata',
+                })}{' '}
+                · IST
+              </small>
+            </time>
           </div>
-          <p className="mt-0.5 text-sm text-[var(--color-ink-2)]">
-            {session.kind.toLowerCase()}
-            {session.modality ? ` · ${session.modality}` : ''}
-            {session.status === 'IN_PROGRESS' ? ' · in progress' : ''}
-            {session.clientIsDemo && (
-              <Badge tone="warn" className="ml-2 align-middle">
-                Example
-              </Badge>
-            )}
-          </p>
-
-          {/* The 0-tap prep read — auto-open on the one session that's next. */}
-          <div className="mt-3">
-            <PreparePanel clientId={session.clientId} defaultOpen />
-          </div>
+          <ol className={styles.journey} aria-label="Session workflow">
+            <li aria-current={session.status === 'SCHEDULED' ? 'step' : undefined}>
+              <span aria-hidden="true">1</span>Prepare
+            </li>
+            <li aria-current={session.status === 'IN_PROGRESS' ? 'step' : undefined}>
+              <span aria-hidden="true">2</span>Session
+            </li>
+            <li>
+              <span aria-hidden="true">3</span>Review &amp; Close
+            </li>
+          </ol>
 
           {session.status === 'IN_PROGRESS' ? (
             <Link
@@ -278,6 +295,11 @@ export function TodaySessionCard({
               {error}
             </p>
           )}
+
+          {/* Keep preparation open, with the session action reachable before a long brief. */}
+          <div className="mt-4">
+            {preparation ?? <PreparePanel clientId={session.clientId} defaultOpen />}
+          </div>
         </Card>
         <RescheduleModal
           open={rescheduleOpen}
@@ -300,17 +322,12 @@ export function TodaySessionCard({
 
   return (
     <>
-      <div
-        className={`flex items-center justify-between gap-3 rounded-xl border border-[var(--color-line-soft)] bg-white px-4 py-3 ${muted ? 'opacity-60' : ''}`}
-      >
-        <div className="flex min-w-0 items-baseline gap-3">
-          <span className="shrink-0 font-mono text-sm tabular-nums text-[var(--color-ink-3)]">
+      <div className={`${styles.row} ${muted ? styles.quietRow : ''}`}>
+        <div className={styles.rowIdentity}>
+          <time className={styles.rowTime} dateTime={session.scheduledAt}>
             {formatTime(session.scheduledAt)}
-          </span>
-          <Link
-            href={`/app/clients/${session.clientId}`}
-            className="truncate text-sm font-medium text-[var(--color-ink)] hover:text-[var(--color-accent)]"
-          >
+          </time>
+          <Link href={`/app/clients/${session.clientId}`} className={styles.rowName}>
             {session.clientName}
           </Link>
           <Badge tone={kindTone(session.kind)}>{session.kind.toLowerCase()}</Badge>
@@ -335,7 +352,7 @@ export function TodaySessionCard({
                 href={primaryStart.href}
                 className="rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
               >
-                Start ▸
+                Start
               </Link>
               <button
                 type="button"
@@ -395,7 +412,7 @@ export function TodaySessionCard({
                 href={`/app/sessions/${session.id}`}
                 className="text-xs font-medium text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
               >
-                ✓ signed
+                ✓ Signed record
               </Link>
             ) : session.draftStatus === 'COMPLETED' ? (
               // TS7.2 — the unsigned-note debt stays visible all day; the
@@ -404,7 +421,7 @@ export function TodaySessionCard({
                 href={`/app/sessions/${session.id}?tab=note`}
                 className="rounded-full border border-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
               >
-                Sign ▸
+                Review &amp; Close
               </Link>
             ) : session.draftStatus === 'IN_PROGRESS' || session.draftStatus === 'PENDING' ? (
               <Link
