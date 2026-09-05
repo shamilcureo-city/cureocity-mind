@@ -26,7 +26,7 @@ export interface WindowOptions {
   minWindowMs: number;
   /** Force-close a window once it reaches this, even mid-speech. */
   maxWindowMs: number;
-  /** A silence gap this long (after minWindow) is a natural boundary. */
+  /** A silence gap this long can close a window once minWindow is reached. */
   silenceMs: number;
   /**
    * Anti-hallucination gate: the minimum fraction (0..1) of a window's frames
@@ -42,24 +42,19 @@ export interface WindowOptions {
 }
 
 /**
- * Defaults tuned for perceived latency (Sprint 74): the window is the
- * dominant term in speech→findings latency — nothing is transcribed or
- * reasoned about until a window closes, so a 15–30 s window meant findings
- * trailed speech by ~30 s (breaching the ≤8 s reasoning-update budget in
- * the DS plan §0.3). 6–12 s windows still cut at natural pauses (silence
- * gap ≥ 600 ms) so utterances stay whole, and total audio tokens are
- * unchanged — the same speech just ships in smaller windows. Tune per
+ * Latency-tuned windows: close after a confirmed natural pause once at
+ * least 2.5 s has buffered, or force-close at 6 s during uninterrupted
+ * speech. The window wait is only one part of speech→transcript latency;
+ * gateway scheduling, network and model processing add to it. Tune per
  * deploy via LIVE_MIN_WINDOW_MS / LIVE_MAX_WINDOW_MS / LIVE_SILENCE_MS.
  */
 export const DEFAULT_WINDOW_OPTIONS: WindowOptions = {
   sampleRate: SAMPLE_RATE,
   frameMs: 20,
   threshold: 0.015,
-  // DS-era default was 6–12 s. Lowered so the transcript follows speech in
-  // ~3 s instead of ~6–8 s: the old 6 s floor meant a short utterance had to
-  // wait for the window to FILL before it could be transcribed at all, which
-  // read as a 4–5 s lag. Utterances still cut at natural pauses; the env
-  // overrides below (LIVE_MIN/MAX_WINDOW_MS, LIVE_SILENCE_MS) tune per deploy.
+  // Keep enough audio context for transcription without making short
+  // utterances wait for the old 6 s minimum. Natural cuts still require a
+  // confirmed pause; only the maximum forces a cut during speech.
   minWindowMs: 2_500,
   maxWindowMs: 6_000,
   silenceMs: 400,
@@ -199,9 +194,9 @@ export function speechFraction(pcm: Buffer, opts: WindowOptions = DEFAULT_WINDOW
  * next transcription window:
  *
  *   • `null`     — the tail is shorter than `minWindowMs`; keep buffering.
- *   • 'silence'  — a silence gap ≥ `silenceMs` began at/after `minWindowMs`;
- *                  cut at the START of that gap so the window ends on the
- *                  last speech (a clean utterance boundary).
+ *   • 'silence'  — a silence gap ≥ `silenceMs` is confirmed and the window
+ *                  has reached `minWindowMs`; cut after the confirmed
+ *                  silence, even if the gap began before the minimum.
  *   • 'max'      — no natural gap yet but the tail reached `maxWindowMs`;
  *                  force-cut so windows stay bounded (the O(n) guarantee).
  *
@@ -216,7 +211,12 @@ export function nextWindowBoundary(
   if (totalMs < opts.minWindowMs) return null;
 
   const frameMs = opts.frameMs;
-  const frames = classifyFrames(pcm, opts);
+  const frameBytes = msToBytes(frameMs, opts.sampleRate);
+  const maxEndByte = clampToBuffer(msToBytes(opts.maxWindowMs, opts.sampleRate), pcm.length);
+  // Only complete frames can confirm a pause. Scanning no further than the
+  // maximum also prevents a buffered backlog from selecting a later gap.
+  const scanEndByte = frameBytes > 0 ? maxEndByte - (maxEndByte % frameBytes) : 0;
+  const frames = classifyFrames(pcm.subarray(0, scanEndByte), opts);
   const neededSilentFrames = Math.max(1, Math.ceil(opts.silenceMs / frameMs));
 
   let runStart = -1; // frame index where the current silence run began
@@ -224,14 +224,13 @@ export function nextWindowBoundary(
     if (!frames[i]) {
       if (runStart < 0) runStart = i;
       const runLen = i - runStart + 1;
-      const runStartMs = runStart * frameMs;
-      if (runLen >= neededSilentFrames && runStartMs >= opts.minWindowMs) {
+      const endByte = (i + 1) * frameBytes;
+      const durationMs = bytesToMs(endByte, opts.sampleRate);
+      if (runLen >= neededSilentFrames && durationMs >= opts.minWindowMs) {
         // Cut just AFTER the confirmed silence so the window absorbs its own
         // trailing pause and the next window starts clean on speech. Keeps
         // windows uniform for uniform speech+pause cadence.
-        const cutMs = (i + 1) * frameMs;
-        const endByte = clampToBuffer(msToBytes(cutMs, opts.sampleRate), pcm.length);
-        return { endByte, durationMs: bytesToMs(endByte, opts.sampleRate), reason: 'silence' };
+        return { endByte, durationMs, reason: 'silence' };
       }
     } else {
       runStart = -1;
@@ -239,8 +238,11 @@ export function nextWindowBoundary(
   }
 
   if (totalMs >= opts.maxWindowMs) {
-    const endByte = clampToBuffer(msToBytes(opts.maxWindowMs, opts.sampleRate), pcm.length);
-    return { endByte, durationMs: bytesToMs(endByte, opts.sampleRate), reason: 'max' };
+    return {
+      endByte: maxEndByte,
+      durationMs: bytesToMs(maxEndByte, opts.sampleRate),
+      reason: 'max',
+    };
   }
   return null;
 }

@@ -87,10 +87,123 @@ describe('nextWindowBoundary', () => {
     expect(b?.durationMs).toBeLessThanOrEqual(5_500);
   });
 
+  it('closes a short answer at the minimum instead of waiting for the maximum', () => {
+    const buf = Buffer.concat([pcm(1_000, SPEECH), pcm(1_500, SILENCE)]);
+    expect(nextWindowBoundary(buf.subarray(0, msToBytes(2_480)))).toBeNull();
+    expect(nextWindowBoundary(buf)).toEqual({
+      endByte: msToBytes(2_500),
+      durationMs: 2_500,
+      reason: 'silence',
+    });
+  });
+
+  it.each([
+    [2_080, 420, 2_500],
+    [2_100, 400, 2_500],
+    [2_120, 380, null],
+    [2_120, 400, 2_520],
+    [2_500, 400, 2_900],
+  ])(
+    'requires both the minimum window and a complete pause (%ims speech + %ims silence)',
+    (speechMs, silenceMs, expectedMs) => {
+      const boundary = nextWindowBoundary(
+        Buffer.concat([pcm(speechMs!, SPEECH), pcm(silenceMs!, SILENCE)]),
+      );
+      if (expectedMs === null) {
+        expect(boundary).toBeNull();
+      } else {
+        expect(boundary).toEqual({
+          endByte: msToBytes(expectedMs!),
+          durationMs: expectedMs,
+          reason: 'silence',
+        });
+      }
+    },
+  );
+
+  it('does not reuse an early pause after speech has resumed across the minimum', () => {
+    const buf = Buffer.concat([pcm(1_000, SPEECH), pcm(1_000, SILENCE), pcm(500, SPEECH)]);
+    expect(nextWindowBoundary(buf)).toBeNull();
+    expect(nextWindowBoundary(Buffer.concat([buf, pcm(400, SILENCE)]))?.durationMs).toBe(2_900);
+  });
+
+  it('does not count a partial frame as the complete required silence', () => {
+    const buf = Buffer.concat([pcm(3_000, SPEECH), pcm(399, SILENCE)]);
+    expect(nextWindowBoundary(buf)).toBeNull();
+    expect(nextWindowBoundary(Buffer.concat([buf, pcm(1, SILENCE)]))).toEqual({
+      endByte: msToBytes(3_400),
+      durationMs: 3_400,
+      reason: 'silence',
+    });
+  });
+
+  it('aligns a natural cut to a complete frame without cutting below an override minimum', () => {
+    const opts = { ...DEFAULT_WINDOW_OPTIONS, minWindowMs: 2_501 };
+    const buf = Buffer.concat([pcm(1_000, SPEECH), pcm(1_501, SILENCE)]);
+    expect(nextWindowBoundary(buf, opts)).toBeNull();
+    const boundary = nextWindowBoundary(Buffer.concat([buf, pcm(19, SILENCE)]), opts);
+    expect(boundary?.durationMs).toBe(2_520);
+    expect(boundary!.endByte % msToBytes(opts.frameMs)).toBe(0);
+  });
+
+  it('flushes quiet audio promptly while preserving the silence and sparse-noise gates', () => {
+    const quiet = pcm(2_500, SILENCE);
+    expect(nextWindowBoundary(quiet)?.durationMs).toBe(2_500);
+    expect(isSilent(quiet)).toBe(true);
+
+    const blip = Buffer.concat([pcm(40, SPEECH), pcm(2_460, SILENCE)]);
+    expect(nextWindowBoundary(blip)?.durationMs).toBe(2_500);
+    expect(isSilent(blip)).toBe(false);
+    expect(speechFraction(blip)).toBeLessThan(DEFAULT_WINDOW_OPTIONS.minSpeechFraction);
+
+    const steadyNoise = pcm(2_500, 300); // below the unchanged RMS threshold
+    expect(nextWindowBoundary(steadyNoise)?.durationMs).toBe(2_500);
+    expect(isSilent(steadyNoise)).toBe(true);
+  });
+
   it('force-cuts at the max window when there is no gap', () => {
     const b = nextWindowBoundary(pcm(9_000, SPEECH), OPTS);
     expect(b?.reason).toBe('max');
     expect(b?.durationMs).toBe(8_000);
+  });
+
+  it('does not wait past the default maximum during sustained speech', () => {
+    expect(nextWindowBoundary(pcm(5_980, SPEECH))).toBeNull();
+    expect(nextWindowBoundary(pcm(6_000, SPEECH))).toEqual({
+      endByte: msToBytes(6_000),
+      durationMs: 6_000,
+      reason: 'max',
+    });
+  });
+
+  it('never selects a natural boundary beyond the maximum in a buffered backlog', () => {
+    const buf = Buffer.concat([pcm(5_800, SPEECH), pcm(500, SILENCE), pcm(1_000, SPEECH)]);
+    const boundary = nextWindowBoundary(buf);
+    expect(boundary).toEqual({
+      endByte: msToBytes(6_000),
+      durationMs: 6_000,
+      reason: 'max',
+    });
+  });
+
+  it('preserves all later speech when an early pause closes a buffered window', () => {
+    const first = Buffer.concat([pcm(1_000, SPEECH), pcm(1_500, SILENCE)]);
+    const laterSpeech = pcm(4_000, SPEECH);
+    const buf = Buffer.concat([first, laterSpeech]);
+    const boundary = nextWindowBoundary(buf);
+    expect(boundary?.durationMs).toBe(2_500);
+    expect(buf.subarray(0, boundary!.endByte).equals(first)).toBe(true);
+    expect(buf.subarray(boundary!.endByte).equals(laterSpeech)).toBe(true);
+  });
+
+  it('ignores a trailing odd byte and keeps forced cuts sample-aligned for max overrides', () => {
+    const opts = { ...DEFAULT_WINDOW_OPTIONS, maxWindowMs: 6_001 };
+    const buf = Buffer.concat([pcm(6_001, SPEECH), Buffer.from([255])]);
+    expect(nextWindowBoundary(buf, opts)).toEqual({
+      endByte: msToBytes(6_001),
+      durationMs: 6_001,
+      reason: 'max',
+    });
   });
 
   it('produces near-uniform windows for a uniform speech/pause cadence (O(n))', () => {

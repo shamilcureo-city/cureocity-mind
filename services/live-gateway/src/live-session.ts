@@ -57,7 +57,7 @@ import {
  *            cost and latency grew without bound (O(n²) in consult length).
  *
  *   NOW    — the stream is segmented at silence boundaries (see vad.ts)
- *            into bounded ~15–30s windows, and Pass 1 transcribes each NEW
+ *            into bounded windows (2.5–6s by default), and Pass 1 transcribes each NEW
  *            window exactly once. We keep an ordered list of Utterances;
  *            the cumulative transcript is just their text joined. Total
  *            transcription work is O(n). A ConsultMeter records tokens /
@@ -174,6 +174,14 @@ export class LiveSession {
   private timer: NodeJS.Timeout | null = null;
   private busy = false;
   private stopped = false;
+  /** Unlike stopped (which begins finalization), terminal also invalidates
+   * late model completions after done/dispose. Promise.race cannot cancel them. */
+  private terminal = false;
+  /** Mind keeps one coalescing analysis worker, separate from ordered audio. */
+  private therapyAnalysis: Promise<void> | null = null;
+  private therapyNoteRequested = false;
+  private therapyForceNoteRequested = false;
+  private therapyAuthorityVersion = 0;
   /** One-shot guard so `final` is emitted at most once (real note or fallback). */
   private finalEmitted = false;
   private startedAtMs = 0;
@@ -255,7 +263,9 @@ export class LiveSession {
     this.sessionId = sessionId;
     this.specialty = specialty;
     this.backends = backends;
-    this.emit = emit;
+    this.emit = (event) => {
+      if (!this.terminal) emit(event);
+    };
     this.windowOpts = windowOpts;
     this.vertical = vertical;
     this.sessionKind = sessionKind;
@@ -319,6 +329,9 @@ export class LiveSession {
 
   /** Replace optional scopes after trusted server-side live reauthorization. */
   updateCapabilities(capabilities: ReadonlySet<PractitionerCapability>): void {
+    if (this.has('CLINICAL_ANALYSIS') !== capabilities.has('CLINICAL_ANALYSIS')) {
+      this.therapyAuthorityVersion += 1;
+    }
     this.capabilities = capabilities;
   }
 
@@ -385,6 +398,9 @@ export class LiveSession {
     } finally {
       this.busy = false;
     }
+    // Also service coalesced reasoning during silence, without holding the
+    // transcription lane or running extra notes on every timer tick.
+    this.scheduleTherapyAnalysis();
     // Sprint TS5 — advance the session arc even during silence, so the
     // pacing rail moves through opening → working → closing on its own. Only
     // emits when the arc PHASE changes (the change-key ignores the minute tick).
@@ -446,6 +462,7 @@ export class LiveSession {
       vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
     });
     this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
+    if (this.terminal) return;
     this.meter.markWindow();
 
     // Advance the cursor + trim the buffer (pending may have grown during
@@ -513,13 +530,16 @@ export class LiveSession {
     // Sprint DS2 — queue the new utterances for the reasoning engine; the
     // scheduler decides whether to run now or coalesce with the next window.
     for (const utterance of utterances) this.reasoningScheduler.enqueue(utterance);
-    const due = this.reasoningScheduler.takeDue();
-    if (due) {
-      if (this.vertical === 'THERAPIST') await this.runTherapyReasoning(due);
-      else await this.runReasoning(due);
+    if (this.vertical === 'THERAPIST') {
+      // Slow note/copilot calls must not hold up the next audio window.
+      // The worker owns takeDue(), so queued utterances cannot be lost while
+      // a previous batch is still being analysed.
+      this.scheduleTherapyAnalysis(true);
+    } else {
+      const due = this.reasoningScheduler.takeDue();
+      if (due) await this.runReasoning(due);
+      await this.runNote(false);
     }
-
-    await this.runNote(false);
     // DOC-2 — deterministic red-flag / interaction checks EVERY window (not
     // gated by the note-refresh debounce). Pure regex/table lookups, ~0 cost.
     this.runDeterministicChecks();
@@ -530,6 +550,57 @@ export class LiveSession {
     if (overBudget && !this.autoFinalizing) {
       this.autoFinalizing = true;
       console.warn(`[live-gateway] auto-finalizing sess=${this.sessionId}: ${overBudget}`);
+    }
+  }
+
+  /** One worker and two coalesced flags, never one queued model call per
+   * window. Audio remains sequential; notes and reasoning remain sequential
+   * with each other, but neither blocks Mind's next transcription. */
+  private scheduleTherapyAnalysis(noteRequested = false, forceNote = false): void {
+    if (this.vertical !== 'THERAPIST' || this.stopped || this.terminal) return;
+    this.therapyNoteRequested ||= noteRequested;
+    this.therapyForceNoteRequested ||= forceNote;
+    if (
+      this.therapyAnalysis ||
+      (!this.therapyNoteRequested && !this.reasoningScheduler.hasPending)
+    ) {
+      return;
+    }
+    this.therapyAnalysis = this.drainTherapyAnalysis().finally(() => {
+      this.therapyAnalysis = null;
+      // A window/manual refresh can arrive between the drain's last check
+      // and this finally. Do not lose that request or spin on not-yet-due reasoning.
+      if (this.therapyNoteRequested) this.scheduleTherapyAnalysis();
+    });
+  }
+
+  private async drainTherapyAnalysis(): Promise<void> {
+    while (!this.stopped && !this.terminal) {
+      const shouldNote = this.therapyNoteRequested;
+      const forceNote = this.therapyForceNoteRequested;
+      this.therapyNoteRequested = false;
+      this.therapyForceNoteRequested = false;
+      const due = this.reasoningScheduler.takeDue();
+      if (!due && !shouldNote) return;
+      try {
+        if (due) await this.runTherapyReasoning(due);
+        if (this.stopped || this.terminal) return;
+        if (shouldNote) {
+          if (forceNote) this.lastNoteTranscriptEndMs = Number.NEGATIVE_INFINITY;
+          await this.runNote(false);
+        }
+      } catch (err) {
+        reportError('therapy background analysis failed', err);
+      }
+      if (this.stopped || this.terminal) return;
+      this.emit({ type: 'meter', summary: this.meterSummary() });
+      // Analysis cost lands outside pump now. Enforce its ceiling even if
+      // the room goes quiet and no further transcription window closes.
+      if (this.overBudgetReason()) {
+        this.autoFinalizing = true;
+        void this.finalize();
+        return;
+      }
     }
   }
 
@@ -615,7 +686,9 @@ export class LiveSession {
    */
   private async runTherapyReasoning(newUtterances: Utterance[]): Promise<void> {
     const store = this.therapyStore;
-    if (!store || !this.has('CLINICAL_ANALYSIS') || newUtterances.length === 0) return;
+    if (this.terminal || !store || !this.has('CLINICAL_ANALYSIS') || newUtterances.length === 0)
+      return;
+    const authorityVersion = this.therapyAuthorityVersion;
     try {
       const newIds = new Set(newUtterances.map((u) => u.id));
       const recentUtterances = store.recentTail(newIds);
@@ -631,6 +704,13 @@ export class LiveSession {
         priorRisk: store.priorRisk,
       });
       this.meter.recordReasoning(res.callLog);
+      if (
+        this.terminal ||
+        this.finalEmitted ||
+        !this.has('CLINICAL_ANALYSIS') ||
+        authorityVersion !== this.therapyAuthorityVersion
+      )
+        return;
 
       const { changed, snapshot } = store.apply(res.output, this.elapsedMs());
       if (changed) this.emit({ type: 'therapyReasoning', reasoning: snapshot });
@@ -677,6 +757,10 @@ export class LiveSession {
       return;
     }
     this.lastManualRefreshAtMs = now;
+    if (this.vertical === 'THERAPIST') {
+      this.scheduleTherapyAnalysis(true, true);
+      return;
+    }
     void (async () => {
       const deadline = Date.now() + 4_000;
       while (this.busy && Date.now() < deadline)
@@ -785,6 +869,7 @@ export class LiveSession {
    * (note + drafted Rx + orders) instead of an incremental `note`.
    */
   private async runNote(isFinal: boolean): Promise<void> {
+    if (this.terminal || this.finalEmitted) return;
     const transcript = this.cumulativeTranscript();
     if (transcript.length === 0) {
       if (isFinal) this.emitFinalFromLatest();
@@ -816,13 +901,16 @@ export class LiveSession {
     const pass2 = await backend.run({
       sessionId: this.sessionId,
       transcript,
-      speakerSegments: this.segments,
+      // Transcription can append while Mind's backend is working. Keep the
+      // note input and debounce cursor tied to this exact transcript snapshot.
+      speakerSegments: [...this.segments],
       kind: this.vertical === 'DOCTOR' ? 'TREATMENT' : this.sessionKind,
       modality: this.vertical === 'DOCTOR' ? null : this.sessionModality,
       vertical: this.vertical,
       clientContext: {},
     });
     this.meter.recordNote(pass2.callLog, Date.now() - t0);
+    if (this.terminal || this.finalEmitted) return;
     this.lastNoteTranscriptEndMs = transcriptEndMs;
 
     // Sprint TS1 — therapist branch: a SOAP/intake note (no meds/orders/Rx),
@@ -1064,6 +1152,7 @@ export class LiveSession {
       if (timer) clearTimeout(timer);
       this.emit({ type: 'meter', summary: this.meterSummary() });
       this.emit({ type: 'status', state: 'done' });
+      this.terminal = true;
     }
   }
 
@@ -1077,6 +1166,11 @@ export class LiveSession {
    * tail in that case — a few unheard seconds beats a doubled transcript.
    */
   private async finalizeWork(idle: boolean): Promise<void> {
+    // Join already-owned analysis inside the existing finalize deadline.
+    // No new worker starts after stopAudio(); the remaining scheduler batch
+    // is flushed below before the final note. Timeout invalidates late results.
+    if (this.therapyAnalysis) await this.therapyAnalysis;
+    if (this.terminal) return;
     // Transcribe whatever remains as the final window (may be short).
     if (this.pending.length > 0 && idle) {
       const tail = this.pending;
@@ -1092,6 +1186,7 @@ export class LiveSession {
         vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
       });
       this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
+      if (this.terminal) return;
       this.meter.markWindow();
       this.flushedBytes += consumed;
       const tEndMs = bytesToMs(this.flushedBytes);
@@ -1129,6 +1224,7 @@ export class LiveSession {
       if (this.vertical === 'THERAPIST') await this.runTherapyReasoning(pending);
       else await this.runReasoning(pending);
     }
+    if (this.terminal) return;
     // DOC-2 — run the deterministic checks over the FULL transcript (incl. the
     // tail window just committed above) BEFORE the note's `final` event, so a
     // red flag in the closing seconds reaches the before-you-close gate.
@@ -1170,7 +1266,7 @@ export class LiveSession {
   }
 
   private emitFinalFromLatest(): void {
-    if (this.finalEmitted) return;
+    if (this.terminal || this.finalEmitted) return;
     // Sprint TS1 — therapist fallback final (on a finalize timeout/failure).
     if (this.vertical === 'THERAPIST') {
       if (!this.latestTherapyNote) {
@@ -1232,7 +1328,12 @@ export class LiveSession {
   }
 
   dispose(): void {
+    this.terminal = true;
     this.stopAudio();
+    this.streamTranscriber?.stop();
+    this.streamTranscriber = null;
+    this.therapyNoteRequested = false;
+    this.therapyForceNoteRequested = false;
     this.pending = Buffer.alloc(0);
     this.totalBytes = 0;
   }
