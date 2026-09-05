@@ -39,6 +39,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Smoke production dependency entrypoints
+        run: pnpm smoke:prod-dependencies
+
       - name: Restore Nx cache
         uses: actions/cache@v4
         with:
