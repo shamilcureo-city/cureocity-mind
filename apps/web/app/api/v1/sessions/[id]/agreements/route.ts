@@ -4,6 +4,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
+import { ClientPhiWriteForbiddenError, lockActiveClientForSession } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,24 +26,34 @@ export async function GET(
   const { id: sessionId } = await params;
 
   const session = await prisma.session.findFirst({
-    where: { id: sessionId, psychologistId: auth.value.psychologistId },
+    where: {
+      id: sessionId,
+      psychologistId: auth.value.psychologistId,
+      client: { is: { deletedAt: null } },
+    },
     select: { id: true },
   });
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
-  const rows = await prisma.sessionAgreement.findMany({
-    where: { sessionId },
-    orderBy: { createdAt: 'asc' },
-  });
-  const agreements: SessionAgreementDto[] = rows.map((r) => ({
-    id: r.id,
-    sessionId: r.sessionId,
-    text: r.text,
-    speaker: r.speaker,
-    followUp: r.followUp,
-    createdAt: r.createdAt.toISOString(),
-  }));
-  return NextResponse.json({ agreements });
+  try {
+    const rows = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      return tx.sessionAgreement.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' } });
+    });
+    const agreements: SessionAgreementDto[] = rows.map((r) => ({
+      id: r.id,
+      sessionId: r.sessionId,
+      text: r.text,
+      speaker: r.speaker,
+      followUp: r.followUp,
+      createdAt: r.createdAt.toISOString(),
+    }));
+    return NextResponse.json({ agreements });
+  } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError)
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    throw error;
+  }
 }
 
 export async function POST(
@@ -57,56 +68,66 @@ export async function POST(
   if (!body.ok) return body.response;
 
   const session = await prisma.session.findFirst({
-    where: { id: sessionId, psychologistId: auth.value.psychologistId },
+    where: {
+      id: sessionId,
+      psychologistId: auth.value.psychologistId,
+      client: { is: { deletedAt: null } },
+    },
     select: { id: true, clientId: true },
   });
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
-  const count = await prisma.sessionAgreement.count({ where: { sessionId } });
-  if (count >= 8) {
-    return NextResponse.json(
-      { error: 'A session carries at most 8 agreements — fewer, kept, beats many, forgotten.' },
-      { status: 422 },
-    );
-  }
-
-  const row = await prisma.$transaction(async (tx) => {
-    const created = await tx.sessionAgreement.create({
-      data: {
-        sessionId,
-        clientId: session.clientId,
-        psychologistId: auth.value.psychologistId,
-        speaker: body.value.speaker,
-        text: body.value.text,
-      },
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'AGREEMENT_RECORDED',
-        targetType: 'SessionAgreement',
-        targetId: created.id,
-        metadata: {
-          ...auditMetadataFromRequest(req),
+  try {
+    const row = await prisma.$transaction(async (tx) => {
+      const client = await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      // Serialize quota and insert with erasure and other agreement writers.
+      const count = await tx.sessionAgreement.count({ where: { sessionId } });
+      if (count >= 8) return null;
+      const created = await tx.sessionAgreement.create({
+        data: {
           sessionId,
-          clientId: session.clientId,
-          op: 'create',
+          clientId: client.id,
+          psychologistId: auth.value.psychologistId,
           speaker: body.value.speaker,
+          text: body.value.text,
         },
-      },
-      tx,
-    );
-    return created;
-  });
-
-  const dto: SessionAgreementDto = {
-    id: row.id,
-    sessionId: row.sessionId,
-    text: row.text,
-    speaker: row.speaker,
-    followUp: row.followUp,
-    createdAt: row.createdAt.toISOString(),
-  };
-  return NextResponse.json({ agreement: dto }, { status: 201 });
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'AGREEMENT_RECORDED',
+          targetType: 'SessionAgreement',
+          targetId: created.id,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            sessionId,
+            clientId: session.clientId,
+            op: 'create',
+            speaker: body.value.speaker,
+          },
+        },
+        tx,
+      );
+      return created;
+    });
+    if (!row)
+      return NextResponse.json(
+        { error: 'A session carries at most 8 agreements — fewer, kept, beats many, forgotten.' },
+        { status: 422 },
+      );
+    const dto: SessionAgreementDto = {
+      id: row.id,
+      sessionId: row.sessionId,
+      text: row.text,
+      speaker: row.speaker,
+      followUp: row.followUp,
+      createdAt: row.createdAt.toISOString(),
+    };
+    return NextResponse.json({ agreement: dto }, { status: 201 });
+  } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError)
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    throw error;
+  }
 }

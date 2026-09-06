@@ -11,6 +11,7 @@ describe('toNoteDraft', () => {
       sessionId: 'csess11111111111111111111',
       status: 'COMPLETED',
       transcriptEncrypted: encryptedTranscript,
+      recoveryTranscriptEncrypted: null,
       speakerSegments: null,
       affectFeatures: null,
       content: null,

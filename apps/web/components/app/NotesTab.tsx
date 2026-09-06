@@ -18,6 +18,7 @@ import { IntakeNotePreview } from './IntakeNotePreview';
 import { NotePreview } from './NotePreview';
 import { NoteEditor } from './NoteEditor';
 import { IntakeNoteEditor } from './IntakeNoteEditor';
+import { TranscriptTab } from './TranscriptTab';
 import { NoteToolbar } from './NoteToolbar';
 import { TemplatePicker } from './TemplatePicker';
 import { intakeNoteToText, therapyNoteToText } from '../../lib/note-text';
@@ -149,6 +150,7 @@ export function NotesTab({
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  const [modifying, setModifying] = useState(false);
   // View density for the note ("Detailed" dropdown in the toolbar). Per-device.
   const [verbosity, setVerbosity] = useState<NoteVerbosity>('DETAILED');
   useEffect(() => {
@@ -329,7 +331,7 @@ export function NotesTab({
   }, [triggerGeneration]);
 
   const triggerSignOff = useCallback(async (): Promise<void> => {
-    if (phase.kind !== 'completed') return;
+    if (phase.kind !== 'completed' || translating || modifying || savingEdit || generating) return;
     setSigning(true);
     setSignError(null);
     try {
@@ -355,7 +357,7 @@ export function NotesTab({
     } finally {
       setSigning(false);
     }
-  }, [phase, router, sessionId]);
+  }, [phase, router, sessionId, translating, modifying, savingEdit, generating]);
 
   // Share from an unsigned draft: sign first, then open the share modal once
   // the sign lands (the share snapshot is built from the signed note).
@@ -410,10 +412,10 @@ export function NotesTab({
         // The modify route is kind-aware — it returns whichever shape it was
         // given (TherapyNoteV1 or IntakeNoteV1). Stored back as opaque draft
         // content so this path serves both note kinds.
-        const b = (await res.json()) as { note: unknown };
+        const b = (await res.json()) as { note: unknown; updatedAt: string };
         setPhase({
           kind: 'completed',
-          draft: { ...draft, content: b.note as NoteDraft['content'] },
+          draft: { ...draft, content: b.note as NoteDraft['content'], updatedAt: b.updatedAt },
           reopened,
         });
         setNoteLang(code);
@@ -445,16 +447,16 @@ export function NotesTab({
         const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ note: next }),
+          body: JSON.stringify({ note: next, expectedUpdatedAt: draft.updatedAt }),
         });
         if (!res.ok) {
           const b = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(b.error ?? `Save failed (${res.status})`);
         }
-        const b = (await res.json()) as { note: unknown };
+        const b = (await res.json()) as { note: unknown; updatedAt: string };
         setPhase({
           kind: 'completed',
-          draft: { ...draft, content: b.note as NoteDraft['content'] },
+          draft: { ...draft, content: b.note as NoteDraft['content'], updatedAt: b.updatedAt },
           reopened,
         });
         setEditing(false);
@@ -471,7 +473,6 @@ export function NotesTab({
   // editable "completed" state using the signed content as the draft.
   const unlockNote = useCallback(async (): Promise<void> => {
     if (phase.kind !== 'signed' || unlocking) return;
-    const note = phase.note;
     setUnlocking(true);
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/note/unlock`, { method: 'POST' });
@@ -479,21 +480,11 @@ export function NotesTab({
         const b = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(b.error ?? `Unlock failed (${res.status})`);
       }
-      const content = note.content as unknown as NoteDraft['content'];
-      const base: NoteDraft = initialDraft ?? {
-        id: note.draftId,
-        sessionId,
-        status: 'COMPLETED',
-        transcript: null,
-        speakerSegments: null,
-        affectFeatures: null,
-        content,
-        riskSeverity: null,
-        totalCostInr: '0',
-        errorMessage: null,
-        createdAt: note.createdAt,
-        updatedAt: note.createdAt,
-      };
+      const fresh = await fetch(`/api/v1/sessions/${sessionId}/note-draft`, { cache: 'no-store' });
+      if (!fresh.ok)
+        throw new Error('Note reopened. Reload to retrieve the current editable draft.');
+      const base = (await fresh.json()) as NoteDraft;
+      const content = base.content;
       setPhase({
         kind: 'completed',
         draft: { ...base, status: 'COMPLETED', content },
@@ -847,16 +838,19 @@ export function NotesTab({
             )}
             <RiskBanner riskFlags={intakeNote.riskFlags} />
             {editing ? (
-              <IntakeNoteEditor
-                note={intakeNote}
-                saving={savingEdit}
-                error={editError}
-                onSave={saveEdit}
-                onCancel={() => {
-                  setEditing(false);
-                  setEditError(null);
-                }}
-              />
+              <>
+                <NoteTranscriptReference draft={phase.draft} />
+                <IntakeNoteEditor
+                  note={intakeNote}
+                  saving={savingEdit}
+                  error={editError}
+                  onSave={saveEdit}
+                  onCancel={() => {
+                    setEditing(false);
+                    setEditError(null);
+                  }}
+                />
+              </>
             ) : (
               <>
                 <IntakeNotePreview note={intakeNote} verbosity={verbosity} />
@@ -883,15 +877,16 @@ export function NotesTab({
           </Card>
           <MindSessionNoteTools focused={focusedReview} signed={false}>
             <ModifyPanel
+              onBusyChange={setModifying}
               disabled={false}
-              busy={translating || editing}
+              busy={translating || editing || signing}
               sessionId={sessionId}
               clientName={clientName}
               templateLabel={aiDocLabel}
-              onModified={(next) =>
+              onModified={(next, updatedAt) =>
                 setPhase({
                   kind: 'completed',
-                  draft: { ...phase.draft, content: next as NoteDraft['content'] },
+                  draft: { ...phase.draft, content: next as NoteDraft['content'], updatedAt },
                   reopened,
                 })
               }
@@ -901,6 +896,7 @@ export function NotesTab({
         {(focusedReview || canShare) && !editing && (
           <SignAndSendBar
             focusedReview={focusedReview}
+            blocked={translating || modifying || generating}
             signing={signing}
             reopened={reopened}
             riskSeverity={intakeNote.riskFlags?.severity ?? null}
@@ -953,16 +949,19 @@ export function NotesTab({
           )}
           <RiskBanner riskFlags={note.riskFlags} />
           {editing ? (
-            <NoteEditor
-              note={note}
-              saving={savingEdit}
-              error={editError}
-              onSave={saveEdit}
-              onCancel={() => {
-                setEditing(false);
-                setEditError(null);
-              }}
-            />
+            <>
+              <NoteTranscriptReference draft={phase.draft} />
+              <NoteEditor
+                note={note}
+                saving={savingEdit}
+                error={editError}
+                onSave={saveEdit}
+                onCancel={() => {
+                  setEditing(false);
+                  setEditError(null);
+                }}
+              />
+            </>
           ) : (
             <>
               <NotePreview note={note} verbosity={verbosity} />
@@ -989,15 +988,16 @@ export function NotesTab({
         </Card>
         <MindSessionNoteTools focused={focusedReview} signed={false}>
           <ModifyPanel
+            onBusyChange={setModifying}
             disabled={false}
-            busy={translating || editing}
+            busy={translating || editing || signing}
             sessionId={sessionId}
             clientName={clientName}
             templateLabel={aiDocLabel}
-            onModified={(next) =>
+            onModified={(next, updatedAt) =>
               setPhase({
                 kind: 'completed',
-                draft: { ...phase.draft, content: next as NoteDraft['content'] },
+                draft: { ...phase.draft, content: next as NoteDraft['content'], updatedAt },
                 reopened,
               })
             }
@@ -1007,6 +1007,7 @@ export function NotesTab({
       {(focusedReview || canShare) && !editing && (
         <SignAndSendBar
           focusedReview={focusedReview}
+          blocked={translating || modifying || generating}
           signing={signing}
           reopened={reopened}
           riskSeverity={note.riskFlags?.severity ?? null}
@@ -1016,6 +1017,28 @@ export function NotesTab({
         />
       )}
     </>
+  );
+}
+
+function NoteTranscriptReference({ draft }: { draft: NoteDraft }) {
+  return (
+    <details className="mb-5 rounded-xl border border-[var(--color-line)] p-4">
+      <summary className="cursor-pointer text-sm font-medium">
+        Check the transcript without leaving this edit
+      </summary>
+      <div className="mt-4 max-h-80 overflow-y-auto">
+        <TranscriptTab
+          data={{
+            status: draft.status,
+            segments: draft.speakerSegments,
+            transcript: draft.transcript,
+            totalCostInr: draft.totalCostInr,
+            backend: null,
+            errorMessage: draft.errorMessage,
+          }}
+        />
+      </div>
+    </details>
   );
 }
 
@@ -1157,6 +1180,7 @@ function GeneratingState({
  */
 function SignAndSendBar({
   focusedReview = false,
+  blocked = false,
   signing,
   reopened,
   riskSeverity,
@@ -1165,6 +1189,7 @@ function SignAndSendBar({
   onSignOnly,
 }: {
   focusedReview?: boolean;
+  blocked?: boolean;
   signing: boolean;
   reopened: boolean;
   riskSeverity: string | null;
@@ -1188,7 +1213,7 @@ function SignAndSendBar({
             <button
               type="button"
               onClick={onSignOnly}
-              disabled={signing}
+              disabled={signing || blocked}
               className="text-xs text-[var(--color-ink-2)] underline-offset-2 hover:underline"
             >
               {reopened ? 'Sign & re-lock' : 'Sign without sending'}
@@ -1197,7 +1222,7 @@ function SignAndSendBar({
         </div>
         <Button
           onClick={focusedReview ? onSignOnly : onSignAndSend}
-          disabled={signing}
+          disabled={signing || blocked}
           className="w-full text-base"
         >
           {signing
@@ -1363,6 +1388,7 @@ const QUICK_INSTRUCTIONS: { label: string; icon: SuggestKind }[] = [
  */
 function ModifyPanel({
   disabled,
+  onBusyChange,
   busy,
   sessionId,
   clientName,
@@ -1370,6 +1396,7 @@ function ModifyPanel({
   onModified,
 }: {
   disabled: boolean;
+  onBusyChange?: (busy: boolean) => void;
   /** Another note-mutating op (e.g. a translation) is in flight — gate
    *  edits so two concurrent /note/modify calls can't clobber each other. */
   busy?: boolean;
@@ -1379,7 +1406,7 @@ function ModifyPanel({
   templateLabel: string;
   /** Kind-agnostic: the /note/modify route returns whichever shape it was
    *  given, so this serves both treatment (SOAP) and intake notes. */
-  onModified?: (next: TherapyNoteV1 | IntakeNoteV1) => void;
+  onModified?: (next: TherapyNoteV1 | IntakeNoteV1, updatedAt: string) => void;
 }) {
   const [instruction, setInstruction] = useState('');
   const [pending, setPending] = useState(false);
@@ -1391,6 +1418,7 @@ function ModifyPanel({
     async (text: string) => {
       if (!text.trim() || disabled || busy || !onModified) return;
       setPending(true);
+      onBusyChange?.(true);
       setError(null);
       setLastChanged(null);
       // TS-fix — client-side deadline so a stalled modify can't latch the panel
@@ -1410,9 +1438,10 @@ function ModifyPanel({
         }
         const body = (await res.json()) as {
           note: TherapyNoteV1 | IntakeNoteV1;
+          updatedAt: string;
           changedFields: string[];
         };
-        onModified(body.note);
+        onModified(body.note, body.updatedAt);
         setLastChanged(body.changedFields);
         setInstruction('');
       } catch (e) {
@@ -1424,9 +1453,10 @@ function ModifyPanel({
       } finally {
         clearTimeout(timeout);
         setPending(false);
+        onBusyChange?.(false);
       }
     },
-    [disabled, busy, onModified, sessionId],
+    [disabled, busy, onModified, sessionId, onBusyChange],
   );
 
   function reset(): void {

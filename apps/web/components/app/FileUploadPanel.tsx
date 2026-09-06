@@ -1,11 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Label, FieldError } from '../ui/Field';
-import { uploadAudioFile } from '@/lib/audio/upload-file';
+import {
+  uploadAudioFile,
+  IncompleteAudioUploadError,
+  AudioFileStorageError,
+  retryAudioUpload,
+} from '@/lib/audio/upload-file';
 
 interface Props {
   sessionId: string;
@@ -23,18 +28,40 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
   const [progress, setProgress] = useState({ decoded: 0, total: 1, chunksUploaded: 0 });
   const [error, setError] = useState<string | null>(null);
   const [durationMs, setDurationMs] = useState(0);
+  const [retryUpload, setRetryUpload] = useState(false);
+  const [audioUploaded, setAudioUploaded] = useState(false);
+  const [retryPreparation, setRetryPreparation] = useState(false);
+  const [chunksTotal, setChunksTotal] = useState(0);
+  useEffect(() => {
+    if (phase !== 'uploading' && !retryUpload && !retryPreparation) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [phase, retryUpload, retryPreparation]);
 
   async function run(): Promise<void> {
     if (!file) return;
     setError(null);
     setPhase('uploading');
     try {
-      const result = await uploadAudioFile({
-        sessionId,
-        file,
-        onProgress: setProgress,
-      });
-      setDurationMs(result.durationMs);
+      if (retryUpload) {
+        await retryAudioUpload(sessionId);
+        setProgress((previous) => ({ ...previous, chunksUploaded: chunksTotal }));
+      } else if (!audioUploaded) {
+        const result = await uploadAudioFile({
+          sessionId,
+          file,
+          onProgress: setProgress,
+        });
+        setDurationMs(result.durationMs);
+        setChunksTotal(result.chunksWritten);
+      }
+      setAudioUploaded(true);
+      setRetryUpload(false);
+      setRetryPreparation(false);
       const end = await fetch(`/api/v1/sessions/${sessionId}/end`, { method: 'POST' });
       if (!end.ok) {
         const body = (await end.json().catch(() => ({}))) as { error?: string };
@@ -44,11 +71,20 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
       // PENDING -> IN_PROGRESS -> COMPLETED progression.
       void fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
         method: 'POST',
+        keepalive: true,
       }).catch(() => {
         /* swallow — the polling UI surfaces real failures */
       });
       setPhase('done');
     } catch (e) {
+      if (e instanceof IncompleteAudioUploadError) {
+        setRetryUpload(true);
+        if (e.prepared) {
+          setDurationMs(e.prepared.durationMs);
+          setChunksTotal(e.prepared.chunksWritten);
+        }
+      }
+      if (e instanceof AudioFileStorageError) setRetryPreparation(true);
       setError((e as Error).message);
       setPhase('error');
     }
@@ -102,7 +138,13 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
         {phase === 'uploading' && (
           <div className="space-y-3">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-[var(--color-ink-2)]">Decoding audio…</span>
+              <span className="text-[var(--color-ink-2)]">
+                {audioUploaded
+                  ? 'Finishing session…'
+                  : pct === 100
+                    ? 'Uploading audio…'
+                    : 'Preparing audio…'}
+              </span>
               <span className="tabular-nums">{pct}%</span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
@@ -125,10 +167,10 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
               Upload complete · {progress.chunksUploaded} chunks
             </p>
             <p className="text-sm text-[var(--color-ink-2)]">
-              Audio duration: {formatDuration(durationMs)}. The session is now COMPLETED — note
-              generation (Sprint 2) will run from the session detail page.
+              {durationMs > 0 ? `Audio duration: ${formatDuration(durationMs)}. ` : ''}All audio
+              parts are uploaded. Open the session to check note generation and review the draft.
             </p>
-            <Button onClick={onFinished}>Back to sessions</Button>
+            <Button onClick={onFinished}>Review session</Button>
           </div>
         )}
 
@@ -137,8 +179,19 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
             <div className="rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-4 py-3 text-sm text-[var(--color-warn)]">
               {error}
             </div>
-            <Button variant="secondary" onClick={() => setPhase('pick')}>
-              Try again
+            <Button
+              variant="secondary"
+              onClick={() =>
+                retryUpload || retryPreparation || audioUploaded ? void run() : setPhase('pick')
+              }
+            >
+              {retryUpload
+                ? 'Retry upload'
+                : retryPreparation
+                  ? 'Retry saving this file'
+                  : audioUploaded
+                    ? 'Retry finish'
+                    : 'Choose audio again'}
             </Button>
           </div>
         )}

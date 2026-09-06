@@ -438,6 +438,12 @@ export const PENDING_SECTION_CONFIRMATIONS: ClinicalSectionConfirmations = {
 export const ClinicalReportStatusSchema = z.enum(['PENDING', 'COMPLETED', 'FAILED']);
 export type ClinicalReportStatus = z.infer<typeof ClinicalReportStatusSchema>;
 
+export const PlanSuggestionDecisionSchema = z.object({
+  revision: z.string().min(1),
+  currentPlanId: z.string().min(1),
+  appliedIndexes: z.array(z.number().int().nonnegative()),
+});
+
 export const ClinicalReportSchema = z.object({
   id: CuidSchema,
   sessionId: CuidSchema,
@@ -446,6 +452,7 @@ export const ClinicalReportSchema = z.object({
   status: ClinicalReportStatusSchema,
   body: ClinicalReportV1Schema.nullable(),
   confirmations: ClinicalSectionConfirmationsSchema,
+  planSuggestionDecision: PlanSuggestionDecisionSchema.nullable().optional(),
   totalCostInr: z.string(),
   errorMessage: z.string().nullable(),
   createdAt: IsoDateTimeSchema,
@@ -491,6 +498,9 @@ export type ConfirmClinicalSectionInput = z.infer<typeof ConfirmClinicalSectionI
 /// POST /api/v1/clinical-reports/[id]/plan-suggestion
 export const AcceptPlanSuggestionInputSchema = z
   .object({
+    /** Bind this decision to the exact report and active plan shown on screen. */
+    revision: z.string().min(1).optional(),
+    expectedPlanId: z.string().min(1).optional(),
     /** Index into the report's `planSuggestions` array. */
     suggestionIndex: z.number().int().nonnegative().optional(),
     /**
@@ -544,6 +554,8 @@ export type CarriedQuestion = z.infer<typeof CarriedQuestionSchema>;
 /// POST /api/v1/clients/[id]/carried-questions — replaces the list wholesale.
 export const SaveCarriedQuestionsInputSchema = z.object({
   questions: z.array(CarriedQuestionSchema).max(8),
+  /** Session whose current selections are being edited, not older resolved questions. */
+  sourceSessionId: z.string().min(1).optional(),
 });
 export type SaveCarriedQuestionsInput = z.infer<typeof SaveCarriedQuestionsInputSchema>;
 

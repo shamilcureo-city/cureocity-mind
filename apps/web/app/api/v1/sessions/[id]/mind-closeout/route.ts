@@ -36,10 +36,27 @@ export async function PATCH(req: NextRequest, ctx: RouteContext): Promise<NextRe
       psychologistId: auth.value.psychologistId,
       status: 'COMPLETED',
     },
-    select: { id: true, psychologist: { select: { vertical: true } } },
+    select: {
+      id: true,
+      psychologist: { select: { vertical: true } },
+      clinicalReport: { select: { status: true } },
+    },
   });
   if (!session || session.psychologist.vertical === 'DOCTOR') {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  }
+  if (
+    dto.value.step === 'clinicalSuggestions' &&
+    dto.value.outcome === 'COMPLETE' &&
+    session.clinicalReport?.status !== 'COMPLETED'
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'No completed clinical analysis is available to review. You can retry it or record that it is not needed today.',
+      },
+      { status: 409 },
+    );
   }
 
   const now = new Date();

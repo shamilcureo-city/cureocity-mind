@@ -4,6 +4,15 @@ export interface RecoveryStorage {
   removeItem(key: string): void;
 }
 
+/** Access itself can throw when browser storage is disabled. */
+export function browserRecoveryStorage(): RecoveryStorage {
+  return {
+    getItem: (key) => window.localStorage.getItem(key),
+    setItem: (key, value) => window.localStorage.setItem(key, value),
+    removeItem: (key) => window.localStorage.removeItem(key),
+  };
+}
+
 export interface RecoveryUtterance {
   id: string;
   speaker: string;
@@ -26,8 +35,13 @@ export function recoveryDraftKey(sessionId: string): string {
   return `cureocity:mind-live-recovery:${sessionId}`;
 }
 
-export function saveRecoveryDraft(storage: RecoveryStorage, draft: LiveRecoveryDraft): void {
-  storage.setItem(recoveryDraftKey(draft.sessionId), JSON.stringify(draft));
+export function saveRecoveryDraft(storage: RecoveryStorage, draft: LiveRecoveryDraft): boolean {
+  try {
+    storage.setItem(recoveryDraftKey(draft.sessionId), JSON.stringify(draft));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function loadRecoveryDraft(
@@ -76,6 +90,10 @@ export function clearRecoveryDraftAfterDurableSave(
   durableSaveConfirmed: boolean,
 ): boolean {
   if (!durableSaveConfirmed) return false;
-  storage.removeItem(recoveryDraftKey(sessionId));
-  return true;
+  try {
+    storage.removeItem(recoveryDraftKey(sessionId));
+    return true;
+  } catch {
+    return false;
+  }
 }

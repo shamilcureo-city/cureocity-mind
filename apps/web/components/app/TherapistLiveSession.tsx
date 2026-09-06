@@ -40,8 +40,8 @@ import {
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import {
+  browserRecoveryStorage,
   clearRecoveryDraftAfterDurableSave,
-  hasUniqueUnsavedContent,
   loadRecoveryDraft,
   saveRecoveryDraft,
   shouldResumeRecovery,
@@ -80,6 +80,7 @@ interface Props {
   plannedMinutes?: number | null;
   selectedDeviceId?: string;
   preparedGuides?: PreparedMindGuide[];
+  initialGuideId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,11 +230,15 @@ export function TherapistLiveSession({
   plannedMinutes = null,
   selectedDeviceId,
   preparedGuides = [],
+  initialGuideId,
 }: Props) {
   const router = useRouter();
-  const [workspaceMode, setWorkspaceMode] = useState<'quiet' | 'guided'>('quiet');
+  const initialGuide = preparedGuides.find((guide) => guide.id === initialGuideId);
+  const [workspaceMode, setWorkspaceMode] = useState<'quiet' | 'guided'>(
+    initialGuide ? 'guided' : 'quiet',
+  );
   const [showTranscript, setShowTranscript] = useState(false);
-  const [guideId, setGuideId] = useState('');
+  const [guideId, setGuideId] = useState(initialGuide?.id ?? '');
   const [phase, setPhase] = useState<Phase>('idle');
   const [utterances, setUtterances] = useState<Utterance[]>([]);
   const [note, setNote] = useState<Record<string, unknown>>({});
@@ -260,6 +265,12 @@ export function TherapistLiveSession({
   // browser is the ONLY holder of the live note + transcript, so this state
   // must never silently redirect — it renders a retry card instead.
   const [saveFailed, setSaveFailed] = useState<string | null>(null);
+  const [localRecoveryFailed, setLocalRecoveryFailed] = useState(false);
+  const durableRef = useRef(false);
+  const startingRef = useRef(false);
+  const liveAttemptRef = useRef(0);
+  const attemptAbortRef = useRef<AbortController | null>(null);
+  const unmountedRef = useRef(false);
   // The live-token 409: the client's consents on record don't cover the live
   // scribe. Rendered with the real reason + the path to capture consent,
   // instead of the gateway's generic "could not be authorized".
@@ -342,7 +353,7 @@ export function TherapistLiveSession({
   // is refreshed on every utterance and remains until the server acknowledges
   // the final durable note/transcript write.
   useEffect(() => {
-    const recovered = loadRecoveryDraft(window.localStorage, sessionId);
+    const recovered = loadRecoveryDraft(browserRecoveryStorage(), sessionId);
     if (!recovered || recovered.utterances.length === 0) return;
     const restored = recovered.utterances as Utterance[];
     utterancesRef.current = restored;
@@ -351,7 +362,8 @@ export function TherapistLiveSession({
   }, [sessionId]);
   useEffect(() => {
     if (utterances.length === 0) return;
-    saveRecoveryDraft(window.localStorage, {
+    durableRef.current = false;
+    const saved = saveRecoveryDraft(browserRecoveryStorage(), {
       version: 1,
       sessionId,
       savedAt: new Date().toISOString(),
@@ -360,19 +372,18 @@ export function TherapistLiveSession({
       captureMode: 'LIVE',
       durable: false,
     });
+    setLocalRecoveryFailed(!saved);
   }, [sessionId, utterances]);
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      const draft = loadRecoveryDraft(window.localStorage, sessionId);
-      if (!hasUniqueUnsavedContent(draft)) return;
+      if (durableRef.current || (!utterancesRef.current.length && !finalPayloadRef.current)) return;
       event.preventDefault();
       event.returnValue = '';
     };
     const onDocumentClick = (event: MouseEvent) => {
       const anchor = (event.target as Element | null)?.closest('a[href]');
       if (!anchor) return;
-      const draft = loadRecoveryDraft(window.localStorage, sessionId);
-      if (!hasUniqueUnsavedContent(draft)) return;
+      if (durableRef.current || (!utterancesRef.current.length && !finalPayloadRef.current)) return;
       if (
         window.confirm(
           'This session has transcript content that is not saved on the server yet. Leave anyway?',
@@ -402,6 +413,12 @@ export function TherapistLiveSession({
       const ws = wsRef.current;
       if (ws && ws.readyState === ws.OPEN) ws.send(pcm);
     },
+    onInterrupted: (message) => {
+      setError(message);
+      setConnectionLost(true);
+      setPhase('error');
+      wsRef.current?.close();
+    },
   });
   const streamRef = useRef(stream);
   streamRef.current = stream;
@@ -411,9 +428,17 @@ export function TherapistLiveSession({
   phaseRef.current = phase;
 
   useEffect(() => {
+    unmountedRef.current = false;
     return () => {
-      wsRef.current?.close();
-      void streamRef.current.stop();
+      unmountedRef.current = true;
+      startingRef.current = false;
+      autoStartedRef.current = false;
+      ++liveAttemptRef.current;
+      attemptAbortRef.current?.abort();
+      const socket = wsRef.current;
+      wsRef.current = null;
+      socket?.close();
+      void streamRef.current.stop().catch(() => {});
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     };
   }, []);
@@ -510,7 +535,8 @@ export function TherapistLiveSession({
       }
       if (meterRef.current) void persistMeter(meterRef.current);
       setFinalStage('ready');
-      clearRecoveryDraftAfterDurableSave(window.localStorage, sessionId, true);
+      durableRef.current = true;
+      clearRecoveryDraftAfterDurableSave(browserRecoveryStorage(), sessionId, true);
       // The note is a COMPLETED NoteDraft now. Land on the copilot board —
       // review + sign live there, and no generation wait stands in the way.
       router.push(`/app/sessions/${sessionId}`);
@@ -547,23 +573,85 @@ export function TherapistLiveSession({
     URL.revokeObjectURL(url);
   }
 
-  function continueAsBatch(): void {
-    const transcript = buildTranscript(utterancesRef.current);
-    if (transcript) {
-      saveRecoveryDraft(window.localStorage, {
-        version: 1,
-        sessionId,
-        savedAt: new Date().toISOString(),
-        utterances: utterancesRef.current,
-        transcript,
-        captureMode: 'BATCH',
-        durable: false,
-      });
+  function navigateAway(href: string): void {
+    if (!durableRef.current && (utterancesRef.current.length || finalPayloadRef.current)) {
+      setError(
+        'This session has unsaved work. Save the transcript or finish saving before leaving this page.',
+      );
+      return;
     }
-    if (clientId) router.push(`/app?record=${clientId}&session=${sessionId}&capture=BATCH`);
+    router.push(href);
+  }
+
+  async function recoverTranscript(action: 'CONTINUE_RECORDING' | 'FINALIZE'): Promise<void> {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    ++liveAttemptRef.current;
+    attemptAbortRef.current?.abort();
+    startingRef.current = false;
+    try {
+      await streamRef.current.stop();
+      // Recovery uses captured words; it never reacquires a microphone or fabricates a note.
+      finalHandledRef.current = true;
+      wsRef.current?.close();
+      if (utterancesRef.current.length) {
+        const response = await fetch(`/api/v1/sessions/${sessionId}/recovery-transcript`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          signal: AbortSignal.timeout(30_000),
+          body: JSON.stringify({ action, utterances: utterancesRef.current }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error ?? 'Captured words could not be saved. Keep this tab open.');
+        }
+        durableRef.current = true;
+        clearRecoveryDraftAfterDurableSave(browserRecoveryStorage(), sessionId, true);
+      } else if (action === 'FINALIZE') {
+        throw new Error(
+          'No captured words are available. Resume recording or open the session to document manually.',
+        );
+      }
+      if (action === 'CONTINUE_RECORDING') {
+        if (clientId) router.push(`/app?record=${clientId}&session=${sessionId}&capture=BATCH`);
+      } else {
+        setFinalStage('generating-note');
+        const generated = await fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
+          method: 'POST',
+          keepalive: true,
+        });
+        if (!generated.ok)
+          throw new Error(
+            'Transcript saved securely, but the note needs a retry. Open the session to continue.',
+          );
+        router.push(`/app/sessions/${sessionId}`);
+      }
+    } catch (reason) {
+      finalHandledRef.current = false;
+      setError((reason as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function continueAsBatch(): void {
+    void recoverTranscript('CONTINUE_RECORDING');
   }
 
   async function start(opts: { resume?: boolean } = {}): Promise<void> {
+    if (unmountedRef.current || startingRef.current || saving) return;
+    startingRef.current = true;
+    const attempt = ++liveAttemptRef.current;
+    attemptAbortRef.current?.abort();
+    const abort = new AbortController();
+    attemptAbortRef.current = abort;
+    const isCurrentAttempt = () => !unmountedRef.current && liveAttemptRef.current === attempt;
+    const previousSocket = wsRef.current;
+    wsRef.current = null;
+    previousSocket?.close();
+    await streamRef.current.stop().catch(() => {});
+    if (!isCurrentAttempt()) return;
     // Reconnect path: the browser still holds the transcript — keep it on
     // screen and replay it to the gateway (`resume`) so the consult continues
     // from the whole session, not just what it hears after the drop.
@@ -590,12 +678,17 @@ export function TherapistLiveSession({
       setError(
         'The live scribe is not configured for secure connections. Record the batch way instead.',
       );
+      startingRef.current = false;
       return;
     }
 
     let token: string | undefined;
     try {
-      const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, { method: 'POST' });
+      const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, {
+        method: 'POST',
+        signal: AbortSignal.any([AbortSignal.timeout(20_000), abort.signal]),
+      });
+      if (!isCurrentAttempt()) return;
       if (r.ok) {
         token = ((await r.json()) as { token?: string }).token;
       } else if (r.status === 409) {
@@ -604,17 +697,28 @@ export function TherapistLiveSession({
         // Surface the server's real reason + the capture path, instead of
         // proceeding tokenless into the gateway's generic "unauthorized".
         const body = (await r.json().catch(() => ({}))) as { error?: string };
+        if (!isCurrentAttempt()) return;
         setPhase('error');
         setConsentBlocked(
           body.error ?? "The client's consents on record don't cover the live scribe.",
         );
+        startingRef.current = false;
         return;
+      } else {
+        const body = await r.json().catch(() => ({}));
+        throw new Error(
+          body.error ?? 'Could not authorize this session. Check your sign-in and try again.',
+        );
       }
-      // Other non-OK responses: proceed tokenless — the dev gateway runs
-      // open, and a secured gateway will refuse below with `unauthorized`.
-    } catch {
-      /* dev gateway runs open */
+    } catch (reason) {
+      if (!isCurrentAttempt()) return;
+      startingRef.current = false;
+      setPhase('error');
+      setError((reason as Error).message);
+      return;
     }
+
+    if (!isCurrentAttempt()) return;
 
     let ws: WebSocket;
     try {
@@ -622,36 +726,50 @@ export function TherapistLiveSession({
     } catch (e) {
       setPhase('error');
       setError((e as Error).message);
+      startingRef.current = false;
       return;
     }
     wsRef.current = ws;
+    const ownsSocket = () => isCurrentAttempt() && wsRef.current === ws;
+    const assertOwnsSocket = () => {
+      if (!ownsSocket()) throw new Error('Live capture start was cancelled.');
+    };
 
     ws.onopen = () => {
+      if (!ownsSocket()) return;
       void coordinateMindSessionStart(
         { clientId: clientId ?? '', sessionId, captureMode: 'LIVE' },
         {
-          selectOrReuseSession: async () => ({
-            id: sessionId,
-            status: lifecycleStartedRef.current ? 'IN_PROGRESS' : 'SCHEDULED',
-          }),
+          selectOrReuseSession: async () => {
+            assertOwnsSocket();
+            return {
+              id: sessionId,
+              status: lifecycleStartedRef.current ? 'IN_PROGRESS' : 'SCHEDULED',
+            };
+          },
           // Scheduled pages can reach this point only through the same-session
           // preflight; live-token above also verified the durable snapshot.
           resolveConsent: async () => ({ sessionId, snapshotRecorded: true }),
           runPreflight: async () => ({ ready: true }),
           activateCapture: async () => {
             try {
-              await stream.start();
+              assertOwnsSocket();
+              await streamRef.current.start();
+              assertOwnsSocket();
               return { active: true as const };
             } catch (reason) {
               return { active: false as const, reason: (reason as Error).message };
             }
           },
           authorizeCapture: async () => {
+            assertOwnsSocket();
             const response = await fetch(`/api/v1/sessions/${sessionId}/start`, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ captureMode: 'LIVE' }),
+              signal: AbortSignal.any([AbortSignal.timeout(20_000), abort.signal]),
             });
+            assertOwnsSocket();
             if (!response.ok) {
               const body = (await response.json().catch(() => ({}))) as { error?: string };
               throw new Error(body.error ?? `Could not mark capture active (${response.status}).`);
@@ -661,6 +779,8 @@ export function TherapistLiveSession({
         },
       )
         .then(() => {
+          if (!ownsSocket()) return;
+          startingRef.current = false;
           const replay = resume ? utterancesRef.current : [];
           ws.send(
             JSON.stringify({
@@ -685,20 +805,28 @@ export function TherapistLiveSession({
           }
         })
         .catch((reason: unknown) => {
-          setError(`Microphone unavailable: ${(reason as Error).message}. Tap Start to try again.`);
+          if (!ownsSocket()) return;
+          startingRef.current = false;
+          void streamRef.current.stop().catch(() => {});
+          setError(
+            `Could not start capture: ${(reason as Error).message}. Try again after resolving this issue.`,
+          );
           setPhase('idle');
           ws.close();
         });
     };
 
     ws.onerror = () => {
+      if (!ownsSocket()) return;
+      startingRef.current = false;
+      void streamRef.current.stop().catch(() => {});
       // Mid-session an error event is always followed by close — the
       // recovery card (onclose) owns that path. Only a failed initial
       // connect reports the connect-time message.
       if (phaseRef.current !== 'connecting') return;
       setPhase('error');
       setError(
-        `Couldn't reach the live gateway at ${GATEWAY_URL}. Start it with: pnpm --filter @cureocity/live-gateway dev`,
+        'The live scribe could not connect. Check your connection, try again, or use Record only.',
       );
     };
 
@@ -707,16 +835,27 @@ export function TherapistLiveSession({
     // were mid-session and no final note arrived, stop the mic and surface a
     // recovery card (reconnect, or continue the classic recorded way).
     ws.onclose = () => {
+      if (!ownsSocket()) return;
+      ++liveAttemptRef.current;
+      abort.abort();
+      wsRef.current = null;
+      startingRef.current = false;
+      void streamRef.current.stop().catch(() => {});
       if (finalHandledRef.current) return;
       const p = phaseRef.current;
       if (p === 'listening' || p === 'finalizing') {
-        void streamRef.current.stop();
         setConnectionLost(true);
         setPhase('error');
+      } else if (p === 'connecting') {
+        setPhase('error');
+        setError(
+          'The live connection closed before capture could start. Try again or use Record only.',
+        );
       }
     };
 
     ws.onmessage = (ev) => {
+      if (!ownsSocket()) return;
       let raw: unknown;
       try {
         raw = JSON.parse(typeof ev.data === 'string' ? ev.data : '');
@@ -739,6 +878,7 @@ export function TherapistLiveSession({
             // surface a recovery panel instead of hanging on "Finishing…".
             if (!finalHandledRef.current) setNoteFailed(true);
           } else if (event.state === 'unauthorized' || event.state === 'busy') {
+            void streamRef.current.stop().catch(() => {});
             setPhase('error');
             setError(
               event.state === 'busy'
@@ -748,6 +888,7 @@ export function TherapistLiveSession({
           }
           break;
         case 'utterance':
+          utterancesRef.current = [...utterancesRef.current, event.utterance];
           setUtterances((prev) => [...prev, event.utterance]);
           break;
         case 'therapyNote':
@@ -781,13 +922,21 @@ export function TherapistLiveSession({
     setEndConfirmOpen(true);
   }
 
-  function confirmEnd(): void {
+  async function confirmEnd(): Promise<void> {
     if (phase !== 'listening') return;
     setEndConfirmOpen(false);
     setFinalStage('stopping');
     setPhase('finalizing');
-    void stream.stop();
-    wsRef.current?.send(JSON.stringify({ type: 'stop' }));
+    try {
+      await stream.stop();
+      if (wsRef.current?.readyState !== WebSocket.OPEN)
+        throw new Error('The live connection closed. Recover the captured transcript below.');
+      wsRef.current.send(JSON.stringify({ type: 'stop' }));
+    } catch (reason) {
+      setConnectionLost(true);
+      setPhase('error');
+      setError((reason as Error).message);
+    }
   }
 
   /** TS-B3 — "Update now": ask the gateway for an immediate note refresh. */
@@ -1034,7 +1183,8 @@ export function TherapistLiveSession({
           <Card className="w-full max-w-md p-6">
             <h2 className="font-serif text-xl">End this session?</h2>
             <p className="mt-2 text-sm text-[var(--color-ink-2)]">
-              Capture will stop and the transcript will be saved before the note is generated.
+              Capture will stop, the final note will be generated, then both will be saved. Keep
+              this page open until saving finishes.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setEndConfirmOpen(false)}>
@@ -1048,10 +1198,11 @@ export function TherapistLiveSession({
 
       {finalStage === 'generating-note' && !saveFailed && (
         <Card className="flex flex-wrap items-center justify-between gap-3 p-4 text-sm">
-          <span>The transcript is held safely. Note generation continues on the server.</span>
-          <Button variant="secondary" onClick={() => router.push('/app/today')}>
-            Return to Today
-          </Button>
+          <span>
+            {durableRef.current
+              ? 'Transcript saved securely. Note generation is running.'
+              : 'Finishing the note. Keep this page open: saving is not yet confirmed.'}
+          </span>
         </Card>
       )}
 
@@ -1064,15 +1215,24 @@ export function TherapistLiveSession({
                 Try again
               </Button>
               {clientId && (
-                <Button variant="secondary" onClick={() => router.push(`/app?record=${clientId}`)}>
+                <Button variant="secondary" onClick={continueAsBatch} disabled={saving}>
                   Record the classic way
                 </Button>
               )}
-              <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
+              <Button
+                variant="secondary"
+                onClick={() => navigateAway(`/app/sessions/${sessionId}`)}
+              >
                 Open session
               </Button>
             </div>
           )}
+        </Card>
+      )}
+      {localRecoveryFailed && (
+        <Card className="border-amber-300 p-4 text-sm">
+          Browser recovery storage is unavailable. Keep this tab open until the server confirms
+          saving, or save a transcript copy.
         </Card>
       )}
 
@@ -1082,7 +1242,7 @@ export function TherapistLiveSession({
           <p className="mt-1">{consentBlocked}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             {clientId && (
-              <Button onClick={() => router.push(`/app?record=${clientId}`)}>
+              <Button onClick={() => navigateAway(`/app?record=${clientId}`)}>
                 Capture consent &amp; start
               </Button>
             )}
@@ -1100,9 +1260,9 @@ export function TherapistLiveSession({
         <Card className="border-red-300 bg-red-50 p-5 text-sm text-red-900">
           <strong className="block">The note is finished but could not be saved.</strong>
           <p className="mt-1">
-            {saveFailed} Nothing is lost while this tab stays open — the note and transcript are
-            held right here. Retry the save; if it keeps failing, keep this tab open and try again
-            in a minute.
+            {saveFailed} The generated note and received transcript are still held in this tab. Keep
+            it open and retry saving. A transcript download preserves only the displayed words, not
+            the original audio or any untranscribed speech.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={retrySave} disabled={saving}>
@@ -1114,7 +1274,7 @@ export function TherapistLiveSession({
             <Button variant="secondary" onClick={downloadHeldTranscript}>
               Save transcript
             </Button>
-            <Button variant="secondary" onClick={() => router.push('/app/today')}>
+            <Button variant="secondary" onClick={() => navigateAway('/app/today')}>
               Return to Today
             </Button>
           </div>
@@ -1125,19 +1285,26 @@ export function TherapistLiveSession({
         <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
           <strong className="block">The live connection dropped.</strong>
           <p className="mt-1">
-            The scribe lost its link to the gateway mid-session. What was already transcribed is on
-            this screen and will carry over — Reconnect continues the same session (the transcript
-            so far is replayed to the scribe), or switch to the classic recorder (it reuses this
-            same session).
+            Capture has stopped. Reconnect replays the words already shown here. Switching to
+            recording first saves those words securely, then continues the same session. Audio not
+            yet transcribed cannot be recovered by these actions; check the last captured words and
+            repeat or document anything missing.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button onClick={() => void start({ resume: true })}>Reconnect</Button>
             {clientId && (
-              <Button variant="secondary" onClick={continueAsBatch}>
+              <Button variant="secondary" onClick={continueAsBatch} disabled={saving}>
                 Continue as recording (transcript preserved)
               </Button>
             )}
-            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
+            <Button
+              variant="secondary"
+              onClick={() => void recoverTranscript('FINALIZE')}
+              disabled={saving || !utterances.length}
+            >
+              Generate from captured transcript
+            </Button>
+            <Button variant="secondary" onClick={() => navigateAway(`/app/sessions/${sessionId}`)}>
               Open session
             </Button>
           </div>
@@ -1148,21 +1315,24 @@ export function TherapistLiveSession({
         <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
           <strong className="block">The note couldn’t be generated automatically.</strong>
           <p className="mt-1">
-            The session ended but the AI note didn’t come back (the transcriber may have returned
-            nothing for this audio). Your session isn’t lost — you can try the live scribe again, or
-            open the session to record or write the note there.
+            The AI note did not come back. Generate again using only the words already shown here,
+            without reopening the microphone. Check for missing speech before relying on the draft;
+            audio that was never transcribed is not included.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => void start({ resume: utterances.length > 0 })}>
-              Retry finalization
+            <Button
+              onClick={() => void recoverTranscript('FINALIZE')}
+              disabled={saving || !utterances.length}
+            >
+              {saving ? 'Saving & generating…' : 'Generate from captured transcript'}
             </Button>
             <Button variant="secondary" onClick={downloadHeldTranscript}>
               Save transcript
             </Button>
-            <Button variant="secondary" onClick={() => router.push('/app/today')}>
+            <Button variant="secondary" onClick={() => navigateAway('/app/today')}>
               Return to Today
             </Button>
-            <Button variant="secondary" onClick={() => router.push(`/app/sessions/${sessionId}`)}>
+            <Button variant="secondary" onClick={() => navigateAway(`/app/sessions/${sessionId}`)}>
               Open session
             </Button>
           </div>
@@ -1176,6 +1346,7 @@ export function TherapistLiveSession({
           onResolve={resolveCopilot}
           onShown={reportShownCopilot}
           mode={workspaceMode}
+          guideActive={hasGuide}
         />
       )}
 
@@ -1190,6 +1361,15 @@ export function TherapistLiveSession({
               <MindTherapyGuide
                 key={selectedGuide.id + selectedGuide.updatedAt}
                 script={selectedGuide.body}
+                reviewTarget={
+                  clientId
+                    ? {
+                        clientId,
+                        scriptId: selectedGuide.id,
+                        scriptUpdatedAt: selectedGuide.updatedAt,
+                      }
+                    : undefined
+                }
               />
             </div>
           )}

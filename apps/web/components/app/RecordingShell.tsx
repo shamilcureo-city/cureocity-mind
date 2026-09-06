@@ -18,6 +18,7 @@ interface Props {
   initialClientId?: string | null;
   initialSessionId?: string | null;
   initialCapture?: 'LIVE' | 'BATCH' | null;
+  initialGuideId?: string;
   /** TS6 — the therapist's preferred in-person capture (live vs batch). */
   defaultCapture?: 'LIVE' | 'BATCH';
   /** VS1 — server-computed livekitConfigured(); gates the Virtual option. */
@@ -71,6 +72,7 @@ export function RecordingShell({
   initialClientId = null,
   initialSessionId = null,
   initialCapture = null,
+  initialGuideId,
   defaultCapture,
   videoEnabled = true,
 }: Props) {
@@ -165,6 +167,7 @@ export function RecordingShell({
         mode={mode}
         defaultCapture={initialCapture ?? defaultCapture ?? 'LIVE'}
         expectedSessionId={initialSessionId}
+        initialGuideId={initialGuideId}
         videoEnabled={videoEnabled}
         onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
         onReady={(ready) => handleReady(ready, mode)}

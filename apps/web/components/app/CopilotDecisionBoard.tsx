@@ -400,10 +400,18 @@ export function CopilotDecisionBoard({
       const res = await fetch(`/api/v1/clinical-reports/${report.id}/plan-suggestion`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          ...body,
+          revision: report.planSuggestionDecision?.revision,
+          expectedPlanId: report.planSuggestionDecision?.currentPlanId,
+        }),
       });
-      const payload = (await res.json().catch(() => ({}))) as { error?: string };
+      const payload = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        report?: ClinicalReport;
+      };
       if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      if (payload.report) setReport(payload.report);
       router.refresh();
     },
     [report, router],
@@ -672,6 +680,7 @@ export function CopilotDecisionBoard({
 
               <PlanStep
                 isIntake={isIntake}
+                decision={report?.planSuggestionDecision ?? null}
                 plan={data.plan}
                 planSuggestions={data.planSuggestions}
                 therapies={data.therapies}
@@ -1224,18 +1233,8 @@ function ImpressionStep({
                       </span>
                     )}
                   </button>
-                  {/* Mobile: the confidence meter drops to its own full-width
-                      row instead of squeezing the label to one word a line. */}
-                  <span className="w-24 flex-none max-sm:order-last max-sm:w-full">
-                    <span className="block h-[5px] overflow-hidden rounded-full bg-[var(--color-line-soft)]">
-                      <span
-                        className="block h-full bg-[var(--color-accent)] opacity-75"
-                        style={{ width: `${Math.round(c.confidence * 100)}%` }}
-                      />
-                    </span>
-                    <span className="mt-0.5 block text-right text-[11px] text-[var(--color-ink-3)] tabular-nums">
-                      AI {Math.round(c.confidence * 100)}%
-                    </span>
+                  <span className="max-w-40 flex-none text-right text-xs text-[var(--color-ink-3)]">
+                    Provisional · review supporting and missing evidence
                   </span>
                   <span aria-hidden className="flex-none text-xs text-[var(--color-ink-3)]">
                     {isOpen ? '▴' : '▾'}
@@ -1545,7 +1544,7 @@ function AskNextStep({
       const res = await fetch(`/api/v1/clients/${clientId}/carried-questions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questions }),
+        body: JSON.stringify({ questions, sourceSessionId: sessionId }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
@@ -1756,6 +1755,7 @@ function AskNextStep({
 
 function PlanStep({
   isIntake,
+  decision,
   plan,
   planSuggestions,
   therapies,
@@ -1768,6 +1768,7 @@ function PlanStep({
   onDraftPlan,
 }: {
   isIntake: boolean;
+  decision: ClinicalReport['planSuggestionDecision'];
   plan: ClinicalTreatmentPlan | null;
   /// Plan-as-diff (R3): edits proposed to the client's ACTIVE plan on a
   /// follow-up. Empty on intakes / first plans / when the AI proposed none.
@@ -1930,6 +1931,7 @@ function PlanStep({
   if (recordPlan) {
     return (
       <PlanDiffStep
+        decision={decision}
         suggestions={planSuggestions}
         recordPlan={recordPlan}
         planHref={planHref}
@@ -2005,19 +2007,21 @@ function suggestionLabel(s: ClinicalPlanSuggestion): { op: string; tone: string;
 }
 
 function PlanDiffStep({
+  decision,
   suggestions,
   recordPlan,
   planHref,
   aiPlanDetail,
   onApplySuggestions,
 }: {
+  decision: ClinicalReport['planSuggestionDecision'];
   suggestions: ClinicalPlanSuggestion[];
   recordPlan: RecordPlan;
   planHref: string;
   aiPlanDetail: ReactNode;
   onApplySuggestions: (indexes: number[]) => Promise<void>;
 }) {
-  const [applied, setApplied] = useState<Set<number>>(new Set());
+  const applied = new Set(decision?.appliedIndexes ?? []);
   const [busy, setBusy] = useState<'all' | number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -2026,7 +2030,6 @@ function PlanDiffStep({
     setError(null);
     try {
       await onApplySuggestions([i]);
-      setApplied((s) => new Set(s).add(i));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -2041,7 +2044,6 @@ function PlanDiffStep({
     setError(null);
     try {
       await onApplySuggestions(remaining);
-      setApplied(new Set(suggestions.map((_, i) => i)));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -2097,6 +2099,12 @@ function PlanDiffStep({
     >
       {planSummary}
       <div className="mt-3 space-y-2">
+        {!decision && (
+          <p role="status" className="text-sm text-[var(--color-ink-2)]">
+            Regenerate this clinical analysis before applying plan changes. The original plan
+            version is unavailable.
+          </p>
+        )}
         {suggestions.map((s, i) => {
           const { op, tone, text } = suggestionLabel(s);
           const isApplied = applied.has(i);
@@ -2122,7 +2130,7 @@ function PlanDiffStep({
               {isApplied ? (
                 <DoneChip>Applied</DoneChip>
               ) : (
-                <Act primary onClick={() => void apply(i)} disabled={busy !== null}>
+                <Act primary onClick={() => void apply(i)} disabled={busy !== null || !decision}>
                   {busy === i ? 'Applying…' : 'Apply'}
                 </Act>
               )}
@@ -2132,7 +2140,7 @@ function PlanDiffStep({
       </div>
       {remaining.length > 1 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
-          <Act onClick={() => void applyAll()} disabled={busy !== null}>
+          <Act onClick={() => void applyAll()} disabled={busy !== null || !decision}>
             {busy === 'all' ? 'Applying…' : `Apply all ${remaining.length}`}
           </Act>
           <span className="text-[11px] text-[var(--color-ink-3)]">
@@ -2705,7 +2713,7 @@ function WrapUpSignStep({
             ) : signed ? (
               <div className="flex flex-wrap items-center gap-3">
                 <DoneChip>
-                  Session closed
+                  Note signed
                   {signed.signerName ? ` — signed by ${signed.signerName}` : ''} ·{' '}
                   {formatDate(signed.signedAt)}
                 </DoneChip>

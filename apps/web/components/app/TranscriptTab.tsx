@@ -1,5 +1,10 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import type { NoteDraft } from '@cureocity/contracts';
 import type { SpeakerSegment } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
+import { transcriptIsProcessing } from '../../lib/transcript-state';
 
 interface TranscriptPanelData {
   status: string;
@@ -29,26 +34,89 @@ const SPEAKER_LABEL: Record<SpeakerSegment['speaker'], string> = {
   unknown: 'Unknown',
 };
 
-export function TranscriptTab({ data }: { data: TranscriptPanelData }) {
-  if (data.status === 'PENDING' || data.status === 'GENERATING') {
+export function TranscriptTab({
+  data: initialData,
+  sessionId,
+}: {
+  data: TranscriptPanelData;
+  sessionId?: string;
+}) {
+  const [data, setData] = useState(initialData);
+  const [pollError, setPollError] = useState<string | null>(null);
+  useEffect(() => setData(initialData), [initialData]);
+  const processing = transcriptIsProcessing(data.status);
+  useEffect(() => {
+    if (!sessionId || !processing) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      let again = true;
+      try {
+        const response = await fetch(`/api/v1/sessions/${sessionId}/note-draft`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          if ([401, 403, 404].includes(response.status)) again = false;
+          throw new Error('Could not refresh the transcript. Reload the page to retry.');
+        }
+        const draft = (await response.json()) as NoteDraft;
+        if (controller.signal.aborted) return;
+        setData((previous) => ({
+          ...previous,
+          status: draft.status,
+          transcript: draft.transcript,
+          segments: draft.speakerSegments,
+          totalCostInr: draft.totalCostInr,
+          errorMessage: draft.errorMessage,
+        }));
+        setPollError(null);
+        again = transcriptIsProcessing(draft.status);
+      } catch (error) {
+        if (!controller.signal.aborted)
+          setPollError(
+            error instanceof Error ? error.message : 'Could not refresh the transcript.',
+          );
+      }
+      if (again && !controller.signal.aborted) timer = setTimeout(() => void poll(), 3000);
+    };
+    timer = setTimeout(() => void poll(), 1500);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [sessionId, processing]);
+
+  if (processing && !data.transcript && !data.segments?.length) {
     return (
       <EmptyState
         title="Transcript not ready yet"
-        body="Pass 1 (de-identify + diarize) is still running. The transcript will appear here automatically once it completes."
+        body={
+          pollError ??
+          (sessionId
+            ? 'Transcription is still processing. This view will update automatically.'
+            : 'Transcription is still processing. This is the transcript saved with your current draft.')
+        }
       />
     );
   }
-  if (data.status === 'FAILED' && data.errorMessage) {
-    return <EmptyState title="Pass 1 failed" body={data.errorMessage} tone="warn" />;
+  if (data.status === 'FAILED' && !data.transcript && !data.segments?.length) {
+    return (
+      <EmptyState
+        title="Transcript needs attention"
+        body="No transcript was saved. Return to Review & Close to check the generation error and recovery options."
+        tone="warn"
+      />
+    );
   }
   if (!data.segments || data.segments.length === 0) {
     return (
       <EmptyState
-        title="No transcript available"
+        title={data.transcript ? 'Saved transcript' : 'No transcript available'}
         body={
           data.transcript
-            ? 'Pass 1 returned a plain transcript without speaker diarization. Showing it raw below.'
-            : 'No transcript was produced for this session. If you expected one, retry the note generation from the Notes tab.'
+            ? 'Speaker labels were not available. The saved transcript is shown below.'
+            : 'No transcript was produced for this session. Return to Review & Close for recovery options.'
         }
         rawTranscript={data.transcript ?? undefined}
       />
@@ -57,10 +125,23 @@ export function TranscriptTab({ data }: { data: TranscriptPanelData }) {
 
   return (
     <div className="space-y-4">
+      {processing && (
+        <p role="status" className="text-sm text-[var(--color-ink-2)]">
+          The saved transcript is available; the note is still processing.
+        </p>
+      )}
+      {data.status === 'FAILED' && (
+        <p role="status" className="text-sm text-[var(--color-warn)]">
+          The saved transcript is available even though note generation needs attention.
+        </p>
+      )}
+      {pollError && (
+        <p role="alert" className="text-sm text-[var(--color-warn)]">
+          {pollError}
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
         <span>{data.segments.length} segments</span>
-        <span>Cost ₹{data.totalCostInr}</span>
-        <span>Backend {data.backend ?? 'unknown'}</span>
       </div>
 
       <ol className="space-y-3">

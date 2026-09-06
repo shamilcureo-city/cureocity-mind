@@ -1,9 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { PractitionerVertical } from '@cureocity/contracts';
 import { subjectNounFor } from '@/lib/vertical';
 import { CreateClientModal } from './CreateClientModal';
+import { createdClientDestination } from '@/lib/client-entry-intent';
 
 /**
  * Header for the roster page — title + create button that opens
@@ -11,8 +13,19 @@ import { CreateClientModal } from './CreateClientModal';
  * stays a server component. Sprint DV2 — vertical-aware: doctors see
  * "Patients" + "New patient"; therapists are unchanged.
  */
-export function ClientsHeader({ vertical = 'THERAPIST' }: { vertical?: PractitionerVertical }) {
-  const [open, setOpen] = useState(false);
+export function ClientsHeader({
+  vertical = 'THERAPIST',
+  initiallyOpen = false,
+  returnToSession = false,
+  captureMode = 'LIVE',
+}: {
+  vertical?: PractitionerVertical;
+  initiallyOpen?: boolean;
+  returnToSession?: boolean;
+  captureMode?: 'LIVE' | 'BATCH';
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(initiallyOpen);
   const isDoctor = vertical === 'DOCTOR';
   return (
     <>
@@ -31,7 +44,23 @@ export function ClientsHeader({ vertical = 'THERAPIST' }: { vertical?: Practitio
           {isDoctor ? '+ New patient' : '+ Create new'}
         </button>
       </header>
-      <CreateClientModal open={open} onClose={() => setOpen(false)} vertical={vertical} />
+      <CreateClientModal
+        open={open}
+        onClose={() => {
+          setOpen(false);
+          if (initiallyOpen) router.replace(isDoctor ? '/app/patients' : '/app/clients');
+        }}
+        vertical={vertical}
+        redirectOnCreated={!returnToSession || isDoctor}
+        onCreated={
+          returnToSession && !isDoctor
+            ? (client) => {
+                setOpen(false);
+                router.push(createdClientDestination(client.id, captureMode));
+              }
+            : undefined
+        }
+      />
     </>
   );
 }

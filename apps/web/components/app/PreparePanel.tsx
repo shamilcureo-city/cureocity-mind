@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type {
   AgreementFollowUp,
@@ -36,42 +36,62 @@ export function PreparePanel({ clientId, defaultOpen = false }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const generationRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setLoading(true);
+    setGenerating(false);
     setError(null);
+    setData(null);
     try {
-      const res = await fetch(`/api/v1/clients/${clientId}/prepare`, { cache: 'no-store' });
+      const res = await fetch(`/api/v1/clients/${clientId}/prepare`, {
+        cache: 'no-store',
+        signal: controller.signal,
+      });
       const body = (await res.json().catch(() => ({}))) as PrepareSummaryV1 & { error?: string };
+      if (controller.signal.aborted) return;
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
       setData(body);
     } catch (e) {
-      setError((e as Error).message);
+      if (!controller.signal.aborted) setError((e as Error).message);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [clientId]);
 
   useEffect(() => {
-    if (open && data === null && !loading) void load();
-  }, [open, data, loading, load]);
+    if (open) void load();
+    return () => {
+      requestRef.current?.abort();
+      generationRef.current?.abort();
+    };
+  }, [open, load]);
 
   async function generateFreshBrief() {
+    generationRef.current?.abort();
+    const controller = new AbortController();
+    generationRef.current = controller;
     setGenerating(true);
     setError(null);
     try {
       const res = await fetch(`/api/v1/clients/${clientId}/pre-session-brief?refresh=1`, {
         cache: 'no-store',
+        signal: controller.signal,
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
+      if (controller.signal.aborted) return;
       if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
       // Re-fetch the summary so the cached-brief block flips to the
       // fresh content.
       await load();
     } catch (e) {
-      setError((e as Error).message);
+      if (!controller.signal.aborted) setError((e as Error).message);
     } finally {
-      setGenerating(false);
+      if (!controller.signal.aborted) setGenerating(false);
     }
   }
 
@@ -80,6 +100,7 @@ export function PreparePanel({ clientId, defaultOpen = false }: Props) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
         <span aria-hidden>{open ? '▾' : '▸'}</span>
@@ -93,6 +114,14 @@ export function PreparePanel({ clientId, defaultOpen = false }: Props) {
           {error && (
             <p className="rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-xs text-[var(--color-warn)]">
               {error}
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="ml-3 font-medium underline"
+                disabled={loading}
+              >
+                Retry preparation
+              </button>
             </p>
           )}
           {data && (

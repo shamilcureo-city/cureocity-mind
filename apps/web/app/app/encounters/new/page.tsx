@@ -17,7 +17,12 @@ export const dynamic = 'force-dynamic';
 export default async function RecordPage({
   searchParams,
 }: {
-  searchParams: Promise<{ record?: string; session?: string; capture?: 'LIVE' | 'BATCH' }>;
+  searchParams: Promise<{
+    record?: string;
+    session?: string;
+    capture?: 'LIVE' | 'BATCH';
+    guide?: string;
+  }>;
 }) {
   const therapist = await requireOnboardedPsychologist();
   const sp = await searchParams;
@@ -101,6 +106,7 @@ export default async function RecordPage({
           initialClientId={sp.record ?? null}
           initialSessionId={sp.session ?? null}
           initialCapture={sp.capture ?? null}
+          initialGuideId={sp.guide}
           defaultCapture={
             therapist.defaultCaptureMode && therapist.defaultCaptureMode !== 'LIVE'
               ? 'BATCH'

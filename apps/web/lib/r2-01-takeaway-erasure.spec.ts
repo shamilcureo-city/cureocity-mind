@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
 
 const mocks = vi.hoisted(() => ({
   requireCapability: vi.fn(),
@@ -93,7 +94,7 @@ beforeEach(() => {
 });
 
 describe('R2-01 patient takeaway erasure boundary', () => {
-  it('redacts only patientTakeaway while retaining non-PHI closeout completion proof', async () => {
+  it('redacts takeaway and question narratives while retaining non-PHI closeout completion proof', async () => {
     const closeoutUpdates: unknown[] = [];
     const tx = new Proxy(
       {},
@@ -143,7 +144,7 @@ describe('R2-01 patient takeaway erasure boundary', () => {
     expect(closeoutUpdates).toEqual([
       {
         where: { sessionId: { in: ['session-1'] } },
-        data: { patientTakeaway: null },
+        data: { patientTakeaway: null, nextQuestionsSnapshot: Prisma.DbNull },
       },
     ]);
     expect(DPDP_ERASURE_MANIFEST.MindSessionCloseoutState).toMatchObject({

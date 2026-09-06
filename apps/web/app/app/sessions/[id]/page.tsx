@@ -258,7 +258,10 @@ async function NotesTabPanel({
         where: { sessionId },
         include: { edits: { orderBy: { createdAt: 'asc' } } },
       }),
-      prisma.mindSessionCloseoutState.findUnique({ where: { sessionId } }),
+      prisma.mindSessionCloseoutState.findUnique({
+        where: { sessionId },
+        include: { followUpSession: { select: { id: true, scheduledAt: true } } },
+      }),
       prisma.sessionAgreement.count({ where: { sessionId } }),
       prisma.client.findFirst({
         where: { id: clientId, psychologistId },
@@ -317,7 +320,7 @@ async function NotesTabPanel({
     : null;
 
   const selectedQuestions = selectedQuestionsForSession(
-    clientQuestionState?.carriedQuestions,
+    closeoutState?.nextQuestionsSnapshot ?? clientQuestionState?.carriedQuestions,
     sessionId,
   );
   const closeout = deriveMindSessionCloseout({
@@ -342,6 +345,14 @@ async function NotesTabPanel({
       closeout={closeout}
       client={{ id: clientId, fullName: clientName, preferredModality: clientPreferredModality }}
       sessionAt={sessionAt}
+      followUpSession={
+        closeoutState?.followUpSession
+          ? {
+              id: closeoutState.followUpSession.id,
+              scheduledAt: closeoutState.followUpSession.scheduledAt.toISOString(),
+            }
+          : null
+      }
       sessionCompleted={sessionStatus === 'COMPLETED'}
       canShare={canShare}
       agreementCount={agreementCount}
@@ -442,6 +453,7 @@ async function TranscriptTabPanel({
   return (
     <div className="space-y-6">
       <TranscriptTab
+        sessionId={sessionId}
         data={{
           status: draftRow.status,
           segments,

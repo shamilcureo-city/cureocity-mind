@@ -1062,6 +1062,8 @@ model MindSessionCloseoutState {
   clinicalSuggestionsSkippedAt  DateTime?
   agreementsSkippedAt           DateTime?
   nextQuestionsSkippedAt        DateTime?
+  /// Historical clinician selections, independent of the active carry-forward queue.
+  nextQuestionsSnapshot         Json?
   shareSkippedAt                DateTime?
   patientTakeaway               String?   @db.Text
   followUpSkippedAt             DateTime?
@@ -1388,9 +1390,12 @@ model NoteDraft {
   /// Envelope-encrypted transcript per @cureocity/crypto — the ONLY copy at
   /// rest (the plaintext column was scrub-verified and dropped, S-hardening
   /// 2026-08). Read via lib/note-transcript.ts.
-  transcriptEncrypted String? @db.Text
-  speakerSegments     Json?
-  affectFeatures      Json?
+  transcriptEncrypted         String? @db.Text
+  /// Immutable/append-only imported live prefix, distinct from regenerated transcript.
+  /// Envelope contains transcript and timed speakers; cleared with session PHI erasure.
+  recoveryTranscriptEncrypted String? @db.Text
+  speakerSegments             Json?
+  affectFeatures              Json?
 
   // Pass 2 output (validated TherapyNoteV1)
   content      Json?
@@ -1741,6 +1746,10 @@ model ClinicalReport {
   /// Defaults to every section PENDING; route handlers validate the
   /// payload against ClinicalSectionConfirmationsSchema.
   confirmations Json @default("{}")
+
+  /// Immutable plan baseline plus durable applied suggestion indexes and revision.
+  /// Null legacy reports must be regenerated before applying plan diffs.
+  planSuggestionState Json?
 
   totalCostInr Decimal @default(0) @db.Decimal(10, 4)
   errorMessage String? @db.Text
@@ -2288,6 +2297,9 @@ model TherapyScript {
 
   /// Validated against TherapyScriptV1Schema before write.
   body Json
+
+  /// Version-bound navigation/review markers, never delivered therapy or consent.
+  reviewProgress Json?
 
   /// Optional grounding — the TreatmentPlan + primary ClientDiagnosis
   /// the script was generated against. Nullable because both can be
@@ -3056,6 +3068,7 @@ enum AuditAction {
   // language, inputs-hash); cached + audited.
   THERAPY_SCRIPT_GENERATED
   THERAPY_SCRIPT_VIEWED
+  THERAPY_GUIDE_REVIEW_UPDATED
 
   // Patient CRM / sharing — Sprint 15. Every Send-to-patient click
   // writes ARTEFACT_SHARED with the channel + outcome; portal opens

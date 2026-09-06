@@ -61,16 +61,16 @@ function observer() {
 }
 
 describe('truthful copilot card disclosure', () => {
-  it('reports every visible live risk and only the first ordinary card per category in Guided', () => {
+  it('reports every visible live risk and only the single ordinary focus in Guided', () => {
     const shown = disclosedCopilotSuggestions(reasoning, 'guided', collapsed);
-    expect(ids(shown)).toEqual([...riskIds, 'LIVE-1', 'thread-1']);
+    expect(ids(shown)).toEqual([...riskIds, 'LIVE-1']);
     expect(shown.find((item) => item.id === 'LIVE-1')).toEqual({
       id: 'LIVE-1',
       kind: 'ASK_NEXT',
       label: 'Synthetic LIVE question 1',
     });
     expect(shown.find((item) => item.id === 'risk-high')?.kind).toBe('RED_FLAG');
-    expect(shown.find((item) => item.id === 'thread-1')?.kind).toBe('GAP');
+    expect(shown.find((item) => item.id === 'thread-1')).toBeUndefined();
   });
 
   it.each([collapsed, expanded, { live: true, threads: false }, { live: false, threads: true }])(
@@ -81,7 +81,7 @@ describe('truthful copilot card disclosure', () => {
   );
 
   it.each([
-    [{ live: true, threads: false }, ['LIVE-1', 'LIVE-2', 'LIVE-3', 'thread-1']],
+    [{ live: true, threads: false }, ['LIVE-1', 'LIVE-2', 'LIVE-3']],
     [{ live: false, threads: true }, ['LIVE-1', 'thread-1', 'thread-2', 'thread-3']],
     [expanded, ['LIVE-1', 'LIVE-2', 'LIVE-3', 'thread-1', 'thread-2', 'thread-3']],
   ] as const)('reports extra cards only in their own expanded disclosure %j', (open, expected) => {
@@ -135,7 +135,7 @@ describe('truthful copilot card disclosure', () => {
       askNext: reasoning.askNext.filter((item) => item.id !== 'LIVE-1'),
       threads: reasoning.threads.filter((item) => item.id !== 'thread-1'),
     };
-    expect(ids(observe(resolved))).toEqual(['LIVE-2', 'thread-2']);
+    expect(ids(observe(resolved))).toEqual(['LIVE-2']);
   });
 
   it('does not duplicate shown events on reopening, rerendering, or reordering', () => {
@@ -169,7 +169,7 @@ describe('truthful copilot card disclosure', () => {
   it('counts previously hidden ordinary cards when switching from Quiet to Guided', () => {
     const observe = observer();
     expect(ids(observe(reasoning, 'quiet'))).toEqual(riskIds);
-    expect(ids(observe(reasoning))).toEqual(['LIVE-1', 'thread-1']);
+    expect(ids(observe(reasoning))).toEqual(['LIVE-1']);
     expect(observe(reasoning, 'quiet')).toEqual([]);
   });
 
@@ -204,5 +204,14 @@ describe('truthful copilot card disclosure', () => {
     expect(html).not.toMatch(/<details\b[^>]*\bopen(?:[\s=>])/);
     expect(onShown).not.toHaveBeenCalled();
     expect(onResolve).not.toHaveBeenCalled();
+  });
+  it('does not log guide-hidden suggestions until their own disclosure opens', () => {
+    expect(ids(disclosedCopilotSuggestions(reasoning, 'guided', collapsed, true))).toEqual(riskIds);
+    expect(
+      ids(disclosedCopilotSuggestions(reasoning, 'guided', { live: true, threads: false }, true)),
+    ).toEqual([...riskIds, 'LIVE-1', 'LIVE-2', 'LIVE-3']);
+    expect(
+      ids(disclosedCopilotSuggestions(reasoning, 'guided', { live: false, threads: true }, true)),
+    ).toEqual([...riskIds, 'thread-1', 'thread-2', 'thread-3']);
   });
 });

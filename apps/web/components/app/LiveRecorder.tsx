@@ -10,6 +10,7 @@ import { useSessionRecorder, type CaptureSource } from '@/lib/audio/use-session-
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import { InRoomDirection } from './InRoomDirection';
 import { coordinateMindSessionStart } from '@/lib/mind-session-start';
+import { SessionStore } from '@/lib/audio/idb-chunk-store';
 
 const MODE_LABEL: Record<CaptureSource, string> = {
   mic: 'In-person',
@@ -75,7 +76,7 @@ export function LiveRecorder({
   const [captureAuthorizationError, setCaptureAuthorizationError] = useState<string | null>(null);
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
   const [finalStage, setFinalStage] = useState<
-    'stopping' | 'saving-transcript' | 'generating-note' | 'ready' | null
+    'stopping' | 'saving-recording' | 'generating-note' | 'ready' | null
   >(null);
   // FLOW-2 — how many chunks are still uploading while we hold "End", and
   // whether the queue never drained (→ ask the therapist to confirm an
@@ -89,7 +90,7 @@ export function LiveRecorder({
   // moved the session into IN_PROGRESS, so the user expects to be live
   // immediately.
   useEffect(() => {
-    if (recorder.state === 'idle') void recorder.start();
+    if (recorder.state === 'idle') void recorder.start().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -123,14 +124,14 @@ export function LiveRecorder({
       })
       .catch((reason: unknown) => {
         setCaptureAuthorizationError((reason as Error).message);
-        void recorder.stop();
+        void recorder.stop().catch(() => {});
       });
   }, [authorizeMindAfterCaptureActive, captureAuthorized, clientId, recorder.state, sessionId]);
 
   function retryCaptureAuthorization(): void {
     authorizationStartedRef.current = false;
     setCaptureAuthorizationError(null);
-    void recorder.start();
+    void recorder.start().catch(() => {});
   }
 
   // VS1 — report whether a recording is in flight (anything between start and
@@ -160,37 +161,30 @@ export function LiveRecorder({
     return () => clearInterval(id);
   }, [recorder.state, recorder.startedAt]);
 
-  // FLOW-2 — end + generate ONLY once the upload queue is empty (or the
-  // therapist explicitly accepts an incomplete note). `force` skips the
-  // queue gate for the "End anyway" confirm.
-  async function endSession(force = false): Promise<void> {
+  // Never generate a silently incomplete clinical note from a partial upload.
+  async function endSession(retryUploads = false): Promise<void> {
     setEndError(null);
     setIncompleteLeft(0);
     setEnding(true);
     setFinalStage('stopping');
     try {
       await recorder.stop();
-      setFinalStage('saving-transcript');
+      setFinalStage('saving-recording');
 
       // Hold until the tail of the recording is safely on the server. On
       // clinic Wi-Fi the last chunks often land seconds after stop(); ending
       // now would build a COMPLETED note missing the session's tail (where
       // risk + homework often live). Retry-drain, showing "n left".
-      if (!force) {
-        setUploadingLeft(recorder.pendingCount);
-        const remaining = await flushPendingWithRetries(recorder.drainPending, {
-          onProgress: (left) => setUploadingLeft(left),
-        });
-        setUploadingLeft(null);
-        if (remaining > 0) {
-          // Couldn't flush — don't silently ship a partial note. Surface an
-          // explicit confirm; the therapist decides.
-          setIncompleteLeft(remaining);
-          setEnding(false);
-          return;
-        }
-      } else {
-        setUploadingLeft(null);
+      setUploadingLeft(recorder.pendingCount);
+      if (retryUploads) await recorder.drainPending(true);
+      const remaining = await flushPendingWithRetries(recorder.drainPending, {
+        onProgress: (left) => setUploadingLeft(left),
+      });
+      setUploadingLeft(null);
+      if (remaining > 0) {
+        setIncompleteLeft(remaining);
+        setEnding(false);
+        return;
       }
 
       const res = await fetch(`/api/v1/sessions/${sessionId}/end`, { method: 'POST' });
@@ -199,6 +193,7 @@ export function LiveRecorder({
         throw new Error(body.error ?? `End failed (${res.status})`);
       }
       setFinalStage('generating-note');
+      await SessionStore.clear(sessionId);
       // Kick off note generation; don't block the redirect. The session
       // detail page polls the draft status, so the user immediately sees
       // "Generating note…" and watches it flip to COMPLETED.
@@ -266,7 +261,7 @@ export function LiveRecorder({
           tone={isRecording ? 'warn' : 'default'}
         />
         <StatTile
-          label="Chunks recorded"
+          label="Audio parts captured"
           value={String(Math.max(recorder.lastChunkIndex + 1, 0))}
           mono
         />
@@ -281,13 +276,18 @@ export function LiveRecorder({
       {errored && (
         <div className="mx-6 mb-4 rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-4 py-3 text-sm text-[var(--color-warn)]">
           {recorder.error ?? 'The recorder hit an error.'}
+          {!isRecording && !captureAuthorizationError && (
+            <Button variant="secondary" onClick={() => void recorder.start().catch(() => {})}>
+              Resume capture
+            </Button>
+          )}
         </div>
       )}
       {captureAuthorizationError && (
         <div className="mx-6 mb-4 rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-4 py-3 text-sm text-[var(--color-warn)]">
           <p>
-            Capture stopped safely before the session was marked in progress:{' '}
-            {captureAuthorizationError}
+            The session could not be marked in progress. Capture was stopped; keep this page open if
+            saving is unfinished: {captureAuthorizationError}
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button
@@ -295,9 +295,6 @@ export function LiveRecorder({
               disabled={recorder.state === 'finishing' || recorder.state === 'preparing'}
             >
               Retry start
-            </Button>
-            <Button variant="secondary" onClick={() => router.push('/app/today')}>
-              Return to Today
             </Button>
           </div>
         </div>
@@ -309,9 +306,7 @@ export function LiveRecorder({
             <Button onClick={() => void endSession(true)} disabled={ending}>
               Retry finalization
             </Button>
-            <Button variant="secondary" onClick={() => router.push('/app/today')}>
-              Return to Today
-            </Button>
+            <p className="text-xs">Keep this page open until all captured audio is saved.</p>
           </div>
         </div>
       )}
@@ -331,20 +326,12 @@ export function LiveRecorder({
             upload.
           </p>
           <p className="mt-1">
-            Check your connection and try ending again. If you end now, the note may be missing the
-            last part of the session.
+            Check your connection and retry uploading. Note generation is paused until every
+            captured part is uploaded. Keep this page open.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button onClick={() => void endSession(false)} disabled={ending}>
+            <Button onClick={() => void endSession(true)} disabled={ending}>
               Retry upload
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => void endSession(true)}
-              disabled={ending}
-              className="text-[var(--color-warn)]"
-            >
-              End anyway (note may be incomplete)
             </Button>
           </div>
         </div>
@@ -388,11 +375,11 @@ export function LiveRecorder({
         <p className="text-xs text-[var(--color-ink-3)]">
           {finalStage === 'stopping'
             ? 'Stopping capture…'
-            : finalStage === 'saving-transcript'
-              ? 'Saving transcript…'
+            : finalStage === 'saving-recording'
+              ? 'Saving recording…'
               : finalStage === 'generating-note'
-                ? 'Generating note… You may safely return to Today.'
-                : 'Session is auto-saved every chunk. If your browser refreshes, recording resumes from the next chunk.'}
+                ? 'Audio uploaded. Opening the session to review note generation…'
+                : 'Saved audio parts can resume after reopening this session. Keep this page open while recording or saving.'}
         </p>
         <Button
           onClick={() => setEndConfirmOpen(true)}

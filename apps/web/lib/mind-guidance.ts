@@ -61,8 +61,16 @@ export function liveCopilotVisibleCounts(
   planned: number,
   live: number,
   threads: number,
+  guideActive = false,
 ) {
-  return mode === 'quiet'
+  // One ordinary focus in the room. A chosen guide takes precedence; otherwise
+  // preserve the model's ordering within live questions, then prepared questions,
+  // then unexplored topics. Risk is handled separately and is never collapsed.
+  return mode === 'quiet' || guideActive
     ? { planned: 0, live: 0, threads: 0 }
-    : { planned: Math.min(1, planned), live: Math.min(1, live), threads: Math.min(1, threads) };
+    : {
+        planned: live > 0 ? 0 : Math.min(1, planned),
+        live: Math.min(1, live),
+        threads: live > 0 || planned > 0 ? 0 : Math.min(1, threads),
+      };
 }

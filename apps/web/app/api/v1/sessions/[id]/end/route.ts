@@ -31,6 +31,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   const { id: sessionId } = await ctx.params;
   const existing = await fetchOwnedSession(auth.value.psychologistId, sessionId);
   if (!existing) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  // Lost response after a committed End is a retry, not a second lifecycle event.
+  if (existing.status === 'COMPLETED') return NextResponse.json(toSession(existing));
   if (existing.status !== 'IN_PROGRESS') {
     return NextResponse.json(
       { error: `Cannot end a session in ${existing.status} state` },

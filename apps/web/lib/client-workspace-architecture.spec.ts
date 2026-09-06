@@ -32,7 +32,10 @@ describe('Mind longitudinal client workspace architecture', () => {
     expect(overview).toContain('Latest change');
     expect(overview).toContain('Homework');
     expect(overview).toContain('Next action');
-    expect(overview).toContain('<PreparePanel clientId={client.id} defaultOpen />');
+    expect(overview).toContain('<PreparePanel clientId={client.id} />');
+    expect(overview.indexOf('<h1')).toBeLessThan(overview.indexOf('<PreparePanel'));
+    expect(overview.match(/>\s+Start session\s+</g)).toHaveLength(1);
+    expect(overview).toContain('captureMode: defaultCapture');
     expect(overview).toContain('Start session');
     expect(overview).toContain('Schedule follow-up');
     expect(overview).toContain('client.sessions.find');

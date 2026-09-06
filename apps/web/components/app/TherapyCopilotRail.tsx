@@ -32,9 +32,11 @@ export function TherapyCopilotRail({
   onResolve,
   onShown,
   mode = 'guided',
+  guideActive = false,
 }: {
   reasoning: TherapyReasoningV1;
   mode?: 'quiet' | 'guided';
+  guideActive?: boolean;
   onShown?: (items: DisclosedCopilotSuggestion[]) => void;
   onResolve: (
     id: string,
@@ -49,32 +51,47 @@ export function TherapyCopilotRail({
   const planned = askNext.filter((a) => a.source === 'CARRIED');
   const live = askNext.filter((a) => a.source !== 'CARRIED');
   const nothing = riskWatch.length === 0 && askNext.length === 0 && threads.length === 0;
-  const visible = liveCopilotVisibleCounts(mode, planned.length, live.length, threads.length);
+  const visible = liveCopilotVisibleCounts(
+    mode,
+    planned.length,
+    live.length,
+    threads.length,
+    guideActive,
+  );
   const liveDetailsRef = useRef<HTMLDetailsElement>(null);
   const threadDetailsRef = useRef<HTMLDetailsElement>(null);
   const reportShown = useCallback(() => {
     if (!onShown) return;
     // Read native disclosure state, so updates while open and removed/remounted
     // details use what is actually disclosed, not stale expansion state.
-    const items = disclosedCopilotSuggestions(reasoning, mode, {
-      live: liveDetailsRef.current?.open ?? false,
-      threads: threadDetailsRef.current?.open ?? false,
-    });
+    const items = disclosedCopilotSuggestions(
+      reasoning,
+      mode,
+      {
+        live: liveDetailsRef.current?.open ?? false,
+        threads: threadDetailsRef.current?.open ?? false,
+      },
+      guideActive,
+    );
     if (items.length > 0) onShown(items);
-  }, [reasoning, mode, onShown]);
+  }, [reasoning, mode, onShown, guideActive]);
   useEffect(reportShown, [reportShown]);
 
   return (
     <Card className="overflow-hidden border-t-[3px] border-t-[#d9c9a3] p-0">
       <div className="flex items-center gap-2 px-4 pb-2 pt-3.5">
-        <h2 className="text-sm font-semibold text-[var(--color-ink)]">Session companion</h2>
+        <h2 className="text-base font-semibold text-[var(--color-ink)]">Session companion</h2>
         <span className="rounded-full border border-[#e7d9b0] bg-[#f6efdc] px-2 py-px text-[10px] font-bold tracking-[0.08em] text-[#8a7434]">
           AI
         </span>
-        <span className="ml-auto text-[11px] text-[var(--color-ink-3)]">
-          suggestions — you decide
-        </span>
+        <span className="ml-auto text-xs text-[var(--color-ink-2)]">suggestions — you decide</span>
       </div>
+
+      {mode === 'guided' && guideActive && (
+        <p className="px-4 pb-3 text-sm text-[var(--color-ink-2)]">
+          Your selected guide is in focus. Open other questions only when they are useful.
+        </p>
+      )}
 
       {riskWatch.length > 0 && (
         <RailSection title="Risk watch" risk>
@@ -85,14 +102,15 @@ export function TherapyCopilotRail({
       )}
 
       {mode === 'guided' && planned.length > 0 && (
-        <RailSection title={`Session plan · ${planned.length} to ask`}>
+        <RailSection title={visible.planned ? 'A question you prepared' : 'Prepared questions'}>
           {planned.slice(0, visible.planned).map((a) => (
             <AskCard key={a.id} item={a} onResolve={onResolve} />
           ))}
           {planned.length > visible.planned && (
-            <details className="pt-2 text-xs">
+            <details className="pt-2 text-sm">
               <summary className="cursor-pointer text-[var(--color-accent)]">
-                {planned.length - visible.planned} more prepared questions
+                {visible.planned ? 'More prepared questions' : 'Open prepared questions'} (
+                {planned.length - visible.planned})
               </summary>
               <div className="mt-3 space-y-2">
                 {planned.slice(visible.planned).map((a) => (
@@ -105,14 +123,19 @@ export function TherapyCopilotRail({
       )}
 
       {mode === 'guided' && live.length > 0 && (
-        <RailSection title="Heard live — ask next">
+        <RailSection
+          title={visible.live ? 'A question to consider now' : 'Questions from this conversation'}
+        >
           {live.slice(0, visible.live).map((a) => (
             <AskCard key={a.id} item={a} onResolve={onResolve} />
           ))}
           {live.length > visible.live && (
-            <details ref={liveDetailsRef} onToggle={reportShown} className="pt-2 text-xs">
+            <details ref={liveDetailsRef} onToggle={reportShown} className="pt-2 text-sm">
               <summary className="cursor-pointer text-[var(--color-accent)]">
-                {live.length - visible.live} more live suggestions
+                {visible.live
+                  ? 'More questions from this conversation'
+                  : 'Open questions from this conversation'}{' '}
+                ({live.length - visible.live})
               </summary>
               <div className="mt-3 space-y-2">
                 {live.slice(visible.live).map((a) => (
@@ -125,14 +148,15 @@ export function TherapyCopilotRail({
       )}
 
       {mode === 'guided' && threads.length > 0 && (
-        <RailSection title="Threads not followed">
+        <RailSection title="Topics to return to">
           {threads.slice(0, visible.threads).map((t) => (
             <ThreadCard key={t.id} item={t} onResolve={onResolve} />
           ))}
           {threads.length > visible.threads && (
-            <details ref={threadDetailsRef} onToggle={reportShown} className="pt-2 text-xs">
+            <details ref={threadDetailsRef} onToggle={reportShown} className="pt-2 text-sm">
               <summary className="cursor-pointer text-[var(--color-accent)]">
-                {threads.length - visible.threads} more threads
+                {visible.threads ? 'More topics' : 'Open topics'} (
+                {threads.length - visible.threads})
               </summary>
               <div className="mt-3 space-y-2">
                 {threads.slice(visible.threads).map((t) => (
@@ -157,10 +181,10 @@ export function TherapyCopilotRail({
       )}
 
       {arc && (
-        <div className="border-t border-[var(--color-line-soft)] px-4 py-3">
-          <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
-            Session arc
-          </p>
+        <details className="border-t border-[var(--color-line-soft)] px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
+            Session pacing · {arc.elapsedMin} of {arc.plannedMin} min
+          </summary>
           <p className="mt-1 text-[12.5px] capitalize text-[var(--color-ink-2)]">
             {arc.phase} phase · {arc.elapsedMin} of {arc.plannedMin} min
           </p>
@@ -173,7 +197,7 @@ export function TherapyCopilotRail({
             />
           </div>
           <p className="text-[12px] text-[var(--color-ink-3)]">{arc.suggestion}</p>
-        </div>
+        </details>
       )}
     </Card>
   );
@@ -191,7 +215,7 @@ function RailSection({
   return (
     <div className="border-t border-[var(--color-line-soft)] px-4 py-3">
       <h3
-        className={`mb-2 text-[10.5px] font-bold uppercase tracking-[0.1em] ${
+        className={`mb-2 text-sm font-semibold ${
           risk ? 'text-[var(--color-risk,#a03b34)]' : 'text-[var(--color-ink-3)]'
         }`}
       >
@@ -223,11 +247,11 @@ function RiskCard({
 }) {
   return (
     <div
-      className={`rounded-xl border p-2.5 text-[12.5px] ${SEVERITY_TONE[item.severity] ?? SEVERITY_TONE['low']}`}
+      className={`rounded-xl border p-3 text-sm ${SEVERITY_TONE[item.severity] ?? SEVERITY_TONE['low']}`}
     >
       <div className="flex items-baseline justify-between gap-2">
         <b className="text-[var(--color-ink)]">{item.label}</b>
-        <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--color-ink-3)]">
+        <span className="text-xs font-semibold text-[var(--color-ink-2)]">
           {item.source === 'CARRIED_RISK' ? 'carried' : item.severity}
         </span>
       </div>
@@ -257,7 +281,7 @@ function AskCard({
   ) => void;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--color-line-soft)] p-2.5 text-[12.5px]">
+    <div className="rounded-xl border border-[var(--color-line-soft)] p-3 text-sm">
       <b className="text-[var(--color-ink)]">{item.question}</b>
       <p className="mt-0.5 text-[var(--color-ink-3)]">{item.why}</p>
       <div className="mt-1.5 flex gap-1.5">
@@ -285,7 +309,7 @@ function ThreadCard({
   ) => void;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--color-line-soft)] p-2.5 text-[12.5px]">
+    <div className="rounded-xl border border-[var(--color-line-soft)] p-3 text-sm">
       <div className="flex items-baseline justify-between gap-2">
         <b className="text-[var(--color-ink)]">{item.topic}</b>
         {item.mentions > 1 && (
@@ -315,13 +339,11 @@ function MiniAct({
   quiet?: boolean;
 }) {
   return (
-    // TS7.5 — tapped mid-conversation, half-looking: the label stays small
-    // but py-2/px-3 grows the hit area toward the 44px minimum without
-    // reshaping the rail.
+    // Large enough to use while attention stays primarily with the client.
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-3 py-2 text-[11px] font-semibold transition-colors ${
+      className={`min-h-11 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
         quiet
           ? 'text-[var(--color-ink-3)] hover:text-[var(--color-ink)]'
           : 'border border-[var(--color-line)] bg-white text-[var(--color-accent)] hover:border-[var(--color-accent)]'

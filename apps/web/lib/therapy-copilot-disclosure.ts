@@ -12,6 +12,7 @@ export function disclosedCopilotSuggestions(
   reasoning: TherapyReasoningV1,
   mode: 'quiet' | 'guided',
   expanded: { live: boolean; threads: boolean },
+  guideActive = false,
 ): DisclosedCopilotSuggestion[] {
   const risks: DisclosedCopilotSuggestion[] = reasoning.riskWatch
     .filter((item) => item.source !== 'CARRIED_RISK')
@@ -19,7 +20,14 @@ export function disclosedCopilotSuggestions(
   if (mode === 'quiet') return risks;
 
   const live = reasoning.askNext.filter((item) => item.source !== 'CARRIED');
-  const visible = liveCopilotVisibleCounts(mode, 0, live.length, reasoning.threads.length);
+  const planned = reasoning.askNext.filter((item) => item.source === 'CARRIED');
+  const visible = liveCopilotVisibleCounts(
+    mode,
+    planned.length,
+    live.length,
+    reasoning.threads.length,
+    guideActive,
+  );
   return [
     ...risks,
     ...live.slice(0, expanded.live ? live.length : visible.live).map((item) => ({

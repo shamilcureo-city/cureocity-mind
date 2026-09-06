@@ -44,6 +44,7 @@ beforeEach(() => {
   mocks.sessionFindFirst.mockResolvedValue({
     id: 'session-1',
     psychologist: { vertical: 'THERAPIST' },
+    clinicalReport: { status: 'COMPLETED' },
   });
   mocks.executeRaw.mockResolvedValue(1);
   mocks.closeoutFindUnique.mockResolvedValue(null);
@@ -124,5 +125,22 @@ describe('Mind closeout decision route', () => {
       }),
       expect.objectContaining({ mindSessionCloseoutState: expect.anything() }),
     );
+  });
+  it('cannot mark missing clinical analysis as reviewed, but permits an explicit skip', async () => {
+    mocks.sessionFindFirst.mockResolvedValue({
+      id: 'session-1',
+      psychologist: { vertical: 'THERAPIST' },
+      clinicalReport: null,
+    });
+    const response = await PATCH(request('clinicalSuggestions', 'COMPLETE') as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(409);
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    const skipped = await PATCH(request('clinicalSuggestions', 'SKIPPED') as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(skipped.status).toBe(200);
+    expect(mocks.closeoutUpsert).toHaveBeenCalledOnce();
   });
 });

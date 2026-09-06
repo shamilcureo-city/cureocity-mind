@@ -377,7 +377,7 @@ export async function ClientPlanOfCareContent({
     suggestions: latestReportParse?.success ? latestReportParse.data.formulationSuggestions : [],
   };
   const recommendedTherapies = latestReportParse?.success
-    ? latestReportParse.data.recommendedTherapies.map((t) => t.name)
+    ? latestReportParse.data.recommendedTherapies
     : [];
   const langParse = ClinicalLocaleSchema.safeParse(preferredLanguage);
   const defaultLanguage: ClinicalLocale = langParse.success ? langParse.data : 'en';

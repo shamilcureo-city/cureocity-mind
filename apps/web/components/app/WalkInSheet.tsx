@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '../ui/Button';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { mindStartEntryHref } from '@/lib/mind-session-start';
+import { newWalkInClientHref } from '@/lib/client-entry-intent';
 
 export interface WalkInClient {
   id: string;
@@ -118,15 +119,13 @@ export function WalkInSheet({ clients, recentClientIds, defaultCapture }: Props)
                         </span>
                       )}
                     </span>
-                    <span className="text-xs font-medium text-[var(--color-accent)]">
-                      ▸ preflight
-                    </span>
+                    <span className="text-xs font-medium text-[var(--color-accent)]">Continue</span>
                   </button>
                 </li>
               ))}
             </ul>
             <Link
-              href="/app/clients"
+              href={newWalkInClientHref(defaultCapture)}
               className="mt-3 block rounded-full border border-[var(--color-line)] bg-white px-4 py-2.5 text-center text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
             >
               + New client
