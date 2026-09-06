@@ -117,6 +117,7 @@ export const AuditActionSchema = z.enum([
   // can replay what the therapist viewed.
   'THERAPY_SCRIPT_GENERATED',
   'THERAPY_SCRIPT_VIEWED',
+  'THERAPY_GUIDE_REVIEW_UPDATED',
   // Patient CRM / sharing — Sprint 15.
   // Every Send-to-patient click writes ARTEFACT_SHARED with the
   // channel + outcome; portal opens write PORTAL_OPENED.

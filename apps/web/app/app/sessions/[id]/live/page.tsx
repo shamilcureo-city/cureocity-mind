@@ -24,7 +24,7 @@ export default async function TherapistLivePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ flash?: string; mic?: string }>;
+  searchParams: Promise<{ flash?: string; mic?: string; guide?: string }>;
 }) {
   const therapist = await requireOnboardedPsychologist();
   if (therapist.vertical === 'DOCTOR') redirect('/app/clinic');
@@ -148,6 +148,7 @@ export default async function TherapistLivePage({
         carriedQuestions={carriedQuestions}
         priorRisk={priorRisk}
         preparedGuides={preparedGuides}
+        initialGuideId={sp.guide}
       />
     </Container>
   );

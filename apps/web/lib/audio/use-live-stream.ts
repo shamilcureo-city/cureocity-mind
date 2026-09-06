@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PolyphaseDecimator, float32ToInt16Le } from '@cureocity/audio';
+import { stopWorklet } from './stop-worklet';
 
 export type LiveStreamState = 'idle' | 'preparing' | 'streaming' | 'error';
 
@@ -10,6 +11,7 @@ export interface LiveStreamOptions {
   onFrame: (pcm: Uint8Array) => void;
   /** Exact microphone selected and proven by Mind preflight. */
   selectedDeviceId?: string;
+  onInterrupted?: (message: string) => void;
 }
 
 export interface LiveStreamHandle {
@@ -36,27 +38,35 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
   const [state, setState] = useState<LiveStreamState>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const workletRef = useRef<AudioWorkletNode | null>(null);
-  const decimatorRef = useRef<PolyphaseDecimator | null>(null);
+  type Capture = {
+    stream?: MediaStream;
+    ctx?: AudioContext;
+    worklet?: AudioWorkletNode;
+    decimator?: PolyphaseDecimator;
+    stopping: boolean;
+  };
+  const captureRef = useRef<Capture | null>(null);
   const onFrameRef = useRef(opts.onFrame);
   onFrameRef.current = opts.onFrame;
-
-  const teardown = useCallback(async (): Promise<void> => {
-    workletRef.current?.disconnect();
-    workletRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
-      await audioCtxRef.current.close();
-    }
-    audioCtxRef.current = null;
-    decimatorRef.current?.reset();
-    decimatorRef.current = null;
+  const interruptedRef = useRef(opts.onInterrupted);
+  interruptedRef.current = opts.onInterrupted;
+  const generationRef = useRef(0);
+  const teardown = useCallback(async (capture: Capture | null): Promise<void> => {
+    if (!capture) return;
+    capture.stopping = true;
+    if (captureRef.current === capture) captureRef.current = null;
+    capture.worklet?.disconnect();
+    capture.stream?.getTracks().forEach((t) => t.stop());
+    capture.decimator?.reset();
+    if (capture.ctx && capture.ctx.state !== 'closed') await capture.ctx.close();
   }, []);
 
   const start = useCallback(async (): Promise<void> => {
+    const generation = ++generationRef.current;
+    await teardown(captureRef.current);
+    if (generation !== generationRef.current) throw new Error('Capture start was cancelled.');
+    const capture: Capture = { stopping: false };
+    captureRef.current = capture;
     setState('preparing');
     setError(null);
     try {
@@ -69,22 +79,52 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
           ...(opts.selectedDeviceId ? { deviceId: { exact: opts.selectedDeviceId } } : {}),
         },
       });
-      streamRef.current = stream;
+      capture.stream = stream;
+      if (generation !== generationRef.current) {
+        throw new Error('Capture start was cancelled.');
+      }
+      const interrupted = (message: string) => {
+        if (capture.stopping || generation !== generationRef.current) return;
+        ++generationRef.current;
+        setError(message);
+        setState('error');
+        void teardown(capture);
+        interruptedRef.current?.(message);
+      };
+      stream.getAudioTracks().forEach((track) => {
+        const unavailable = () =>
+          interrupted(
+            'The microphone stopped or became unavailable. Reconnect it before resuming capture.',
+          );
+        track.addEventListener('ended', unavailable);
+        track.addEventListener('mute', unavailable);
+      });
 
       const ctx = new AudioContext({ sampleRate: 48_000 });
+      capture.ctx = ctx;
       await ctx.audioWorklet.addModule('/recorder-worklet.js');
-      audioCtxRef.current = ctx;
+      if (generation !== generationRef.current) throw new Error('Capture start was cancelled.');
+      if (ctx.state !== 'running') await ctx.resume();
+      if (generation !== generationRef.current) throw new Error('Capture start was cancelled.');
+      if (ctx.state !== 'running')
+        throw new Error('Audio capture is suspended. Resume capture when this tab is active.');
+      ctx.addEventListener('statechange', () => {
+        if (ctx.state !== 'running')
+          interrupted(
+            'Audio capture was interrupted by the browser or device. Keep this tab active and resume capture.',
+          );
+      });
 
       const source = ctx.createMediaStreamSource(stream);
       const worklet = new AudioWorkletNode(ctx, 'cureocity-recorder');
-      workletRef.current = worklet;
+      capture.worklet = worklet;
 
       const decimator = new PolyphaseDecimator(3);
-      decimatorRef.current = decimator;
+      capture.decimator = decimator;
 
       worklet.port.onmessage = (e: MessageEvent<{ type: string; samples: Float32Array }>) => {
-        if (e.data.type !== 'frames' || !decimatorRef.current) return;
-        const decimated = decimatorRef.current.process(e.data.samples);
+        if (e.data.type !== 'frames' || captureRef.current !== capture) return;
+        const decimated = decimator.process(e.data.samples);
         if (decimated.length === 0) return;
         onFrameRef.current(float32ToInt16Le(decimated));
       };
@@ -96,22 +136,31 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
 
       setState('streaming');
     } catch (e) {
-      setError((e as Error).message);
-      setState('error');
-      await teardown();
+      if (generation === generationRef.current) {
+        setError((e as Error).message);
+        setState('error');
+      }
+      await teardown(capture);
       throw e;
     }
   }, [opts.selectedDeviceId, teardown]);
 
   const stop = useCallback(async (): Promise<void> => {
-    workletRef.current?.port.postMessage({ type: 'stop' });
-    await teardown();
-    setState('idle');
+    const generation = ++generationRef.current;
+    const capture = captureRef.current;
+    if (capture) capture.stopping = true;
+    try {
+      await stopWorklet(capture?.worklet ?? null);
+    } finally {
+      await teardown(capture);
+      if (generation === generationRef.current) setState('idle');
+    }
   }, [teardown]);
 
   useEffect(() => {
     return () => {
-      void teardown();
+      ++generationRef.current;
+      void teardown(captureRef.current);
     };
   }, [teardown]);
 

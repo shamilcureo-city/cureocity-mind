@@ -112,11 +112,11 @@ describe('Mind guide identity and truthful review progress', () => {
     expect(reviewedGuideCount([], new Set(['opening']))).toBe(0);
   });
 
-  it('limits ordinary guided prompts to one per category and hides them all in Quiet', () => {
+  it('shows one ordinary focus across categories and hides all ordinary prompts in Quiet', () => {
     expect(liveCopilotVisibleCounts('guided', 3, 7, 2)).toEqual({
-      planned: 1,
+      planned: 0,
       live: 1,
-      threads: 1,
+      threads: 0,
     });
     expect(liveCopilotVisibleCounts('guided', 0, 1, 0)).toEqual({
       planned: 0,
@@ -124,6 +124,21 @@ describe('Mind guide identity and truthful review progress', () => {
       threads: 0,
     });
     expect(liveCopilotVisibleCounts('quiet', 3, 7, 2)).toEqual({
+      planned: 0,
+      live: 0,
+      threads: 0,
+    });
+    expect(liveCopilotVisibleCounts('guided', 3, 0, 2)).toEqual({
+      planned: 1,
+      live: 0,
+      threads: 0,
+    });
+    expect(liveCopilotVisibleCounts('guided', 0, 0, 2)).toEqual({
+      planned: 0,
+      live: 0,
+      threads: 1,
+    });
+    expect(liveCopilotVisibleCounts('guided', 3, 7, 2, true)).toEqual({
       planned: 0,
       live: 0,
       threads: 0,
@@ -181,11 +196,28 @@ describe('Mind Quiet mode clinical boundary', () => {
     for (const question of reasoning.askNext) expect(html).toContain(question.question);
     for (const thread of reasoning.threads) expect(html).toContain(thread.topic);
     expect(collapsed[0]).toContain('SYNTHETIC CARRIED ordinary question 2');
-    expect(collapsed[0]).not.toContain('SYNTHETIC CARRIED ordinary question 1');
+    expect(collapsed[0]).toContain('SYNTHETIC CARRIED ordinary question 1');
     expect(collapsed[1]).toContain('SYNTHETIC LIVE ordinary question 2');
     expect(collapsed[1]).not.toContain('SYNTHETIC LIVE ordinary question 1');
     expect(collapsed[2]).toContain('SYNTHETIC ordinary topic 2');
-    expect(collapsed[2]).not.toContain('SYNTHETIC ordinary topic 1');
+    expect(collapsed[2]).toContain('SYNTHETIC ordinary topic 1');
+    const outsideDisclosures = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '');
+    expect(outsideDisclosures).toContain('SYNTHETIC LIVE ordinary question 1');
+    for (const item of reasoning.askNext.filter((item) => item.id !== 'LIVE-1')) {
+      expect(outsideDisclosures).not.toContain(item.question);
+    }
+  });
+
+  it('keeps all ordinary prompts optional when a guide is selected, without hiding risk', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(TherapyCopilotRail, { reasoning, guideActive: true, onResolve: vi.fn() }),
+    );
+    const outsideDisclosures = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '');
+    for (const item of reasoning.riskWatch) expect(outsideDisclosures).toContain(item.label);
+    for (const item of reasoning.askNext) expect(outsideDisclosures).not.toContain(item.question);
+    for (const item of reasoning.threads) expect(outsideDisclosures).not.toContain(item.topic);
+    expect(outsideDisclosures).toContain('Your selected guide is in focus');
+    expect(html).toContain('min-h-11');
   });
 });
 

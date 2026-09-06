@@ -92,7 +92,7 @@ export const DPDP_ERASURE_MANIFEST = {
   CaseFormulation: clinicalDelete('delete formulation body and provenance'),
   SessionAgreement: clinicalDelete('delete carried agreement text and follow-up'),
   MindSessionCloseoutState: redact(
-    'clear patientTakeaway narrative; retain non-PHI closeout completion evidence and follow-up linkage',
+    'clear patientTakeaway narrative and nextQuestionsSnapshot; retain non-PHI closeout completion evidence and follow-up linkage',
   ),
   TreatmentEpisode: clinicalDelete('delete episode outcome and close reason'),
   AssessmentItem: clinicalDelete('delete assessment question, rationale and resolution'),

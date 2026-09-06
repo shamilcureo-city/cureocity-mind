@@ -37,10 +37,15 @@
   border-radius: 12px;
 }
 .modes button {
+  min-height: 44px;
   border-radius: 8px;
   padding: 8px 12px;
   color: var(--color-ink-2);
-  font-size: 12px;
+  font-size: 14px;
+}
+.modes button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .modes button[aria-pressed='true'] {
   background: var(--color-accent-soft);
@@ -109,6 +114,7 @@
   gap: 7px;
 }
 .path button {
+  min-height: 44px;
   position: relative;
   display: flex;
   gap: 10px;
@@ -118,7 +124,7 @@
   color: var(--color-ink-2);
   text-align: left;
   border-radius: 10px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .path button[aria-current='step'] {
   background: var(--color-accent-soft);

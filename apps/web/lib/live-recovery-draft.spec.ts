@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  browserRecoveryStorage,
   clearRecoveryDraftAfterDurableSave,
   hasUniqueUnsavedContent,
   loadRecoveryDraft,
@@ -31,6 +32,21 @@ const draft = {
 };
 
 describe('live recovery draft', () => {
+  it('reports disabled storage even when accessing localStorage itself throws', () => {
+    vi.stubGlobal('window', {
+      get localStorage() {
+        throw new Error('storage disabled');
+      },
+    });
+    try {
+      const storage = browserRecoveryStorage();
+      expect(saveRecoveryDraft(storage, draft)).toBe(false);
+      expect(loadRecoveryDraft(storage, 'session-1')).toBeNull();
+      expect(clearRecoveryDraftAfterDurableSave(storage, 'session-1', true)).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
   it('restores unique captured content after refresh or reopen', () => {
     const storage = memoryStorage();
     saveRecoveryDraft(storage, draft);

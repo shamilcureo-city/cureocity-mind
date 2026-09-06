@@ -1,4 +1,6 @@
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { createPlanSuggestionState } from './plan-suggestion-state';
 import {
   computeCostInr,
   estimateAudioInputTokens,
@@ -26,7 +28,8 @@ import { isBuiltinTemplateId, resolveBuiltinTemplate } from './builtin-templates
 import { writeAudit } from './audit';
 import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { clientIdForSession, fetchActiveMedications } from './patient-context';
-import { encryptForTenant } from './tenant-crypto';
+import { encryptForTenant, decryptForTenant } from './tenant-crypto';
+import { mergeRecoveryPrefix, type RecoveryPrefix } from './mind-recovery-prefix';
 import { ensureEnglishNote } from './ensure-english-note';
 import { mapRiskSeverity, recordCommittedNoteRisk, writeNoteRiskAudit } from './note-risk';
 import { modelRouter } from './llm';
@@ -119,11 +122,49 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
 
   try {
     const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
-    const pass1 = await runOrAssemblePass1({
+    // Use the row returned while claiming IN_PROGRESS under the PHI lock.
+    // A recovery append can commit after the earlier idempotency read;
+    // using that stale snapshot would omit already-acknowledged words.
+    const recoveryCiphertext = draft.recoveryTranscriptEncrypted;
+    let prefix: RecoveryPrefix | null = null;
+    if (session.psychologist.vertical === 'THERAPIST' && recoveryCiphertext) {
+      const decoded = await decryptForTenant(session.psychologistId, recoveryCiphertext);
+      if (!decoded)
+        throw new Error(
+          'Saved recovery transcript could not be decrypted. Retry when secure storage is available.',
+        );
+      prefix = JSON.parse(decoded) as RecoveryPrefix;
+      if (
+        prefix.version !== 1 ||
+        typeof prefix.transcript !== 'string' ||
+        !Array.isArray(prefix.speakerSegments)
+      )
+        throw new Error(
+          'Saved recovery transcript is invalid. Do not generate from incomplete audio.',
+        );
+    }
+    let pass1 = await runOrAssemblePass1({
       sessionId,
       psychologistId: session.psychologistId,
       llmBackend,
     });
+    if (prefix) {
+      const batch =
+        pass1.kind === 'no-audio'
+          ? {
+              kind: 'ready' as const,
+              source: 'assembled' as const,
+              transcript: '',
+              speakerSegments: [],
+              affectFeatures: [],
+              detectedLanguages: [],
+              totalCostInr: 0,
+              totalDurationMs: 0,
+              segmentCount: 0,
+            }
+          : pass1;
+      pass1 = mergeRecoveryPrefix(prefix, batch);
+    }
     if (pass1.kind === 'no-audio') {
       throw new Error(
         'No audio chunks reached storage for this session. Record at least one 30-second chunk and end the session again — the orchestrator skips empty sessions to avoid an unnecessary Gemini bill.',
@@ -898,6 +939,7 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
         update: {
           status: 'PENDING',
           errorMessage: null,
+          planSuggestionState: Prisma.DbNull,
         },
         create: {
           sessionId: args.sessionId,
@@ -1041,6 +1083,13 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
           data: {
             status: 'COMPLETED',
             body: pass3Body as unknown as Prisma.InputJsonValue,
+            planSuggestionState:
+              pass3.output.kind !== 'INTAKE' && activePlan
+                ? ((createPlanSuggestionState(
+                    activePlan,
+                    randomUUID(),
+                  ) as unknown as Prisma.InputJsonValue) ?? Prisma.DbNull)
+                : Prisma.DbNull,
             totalCostInr: new Prisma.Decimal(pass3.callLog.costInr),
           },
         });

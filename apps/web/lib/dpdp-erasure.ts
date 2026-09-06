@@ -109,7 +109,7 @@ export async function eraseClientPhi(
   // Session parents. The patient-authored narrative is not part of that proof.
   await tx.mindSessionCloseoutState.updateMany({
     where: { sessionId: { in: sessionIds } },
-    data: { patientTakeaway: null },
+    data: { patientTakeaway: null, nextQuestionsSnapshot: Prisma.DbNull },
   });
   const notes = await tx.therapyNote.findMany({
     where: { sessionId: { in: sessionIds } },
@@ -224,6 +224,7 @@ export async function eraseClientPhi(
     where: { sessionId: { in: sessionIds } },
     data: {
       transcriptEncrypted: null,
+      recoveryTranscriptEncrypted: null,
       speakerSegments: Prisma.DbNull,
       affectFeatures: Prisma.DbNull,
       content: Prisma.DbNull,

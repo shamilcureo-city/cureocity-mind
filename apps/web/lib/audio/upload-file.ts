@@ -27,6 +27,31 @@ export interface FileUploadResult {
   durationMs: number;
 }
 
+export class IncompleteAudioUploadError extends Error {
+  constructor(
+    readonly remaining: number,
+    readonly prepared?: FileUploadResult,
+  ) {
+    super(
+      `${remaining} recording part(s) are not uploaded. Keep this tab open and retry uploading before generating a note.`,
+    );
+  }
+}
+
+export class AudioFileStorageError extends Error {
+  constructor() {
+    super(
+      'The audio file could not be fully saved in this browser. Keep this file selected, restore browser storage and retry preparation. No note has been requested.',
+    );
+  }
+}
+
+export async function retryAudioUpload(sessionId: string): Promise<void> {
+  await new ChunkUploader({ scribeBase: '/api/v1' }).drainSession(sessionId, undefined, true);
+  const remaining = (await ChunkStore.listForSession(sessionId)).length;
+  if (remaining) throw new IncompleteAudioUploadError(remaining);
+}
+
 /**
  * Decodes an uploaded audio file (any browser-supported codec — wav, mp3,
  * m4a, webm/opus, flac), downmixes to mono, resamples to 16 kHz via the
@@ -39,6 +64,10 @@ export interface FileUploadResult {
  * the target context rate.
  */
 export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUploadResult> {
+  const existingCursor = await SessionStore.getCursor(opts.sessionId);
+  if (existingCursor?.captureIntegrityError) throw new Error(existingCursor.captureIntegrityError);
+  if (opts.file.size > 100 * 1024 * 1024)
+    throw new Error('Choose an audio file smaller than 100 MB.');
   await requestPersistentStorage();
 
   const arrayBuffer = await opts.file.arrayBuffer();
@@ -46,8 +75,14 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
     window.AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
   )();
-  const decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0));
-  await decodeCtx.close();
+  let decoded: AudioBuffer;
+  try {
+    decoded = await decodeCtx.decodeAudioData(arrayBuffer.slice(0));
+  } finally {
+    await decodeCtx.close();
+  }
+  if (decoded.duration <= 0 || decoded.duration > 3 * 60 * 60)
+    throw new Error('Choose audio between 1 second and 3 hours long.');
 
   // Render to 48 kHz mono via OfflineAudioContext so the polyphase
   // decimator (3:1, 48->16) sees the input it was tuned for.
@@ -104,7 +139,7 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
     opts.onProgress?.({
       decoded: cursor,
       total: monoMid.length,
-      chunksUploaded: chunksWritten,
+      chunksUploaded: 0,
     });
     // Yield to the event loop occasionally.
     await new Promise((r) => setTimeout(r, 0));
@@ -128,40 +163,54 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
   // inside the chunker via its internal buffer copy in the
   // packages/audio implementation — but for safety, the chunker stores
   // int16 bytes directly per its contract).
-  for (const chunk of completedChunks) {
-    // PcmChunker emits 16-bit int LE PCM bytes per its type contract;
-    // belt-and-braces re-encode in case a future change relaxes that.
-    const bytes =
-      chunk.bytes instanceof Uint8Array
-        ? chunk.bytes
-        : float32ToInt16Le(chunk.bytes as unknown as Float32Array);
-    await ChunkStore.insert({
-      sessionId: opts.sessionId,
-      chunkIndex: chunk.chunkIndex,
-      mimeType: TARGET_MIME_TYPE,
-      sampleRate: TARGET_SAMPLE_RATE_HZ,
-      durationMs: chunk.durationMs,
-      bytes,
-      enqueuedAt: chunk.startedAt,
-      attempts: 0,
-    });
-    chunksWritten += 1;
-    opts.onProgress?.({
-      decoded: monoMid.length,
-      total: monoMid.length,
-      chunksUploaded: chunksWritten,
-    });
+  try {
+    for (const chunk of completedChunks) {
+      // PcmChunker emits 16-bit int LE PCM bytes per its type contract;
+      // belt-and-braces re-encode in case a future change relaxes that.
+      const bytes =
+        chunk.bytes instanceof Uint8Array
+          ? chunk.bytes
+          : float32ToInt16Le(chunk.bytes as unknown as Float32Array);
+      await ChunkStore.insert({
+        sessionId: opts.sessionId,
+        chunkIndex: chunk.chunkIndex,
+        mimeType: TARGET_MIME_TYPE,
+        sampleRate: TARGET_SAMPLE_RATE_HZ,
+        durationMs: chunk.durationMs,
+        bytes,
+        enqueuedAt: chunk.startedAt,
+        attempts: 0,
+      });
+      chunksWritten += 1;
+      opts.onProgress?.({
+        decoded: monoMid.length,
+        total: monoMid.length,
+        chunksUploaded: 0,
+      });
+    }
+  } catch {
+    throw new AudioFileStorageError();
   }
 
-  await uploader.drainSession(opts.sessionId);
+  const prepared = { chunksWritten, durationMs: Math.round(decoded.duration * 1000) };
+  try {
+    await uploader.drainSession(opts.sessionId, (done) =>
+      opts.onProgress?.({
+        decoded: monoMid.length,
+        total: monoMid.length,
+        chunksUploaded: done,
+      }),
+    );
 
-  const remaining = (await ChunkStore.listForSession(opts.sessionId)).length;
-  if (remaining === 0) await SessionStore.clear(opts.sessionId);
+    const remaining = (await ChunkStore.listForSession(opts.sessionId)).length;
+    if (remaining > 0) throw new IncompleteAudioUploadError(remaining, prepared);
+    await SessionStore.clear(opts.sessionId);
+  } catch (reason) {
+    if (reason instanceof IncompleteAudioUploadError) throw reason;
+    throw new IncompleteAudioUploadError(chunksWritten, prepared);
+  }
 
-  return {
-    chunksWritten,
-    durationMs: Math.round(decoded.duration * 1000),
-  };
+  return prepared;
 }
 
 /**

@@ -11,6 +11,7 @@ import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
 import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
+import { clientCreationEntry } from '@/lib/client-entry-intent';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,9 @@ interface SearchParams {
   q?: string;
   status?: string;
   cursor?: string;
+  new?: string;
+  returnTo?: string;
+  capture?: string;
 }
 
 export default async function ClientsPage({
@@ -52,11 +56,6 @@ export default async function ClientsPage({
     isDemo: true,
     createdAt: true,
     _count: { select: { sessions: true } },
-    sessions: {
-      orderBy: { scheduledAt: 'desc' as const },
-      take: 1,
-      select: { scheduledAt: true },
-    },
   } satisfies Prisma.ClientSelect;
 
   let pageRows: Prisma.ClientGetPayload<{ select: typeof clientSelect }>[];
@@ -112,6 +111,35 @@ export default async function ClientsPage({
     );
   }
 
+  const pageClientIds = pageRows.map((client) => client.id);
+  const [completed, upcoming] = pageClientIds.length
+    ? await Promise.all([
+        prisma.session.groupBy({
+          by: ['clientId'],
+          where: {
+            psychologistId: therapist.id,
+            clientId: { in: pageClientIds },
+            status: 'COMPLETED',
+          },
+          _max: { endedAt: true, scheduledAt: true },
+        }),
+        prisma.session.groupBy({
+          by: ['clientId'],
+          where: {
+            psychologistId: therapist.id,
+            clientId: { in: pageClientIds },
+            status: 'SCHEDULED',
+            scheduledAt: { gte: new Date() },
+          },
+          _min: { scheduledAt: true },
+        }),
+      ])
+    : [[], []];
+  const lastByClient = new Map(
+    completed.map((row) => [row.clientId, row._max.endedAt ?? row._max.scheduledAt]),
+  );
+  const nextByClient = new Map(upcoming.map((row) => [row.clientId, row._min.scheduledAt]));
+
   // Preserve the active query + status when paginating.
   const nextHref = nextCursor
     ? `/app/clients?${new URLSearchParams({
@@ -125,7 +153,7 @@ export default async function ClientsPage({
 
   return (
     <Container className="py-10">
-      <ClientsHeader />
+      <ClientsHeader key={`${sp.new ?? ''}:${sp.returnTo ?? ''}`} {...clientCreationEntry(sp)} />
 
       <ClientSearchControls />
 
@@ -142,7 +170,7 @@ export default async function ClientsPage({
           <span>Status</span>
           <span>Client since</span>
           <span className="text-right tabular-nums">Total sessions</span>
-          <span>Last session</span>
+          <span>Last completed / next</span>
         </div>
         {pageRows.length === 0 ? (
           filtered ? (
@@ -192,7 +220,18 @@ export default async function ClientsPage({
                     {c._count.sessions}
                   </span>
                   <span className="text-[var(--color-ink-2)]">
-                    {c.sessions[0] ? formatDateTime(c.sessions[0].scheduledAt) : '—'}
+                    <span className="block">
+                      Last:{' '}
+                      {lastByClient.get(c.id)
+                        ? formatDateTime(lastByClient.get(c.id)!)
+                        : 'None yet'}
+                    </span>
+                    <span className="mt-1 block text-xs text-[var(--color-ink-3)]">
+                      Next:{' '}
+                      {nextByClient.get(c.id)
+                        ? formatDateTime(nextByClient.get(c.id)!)
+                        : 'Not booked'}
+                    </span>
                   </span>
                 </Link>
                 <div className="shrink-0 pr-4">

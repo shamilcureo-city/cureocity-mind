@@ -1,7 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { TherapyScriptSchema, type TherapyScript } from '@cureocity/contracts';
+import Link from 'next/link';
+import {
+  TherapyScriptSchema,
+  type ClinicalRecommendedTherapy,
+  type TherapyScript,
+} from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { languageName } from '../../lib/language-names';
 import { Button } from '../ui/Button';
@@ -11,8 +16,8 @@ import { MindTherapyGuide } from './MindTherapyGuide';
 
 interface TherapyLibraryProps {
   clientId: string;
-  /** Names of therapies the active ClinicalReport recommended. May be empty. */
-  recommendedTherapies: string[];
+  /** Preserve the case rationale where the psychologist chooses an approach. */
+  recommendedTherapies: ClinicalRecommendedTherapy[];
   /** Always-available fallback list for browse mode. */
   libraryTherapies: string[];
   defaultLanguage: 'en' | 'ml' | 'hi' | 'ta' | 'bn';
@@ -36,8 +41,8 @@ interface ScriptResponse {
  * Lists therapies grouped by source (recommended vs. library), each
  * a clickable button that opens the Script Player. The Player loads
  * a TherapyScriptV1 via the cached `/api/v1/clients/[id]/therapy-scripts`
- * POST. Guide-review navigation is held in component state (no server-side
- * persistence in V1 — that's a Sprint 14 follow-up).
+ * POST. Review navigation is saved separately from clinical content; neither
+ * opening a step nor reviewing it records therapy delivery.
  */
 export function TherapyLibrary({
   clientId,
@@ -110,7 +115,10 @@ export function TherapyLibrary({
   // De-dupe: a therapy that appears in both lists shows under
   // "Recommended" only.
   const visibleLibrary = useMemo(
-    () => libraryTherapies.filter((t) => !recommendedTherapies.includes(t)),
+    () =>
+      libraryTherapies
+        .filter((t) => !recommendedTherapies.some((item) => item.name === t))
+        .map((name) => ({ name })),
     [libraryTherapies, recommendedTherapies],
   );
 
@@ -122,6 +130,10 @@ export function TherapyLibrary({
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
             Choose an approach to prepare a case-specific draft. Review its fit, then open your
             step-by-step companion. Your judgment leads the session.
+          </p>
+          <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-2)]">
+            These are AI drafts, not approved therapy protocols. A diagnosis is not required. Choose
+            an approach within your training and review its suitability with the client.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -169,10 +181,31 @@ export function TherapyLibrary({
               ← back to library
             </button>
           </div>
-          {loading && <p className="mt-4 text-sm text-[var(--color-ink-3)]">Loading script…</p>}
+          {loading && (
+            <p role="status" className="mt-4 text-sm text-[var(--color-ink-2)]">
+              Preparing your draft guide…
+            </p>
+          )}
           {error && (
-            <div className="mt-4 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]">
-              {error}
+            <div
+              role="alert"
+              className="mt-4 rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]"
+            >
+              <p>
+                We could not confirm that the draft guide is ready. Retry to check for a saved draft
+                or prepare it again.
+              </p>
+              <Button
+                className="mt-3"
+                variant="secondary"
+                onClick={() => void loadScript(activeTherapy)}
+              >
+                Try again
+              </Button>
+              <details className="mt-3">
+                <summary>Support details</summary>
+                <p>{error}</p>
+              </details>
             </div>
           )}
           {scriptData && (
@@ -210,7 +243,22 @@ export function TherapyLibrary({
               <MindTherapyGuide
                 key={scriptData.script.id + scriptData.script.updatedAt}
                 script={scriptData.script.body}
+                reviewTarget={{
+                  clientId,
+                  scriptId: scriptData.script.id,
+                  scriptUpdatedAt: scriptData.script.updatedAt,
+                }}
               />
+              <p className="text-sm text-[var(--color-ink-2)]">
+                Ready to use this draft? It will be selected for review in your session. Recording
+                will not start automatically.
+              </p>
+              <Link
+                className="inline-flex min-h-11 items-center rounded-xl bg-[var(--color-accent)] px-5 py-3 text-sm font-semibold text-white"
+                href={`/app?record=${encodeURIComponent(clientId)}&capture=LIVE&guide=${encodeURIComponent(scriptData.script.id)}`}
+              >
+                Use this guide in a session
+              </Link>
             </div>
           )}
         </div>
@@ -252,7 +300,7 @@ function TherapyList({
 }: {
   title: string;
   empty: string;
-  therapies: string[];
+  therapies: { name: string; rationale?: string; evidenceSummary?: string; whenInPlan?: string }[];
   onPick: (t: string) => void;
 }) {
   return (
@@ -263,17 +311,34 @@ function TherapyList({
       ) : (
         <ul className="mt-2 grid gap-2 sm:grid-cols-2">
           {therapies.map((t) => (
-            <li key={t}>
-              <button
-                type="button"
-                onClick={() => onPick(t)}
-                className="group flex min-h-20 w-full items-center justify-between gap-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] px-5 py-4 text-left text-sm transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+            <li
+              key={t.name}
+              className="flex flex-col gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5 text-sm"
+            >
+              <h4 className="font-semibold">{t.name}</h4>
+              {t.rationale && (
+                <p className="leading-relaxed text-[var(--color-ink-2)]">{t.rationale}</p>
+              )}
+              {t.whenInPlan && (
+                <p className="text-[var(--color-ink-2)]">Suggested timing: {t.whenInPlan}</p>
+              )}
+              {t.evidenceSummary && (
+                <details className="text-[var(--color-ink-2)]">
+                  <summary className="cursor-pointer font-medium">AI evidence summary</summary>
+                  <p className="mt-2 leading-relaxed">{t.evidenceSummary}</p>
+                  <p className="mt-2">
+                    Check the supporting sources before using this as a clinical rationale.
+                  </p>
+                </details>
+              )}
+              <Button
+                variant="secondary"
+                className="mt-auto min-h-11"
+                onClick={() => onPick(t.name)}
+                aria-label={`Prepare draft guide: ${t.name}`}
               >
-                <span>{t}</span>
-                <span aria-hidden="true" className="text-lg text-[var(--color-accent)]">
-                  ↗
-                </span>
-              </button>
+                Prepare draft guide
+              </Button>
             </li>
           ))}
         </ul>

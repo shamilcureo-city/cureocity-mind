@@ -44,6 +44,7 @@ interface Props {
    */
   videoEnabled?: boolean;
   expectedSessionId?: string | null;
+  initialGuideId?: string;
   onCancel: () => void;
   onReady: (result: RecordReady) => void;
 }
@@ -140,6 +141,7 @@ export function RecordConfirmStrip({
   defaultCapture = 'LIVE',
   videoEnabled = true,
   expectedSessionId = null,
+  initialGuideId,
   onCancel,
   onReady,
 }: Props) {
@@ -318,7 +320,8 @@ export function RecordConfirmStrip({
       const useLiveScribe = mode === 'live-capture' && method === 'mic' && capture === 'live';
       if (useLiveScribe) {
         const mic = selectedDeviceId ? `&mic=${encodeURIComponent(selectedDeviceId)}` : '';
-        router.push(`/app/sessions/${sessionRow.id}/live?flash=1${mic}`);
+        const guide = initialGuideId ? `&guide=${encodeURIComponent(initialGuideId)}` : '';
+        router.push(`/app/sessions/${sessionRow.id}/live?flash=1${mic}${guide}`);
         return;
       }
 
@@ -340,7 +343,7 @@ export function RecordConfirmStrip({
       }
 
       const startAfterCaptureActive =
-        mode === 'live-capture' && (method === 'mic' || method === 'display');
+        !alreadyStarted && mode === 'live-capture' && (method === 'mic' || method === 'display');
       if (!alreadyStarted && !startAfterCaptureActive) {
         const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
         if (!startRes.ok) {

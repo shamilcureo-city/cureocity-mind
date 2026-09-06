@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { MindSessionCloseout } from '@cureocity/contracts';
 import { ScheduleSessionPanel } from './ScheduleSessionPanel';
 import { MindCloseoutDecisionActions } from './MindCloseoutDecisionActions';
+import { MindSessionAgreements } from './MindSessionAgreements';
 import { ShareReceiptList, type ShareReceiptView } from './ShareReceiptList';
 import { suggestFollowUp } from '../../lib/follow-up-suggestion';
 import styles from './MindSessionReview.module.css';
@@ -15,6 +16,7 @@ interface Props {
     preferredModality: string | null;
   };
   sessionAt: Date;
+  followUpSession?: { id: string; scheduledAt: string } | null;
   sessionCompleted: boolean;
   canShare: boolean;
   agreementCount?: number;
@@ -28,6 +30,7 @@ export function MindSessionCloseout({
   closeout,
   client,
   sessionAt,
+  followUpSession,
   sessionCompleted,
   canShare,
   agreementCount = 0,
@@ -49,7 +52,7 @@ export function MindSessionCloseout({
           <p>
             {signed
               ? 'Your signed note is saved. Its signature does not send anything to the client.'
-              : 'Make the note yours, sign when it is accurate, then choose the next steps below.'}
+              : 'Review your note and next-step decisions below. Sign the note when it accurately reflects the session.'}
           </p>
         </div>
         <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
@@ -86,6 +89,7 @@ export function MindSessionCloseout({
               steps={closeout.steps}
               canShare={canShare}
             />
+            <MindSessionAgreements sessionId={sessionId} signed={signed} />
           </section>
           <section className={styles.finishSection} aria-labelledby="follow-up-title">
             <h3 id="follow-up-title">The next appointment</h3>
@@ -101,6 +105,7 @@ export function MindSessionCloseout({
               closeoutMode
               sourceSessionId={sessionId}
               followUpState={closeout.steps.followUp}
+              followUpSession={followUpSession}
             />
           </section>
         </div>

@@ -19,6 +19,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editingStep, setEditingStep] = useState<DecisionStep | null>(null);
 
   async function decide(step: DecisionStep, outcome: 'COMPLETE' | 'SKIPPED'): Promise<void> {
     setBusy(`${step}:${outcome}`);
@@ -34,6 +35,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
         throw new Error(body.error ?? 'Could not save this closeout decision.');
       }
       router.refresh();
+      setEditingStep(null);
     } catch (cause) {
       setError((cause as Error).message);
     } finally {
@@ -41,20 +43,33 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
     }
   }
 
-  const pending = (step: DecisionStep) => steps[step] === 'PENDING';
-  if (
-    !pending('clinicalSuggestions') &&
-    !pending('agreements') &&
-    !pending('nextSessionQuestions') &&
-    (!canShare || !pending('shared'))
-  ) {
-    return (
-      <p className="mt-4 text-sm text-[var(--color-accent)]">Your care decisions are saved.</p>
-    );
-  }
+  const pending = (step: DecisionStep) => steps[step] === 'PENDING' || editingStep === step;
+  const labels: Record<DecisionStep, string> = {
+    clinicalSuggestions: 'Clinical suggestions',
+    agreements: 'Agreements or homework',
+    nextSessionQuestions: 'Next-session questions',
+    shared: 'Client sharing',
+  };
 
   return (
     <div className="mt-4 space-y-4">
+      {(Object.keys(labels) as DecisionStep[])
+        .filter((step) => (canShare || step !== 'shared') && steps[step] !== 'PENDING')
+        .map((step) => (
+          <div key={step} className="flex items-center justify-between gap-3 text-sm">
+            <span>
+              {labels[step]} · {steps[step] === 'SKIPPED' ? 'Not needed this session' : 'Recorded'}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy !== null}
+              onClick={() => setEditingStep(editingStep === step ? null : step)}
+            >
+              {steps[step] === 'COMPLETE' && step !== 'clinicalSuggestions' ? 'Review' : 'Change'}
+            </Button>
+          </div>
+        ))}
       {pending('clinicalSuggestions') && (
         <DecisionRow label="Clinical suggestions">
           <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
@@ -82,7 +97,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
       )}
       {pending('agreements') && (
         <DecisionRow label="Agreements or homework">
-          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+          <Link href="#session-agreements" className={styles.contextLink}>
             Add what you agreed
           </Link>
           <Button
@@ -90,7 +105,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
             size="sm"
             variant="secondary"
             onClick={() => void decide('agreements', 'SKIPPED')}
-            disabled={busy !== null}
+            disabled={busy !== null || steps.agreements === 'COMPLETE'}
           >
             None this session
           </Button>
@@ -106,7 +121,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
             size="sm"
             variant="secondary"
             onClick={() => void decide('nextSessionQuestions', 'SKIPPED')}
-            disabled={busy !== null}
+            disabled={busy !== null || steps.nextSessionQuestions === 'COMPLETE'}
           >
             None to carry forward
           </Button>
@@ -114,12 +129,18 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
       )}
       {canShare && pending('shared') && (
         <DecisionRow label="Client sharing">
+          {steps.shared === 'COMPLETE' && (
+            <p className="text-sm text-[var(--color-ink-2)]">
+              Sharing is already recorded. Review the receipts and client sharing history below to
+              manage existing links; a skip decision does not revoke them.
+            </p>
+          )}
           <Button
             type="button"
             size="sm"
             variant="secondary"
             onClick={() => void decide('shared', 'SKIPPED')}
-            disabled={busy !== null}
+            disabled={busy !== null || steps.shared === 'COMPLETE'}
           >
             Do not share
           </Button>

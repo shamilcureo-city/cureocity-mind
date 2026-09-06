@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from 'react';
 import type { TherapyScriptV1 } from '@cureocity/contracts';
 import { Button } from '@/components/ui/Button';
 import { mindGuideSteps, reviewedGuideCount } from '@/lib/mind-guidance';
+import { useMindGuideReview, type MindGuideReviewTarget } from '@/lib/use-mind-guide-review';
 import styles from './MindTherapyGuide.module.css';
 
 export interface PreparedMindGuide {
@@ -14,24 +15,21 @@ export interface PreparedMindGuide {
 
 /** Read-only, clinician-led use of an existing AI draft. No generated steps,
  * diagnoses, signed records or delivered interventions are inferred here. */
-export function MindTherapyGuide({ script }: { script: TherapyScriptV1 }) {
+export function MindTherapyGuide({
+  script,
+  reviewTarget,
+}: {
+  script: TherapyScriptV1;
+  reviewTarget?: MindGuideReviewTarget;
+}) {
   const steps = useMemo(() => mindGuideSteps(script), [script]);
   const [mode, setMode] = useState<'guided' | 'overview'>('overview');
   const [reviewedForUse, setReviewedForUse] = useState(false);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [reviewed, setReviewed] = useState<Set<string>>(() => new Set());
+  const { activeIndex, reviewed, setActiveIndex, toggleReviewed, saveStatus, canEdit, reload } =
+    useMindGuideReview(steps, reviewTarget);
   const statusId = useId();
   const active = steps[activeIndex] ?? steps[0]!;
   const count = reviewedGuideCount(steps, reviewed);
-
-  function toggleReviewed() {
-    setReviewed((current) => {
-      const next = new Set(current);
-      if (next.has(active.id)) next.delete(active.id);
-      else next.add(active.id);
-      return next;
-    });
-  }
 
   return (
     <section className={styles.guide} aria-label="Psychologist session guide">
@@ -51,7 +49,13 @@ export function MindTherapyGuide({ script }: { script: TherapyScriptV1 }) {
           >
             Overview
           </button>
-          <button type="button" aria-pressed={mode === 'guided'} onClick={() => setMode('guided')}>
+          <button
+            type="button"
+            disabled={!reviewedForUse}
+            aria-pressed={mode === 'guided' && reviewedForUse}
+            onClick={() => setMode('guided')}
+            aria-describedby={statusId}
+          >
             Step by step
           </button>
         </div>
@@ -134,6 +138,7 @@ export function MindTherapyGuide({ script }: { script: TherapyScriptV1 }) {
                   <button
                     type="button"
                     onClick={() => setActiveIndex(index)}
+                    disabled={!canEdit}
                     aria-current={index === activeIndex ? 'step' : undefined}
                   >
                     <span
@@ -186,6 +191,7 @@ export function MindTherapyGuide({ script }: { script: TherapyScriptV1 }) {
                 variant="secondary"
                 size="sm"
                 onClick={toggleReviewed}
+                disabled={!canEdit}
                 aria-pressed={reviewed.has(active.id)}
                 aria-describedby={statusId}
               >
@@ -195,14 +201,14 @@ export function MindTherapyGuide({ script }: { script: TherapyScriptV1 }) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={activeIndex === 0}
+                  disabled={!canEdit || activeIndex === 0}
                   onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
                 >
                   Previous
                 </Button>
                 <Button
                   size="sm"
-                  disabled={activeIndex === steps.length - 1}
+                  disabled={!canEdit || activeIndex === steps.length - 1}
                   onClick={() => setActiveIndex((i) => Math.min(steps.length - 1, i + 1))}
                 >
                   Next section
@@ -238,9 +244,36 @@ export function MindTherapyGuide({ script }: { script: TherapyScriptV1 }) {
         </p>
       )}
       <p className={styles.footnote} id={statusId}>
-        Review markers apply only to this open guide. They do not save a clinical event, advance
-        therapy, assign homework or share anything with the client.
+        {reviewTarget
+          ? 'Review markers and your place can be saved for this version of the guide. Review suitability again for each use. '
+          : 'Review markers apply only to this open guide. '}
+        They do not save a clinical event, advance therapy, assign homework or share anything with
+        the client.
       </p>
+      {reviewTarget && (
+        <div className={styles.footnote} role="status">
+          {saveStatus === 'loading'
+            ? 'Loading your place in this guide…'
+            : saveStatus === 'ready'
+              ? 'No saved review progress for this draft yet.'
+              : saveStatus === 'saving'
+                ? 'Saving guide review progress…'
+                : saveStatus === 'stale'
+                  ? 'This draft has changed. Close and reopen the guide to review its current content.'
+                  : saveStatus === 'conflict'
+                    ? 'Saved progress changed in another view. Reload it before continuing; your last change was not saved.'
+                    : saveStatus === 'load-error'
+                      ? 'Saved progress could not be loaded. Reload it before marking sections.'
+                      : saveStatus === 'save-error'
+                        ? 'The last save could not be confirmed. Reload saved progress before continuing.'
+                        : 'Guide review progress saved. No therapy delivery has been recorded.'}
+          {['load-error', 'save-error', 'conflict'].includes(saveStatus) && (
+            <Button variant="secondary" size="sm" onClick={reload}>
+              Reload saved progress
+            </Button>
+          )}
+        </div>
+      )}
     </section>
   );
 }

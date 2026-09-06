@@ -5,6 +5,7 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
+import { lockActiveClient } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,17 @@ export async function POST(
   if (!client || client.deletedAt !== null || client.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
   }
+  if (body.value.sourceSessionId) {
+    const source = await prisma.session.findFirst({
+      where: {
+        id: body.value.sourceSessionId,
+        clientId,
+        psychologistId: auth.value.psychologistId,
+      },
+      select: { id: true },
+    });
+    if (!source) return NextResponse.json({ error: 'Source session not found' }, { status: 404 });
+  }
 
   // The Pass-5 brief is cached per (clientId, lastSessionId, language) — and
   // the brief for the NEXT visit may already be cached under the CURRENT
@@ -49,10 +61,23 @@ export async function POST(
   });
 
   await prisma.$transaction(async (tx) => {
+    await lockActiveClient(tx, clientId, auth.value.psychologistId);
     await tx.client.update({
       where: { id: clientId },
       data: { carriedQuestions: body.value.questions as unknown as Prisma.InputJsonValue },
     });
+    // Only the session actively being edited changes its historical receipt.
+    // Removing an older carried question must not reopen that older closeout.
+    if (body.value.sourceSessionId) {
+      const snapshot = body.value.questions.filter(
+        (question) => question.sourceSessionId === body.value.sourceSessionId,
+      ) as unknown as Prisma.InputJsonValue;
+      await tx.mindSessionCloseoutState.upsert({
+        where: { sessionId: body.value.sourceSessionId },
+        create: { sessionId: body.value.sourceSessionId, nextQuestionsSnapshot: snapshot },
+        update: { nextQuestionsSnapshot: snapshot, nextQuestionsSkippedAt: null },
+      });
+    }
     await tx.preSessionBrief.deleteMany({
       where: {
         clientId,

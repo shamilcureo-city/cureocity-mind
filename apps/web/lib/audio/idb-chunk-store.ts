@@ -29,6 +29,8 @@ export interface PersistedChunk {
   enqueuedAt: number;
   /** Number of times we've tried to upload; informs backoff. */
   attempts: number;
+  /** Last refusal; permanent payload/state failures need a different remedy. */
+  lastHttpStatus?: number;
 }
 
 export interface PersistedSession {
@@ -37,6 +39,8 @@ export interface PersistedSession {
   nextChunkIndex: number;
   /** Session-level wall-clock start time. */
   startedAt: number;
+  /** A missing final worklet acknowledgement cannot be cured by upload retry. */
+  captureIntegrityError?: string;
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
@@ -76,8 +80,11 @@ function tx<T>(
         const result = fn(s);
         if (result && typeof result === 'object' && 'onsuccess' in result) {
           const req = result as IDBRequest<T>;
-          req.onsuccess = () => resolve(req.result);
+          // A request success is not a durable transaction commit.
+          t.oncomplete = () => resolve(req.result);
           req.onerror = () => reject(req.error);
+          t.onabort = () => reject(t.error ?? new Error('Audio storage transaction aborted'));
+          t.onerror = () => reject(t.error);
         } else {
           t.oncomplete = () => resolve(result as T);
           t.onerror = () => reject(t.error);
@@ -106,7 +113,11 @@ export const ChunkStore = {
     });
   },
 
-  async incrementAttempts(sessionId: string, chunkIndex: number): Promise<void> {
+  async incrementAttempts(
+    sessionId: string,
+    chunkIndex: number,
+    httpStatus?: number,
+  ): Promise<void> {
     const existing = await tx<PersistedChunk | undefined>(
       CHUNKS_STORE,
       'readonly',
@@ -114,7 +125,15 @@ export const ChunkStore = {
     );
     if (!existing) return;
     existing.attempts += 1;
+    existing.lastHttpStatus = httpStatus;
     await tx<IDBValidKey>(CHUNKS_STORE, 'readwrite', (s) => s.put(existing));
+  },
+  async resetRetryableAttempts(sessionId: string): Promise<void> {
+    for (const chunk of await this.listForSession(sessionId)) {
+      const status = chunk.lastHttpStatus;
+      if (status && status >= 400 && status < 500 && ![401, 408, 429].includes(status)) continue;
+      await this.insert({ ...chunk, attempts: 0 });
+    }
   },
 };
 

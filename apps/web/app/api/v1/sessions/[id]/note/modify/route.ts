@@ -90,7 +90,7 @@ export async function POST(
       id: true,
       psychologistId: true,
       kind: true,
-      noteDraft: { select: { id: true, content: true, status: true } },
+      noteDraft: { select: { id: true, content: true, status: true, updatedAt: true } },
       therapyNote: { select: { id: true, locked: true } },
     },
   });
@@ -245,9 +245,20 @@ export async function POST(
   }
 
   // changedFields was computed above per-kind via diffKeys.
-  await prisma.$transaction(async (tx) => {
+  const saved = await prisma.$transaction(async (tx) => {
     await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-    await tx.noteDraft.update({
+    const [current, note] = await Promise.all([
+      tx.noteDraft.findUnique({ where: { sessionId }, select: { updatedAt: true, status: true } }),
+      tx.therapyNote.findUnique({ where: { sessionId }, select: { locked: true } }),
+    ]);
+    if (
+      !current ||
+      current.status !== 'COMPLETED' ||
+      note?.locked ||
+      current.updatedAt.getTime() !== session.noteDraft!.updatedAt.getTime()
+    )
+      return null;
+    const updated = await tx.noteDraft.update({
       where: { id: session.noteDraft!.id },
       data: { content: validated as unknown as object },
     });
@@ -267,10 +278,19 @@ export async function POST(
       },
       tx,
     );
+    return updated;
   });
-
+  if (!saved)
+    return NextResponse.json(
+      {
+        error:
+          'The note changed while AI was working. Reload to review the current draft; no AI changes were saved.',
+      },
+      { status: 409 },
+    );
   return NextResponse.json({
     note: validated,
+    updatedAt: saved.updatedAt.toISOString(),
     changedFields,
     model: modifyModel,
     kind: isIntake ? 'INTAKE' : 'TREATMENT',

@@ -8,6 +8,7 @@ import type {
   TherapyScript as TherapyScriptRow,
   TreatmentPlan as TreatmentPlanRow,
 } from '@prisma/client';
+import { PlanSuggestionStateSchema } from './plan-suggestion-state';
 import {
   ClinicalLocaleSchema,
   ClinicalReportV1Schema,
@@ -53,6 +54,7 @@ import {
  */
 
 export function toClinicalReport(row: ClinicalReportRow): ClinicalReport {
+  const planDecision = PlanSuggestionStateSchema.safeParse(row.planSuggestionState);
   let body: ClinicalReportV1 | null = null;
   if (row.body !== null && row.body !== undefined) {
     const parsed = ClinicalReportV1Schema.safeParse(row.body);
@@ -73,6 +75,13 @@ export function toClinicalReport(row: ClinicalReportRow): ClinicalReport {
     status: row.status,
     body,
     confirmations,
+    planSuggestionDecision: planDecision.success
+      ? {
+          revision: planDecision.data.revision,
+          currentPlanId: planDecision.data.currentPlanId,
+          appliedIndexes: planDecision.data.appliedIndexes,
+        }
+      : null,
     totalCostInr: row.totalCostInr.toString(),
     errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),

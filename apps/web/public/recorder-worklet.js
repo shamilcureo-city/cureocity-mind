@@ -13,7 +13,10 @@ class CureocityRecorderProcessor extends AudioWorkletProcessor {
     super();
     this.stopped = false;
     this.port.onmessage = (e) => {
-      if (e.data && e.data.type === 'stop') this.stopped = true;
+      if (e.data && e.data.type === 'stop') {
+        this.stopped = true;
+        this.port.postMessage({ type: 'stopped' });
+      }
     };
   }
 

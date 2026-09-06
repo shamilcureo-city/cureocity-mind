@@ -55,7 +55,10 @@ class CureocityRecorderProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.port.onmessage = (e: MessageEvent<StopMessage>) => {
-      if (e.data.type === 'stop') this.stopped = true;
+      if (e.data.type === 'stop') {
+        this.stopped = true;
+        this.port.postMessage({ type: 'stopped' });
+      }
     };
   }
 

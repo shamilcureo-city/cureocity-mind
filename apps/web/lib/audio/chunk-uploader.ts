@@ -51,19 +51,20 @@ export class ChunkUploader {
       'x-duration-ms': String(chunk.durationMs),
       'x-sample-rate': String(chunk.sampleRate),
     };
-    if (this.opts.getAuthToken) {
-      const token = await this.opts.getAuthToken();
-      if (token) headers.authorization = `Bearer ${token}`;
-    }
     try {
+      if (this.opts.getAuthToken) {
+        const token = await this.opts.getAuthToken();
+        if (token) headers.authorization = `Bearer ${token}`;
+      }
       const res = await fetch(`${this.opts.scribeBase}/audio/chunks/upload`, {
         method: 'POST',
         headers,
         body: chunk.bytes as Uint8Array<ArrayBuffer>,
+        signal: AbortSignal.timeout(20_000),
       });
       if (res.ok) return { status: 'ok' };
       const errorBody = await res.text().catch(() => '');
-      if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+      if (res.status >= 400 && res.status < 500 && ![401, 408, 429].includes(res.status)) {
         return {
           status: 'permanent',
           error: errorBody || `HTTP ${res.status}`,
@@ -96,9 +97,15 @@ export class ChunkUploader {
   drainSession(
     sessionId: string,
     onProgress?: (done: number, total: number) => void,
+    retryExhausted = false,
   ): Promise<void> {
-    if (this.drainInFlight) return this.drainInFlight;
+    if (this.drainInFlight) {
+      return retryExhausted
+        ? this.drainInFlight.then(() => this.drainSession(sessionId, onProgress, true))
+        : this.drainInFlight;
+    }
     const run = (async (): Promise<void> => {
+      if (retryExhausted) await ChunkStore.resetRetryableAttempts(sessionId);
       const pending = (await ChunkStore.listForSession(sessionId)).sort(
         (a, b) => a.chunkIndex - b.chunkIndex,
       );
@@ -108,13 +115,13 @@ export class ChunkUploader {
         const outcome = await this.uploadOne(chunk);
         if (outcome.status === 'ok') {
           await ChunkStore.remove(sessionId, chunk.chunkIndex);
+          done += 1;
         } else if (outcome.status === 'permanent') {
-          await ChunkStore.incrementAttempts(sessionId, chunk.chunkIndex);
+          await ChunkStore.incrementAttempts(sessionId, chunk.chunkIndex, outcome.httpStatus);
         } else {
-          await ChunkStore.incrementAttempts(sessionId, chunk.chunkIndex);
+          await ChunkStore.incrementAttempts(sessionId, chunk.chunkIndex, outcome.httpStatus);
           await sleep(backoffMs(chunk.attempts + 1));
         }
-        done += 1;
         onProgress?.(done, pending.length);
       }
     })();

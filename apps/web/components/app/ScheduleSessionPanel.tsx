@@ -1,6 +1,7 @@
 'use client';
 
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BillingEntitlement } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
@@ -8,7 +9,17 @@ import { Button } from '../ui/Button';
 import { Input, Label, Select, FieldError } from '../ui/Field';
 import { UpgradeModal } from './UpgradeModal';
 import { CreateClientModal } from './CreateClientModal';
-import { addCreatedClientOption } from '@/lib/schedule-client-options';
+import {
+  addCreatedClientOption,
+  visibleScheduleClients,
+  scheduleSelectionAfterSearch,
+  requireScheduleClient,
+  readScheduleReceipt,
+  scheduleTriggerDisabled,
+  type ScheduleReceipt,
+} from '@/lib/schedule-client-options';
+import { useModalA11y } from '@/lib/use-modal-a11y';
+import { formatIstDateTime } from '@/lib/ist';
 
 export interface ClientOption {
   id: string;
@@ -24,6 +35,7 @@ interface Props {
   closeoutMode?: boolean;
   sourceSessionId?: string;
   followUpState?: 'PENDING' | 'COMPLETE' | 'SKIPPED';
+  followUpSession?: { id: string; scheduledAt: string } | null;
   triggerLabelOverride?: string;
 }
 
@@ -46,6 +58,7 @@ export function ScheduleSessionPanel({
   closeoutMode = false,
   sourceSessionId,
   followUpState = 'PENDING',
+  followUpSession = null,
   triggerLabelOverride,
 }: Props) {
   const router = useRouter();
@@ -53,10 +66,14 @@ export function ScheduleSessionPanel({
   const [outcome, setOutcome] = useState<'scheduled' | 'skipped' | null>(
     followUpState === 'COMPLETE' ? 'scheduled' : followUpState === 'SKIPPED' ? 'skipped' : null,
   );
+  const [receipt, setReceipt] = useState(followUpSession);
+  const [confirmationMissing, setConfirmationMissing] = useState(false);
   const triggerLabel =
     triggerLabelOverride ??
     (outcome === 'scheduled'
-      ? 'Follow-up scheduled'
+      ? closeoutMode
+        ? 'Follow-up scheduled'
+        : 'Schedule another session'
       : closeoutMode
         ? 'Schedule next session'
         : 'Schedule session');
@@ -64,13 +81,36 @@ export function ScheduleSessionPanel({
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => setOpen(true)} disabled={outcome === 'scheduled'}>
+        <Button
+          onClick={() => setOpen(true)}
+          disabled={scheduleTriggerDisabled(closeoutMode, outcome)}
+        >
           {outcome === 'skipped' ? 'Change follow-up' : triggerLabel}
         </Button>
         {outcome === 'skipped' && (
           <span className="text-xs text-[var(--color-ink-3)]">Follow-up intentionally skipped</span>
         )}
       </div>
+      {(receipt ?? followUpSession) && (
+        <p className="mt-2 text-sm text-[var(--color-ink-2)]" role="status">
+          Booked for {formatIstDateTime(new Date((receipt ?? followUpSession)!.scheduledAt))}.{' '}
+          <Link
+            href={`/app/sessions/${(receipt ?? followUpSession)!.id}`}
+            className="text-[var(--color-accent)] underline"
+          >
+            View appointment
+          </Link>
+        </p>
+      )}
+      {confirmationMissing && (
+        <p className="mt-2 text-sm text-[var(--color-warn)]" role="status">
+          The booking was saved, but its confirmation could not be read. Check{' '}
+          <Link href="/app/today" className="underline">
+            Today
+          </Link>{' '}
+          before booking again.
+        </p>
+      )}
       {open && (
         <ScheduleModal
           clients={clients}
@@ -80,19 +120,27 @@ export function ScheduleSessionPanel({
           closeoutMode={closeoutMode}
           sourceSessionId={sourceSessionId}
           onSkip={async () => {
-            if (!sourceSessionId) return;
+            if (!sourceSessionId)
+              throw new Error('This session could not be identified. Refresh and try again.');
             const res = await fetch(`/api/v1/sessions/${sourceSessionId}/mind-closeout`, {
               method: 'PATCH',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ step: 'followUp', outcome: 'SKIPPED' }),
             });
-            if (!res.ok) return;
+            if (!res.ok) {
+              const body = (await res.json().catch(() => null)) as { error?: string } | null;
+              throw new Error(
+                body?.error ?? 'Could not save the follow-up decision. Please try again.',
+              );
+            }
             setOutcome('skipped');
             setOpen(false);
             router.refresh();
           }}
           onClose={() => setOpen(false)}
-          onScheduled={() => {
+          onScheduled={(saved) => {
+            setReceipt(saved);
+            setConfirmationMissing(saved === null);
             setOutcome('scheduled');
             setOpen(false);
             router.refresh();
@@ -120,37 +168,55 @@ function ScheduleModal({
   initialTime?: string;
   closeoutMode: boolean;
   sourceSessionId?: string;
-  onSkip: () => void;
+  onSkip: () => Promise<void>;
   onClose: () => void;
-  onScheduled: () => void;
+  onScheduled: (receipt: ScheduleReceipt | null) => void;
 }) {
   const tomorrow = useMemo(() => seedTomorrow(), []);
   const [clientOptions, setClientOptions] = useState(clients);
-  const [clientId, setClientId] = useState(initialClientId ?? clients[0]?.id ?? '');
+  const [clientId, setClientId] = useState(initialClientId ?? '');
   const [creatingClient, setCreatingClient] = useState(false);
   const [query, setQuery] = useState('');
   const [date, setDate] = useState(initialDate ?? tomorrow.date);
   const [time, setTime] = useState(initialTime ?? '10:00');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   // Sprint 53 — trial cap modal trigger; Sprint 56 — paid-cap variant too.
   const [upgradePrompt, setUpgradePrompt] = useState<{
     variant: 'TRIAL_CAP' | 'PLAN_CAP';
     entitlement: BillingEntitlement;
   } | null>(null);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return clientOptions.slice(0, 30);
-    return clientOptions.filter((c) => c.fullName.toLowerCase().includes(q)).slice(0, 30);
-  }, [clientOptions, query]);
+  const filtered = useMemo(
+    () => visibleScheduleClients(clientOptions, query, clientId),
+    [clientOptions, query, clientId],
+  );
+  const fixedClient = closeoutMode ? clients.find((client) => client.id === initialClientId) : null;
+  useModalA11y(!creatingClient && !upgradePrompt, dialogRef, submitting ? undefined : onClose);
+
+  async function skipFollowUp() {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onSkip();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save the follow-up decision.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
     try {
-      if (!clientId) throw new Error('Pick a client.');
+      requireScheduleClient(
+        closeoutMode ? clients : filtered,
+        clientId,
+        closeoutMode ? (initialClientId ?? '') : undefined,
+      );
       const scheduledAt = combineToIso(date, time);
       if (!scheduledAt) throw new Error('Pick a valid date and time.');
       if (new Date(scheduledAt).getTime() <= Date.now()) {
@@ -180,7 +246,7 @@ function ScheduleModal({
         }
         throw new Error(body.error ?? `Failed (${res.status})`);
       }
-      onScheduled();
+      onScheduled(readScheduleReceipt(await res.json().catch(() => null), clientId));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -190,6 +256,7 @@ function ScheduleModal({
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
@@ -203,6 +270,7 @@ function ScheduleModal({
           <button
             type="button"
             onClick={onClose}
+            disabled={submitting}
             className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
           >
             cancel
@@ -214,7 +282,9 @@ function ScheduleModal({
             cadence fits better.
           </p>
         )}
-        {clientOptions.length === 0 ? (
+        {closeoutMode && !fixedClient ? (
+          <p role="alert">The client for this session is unavailable. Refresh before scheduling.</p>
+        ) : clientOptions.length === 0 ? (
           <div className="rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4">
             <p className="text-sm text-[var(--color-ink-2)]">
               No active clients yet. Add a client here, then schedule without leaving Today.
@@ -225,43 +295,53 @@ function ScheduleModal({
           </div>
         ) : (
           <form onSubmit={submit} className="space-y-4">
-            <div>
-              <Label htmlFor="sched-search" hint="search by name">
-                Client
-              </Label>
-              <Input
-                id="sched-search"
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search…"
-              />
-              <Select
-                className="mt-2"
-                aria-label="Pick a client"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                required
-              >
-                {filtered.length === 0 ? (
-                  <option value="">No matches</option>
-                ) : (
-                  filtered.map((c) => (
+            {closeoutMode ? (
+              <p className="rounded-xl bg-[var(--color-surface-soft)] p-3 text-sm">
+                Follow-up for <strong>{fixedClient!.fullName}</strong>
+              </p>
+            ) : (
+              <div>
+                <Label htmlFor="sched-search" hint="search by name">
+                  Client
+                </Label>
+                <Input
+                  id="sched-search"
+                  type="search"
+                  value={query}
+                  onChange={(e) => {
+                    setQuery(e.target.value);
+                    setClientId(
+                      scheduleSelectionAfterSearch(clientOptions, e.target.value, clientId),
+                    );
+                  }}
+                  placeholder="Search…"
+                />
+                <Select
+                  className="mt-2"
+                  aria-label="Pick a client"
+                  value={clientId}
+                  onChange={(e) => setClientId(e.target.value)}
+                  required
+                >
+                  <option value="">
+                    {filtered.length === 0 ? 'No matches' : 'Choose a client'}
+                  </option>
+                  {filtered.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.fullName}
                       {c.preferredModality ? ` · ${c.preferredModality}` : ''}
                     </option>
-                  ))
-                )}
-              </Select>
-              <button
-                type="button"
-                onClick={() => setCreatingClient(true)}
-                className="mt-2 text-xs font-medium text-[var(--color-accent)] hover:underline"
-              >
-                + Add a client
-              </button>
-            </div>
+                  ))}
+                </Select>
+                <button
+                  type="button"
+                  onClick={() => setCreatingClient(true)}
+                  className="mt-2 text-xs font-medium text-[var(--color-accent)] hover:underline"
+                >
+                  + Add a client
+                </button>
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="sched-date">Date</Label>
@@ -287,14 +367,19 @@ function ScheduleModal({
             <FieldError message={error} />
             <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-line-soft)] pt-4">
               {closeoutMode && (
-                <Button type="button" variant="secondary" onClick={onSkip} disabled={submitting}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void skipFollowUp()}
+                  disabled={submitting}
+                >
                   Skip follow-up
                 </Button>
               )}
               <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting}>
+              <Button type="submit" disabled={submitting || !clientId}>
                 {submitting ? 'Scheduling…' : 'Schedule'}
               </Button>
             </div>
@@ -317,6 +402,7 @@ function ScheduleModal({
         onCreated={(created) => {
           setClientOptions((current) => addCreatedClientOption(current, created));
           setClientId(created.id);
+          setQuery('');
           setCreatingClient(false);
         }}
       />

@@ -21,6 +21,7 @@ import { resolveClientPii } from '@/lib/client-pii';
 import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
 import { mindStartEntryHref } from '@/lib/mind-session-start';
+import { clientSessionSummary } from '@/lib/client-session-summary';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +61,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
           modality: true,
           status: true,
           scheduledAt: true,
-          therapyNote: { select: { id: true } },
+          therapyNote: { select: { id: true, locked: true, signedAt: true } },
           noteDraft: { select: { status: true } },
         },
       },
@@ -68,6 +69,8 @@ export default async function ClientDetailPage({ params }: PageProps) {
   });
   if (!client) notFound();
   const pii = await resolveClientPii(client);
+  const defaultCapture =
+    therapist.defaultCaptureMode && therapist.defaultCaptureMode !== 'LIVE' ? 'BATCH' : 'LIVE';
   const [journey, activeHomework] = await Promise.all([
     computeClientJourney(client.id, therapist.id),
     prisma.exerciseAssignment.findMany({
@@ -153,78 +156,6 @@ export default async function ClientDetailPage({ params }: PageProps) {
       <PageCrisisBanner briefing={briefing} />
 
       <div className="mt-4">
-        <ClientWorkspaceNav clientId={client.id} />
-      </div>
-
-      <Card className="mt-5 p-5">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <section>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Stage</p>
-            <p className="mt-1 font-medium text-[var(--color-ink)]">
-              {journey.stage.replace(/_/g, ' ').toLowerCase()}
-            </p>
-          </section>
-          <section>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Latest change
-            </p>
-            <p className="mt-1 text-sm text-[var(--color-ink)]">{formatDateTime(latestChange)}</p>
-            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-              {journey.instrumentChanges[0]
-                ? `${journey.instrumentChanges[0].instrumentKey} ${journey.instrumentChanges[0].baselineScore}→${journey.instrumentChanges[0].latestScore}`
-                : 'No outcome change recorded yet'}
-            </p>
-          </section>
-          <section>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Homework</p>
-            <p className="mt-1 text-sm text-[var(--color-ink)]">
-              {activeHomework.length > 0
-                ? `${activeHomework.length} active assignment${activeHomework.length === 1 ? '' : 's'}`
-                : 'Nothing active'}
-            </p>
-          </section>
-          <section>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Next action</p>
-            <p className="mt-1 text-sm font-medium text-[var(--color-ink)]">
-              {journey.nextBestAction?.title ?? 'Continue care'}
-            </p>
-          </section>
-        </div>
-        <div className="mt-5 flex flex-wrap items-center gap-2">
-          <a
-            href="#prepare"
-            className="rounded-full border border-[var(--color-line)] px-4 py-2 text-sm font-medium text-[var(--color-ink)]"
-          >
-            Prepare
-          </a>
-          <Link
-            href={mindStartEntryHref({
-              source: 'CLIENT',
-              clientId: client.id,
-              captureMode: 'LIVE',
-            })}
-            className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-          >
-            Start session
-          </Link>
-          <ScheduleSessionPanel
-            clients={[
-              {
-                id: client.id,
-                fullName: pii.fullName,
-                preferredModality: client.preferredModality,
-              },
-            ]}
-            initialClientId={client.id}
-            triggerLabelOverride="Schedule follow-up"
-          />
-        </div>
-        <div id="prepare">
-          <PreparePanel clientId={client.id} defaultOpen />
-        </div>
-      </Card>
-
-      <div className="mt-4">
         <Card className="p-7">
           <header className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -254,13 +185,24 @@ export default async function ClientDetailPage({ params }: PageProps) {
                   href={mindStartEntryHref({
                     source: 'CLIENT',
                     clientId: client.id,
-                    captureMode: 'LIVE',
+                    captureMode: defaultCapture,
                   })}
                   className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-accent-hover)]"
                 >
                   Start session
                 </Link>
               )}
+              <ScheduleSessionPanel
+                clients={[
+                  {
+                    id: client.id,
+                    fullName: pii.fullName,
+                    preferredModality: client.preferredModality,
+                  },
+                ]}
+                initialClientId={client.id}
+                triggerLabelOverride="Schedule follow-up"
+              />
               <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
               {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
               {client.isDemo && <DemoClientButton demoClientId={client.id} variant="inline" />}
@@ -322,6 +264,46 @@ export default async function ClientDetailPage({ params }: PageProps) {
         </Card>
       </div>
 
+      <div className="mt-4">
+        <ClientWorkspaceNav clientId={client.id} />
+      </div>
+      <Card className="mt-5 p-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Stage</p>
+            <p className="mt-1 font-medium">{journey.stage.replace(/_/g, ' ').toLowerCase()}</p>
+          </section>
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Latest change
+            </p>
+            <p className="mt-1 text-sm">{formatDateTime(latestChange)}</p>
+            <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+              {journey.instrumentChanges[0]
+                ? `${journey.instrumentChanges[0].instrumentKey} ${journey.instrumentChanges[0].baselineScore}→${journey.instrumentChanges[0].latestScore}`
+                : 'No outcome change recorded yet'}
+            </p>
+          </section>
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Homework</p>
+            <p className="mt-1 text-sm">
+              {activeHomework.length > 0
+                ? `${activeHomework.length === 3 ? 'At least ' : ''}${activeHomework.length} active assignment${activeHomework.length === 1 ? '' : 's'}`
+                : 'Nothing active'}
+            </p>
+          </section>
+          <section>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Next action</p>
+            <p className="mt-1 text-sm font-medium">
+              {journey.nextBestAction?.title ?? 'Continue care'}
+            </p>
+          </section>
+        </div>
+        <div id="prepare">
+          <PreparePanel clientId={client.id} />
+        </div>
+      </Card>
+
       <div className="mt-6">
         <Card className="p-5">
           <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
@@ -363,12 +345,9 @@ export default async function ClientDetailPage({ params }: PageProps) {
                 No sessions yet. Record the first session, or add a PHQ-9 / GAD-7 baseline to start
                 tracking progress.
               </p>
-              <Link
-                href={`/app?record=${client.id}`}
-                className="mt-3 inline-flex items-center rounded-full bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2"
-              >
-                Record a session
-              </Link>
+              <p className="mt-3 text-xs text-[var(--color-ink-3)]">
+                Use Start session above when you are ready.
+              </p>
             </div>
           ) : (
             <ul className="divide-y divide-[var(--color-line-soft)]">
@@ -381,7 +360,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
                     <span className="text-[var(--color-ink)]">{formatDateTime(s.scheduledAt)}</span>
                     <span className="text-[var(--color-ink-2)]">{s.modality ?? '—'}</span>
                     <span className="text-[var(--color-ink-2)]">
-                      {sessionSummary(s.status, s.therapyNote, s.noteDraft)}
+                      {clientSessionSummary(s.status, s.therapyNote, s.noteDraft)}
                     </span>
                     <span className="text-right">
                       <Badge tone={statusTone(s.status)}>{s.status.toLowerCase()}</Badge>
@@ -455,17 +434,4 @@ function statusTone(status: string): 'accent' | 'warn' | 'muted' | 'default' {
   if (status === 'IN_PROGRESS') return 'warn';
   if (status === 'CANCELLED' || status === 'NO_SHOW') return 'muted';
   return 'default';
-}
-
-function sessionSummary(
-  status: string,
-  signedNote: { id: string } | null,
-  draft: { status: string } | null,
-): string {
-  if (signedNote) return 'Signed note';
-  if (draft?.status === 'COMPLETED') return 'Unsigned draft';
-  if (draft?.status === 'IN_PROGRESS') return 'Generating note…';
-  if (draft?.status === 'FAILED') return 'Note generation failed';
-  if (status === 'IN_PROGRESS') return 'Recording…';
-  return '—';
 }

@@ -13,11 +13,15 @@ import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { toNoteDraft } from '@/lib/mappers';
 import { resolveNoteTranscript } from '@/lib/note-transcript';
 import { parseJson } from '@/lib/validate';
+import { canonicalIntakeEdit, canonicalTreatmentEdit } from '@/lib/canonical-note-edit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const SaveDraftSchema = z.object({ note: z.unknown() });
+const SaveDraftSchema = z.object({
+  note: z.unknown(),
+  expectedUpdatedAt: z.string().datetime().optional(),
+});
 
 interface RouteContext {
   params: Promise<{ id: string }>;
@@ -74,6 +78,19 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const { id: sessionId } = await ctx.params;
   const body = await parseJson(req, SaveDraftSchema);
   if (!body.ok) return body.response;
+  if (
+    body.value.note &&
+    typeof body.value.note === 'object' &&
+    ['summary', 'topics', 'templateSections'].some((key) => key in (body.value.note as object))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'This note editor is outdated. Keep a copy of your edits, then reload and edit the source clinical fields.',
+      },
+      { status: 409 },
+    );
+  }
 
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
@@ -120,10 +137,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
     if (!parsed.success) {
       return NextResponse.json({ error: 'Edited intake note failed validation.' }, { status: 422 });
     }
-    validated = IntakeNoteV1Schema.parse({
-      ...parsed.data,
-      riskFlags: { ...parsed.data.riskFlags, severity: current.riskFlags.severity },
-    });
+    validated = IntakeNoteV1Schema.parse(canonicalIntakeEdit(current, parsed.data));
   } else {
     const currentParsed = TherapyNoteV1Schema.safeParse(session.noteDraft.content);
     if (!currentParsed.success) {
@@ -137,16 +151,23 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
     if (!parsed.success) {
       return NextResponse.json({ error: 'Edited note failed validation.' }, { status: 422 });
     }
-    validated = TherapyNoteV1Schema.parse({
-      ...parsed.data,
-      modality: current.modality,
-      riskFlags: { ...parsed.data.riskFlags, severity: current.riskFlags.severity },
-    });
+    validated = TherapyNoteV1Schema.parse(canonicalTreatmentEdit(current, parsed.data));
   }
 
-  await prisma.$transaction(async (tx) => {
+  const saved = await prisma.$transaction(async (tx) => {
     await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-    await tx.noteDraft.update({
+    const [current, note] = await Promise.all([
+      tx.noteDraft.findUnique({ where: { sessionId }, select: { status: true, updatedAt: true } }),
+      tx.therapyNote.findUnique({ where: { sessionId }, select: { locked: true } }),
+    ]);
+    if (
+      !current ||
+      current.status !== 'COMPLETED' ||
+      note?.locked ||
+      current.updatedAt.toISOString() !== body.value.expectedUpdatedAt
+    )
+      return null;
+    const updated = await tx.noteDraft.update({
       where: { id: session.noteDraft!.id },
       data: { content: validated as unknown as object },
     });
@@ -161,7 +182,19 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
       },
       tx,
     );
+    return updated;
   });
-
-  return NextResponse.json({ note: validated, kind: isIntake ? 'INTAKE' : 'TREATMENT' });
+  if (!saved)
+    return NextResponse.json(
+      {
+        error:
+          'This note changed or was signed in another view. Your unsaved text is still here; copy it before reloading to review the current draft.',
+      },
+      { status: 409 },
+    );
+  return NextResponse.json({
+    note: validated,
+    updatedAt: saved.updatedAt.toISOString(),
+    kind: isIntake ? 'INTAKE' : 'TREATMENT',
+  });
 }

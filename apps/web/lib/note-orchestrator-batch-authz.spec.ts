@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
     writeAudit: fn(),
     ensureEnglishNote: fn(),
     recordCrisisFlag: fn(),
+    decryptForTenant: fn(),
   };
 });
 
@@ -72,7 +73,10 @@ vi.mock('./cost-guard', () => ({
   CostCircuitOpenError: class CostCircuitOpenError extends Error {},
   checkCostCircuit: vi.fn(),
 }));
-vi.mock('./tenant-crypto', () => ({ encryptForTenant: vi.fn().mockResolvedValue('encrypted') }));
+vi.mock('./tenant-crypto', () => ({
+  encryptForTenant: vi.fn().mockResolvedValue('encrypted'),
+  decryptForTenant: mocks.decryptForTenant,
+}));
 vi.mock('./patient-context', () => ({
   clientIdForSession: vi.fn().mockResolvedValue('client-1'),
   fetchActiveMedications: vi.fn().mockResolvedValue([]),
@@ -349,6 +353,87 @@ describe.each(['INTAKE', 'TREATMENT', 'REVIEW'] as const)('batch %s note risk pa
 });
 
 describe('batch therapy risk boundaries', () => {
+  it('generates from an encrypted live prefix without reopening or retranscribing audio', async () => {
+    process.env['LLM_BACKEND'] = 'vertex';
+    setTherapyOutput('TREATMENT', 'none');
+    mocks.noteDraftFindUnique.mockResolvedValue({
+      id: 'draft-1',
+      status: 'PENDING',
+      recoveryTranscriptEncrypted: 'sealed-prefix',
+    });
+    mocks.noteDraftUpsert.mockResolvedValue({
+      id: 'draft-1',
+      recoveryTranscriptEncrypted: 'sealed-prefix',
+    });
+    mocks.decryptForTenant.mockResolvedValue(
+      JSON.stringify({
+        version: 1,
+        transcript: 'Client: The original live words.',
+        speakerSegments: [
+          { speaker: 'client', text: 'The original live words.', startMs: 0, endMs: 1000 },
+        ],
+      }),
+    );
+    await expect(runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION'])).resolves.toMatchObject({
+      status: 'COMPLETED',
+    });
+    expect(mocks.pass1).not.toHaveBeenCalled();
+    expect(mocks.pass2.mock.calls[0][0].transcript).toBe('Client: The original live words.');
+  });
+
+  it('merges the separately stored prefix once with newly recorded audio on every retry', async () => {
+    setTherapyOutput('TREATMENT', 'none');
+    mocks.noteDraftFindUnique.mockResolvedValue({
+      id: 'draft-1',
+      status: 'FAILED',
+      recoveryTranscriptEncrypted: 'sealed-prefix',
+      transcriptEncrypted: 'previous-assembled',
+    });
+    mocks.noteDraftUpsert.mockResolvedValue({
+      id: 'draft-1',
+      recoveryTranscriptEncrypted: 'sealed-prefix',
+    });
+    mocks.decryptForTenant.mockResolvedValue(
+      JSON.stringify({ version: 1, transcript: 'Client: Before switch.', speakerSegments: [] }),
+    );
+    await runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION']);
+    await runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION']);
+    for (const [input] of mocks.pass2.mock.calls)
+      expect(input.transcript).toBe('Client: Before switch.\nPatient reports follow-up symptoms.');
+  });
+  it('uses the locked draft prefix when recovery appended after the idempotency read', async () => {
+    process.env['LLM_BACKEND'] = 'vertex';
+    setTherapyOutput('TREATMENT', 'none');
+    mocks.noteDraftFindUnique.mockResolvedValue({
+      id: 'draft-1',
+      status: 'PENDING',
+      recoveryTranscriptEncrypted: 'prefix-before-lock',
+    });
+    // A concurrent recovery append commits before IN_PROGRESS is claimed.
+    mocks.noteDraftUpsert.mockResolvedValue({
+      id: 'draft-1',
+      status: 'IN_PROGRESS',
+      recoveryTranscriptEncrypted: 'prefix-under-lock',
+    });
+    mocks.decryptForTenant.mockImplementation(async (_tenant, ciphertext) =>
+      JSON.stringify({
+        version: 1,
+        speakerSegments: [],
+        transcript:
+          ciphertext === 'prefix-under-lock'
+            ? 'Client: First words.\nClient: Newly acknowledged words.'
+            : 'Client: First words.',
+      }),
+    );
+    await expect(runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION'])).resolves.toMatchObject({
+      status: 'COMPLETED',
+    });
+    expect(mocks.decryptForTenant).toHaveBeenCalledWith('psy-1', 'prefix-under-lock');
+    expect(mocks.pass1).not.toHaveBeenCalled();
+    expect(mocks.pass2.mock.calls[0][0].transcript).toBe(
+      'Client: First words.\nClient: Newly acknowledged words.',
+    );
+  });
   it('does not repeat a crisis audit/metric when a completed note is requested again', async () => {
     setTherapyOutput('TREATMENT', 'critical');
     await runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION']);

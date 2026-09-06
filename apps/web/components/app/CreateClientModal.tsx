@@ -81,6 +81,7 @@ export function CreateClientModal({
         fullName: string;
         preferredModality: string | null;
       };
+      setDraft(createClientDraft(vertical, 'ADMINISTRATIVE'));
       onCreated?.(created);
       if (redirectOnCreated) {
         router.push(`/app/${isDoctor ? 'patients' : 'clients'}/${created.id}`);

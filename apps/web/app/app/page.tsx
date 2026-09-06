@@ -6,7 +6,12 @@ export const dynamic = 'force-dynamic';
 export default async function AppPage({
   searchParams,
 }: {
-  searchParams: Promise<{ record?: string; session?: string; capture?: 'LIVE' | 'BATCH' }>;
+  searchParams: Promise<{
+    record?: string;
+    session?: string;
+    capture?: 'LIVE' | 'BATCH';
+    guide?: string;
+  }>;
 }) {
   const practitioner = await requireOnboardedPsychologist();
   if (practitioner.vertical === 'DOCTOR') redirect('/app/clinic');
@@ -16,6 +21,7 @@ export default async function AppPage({
   if (params.record) deepLink.set('record', params.record);
   if (params.session) deepLink.set('session', params.session);
   if (params.capture) deepLink.set('capture', params.capture);
+  if (params.guide) deepLink.set('guide', params.guide);
   if (deepLink.size > 0) redirect(`/app/encounters/new?${deepLink.toString()}`);
 
   redirect('/app/today');
