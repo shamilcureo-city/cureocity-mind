@@ -37,6 +37,32 @@ describe('Sprint 1 Mind reliable session journey integration', () => {
     expect(liveToken).toContain('session.psychologist.vertical');
   });
 
+  it('uses an explicit permission action without a blocking speech test or frozen level meter', () => {
+    const preflight = webSource('components/app/MindSessionPreflight.tsx');
+    expect(preflight).toContain('openMicrophone: (deviceId) =>');
+    expect(preflight).toContain('openCaptureMicrophone(');
+    expect(preflight).toContain('() => version === checkVersionRef.current');
+    expect(preflight).toContain('onClick={() => void check(true)}');
+    expect(preflight).toContain('Allow microphone');
+    expect(preflight).toContain('No need to speak');
+    expect(preflight).not.toContain('createAnalyser');
+    expect(preflight).not.toContain('sampleInputLevel');
+    expect(preflight).not.toContain('Microphone input level');
+    expect(preflight).toContain('if (version !== checkVersionRef.current) return');
+    expect(preflight).toContain('++checkVersionRef.current');
+    expect(preflight).toContain('onReadyChange(false)');
+  });
+
+  it("retains today's consent, service readiness and device readiness before a Mind start", () => {
+    const confirm = webSource('components/app/RecordConfirmStrip.tsx');
+    expect(confirm).toContain('confirmedToday &&');
+    expect(confirm).toContain('Object.values(missingRequired).every(Boolean)');
+    expect(confirm).toContain('(!needsDevicePreflight || preflightReady)');
+    expect(confirm).toContain("liveServiceRequired={method === 'mic' && capture === 'live'}");
+    expect(confirm).toContain('onReadyChange={setPreflightReady}');
+    expect(confirm).toContain('onSelectedDeviceIdChange={setSelectedDeviceId}');
+  });
+
   it('integrates durable drafts, guarded navigation, confirmed end and transcript rescue', () => {
     const live = webSource('components/app/TherapistLiveSession.tsx');
     expect(live).toContain('saveRecoveryDraft');

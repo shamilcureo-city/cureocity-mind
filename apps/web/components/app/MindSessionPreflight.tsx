@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   runCapturePreflight,
   type CaptureMicrophone,
-  type CapturePreflightIssue,
+  type CapturePreflightResult,
 } from '@/lib/capture-preflight';
+import { openCaptureMicrophone } from '@/lib/audio/microphone-access';
 import { Button } from '../ui/Button';
 
 interface Props {
@@ -24,109 +25,124 @@ export function MindSessionPreflight({
 }: Props) {
   const [microphones, setMicrophones] = useState<CaptureMicrophone[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
-  const [issues, setIssues] = useState<CapturePreflightIssue[]>([]);
-  const [level, setLevel] = useState(0);
+  const [result, setResult] = useState<CapturePreflightResult | null>(null);
   const [checking, setChecking] = useState(false);
-  const [details, setDetails] = useState<Record<string, unknown> | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
+  const selectedDeviceRef = useRef('');
+  const checkVersionRef = useRef(0);
 
-  const check = useCallback(async () => {
-    if (!enabled) {
-      onReadyChange(true);
-      return;
-    }
-    setChecking(true);
-    onReadyChange(false);
-    const result = await runCapturePreflight(
-      { selectedDeviceId: selectedDeviceId || null },
-      {
-        isCompatible: () =>
-          typeof window !== 'undefined' &&
-          !!navigator.mediaDevices?.getUserMedia &&
-          typeof AudioContext !== 'undefined',
-        permissionState: async () => {
-          if (!navigator.permissions?.query) return 'unsupported';
-          try {
-            return (await navigator.permissions.query({ name: 'microphone' as PermissionName }))
-              .state;
-          } catch {
-            return 'unsupported';
-          }
-        },
-        listMicrophones: async () => {
-          const devices = await navigator.mediaDevices.enumerateDevices();
-          return devices
-            .filter((device) => device.kind === 'audioinput')
-            .map((device, index) => ({
-              deviceId: device.deviceId,
-              label: device.label || `Microphone ${index + 1}`,
-            }));
-        },
-        sampleInputLevel: async (deviceId) => {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-          });
-          const context = new AudioContext();
-          const analyser = context.createAnalyser();
-          context.createMediaStreamSource(stream).connect(analyser);
-          const samples = new Uint8Array(analyser.fftSize);
-          await new Promise((resolve) => setTimeout(resolve, 180));
-          analyser.getByteTimeDomainData(samples);
-          stream.getTracks().forEach((track) => track.stop());
-          await context.close();
-          return Math.max(...samples.map((sample) => Math.abs(sample - 128))) / 128;
-        },
-        serviceReady: async () => {
-          if (!liveServiceRequired) return true;
-          return fetch('/api/v1/live/health', { cache: 'no-store' })
-            .then(async (response) => {
-              if (!response.ok) return false;
-              const body = (await response.json().catch(() => ({}))) as {
-                ok?: boolean;
-                atCapacity?: boolean;
-              };
-              return body.ok === true && body.atCapacity !== true;
-            })
-            .catch(() => false);
-        },
-      },
-    );
-    setMicrophones(
-      result.supportDetails['availableDeviceIds'] instanceof Array
-        ? result.supportDetails['availableDeviceIds'].map((deviceId, index) => ({
-            deviceId: String(deviceId),
-            label:
-              result.selectedMicrophone?.deviceId === deviceId
-                ? (result.selectedMicrophone?.label ?? `Microphone ${index + 1}`)
-                : `Microphone ${index + 1}`,
-          }))
-        : [],
-    );
-    if (!selectedDeviceId && result.selectedMicrophone) {
-      setSelectedDeviceId(result.selectedMicrophone.deviceId);
-      onSelectedDeviceIdChange(result.selectedMicrophone.deviceId);
-    }
-    setIssues(result.issues);
-    setLevel(result.inputLevel);
-    setDetails(result.supportDetails);
-    onReadyChange(result.ready);
-    setChecking(false);
-  }, [enabled, liveServiceRequired, onReadyChange, onSelectedDeviceIdChange, selectedDeviceId]);
+  const check = useCallback(
+    async (requestPermission = false) => {
+      const version = ++checkVersionRef.current;
+      onReadyChange(false);
+      setResult(null);
+      setCheckError(null);
+      if (!enabled) {
+        setChecking(false);
+        return;
+      }
+      setChecking(true);
+      try {
+        const next = await runCapturePreflight(
+          { selectedDeviceId: selectedDeviceRef.current || null, requestPermission },
+          {
+            isCompatible: () =>
+              typeof window !== 'undefined' &&
+              !!navigator.mediaDevices?.getUserMedia &&
+              typeof AudioContext !== 'undefined',
+            permissionState: async () => {
+              if (!navigator.permissions?.query) return 'unsupported';
+              try {
+                return (await navigator.permissions.query({ name: 'microphone' as PermissionName }))
+                  .state;
+              } catch {
+                return 'unsupported';
+              }
+            },
+            listMicrophones: async () => {
+              const devices = await navigator.mediaDevices.enumerateDevices();
+              return devices
+                .filter((device) => device.kind === 'audioinput')
+                .map((device, index) => ({
+                  deviceId: device.deviceId,
+                  label: device.label || `Microphone ${index + 1}`,
+                }));
+            },
+            openMicrophone: (deviceId) =>
+              openCaptureMicrophone(
+                deviceId,
+                navigator.mediaDevices,
+                () => version === checkVersionRef.current,
+              ),
+            serviceReady: async () => {
+              if (!liveServiceRequired) return true;
+              return fetch('/api/v1/live/health', { cache: 'no-store' })
+                .then(async (response) => {
+                  if (!response.ok) return false;
+                  const body = (await response.json().catch(() => ({}))) as {
+                    ok?: boolean;
+                    atCapacity?: boolean;
+                  };
+                  return body.ok === true && body.atCapacity !== true;
+                })
+                .catch(() => false);
+            },
+          },
+        );
+        // A device switch, consent change or unmount invalidates old results.
+        // The access helper releases its temporary stream even when discarded.
+        if (version !== checkVersionRef.current) return;
+        setMicrophones(next.microphones);
+        if (!selectedDeviceRef.current && next.selectedMicrophone) {
+          selectedDeviceRef.current = next.selectedMicrophone.deviceId;
+          setSelectedDeviceId(next.selectedMicrophone.deviceId);
+          onSelectedDeviceIdChange(next.selectedMicrophone.deviceId || null);
+        }
+        setResult(next);
+        onReadyChange(next.ready);
+      } catch {
+        if (version === checkVersionRef.current) {
+          setCheckError('The microphone check could not finish. Select Check again to retry.');
+        }
+      } finally {
+        if (version === checkVersionRef.current) setChecking(false);
+      }
+    },
+    [enabled, liveServiceRequired, onReadyChange, onSelectedDeviceIdChange],
+  );
 
   useEffect(() => {
     void check();
+    return () => {
+      ++checkVersionRef.current;
+    };
   }, [check]);
+
+  const needsPermission = result?.issues.some((issue) => issue.code === 'PERMISSION_PROMPT');
 
   if (!enabled) return null;
   return (
-    <section className="mt-5 rounded-xl border border-[var(--color-line-soft)] p-4">
+    <section
+      className="mt-5 rounded-xl border border-[var(--color-line-soft)] p-4"
+      aria-busy={checking}
+    >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold">Microphone &amp; live service</p>
-          <p className="text-xs text-[var(--color-ink-3)]">Checked before recording begins.</p>
+          <p className="text-sm font-semibold">
+            {liveServiceRequired ? 'Microphone & live service' : 'Microphone access'}
+          </p>
+          <p className="text-xs text-[var(--color-ink-3)]">
+            Allow microphone access. No need to speak to pass this check.
+          </p>
         </div>
-        <Button variant="secondary" onClick={() => void check()} disabled={checking}>
-          {checking ? 'Checking…' : 'Check again'}
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => void check(true)}
+          disabled={checking}
+        >
+          {checking ? 'Checking…' : needsPermission ? 'Allow microphone' : 'Check again'}
         </Button>
       </div>
       {microphones.length > 0 && (
@@ -135,11 +151,19 @@ export function MindSessionPreflight({
           <select
             value={selectedDeviceId}
             onChange={(event) => {
+              ++checkVersionRef.current;
+              onReadyChange(false);
+              selectedDeviceRef.current = event.target.value;
               setSelectedDeviceId(event.target.value);
               onSelectedDeviceIdChange(event.target.value || null);
+              void check(true);
             }}
             className="mt-1 block w-full rounded-lg border border-[var(--color-line)] bg-white px-3 py-2 text-sm"
           >
+            {!selectedDeviceId && <option value="">System default</option>}
+            {selectedDeviceId && !microphones.some((mic) => mic.deviceId === selectedDeviceId) && (
+              <option value={selectedDeviceId}>Selected microphone (unavailable)</option>
+            )}
             {microphones.map((microphone) => (
               <option key={microphone.deviceId} value={microphone.deviceId}>
                 {microphone.label}
@@ -148,16 +172,19 @@ export function MindSessionPreflight({
           </select>
         </label>
       )}
-      <div
-        className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--color-line-soft)]"
-        aria-label="Microphone input level"
-      >
-        <div
-          className="h-full bg-[var(--color-accent)]"
-          style={{ width: `${Math.min(100, level * 100)}%` }}
-        />
+      <div role="status" aria-live="polite" className="mt-3 text-xs text-[var(--color-ink-2)]">
+        {checking
+          ? 'Checking access. If your browser asks, choose Allow.'
+          : result?.ready
+            ? 'Microphone access is ready. You can start without speaking first.'
+            : null}
       </div>
-      {issues.map((issue) => (
+      {checkError && (
+        <p role="alert" className="mt-2 text-xs text-[var(--color-warn)]">
+          {checkError}
+        </p>
+      )}
+      {result?.issues.map((issue) => (
         <div
           key={issue.code}
           className="mt-2 rounded-lg bg-[var(--color-warn-soft)] px-3 py-2 text-xs text-[var(--color-warn)]"
@@ -165,7 +192,7 @@ export function MindSessionPreflight({
           <strong>{issue.message}</strong> {issue.action}.
         </div>
       ))}
-      {details && (
+      {result && (
         <button
           type="button"
           onClick={() => setShowDetails((value) => !value)}
@@ -174,9 +201,9 @@ export function MindSessionPreflight({
           {showDetails ? 'Hide support details' : 'Support details'}
         </button>
       )}
-      {showDetails && details && (
+      {showDetails && result && (
         <pre className="mt-2 overflow-auto rounded-lg bg-slate-950 p-3 text-[10px] text-white">
-          {JSON.stringify(details, null, 2)}
+          {JSON.stringify(result.supportDetails, null, 2)}
         </pre>
       )}
     </section>
