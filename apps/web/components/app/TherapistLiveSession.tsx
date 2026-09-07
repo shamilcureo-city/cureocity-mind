@@ -20,7 +20,7 @@
  * COMPLETED NoteDraft) and routes to the session workspace for review + sign.
  *
  * NOTE: like DoctorLiveEncounter, this is a browser-only WS/audio surface — it
- * cannot be exercised in CI. Drive it once with `pnpm gateway` before trusting.
+ * needs real-device/gateway validation beyond the isolated React/mock CI tests.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -60,7 +60,16 @@ import { MindTherapyGuide, type PreparedMindGuide } from './MindTherapyGuide';
 
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
-type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'error';
+type Phase =
+  | 'idle'
+  | 'connecting'
+  | 'listening'
+  | 'pausing'
+  | 'paused'
+  | 'pause-unconfirmed'
+  | 'finalizing'
+  | 'done'
+  | 'error';
 
 interface Props {
   sessionId: string;
@@ -271,6 +280,16 @@ export function TherapistLiveSession({
   const liveAttemptRef = useRef(0);
   const attemptAbortRef = useRef<AbortController | null>(null);
   const unmountedRef = useRef(false);
+  const audioDeliveryRef = useRef<'off' | 'buffering' | 'sending'>('off');
+  const startupAudioRef = useRef<Uint8Array[]>([]);
+  const startupAudioBytesRef = useRef(0);
+  const captureIntegrityErrorRef = useRef(false);
+  const pauseReplyRef = useRef<{
+    requestId: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+  const [pauseWarning, setPauseWarning] = useState<string | null>(null);
   // The live-token 409: the client's consents on record don't cover the live
   // scribe. Rendered with the real reason + the path to capture consent,
   // instead of the gateway's generic "could not be authorized".
@@ -411,9 +430,24 @@ export function TherapistLiveSession({
     ...(selectedDeviceId ? { selectedDeviceId } : {}),
     onFrame: (pcm) => {
       const ws = wsRef.current;
-      if (ws && ws.readyState === ws.OPEN) ws.send(pcm);
+      if (audioDeliveryRef.current === 'buffering') {
+        if (startupAudioBytesRef.current + pcm.byteLength > 1_048_576) {
+          audioDeliveryRef.current = 'off';
+          setError(
+            'The live connection did not become ready. Capture stopped; the startup audio was not transcribed. Retry before continuing the conversation.',
+          );
+          setPhase('error');
+          void streamRef.current.stop().catch(() => {});
+          ws?.close();
+          return;
+        }
+        startupAudioRef.current.push(pcm);
+        startupAudioBytesRef.current += pcm.byteLength;
+      } else if (audioDeliveryRef.current === 'sending' && ws && ws.readyState === ws.OPEN)
+        ws.send(pcm);
     },
     onInterrupted: (message) => {
+      audioDeliveryRef.current = 'off';
       setError(message);
       setConnectionLost(true);
       setPhase('error');
@@ -431,6 +465,8 @@ export function TherapistLiveSession({
     unmountedRef.current = false;
     return () => {
       unmountedRef.current = true;
+      audioDeliveryRef.current = 'off';
+      pauseReplyRef.current?.reject(new Error('This page closed.'));
       startingRef.current = false;
       autoStartedRef.current = false;
       ++liveAttemptRef.current;
@@ -641,6 +677,12 @@ export function TherapistLiveSession({
 
   async function start(opts: { resume?: boolean } = {}): Promise<void> {
     if (unmountedRef.current || startingRef.current || saving) return;
+    if (captureIntegrityErrorRef.current) {
+      setError(
+        'The last audio frame was not confirmed. Document any missing speech manually before continuing; reconnect cannot recover it.',
+      );
+      return;
+    }
     startingRef.current = true;
     const attempt = ++liveAttemptRef.current;
     attemptAbortRef.current?.abort();
@@ -650,6 +692,8 @@ export function TherapistLiveSession({
     const previousSocket = wsRef.current;
     wsRef.current = null;
     previousSocket?.close();
+    audioDeliveryRef.current = 'off';
+    pauseReplyRef.current?.reject(new Error('A new connection was requested.'));
     await streamRef.current.stop().catch(() => {});
     if (!isCurrentAttempt()) return;
     // Reconnect path: the browser still holds the transcript — keep it on
@@ -661,7 +705,8 @@ export function TherapistLiveSession({
     setConnectionLost(false);
     setConsentBlocked(null);
     setSaveFailed(null);
-    if (!resume) {
+    setPauseWarning(null);
+    if (!resume && !opts.resume) {
       setUtterances([]);
       setNote({});
       setNoteUpdatedAt(null);
@@ -672,6 +717,9 @@ export function TherapistLiveSession({
     setRefreshingNote(false);
     finalHandledRef.current = false;
     setPhase('connecting');
+    phaseRef.current = 'connecting';
+    startupAudioRef.current = [];
+    startupAudioBytesRef.current = 0;
 
     if (window.location.protocol === 'https:' && GATEWAY_URL.startsWith('ws://')) {
       setPhase('error');
@@ -754,6 +802,7 @@ export function TherapistLiveSession({
           activateCapture: async () => {
             try {
               assertOwnsSocket();
+              audioDeliveryRef.current = 'buffering';
               await streamRef.current.start();
               assertOwnsSocket();
               return { active: true as const };
@@ -818,6 +867,10 @@ export function TherapistLiveSession({
 
     ws.onerror = () => {
       if (!ownsSocket()) return;
+      audioDeliveryRef.current = 'off';
+      pauseReplyRef.current?.reject(
+        new Error('The live connection failed before pause was confirmed.'),
+      );
       startingRef.current = false;
       void streamRef.current.stop().catch(() => {});
       // Mid-session an error event is always followed by close — the
@@ -836,6 +889,10 @@ export function TherapistLiveSession({
     // recovery card (reconnect, or continue the classic recorded way).
     ws.onclose = () => {
       if (!ownsSocket()) return;
+      audioDeliveryRef.current = 'off';
+      pauseReplyRef.current?.reject(
+        new Error('The live connection closed before pause was confirmed.'),
+      );
       ++liveAttemptRef.current;
       abort.abort();
       wsRef.current = null;
@@ -843,7 +900,18 @@ export function TherapistLiveSession({
       void streamRef.current.stop().catch(() => {});
       if (finalHandledRef.current) return;
       const p = phaseRef.current;
-      if (p === 'listening' || p === 'finalizing') {
+      if (p === 'paused') {
+        setPauseWarning(
+          'Microphone off. The paused connection has expired or disconnected. Resume explicitly to recheck consent and continue from the confirmed transcript.',
+        );
+      } else if (p === 'pausing' || p === 'pause-unconfirmed') {
+        phaseRef.current = 'pause-unconfirmed';
+        setPhase('pause-unconfirmed');
+        setPauseWarning(
+          'Microphone off, connection lost. The last spoken words were not confirmed transcribed. Review captured words before continuing.',
+        );
+        setConnectionLost(true);
+      } else if (p === 'listening' || p === 'finalizing') {
         setConnectionLost(true);
         setPhase('error');
       } else if (p === 'connecting') {
@@ -867,18 +935,42 @@ export function TherapistLiveSession({
       const event = parsed.data;
       switch (event.type) {
         case 'status':
-          if (event.state === 'listening') setPhase('listening');
-          else if (event.state === 'finalizing') {
+          if (event.state === 'listening' && phaseRef.current === 'connecting') {
+            for (const pcm of startupAudioRef.current) ws.send(pcm);
+            startupAudioRef.current = [];
+            startupAudioBytesRef.current = 0;
+            audioDeliveryRef.current = 'sending';
+            phaseRef.current = 'listening';
+            setPhase('listening');
+          } else if (event.state === 'finalizing') {
+            if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) {
+              setPauseWarning(
+                'Microphone off. This gateway started closing while paused; it may need the pause-support update. No note will be saved automatically.',
+              );
+              break;
+            }
             setPhase('finalizing');
             setFinalStage('generating-note');
           } else if (event.state === 'done') {
+            if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) break;
             setPhase('done');
             // The gateway always sends `done` after a therapyFinal. If we get
             // here without one, no note was generated (Pass 2 empty/blocked) —
             // surface a recovery panel instead of hanging on "Finishing…".
             if (!finalHandledRef.current) setNoteFailed(true);
           } else if (event.state === 'unauthorized' || event.state === 'busy') {
+            audioDeliveryRef.current = 'off';
+            pauseReplyRef.current?.reject(
+              new Error('The live connection is no longer authorized.'),
+            );
             void streamRef.current.stop().catch(() => {});
+            if (phaseRef.current === 'paused') {
+              setPauseWarning(
+                'Microphone off. Live authorization expired or changed. Resume explicitly to recheck access and consent.',
+              );
+              ws.close();
+              break;
+            }
             setPhase('error');
             setError(
               event.state === 'busy'
@@ -886,6 +978,17 @@ export function TherapistLiveSession({
                 : 'The live session could not be authorized.',
             );
           }
+          break;
+        case 'capturePaused':
+          if (pauseReplyRef.current?.requestId === event.requestId) pauseReplyRef.current.resolve();
+          break;
+        case 'capturePauseFailed':
+          if (pauseReplyRef.current?.requestId === event.requestId)
+            pauseReplyRef.current.reject(
+              new Error(
+                'The gateway could not confirm the last audio. Retry confirming pause, or end and save.',
+              ),
+            );
           break;
         case 'utterance':
           utterancesRef.current = [...utterancesRef.current, event.utterance];
@@ -903,6 +1006,17 @@ export function TherapistLiveSession({
           meterRef.current = event.summary;
           break;
         case 'therapyFinal':
+          if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) {
+            finalPayloadRef.current = {
+              kind: event.kind,
+              note: event.note,
+              transcript: event.transcript ?? buildTranscript(utterancesRef.current),
+            };
+            setSaveFailed(
+              'The gateway finished while capture was paused. Review the captured transcript; use Retry save only if you intend to end this session.',
+            );
+            break;
+          }
           setNote(event.note as unknown as Record<string, unknown>);
           setNoteUpdatedAt(Date.now());
           void persistAndFinish(
@@ -918,17 +1032,27 @@ export function TherapistLiveSession({
   }
 
   function end(): void {
-    if (phase !== 'listening') return;
+    if (
+      !['listening', 'paused', 'pause-unconfirmed'].includes(phaseRef.current) ||
+      captureIntegrityErrorRef.current
+    )
+      return;
     setEndConfirmOpen(true);
   }
 
   async function confirmEnd(): Promise<void> {
-    if (phase !== 'listening') return;
+    if (
+      !['listening', 'paused', 'pause-unconfirmed'].includes(phaseRef.current) ||
+      captureIntegrityErrorRef.current
+    )
+      return;
     setEndConfirmOpen(false);
     setFinalStage('stopping');
     setPhase('finalizing');
+    phaseRef.current = 'finalizing';
     try {
       await stream.stop();
+      audioDeliveryRef.current = 'off';
       if (wsRef.current?.readyState !== WebSocket.OPEN)
         throw new Error('The live connection closed. Recover the captured transcript below.');
       wsRef.current.send(JSON.stringify({ type: 'stop' }));
@@ -936,6 +1060,68 @@ export function TherapistLiveSession({
       setConnectionLost(true);
       setPhase('error');
       setError((reason as Error).message);
+    }
+  }
+
+  async function pauseCapture(): Promise<void> {
+    if (!['listening', 'pause-unconfirmed'].includes(phaseRef.current) || unmountedRef.current)
+      return;
+    const attempt = liveAttemptRef.current;
+    const socket = wsRef.current;
+    phaseRef.current = 'pausing';
+    setPhase('pausing');
+    setPauseWarning(null);
+    try {
+      try {
+        await streamRef.current.stop();
+      } catch {
+        captureIntegrityErrorRef.current = true;
+        throw new Error(
+          'Microphone off, but the final audio frame was not confirmed. Known transcript words remain available; missing speech must be documented manually.',
+        );
+      }
+      audioDeliveryRef.current = 'off';
+      if (unmountedRef.current || liveAttemptRef.current !== attempt) return;
+      if (!socket || socket.readyState !== WebSocket.OPEN)
+        throw new Error(
+          'The live connection is closed. The last audio was not confirmed transcribed.',
+        );
+      const requestId = crypto.randomUUID();
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () =>
+            pauseReplyRef.current?.requestId === requestId &&
+            pauseReplyRef.current.reject(
+              new Error(
+                'The gateway has not confirmed pause. It may be slow or need the pause-support update. Your microphone is off; the last spoken words are not yet confirmed transcribed.',
+              ),
+            ),
+          30_000,
+        );
+        pauseReplyRef.current = {
+          requestId,
+          resolve: () => {
+            clearTimeout(timer);
+            pauseReplyRef.current = null;
+            resolve();
+          },
+          reject: (error) => {
+            clearTimeout(timer);
+            pauseReplyRef.current = null;
+            reject(error);
+          },
+        };
+        socket.send(JSON.stringify({ type: 'pause', requestId }));
+      });
+      if (unmountedRef.current || liveAttemptRef.current !== attempt) return;
+      phaseRef.current = 'paused';
+      setPhase('paused');
+    } catch (reason) {
+      if (unmountedRef.current || liveAttemptRef.current !== attempt) return;
+      audioDeliveryRef.current = 'off';
+      phaseRef.current = 'pause-unconfirmed';
+      setPhase('pause-unconfirmed');
+      setPauseWarning((reason as Error).message);
     }
   }
 
@@ -1034,14 +1220,36 @@ export function TherapistLiveSession({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          {phase === 'idle' && (
+            <Button onClick={() => void start({ resume: utterances.length > 0 })}>
+              Start session
+            </Button>
+          )}
+          {phase === 'connecting' && (
+            <span role="status" className="text-sm">
+              Connecting capture…
+            </span>
+          )}
           {phase === 'listening' && (
             <span className="flex items-center gap-2 text-sm tabular-nums text-[var(--color-ink-2)]">
               <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
               {mm}:{ss}
             </span>
           )}
-          {phase === 'listening' && <Button onClick={end}>End session</Button>}
+          {phase === 'listening' && (
+            <Button variant="secondary" onClick={() => void pauseCapture()}>
+              Pause recording
+            </Button>
+          )}
+          {phase === 'paused' && (
+            <Button onClick={() => void start({ resume: true })}>Resume recording</Button>
+          )}
+          {['listening', 'paused', 'pause-unconfirmed'].includes(phase) && (
+            <Button variant="secondary" onClick={end} disabled={captureIntegrityErrorRef.current}>
+              End session
+            </Button>
+          )}
           {(phase === 'finalizing' || saving) && (
             <span className="text-sm text-[var(--color-ink-3)]">
               {finalStage === 'stopping'
@@ -1055,6 +1263,36 @@ export function TherapistLiveSession({
           )}
         </div>
       </header>
+
+      {['pausing', 'paused', 'pause-unconfirmed'].includes(phase) && (
+        <Card
+          className="border-[var(--color-line)] bg-[var(--color-surface-soft)] p-4 text-sm"
+          role="status"
+        >
+          <p className="font-medium">
+            Microphone off ·{' '}
+            {phase === 'pausing'
+              ? 'confirming the last audio…'
+              : phase === 'paused'
+                ? 'recording paused'
+                : 'pause not confirmed'}
+          </p>
+          <p className="mt-1">
+            No new audio is being captured.{' '}
+            {phase === 'paused'
+              ? 'The gateway confirmed the audio before this pause was processed. This session has not ended; keep this page open and choose Resume when ready.'
+              : 'Keep this page open until the last captured audio is confirmed. Do not continue speaking for the record yet.'}
+          </p>
+          {pauseWarning && <p className="mt-2 text-[var(--color-warn)]">{pauseWarning}</p>}
+          {phase === 'pause-unconfirmed' &&
+            !captureIntegrityErrorRef.current &&
+            wsRef.current?.readyState === WebSocket.OPEN && (
+              <Button className="mt-3" variant="secondary" onClick={() => void pauseCapture()}>
+                Retry pause confirmation
+              </Button>
+            )}
+        </Card>
+      )}
 
       <div className="mind-live-modes">
         <div>
@@ -1188,7 +1426,9 @@ export function TherapistLiveSession({
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setEndConfirmOpen(false)}>
-                Keep recording
+                {phase === 'paused' || phase === 'pause-unconfirmed'
+                  ? 'Stay paused'
+                  : 'Keep recording'}
               </Button>
               <Button onClick={confirmEnd}>End &amp; save</Button>
             </div>
@@ -1281,9 +1521,13 @@ export function TherapistLiveSession({
         </Card>
       )}
 
-      {connectionLost && (
+      {(connectionLost || captureIntegrityErrorRef.current) && (
         <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
-          <strong className="block">The live connection dropped.</strong>
+          <strong className="block">
+            {captureIntegrityErrorRef.current
+              ? 'The final audio frame could not be confirmed.'
+              : 'The live connection dropped.'}
+          </strong>
           <p className="mt-1">
             Capture has stopped. Reconnect replays the words already shown here. Switching to
             recording first saves those words securely, then continues the same session. Audio not
@@ -1291,7 +1535,9 @@ export function TherapistLiveSession({
             repeat or document anything missing.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
-            <Button onClick={() => void start({ resume: true })}>Reconnect</Button>
+            {!captureIntegrityErrorRef.current && (
+              <Button onClick={() => void start({ resume: true })}>Reconnect</Button>
+            )}
             {clientId && (
               <Button variant="secondary" onClick={continueAsBatch} disabled={saving}>
                 Continue as recording (transcript preserved)
@@ -1304,6 +1550,11 @@ export function TherapistLiveSession({
             >
               Generate from captured transcript
             </Button>
+            {captureIntegrityErrorRef.current && (
+              <Button variant="secondary" onClick={downloadHeldTranscript}>
+                Save transcript
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => navigateAway(`/app/sessions/${sessionId}`)}>
               Open session
             </Button>
@@ -1457,9 +1708,9 @@ export function TherapistLiveSession({
                 The conversation and note build in real time as you talk. Recording starts only when
                 you choose.
               </p>
-              <Button onClick={() => void start({ resume: utterances.length > 0 })}>
-                Start session
-              </Button>
+              <p className="text-sm text-[var(--color-ink-3)]">
+                Use Start session at the top when you are ready.
+              </p>
             </Card>
           ) : (
             <>

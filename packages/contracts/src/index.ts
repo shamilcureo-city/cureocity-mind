@@ -74,3 +74,4 @@ export * from './formulation';
 export * from './marketing';
 export * from './orbit-capability';
 export * from './mind-recovery';
+export * from './note-edit-recovery';

@@ -13,6 +13,7 @@ interface Props {
   sessionId: string;
   active?: TabKey;
   sessionKind?: SessionKind;
+  canReviewClinical?: boolean;
 }
 
 const TABS: TabSpec[] = [
@@ -23,10 +24,14 @@ const TABS: TabSpec[] = [
 ];
 
 /** Mind keeps longitudinal care on the client and visit evidence on the session. */
-export function SessionWorkspaceTabs({ sessionId, active = 'note' }: Props) {
+export function SessionWorkspaceTabs({
+  sessionId,
+  active = 'note',
+  canReviewClinical = true,
+}: Props) {
   return (
     <nav className={styles.tabs} aria-label="Session sections">
-      {TABS.map((tab) => {
+      {TABS.filter((tab) => canReviewClinical || tab.key !== 'review').map((tab) => {
         const activeTab = tab.key === active;
         const href = `/app/sessions/${sessionId}?tab=${tab.key}`;
         return (

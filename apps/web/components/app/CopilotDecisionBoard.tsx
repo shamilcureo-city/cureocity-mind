@@ -125,6 +125,7 @@ interface Props {
   closeout: CloseoutData;
   canShare: boolean;
   canUseMeasures: boolean;
+  embeddedCloseout?: boolean;
 }
 
 /** The kind-normalised AI reading the five steps render from. */
@@ -162,6 +163,7 @@ export function CopilotDecisionBoard({
   closeout,
   canShare,
   canUseMeasures,
+  embeddedCloseout = false,
 }: Props) {
   const router = useRouter();
   const isIntake = sessionKind === 'INTAKE';
@@ -695,20 +697,22 @@ export function CopilotDecisionBoard({
                 onDraftPlan={acceptIntakePlan}
               />
 
-              <WrapUpSignStep
-                sessionId={sessionId}
-                clientId={clientId}
-                isIntake={isIntake}
-                hasCrisis={data.crisisFlags.length > 0}
-                crisisAcknowledged={crisisAcknowledged}
-                record={record}
-                reviewedAt={reviewedAt}
-                measuresHref={measuresHref}
-                recommendedInstruments={data.recommendedInstruments}
-                closeout={closeout}
-                canShare={canShare}
-                canUseMeasures={canUseMeasures}
-              />
+              {!embeddedCloseout && (
+                <WrapUpSignStep
+                  sessionId={sessionId}
+                  clientId={clientId}
+                  isIntake={isIntake}
+                  hasCrisis={data.crisisFlags.length > 0}
+                  crisisAcknowledged={crisisAcknowledged}
+                  record={record}
+                  reviewedAt={reviewedAt}
+                  measuresHref={measuresHref}
+                  recommendedInstruments={data.recommendedInstruments}
+                  closeout={closeout}
+                  canShare={canShare}
+                  canUseMeasures={canUseMeasures}
+                />
+              )}
             </div>
 
             {/* ================= Your record lane ================= */}

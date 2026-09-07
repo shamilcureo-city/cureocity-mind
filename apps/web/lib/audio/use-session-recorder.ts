@@ -14,7 +14,14 @@ import { requestPersistentStorage } from './storage-buckets';
 import { AudioPersistenceQueue } from './persistence-queue';
 import { stopWorklet } from './stop-worklet';
 
-export type RecorderState = 'idle' | 'preparing' | 'recording' | 'finishing' | 'error';
+export type RecorderState =
+  | 'idle'
+  | 'preparing'
+  | 'recording'
+  | 'pausing'
+  | 'paused'
+  | 'finishing'
+  | 'error';
 
 export type CaptureSource = 'mic' | 'display' | 'dictation' | 'external';
 
@@ -48,6 +55,8 @@ export interface RecorderHandle {
   startedAt: number | null;
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  /** Release input and preserve the flushed tail without completing the session. */
+  pause: () => Promise<void>;
   /** FLOW-2 — drain the IDB queue once more; resolves to the count still
    *  pending (0 = safe to generate the note). */
   drainPending: (retryExhausted?: boolean) => Promise<number>;
@@ -96,6 +105,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   const uploaderRef = useRef<ChunkUploader | null>(null);
   const stopInFlightRef = useRef<Promise<void> | null>(null);
   const generationRef = useRef(0);
+  const disposedRef = useRef(false);
   const integrityErrorRef = useRef<string | null>(null);
   const pendingCountRef = useRef(0);
   pendingCountRef.current = pendingCount;
@@ -151,6 +161,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   }, [opts.sessionId, base, opts.getAuthToken]);
 
   const start = useCallback(async (): Promise<void> => {
+    if (disposedRef.current) throw new Error('Capture is no longer available on this page.');
     if (stateRef.current === 'recording' || stateRef.current === 'preparing')
       throw new Error('Capture is already starting or active.');
     const generation = ++generationRef.current;
@@ -265,7 +276,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
       stream.getTracks().forEach((t) => {
         const unavailable = () =>
           interrupted(
-            'The audio source stopped. Capture is paused; finish saving below, or reconnect the microphone and resume.',
+            'The audio source disconnected. Capture stopped; finish saving below, or reconnect the source and resume.',
           );
         t.addEventListener('ended', unavailable);
         t.addEventListener('mute', unavailable);
@@ -299,89 +310,101 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
       }
       throw e;
     }
-  }, [opts.sessionId, opts.source, opts.getAuthToken, opts.selectedDeviceId, base]);
+  }, [
+    opts.sessionId,
+    opts.source,
+    opts.externalStream,
+    opts.getAuthToken,
+    opts.selectedDeviceId,
+    base,
+  ]);
 
-  const stopInternal = useCallback((): Promise<void> => {
-    if (stopInFlightRef.current) return stopInFlightRef.current;
-    ++generationRef.current;
-    const work = (async () => {
-      setState('finishing');
-      stateRef.current = 'finishing';
-      try {
+  const stopInternal = useCallback(
+    (pause = false): Promise<void> => {
+      if (stopInFlightRef.current) return stopInFlightRef.current;
+      ++generationRef.current;
+      const work = (async () => {
+        setState(pause ? 'pausing' : 'finishing');
+        stateRef.current = pause ? 'pausing' : 'finishing';
+        streamRef.current?.getTracks().forEach((track) => track.stop());
         try {
-          await stopWorklet(workletRef.current);
-        } catch {
-          integrityErrorRef.current =
-            'The final audio frame could not be confirmed. Known audio parts will be saved, but automatic finalization is blocked. Review the session and document any missing speech manually; retrying uploads cannot recover that frame.';
-        }
-        const finalChunks = chunkerRef.current?.flush() ?? [];
-        for (const c of finalChunks) {
-          persistenceRef.current!.add({
-            sessionId: opts.sessionId,
-            chunkIndex: c.chunkIndex,
-            mimeType: TARGET_MIME_TYPE,
-            sampleRate: TARGET_SAMPLE_RATE_HZ,
-            durationMs: c.durationMs,
-            bytes: c.bytes,
-            enqueuedAt: c.startedAt,
-            attempts: 0,
-          });
-        }
-        // The tail is now owned by the retry queue. Upload backoff must not
-        // leave the microphone/device open for seconds or minutes.
-        await teardown();
-        await persistenceRef.current!.flush();
-        const cursor = await SessionStore.getCursor(opts.sessionId);
-        const integrityError = integrityErrorRef.current ?? cursor?.captureIntegrityError;
-        if (integrityError) {
-          integrityErrorRef.current = integrityError;
-          await SessionStore.saveCursor({
-            sessionId: opts.sessionId,
-            nextChunkIndex: cursor?.nextChunkIndex ?? 0,
-            startedAt: cursor?.startedAt ?? Date.now(),
-            captureIntegrityError: integrityError,
-          });
-        }
-        if (uploaderRef.current) {
-          setDraining(true);
-          await uploaderRef.current.drainSession(opts.sessionId);
+          try {
+            await stopWorklet(workletRef.current);
+          } catch {
+            integrityErrorRef.current =
+              'The final audio frame could not be confirmed. Known audio parts will be saved, but automatic finalization is blocked. Review the session and document any missing speech manually; retrying uploads cannot recover that frame.';
+          }
+          const finalChunks = chunkerRef.current?.flush() ?? [];
+          for (const c of finalChunks) {
+            persistenceRef.current!.add({
+              sessionId: opts.sessionId,
+              chunkIndex: c.chunkIndex,
+              mimeType: TARGET_MIME_TYPE,
+              sampleRate: TARGET_SAMPLE_RATE_HZ,
+              durationMs: c.durationMs,
+              bytes: c.bytes,
+              enqueuedAt: c.startedAt,
+              attempts: 0,
+            });
+          }
+          // The tail is now owned by the retry queue. Upload backoff must not
+          // leave the microphone/device open for seconds or minutes.
+          await teardown();
+          await persistenceRef.current!.flush();
+          const cursor = await SessionStore.getCursor(opts.sessionId);
+          const integrityError = integrityErrorRef.current ?? cursor?.captureIntegrityError;
+          if (integrityError) {
+            integrityErrorRef.current = integrityError;
+            await SessionStore.saveCursor({
+              sessionId: opts.sessionId,
+              nextChunkIndex: cursor?.nextChunkIndex ?? 0,
+              startedAt: cursor?.startedAt ?? Date.now(),
+              captureIntegrityError: integrityError,
+            });
+          }
+          if (uploaderRef.current) {
+            setDraining(true);
+            await uploaderRef.current.drainSession(opts.sessionId);
+            setDraining(false);
+          }
+          const remaining = (await ChunkStore.listForSession(opts.sessionId)).length;
+          setPendingCount(remaining);
+          if (integrityError) throw new Error(integrityError);
+          // Keep the cursor until session completion, not merely an empty queue.
+          setState(pause ? 'paused' : 'idle');
+          stateRef.current = pause ? 'paused' : 'idle';
+        } catch (e) {
+          setError((e as Error).message);
+          setState('error');
+          stateRef.current = 'error';
+          throw e;
+        } finally {
+          for (const c of chunkerRef.current?.flush() ?? [])
+            persistenceRef.current!.add({
+              sessionId: opts.sessionId,
+              chunkIndex: c.chunkIndex,
+              mimeType: TARGET_MIME_TYPE,
+              sampleRate: TARGET_SAMPLE_RATE_HZ,
+              durationMs: c.durationMs,
+              bytes: c.bytes,
+              enqueuedAt: c.startedAt,
+              attempts: 0,
+            });
+          await teardown();
           setDraining(false);
         }
-        const remaining = (await ChunkStore.listForSession(opts.sessionId)).length;
-        setPendingCount(remaining);
-        if (integrityError) throw new Error(integrityError);
-        // Keep the cursor until session completion, not merely an empty queue.
-        setState('idle');
-        stateRef.current = 'idle';
-      } catch (e) {
-        setError((e as Error).message);
-        setState('error');
-        stateRef.current = 'error';
-        throw e;
-      } finally {
-        for (const c of chunkerRef.current?.flush() ?? [])
-          persistenceRef.current!.add({
-            sessionId: opts.sessionId,
-            chunkIndex: c.chunkIndex,
-            mimeType: TARGET_MIME_TYPE,
-            sampleRate: TARGET_SAMPLE_RATE_HZ,
-            durationMs: c.durationMs,
-            bytes: c.bytes,
-            enqueuedAt: c.startedAt,
-            attempts: 0,
-          });
-        await teardown();
-        setDraining(false);
-      }
-    })();
-    stopInFlightRef.current = work.finally(() => {
-      stopInFlightRef.current = null;
-    });
-    return stopInFlightRef.current;
-  }, [opts.sessionId]);
+      })();
+      stopInFlightRef.current = work.finally(() => {
+        stopInFlightRef.current = null;
+      });
+      return stopInFlightRef.current;
+    },
+    [opts.sessionId],
+  );
 
   // Stable wrapper for the consumer.
   const stop = useCallback(() => stopInternal(), [stopInternal]);
+  const pause = useCallback(() => stopInternal(true), [stopInternal]);
 
   // FLOW-2 — drain the IndexedDB queue once more and report how many chunks
   // still failed to upload. The End flow calls this in a retry loop so it can
@@ -408,7 +431,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   // beforeunload warning while recording — discourage accidental refresh.
   useEffect(() => {
     const needsWarning = () =>
-      ['preparing', 'recording', 'finishing'].includes(stateRef.current) ||
+      ['preparing', 'recording', 'pausing', 'paused', 'finishing'].includes(stateRef.current) ||
       pendingCountRef.current > 0 ||
       !!persistenceRef.current?.size;
     const handler = (e: BeforeUnloadEvent): void => {
@@ -444,7 +467,9 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
 
   // Teardown on unmount.
   useEffect(() => {
+    disposedRef.current = false;
     return () => {
+      disposedRef.current = true;
       // Invalidate pending permission requests synchronously. When navigating
       // inside the app, make a best-effort tail save before releasing capture.
       void stopInternal().catch(() => {});
@@ -476,6 +501,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     startedAt,
     start,
     stop,
+    pause,
     drainPending,
   };
 }
@@ -493,7 +519,8 @@ async function acquireStream(
     if (!externalStream || externalStream.getAudioTracks().length === 0) {
       throw new Error('The call audio is not ready yet — wait for the room to connect.');
     }
-    return externalStream;
+    // Record owned clones: pausing capture must not stop the virtual call.
+    return externalStream.clone();
   }
   if (source === 'display') {
     if (!SUPPORTS_DISPLAY_MEDIA) {

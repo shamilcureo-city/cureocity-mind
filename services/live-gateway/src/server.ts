@@ -15,6 +15,7 @@ import {
 import { buildBackends } from './llm';
 import { LiveAuthority } from './live-authority';
 import { LiveSession } from './live-session';
+import { OrderedSocketInput } from './ordered-socket-input';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
 import { initSentry } from './sentry';
 import { makeStreamTranscriber } from './stream-transcript';
@@ -185,186 +186,204 @@ wss.on('connection', (ws, req) => {
   };
   armIdle(STARTUP_GRACE_MS);
 
-  ws.on('message', async (raw: RawData, isBinary: boolean) => {
+  const inputQueue = new OrderedSocketInput(() => ws.close());
+  ws.on('message', (raw: RawData, isBinary: boolean) => {
     armIdle(started ? IDLE_TIMEOUT_MS : STARTUP_GRACE_MS);
-    // Binary frames are streamed PCM audio for the active session.
-    if (isBinary) {
-      if (started && (!authority || (await authority.authorizeCurrentInput()))) {
-        session?.pushAudio(toBuffer(raw));
-      }
-      return;
-    }
-    const parsed = LiveGatewayCommandSchema.safeParse(safeJson(raw));
-    if (!parsed.success) return;
-    const cmd = parsed.data;
-    if (cmd.type === 'start') {
-      // One socket owns one authorization/session lifecycle. This also keeps a
-      // second start from racing the first asynchronous authority check.
-      if (session || authority || started) {
-        send(ws, { type: 'status', state: 'unauthorized' });
-        ws.close();
-        return;
-      }
-      // Batch A — the node is shutting down; shed the start so the browser
-      // retries against a healthy instance instead of streaming into a corpse.
-      if (draining) {
-        send(ws, { type: 'status', state: 'busy' });
-        ws.close();
-        return;
-      }
-      // Sprint DV8 hardening — verify the practitioner token before
-      // streaming (no-op in dev when LIVE_GATEWAY_SECRET is unset).
-      if (!verifyStartToken(cmd.token, cmd.sessionId)) {
-        send(ws, { type: 'status', state: 'unauthorized' });
-        ws.close();
-        return;
-      }
-      // NEXT4 — refuse a tenant already over its daily spend cap. Claims
-      // are only trusted when HMAC-verified (dev/no-secret → null → open,
-      // matching mock's zero cost).
-      const claims = extractVerifiedClaims(cmd.token, cmd.sessionId);
-      const tenantId = claims?.psychologistId ?? null;
-      let capabilities: ReadonlySet<PractitionerCapability> = claims
-        ? new Set(claims.capabilities)
-        : DEV_OPEN_CAPABILITIES;
-      const vertical = claims?.vertical ?? cmd.vertical ?? 'DOCTOR';
-      if (tenantId && tenantSpend.isOverCap(tenantId)) {
-        console.warn(`[gateway] tenant ${tenantId} over daily cost cap — shedding start`);
-        send(ws, { type: 'status', state: 'busy' });
-        ws.close();
-        return;
-      }
-      // Sprint DS8 — shed NEW sessions once the node is at capacity; a
-      // consult already streaming keeps its slot.
-      if (!acquired) {
-        if (!pool.tryAcquire()) {
-          send(ws, { type: 'status', state: 'busy' });
-          ws.close();
-          return;
+    // Start revalidation on receipt (coalesces concurrent frames), but apply
+    // the result in arrival order. Do not let a slow old authority survive
+    // teardown or a pause overtake its preceding audio.
+    const inputAuthority = authority;
+    const authorized = inputAuthority?.authorizeCurrentInput();
+    const wasStarted = started;
+    inputQueue.enqueue(async () => {
+      if (inputAuthority && !inputAuthority.authorizeInput()) return;
+      // Binary frames are streamed PCM audio for the active session.
+      if (isBinary) {
+        if (
+          wasStarted &&
+          started &&
+          authority === inputAuthority &&
+          (!authorized || (await authorized))
+        ) {
+          session?.pushAudio(toBuffer(raw));
         }
-        acquired = true;
+        return;
       }
-      // NEXT4 — feed the ledger from meter events. `summary.costInr` is
-      // cumulative per consult, so only the delta since the last event is
-      // added.
-      let lastMeterInr = 0;
-      let outputQueue = Promise.resolve();
-      const forward = (event: LiveGatewayEvent): void => {
-        outputQueue = outputQueue
-          .then(async () => {
-            const authorized = authority ? await authority.authorizeEvent(event) : event;
-            if (!authorized) return;
-            if (tenantId && authorized.type === 'meter') {
-              tenantSpend.add(tenantId, authorized.summary.costInr - lastMeterInr);
-              lastMeterInr = Math.max(lastMeterInr, authorized.summary.costInr);
-            }
-            send(ws, authorized);
-          })
-          .catch(() => {
-            // Keep the queue usable and fail closed if an unexpected verifier
-            // or callback failure escapes LiveAuthority.
-            send(ws, { type: 'status', state: 'unauthorized' });
-            ws.close();
-          });
-      };
-      const beginSession = (): void => {
-        if (session || ws.readyState !== ws.OPEN) return;
-        // Construct only after the immediate current-authority check, so
-        // downgraded optional capabilities also scope patient context before
-        // any model/store sees it.
-        session = new LiveSession(
-          cmd.sessionId ?? `live-${Date.now()}`,
-          cmd.specialty ?? null,
-          backends,
-          forward,
-          windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
-          scopePatientContext(cmd.context, capabilities),
-          undefined, // noteRefreshMs — the constructor picks the per-vertical default
-          vertical,
-          cmd.kind ?? 'TREATMENT',
-          cmd.modality ?? null,
-          cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
-          capabilities,
-        );
-        // Batch A — a reconnect after a dropped socket replays the transcript the
-        // browser still holds, so the consult continues instead of starting blank.
-        if (cmd.resume?.utterances.length) {
-          session.seedResume(cmd.resume.utterances);
-          console.log(
-            `[gateway] resumed ${cmd.sessionId ?? '(anon)'} with ${cmd.resume.utterances.length} replayed utterances`,
-          );
-        }
-        // Sprint DS13 — the flag-gated streaming display rail (doctor path only).
-        if (vertical === 'DOCTOR') {
-          const forSession = session;
-          const transcriber = makeStreamTranscriber({
-            sessionId: cmd.sessionId ?? 'live',
-            env: process.env,
-            onPartial: (fragment) => forSession.handleStreamPartial(fragment),
-          });
-          if (transcriber) {
-            forSession.attachStreamTranscriber(transcriber);
-            transcriber.start();
-          }
-        }
-        session.start();
-        liveSessions.add(session);
-        started = true;
-        armIdle(IDLE_TIMEOUT_MS);
-      };
-
-      if (claims) {
-        const serviceSecret = process.env['LIVE_GATEWAY_SECRET'];
-        if (!LIVE_AUTHZ_REVALIDATE_URL || !serviceSecret) {
+      const parsed = LiveGatewayCommandSchema.safeParse(safeJson(raw));
+      if (!parsed.success) return;
+      const cmd = parsed.data;
+      if (cmd.type === 'start') {
+        // One socket owns one authorization/session lifecycle. This also keeps a
+        // second start from racing the first asynchronous authority check.
+        if (session || authority || started) {
           send(ws, { type: 'status', state: 'unauthorized' });
           ws.close();
           return;
         }
-        const pendingAuthority = new LiveAuthority({
-          sessionId: claims.sessionId,
-          psychologistId: claims.psychologistId,
-          tokenExpiresAt: claims.exp,
-          vertical: claims.vertical,
-          requiredCapabilities: new Set<PractitionerCapability>([
-            'LIVE_ENCOUNTER',
-            vertical === 'DOCTOR' ? 'MEDICAL_DOCUMENTATION' : 'BEHAVIORAL_HEALTH_DOCUMENTATION',
-          ]),
-          verifierUrl: LIVE_AUTHZ_REVALIDATE_URL,
-          serviceSecret,
-          intervalMs: LIVE_AUTHZ_INTERVAL_MS,
-          timeoutMs: LIVE_AUTHZ_TIMEOUT_MS,
-          updateCapabilities: (updated) => {
-            capabilities = updated;
-            session?.updateCapabilities(updated);
-          },
-          close: () => {
+        // Batch A — the node is shutting down; shed the start so the browser
+        // retries against a healthy instance instead of streaming into a corpse.
+        if (draining) {
+          send(ws, { type: 'status', state: 'busy' });
+          ws.close();
+          return;
+        }
+        // Sprint DV8 hardening — verify the practitioner token before
+        // streaming (no-op in dev when LIVE_GATEWAY_SECRET is unset).
+        if (!verifyStartToken(cmd.token, cmd.sessionId)) {
+          send(ws, { type: 'status', state: 'unauthorized' });
+          ws.close();
+          return;
+        }
+        // NEXT4 — refuse a tenant already over its daily spend cap. Claims
+        // are only trusted when HMAC-verified (dev/no-secret → null → open,
+        // matching mock's zero cost).
+        const claims = extractVerifiedClaims(cmd.token, cmd.sessionId);
+        const tenantId = claims?.psychologistId ?? null;
+        let capabilities: ReadonlySet<PractitionerCapability> = claims
+          ? new Set(claims.capabilities)
+          : DEV_OPEN_CAPABILITIES;
+        const vertical = claims?.vertical ?? cmd.vertical ?? 'DOCTOR';
+        if (tenantId && tenantSpend.isOverCap(tenantId)) {
+          console.warn(`[gateway] tenant ${tenantId} over daily cost cap — shedding start`);
+          send(ws, { type: 'status', state: 'busy' });
+          ws.close();
+          return;
+        }
+        // Sprint DS8 — shed NEW sessions once the node is at capacity; a
+        // consult already streaming keeps its slot.
+        if (!acquired) {
+          if (!pool.tryAcquire()) {
+            send(ws, { type: 'status', state: 'busy' });
+            ws.close();
+            return;
+          }
+          acquired = true;
+        }
+        // NEXT4 — feed the ledger from meter events. `summary.costInr` is
+        // cumulative per consult, so only the delta since the last event is
+        // added.
+        let lastMeterInr = 0;
+        let outputQueue = Promise.resolve();
+        const forward = (event: LiveGatewayEvent): void => {
+          outputQueue = outputQueue
+            .then(async () => {
+              const authorized = authority ? await authority.authorizeEvent(event) : event;
+              if (!authorized) return;
+              if (tenantId && authorized.type === 'meter') {
+                tenantSpend.add(tenantId, authorized.summary.costInr - lastMeterInr);
+                lastMeterInr = Math.max(lastMeterInr, authorized.summary.costInr);
+              }
+              send(ws, authorized);
+            })
+            .catch(() => {
+              // Keep the queue usable and fail closed if an unexpected verifier
+              // or callback failure escapes LiveAuthority.
+              send(ws, { type: 'status', state: 'unauthorized' });
+              ws.close();
+            });
+        };
+        const beginSession = (): void => {
+          if (session || ws.readyState !== ws.OPEN) return;
+          // Construct only after the immediate current-authority check, so
+          // downgraded optional capabilities also scope patient context before
+          // any model/store sees it.
+          session = new LiveSession(
+            cmd.sessionId ?? `live-${Date.now()}`,
+            cmd.specialty ?? null,
+            backends,
+            forward,
+            windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
+            scopePatientContext(cmd.context, capabilities),
+            undefined, // noteRefreshMs — the constructor picks the per-vertical default
+            vertical,
+            cmd.kind ?? 'TREATMENT',
+            cmd.modality ?? null,
+            cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
+            capabilities,
+          );
+          // Batch A — a reconnect after a dropped socket replays the transcript the
+          // browser still holds, so the consult continues instead of starting blank.
+          if (cmd.resume?.utterances.length) {
+            session.seedResume(cmd.resume.utterances);
+            console.log(
+              `[gateway] resumed ${cmd.sessionId ?? '(anon)'} with ${cmd.resume.utterances.length} replayed utterances`,
+            );
+          }
+          // Sprint DS13 — the flag-gated streaming display rail (doctor path only).
+          if (vertical === 'DOCTOR') {
+            const forSession = session;
+            const transcriber = makeStreamTranscriber({
+              sessionId: cmd.sessionId ?? 'live',
+              env: process.env,
+              onPartial: (fragment) => forSession.handleStreamPartial(fragment),
+            });
+            if (transcriber) {
+              forSession.attachStreamTranscriber(transcriber);
+              transcriber.start();
+            }
+          }
+          session.start();
+          liveSessions.add(session);
+          started = true;
+          armIdle(IDLE_TIMEOUT_MS);
+        };
+
+        if (claims) {
+          const serviceSecret = process.env['LIVE_GATEWAY_SECRET'];
+          if (!LIVE_AUTHZ_REVALIDATE_URL || !serviceSecret) {
             send(ws, { type: 'status', state: 'unauthorized' });
             ws.close();
-          },
-        });
-        authority = pendingAuthority;
-        void pendingAuthority.revalidate().then((authorized) => {
-          if (!authorized || authority !== pendingAuthority) return;
-          pendingAuthority.start();
+            return;
+          }
+          const pendingAuthority = new LiveAuthority({
+            sessionId: claims.sessionId,
+            psychologistId: claims.psychologistId,
+            tokenExpiresAt: claims.exp,
+            vertical: claims.vertical,
+            requiredCapabilities: new Set<PractitionerCapability>([
+              'LIVE_ENCOUNTER',
+              vertical === 'DOCTOR' ? 'MEDICAL_DOCUMENTATION' : 'BEHAVIORAL_HEALTH_DOCUMENTATION',
+            ]),
+            verifierUrl: LIVE_AUTHZ_REVALIDATE_URL,
+            serviceSecret,
+            intervalMs: LIVE_AUTHZ_INTERVAL_MS,
+            timeoutMs: LIVE_AUTHZ_TIMEOUT_MS,
+            updateCapabilities: (updated) => {
+              capabilities = updated;
+              session?.updateCapabilities(updated);
+            },
+            close: () => {
+              send(ws, { type: 'status', state: 'unauthorized' });
+              ws.close();
+            },
+          });
+          authority = pendingAuthority;
+          void pendingAuthority.revalidate().then((authorized) => {
+            if (!authorized || authority !== pendingAuthority) return;
+            pendingAuthority.start();
+            beginSession();
+          });
+        } else {
           beginSession();
-        });
-      } else {
-        beginSession();
+        }
+      } else if (authority !== inputAuthority || (authorized && !(await authorized))) {
+        return;
+      } else if (cmd.type === 'pause') {
+        await session?.pause(cmd.requestId);
+      } else if (cmd.type === 'stop') {
+        void session?.finalize();
+      } else if (cmd.type === 'dismiss') {
+        // Sprint DS3 — the doctor dismissed an ask-next question.
+        session?.dismissQuestion(cmd.questionId);
+      } else if (cmd.type === 'refreshNote') {
+        // Sprint TS-B3 — "Update now" on the live note panel.
+        session?.requestNoteRefresh();
       }
-    } else if (authority && !(await authority.authorizeCurrentInput())) {
-      return;
-    } else if (cmd.type === 'stop') {
-      void session?.finalize();
-    } else if (cmd.type === 'dismiss') {
-      // Sprint DS3 — the doctor dismissed an ask-next question.
-      session?.dismissQuestion(cmd.questionId);
-    } else if (cmd.type === 'refreshNote') {
-      // Sprint TS-B3 — "Update now" on the live note panel.
-      session?.requestNoteRefresh();
-    }
+    });
   });
 
   const teardown = (): void => {
+    inputQueue.dispose();
     clearTimeout(idleTimer);
     authority?.dispose();
     authority = null;
@@ -400,7 +419,7 @@ function drain(signal: string): void {
   httpServer.close();
   const finals = [...liveSessions].map((s) =>
     s
-      .finalize()
+      .finalizeForShutdown()
       .catch((err: unknown) => console.error('[live-gateway] drain finalize failed', err)),
   );
   const hardStop = setTimeout(() => {

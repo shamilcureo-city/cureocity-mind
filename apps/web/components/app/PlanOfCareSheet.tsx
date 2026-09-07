@@ -1137,7 +1137,11 @@ function DiagnosisRow({
                   setCode(entry.code);
                   setLabel(entry.label);
                 }}
-                onCodeChange={setCode}
+                onCodeChange={(value) => {
+                  setCode(value);
+                  // A different/custom code has no confirmed catalogue title.
+                  setLabel('');
+                }}
                 disabled={busy}
                 inputClassName={INPUT_CLASS}
                 inputStyle={{ borderColor: P.line, background: P.bg, color: P.ink }}

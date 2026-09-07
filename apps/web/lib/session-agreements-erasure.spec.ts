@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   session: vi.fn(),
   read: vi.fn(),
+  duplicate: vi.fn(),
   count: vi.fn(),
   create: vi.fn(),
   audit: vi.fn(),
@@ -27,18 +28,18 @@ const row = {
   createdAt: new Date('2026-09-06T10:00:00.000Z'),
 };
 const client = { id: 'client-1', psychologistId: 'psy-1' };
-const request = (method: 'GET' | 'POST') =>
+const request = (method: 'GET' | 'POST', text = row.text) =>
   new Request('https://example.test/api/v1/sessions/session-1/agreements', {
     method,
     ...(method === 'POST'
       ? {
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text: row.text, speaker: row.speaker }),
+          body: JSON.stringify({ text, speaker: row.speaker }),
         }
       : {}),
   });
 const get = () => GET(request('GET') as never, params);
-const post = () => POST(request('POST') as never, params);
+const post = (text = row.text) => POST(request('POST', text) as never, params);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -46,13 +47,19 @@ beforeEach(() => {
   mocks.session.mockResolvedValue({ id: 'session-1', clientId: 'client-1' });
   mocks.queryRaw.mockResolvedValue([client]);
   mocks.read.mockResolvedValue([row]);
+  mocks.duplicate.mockResolvedValue(null);
   mocks.count.mockResolvedValue(0);
   mocks.create.mockResolvedValue(row);
   mocks.audit.mockResolvedValue(undefined);
   mocks.transaction.mockImplementation(async (callback) =>
     callback({
       $queryRaw: mocks.queryRaw,
-      sessionAgreement: { findMany: mocks.read, count: mocks.count, create: mocks.create },
+      sessionAgreement: {
+        findMany: mocks.read,
+        findFirst: mocks.duplicate,
+        count: mocks.count,
+        create: mocks.create,
+      },
     }),
   );
 });
@@ -134,6 +141,7 @@ describe('session agreements terminal-client boundary', () => {
           return [client];
         }),
         sessionAgreement: {
+          findFirst: mocks.duplicate,
           count: vi.fn(async () => count),
           create: vi.fn(async () => {
             count += 1;
@@ -147,7 +155,7 @@ describe('session agreements terminal-client boundary', () => {
         release();
       }
     });
-    const responses = await Promise.all([post(), post()]);
+    const responses = await Promise.all([post(), post('A different agreement')]);
     expect(responses.map((response) => response.status).sort()).toEqual([201, 422]);
     expect(count).toBe(8);
     expect(mocks.audit).toHaveBeenCalledOnce();

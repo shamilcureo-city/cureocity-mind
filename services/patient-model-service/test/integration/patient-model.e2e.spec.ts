@@ -6,7 +6,8 @@
  *   AUTH_BYPASS=true
  *   RUN_INTEGRATION_TESTS=1
  *
- * Locally: `pnpm infra:up && DATABASE_URL=... AUTH_BYPASS=true RUN_INTEGRATION_TESTS=1 pnpm nx test patient-model-service`
+ * Destructive: requires the exact local cureocity_mind_test database and no
+ * remote DB aliases. See docs/MIND_RELEASE_VALIDATION.md before running.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -16,6 +17,7 @@ import { PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { assertDisposableIntegrationDatabase } from '../../../test-support/disposable-database';
 
 const SKIP = process.env['RUN_INTEGRATION_TESTS'] !== '1';
 
@@ -39,18 +41,21 @@ describe.skipIf(SKIP)('patient-model-service (integration)', () => {
   let dbLock: PrismaClient | null = null;
 
   beforeAll(async () => {
-    const base = process.env['DATABASE_URL'];
-    if (base) {
-      const url = base.includes('?') ? `${base}&connection_limit=1` : `${base}?connection_limit=1`;
-      dbLock = new PrismaClient({ datasources: { db: { url } } });
-      // ::text cast — pg_advisory_lock() returns void, which Prisma can't deserialize.
-      await dbLock.$queryRaw`SELECT pg_advisory_lock(${E2E_DB_LOCK_KEY})::text`;
-    }
+    const base = assertDisposableIntegrationDatabase();
+    const lockUrl = new URL(base);
+    lockUrl.searchParams.set('connection_limit', '1');
+    dbLock = new PrismaClient({ datasources: { db: { url: lockUrl.toString() } } });
+    // ::text cast — pg_advisory_lock() returns void, which Prisma can't deserialize.
+    await dbLock.$queryRaw`SELECT pg_advisory_lock(${E2E_DB_LOCK_KEY})::text`;
 
     process.env['AUTH_BYPASS'] = 'true';
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      // Pin the real service client to the same checked target as the lock.
+      .overrideProvider(PrismaService)
+      .useValue(new PrismaService({ datasources: { db: { url: base } } }))
+      .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     await app.init();
@@ -64,6 +69,7 @@ describe.skipIf(SKIP)('patient-model-service (integration)', () => {
   });
 
   beforeEach(async () => {
+    assertDisposableIntegrationDatabase();
     await prisma.auditLog.deleteMany();
     await prisma.consent.deleteMany();
     await prisma.session.deleteMany();

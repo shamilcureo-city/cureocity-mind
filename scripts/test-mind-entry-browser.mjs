@@ -30,6 +30,10 @@ const bundle = await build({
       import { MindTherapyGuide } from './components/app/MindTherapyGuide';
       import { NoteEditor } from './components/app/NoteEditor';
       import { TranscriptTab } from './components/app/TranscriptTab';
+      import { MindSessionAgreements } from './components/app/MindSessionAgreements';
+      import { MindCloseoutDecisionActions } from './components/app/MindCloseoutDecisionActions';
+      import { NoteRecoveryNotice } from './components/app/NoteRecoveryNotice';
+      import { NoteEditingLayout } from './components/app/NoteEditingLayout';
       const root = createRoot(document.getElementById('root'));
       const clients = [
         { id: 'client-a', fullName: 'Asha Example', preferredModality: null },
@@ -41,9 +45,16 @@ const bundle = await build({
       window.behavior = {};
       window.prepareSignals = [];
       window.refreshCount = 0;
+      window.agreements = [];
+      function NoticeCase() {
+        const [status, setStatus] = React.useState('loading');
+        return <><NoteRecoveryNotice sessionId="synthetic-session" draftUpdatedAt="2026-09-07T10:00:00.000Z"
+          onStatusChange={setStatus} onResume={() => window.routes.push('edit')} />
+          <button id="fake-sign" disabled={status !== 'none'}>Fictional sign gate</button></>;
+      }
       const guideVersion = '2026-09-06T10:00:00.000Z';
       const realTimeoutSignal = AbortSignal.timeout.bind(AbortSignal);
-      AbortSignal.timeout = milliseconds => realTimeoutSignal(window.behavior.shortGuideDeadline ? 25 : milliseconds);
+      AbortSignal.timeout = milliseconds => realTimeoutSignal(window.behavior.shortGuideDeadline || window.behavior.shortDeadline ? 25 : milliseconds);
       const script = { version: 'V1', therapyName: 'Synthetic guide', openingScript: 'Synthetic opening', mainExercise: { steps: [{ id: 'one', purpose: 'Synthetic exercise', therapistSays: 'Synthetic prompt', listenFor: 'Synthetic context', branches: [] }] }, closingScript: 'Synthetic close', homework: { description: 'Synthetic next step', deliveryNotes: 'If agreed' }, adaptationCues: [], riskWatchpoints: [], estimatedDurationMin: 20 };
       window.guideSaved = null;
       const syntheticNote = {
@@ -54,6 +65,13 @@ const bundle = await build({
       window.fetch = async (url, options = {}) => {
         const body = options.body ? JSON.parse(options.body) : null;
         window.calls.push({ url: String(url), method: options.method ?? 'GET', body });
+        if (String(url).endsWith('/agreements')) {
+          if (window.behavior.agreementHangs) return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(options.signal.reason), {once: true}));
+          if (window.behavior.agreementFail) return new Response(JSON.stringify({error:'Synthetic agreement save failed'}), {status:503});
+          if (options.method === 'POST') window.agreements.push({id:'agreement-' + window.agreements.length, text:body.text});
+          return new Response(JSON.stringify(options.method === 'POST' ? {agreement:window.agreements.at(-1)} : {agreements:window.agreements}), {status:200});
+        }
+        if (String(url).endsWith('/note-edit-recovery')) return new Response(JSON.stringify({revision:0, recovery:window.behavior.hasRecovery ? {fields:{}} : null, stale:false}), {status:window.behavior.recoveryFail ? 503 : 200});
         if (String(url).endsWith('/note-draft')) {
           return new Response(JSON.stringify({ status: 'COMPLETED', transcript: 'Synthetic saved transcript from completed processing.', speakerSegments: null, totalCostInr: '0', errorMessage: null }), { status: 200 });
         }
@@ -107,6 +125,7 @@ const bundle = await build({
       window.mountCase = (kind, behavior = {}) => {
         window.calls = []; window.routes = []; window.prepareSignals = []; window.behavior = behavior;
         window.noteSaves = []; window.noteCancels = 0; window.linkClicks = []; window.confirmMessages = []; window.confirmAnswer = false;
+        window.agreements = [];
         window.confirm = message => { window.confirmMessages.push(message); return window.confirmAnswer; };
         if (behavior.resetGuide) window.guideSaved = { version: 1, revision: 2, scriptUpdatedAt: guideVersion, activeIndex: 1, reviewedIndexes: [0] };
         const key = ++mount;
@@ -123,6 +142,16 @@ const bundle = await build({
             </section>
           : kind === 'transcript'
           ? <TranscriptTab key={key} sessionId="synthetic-session" data={{ status: 'IN_PROGRESS', transcript: null, segments: null, totalCostInr: '0', backend: null, errorMessage: null }} />
+          : kind === 'agreements'
+          ? <><MindSessionAgreements sessionId="synthetic-session" signed={false} />
+              <a id="leave-agreement" href="https://example.test/app/today" onClick={event => { event.preventDefault(); window.linkClicks.push('leave'); }}>Leave agreement</a></>
+          : kind === 'finish'
+          ? <MindCloseoutDecisionActions sessionId="synthetic-session" canShare={false} canReviewClinical={!behavior.noClinical}
+              steps={{clinicalSuggestions:'PENDING', agreements:'PENDING', nextSessionQuestions:'PENDING', shared:'PENDING'}}
+              clinicalReview={<label>Fictional clinical review<input id="inline-review" /></label>} />
+          : kind === 'notice' ? <NoticeCase />
+          : kind === 'editing-layout'
+          ? <NoteEditingLayout reference={<p>Fictional transcript reference</p>}><label>Fictional editable note<input id="layout-note" /></label></NoteEditingLayout>
           : <ScheduleSessionPanel key={key} clients={clients}
               initialClientId={kind === 'closeout' ? 'client-a' : undefined}
               initialDate="2099-10-05" initialTime="10:00"
@@ -231,28 +260,47 @@ async function mount(kind, behavior = {}) {
     (kind) =>
       kind === 'entry'
         ? !!document.querySelector('#cc-name')
-        : kind === 'editor'
-          ? !!document.querySelector('textarea')
-          : kind === 'transcript'
-            ? document.body.textContent.includes('Transcript not ready yet')
-            : kind === 'guide'
-              ? document.body.textContent.includes('Synthetic guide')
-              : kind === 'prepare'
-                ? document.body.textContent.includes('Preparation temporarily unavailable')
-                : [...document.querySelectorAll('button')].some(
-                    (button) =>
-                      button.textContent.trim() ===
-                      (kind === 'closeout' ? 'Schedule next session' : 'Schedule session'),
-                  ),
+        : ['agreements', 'finish', 'notice', 'editing-layout'].includes(kind)
+          ? !!document.querySelector('[data-case-key]')
+          : kind === 'editor'
+            ? !!document.querySelector('textarea')
+            : kind === 'transcript'
+              ? document.body.textContent.includes('Transcript not ready yet')
+              : kind === 'guide'
+                ? document.body.textContent.includes('Synthetic guide')
+                : kind === 'prepare'
+                  ? document.body.textContent.includes('Preparation temporarily unavailable')
+                  : [...document.querySelectorAll('button')].some(
+                      (button) =>
+                        button.textContent.trim() ===
+                        (kind === 'closeout' ? 'Schedule next session' : 'Schedule session'),
+                    ),
     {},
     kind,
   );
 }
 async function waitForText(text) {
-  await page.waitForFunction((text) => document.body.textContent.includes(text), {}, text);
+  await page.waitForFunction(
+    (text) => document.getElementById('root')?.innerText.includes(text),
+    { polling: 100 },
+    text,
+  );
 }
 async function calls() {
   return page.evaluate(() => window.calls);
+}
+async function assertGuideReviewBlocked() {
+  assert.equal(
+    await page.evaluate(
+      () =>
+        [...document.querySelectorAll('button')].find(
+          (button) =>
+            button.textContent.includes('Mark section reviewed') ||
+            button.textContent.includes('Reviewed · undo'),
+        )?.disabled,
+    ),
+    true,
+  );
 }
 async function replaceClinicalField(field, text) {
   const selector = `textarea[id$="-${field}"]`;
@@ -430,16 +478,17 @@ try {
     );
   });
 
-  await test('guide hydration blocks edits and retains saved markers, then uses latest acknowledged revisions', async () => {
+  await test('guide hydration allows reading but blocks review markers, then uses latest acknowledged revisions', async () => {
     await mount('guide', { resetGuide: true, guideHydrationDeferred: true });
     await page.click('input[type="checkbox"]');
     await clickButton('Step by step');
     assert.equal(
       await page.$eval('nav[aria-label="Guide sections"] button', (button) => button.disabled),
-      true,
+      false,
     );
     await clickButton('Mark section reviewed');
     assert.equal((await calls()).filter((call) => call.method === 'PATCH').length, 0);
+    await assertGuideReviewBlocked();
     await page.evaluate(() => window.resolveGuideRead());
     await waitForText('Guide review progress saved.');
     await clickButton('Mark section reviewed');
@@ -469,10 +518,11 @@ try {
     });
     await clickButton('Mark section reviewed');
     await waitForText('Saved progress changed in another view.');
+    await assertGuideReviewBlocked();
     assert.deepEqual(await page.evaluate(() => window.guideSaved.reviewedIndexes), [0, 2]);
     assert.equal(
       await page.$eval('nav[aria-label="Guide sections"] button', (button) => button.disabled),
-      true,
+      false,
     );
     await clickButton('Reload saved progress');
     await waitForText('Guide review progress saved.');
@@ -508,9 +558,10 @@ try {
     await clickButton('Step by step');
     assert.equal(
       await page.$eval('nav[aria-label="Guide sections"] button', (button) => button.disabled),
-      true,
+      false,
     );
     assert.equal((await calls()).filter((call) => call.method === 'PATCH').length, 0);
+    await assertGuideReviewBlocked();
   });
 
   await test('guide GET and PATCH deadlines surface recoverable errors, not endless loading or saving', async () => {
@@ -538,9 +589,10 @@ try {
     });
     await clickButton('Mark section reviewed');
     await waitForText('The last save could not be confirmed.');
+    await assertGuideReviewBlocked();
     assert.equal(
       await page.$eval('nav[aria-label="Guide sections"] button', (button) => button.disabled),
-      true,
+      false,
     );
     await page.evaluate(() => {
       window.behavior = {};
@@ -643,6 +695,165 @@ try {
       0,
       'Viewing the saved transcript has no generation/signing action',
     );
+  });
+
+  await test('unsaved agreements guard leaving and unload until the save is acknowledged', async () => {
+    await mount('agreements');
+    await page.waitForSelector('#closeout-agreement');
+    await page.type('#closeout-agreement', 'Fictional agreed next step');
+    await page.click('#leave-agreement');
+    assert.deepEqual(await page.evaluate(() => window.linkClicks), []);
+    assert.equal(
+      await page.evaluate(() => {
+        const event = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      }),
+      true,
+    );
+    assert.equal(
+      await page.$eval('#closeout-agreement', (el) => el.value),
+      'Fictional agreed next step',
+    );
+    await clickButton('Save agreement');
+    await page.waitForFunction(() => document.getElementById('closeout-agreement').value === '');
+    assert.equal((await calls()).filter((call) => call.method === 'POST').length, 1);
+    await page.click('#leave-agreement');
+    assert.deepEqual(await page.evaluate(() => window.linkClicks), ['leave']);
+    assert.equal(
+      await page.evaluate(() => {
+        const event = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      }),
+      false,
+    );
+  });
+
+  await test('an agreement timeout retains the text and permits an explicit retry', async () => {
+    await mount('agreements');
+    await page.waitForSelector('#closeout-agreement');
+    await page.type('#closeout-agreement', 'Fictional retry agreement');
+    await page.evaluate(() => {
+      window.behavior = { agreementHangs: true, shortDeadline: true };
+    });
+    await clickButton('Save agreement');
+    await waitForText('The save could not be confirmed. Your text is still here.');
+    assert.equal(
+      await page.$eval('#closeout-agreement', (el) => el.value),
+      'Fictional retry agreement',
+    );
+    assert.equal(await page.$eval('#closeout-agreement', (el) => el.disabled), false);
+    await page.evaluate(() => {
+      window.behavior = {};
+    });
+    await clickButton('Save agreement');
+    await page.waitForFunction(() => document.getElementById('closeout-agreement').value === '');
+    assert.equal((await calls()).filter((call) => call.method === 'POST').length, 2);
+  });
+
+  await test('clinical closeout opens inline without accepting anything and preserves unfinished review', async () => {
+    await mount('finish');
+    await clickButton('Review suggestions here');
+    await page.waitForSelector('#inline-review');
+    assert.deepEqual(await calls(), []);
+    assert.deepEqual(await page.evaluate(() => window.routes), []);
+    await page.type('#inline-review', 'Fictional unfinished review');
+    await clickButton('Return to finish checklist');
+    assert.equal(await page.$eval('#inline-review', (el) => !!el.closest('[hidden]')), true);
+    await clickButton('Choose questions here');
+    assert.equal(
+      await page.$eval('#inline-review', (el) => el.value),
+      'Fictional unfinished review',
+    );
+    assert.deepEqual(await calls(), []);
+    await clickButton('Reviewed');
+    assert.deepEqual(
+      (await calls()).map((call) => call.body),
+      [{ step: 'clinicalSuggestions', outcome: 'COMPLETE' }],
+    );
+  });
+
+  await test('documentation-only closeout hides clinical review controls without writing skipped decisions', async () => {
+    await mount('finish', { noClinical: true });
+    assert.equal(
+      await page.evaluate(() =>
+        document.getElementById('root').innerText.includes('Review suggestions here'),
+      ),
+      false,
+    );
+    assert.equal(
+      await page.evaluate(() =>
+        document.getElementById('root').innerText.includes('Choose questions here'),
+      ),
+      false,
+    );
+    assert.deepEqual(await calls(), []);
+  });
+
+  await test('a delayed panel heading focus never interrupts typing already in progress', async () => {
+    await mount('finish');
+    await page.evaluate(() => {
+      window.originalReviewFrame = window.requestAnimationFrame;
+      window.reviewFrames = [];
+      window.requestAnimationFrame = (callback) => {
+        window.reviewFrames.push(callback);
+        return 1;
+      };
+    });
+    try {
+      await clickButton('Review suggestions here');
+      await page.waitForSelector('#inline-review');
+      await page.type('#inline-review', 'Fictional review');
+      await page.evaluate(() =>
+        window.reviewFrames.splice(0).forEach((callback) => callback(performance.now())),
+      );
+      assert.equal(await page.evaluate(() => document.activeElement.id), 'inline-review');
+      await page.keyboard.type(' continued');
+      assert.equal(
+        await page.$eval('#inline-review', (el) => el.value),
+        'Fictional review continued',
+      );
+      assert.deepEqual(await calls(), []);
+    } finally {
+      await page.evaluate(() => {
+        window.requestAnimationFrame = window.originalReviewFrame;
+      });
+    }
+  });
+
+  await test('recovery notice reports available and failed checks to the sign gate; opening only resumes editing', async () => {
+    await mount('notice', { hasRecovery: true });
+    await waitForText('There are saved edits to review.');
+    assert.equal(await page.$eval('#fake-sign', (el) => el.disabled), true);
+    await clickButton('Resume saved edits');
+    assert.deepEqual(await page.evaluate(() => window.routes), ['edit']);
+    assert.equal(
+      (await calls()).every((call) => call.method === 'GET'),
+      true,
+    );
+    await mount('notice', { recoveryFail: true });
+    await waitForText('Saved edits could not be checked.');
+    assert.equal(await page.$eval('#fake-sign', (el) => el.disabled), true);
+    await mount('notice');
+    await page.waitForFunction(() => document.getElementById('fake-sign').disabled === false);
+  });
+
+  await test('showing and hiding the transcript reference keeps the active note edit mounted', async () => {
+    await mount('editing-layout');
+    await page.type('#layout-note', 'Fictional correction in progress');
+    await clickButton('Show transcript reference');
+    await waitForText('Fictional transcript reference');
+    assert.equal(
+      await page.$eval('#layout-note', (el) => el.value),
+      'Fictional correction in progress',
+    );
+    await clickButton('Hide transcript reference');
+    assert.equal(
+      await page.$eval('#layout-note', (el) => el.value),
+      'Fictional correction in progress',
+    );
+    assert.deepEqual(await calls(), []);
   });
 
   assert.deepEqual(browserErrors, [], 'Unexpected React/browser errors');

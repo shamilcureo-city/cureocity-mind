@@ -1,4 +1,8 @@
 import { StorageNotFoundError } from '@cureocity/storage';
+import {
+  ErasureStorageConfigurationError,
+  legacyAudioReferenceProvider,
+} from './dpdp-object-storage-config';
 
 export interface ClaimedErasureObjectDeletionTask {
   id: string;
@@ -85,12 +89,16 @@ export async function runErasureObjectDeletionWorker(
 
     let errorCode: string | null = null;
     if (task.storageProvider !== 'S3') errorCode = 'UNSUPPORTED_PROVIDER';
-    else if (!task.objectKey) errorCode = 'MISSING_OBJECT_KEY';
+    else if (!task.objectKey?.trim()) errorCode = 'MISSING_OBJECT_KEY';
+    else if (legacyAudioReferenceProvider(task.objectKey) !== 'S3')
+      errorCode = 'UNSUPPORTED_OBJECT_REFERENCE';
     else {
       try {
         await deps.remove({ bucket: deps.bucket ?? DEFAULT_BUCKET, key: task.objectKey });
       } catch (error) {
-        if (!(error instanceof StorageNotFoundError)) errorCode = 'STORAGE_ERROR';
+        if (error instanceof ErasureStorageConfigurationError)
+          errorCode = 'STORAGE_CONFIGURATION_MISSING';
+        else if (!(error instanceof StorageNotFoundError)) errorCode = 'STORAGE_ERROR';
       }
     }
 

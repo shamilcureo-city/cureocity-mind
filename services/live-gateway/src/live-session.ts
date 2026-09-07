@@ -189,6 +189,8 @@ export class LiveSession {
   private readonly guards = runawayGuardsFromEnv();
   /** Set once a ceiling trips, so pump auto-finalizes exactly once. */
   private autoFinalizing = false;
+  private pausedAtMs: number | null = null;
+  private pauseInFlight: Promise<void> | null = null;
 
   /**
    * Sprint DS13 — the optional streaming display rail. Attached by the
@@ -360,7 +362,7 @@ export class LiveSession {
 
   /** Append a chunk of PCM audio streamed from the browser. */
   pushAudio(chunk: Buffer): void {
-    if (this.stopped || chunk.length === 0) return;
+    if (this.stopped || this.pausedAtMs !== null || chunk.length === 0) return;
     this.streamTranscriber?.feed(chunk);
     // DOC-9 — stamp the wall-clock of the very first audio byte. Because the
     // browser streams PCM in real time, a byte at offset b was spoken at
@@ -380,11 +382,11 @@ export class LiveSession {
    * the current call to drain them.
    */
   async pump(): Promise<void> {
-    if (this.busy || this.stopped) return;
+    if (this.busy || this.stopped || this.pausedAtMs !== null) return;
     this.busy = true;
     try {
       for (;;) {
-        if (this.stopped) break;
+        if (this.stopped || this.pausedAtMs !== null) break;
         // Cheap guard before any silence scan: nothing to close yet.
         if (bytesToMs(this.pending.length) < this.windowOpts.minWindowMs) break;
         const boundary = nextWindowBoundary(this.pending, this.windowOpts);
@@ -404,7 +406,12 @@ export class LiveSession {
     // Sprint TS5 — advance the session arc even during silence, so the
     // pacing rail moves through opening → working → closing on its own. Only
     // emits when the arc PHASE changes (the change-key ignores the minute tick).
-    if (this.therapyStore && this.has('CLINICAL_ANALYSIS') && !this.stopped) {
+    if (
+      this.therapyStore &&
+      this.has('CLINICAL_ANALYSIS') &&
+      !this.stopped &&
+      this.pausedAtMs === null
+    ) {
       const { changed, snapshot } = this.therapyStore.recompute(this.elapsedMs());
       if (changed) this.emit({ type: 'therapyReasoning', reasoning: snapshot });
     }
@@ -412,12 +419,51 @@ export class LiveSession {
     // DOC-5 — a runaway guard tripped this window: close the consult now (after
     // the pump is idle, so finalize()'s waitIdle doesn't deadlock). finalize()
     // is a no-op if already stopped, so this fires exactly once.
-    if (this.autoFinalizing && !this.stopped) void this.finalize();
+    if (this.autoFinalizing && !this.stopped && this.pausedAtMs === null) void this.finalize();
   }
 
-  /** Milliseconds since start() — drives the therapy session arc. */
+  /** Flush accepted audio without finalizing. Resume uses a newly authorized
+   * socket seeded with acknowledged utterances; paused never renews authority. */
+  async pause(requestId: string): Promise<void> {
+    if (this.pauseInFlight) await this.pauseInFlight;
+    if (this.stopped || this.terminal) {
+      if (!this.terminal) this.emit({ type: 'capturePauseFailed', requestId });
+      return;
+    }
+    this.pausedAtMs ??= Date.now();
+    const work = (async () => {
+      try {
+        if (!(await this.waitIdle())) throw new Error('Capture is still processing');
+        if (this.stopped || this.terminal) return;
+        if (this.pending.length) {
+          const tail = this.pending;
+          await this.processWindow(tail, bytesToMs(tail.length), tail.length);
+        }
+        if (!this.stopped && !this.terminal) this.emit({ type: 'capturePaused', requestId });
+      } catch {
+        // No raw transcription/provider error goes over the wire. Pending
+        // audio remains available for an explicit retry or finalization.
+        if (!this.stopped && !this.terminal) this.emit({ type: 'capturePauseFailed', requestId });
+      }
+    })();
+    this.pauseInFlight = work;
+    try {
+      await work;
+    } finally {
+      if (this.pauseInFlight === work) this.pauseInFlight = null;
+    }
+  }
+
+  /** Active connection time plus the acknowledged replay timeline. Resume
+   * must not restart the therapy arc or duration ceiling at zero. Pauses and
+   * disconnected wall-clock gaps are deliberately not inferred from replay. */
   private elapsedMs(): number {
-    return this.startedAtMs ? Date.now() - this.startedAtMs : 0;
+    const activeMs = this.startedAtMs
+      ? Math.max(0, (this.pausedAtMs ?? Date.now()) - this.startedAtMs)
+      : 0;
+    // Replay is client-supplied: keep telemetry inside its one-day contract.
+    // The duration guard still trips (its maximum is six hours) on excess.
+    return Math.min(86_400_000, this.timeOffsetMs + activeMs);
   }
 
   /**
@@ -557,7 +603,8 @@ export class LiveSession {
    * window. Audio remains sequential; notes and reasoning remain sequential
    * with each other, but neither blocks Mind's next transcription. */
   private scheduleTherapyAnalysis(noteRequested = false, forceNote = false): void {
-    if (this.vertical !== 'THERAPIST' || this.stopped || this.terminal) return;
+    if (this.vertical !== 'THERAPIST' || this.stopped || this.terminal || this.pausedAtMs !== null)
+      return;
     this.therapyNoteRequested ||= noteRequested;
     this.therapyForceNoteRequested ||= forceNote;
     if (
@@ -575,7 +622,7 @@ export class LiveSession {
   }
 
   private async drainTherapyAnalysis(): Promise<void> {
-    while (!this.stopped && !this.terminal) {
+    while (!this.stopped && !this.terminal && this.pausedAtMs === null) {
       const shouldNote = this.therapyNoteRequested;
       const forceNote = this.therapyForceNoteRequested;
       this.therapyNoteRequested = false;
@@ -584,7 +631,7 @@ export class LiveSession {
       if (!due && !shouldNote) return;
       try {
         if (due) await this.runTherapyReasoning(due);
-        if (this.stopped || this.terminal) return;
+        if (this.stopped || this.terminal || this.pausedAtMs !== null) return;
         if (shouldNote) {
           if (forceNote) this.lastNoteTranscriptEndMs = Number.NEGATIVE_INFINITY;
           await this.runNote(false);
@@ -592,7 +639,7 @@ export class LiveSession {
       } catch (err) {
         reportError('therapy background analysis failed', err);
       }
-      if (this.stopped || this.terminal) return;
+      if (this.stopped || this.terminal || this.pausedAtMs !== null) return;
       this.emit({ type: 'meter', summary: this.meterSummary() });
       // Analysis cost lands outside pump now. Enforce its ceiling even if
       // the room goes quiet and no further transcription window closes.
@@ -606,7 +653,7 @@ export class LiveSession {
 
   /** DOC-5 — reason the consult should auto-close (null = within budget). */
   private overBudgetReason(): string | null {
-    if (Date.now() - this.startedAtMs >= this.guards.maxConsultMs) {
+    if (this.elapsedMs() >= this.guards.maxConsultMs) {
       return `max consult duration ${Math.round(this.guards.maxConsultMs / 60_000)}min reached`;
     }
     if (this.meterSummary().costInr >= this.guards.costCeilingInr) {
@@ -1118,6 +1165,9 @@ export class LiveSession {
 
   /** Doctor ended the consult: flush the tail, close the note, report. */
   async finalize(): Promise<void> {
+    // Explicit End or shutdown can race the pause tail worker. Join it before
+    // starting another transcription of the same bytes.
+    if (this.pauseInFlight) await this.pauseInFlight;
     if (this.stopped) return;
     // DS13 — the display rail ends with the consult; failures here are moot.
     this.streamTranscriber?.stop();
@@ -1325,6 +1375,17 @@ export class LiveSession {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+
+  /** An intentional pause is not consent to end when a node is deployed.
+   * Finish its pending acknowledgement if possible, then let disconnect UX
+   * require an explicit, newly authorized Resume on the replacement node. */
+  async finalizeForShutdown(): Promise<void> {
+    if (this.pausedAtMs !== null) {
+      await this.pauseInFlight;
+      return;
+    }
+    await this.finalize();
   }
 
   dispose(): void {

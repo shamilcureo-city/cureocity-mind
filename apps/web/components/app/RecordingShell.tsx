@@ -8,6 +8,7 @@ import { RecordConfirmStrip } from './RecordConfirmStrip';
 import { LiveRecorder } from './LiveRecorder';
 import { FileUploadPanel } from './FileUploadPanel';
 import type { RecordReady } from './record-types';
+import { mindEntryContextForClient } from '@/lib/mind-session-start';
 
 type ConfirmMode = 'live-capture' | 'dictation' | 'upload';
 
@@ -160,14 +161,21 @@ export function RecordingShell({
 
   if (shell.kind === 'confirm') {
     const mode = shell.mode;
+    const context = mindEntryContextForClient({
+      initialClientId,
+      clientId: shell.client.id,
+      initialSessionId,
+      initialGuideId,
+    });
     return (
       <RecordConfirmStrip
+        key={shell.client.id}
         clientId={shell.client.id}
         clientName={shell.client.fullName}
         mode={mode}
         defaultCapture={initialCapture ?? defaultCapture ?? 'LIVE'}
-        expectedSessionId={initialSessionId}
-        initialGuideId={initialGuideId}
+        expectedSessionId={context.sessionId}
+        initialGuideId={context.guideId}
         videoEnabled={videoEnabled}
         onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
         onReady={(ready) => handleReady(ready, mode)}

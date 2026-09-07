@@ -220,6 +220,21 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         throw new SigningHttpError(409, 'Therapy note already signed for this session');
       }
 
+      // The client PHI lock is also held by autosave, discard and canonical
+      // save. A signature must never silently omit an unapplied checkpoint.
+      if (session.vertical === 'THERAPIST') {
+        const recovery = await tx.noteEditRecovery.findUnique({
+          where: { sessionId },
+          select: { encryptedFields: true },
+        });
+        if (recovery?.encryptedFields != null) {
+          throw new SigningHttpError(
+            409,
+            'Saved manual edits have not been applied. Open Edit note to review and save or discard them before signing.',
+          );
+        }
+      }
+
       const activeCredentials = await tx.$queryRaw<LockedWebAuthnCredential[]>`
         SELECT "id", "credentialId", "publicKey", "signCount"
         FROM "webauthn_credentials"

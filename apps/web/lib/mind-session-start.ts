@@ -1,6 +1,37 @@
 export type MindCaptureMode = 'LIVE' | 'BATCH';
 export type MindStartSource = 'TODAY' | 'WALK_IN' | 'RECORD' | 'CLIENT';
 
+/** A visit's current state determines its destination, not the list it appears in. */
+export function mindSessionDestination(
+  session: { id: string; clientId: string; status: string; captureMode?: string | null },
+  defaultCapture: MindCaptureMode = 'LIVE',
+): string {
+  if (session.status === 'IN_PROGRESS' && session.captureMode === 'LIVE') {
+    return `/app/sessions/${encodeURIComponent(session.id)}/live`;
+  }
+  if (session.status === 'SCHEDULED' || session.status === 'IN_PROGRESS') {
+    return mindStartEntryHref({
+      source: 'TODAY',
+      clientId: session.clientId,
+      sessionId: session.id,
+      captureMode: session.status === 'IN_PROGRESS' ? 'BATCH' : defaultCapture,
+    });
+  }
+  return `/app/sessions/${encodeURIComponent(session.id)}?tab=note`;
+}
+
+/** Never carry another client's booking or prepared-guide intent into a mutation. */
+export function mindEntryContextForClient(input: {
+  initialClientId: string | null;
+  clientId: string;
+  initialSessionId: string | null;
+  initialGuideId?: string;
+}): { sessionId: string | null; guideId: string | undefined } {
+  return input.initialClientId === input.clientId
+    ? { sessionId: input.initialSessionId, guideId: input.initialGuideId }
+    : { sessionId: null, guideId: undefined };
+}
+
 export function mindStartEntryHref(input: {
   source: MindStartSource;
   clientId: string;

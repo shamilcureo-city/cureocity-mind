@@ -4,6 +4,8 @@ import { eraseClientPhi } from './dpdp-erasure';
 const calls: string[] = [];
 let activeShareSubmission = false;
 const patientShareFindFirstArgs: unknown[] = [];
+const recoveryDeletionArgs: unknown[] = [];
+let sessionRows: Array<{ id: string }> = [];
 
 function model(name: string) {
   return new Proxy(
@@ -12,7 +14,9 @@ function model(name: string) {
       get: (_target, operation: string) =>
         vi.fn(async (args?: unknown) => {
           calls.push(`${name}.${operation}`);
-          if (name === 'session' && operation === 'findMany') return [];
+          if (name === 'noteEditRecovery' && operation === 'deleteMany')
+            recoveryDeletionArgs.push(args);
+          if (name === 'session' && operation === 'findMany') return sessionRows;
           if (name === 'therapyNote' && operation === 'findMany') return [];
           if (name === 'audioChunk' && operation === 'findMany') return [];
           if (name === 'clientErasureRequest' && operation === 'findMany') return [];
@@ -65,6 +69,8 @@ describe('DPDP appointment erasure invariant', () => {
     appointmentUpdates.length = 0;
     activeShareSubmission = false;
     patientShareFindFirstArgs.length = 0;
+    recoveryDeletionArgs.length = 0;
+    sessionRows = [];
   });
 
   it('makes linked appointments non-enqueueable before deleting reminder outbox rows', async () => {
@@ -78,6 +84,10 @@ describe('DPDP appointment erasure invariant', () => {
     });
 
     expect(appointmentUpdates).toHaveLength(2);
+    expect(recoveryDeletionArgs).toEqual([{ where: { sessionId: { in: [] } } }]);
+    expect(calls.indexOf('noteEditRecovery.deleteMany')).toBeLessThan(
+      calls.indexOf('noteDraft.updateMany'),
+    );
     expect(appointmentUpdates[0]).toMatchObject({
       where: { OR: [{ clientId: 'client-1' }, { sessionId: { in: [] } }] },
       data: { status: 'CANCELLED', startAt: now, endAt: now },
@@ -110,6 +120,18 @@ describe('DPDP appointment erasure invariant', () => {
 
     expect(calls).not.toContain('client.update');
     expect(calls).not.toContain('patientShare.deleteMany');
+  });
+  it('erases checkpoints and tombstones only for the erased client session set', async () => {
+    sessionRows = [{ id: 'session-1' }, { id: 'session-2' }];
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now: new Date('2026-08-18T10:00:00.000Z'),
+    });
+    expect(recoveryDeletionArgs).toEqual([
+      { where: { sessionId: { in: ['session-1', 'session-2'] } } },
+    ]);
   });
 
   it('does not treat an expired or missing dispatch lease as an active submission', async () => {

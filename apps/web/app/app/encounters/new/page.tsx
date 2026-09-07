@@ -11,6 +11,7 @@ import { decryptClientField } from '@/lib/client-pii';
 import { livekitConfigured } from '@/lib/livekit';
 import { prisma } from '@/lib/prisma';
 import type { Session as SessionPrismaRow } from '@prisma/client';
+import { mindSessionDestination } from '@/lib/mind-session-start';
 
 export const dynamic = 'force-dynamic';
 
@@ -102,6 +103,7 @@ export default async function RecordPage({
     <main>
       <Container className="py-10">
         <RecordingShell
+          key={[sp.record ?? '', sp.session ?? '', sp.capture ?? '', sp.guide ?? ''].join(':')}
           clients={clients}
           initialClientId={sp.record ?? null}
           initialSessionId={sp.session ?? null}
@@ -149,7 +151,13 @@ export default async function RecordPage({
                       {g.rows.map((s) => (
                         <li key={s.id}>
                           <Link
-                            href={`/app/sessions/${s.id}`}
+                            href={mindSessionDestination(
+                              s,
+                              therapist.defaultCaptureMode === 'LIVE' ||
+                                !therapist.defaultCaptureMode
+                                ? 'LIVE'
+                                : 'BATCH',
+                            )}
                             className="flex items-center justify-between gap-3 px-5 py-3 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
                           >
                             <div className="flex items-center gap-3">

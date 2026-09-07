@@ -21,6 +21,7 @@ export const dynamic = 'force-dynamic';
 const SaveDraftSchema = z.object({
   note: z.unknown(),
   expectedUpdatedAt: z.string().datetime().optional(),
+  expectedRecoveryRevision: z.number().int().min(0).max(2_147_483_647).optional(),
 });
 
 interface RouteContext {
@@ -156,20 +157,41 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
 
   const saved = await prisma.$transaction(async (tx) => {
     await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-    const [current, note] = await Promise.all([
+    const [current, note, recovery] = await Promise.all([
       tx.noteDraft.findUnique({ where: { sessionId }, select: { status: true, updatedAt: true } }),
       tx.therapyNote.findUnique({ where: { sessionId }, select: { locked: true } }),
+      tx.noteEditRecovery.findUnique({
+        where: { sessionId },
+        select: { revision: true, encryptedFields: true },
+      }),
     ]);
     if (
       !current ||
       current.status !== 'COMPLETED' ||
       note?.locked ||
-      current.updatedAt.toISOString() !== body.value.expectedUpdatedAt
+      current.updatedAt.toISOString() !== body.value.expectedUpdatedAt ||
+      (body.value.expectedRecoveryRevision !== undefined &&
+        body.value.expectedRecoveryRevision !== (recovery?.revision ?? 0)) ||
+      (recovery?.encryptedFields != null && body.value.expectedRecoveryRevision === undefined)
     )
       return null;
     const updated = await tx.noteDraft.update({
       where: { id: session.noteDraft!.id },
       data: { content: validated as unknown as object },
+    });
+    // Applying the canonical note and clearing its checkpoint are one atomic
+    // write. Retain a revisioned tombstone so delayed autosaves cannot resurrect it.
+    await tx.noteEditRecovery.updateMany({
+      where: { sessionId },
+      data: {
+        encryptedFields: null,
+        revision: { increment: 1 },
+        kind: null,
+        baseDraftUpdatedAt: null,
+        lastMutationId: null,
+        lastMutationRevision: null,
+        lastMutationOperation: null,
+      },
     });
     await writeAudit(
       {
@@ -188,7 +210,7 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
     return NextResponse.json(
       {
         error:
-          'This note changed or was signed in another view. Your unsaved text is still here; copy it before reloading to review the current draft.',
+          'This note or its saved edits changed, or it was signed in another view. Your unsaved text is still here; review recovery before saving again.',
       },
       { status: 409 },
     );

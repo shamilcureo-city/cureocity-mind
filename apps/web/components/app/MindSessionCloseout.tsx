@@ -23,6 +23,8 @@ interface Props {
   selectedQuestionCount?: number;
   receipts: ShareReceiptView[];
   children: React.ReactNode;
+  clinicalReview?: React.ReactNode;
+  canReviewClinical?: boolean;
 }
 
 export function MindSessionCloseout({
@@ -37,12 +39,18 @@ export function MindSessionCloseout({
   selectedQuestionCount = 0,
   receipts,
   children,
+  clinicalReview,
+  canReviewClinical = true,
 }: Props) {
   if (!sessionCompleted) return <>{children}</>;
   const suggestedFollowUp = suggestFollowUp(sessionAt);
   const signed = closeout.steps.signed === 'COMPLETE';
   const complete = Object.entries(closeout.steps)
     .filter(([key]) => canShare || key !== 'shared')
+    .filter(
+      ([key]) =>
+        canReviewClinical || !['clinicalSuggestions', 'nextSessionQuestions'].includes(key),
+    )
     .every(([, state]) => state !== 'PENDING');
   return (
     <section className="space-y-6" aria-labelledby="mind-closeout-title">
@@ -55,9 +63,11 @@ export function MindSessionCloseout({
               : 'Review your note and next-step decisions below. Sign the note when it accurately reflects the session.'}
           </p>
         </div>
-        <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
-          Consult the clinical context
-        </Link>
+        {canReviewClinical && (
+          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+            Consult the clinical context
+          </Link>
+        )}
       </div>
       {children}
       <div className={styles.finish} id="session-next-steps">
@@ -74,21 +84,29 @@ export function MindSessionCloseout({
           <span>
             {agreementCount} {agreementCount === 1 ? 'agreement saved' : 'agreements saved'}
           </span>
-          <span>
-            {selectedQuestionCount}{' '}
-            {selectedQuestionCount === 1 ? 'question selected' : 'questions selected'} from this
-            session
-          </span>
+          {canReviewClinical && (
+            <span>
+              {selectedQuestionCount}{' '}
+              {selectedQuestionCount === 1 ? 'question selected' : 'questions selected'} from this
+              session
+            </span>
+          )}
         </div>
+        <MindCloseoutDecisionActions
+          sessionId={sessionId}
+          steps={closeout.steps}
+          canShare={canShare}
+          clinicalReview={clinicalReview}
+          canReviewClinical={canReviewClinical}
+        />
         <div className={styles.finishGrid}>
           <section className={styles.finishSection} aria-labelledby="care-decisions-title">
             <h3 id="care-decisions-title">Carry the care forward</h3>
-            <p>Clinical suggestions stay separate from your decisions until you review them.</p>
-            <MindCloseoutDecisionActions
-              sessionId={sessionId}
-              steps={closeout.steps}
-              canShare={canShare}
-            />
+            <p>
+              {canReviewClinical
+                ? 'Clinical suggestions stay separate from your decisions until you review them.'
+                : 'Record the next practical steps you and the client agreed.'}
+            </p>
             <MindSessionAgreements sessionId={sessionId} signed={signed} />
           </section>
           <section className={styles.finishSection} aria-labelledby="follow-up-title">

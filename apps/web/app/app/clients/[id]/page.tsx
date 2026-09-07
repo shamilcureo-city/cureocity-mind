@@ -20,7 +20,7 @@ import { JourneyError, computeClientJourney } from '@/lib/journey';
 import { resolveClientPii } from '@/lib/client-pii';
 import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
-import { mindStartEntryHref } from '@/lib/mind-session-start';
+import { mindSessionDestination, mindStartEntryHref } from '@/lib/mind-session-start';
 import { clientSessionSummary } from '@/lib/client-session-summary';
 
 export const dynamic = 'force-dynamic';
@@ -60,6 +60,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
           id: true,
           modality: true,
           status: true,
+          captureMode: true,
           scheduledAt: true,
           therapyNote: { select: { id: true, locked: true, signedAt: true } },
           noteDraft: { select: { status: true } },
@@ -354,7 +355,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
               {client.sessions.map((s) => (
                 <li key={s.id}>
                   <Link
-                    href={`/app/sessions/${s.id}`}
+                    href={mindSessionDestination({ ...s, clientId: client.id }, defaultCapture)}
                     className="grid grid-cols-[1.5fr_1fr_1.5fr_1fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
                   >
                     <span className="text-[var(--color-ink)]">{formatDateTime(s.scheduledAt)}</span>

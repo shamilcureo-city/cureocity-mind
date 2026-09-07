@@ -42,6 +42,7 @@ const MAX_RECENT_TILES = 6;
  */
 export function ClientPicker({ clients, onPickClient, onNewClient, onDictation, onUpload }: Props) {
   const [query, setQuery] = useState('');
+  const [showAll, setShowAll] = useState(false);
 
   const sorted = useMemo(() => {
     return [...clients].sort((a, b) => {
@@ -92,7 +93,7 @@ export function ClientPicker({ clients, onPickClient, onNewClient, onDictation, 
           />
         </div>
 
-        {showRecent && recent.length > 0 && (
+        {showRecent && recent.length > 0 && !showAll && (
           <div>
             <p className="mb-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Recent</p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -119,18 +120,25 @@ export function ClientPicker({ clients, onPickClient, onNewClient, onDictation, 
           </div>
         )}
 
-        {showRecent && recent.length === 0 && clients.length > 0 && (
-          <Card className="p-6 text-sm text-[var(--color-ink-2)]">
-            No recent sessions — use search or start with{' '}
-            <button
-              type="button"
-              onClick={onNewClient}
-              className="text-[var(--color-accent)] underline"
-            >
-              + New client
-            </button>
-            .
-          </Card>
+        {showRecent && (showAll || recent.length === 0) && clients.length > 0 && (
+          <div>
+            <p className="mb-3 text-sm text-[var(--color-ink-2)]">All clients</p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {sorted.map((client) => (
+                <ClientTile key={client.id} entry={client} onPick={onPickClient} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showRecent && recent.length > 0 && sorted.length > recent.length && (
+          <button
+            type="button"
+            onClick={() => setShowAll((value) => !value)}
+            className="mt-3 rounded-lg px-2 py-2 text-sm text-[var(--color-accent)] underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+          >
+            {showAll ? 'Show recent clients' : `Browse all ${sorted.length} clients`}
+          </button>
         )}
 
         {clients.length === 0 && (

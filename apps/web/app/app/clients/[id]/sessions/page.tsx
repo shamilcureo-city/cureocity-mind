@@ -7,6 +7,8 @@ import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { resolveClientPii } from '@/lib/client-pii';
 import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
+import { mindSessionDestination } from '@/lib/mind-session-start';
+import { clientSessionSummary } from '@/lib/client-session-summary';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,7 +30,8 @@ export default async function ClientSessionsPage({ params }: PageProps) {
           scheduledAt: true,
           modality: true,
           status: true,
-          therapyNote: { select: { id: true } },
+          captureMode: true,
+          therapyNote: { select: { id: true, locked: true, signedAt: true } },
           noteDraft: { select: { status: true } },
         },
       },
@@ -53,19 +56,18 @@ export default async function ClientSessionsPage({ params }: PageProps) {
             {client.sessions.map((session) => (
               <li key={session.id}>
                 <Link
-                  href={`/app/sessions/${session.id}`}
+                  href={mindSessionDestination(
+                    { ...session, clientId: client.id },
+                    therapist.defaultCaptureMode && therapist.defaultCaptureMode !== 'LIVE'
+                      ? 'BATCH'
+                      : 'LIVE',
+                  )}
                   className="grid gap-2 px-5 py-4 text-sm hover:bg-[var(--color-surface-soft)] sm:grid-cols-[1.4fr_1fr_1fr_auto]"
                 >
                   <span>{formatIstDateTime(session.scheduledAt)}</span>
                   <span className="text-[var(--color-ink-2)]">{session.modality ?? '—'}</span>
                   <span className="text-[var(--color-ink-2)]">
-                    {session.therapyNote
-                      ? 'Signed note'
-                      : session.noteDraft?.status === 'COMPLETED'
-                        ? 'Ready to review'
-                        : session.noteDraft?.status === 'FAILED'
-                          ? 'Needs attention'
-                          : '—'}
+                    {clientSessionSummary(session.status, session.therapyNote, session.noteDraft)}
                   </span>
                   <Badge tone={session.status === 'COMPLETED' ? 'accent' : 'muted'}>
                     {session.status.toLowerCase()}

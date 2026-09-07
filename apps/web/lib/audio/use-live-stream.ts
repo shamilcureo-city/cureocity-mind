@@ -51,6 +51,8 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
   const interruptedRef = useRef(opts.onInterrupted);
   interruptedRef.current = opts.onInterrupted;
   const generationRef = useRef(0);
+  const disposedRef = useRef(false);
+  const stopInFlightRef = useRef<Promise<void> | null>(null);
   const teardown = useCallback(async (capture: Capture | null): Promise<void> => {
     if (!capture) return;
     capture.stopping = true;
@@ -62,7 +64,9 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
   }, []);
 
   const start = useCallback(async (): Promise<void> => {
+    if (disposedRef.current) throw new Error('Capture is no longer available on this page.');
     const generation = ++generationRef.current;
+    await stopInFlightRef.current;
     await teardown(captureRef.current);
     if (generation !== generationRef.current) throw new Error('Capture start was cancelled.');
     const capture: Capture = { stopping: false };
@@ -145,20 +149,34 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     }
   }, [opts.selectedDeviceId, teardown]);
 
-  const stop = useCallback(async (): Promise<void> => {
+  const stop = useCallback((): Promise<void> => {
+    if (stopInFlightRef.current) return stopInFlightRef.current;
     const generation = ++generationRef.current;
     const capture = captureRef.current;
-    if (capture) capture.stopping = true;
-    try {
-      await stopWorklet(capture?.worklet ?? null);
-    } finally {
-      await teardown(capture);
-      if (generation === generationRef.current) setState('idle');
+    if (capture) {
+      capture.stopping = true;
+      // Stop the physical input immediately; already-posted worklet frames
+      // still drain in port order before its acknowledgement.
+      capture.stream?.getTracks().forEach((track) => track.stop());
     }
+    const work = (async () => {
+      try {
+        await stopWorklet(capture?.worklet ?? null);
+      } finally {
+        await teardown(capture);
+        if (generation === generationRef.current) setState('idle');
+      }
+    })();
+    stopInFlightRef.current = work.finally(() => {
+      stopInFlightRef.current = null;
+    });
+    return stopInFlightRef.current;
   }, [teardown]);
 
   useEffect(() => {
+    disposedRef.current = false;
     return () => {
+      disposedRef.current = true;
       ++generationRef.current;
       void teardown(captureRef.current);
     };

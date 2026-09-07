@@ -15,6 +15,8 @@
  *   GCP_PROJECT_ID unset         → Mock Gemini Pass 1 + Pass 2
  *
  * Skipped unless RUN_INTEGRATION_TESTS=1.
+ * Destructive setup also requires the exact local cureocity_mind_test database
+ * and rejects remote DB aliases; see docs/MIND_RELEASE_VALIDATION.md.
  *
  * A separate test below is configured for the real Vertex Gemini API.
  * That test runs ONLY when GCP_PROJECT_ID, GCP_SA_KEY_PATH are set;
@@ -29,6 +31,7 @@ import request from 'supertest';
 import { AppModule } from '../../src/app.module';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { generateSilence } from './synthetic-audio';
+import { assertDisposableIntegrationDatabase } from '../../../test-support/disposable-database';
 
 const SKIP = process.env['RUN_INTEGRATION_TESTS'] !== '1';
 const DEV_FIREBASE_UID = 'dev-firebase-uid-priya';
@@ -53,20 +56,22 @@ describe.skipIf(SKIP)('scribe-service E2E (mock Gemini, in-memory storage, inlin
   let dbLock: PrismaClient | null = null;
 
   beforeAll(async () => {
-    const base = process.env['DATABASE_URL'];
-    if (base) {
-      const url = base.includes('?') ? `${base}&connection_limit=1` : `${base}?connection_limit=1`;
-      dbLock = new PrismaClient({ datasources: { db: { url } } });
-      // ::text cast — pg_advisory_lock() returns void, which Prisma can't deserialize.
-      await dbLock.$queryRaw`SELECT pg_advisory_lock(${E2E_DB_LOCK_KEY})::text`;
-    }
+    const base = assertDisposableIntegrationDatabase();
+    const lockUrl = new URL(base);
+    lockUrl.searchParams.set('connection_limit', '1');
+    dbLock = new PrismaClient({ datasources: { db: { url: lockUrl.toString() } } });
+    // ::text cast — pg_advisory_lock() returns void, which Prisma can't deserialize.
+    await dbLock.$queryRaw`SELECT pg_advisory_lock(${E2E_DB_LOCK_KEY})::text`;
 
     process.env['AUTH_BYPASS'] = 'true';
     process.env['STORAGE_BACKEND'] = 'memory';
     process.env['NOTE_QUEUE_BACKEND'] = 'sync';
     delete process.env['GCP_PROJECT_ID']; // force mock backends
 
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(PrismaService)
+      .useValue(new PrismaService({ datasources: { db: { url: base } } }))
+      .compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api/v1');
     await app.init();
@@ -80,6 +85,7 @@ describe.skipIf(SKIP)('scribe-service E2E (mock Gemini, in-memory storage, inlin
   });
 
   beforeEach(async () => {
+    assertDisposableIntegrationDatabase();
     await prisma.geminiCallLog.deleteMany();
     await prisma.therapyNote.deleteMany();
     await prisma.noteDraft.deleteMany();

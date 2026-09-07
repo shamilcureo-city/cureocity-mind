@@ -18,6 +18,7 @@ import { homeworkResponseDetail } from '@/lib/mind-care-loop';
 import { dedupeTodayCrossSource } from '@/lib/today-cross-source-dedupe';
 import { selectAuthoritativeTodayHero } from '@/lib/today-hero';
 import { canOpenMindPage, loadOptionalCapabilityData } from '@/lib/mind-page-capabilities';
+import { mindSessionDestination } from '@/lib/mind-session-start';
 
 export const dynamic = 'force-dynamic';
 
@@ -423,8 +424,8 @@ export default async function TodayPage() {
             occurredAt: session.scheduledAt.toISOString(),
             title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
             detail: 'Scheduled session still unresolved',
-            href: `/app/sessions/${session.id}`,
-            ctaLabel: 'Resolve session',
+            href: mindSessionDestination(session, defaultCapture),
+            ctaLabel: 'Open preparation',
           })),
         ...rawOverdueAssignments.map(async (assignment) => ({
           id: assignment.id,

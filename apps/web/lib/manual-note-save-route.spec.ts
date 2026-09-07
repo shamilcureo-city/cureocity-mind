@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   audit: vi.fn(),
   lock: vi.fn(),
+  recovery: vi.fn(),
+  clearRecovery: vi.fn(),
 }));
 vi.mock('./auth-server', () => ({ requirePsychologistId: mocks.auth }));
 vi.mock('./audit', () => ({ auditMetadataFromRequest: () => ({}), writeAudit: mocks.audit }));
@@ -46,12 +48,13 @@ const send = (
     modalitySpecific: {},
   },
   expectedUpdatedAt = version,
+  expectedRecoveryRevision?: number,
 ) =>
   PUT(
     new Request('https://example.test/api/v1/sessions/session-1/note-draft', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ note: content, expectedUpdatedAt }),
+      body: JSON.stringify({ note: content, expectedUpdatedAt, expectedRecoveryRevision }),
     }) as never,
     { params: Promise.resolve({ id: 'session-1' }) },
   );
@@ -67,11 +70,14 @@ beforeEach(() => {
   });
   mocks.current.mockResolvedValue({ status: 'COMPLETED', updatedAt: new Date(version) });
   mocks.signed.mockResolvedValue(null);
+  mocks.recovery.mockResolvedValue(null);
+  mocks.clearRecovery.mockResolvedValue({ count: 0 });
   mocks.update.mockResolvedValue({ updatedAt: new Date('2026-09-06T10:01:00.000Z') });
   mocks.transaction.mockImplementation(async (callback) =>
     callback({
       noteDraft: { findUnique: mocks.current, update: mocks.update },
       therapyNote: { findUnique: mocks.signed },
+      noteEditRecovery: { findUnique: mocks.recovery, updateMany: mocks.clearRecovery },
     }),
   );
 });
@@ -90,6 +96,10 @@ describe('manual note save revision and safety boundary', () => {
     expect(result.note.modalitySpecific).toEqual(note.modalitySpecific);
     expect(result.updatedAt).toBe('2026-09-06T10:01:00.000Z');
     expect(mocks.audit).toHaveBeenCalledOnce();
+    expect(mocks.clearRecovery).toHaveBeenCalledWith({
+      where: { sessionId: 'session-1' },
+      data: expect.objectContaining({ encryptedFields: null, revision: { increment: 1 } }),
+    });
   });
   it('refuses a stale editor without overwriting another clinician correction', async () => {
     expect((await send(submission, '2026-09-06T09:00:00.000Z')).status).toBe(409);
@@ -104,5 +114,14 @@ describe('manual note save revision and safety boundary', () => {
   it('rejects an old summary-only editor without silently dropping its changes', async () => {
     expect((await send({ ...note, summary: 'Only visible edit' })).status).toBe(409);
     expect(mocks.transaction).not.toHaveBeenCalled();
+  });
+  it('refuses to clear unapplied recovery for a legacy editor or a stale recovery revision', async () => {
+    mocks.recovery.mockResolvedValue({ revision: 2, encryptedFields: 'opaque-envelope' });
+    expect((await send()).status).toBe(409);
+    expect((await send(submission, version, 1)).status).toBe(409);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.clearRecovery).not.toHaveBeenCalled();
+    expect((await send(submission, version, 2)).status).toBe(200);
+    expect(mocks.clearRecovery).toHaveBeenCalledOnce();
   });
 });

@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   webAuthnUpdate: vi.fn(),
   noteSafeParse: vi.fn(),
   rxSafeParse: vi.fn(),
+  recoveryFindUnique: vi.fn(),
 }));
 
 vi.mock('@cureocity/contracts', () => {
@@ -102,6 +103,7 @@ const tx = {
   noteSignatureVersion: { create: mocks.signatureVersionCreate },
   noteEdit: { createMany: mocks.editsCreateMany },
   webAuthnCredential: { update: mocks.webAuthnUpdate },
+  noteEditRecovery: { findUnique: mocks.recoveryFindUnique },
 };
 
 function sqlText(strings: TemplateStringsArray): string {
@@ -141,6 +143,7 @@ beforeEach(() => {
     rxPad: null,
   });
   mocks.noteFindUnique.mockResolvedValue(null);
+  mocks.recoveryFindUnique.mockResolvedValue(null);
   mocks.persistedEdits.mockResolvedValue([]);
   mocks.noteCreate.mockImplementation(({ data }) =>
     Promise.resolve({
@@ -223,6 +226,77 @@ beforeEach(() => {
 afterAll(() => vi.useRealTimers());
 
 describe('medical signing route transaction behavior', () => {
+  it('refuses an unapplied Mind checkpoint under the signature lock, without signing or clearing it', async () => {
+    mocks.signableKind = 'THERAPY';
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+      sqlText(strings).includes('FROM "sessions"')
+        ? Promise.resolve([
+            {
+              id: 'session-1',
+              psychologistId: 'psy-1',
+              status: 'COMPLETED',
+              kind: 'TREATMENT',
+              vertical: 'THERAPIST',
+            },
+          ])
+        : baseQuery(strings, ...values),
+    );
+    mocks.recoveryFindUnique.mockResolvedValue({ encryptedFields: 'opaque-checkpoint' });
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining('save or discard'),
+    });
+    expect(mocks.recoveryFindUnique).toHaveBeenCalledWith({
+      where: { sessionId: 'session-1' },
+      select: { encryptedFields: true },
+    });
+    const clientLockIndex = mocks.queryRaw.mock.calls.findIndex(([strings]) =>
+      sqlText(strings).includes('FOR UPDATE OF c'),
+    );
+    expect(clientLockIndex).toBeGreaterThanOrEqual(0);
+    expect(mocks.queryRaw.mock.invocationCallOrder[clientLockIndex]).toBeLessThan(
+      mocks.recoveryFindUnique.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.noteCreate).not.toHaveBeenCalled();
+    expect(mocks.noteUpdate).not.toHaveBeenCalled();
+    expect(mocks.signatureVersionCreate).not.toHaveBeenCalled();
+    expect(mocks.webAuthnUpdate).not.toHaveBeenCalled();
+  });
+  it('allows therapy signing after the checkpoint is applied or discarded', async () => {
+    mocks.signableKind = 'THERAPY';
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+      sqlText(strings).includes('FROM "sessions"')
+        ? Promise.resolve([
+            {
+              id: 'session-1',
+              psychologistId: 'psy-1',
+              status: 'COMPLETED',
+              kind: 'TREATMENT',
+              vertical: 'THERAPIST',
+            },
+          ])
+        : baseQuery(strings, ...values),
+    );
+    mocks.recoveryFindUnique.mockResolvedValue({ encryptedFields: null });
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.noteCreate).toHaveBeenCalledOnce();
+  });
+  it('does not add a Mind checkpoint requirement to Scribe signing', async () => {
+    mocks.recoveryFindUnique.mockRejectedValue(new Error('Must not inspect Mind-only state'));
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.recoveryFindUnique).not.toHaveBeenCalled();
+  });
   it.each([
     ['stale', '2026-08-18T11:54:59.999Z'],
     ['future', '2026-08-18T12:05:00.001Z'],

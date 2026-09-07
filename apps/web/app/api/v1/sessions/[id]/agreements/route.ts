@@ -15,7 +15,8 @@ export const dynamic = 'force-dynamic';
  * card reads these back and marks follow-up.
  *
  * GET  — this session's agreements.
- * POST — record one agreement (audited `AGREEMENT_RECORDED`).
+ * POST — record one agreement (audited `AGREEMENT_RECORDED`), or return the
+ * existing receipt when the same creation is retried without a follow-up mark.
  */
 export async function GET(
   req: NextRequest,
@@ -78,8 +79,25 @@ export async function POST(
   if (!session) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
 
   try {
-    const row = await prisma.$transaction(async (tx) => {
+    const saved = await prisma.$transaction(async (tx) => {
       const client = await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      // Creation has followUp=null. Compare the schema-parsed text exactly:
+      // retries cannot consume quota or emit another audit, while different
+      // speakers/text and already-followed-up agreements remain distinct.
+      // This lookup must happen under the same lock as quota/insert and before
+      // the eight-row limit, including when the first attempt filled the quota.
+      const existing = await tx.sessionAgreement.findFirst({
+        where: {
+          sessionId,
+          clientId: client.id,
+          psychologistId: auth.value.psychologistId,
+          text: body.value.text,
+          speaker: body.value.speaker,
+          followUp: null,
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      if (existing) return { row: existing, created: false };
       // Serialize quota and insert with erasure and other agreement writers.
       const count = await tx.sessionAgreement.count({ where: { sessionId } });
       if (count >= 8) return null;
@@ -109,13 +127,14 @@ export async function POST(
         },
         tx,
       );
-      return created;
+      return { row: created, created: true };
     });
-    if (!row)
+    if (!saved)
       return NextResponse.json(
         { error: 'A session carries at most 8 agreements — fewer, kept, beats many, forgotten.' },
         { status: 422 },
       );
+    const { row } = saved;
     const dto: SessionAgreementDto = {
       id: row.id,
       sessionId: row.sessionId,
@@ -124,7 +143,7 @@ export async function POST(
       followUp: row.followUp,
       createdAt: row.createdAt.toISOString(),
     };
-    return NextResponse.json({ agreement: dto }, { status: 201 });
+    return NextResponse.json({ agreement: dto }, { status: saved.created ? 201 : 200 });
   } catch (error) {
     if (error instanceof ClientPhiWriteForbiddenError)
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
