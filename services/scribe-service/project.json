@@ -17,6 +17,7 @@
     "typecheck": {
       "executor": "nx:run-commands",
       "cache": true,
+      "inputs": ["default", "^production", "{workspaceRoot}/services/test-support/**/*.ts"],
       "options": {
         "command": "tsc --noEmit",
         "cwd": "services/scribe-service"
@@ -33,6 +34,12 @@
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/services/test-support/**/*.ts",
+        { "env": "RUN_INTEGRATION_TESTS" }
+      ],
       "options": {
         "command": "vitest run",
         "cwd": "services/scribe-service"

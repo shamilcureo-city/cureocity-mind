@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type {
   BillingEntitlement,
   ConsentScope,
@@ -19,6 +20,7 @@ import { type RecordReady, SCRIPT_VERSION } from './record-types';
 import { UpgradeModal } from './UpgradeModal';
 import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
 import { MindSessionPreflight } from './MindSessionPreflight';
+import { PreparePanel } from './PreparePanel';
 
 type ConfirmMode = 'live-capture' | 'dictation' | 'upload';
 
@@ -177,10 +179,50 @@ export function RecordConfirmStrip({
   } | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
+  const startingRef = useRef<AbortController | null>(null);
+  useEffect(() => () => startingRef.current?.abort(), []);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [preflightReady, setPreflightReady] = useState(false);
   const [confirmedToday, setConfirmedToday] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
+  const [preparedGuides, setPreparedGuides] = useState<
+    Array<{ id: string; name: string; updatedAt: string }>
+  >([]);
+  const [guideId, setGuideId] = useState('');
+  const [guideLoading, setGuideLoading] = useState(true);
+  const [guideError, setGuideError] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPreparedGuides([]);
+    setGuideId(initialGuideId ?? '');
+    setGuideLoading(true);
+    setGuideError(false);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/v1/clients/${clientId}/session-defaults?guides=1`, {
+          cache: 'no-store',
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+        });
+        if (!response.ok) throw new Error('Guide list unavailable');
+        const body = (await response.json()) as {
+          guides?: Array<{ id: string; name: string; updatedAt: string }>;
+        };
+        if (!Array.isArray(body.guides)) throw new Error('Invalid guide list');
+        if (controller.signal.aborted) return;
+        setPreparedGuides(body.guides);
+        setGuideId(body.guides.some((guide) => guide.id === initialGuideId) ? initialGuideId! : '');
+      } catch {
+        if (!controller.signal.aborted) {
+          setGuideError(true);
+          setGuideId('');
+        }
+      } finally {
+        if (!controller.signal.aborted) setGuideLoading(false);
+      }
+    })();
+    return () => controller.abort();
+  }, [clientId, initialGuideId]);
 
   useEffect(() => {
     setDisplaySupported(isDisplayCaptureSupported());
@@ -225,12 +267,16 @@ export function RecordConfirmStrip({
   }, [clientId]);
 
   async function start(): Promise<void> {
-    if (!defaults) return;
+    if (!defaults || startingRef.current) return;
+    const controller = new AbortController();
+    startingRef.current = controller;
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
     setSubmitError(null);
     setSubmitting(true);
     try {
       const createRes = await fetch('/api/v1/sessions', {
         method: 'POST',
+        signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           clientId,
@@ -242,8 +288,10 @@ export function RecordConfirmStrip({
           // TS3 (F1) — starting now: reuse today's booked session for this
           // client instead of minting a duplicate that orphans the slot.
           startNow: true,
+          ...(expectedSessionId ? { expectedSessionId } : {}),
         }),
       });
+      signal.throwIfAborted();
       if (!createRes.ok) {
         const body = (await createRes.json().catch(() => ({}))) as {
           error?: string;
@@ -271,6 +319,7 @@ export function RecordConfirmStrip({
         modality: SessionModality | null;
         status?: string;
       };
+      signal.throwIfAborted();
       if (expectedSessionId && sessionRow.id !== expectedSessionId) {
         throw new Error(
           'The booked session changed while preflight was open. Return to Today and try again.',
@@ -298,12 +347,14 @@ export function RecordConfirmStrip({
 
         const consentRes = await fetch(`/api/v1/sessions/${sessionRow.id}/consent`, {
           method: 'POST',
+          signal,
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             scopes: Array.from(acked),
             scriptVersion: SCRIPT_VERSION,
           }),
         });
+        signal.throwIfAborted();
         if (!consentRes.ok) {
           const body = (await consentRes.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `Record consent failed (${consentRes.status})`);
@@ -320,7 +371,7 @@ export function RecordConfirmStrip({
       const useLiveScribe = mode === 'live-capture' && method === 'mic' && capture === 'live';
       if (useLiveScribe) {
         const mic = selectedDeviceId ? `&mic=${encodeURIComponent(selectedDeviceId)}` : '';
-        const guide = initialGuideId ? `&guide=${encodeURIComponent(initialGuideId)}` : '';
+        const guide = guideId ? `&guide=${encodeURIComponent(guideId)}` : '';
         router.push(`/app/sessions/${sessionRow.id}/live?flash=1${mic}${guide}`);
         return;
       }
@@ -332,7 +383,9 @@ export function RecordConfirmStrip({
         if (!alreadyStarted) {
           const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, {
             method: 'POST',
+            signal,
           });
+          signal.throwIfAborted();
           if (!startRes.ok) {
             const body = (await startRes.json().catch(() => ({}))) as { error?: string };
             throw new Error(body.error ?? `Start session failed (${startRes.status})`);
@@ -345,7 +398,11 @@ export function RecordConfirmStrip({
       const startAfterCaptureActive =
         !alreadyStarted && mode === 'live-capture' && (method === 'mic' || method === 'display');
       if (!alreadyStarted && !startAfterCaptureActive) {
-        const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, { method: 'POST' });
+        const startRes = await fetch(`/api/v1/sessions/${sessionRow.id}/start`, {
+          method: 'POST',
+          signal,
+        });
+        signal.throwIfAborted();
         if (!startRes.ok) {
           const body = (await startRes.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `Start session failed (${startRes.status})`);
@@ -363,9 +420,10 @@ export function RecordConfirmStrip({
         ...(startAfterCaptureActive ? { startAfterCaptureActive: true } : {}),
       });
     } catch (err) {
-      setSubmitError((err as Error).message);
+      if (!controller.signal.aborted) setSubmitError((err as Error).message);
     } finally {
-      setSubmitting(false);
+      startingRef.current = null;
+      if (!controller.signal.aborted) setSubmitting(false);
     }
   }
 
@@ -393,6 +451,7 @@ export function RecordConfirmStrip({
       <button
         type="button"
         onClick={onCancel}
+        disabled={submitting}
         className="mb-5 text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
         ← Back
@@ -408,6 +467,10 @@ export function RecordConfirmStrip({
           <p className="mt-1 text-xs text-[var(--color-ink-3)]">
             {KIND_SUBLINE[defaults.kind](defaults)}
           </p>
+
+          {mode === 'live-capture' && (
+            <PreparePanel clientId={clientId} defaultOpen={expectedSessionId !== null} />
+          )}
 
           {mode === 'live-capture' && (
             <div className="mt-6">
@@ -461,6 +524,48 @@ export function RecordConfirmStrip({
                 />
               </div>
             </div>
+          )}
+
+          {mode === 'live-capture' && method === 'mic' && capture === 'live' && (
+            <section className="mt-5 space-y-2" aria-label="Optional session support">
+              <Label htmlFor="rcs-guide">Session support (optional)</Label>
+              <Select
+                id="rcs-guide"
+                value={guideId}
+                onChange={(event) => setGuideId(event.target.value)}
+                disabled={guideLoading || guideError}
+              >
+                <option value="">Quiet focus — no guide selected</option>
+                {guideLoading && guideId && (
+                  <option value={guideId}>Selected prepared guide — checking availability</option>
+                )}
+                {preparedGuides.map((guide) => (
+                  <option key={guide.id} value={guide.id}>
+                    {guide.name} ·{' '}
+                    {new Date(guide.updatedAt).toLocaleDateString('en-IN', {
+                      timeZone: 'Asia/Kolkata',
+                      day: 'numeric',
+                      month: 'short',
+                    })}
+                  </option>
+                ))}
+              </Select>
+              <p className="text-xs text-[var(--color-ink-3)]" role="status">
+                {guideLoading
+                  ? 'Checking previously prepared guides…'
+                  : guideError
+                    ? 'Prepared guides could not be loaded. You can continue in quiet focus.'
+                    : guideId
+                      ? 'The draft guide opens with your session. Review its fit before using it; this does not confirm treatment.'
+                      : 'Stay with the client, or choose a previously prepared guide. This does not generate new advice.'}
+              </p>
+              <Link
+                href={`/app/clients/${clientId}/plan#session-guides`}
+                className="inline-block py-1 text-xs text-[var(--color-accent)] underline"
+              >
+                Prepare a guide before recording
+              </Link>
+            </section>
           )}
 
           <div className="mt-6 rounded-xl border border-[var(--color-line-soft)] p-3">

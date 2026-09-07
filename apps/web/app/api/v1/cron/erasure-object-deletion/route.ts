@@ -3,6 +3,10 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { PrismaErasureObjectDeletionTaskStore } from '@/lib/dpdp-object-deletion-store';
 import { runErasureObjectDeletionWorker } from '@/lib/dpdp-object-deletion-worker';
 import { getMigrationPrisma } from '@/lib/prisma-migration';
+import {
+  ErasureStorageConfigurationError,
+  readErasureS3Configuration,
+} from '@/lib/dpdp-object-storage-config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,35 +20,40 @@ export function isErasureDeletionCronAuthorized(
   return Boolean(secret && authorization === `Bearer ${secret}`);
 }
 
-function requiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`${name} is required for the DPDP object-deletion worker`);
-  return value;
-}
-
 /** Protected outbox worker; CRON_SECRET is required even for Vercel cron. */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!isErasureDeletionCronAuthorized(req.headers.get('authorization'))) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const endpoint = process.env['S3_ENDPOINT'];
-  const storage = new S3StorageClient({
-    region: requiredEnv('S3_REGION'),
-    accessKeyId: requiredEnv('S3_ACCESS_KEY'),
-    secretAccessKey: requiredEnv('S3_SECRET_KEY'),
-    ...(endpoint ? { endpoint } : {}),
-    forcePathStyle: process.env['S3_FORCE_PATH_STYLE'] === 'true',
-  });
+  // Most web recordings live entirely in Postgres. Only actual legacy S3 work
+  // needs object-storage configuration; an empty outbox must not require it.
+  let storage: S3StorageClient | undefined;
+  let bucket: string | undefined;
+  let configurationMissing = false;
   const result = await runErasureObjectDeletionWorker({
     store: new PrismaErasureObjectDeletionTaskStore(getMigrationPrisma()),
-    remove: (input) => storage.delete(input),
-    bucket: requiredEnv('S3_BUCKET_AUDIO'),
+    remove: async ({ key }) => {
+      if (!storage) {
+        try {
+          const config = readErasureS3Configuration(process.env);
+          bucket = config.bucket;
+          storage = new S3StorageClient(config.options);
+        } catch (error) {
+          if (error instanceof ErasureStorageConfigurationError) configurationMissing = true;
+          throw error;
+        }
+      }
+      await storage.delete({ bucket: bucket!, key });
+    },
     log: ({ event, taskId, errorCode }) => {
       // Task IDs and bounded codes only. Never log object keys or provider errors.
       console.info('[dpdp-object-deletion]', { event, taskId, ...(errorCode && { errorCode }) });
     },
   });
 
-  return NextResponse.json(result);
+  return NextResponse.json(
+    { ...result, ...(configurationMissing ? { code: 'STORAGE_CONFIGURATION_MISSING' } : {}) },
+    { status: configurationMissing ? 503 : 200, headers: { 'Cache-Control': 'private, no-store' } },
+  );
 }

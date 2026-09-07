@@ -3,6 +3,7 @@
 import type { TherapyNoteV1 } from '@cureocity/contracts';
 import { canonicalTreatmentEdit, TREATMENT_CLINICAL_FIELDS } from '../../lib/canonical-note-edit';
 import { ClinicalFieldsEditor } from './ClinicalFieldsEditor';
+import type { NoteEditRecoveryTarget } from '../../lib/note-edit-recovery-client';
 
 const FIELDS = [
   { key: 'subjective', label: 'Client account · Subjective', required: true },
@@ -17,12 +18,17 @@ export function NoteEditor({
   error,
   onSave,
   onCancel,
+  recoveryTarget,
 }: {
   note: TherapyNoteV1;
   saving: boolean;
   error?: string | null;
-  onSave: (next: TherapyNoteV1) => void | Promise<void>;
+  onSave: (
+    next: TherapyNoteV1,
+    recoveryRevision?: number,
+  ) => void | boolean | Promise<void | boolean>;
   onCancel: () => void;
+  recoveryTarget?: NoteEditRecoveryTarget;
 }) {
   const initial = Object.fromEntries(TREATMENT_CLINICAL_FIELDS.map((key) => [key, note[key]]));
   return (
@@ -31,6 +37,7 @@ export function NoteEditor({
       fields={FIELDS}
       saving={saving}
       error={error}
+      recoveryTarget={recoveryTarget}
       hasDerivedView={Boolean(
         note.summary ||
         note.topics?.length ||
@@ -40,12 +47,13 @@ export function NoteEditor({
         note.modalitySpecific,
       )}
       onCancel={onCancel}
-      onSave={(values) =>
+      onSave={(values, revision) =>
         onSave(
           canonicalTreatmentEdit(
             note,
             values as Pick<TherapyNoteV1, (typeof TREATMENT_CLINICAL_FIELDS)[number]>,
           ),
+          revision,
         )
       }
     />

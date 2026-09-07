@@ -101,6 +101,19 @@ describe('continuous live authority', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it('pause acknowledgement neither bypasses revoked consent nor renews an expired token', async () => {
+    fetchImpl.mockResolvedValue(response([], false));
+    const auth = authority();
+    await expect(
+      auth.authorizeEvent({
+        type: 'capturePaused',
+        requestId: '00000000-0000-4000-8000-000000000001',
+      }),
+    ).resolves.toBeNull();
+    expect(close).toHaveBeenCalledWith('live_authority_denied');
+    await expect(auth.authorizeCurrentInput()).resolves.toBe(false);
+  });
+
   it('fails closed on verifier timeout or outage', async () => {
     fetchImpl.mockRejectedValue(new Error('unavailable'));
     const auth = authority();

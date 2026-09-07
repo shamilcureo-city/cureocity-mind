@@ -247,6 +247,9 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
       .optional(),
   }),
   z.object({ type: z.literal('stop') }),
+  // Pause is not stop/finalize. The gateway acknowledges only after the
+  // ordered audio preceding this command has been transcribed.
+  z.object({ type: z.literal('pause'), requestId: z.string().uuid() }),
   // Sprint DS3 — the doctor dismissed an "ask next" question. The gateway
   // marks it dismissed for the rest of the consult (never re-suggested).
   z.object({ type: z.literal('dismiss'), questionId: z.string() }),
@@ -273,6 +276,8 @@ export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 /// recognised voice commands.
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
+  z.object({ type: z.literal('capturePaused'), requestId: z.string().uuid() }),
+  z.object({ type: z.literal('capturePauseFailed'), requestId: z.string().uuid() }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
   /**
    * Sprint DS13 — the STREAMING display rail (flag-gated, doctor path).

@@ -7,7 +7,7 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { PreparePanel } from './PreparePanel';
 import { RescheduleModal } from './RescheduleModal';
-import { mindStartEntryHref } from '@/lib/mind-session-start';
+import { mindSessionDestination, mindStartEntryHref } from '@/lib/mind-session-start';
 import styles from './MindTodayStudio.module.css';
 
 export interface TodaySessionCardProps {
@@ -102,10 +102,7 @@ export function TodaySessionCard({
   } as const;
   const primaryStart = startOptions[defaultCapture];
   const secondaryStart = startOptions[defaultCapture === 'LIVE' ? 'BATCH' : 'LIVE'];
-  const resumeHref =
-    session.captureMode === 'LIVE'
-      ? `/app/sessions/${session.id}/live`
-      : `/app?record=${session.clientId}`;
+  const resumeHref = mindSessionDestination(session, defaultCapture);
 
   async function markNoShow() {
     if (busy) return;

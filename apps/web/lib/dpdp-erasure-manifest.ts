@@ -69,11 +69,14 @@ export const DPDP_ERASURE_MANIFEST = {
     'retain the minimal signed-record parent; clear modality, language, phase and consent snapshots',
   ),
   AudioChunk: clinicalDelete(
-    'enqueue every s3Key in the object-deletion outbox, then delete database audio rows',
+    'enqueue nonempty legacy references in the object-deletion outbox (unsupported providers remain unresolved), then delete database audio rows',
   ),
   TranscriptSegment: clinicalDelete('delete transcript, diarization and affect artifacts'),
   GeminiCallLog: clinicalDelete('delete session-linked model logs and bounded error details'),
   NoteDraft: redact('retain signed-note FK parent; clear transcript, content, Rx and errors'),
+  NoteEditRecovery: clinicalDelete(
+    'delete encrypted manual-edit checkpoints, versions and mutation tombstones',
+  ),
   TherapyNote: legalProof(
     'retain hashes/timestamps/actor; redact content, Rx, payload and credentials',
   ),

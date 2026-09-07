@@ -1,22 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { icd11Block, searchIcd11, type Icd11Entry } from '@cureocity/clinical';
 
-/**
- * ICD-11 code picker — PC5.
- *
- * A searchable combobox rather than a plain <select>: the catalogue is a few
- * hundred entries, which is far past the point where scrolling a native
- * dropdown beats typing. Typing filters on both code and label ("6b0", "panic",
- * "dep mod"), and picking an entry fills the code AND its WHO title in one go,
- * so the two fields can't drift apart.
- *
- * Free text is deliberately still allowed. The catalogue is a curated subset of
- * Chapter 06 (see packages/clinical/src/icd11.ts) — a therapist needing a finer
- * child code must not be blocked by our list, so anything typed is kept and the
- * UI just notes that it is outside the catalogue.
- */
+/** Catalogue search and an explicitly confirmed custom code are separate states.
+ * Unselected search text stays visible on blur and cannot retain an older code. */
 export function Icd11Picker({
   code,
   onPick,
@@ -26,9 +14,8 @@ export function Icd11Picker({
   inputStyle,
 }: {
   code: string;
-  /** Fired when an entry is chosen — carries the label so the caller can sync it. */
   onPick: (entry: Icd11Entry) => void;
-  /** Fired on raw typing, for codes outside the catalogue. */
+  /** Called to clear an old selection, or to commit a confirmed custom code. */
   onCodeChange: (code: string) => void;
   disabled?: boolean;
   inputClassName?: string;
@@ -36,23 +23,21 @@ export function Icd11Picker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [customSelected, setCustomSelected] = useState(false);
   const [active, setActive] = useState(0);
-  const wrapRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const id = useId();
+  const listId = id + '-listbox';
+  const statusId = id + '-status';
+  const results = useMemo(() => searchIcd11(dirty ? query : code, 60), [dirty, query, code]);
+  const candidate = query.trim();
+  const customAvailable =
+    dirty &&
+    candidate.length > 0 &&
+    !results.some((entry) => entry.code.toLowerCase() === candidate.toLowerCase());
+  const showResults = open && results.length > 0;
 
-  // While the menu is open the input shows the query; closed, it shows the code.
-  const results = useMemo(() => searchIcd11(open ? query : code, 60), [open, query, code]);
-
-  useEffect(() => {
-    if (!open) return;
-    function onDocMouseDown(e: MouseEvent): void {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
-  }, [open]);
-
-  // Keep the highlighted row in view when arrowing past the visible window.
   useEffect(() => {
     if (!open || !listRef.current) return;
     const el = listRef.current.children[active];
@@ -63,8 +48,17 @@ export function Icd11Picker({
     onPick(entry);
     setOpen(false);
     setQuery('');
+    setDirty(false);
+    setCustomSelected(false);
   }
-
+  function chooseCustom(): void {
+    if (!customAvailable || disabled) return;
+    onCodeChange(candidate);
+    setQuery('');
+    setDirty(false);
+    setCustomSelected(true);
+    setOpen(false);
+  }
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>): void {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
@@ -73,97 +67,116 @@ export function Icd11Picker({
         setActive(0);
         return;
       }
-      setActive((i) => {
-        const next = e.key === 'ArrowDown' ? i + 1 : i - 1;
-        if (next < 0) return results.length - 1;
-        if (next >= results.length) return 0;
-        return next;
-      });
-      return;
-    }
-    if (e.key === 'Enter' && open && results[active]) {
+      if (!results.length) return;
+      setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length);
+    } else if (e.key === 'Enter' && open) {
+      // Never let an unfinished search submit the surrounding diagnosis form.
       e.preventDefault();
-      choose(results[active]);
-      return;
-    }
-    if (e.key === 'Escape' && open) {
+      if (results[active]) choose(results[active]);
+      else if (customAvailable) chooseCustom();
+    } else if (e.key === 'Escape' && open) {
       e.preventDefault();
       e.stopPropagation();
       setOpen(false);
-      setQuery('');
     }
   }
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div
+      className="relative"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
       <input
-        value={open ? query : code}
-        onChange={(e) => {
-          const v = e.target.value;
-          if (open) {
-            setQuery(v);
-            setActive(0);
-          } else {
-            onCodeChange(v);
-          }
+        value={dirty ? query : code}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setDirty(true);
+          setCustomSelected(false);
+          setActive(0);
+          setOpen(true);
+          // A partial search is not a selected code. Clear the previous selection
+          // so the form cannot accidentally submit it while displaying new text.
+          if (code) onCodeChange('');
         }}
         onFocus={() => {
-          setQuery('');
           setActive(0);
           setOpen(true);
         }}
         onKeyDown={onKeyDown}
         disabled={disabled}
         role="combobox"
-        aria-expanded={open}
-        aria-controls="icd11-listbox"
+        aria-label="ICD-11 code"
+        aria-expanded={showResults}
+        aria-controls={showResults ? listId : undefined}
+        aria-activedescendant={open && results[active] ? id + '-option-' + active : undefined}
+        aria-describedby={statusId}
         aria-autocomplete="list"
-        placeholder={open ? 'Search code or name…' : '6A70.1'}
+        placeholder="Search code or name…"
         className={inputClassName}
         style={inputStyle}
       />
-
-      {open && (
+      {showResults && (
         <ul
           ref={listRef}
-          id="icd11-listbox"
+          id={listId}
           role="listbox"
-          className="absolute left-0 right-0 z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border bg-white py-1 shadow-lg"
+          aria-label="ICD-11 catalogue results"
+          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-lg border bg-white py-1 shadow-lg"
           style={{ borderColor: 'var(--color-line)' }}
         >
-          {results.length === 0 ? (
-            <li className="px-3 py-2 text-[12px] text-[var(--color-ink-3)]">
-              No match in the catalogue — you can still type the code by hand.
+          {results.map((entry, i) => (
+            <li
+              key={entry.code}
+              id={id + '-option-' + i}
+              role="option"
+              aria-selected={i === active}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                choose(entry);
+              }}
+              onMouseEnter={() => setActive(i)}
+              className="cursor-pointer px-3 py-1.5 text-[12.5px]"
+              style={i === active ? { background: 'var(--color-accent-soft)' } : undefined}
+            >
+              <span className="font-mono font-semibold text-[var(--color-accent)]">
+                {entry.code}
+              </span>{' '}
+              <span className="text-[var(--color-ink-2)]">{entry.label}</span>
+              <span className="block text-[10.5px] text-[var(--color-ink-3)]">
+                {icd11Block(entry.code)}
+              </span>
             </li>
-          ) : (
-            results.map((entry, i) => (
-              <li
-                key={entry.code}
-                role="option"
-                aria-selected={i === active}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  choose(entry);
-                }}
-                onMouseEnter={() => setActive(i)}
-                className="cursor-pointer px-3 py-1.5 text-[12.5px]"
-                style={i === active ? { background: 'var(--color-accent-soft)' } : undefined}
-              >
-                <span className="font-mono font-semibold text-[var(--color-accent)]">
-                  {entry.code}
-                </span>{' '}
-                <span className="text-[var(--color-ink-2)]">{entry.label}</span>
-                {/* The block keeps a 418-entry catalogue orientable: with many
-                    near-identical substance labels, the heading is often the
-                    only thing distinguishing two rows at a glance. */}
-                <span className="block text-[10.5px] text-[var(--color-ink-3)]">
-                  {icd11Block(entry.code)}
-                </span>
-              </li>
-            ))
-          )}
+          ))}
         </ul>
       )}
+      <div id={statusId} className="mt-1 text-[12px] text-[var(--color-ink-3)]">
+        {dirty && candidate && (
+          <p role="status">
+            {results.length === 0 ? 'No match in this catalogue. ' : ''}
+            No code selected.{' '}
+            {customAvailable
+              ? 'Use this code to confirm your entry, or choose a catalogue result.'
+              : 'Choose the catalogue result to confirm it.'}
+          </p>
+        )}
+        {customSelected && code && (
+          <p role="status">
+            Custom code selected. Confirm its accuracy and enter the diagnosis label.
+          </p>
+        )}
+        {customAvailable && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={chooseCustom}
+            className="mt-1 rounded border px-2 py-1 font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            Use this code: {candidate}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

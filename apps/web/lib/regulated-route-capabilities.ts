@@ -110,6 +110,12 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   ),
   policy('api/v1/sessions/[id]/problems', ['PUT'], ['VERTICAL_DOCUMENTATION'], 'write'),
   policy('api/v1/sessions/[id]/note-draft', ['GET', 'PUT'], ['VERTICAL_DOCUMENTATION'], 'write'),
+  policy(
+    'api/v1/sessions/[id]/note-edit-recovery',
+    ['GET', 'PUT', 'DELETE'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
   policy('api/v1/sessions/[id]/note/edit', ['POST'], ['VERTICAL_DOCUMENTATION'], 'write'),
   policy(
     'api/v1/sessions/[id]/note/edit-history',
@@ -278,6 +284,12 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   ),
   policy('api/v1/sessions/[id]/live-metric', ['POST'], ['LIVE_ENCOUNTER'], 'live'),
   policy('api/v1/sessions/[id]/start', ['POST'], ['AMBIENT_CAPTURE'], 'write'),
+  policy(
+    'api/v1/sessions/[id]/capture-resume',
+    ['POST'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION', 'AMBIENT_CAPTURE'],
+    'live',
+  ),
   policy('api/v1/sessions/[id]/plan-dictation', ['POST'], ['MEDICAL_DOCUMENTATION'], 'write'),
   policy('api/v1/insights', ['GET'], ['LIVE_ENCOUNTER'], 'read'),
   policy('api/v1/insights/export', ['GET'], ['LIVE_ENCOUNTER'], 'disclosure'),

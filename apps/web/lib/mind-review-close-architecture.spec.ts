@@ -34,7 +34,9 @@ describe('Mind Review & Close architecture', () => {
     const notes = read('components/app/NotesTab.tsx');
     const today = read('app/app/today/page.tsx');
 
-    expect(notes).toContain('you may safely return to');
+    expect(notes).toContain('You can return to');
+    expect(notes).toContain('It cannot recover audio that was never saved');
+    expect(notes).not.toContain('Nothing you recorded is');
     expect(notes).toContain('<CloseoutReceipt clientId={clientId} />');
     expect(notes).toContain('Note signed');
     expect(notes).not.toContain('Session closed');
@@ -46,6 +48,32 @@ describe('Mind Review & Close architecture', () => {
   it('refreshes the authoritative server checklist after signing', () => {
     const notes = read('components/app/NotesTab.tsx');
     expect(notes).toContain('router.refresh()');
+  });
+
+  it('checks saved corrections before signing or requesting an AI rewrite', () => {
+    const notes = read('components/app/NotesTab.tsx');
+    const sign = notes.slice(
+      notes.indexOf('const triggerSignOff'),
+      notes.indexOf('const signAndShare'),
+    );
+    expect(sign.indexOf("recoveryStatus !== 'none'")).toBeLessThan(sign.indexOf('postSignNote'));
+    expect(sign).toContain('setEditing(true)');
+    expect(notes).toContain('onStatusChange={setRecoveryStatus}');
+    expect(notes).toContain('Review saved edits before signing');
+    expect(notes).toContain('Apply or discard saved edits before asking AI to rewrite the note');
+    expect(notes).toContain('recoveryBlocked={recoveryStatus');
+  });
+
+  it('embeds optional clinical review without fetching it for documentation-only accounts', () => {
+    const page = read('app/app/sessions/[id]/page.tsx');
+    const actions = read('components/app/MindCloseoutDecisionActions.tsx');
+    expect(page).toContain("effective.capabilities.has('CLINICAL_ANALYSIS')");
+    expect(page).toContain("if (tab === 'review' && !canReviewClinical) notFound()");
+    expect(page).toContain('clinicalReview={');
+    expect(page).toMatch(/canReviewClinical\s*\?\s*\(?\s*<AICopilotTab/);
+    expect(page).toContain('embeddedCloseout');
+    expect(actions).toContain('hidden={!reviewOpen}');
+    expect(actions.replace(/\s+/g, ' ')).toContain('opening this panel does not mark it reviewed');
   });
 
   it('keeps reopened unsigned notes visible in Today', () => {

@@ -161,6 +161,13 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     ['batch', () => useSessionRecorder({ sessionId: 's-1', source: 'mic' })],
   ] as const;
   for (const [name, makeHook] of hooks) {
+    it(`${name}: a retained callback cannot reacquire the microphone after disposal`, async () => {
+      const hook = makeHook();
+      const cleanup = data.effects.at(-1)!();
+      cleanup?.();
+      await expect(hook.start()).rejects.toThrow('no longer available');
+      expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+    });
     it(`${name}: unmount cancels a pending microphone grant and releases late tracks`, async () => {
       let grant!: (stream: MediaStream) => void;
       vi.mocked(navigator.mediaDevices.getUserMedia).mockImplementation(
@@ -213,6 +220,49 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
       await hook.stop();
     });
   }
+
+  it('batch pause stops input immediately, waits for final frames, and resumes the next chunk', async () => {
+    const hook = useSessionRecorder({ sessionId: 's-1', source: 'mic' });
+    await hook.start();
+    const firstPort = data.worklet.port;
+    firstPort.onmessage({ data: { type: 'frames', samples: new Float32Array(4_800).fill(0.2) } });
+    vi.spyOn(firstPort, 'postMessage').mockImplementation(() => {});
+    const paused = hook.pause();
+    expect(data.tracks[0].stopped).toBe(true);
+    expect(data.cursor).toBeNull();
+    firstPort.onmessage({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
+    firstPort.dispatchEvent(new MessageEvent('message', { data: { type: 'stopped' } }));
+    await paused;
+    expect(data.cursor?.nextChunkIndex).toBe(1);
+    const uploadsBefore = vi.mocked(fetch).mock.calls.length;
+    firstPort.onmessage({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
+    await hook.start();
+    expect(data.tracks[1].stopped).toBe(false);
+    data.worklet.port.onmessage({
+      data: { type: 'frames', samples: new Float32Array(480).fill(0.2) },
+    });
+    await hook.stop();
+    expect(data.cursor?.nextChunkIndex).toBe(2);
+    expect(vi.mocked(fetch).mock.calls.length).toBe(uploadsBefore + 1);
+  });
+
+  it('external capture pauses its cloned track without disconnecting the call', async () => {
+    const callTrack = new Track();
+    const captureTrack = new Track();
+    const external = {
+      getAudioTracks: () => [callTrack],
+      clone: () => ({ getTracks: () => [captureTrack], getAudioTracks: () => [captureTrack] }),
+    } as unknown as MediaStream;
+    const hook = useSessionRecorder({
+      sessionId: 's-1',
+      source: 'external',
+      externalStream: external,
+    });
+    await hook.start();
+    await hook.pause();
+    expect(callTrack.stopped).toBe(false);
+    expect(captureTrack.stopped).toBe(true);
+  });
 
   it('live context suspension is surfaced instead of continuing a false streaming state', async () => {
     const interrupted = vi.fn();

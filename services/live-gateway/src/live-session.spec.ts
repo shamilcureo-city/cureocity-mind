@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   LiveGatewayEventSchema,
   type LiveGatewayEvent,
@@ -652,8 +652,8 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
 
   it('DOC-5: auto-finalizes when a runaway guard trips (forgotten mic)', async () => {
     const events: LiveGatewayEvent[] = [];
-    // No start() → startedAtMs stays 0, so the elapsed-time guard trips on the
-    // first processed window — a proxy for a consult that ran past the cap.
+    // Use a real start and controlled clock: an unstarted object is not a
+    // faithful proxy now that resumed elapsed time also drives this guard.
     const session = new LiveSession(
       'sess-runaway',
       'Cardiology',
@@ -661,11 +661,20 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
       (e) => events.push(e),
       OPTS,
     );
-    session.pushAudio(BLOCK);
-    await session.pump(); // processes a window → guard trips → schedules finalize
-    await new Promise((r) => setTimeout(r, 40)); // let the fire-and-forget finalize settle
-    expect(events.some((e) => e.type === 'final')).toBe(true);
-    expect(events.some((e) => e.type === 'status' && e.state === 'done')).toBe(true);
+    const now = vi.spyOn(Date, 'now');
+    try {
+      session.start();
+      now.mockReturnValue(Date.now() + 91 * 60_000);
+      session.pushAudio(BLOCK);
+      await session.pump();
+      await vi.waitFor(() =>
+        expect(events.some((e) => e.type === 'status' && e.state === 'done')).toBe(true),
+      );
+      expect(events.some((e) => e.type === 'final')).toBe(true);
+    } finally {
+      session.dispose();
+      now.mockRestore();
+    }
   });
 });
 

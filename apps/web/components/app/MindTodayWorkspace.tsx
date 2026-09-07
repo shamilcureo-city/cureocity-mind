@@ -8,6 +8,7 @@ import { MindTodayMilestones } from './MindTodayMilestones';
 import type { buildMindTodayProgress } from './MindTodayProgress';
 import type { TodayAttentionItem } from '@/lib/today-priority';
 import { formatDayShort, formatIstTime } from '@/lib/ist';
+import { mindSessionDestination } from '@/lib/mind-session-start';
 import styles from './MindTodayStudio.module.css';
 
 type Session = TodaySessionCardProps['session'];
@@ -135,7 +136,10 @@ export function MindTodayWorkspace({
           <ul className={styles.futureList}>
             {upcoming.map((session) => (
               <li key={session.id}>
-                <Link href={`/app/sessions/${session.id}`} className={styles.futureLink}>
+                <Link
+                  href={mindSessionDestination(session, defaultCapture)}
+                  className={styles.futureLink}
+                >
                   <span>{formatDayShort(new Date(session.scheduledAt))}</span>
                   <span>
                     <b>{session.clientName}</b>

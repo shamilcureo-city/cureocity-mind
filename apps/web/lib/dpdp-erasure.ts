@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { lockClientShareDispatch } from './share-dispatch-safety';
 import { activeShareSubmissionWhere } from './sprint5-final-behavior';
+import { legacyAudioReferenceProvider } from './dpdp-object-storage-config';
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -121,14 +122,18 @@ export async function eraseClientPhi(
     select: { s3Key: true },
   });
 
-  if (chunks.length > 0) {
+  // BYTEA-only recordings have an empty legacy s3Key and no external object.
+  // Keep unsupported nonempty references for manual reconciliation, never
+  // silently discard their only pointer or claim another provider deleted them.
+  const externalObjects = chunks.flatMap(({ s3Key }) => {
+    const storageProvider = legacyAudioReferenceProvider(s3Key);
+    return storageProvider
+      ? [{ erasureRequestId, storageProvider, objectKey: s3Key, objectKeyHashHex: sha256(s3Key) }]
+      : [];
+  });
+  if (externalObjects.length > 0) {
     await tx.erasureObjectDeletionTask.createMany({
-      data: chunks.map(({ s3Key }) => ({
-        erasureRequestId,
-        storageProvider: 'S3',
-        objectKey: s3Key,
-        objectKeyHashHex: sha256(s3Key),
-      })),
+      data: externalObjects,
       skipDuplicates: true,
     });
   }
@@ -220,6 +225,7 @@ export async function eraseClientPhi(
   }
 
   await tx.consent.updateMany({ where: { clientId }, data: { notes: null } });
+  await tx.noteEditRecovery.deleteMany({ where: { sessionId: { in: sessionIds } } });
   await tx.noteDraft.updateMany({
     where: { sessionId: { in: sessionIds } },
     data: {

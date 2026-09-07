@@ -7,6 +7,7 @@ const harness = vi.hoisted(() => ({
   stateIndex: 0,
   refs: [] as Array<{ current: unknown }>,
   refIndex: 0,
+  effects: [] as Array<() => (() => void) | void>,
   push: vi.fn(),
   finished: vi.fn(),
   clear: vi.fn(async () => {}),
@@ -19,6 +20,7 @@ const harness = vi.hoisted(() => ({
     startedAt: 100,
     start: vi.fn(async () => {}),
     stop: vi.fn(async () => {}),
+    pause: vi.fn(async () => {}),
     drainPending: vi.fn(async () => 0),
   },
 }));
@@ -27,7 +29,9 @@ const harness = vi.hoisted(() => ({
 // Browser capture/HTTP are boundaries; recorder internals have separate adapter tests.
 vi.mock('react', async (importOriginal) => ({
   ...(await importOriginal<typeof import('react')>()),
-  useEffect: () => {},
+  useEffect: (effect: () => (() => void) | void) => {
+    harness.effects.push(effect);
+  },
   useState: <T>(initial: T | (() => T)) => {
     const index = harness.stateIndex++;
     if (!(index in harness.states))
@@ -78,6 +82,7 @@ function render() {
   harness.refIndex = 0;
   return LiveRecorder({
     sessionId: 's-1',
+    clientId: 'c-1',
     clientName: 'Fictional client',
     modality: null,
     source: 'mic',
@@ -102,6 +107,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   harness.states = [];
   harness.refs = [];
+  harness.effects = [];
+  harness.recorder.state = 'recording';
+  harness.recorder.pause.mockResolvedValue(undefined);
   harness.recorder.stop.mockResolvedValue(undefined);
   harness.recorder.drainPending.mockResolvedValue(0);
   vi.stubGlobal(
@@ -112,6 +120,64 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('real LiveRecorder finish/recovery action wiring', () => {
+  it('pause neither ends nor clears the cursor, and resume checks current authority before capture', async () => {
+    click('Pause recording');
+    await vi.waitFor(() => expect(harness.recorder.pause).toHaveBeenCalledOnce());
+    expect(fetch).not.toHaveBeenCalled();
+    expect(harness.clear).not.toHaveBeenCalled();
+    harness.recorder.state = 'paused';
+    expect(text(render())).toContain('Microphone off');
+    let authorize!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          authorize = resolve;
+        }),
+    );
+    click('Resume recording');
+    expect(fetch).toHaveBeenCalledWith('/api/v1/sessions/s-1/capture-resume', { method: 'POST' });
+    expect(harness.recorder.start).not.toHaveBeenCalled();
+    authorize(new Response('{"authorized":true}'));
+    await vi.waitFor(() => expect(harness.recorder.start).toHaveBeenCalledOnce());
+    expect(harness.clear).not.toHaveBeenCalled();
+  });
+
+  it('withdrawn consent keeps a paused recording off and shows the refusal', async () => {
+    harness.recorder.state = 'paused';
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('{"error":"Recording consent is required"}', { status: 409 }),
+    );
+    click('Resume recording');
+    await vi.waitFor(() => expect(text(render())).toContain('Recording consent is required'));
+    expect(harness.recorder.start).not.toHaveBeenCalled();
+    expect(harness.clear).not.toHaveBeenCalled();
+  });
+
+  it('unmount during resume authorization never reopens the microphone from the late response', async () => {
+    harness.recorder.state = 'paused';
+    render();
+    const unmount = harness.effects[0]();
+    let authorize!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          authorize = resolve;
+        }),
+    );
+    click('Resume recording');
+    unmount?.();
+    authorize(new Response('{"authorized":true}'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.recorder.start).not.toHaveBeenCalled();
+  });
+
+  it('End from a pause still uses the explicit stop/upload/end path without reopening capture', async () => {
+    harness.recorder.state = 'paused';
+    confirmEnd();
+    await vi.waitFor(() => expect(harness.push).toHaveBeenCalledOnce());
+    expect(harness.recorder.start).not.toHaveBeenCalled();
+    expect(harness.recorder.stop).toHaveBeenCalledOnce();
+  });
   it('failed final storage offers retry but no navigation that discards the in-memory tail', async () => {
     harness.recorder.stop.mockRejectedValue(new Error('Browser storage is full'));
     confirmEnd();

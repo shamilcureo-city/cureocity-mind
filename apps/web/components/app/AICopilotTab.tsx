@@ -40,6 +40,7 @@ interface Props {
   showSubTabs?: boolean;
   canUseMeasures: boolean;
   canShare: boolean;
+  embeddedCloseout?: boolean;
 }
 
 /**
@@ -76,6 +77,7 @@ export async function AICopilotTab({
   showSubTabs = true,
   canUseMeasures,
   canShare,
+  embeddedCloseout = false,
 }: Props) {
   return (
     <div className="space-y-6">
@@ -92,6 +94,7 @@ export async function AICopilotTab({
           sessionKind={sessionKind}
           canUseMeasures={canUseMeasures}
           canShare={canShare}
+          embeddedCloseout={embeddedCloseout}
         />
       )}
       {sub === 'progress' && (
@@ -129,6 +132,7 @@ async function SessionSub({
   sessionKind,
   canUseMeasures,
   canShare,
+  embeddedCloseout = false,
 }: {
   sessionId: string;
   clientId: string;
@@ -140,6 +144,7 @@ async function SessionSub({
   sessionKind: SessionKind;
   canUseMeasures: boolean;
   canShare: boolean;
+  embeddedCloseout?: boolean;
 }) {
   const isIntake = sessionKind === 'INTAKE';
   const [
@@ -290,11 +295,12 @@ async function SessionSub({
         closeout={closeout}
         canShare={canShare}
         canUseMeasures={canUseMeasures}
+        embeddedCloseout={embeddedCloseout}
       />
       {/* The mindmap moved out of the decision flow (R1): it's a view of the
           note (→ Transcript). Left here as a quiet link so the Session board
           stays a pure decision surface. */}
-      {!isIntake && noteJson && (
+      {!embeddedCloseout && !isIntake && noteJson && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-[var(--color-ink-3)]">
           <span className="font-semibold uppercase tracking-[0.12em]">Also from this session</span>
           <a

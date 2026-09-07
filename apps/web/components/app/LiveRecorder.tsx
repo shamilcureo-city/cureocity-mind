@@ -85,12 +85,24 @@ export function LiveRecorder({
   const [incompleteLeft, setIncompleteLeft] = useState(0);
   const [captureAuthorized, setCaptureAuthorized] = useState(!authorizeMindAfterCaptureActive);
   const authorizationStartedRef = useRef(false);
+  const captureOperationRef = useRef(0);
+  const disposedRef = useRef(false);
+  const finishedRef = useRef(false);
+  const [resuming, setResuming] = useState(false);
+  const [pauseError, setPauseError] = useState<string | null>(null);
+  const inputOffLabel =
+    source === 'mic' || source === 'dictation' ? 'Microphone off' : 'Capture off';
 
   // Auto-start when this panel mounts. The pre-record wizard has already
   // moved the session into IN_PROGRESS, so the user expects to be live
   // immediately.
   useEffect(() => {
+    disposedRef.current = false;
     if (recorder.state === 'idle') void recorder.start().catch(() => {});
+    return () => {
+      disposedRef.current = true;
+      ++captureOperationRef.current;
+    };
   }, []);
 
   useEffect(() => {
@@ -119,19 +131,63 @@ export function LiveRecorder({
       },
     )
       .then(() => {
+        if (disposedRef.current) return;
         setCaptureAuthorized(true);
         setCaptureAuthorizationError(null);
       })
       .catch((reason: unknown) => {
+        if (disposedRef.current) return;
         setCaptureAuthorizationError((reason as Error).message);
         void recorder.stop().catch(() => {});
       });
   }, [authorizeMindAfterCaptureActive, captureAuthorized, clientId, recorder.state, sessionId]);
 
   function retryCaptureAuthorization(): void {
+    if (disposedRef.current || finishedRef.current) return;
     authorizationStartedRef.current = false;
     setCaptureAuthorizationError(null);
     void recorder.start().catch(() => {});
+  }
+
+  async function pauseCapture(): Promise<void> {
+    if (resuming || ending || recorder.state !== 'recording' || !captureAuthorized) return;
+    ++captureOperationRef.current;
+    setPauseError(null);
+    try {
+      await recorder.pause();
+    } catch {
+      setPauseError(
+        'Capture is off, but the last audio could not be confirmed saved. Keep this page open and resolve the recording error before resuming.',
+      );
+    }
+  }
+
+  async function resumeCapture(): Promise<void> {
+    if (disposedRef.current || finishedRef.current || resuming || ending) return;
+    const operation = ++captureOperationRef.current;
+    setResuming(true);
+    setPauseError(null);
+    try {
+      if (clientId) {
+        const response = await fetch(`/api/v1/sessions/${sessionId}/capture-resume`, {
+          method: 'POST',
+        });
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(
+            body.error ?? 'Could not reauthorize recording. Check consent before resuming.',
+          );
+        }
+      }
+      if (disposedRef.current || finishedRef.current || operation !== captureOperationRef.current)
+        return;
+      await recorder.start();
+    } catch (reason) {
+      if (!disposedRef.current && operation === captureOperationRef.current)
+        setPauseError((reason as Error).message);
+    } finally {
+      if (!disposedRef.current && operation === captureOperationRef.current) setResuming(false);
+    }
   }
 
   // VS1 — report whether a recording is in flight (anything between start and
@@ -146,16 +202,19 @@ export function LiveRecorder({
       recorder.state === 'recording' ||
       recorder.state === 'preparing' ||
       recorder.state === 'finishing' ||
+      recorder.state === 'pausing' ||
+      recorder.state === 'paused' ||
+      resuming ||
       ending;
     onActiveChangeRef.current?.(active);
-  }, [recorder.state, ending]);
+  }, [recorder.state, ending, resuming]);
   useEffect(() => {
     return () => onActiveChangeRef.current?.(false);
   }, []);
 
   // Live elapsed timer.
   useEffect(() => {
-    if (recorder.state !== 'recording' || !recorder.startedAt) return;
+    if (!['recording', 'pausing', 'paused'].includes(recorder.state) || !recorder.startedAt) return;
     const id = setInterval(() => setElapsedMs(Date.now() - recorder.startedAt!), 250);
     setElapsedMs(Date.now() - recorder.startedAt);
     return () => clearInterval(id);
@@ -163,6 +222,9 @@ export function LiveRecorder({
 
   // Never generate a silently incomplete clinical note from a partial upload.
   async function endSession(retryUploads = false): Promise<void> {
+    if (resuming || recorder.state === 'pausing') return;
+    finishedRef.current = true;
+    ++captureOperationRef.current;
     setEndError(null);
     setIncompleteLeft(0);
     setEnding(true);
@@ -255,7 +317,7 @@ export function LiveRecorder({
 
       <div className="grid gap-4 px-6 py-5 sm:grid-cols-3">
         <StatTile
-          label="Elapsed"
+          label="Session elapsed · includes breaks"
           value={formatElapsed(elapsedMs)}
           mono
           tone={isRecording ? 'warn' : 'default'}
@@ -273,11 +335,35 @@ export function LiveRecorder({
         />
       </div>
 
+      {(recorder.state === 'paused' || recorder.state === 'pausing' || resuming || pauseError) && (
+        <div
+          role="status"
+          className="mx-6 mb-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] px-4 py-3 text-sm"
+        >
+          <p className="font-medium">
+            {resuming
+              ? 'Resuming capture…'
+              : `${inputOffLabel} · ${recorder.state === 'pausing' ? 'saving the last audio…' : recorder.state === 'paused' ? 'capture paused' : 'capture stopped'}`}
+          </p>
+          <p className="mt-1">
+            {resuming
+              ? 'Rechecking consent and reconnecting the audio source. Wait for Recording before continuing.'
+              : 'No new audio is being recorded. This session has not ended.'}{' '}
+            {source === 'external' ? 'The call itself remains connected.' : ''}
+          </p>
+          {pauseError && <p className="mt-2 text-[var(--color-warn)]">{pauseError}</p>}
+        </div>
+      )}
+
       {errored && (
         <div className="mx-6 mb-4 rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] px-4 py-3 text-sm text-[var(--color-warn)]">
           {recorder.error ?? 'The recorder hit an error.'}
           {!isRecording && !captureAuthorizationError && (
-            <Button variant="secondary" onClick={() => void recorder.start().catch(() => {})}>
+            <Button
+              variant="secondary"
+              disabled={resuming || ending || finishedRef.current}
+              onClick={() => void resumeCapture()}
+            >
               Resume capture
             </Button>
           )}
@@ -356,7 +442,7 @@ export function LiveRecorder({
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="secondary" onClick={() => setEndConfirmOpen(false)}>
-                Keep recording
+                {recorder.state === 'paused' ? 'Stay paused' : 'Keep recording'}
               </Button>
               <Button
                 onClick={() => {
@@ -381,17 +467,44 @@ export function LiveRecorder({
                 ? 'Audio uploaded. Opening the session to review note generation…'
                 : 'Saved audio parts can resume after reopening this session. Keep this page open while recording or saving.'}
         </p>
-        <Button
-          onClick={() => setEndConfirmOpen(true)}
-          disabled={ending || isPreparing || recorder.state === 'finishing' || !captureAuthorized}
-          className="bg-[var(--color-warn)] hover:bg-[#a25b30]"
-        >
-          {uploadingLeft !== null && uploadingLeft > 0
-            ? `Uploading… (${uploadingLeft})`
-            : ending
-              ? 'Ending…'
-              : 'End session'}
-        </Button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {clientId && (isRecording || recorder.state === 'pausing') && (
+            <Button
+              variant="secondary"
+              onClick={() => void pauseCapture()}
+              disabled={ending || !captureAuthorized || recorder.state === 'pausing'}
+            >
+              {recorder.state === 'pausing' ? 'Pausing…' : 'Pause recording'}
+            </Button>
+          )}
+          {clientId && recorder.state === 'paused' && (
+            <Button
+              variant="secondary"
+              onClick={() => void resumeCapture()}
+              disabled={resuming || ending}
+            >
+              {resuming ? 'Resuming…' : 'Resume recording'}
+            </Button>
+          )}
+          <Button
+            onClick={() => setEndConfirmOpen(true)}
+            disabled={
+              ending ||
+              resuming ||
+              isPreparing ||
+              recorder.state === 'pausing' ||
+              recorder.state === 'finishing' ||
+              !captureAuthorized
+            }
+            className="bg-[var(--color-warn)] hover:bg-[#a25b30]"
+          >
+            {uploadingLeft !== null && uploadingLeft > 0
+              ? `Uploading… (${uploadingLeft})`
+              : ending
+                ? 'Ending…'
+                : 'End session'}
+          </Button>
+        </div>
       </div>
     </Card>
   );

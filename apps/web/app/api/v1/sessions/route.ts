@@ -38,6 +38,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!auth.ok) return auth.response;
   const dto = await parseJson(req, CreateSessionInputSchema);
   if (!dto.ok) return dto.response;
+  if (dto.value.expectedSessionId) {
+    if (auth.value.user.vertical !== 'THERAPIST') {
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    }
+    const mindAuth = await requireCapability(req, 'BEHAVIORAL_HEALTH_DOCUMENTATION', auth);
+    if (!mindAuth.ok) return mindAuth.response;
+    if (!dto.value.startNow || dto.value.sourceSessionId) {
+      return NextResponse.json(
+        { error: 'An existing booking can only be opened to start or resume.' },
+        { status: 400 },
+      );
+    }
+  }
   if (dto.value.sourceSessionId && auth.value.user.vertical === 'DOCTOR') {
     return NextResponse.json({ error: 'Source session not found' }, { status: 404 });
   }
@@ -52,6 +65,30 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
   if (client.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+  }
+
+  if (dto.value.expectedSessionId) {
+    const booked = await prisma.session.findFirst({
+      where: {
+        id: dto.value.expectedSessionId,
+        clientId: client.id,
+        psychologistId: auth.value.psychologistId,
+        client: { deletedAt: null, psychologistId: auth.value.psychologistId },
+      },
+    });
+    if (!booked) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    if (booked.status !== 'SCHEDULED' && booked.status !== 'IN_PROGRESS') {
+      return NextResponse.json(
+        {
+          error:
+            'This booking is no longer available to start. Return to Today to choose the current session.',
+        },
+        { status: 409 },
+      );
+    }
+    // Read-only selection, including a future booking explicitly opened early.
+    // Consent and capture activation still happen on their existing endpoints.
+    return NextResponse.json(toSession(booked), { status: 200 });
   }
 
   const sourceSession = dto.value.sourceSessionId

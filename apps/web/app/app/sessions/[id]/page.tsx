@@ -66,10 +66,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   const canShare = effective.capabilities.has('PATIENT_SHARING');
   const canUseMeasures = effective.capabilities.has('MEASUREMENT_BASED_CARE');
   const canUseWorkflows = effective.capabilities.has('THERAPY_WORKFLOWS');
+  const canReviewClinical = effective.capabilities.has('CLINICAL_ANALYSIS');
 
   const { id } = await params;
   const { tab: rawTab, sub: rawSub } = await searchParams;
   const tab = parseTab(rawTab);
+  if (tab === 'review' && !canReviewClinical) notFound();
 
   const session = await prisma.session.findFirst({
     where: { id, psychologistId: therapist.id },
@@ -150,7 +152,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       />
 
       <div className="print:hidden">
-        <SessionWorkspaceTabs sessionId={id} active={tab} sessionKind={sessionKind} />
+        <SessionWorkspaceTabs
+          sessionId={id}
+          active={tab}
+          sessionKind={sessionKind}
+          canReviewClinical={canReviewClinical}
+        />
       </div>
 
       <div className="mt-6">
@@ -159,6 +166,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             sessionId={id}
             psychologistId={session.psychologistId}
             sessionStatus={session.status}
+            captureMode={session.captureMode}
             sessionKind={sessionKind}
             clientId={session.clientId}
             clientHasContactPhone={!!pii.contactPhone}
@@ -173,6 +181,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             signerName={therapist.fullName}
             canShare={canShare}
             canUseWorkflows={canUseWorkflows}
+            canUseMeasures={canUseMeasures}
+            canReviewClinical={canReviewClinical}
           />
         )}
         {tab === 'review' && (
@@ -218,6 +228,7 @@ async function NotesTabPanel({
   sessionId,
   psychologistId,
   sessionStatus,
+  captureMode,
   sessionKind,
   clientId,
   clientHasContactPhone,
@@ -232,10 +243,13 @@ async function NotesTabPanel({
   signerName,
   canShare,
   canUseWorkflows,
+  canUseMeasures,
+  canReviewClinical,
 }: {
   sessionId: string;
   psychologistId: string;
   sessionStatus: SessionStatus;
+  captureMode: string | null;
   sessionKind: SessionKind;
   clientId: string;
   clientHasContactPhone: boolean;
@@ -250,6 +264,8 @@ async function NotesTabPanel({
   signerName: string;
   canShare: boolean;
   canUseWorkflows: boolean;
+  canUseMeasures: boolean;
+  canReviewClinical: boolean;
 }) {
   const [draftRow, signedRow, closeoutState, agreementCount, clientQuestionState, shareRows] =
     await Promise.all([
@@ -355,6 +371,26 @@ async function NotesTabPanel({
       }
       sessionCompleted={sessionStatus === 'COMPLETED'}
       canShare={canShare}
+      canReviewClinical={canReviewClinical}
+      clinicalReview={
+        canReviewClinical ? (
+          <AICopilotTab
+            sessionId={sessionId}
+            clientId={clientId}
+            psychologistId={psychologistId}
+            clientName={clientName}
+            clientHasContactPhone={clientHasContactPhone}
+            clientHasContactEmail={clientHasContactEmail}
+            preferredLanguage={clientPreferredLanguage}
+            sessionKind={sessionKind}
+            sub="session"
+            showSubTabs={false}
+            canUseMeasures={canUseMeasures}
+            canShare={canShare}
+            embeddedCloseout
+          />
+        ) : null
+      }
       agreementCount={agreementCount}
       selectedQuestionCount={selectedQuestions.length}
       receipts={shareRows.map((share) => ({
@@ -372,6 +408,7 @@ async function NotesTabPanel({
         <NotesTab
           sessionId={sessionId}
           sessionStatus={sessionStatus}
+          captureMode={captureMode}
           sessionKind={sessionKind}
           initialDraft={draft}
           initialNote={signedNote}

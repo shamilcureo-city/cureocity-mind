@@ -25,8 +25,16 @@ export function MindTherapyGuide({
   const steps = useMemo(() => mindGuideSteps(script), [script]);
   const [mode, setMode] = useState<'guided' | 'overview'>('overview');
   const [reviewedForUse, setReviewedForUse] = useState(false);
-  const { activeIndex, reviewed, setActiveIndex, toggleReviewed, saveStatus, canEdit, reload } =
-    useMindGuideReview(steps, reviewTarget);
+  const {
+    activeIndex,
+    reviewed,
+    setActiveIndex,
+    toggleReviewed,
+    saveStatus,
+    canEdit,
+    reload,
+    retry,
+  } = useMindGuideReview(steps, reviewTarget);
   const statusId = useId();
   const active = steps[activeIndex] ?? steps[0]!;
   const count = reviewedGuideCount(steps, reviewed);
@@ -138,7 +146,6 @@ export function MindTherapyGuide({
                   <button
                     type="button"
                     onClick={() => setActiveIndex(index)}
-                    disabled={!canEdit}
                     aria-current={index === activeIndex ? 'step' : undefined}
                   >
                     <span
@@ -201,14 +208,14 @@ export function MindTherapyGuide({
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={!canEdit || activeIndex === 0}
+                  disabled={activeIndex === 0}
                   onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
                 >
                   Previous
                 </Button>
                 <Button
                   size="sm"
-                  disabled={!canEdit || activeIndex === steps.length - 1}
+                  disabled={activeIndex === steps.length - 1}
                   onClick={() => setActiveIndex((i) => Math.min(steps.length - 1, i + 1))}
                 >
                   Next section
@@ -253,20 +260,25 @@ export function MindTherapyGuide({
       {reviewTarget && (
         <div className={styles.footnote} role="status">
           {saveStatus === 'loading'
-            ? 'Loading your place in this guide…'
+            ? 'Loading saved review progress. You can keep reading.'
             : saveStatus === 'ready'
               ? 'No saved review progress for this draft yet.'
               : saveStatus === 'saving'
-                ? 'Saving guide review progress…'
+                ? 'Saving your place and review progress. You can keep reading; review markers update after saving.'
                 : saveStatus === 'stale'
                   ? 'This draft has changed. Close and reopen the guide to review its current content.'
                   : saveStatus === 'conflict'
-                    ? 'Saved progress changed in another view. Reload it before continuing; your last change was not saved.'
+                    ? 'Saved progress changed in another view. You can keep reading. Reload saved progress before marking more sections.'
                     : saveStatus === 'load-error'
-                      ? 'Saved progress could not be loaded. Reload it before marking sections.'
+                      ? 'Saved progress could not be loaded. You can keep reading; your place is not being saved. Reload before marking sections.'
                       : saveStatus === 'save-error'
-                        ? 'The last save could not be confirmed. Reload saved progress before continuing.'
+                        ? 'The last save could not be confirmed. You can keep reading; your latest place and review change are not confirmed saved. Retry save, or reload to discard the unconfirmed change.'
                         : 'Guide review progress saved. No therapy delivery has been recorded.'}
+          {saveStatus === 'save-error' && (
+            <Button variant="secondary" size="sm" onClick={retry}>
+              Retry save
+            </Button>
+          )}
           {['load-error', 'save-error', 'conflict'].includes(saveStatus) && (
             <Button variant="secondary" size="sm" onClick={reload}>
               Reload saved progress

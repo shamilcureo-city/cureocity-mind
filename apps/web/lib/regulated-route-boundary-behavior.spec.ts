@@ -34,7 +34,13 @@ vi.mock('./journey', () => ({
 }));
 
 import { GET as getSession } from '../app/api/v1/sessions/[id]/route';
+import { POST as resumeCapture } from '../app/api/v1/sessions/[id]/capture-resume/route';
 import { PUT as putNoteDraft } from '../app/api/v1/sessions/[id]/note-draft/route';
+import {
+  GET as getNoteRecovery,
+  PUT as putNoteRecovery,
+  DELETE as deleteNoteRecovery,
+} from '../app/api/v1/sessions/[id]/note-edit-recovery/route';
 import { GET as getNotePdf } from '../app/api/v1/sessions/[id]/note/pdf/route';
 import { GET as searchNotes } from '../app/api/v1/search/notes/route';
 import { GET as getClinicalReportPdf } from '../app/api/v1/sessions/[id]/clinical-report/pdf/route';
@@ -65,6 +71,23 @@ beforeEach(() => {
 });
 
 describe('real regulated route boundary behavior', () => {
+  it.each(['AMBIENT_CAPTURE', 'BEHAVIORAL_HEALTH_DOCUMENTATION'])(
+    'keeps capture paused when only %s authority remains',
+    async (capability) => {
+      mocks.getEffectiveCapabilities.mockResolvedValue({
+        profession: 'CLINICAL_PSYCHOLOGIST',
+        capabilities: new Set([capability]),
+        verifiedCredentialKinds: new Set(),
+      });
+      const response = await resumeCapture(
+        request('/api/v1/sessions/record-1/capture-resume', 'POST'),
+        context,
+      );
+      expect(response.status).toBe(403);
+      expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+      expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     ['absent', null],
     ['revoked', 'CLINICAL_PSYCHOLOGIST'],
@@ -79,7 +102,14 @@ describe('real regulated route boundary behavior', () => {
 
       const responses = await Promise.all([
         getSession(request('/api/v1/sessions/record-1'), context),
+        resumeCapture(request('/api/v1/sessions/record-1/capture-resume', 'POST'), context),
         putNoteDraft(request('/api/v1/sessions/record-1/note-draft', 'PUT'), context),
+        getNoteRecovery(request('/api/v1/sessions/record-1/note-edit-recovery'), context),
+        putNoteRecovery(request('/api/v1/sessions/record-1/note-edit-recovery', 'PUT'), context),
+        deleteNoteRecovery(
+          request('/api/v1/sessions/record-1/note-edit-recovery', 'DELETE'),
+          context,
+        ),
         getNotePdf(request('/api/v1/sessions/record-1/note/pdf'), context),
         searchNotes(request('/api/v1/search/notes?q=sleep')),
         getClinicalReportPdf(request('/api/v1/sessions/record-1/clinical-report/pdf'), context),
@@ -88,10 +118,12 @@ describe('real regulated route boundary behavior', () => {
         getJourney(request('/api/v1/clients/record-1/journey'), context),
       ]);
 
-      expect(responses.map((response) => response.status)).toEqual(Array(8).fill(403));
-      expect(mocks.audit).toHaveBeenCalledTimes(8);
+      expect(responses.map((response) => response.status)).toEqual(Array(12).fill(403));
+      // Capture resume denies both missing documentation and ambient capture;
+      // the shared boundary audits each missing requirement independently.
+      expect(mocks.audit).toHaveBeenCalledTimes(13);
       expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
-      expect(mocks.clientFindUnique).toHaveBeenCalledTimes(8);
+      expect(mocks.clientFindUnique).toHaveBeenCalledTimes(12);
       expect(mocks.clientFindUnique.mock.calls).toSatisfy((calls: unknown[][]) =>
         calls.every(
           ([query]) =>

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WebSocketServer, type WebSocket as ServerSocket } from 'ws';
+import { once } from 'node:events';
+import WebSocket, { WebSocketServer, type WebSocket as ServerSocket } from 'ws';
 import {
   LiveStreamTranscriber,
   buildStreamSetup,
@@ -8,7 +9,7 @@ import {
 
 /**
  * Sprint DS13 — the streaming display rail, tested against an in-process
- * fake Gemini Live server (real `ws` sockets, no network).
+ * fake Gemini Live server (real loopback `ws` sockets, no external service).
  */
 
 interface FakeServer {
@@ -48,7 +49,12 @@ function startFakeGemini(
   });
 }
 
-const flush = (ms = 60): Promise<void> => new Promise((r) => setTimeout(r, ms));
+// Readiness is an observed protocol condition, never an assumed 60 ms delay.
+// The timeout bounds a broken test; healthy sockets proceed immediately.
+const WAIT_OPTIONS = { timeout: 2000, interval: 20 };
+async function waitForSetup(server: FakeServer, index = 0): Promise<void> {
+  await vi.waitFor(() => expect(server.messages[index]?.[0]).toContain('"setup"'), WAIT_OPTIONS);
+}
 
 let servers: FakeServer[] = [];
 let transcribers: LiveStreamTranscriber[] = [];
@@ -56,9 +62,10 @@ let transcribers: LiveStreamTranscriber[] = [];
 function make(
   server: FakeServer,
   extra: Partial<ConstructorParameters<typeof LiveStreamTranscriber>[0]> = {},
-): { t: LiveStreamTranscriber; partials: string[]; downs: string[] } {
+): { t: LiveStreamTranscriber; partials: string[]; downs: string[]; clientSockets: WebSocket[] } {
   const partials: string[] = [];
   const downs: string[] = [];
+  const clientSockets: WebSocket[] = [];
   const t = new LiveStreamTranscriber({
     sessionId: 'sess-test',
     wsUrl: async () => server.url,
@@ -66,15 +73,21 @@ function make(
     onPartial: (f) => partials.push(f),
     onDown: (r) => downs.push(r),
     baseDelayMs: 10,
+    wsFactory: (url) => {
+      const socket = new WebSocket(url);
+      clientSockets.push(socket);
+      return socket;
+    },
     ...extra,
   });
   transcribers.push(t);
-  return { t, partials, downs };
+  return { t, partials, downs, clientSockets };
 }
 
 afterEach(async () => {
   for (const t of transcribers) t.stop();
   transcribers = [];
+  vi.useRealTimers();
   for (const s of servers) await s.close();
   servers = [];
   vi.restoreAllMocks();
@@ -87,14 +100,14 @@ describe('LiveStreamTranscriber', () => {
     const { t } = make(server);
     t.start();
     t.feed(Buffer.from([1, 2, 3, 4])); // fed before the socket is even open
-    await flush();
+    await waitForSetup(server);
 
     expect(server.messages[0]![0]).toContain('"setup"');
     // No audio yet — setupComplete hasn't been sent.
     expect(server.messages[0]!.filter((m) => m.includes('realtime_input'))).toHaveLength(0);
 
     server.sockets[0]!.send(JSON.stringify({ setupComplete: {} }));
-    await flush();
+    await vi.waitFor(() => expect(server.messages[0]).toHaveLength(2), WAIT_OPTIONS);
     const audio = server.messages[0]!.filter((m) => m.includes('realtime_input'));
     expect(audio).toHaveLength(1);
     expect(audio[0]).toContain('audio/pcm;rate=16000');
@@ -107,7 +120,7 @@ describe('LiveStreamTranscriber', () => {
     servers.push(server);
     const { t, partials } = make(server);
     t.start();
-    await flush();
+    await waitForSetup(server);
 
     server.sockets[0]!.send(
       JSON.stringify({ serverContent: { input_transcription: { text: 'seene mein ' } } }),
@@ -119,8 +132,12 @@ describe('LiveStreamTranscriber', () => {
     server.sockets[0]!.send(
       JSON.stringify({ serverContent: { modelTurn: { parts: [{ text: 'ignored' }] } } }),
     );
-    await flush();
-    expect(partials).toEqual(['seene mein ', 'dard']);
+    // A following input fragment is a delivery barrier: the ignored model
+    // output immediately before it has also been processed in socket order.
+    server.sockets[0]!.send(
+      JSON.stringify({ serverContent: { inputTranscription: { text: '.' } } }),
+    );
+    await vi.waitFor(() => expect(partials).toEqual(['seene mein ', 'dard', '.']), WAIT_OPTIONS);
   });
 
   it('reconnects after a drop and presents the resumption handle', async () => {
@@ -130,14 +147,14 @@ describe('LiveStreamTranscriber', () => {
     servers.push(server);
     const { t, downs } = make(server);
     t.start();
-    await flush();
+    await waitForSetup(server);
 
     server.sockets[0]!.send(
       JSON.stringify({ sessionResumptionUpdate: { newHandle: 'resume-42', resumable: true } }),
     );
-    await flush();
+    // ws preserves message order: the resumption update precedes this close.
     server.sockets[0]!.close(1011, 'blip');
-    await flush(120);
+    await waitForSetup(server, 1);
 
     expect(server.sockets.length).toBe(2);
     const resumeSetup = JSON.parse(server.messages[1]![0]!) as {
@@ -152,16 +169,22 @@ describe('LiveStreamTranscriber', () => {
       ws.close(1008, 'nope'); // refuse before setupComplete, every time
     });
     servers.push(server);
-    const { t, downs } = make(server, { maxAttempts: 2, baseDelayMs: 5 });
+    const { t, downs, clientSockets } = make(server, { maxAttempts: 2, baseDelayMs: 5 });
     t.start();
-    await flush(300);
+    await vi.waitFor(() => expect(downs).toHaveLength(1), WAIT_OPTIONS);
 
     expect(downs).toHaveLength(1);
+    expect(clientSockets).toHaveLength(3); // Initial connection plus two retries.
     const connectsAtDown = server.sockets.length;
-    // Inert afterwards — feeding does not resurrect it.
+    // Terminal-state checks advance the clock, not the wall time. Observe
+    // client construction too, so a new handshake need not finish to fail.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     t.feed(Buffer.from([1, 2]));
-    await flush(100);
+    t.start();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(clientSockets).toHaveLength(connectsAtDown);
     expect(server.sockets.length).toBe(connectsAtDown);
+    expect(downs).toHaveLength(1);
   });
 
   it('stop() closes without reconnecting', async () => {
@@ -169,11 +192,15 @@ describe('LiveStreamTranscriber', () => {
       ws.send(JSON.stringify({ setupComplete: {} }));
     });
     servers.push(server);
-    const { t, downs } = make(server);
+    const { t, downs, clientSockets } = make(server);
     t.start();
-    await flush();
+    await waitForSetup(server);
+    const closed = once(clientSockets[0]!, 'close', { signal: AbortSignal.timeout(2000) });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     t.stop();
-    await flush(120);
+    await closed; // The client's close handler has actually run.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(clientSockets).toHaveLength(1);
     expect(server.sockets.length).toBe(1);
     expect(downs).toEqual([]);
   });

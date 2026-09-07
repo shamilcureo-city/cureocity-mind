@@ -256,12 +256,12 @@ describe('closeout and transcript state', () => {
       readFileSync(join(import.meta.dirname, '../components/app', name), 'utf8');
     expect(source('MindSessionCloseout.tsx')).toContain('<MindSessionAgreements');
     expect(source('MindSessionAgreements.tsx')).not.toContain('clinical-analysis');
-    expect(source('ClinicalFieldsEditor.tsx')).toContain(
-      "document.addEventListener('click', navigate, true)",
-    );
-    expect(source('ClinicalFieldsEditor.tsx')).toContain(
-      "window.addEventListener('beforeunload', beforeUnload)",
-    );
+    expect(source('ClinicalFieldsEditor.tsx')).toMatch(/useUnsavedWorkGuard\(\s*unprotected,/);
+    expect(source('MindSessionAgreements.tsx')).toContain('useUnsavedWorkGuard(');
+    const guard = readFileSync(join(import.meta.dirname, 'use-unsaved-work-guard.ts'), 'utf8');
+    expect(guard).toContain("document.addEventListener('click', click, true)");
+    expect(guard).toContain("window.addEventListener('beforeunload', unload)");
+    expect(guard).toContain("navigation?.addEventListener('navigate', navigate)");
     expect(source('NotesTab.tsx')).toContain('<NoteTranscriptReference draft={phase.draft} />');
     expect(source('CopilotDecisionBoard.tsx')).not.toContain('Session closed');
   });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { MindSessionCloseout } from '@cureocity/contracts';
@@ -13,13 +13,37 @@ interface Props {
   sessionId: string;
   steps: MindSessionCloseout['steps'];
   canShare: boolean;
+  clinicalReview?: ReactNode;
+  canReviewClinical?: boolean;
 }
 
-export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Props) {
+export function MindCloseoutDecisionActions({
+  sessionId,
+  steps,
+  canShare,
+  clinicalReview,
+  canReviewClinical = true,
+}: Props) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingStep, setEditingStep] = useState<DecisionStep | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewLoaded, setReviewLoaded] = useState(false);
+  const reviewId = useId();
+  const reviewHeading = useRef<HTMLHeadingElement>(null);
+  const reviewTrigger = useRef<HTMLButtonElement | null>(null);
+  function openReview(trigger: HTMLButtonElement) {
+    reviewTrigger.current = trigger;
+    setReviewOpen(true);
+    setReviewLoaded(true);
+    requestAnimationFrame(() => {
+      // Do not steal focus if the clinician already moved into a field while
+      // the panel was opening (including on a busy/mobile render).
+      if (document.activeElement === trigger || document.activeElement === document.body)
+        reviewHeading.current?.focus();
+    });
+  }
 
   async function decide(step: DecisionStep, outcome: 'COMPLETE' | 'SKIPPED'): Promise<void> {
     setBusy(`${step}:${outcome}`);
@@ -29,6 +53,7 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ step, outcome }),
+        signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -55,6 +80,10 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
     <div className="mt-4 space-y-4">
       {(Object.keys(labels) as DecisionStep[])
         .filter((step) => (canShare || step !== 'shared') && steps[step] !== 'PENDING')
+        .filter(
+          (step) =>
+            canReviewClinical || !['clinicalSuggestions', 'nextSessionQuestions'].includes(step),
+        )
         .map((step) => (
           <div key={step} className="flex items-center justify-between gap-3 text-sm">
             <span>
@@ -70,11 +99,23 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
             </Button>
           </div>
         ))}
-      {pending('clinicalSuggestions') && (
+      {canReviewClinical && pending('clinicalSuggestions') && (
         <DecisionRow label="Clinical suggestions">
-          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
-            Review suggestions
-          </Link>
+          {clinicalReview ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-expanded={reviewOpen}
+              aria-controls={reviewId}
+              onClick={(event) => openReview(event.currentTarget)}
+            >
+              Review suggestions here
+            </Button>
+          ) : (
+            <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+              Review suggestions
+            </Link>
+          )}
           <Button
             type="button"
             size="sm"
@@ -111,11 +152,23 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
           </Button>
         </DecisionRow>
       )}
-      {pending('nextSessionQuestions') && (
+      {canReviewClinical && pending('nextSessionQuestions') && (
         <DecisionRow label="Next-session questions">
-          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
-            Choose questions
-          </Link>
+          {clinicalReview ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              aria-expanded={reviewOpen}
+              aria-controls={reviewId}
+              onClick={(event) => openReview(event.currentTarget)}
+            >
+              Choose questions here
+            </Button>
+          ) : (
+            <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
+              Choose questions
+            </Link>
+          )}
           <Button
             type="button"
             size="sm"
@@ -150,6 +203,40 @@ export function MindCloseoutDecisionActions({ sessionId, steps, canShare }: Prop
         <p role="status" className="text-xs text-[var(--color-ink-3)]">
           Saving your decision…
         </p>
+      )}
+      {reviewLoaded && clinicalReview && (
+        <section
+          id={reviewId}
+          hidden={!reviewOpen}
+          className="space-y-4 rounded-xl border border-[var(--color-line)] bg-white p-4"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 ref={reviewHeading} tabIndex={-1} className="text-lg font-semibold">
+              Clinical suggestions and next-session questions
+            </h3>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setReviewOpen(false);
+                requestAnimationFrame(() => {
+                  const active = document.activeElement;
+                  if (
+                    active === document.body ||
+                    document.getElementById(reviewId)?.contains(active)
+                  )
+                    reviewTrigger.current?.focus();
+                });
+              }}
+            >
+              Return to finish checklist
+            </Button>
+          </div>
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Review only what is useful. Accepting a suggestion is your clinical decision; opening
+            this panel does not mark it reviewed.
+          </p>
+          {clinicalReview}
+        </section>
       )}
       {error && (
         <p role="alert" className="text-sm text-[var(--color-danger)]">

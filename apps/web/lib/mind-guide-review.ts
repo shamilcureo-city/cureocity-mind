@@ -42,23 +42,60 @@ export function readGuideReview(
   };
 }
 
-/** Serial full snapshots: an earlier slow request cannot overwrite a later step. */
+export function sameGuideReviewSnapshot(
+  left: MindGuideReviewSnapshot,
+  right: MindGuideReviewSnapshot,
+): boolean {
+  return (
+    left.scriptUpdatedAt === right.scriptUpdatedAt &&
+    left.activeIndex === right.activeIndex &&
+    left.reviewedIndexes.length === right.reviewedIndexes.length &&
+    left.reviewedIndexes.every((index, position) => index === right.reviewedIndexes[position])
+  );
+}
+
+/** Serial checkpoints, coalescing waiting navigation into its latest snapshot.
+ * An uncertain failure stops all waiting writes until the caller reconciles it. */
 export function createGuideReviewQueue<T>(write: (value: T) => Promise<void>) {
-  let previous = Promise.resolve();
+  type Waiter = { resolve: () => void; reject: (error: unknown) => void };
+  let pending: { value: T; waiters: Waiter[] } | null = null;
+  let running = false;
   let cancelled = false;
+  async function drain() {
+    if (running) return;
+    running = true;
+    while (pending && !cancelled) {
+      const batch = pending;
+      pending = null;
+      try {
+        await write(batch.value);
+        batch.waiters.forEach(({ resolve }) => resolve());
+      } catch (error) {
+        batch.waiters.forEach(({ reject }) => reject(error));
+        const waiting = pending as { value: T; waiters: Waiter[] } | null;
+        pending = null;
+        waiting?.waiters.forEach(({ reject }) => reject(error));
+        break;
+      }
+    }
+    running = false;
+  }
   const enqueue = (value: T): Promise<void> => {
-    const next = previous
-      .catch(() => undefined)
-      .then(() => {
-        if (cancelled) throw new Error('Guide view closed.');
-        return write(value);
-      });
-    previous = next;
-    return next;
+    if (cancelled) return Promise.reject(new Error('Guide view closed.'));
+    const result = new Promise<void>((resolve, reject) => {
+      if (pending) {
+        pending.value = value;
+        pending.waiters.push({ resolve, reject });
+      } else pending = { value, waiters: [{ resolve, reject }] };
+    });
+    void drain();
+    return result;
   };
   return Object.assign(enqueue, {
     cancel: () => {
       cancelled = true;
+      pending?.waiters.forEach(({ reject }) => reject(new Error('Guide view closed.')));
+      pending = null;
     },
   });
 }

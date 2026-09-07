@@ -4,6 +4,7 @@ import {
   createGuideReviewQueue,
   MindGuideReviewSchema,
   readGuideReview,
+  sameGuideReviewSnapshot,
 } from './mind-guide-review';
 
 const progress = {
@@ -72,6 +73,40 @@ describe('guide review is version-bound UI metadata', () => {
     await expect(queue(progress)).rejects.toThrow('offline');
     await expect(queue({ ...progress, activeIndex: 3 })).resolves.toBeUndefined();
     expect(write).toHaveBeenCalledTimes(2);
+  });
+  it('coalesces rapid reading checkpoints while a slow save is in flight', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const committed: number[] = [];
+    const queue = createGuideReviewQueue(async (value: typeof progress) => {
+      if (value.activeIndex === 0) await gate;
+      committed.push(value.activeIndex);
+    });
+    const first = queue({ ...progress, activeIndex: 0 });
+    const second = queue({ ...progress, activeIndex: 1 });
+    const third = queue({ ...progress, activeIndex: 3 });
+    release();
+    await Promise.all([first, second, third]);
+    expect(committed).toEqual([0, 3]);
+  });
+  it('does not send waiting checkpoints after an uncertain failure', async () => {
+    let fail!: (error: Error) => void;
+    const gate = new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+    const write = vi.fn(() => gate);
+    const queue = createGuideReviewQueue(write);
+    const result = Promise.allSettled([queue(progress), queue({ ...progress, activeIndex: 3 })]);
+    fail(new Error('Lost response'));
+    expect((await result).map((item) => item.status)).toEqual(['rejected', 'rejected']);
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+  it("recognizes an exact lost-response checkpoint without accepting another view's markers", () => {
+    expect(sameGuideReviewSnapshot(progress, { ...progress })).toBe(true);
+    expect(sameGuideReviewSnapshot(progress, { ...progress, reviewedIndexes: [0, 2] })).toBe(false);
+    expect(sameGuideReviewSnapshot(progress, { ...progress, activeIndex: 3 })).toBe(false);
   });
   it('does not send queued work after its view has closed', async () => {
     let release!: () => void;

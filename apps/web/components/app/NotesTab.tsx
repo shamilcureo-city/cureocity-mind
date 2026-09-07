@@ -43,6 +43,9 @@ import { glossary } from '../../lib/clinical-glossary';
 import { NoteReadiness } from './NoteReadiness';
 import { checkIntakeNoteReadiness, checkTreatmentNoteReadiness } from '../../lib/note-readiness';
 import { NoteReviewPanel } from './NoteReviewPanel';
+import { NoteRecoveryNotice, type NoteRecoveryStatus } from './NoteRecoveryNotice';
+import { NoteEditingLayout } from './NoteEditingLayout';
+import { mindSessionDestination } from '../../lib/mind-session-start';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -55,6 +58,7 @@ type SessionStatus =
 interface Props {
   sessionId: string;
   sessionStatus: SessionStatus;
+  captureMode?: string | null;
   /// Sprint 19 — drives the discriminator for the note content
   /// (TherapyNoteV1 vs IntakeNoteV1) + which downstream surfaces are
   /// available (sign-off + modify panel are TherapyNote-only).
@@ -123,6 +127,7 @@ const STALL_RUNNING_MS = 30_000;
 export function NotesTab({
   sessionId,
   sessionStatus,
+  captureMode,
   sessionKind,
   initialDraft,
   initialNote,
@@ -150,6 +155,7 @@ export function NotesTab({
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<NoteRecoveryStatus>('loading');
   const [modifying, setModifying] = useState(false);
   // View density for the note ("Detailed" dropdown in the toolbar). Per-device.
   const [verbosity, setVerbosity] = useState<NoteVerbosity>('DETAILED');
@@ -278,6 +284,10 @@ export function NotesTab({
   }, [phase.kind]);
 
   const triggerGeneration = useCallback(async (): Promise<void> => {
+    if (phase.kind === 'completed' && (editing || recoveryStatus !== 'none')) {
+      setEditing(true);
+      return;
+    }
     setGenerating(true);
     // A fresh draft comes back in the session's original language, so reset
     // the language indicator (otherwise it would still claim the last
@@ -319,11 +329,11 @@ export function NotesTab({
     } finally {
       setGenerating(false);
     }
-  }, [sessionId, pollOnce, phase.kind, noteLanguage]);
+  }, [sessionId, pollOnce, phase.kind, noteLanguage, editing, recoveryStatus]);
 
   // Manual recovery from a stalled run. Re-runs the orchestrator, which
   // is idempotent: it resets the draft to IN_PROGRESS and re-drafts from
-  // the saved audio, so nothing the therapist recorded is lost.
+  // acknowledged session material; this does not recover uncaptured content.
   const resumeGeneration = useCallback((): void => {
     setSlow(false);
     genStartRef.current = Date.now();
@@ -332,6 +342,12 @@ export function NotesTab({
 
   const triggerSignOff = useCallback(async (): Promise<void> => {
     if (phase.kind !== 'completed' || translating || modifying || savingEdit || generating) return;
+    if (editing || recoveryStatus !== 'none') {
+      setPendingShare(false);
+      setSignError('Review and apply or discard saved draft edits before signing.');
+      setEditing(true);
+      return;
+    }
     setSigning(true);
     setSignError(null);
     try {
@@ -357,7 +373,17 @@ export function NotesTab({
     } finally {
       setSigning(false);
     }
-  }, [phase, router, sessionId, translating, modifying, savingEdit, generating]);
+  }, [
+    phase,
+    router,
+    sessionId,
+    translating,
+    modifying,
+    savingEdit,
+    generating,
+    editing,
+    recoveryStatus,
+  ]);
 
   // Share from an unsigned draft: sign first, then open the share modal once
   // the sign lands (the share snapshot is built from the signed note).
@@ -366,9 +392,14 @@ export function NotesTab({
       setShareOpen(true);
       return;
     }
+    if (editing || recoveryStatus !== 'none') {
+      setPendingShare(false);
+      setEditing(true);
+      return;
+    }
     setPendingShare(true);
     void triggerSignOff();
-  }, [phase.kind, triggerSignOff]);
+  }, [phase.kind, triggerSignOff, editing, recoveryStatus]);
 
   useEffect(() => {
     if (phase.kind === 'signed' && pendingShare) {
@@ -387,6 +418,10 @@ export function NotesTab({
       // actual language, so clicking the "current" language must still run a
       // translate (otherwise clicking it does nothing — the reported symptom).
       if (phase.kind !== 'completed' || translating) return;
+      if (editing || recoveryStatus !== 'none') {
+        setEditing(true);
+        return;
+      }
       const draft = phase.draft;
       const reopened = phase.reopened;
       const label = noteLanguageLabel(code);
@@ -430,15 +465,18 @@ export function NotesTab({
         setTranslating(false);
       }
     },
-    [phase, sessionId, translating],
+    [phase, sessionId, translating, editing, recoveryStatus],
   );
 
   // Save a manual edit of the draft note (PUT note-draft). Kind-agnostic —
   // the route validates against IntakeNoteV1 / TherapyNoteV1 by session kind.
   // Works pre-sign and on a re-opened (unlocked) signed note.
   const saveEdit = useCallback(
-    async (next: TherapyNoteV1 | IntakeNoteV1): Promise<void> => {
-      if (phase.kind !== 'completed') return;
+    async (
+      next: TherapyNoteV1 | IntakeNoteV1,
+      expectedRecoveryRevision?: number,
+    ): Promise<boolean> => {
+      if (phase.kind !== 'completed') return false;
       const draft = phase.draft;
       const reopened = phase.reopened;
       setSavingEdit(true);
@@ -447,7 +485,12 @@ export function NotesTab({
         const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ note: next, expectedUpdatedAt: draft.updatedAt }),
+          body: JSON.stringify({
+            note: next,
+            expectedUpdatedAt: draft.updatedAt,
+            expectedRecoveryRevision,
+          }),
+          signal: AbortSignal.timeout(20_000),
         });
         if (!res.ok) {
           const b = (await res.json().catch(() => ({}))) as { error?: string };
@@ -460,8 +503,10 @@ export function NotesTab({
           reopened,
         });
         setEditing(false);
+        return true;
       } catch (e) {
         setEditError((e as Error).message);
+        return false;
       } finally {
         setSavingEdit(false);
       }
@@ -535,18 +580,33 @@ export function NotesTab({
   // ----- Render -----
 
   if (phase.kind === 'awaiting-end') {
+    const scheduled = phase.status === 'SCHEDULED';
+    const active = phase.status === 'IN_PROGRESS';
     return (
       <Card className="p-10 text-center">
         <p className="font-serif text-xl">Session is still {phase.status.toLowerCase()}.</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          End the recording from the Record page to release the audio for note generation.
+          {scheduled
+            ? 'Prepare for this appointment, then start when you and the client are ready.'
+            : active
+              ? 'Return to this session to continue or finish recording. Your note will be prepared afterward.'
+              : 'This appointment is not available for recording. Return to Today to choose another session.'}
         </p>
         <div className="mt-4">
           <Link
-            href="/app"
+            href={
+              scheduled || active
+                ? mindSessionDestination({
+                    id: sessionId,
+                    clientId,
+                    status: phase.status,
+                    captureMode,
+                  })
+                : '/app/today'
+            }
             className="rounded-full bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:bg-[var(--color-accent-hover)]"
           >
-            Back to Record
+            {scheduled ? 'Prepare / Start session' : active ? 'Resume session' : 'Return to Today'}
           </Link>
         </div>
       </Card>
@@ -558,8 +618,8 @@ export function NotesTab({
       <Card className="p-10 text-center">
         <p className="font-serif text-xl">Recording saved. Ready to write your note.</p>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          We’ll turn the recording into a clear, written note for you. This usually takes 10–30
-          seconds, and you can change anything before you save it.
+          We’ll prepare a draft from the saved session material. Timing depends on the session
+          length and service availability. Review and correct it before signing.
         </p>
         <div className="mx-auto mt-5 max-w-md">
           <HelpNote title="Nothing is final yet">
@@ -820,14 +880,14 @@ export function NotesTab({
                       sessionId={sessionId}
                       currentTemplateId={noteTemplateId}
                       kind="INTAKE"
-                      disabled={generating || translating || editing}
+                      disabled={generating || translating || editing || recoveryStatus !== 'none'}
                       onApply={triggerGeneration}
                     />
                   )}
                   <LanguagePicker
                     value={noteLang}
                     onChange={translateTo}
-                    disabled={translating || generating || editing}
+                    disabled={translating || generating || editing || recoveryStatus !== 'none'}
                   />
                   <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
                 </>
@@ -838,21 +898,33 @@ export function NotesTab({
             )}
             <RiskBanner riskFlags={intakeNote.riskFlags} />
             {editing ? (
-              <>
-                <NoteTranscriptReference draft={phase.draft} />
+              <NoteEditingLayout reference={<NoteTranscriptReference draft={phase.draft} />}>
                 <IntakeNoteEditor
+                  key={phase.draft.id + phase.draft.updatedAt}
                   note={intakeNote}
+                  recoveryTarget={{
+                    sessionId,
+                    baseUpdatedAt: phase.draft.updatedAt,
+                    kind: 'INTAKE',
+                  }}
                   saving={savingEdit}
                   error={editError}
                   onSave={saveEdit}
                   onCancel={() => {
+                    setRecoveryStatus('loading');
                     setEditing(false);
                     setEditError(null);
                   }}
                 />
-              </>
+              </NoteEditingLayout>
             ) : (
               <>
+                <NoteRecoveryNotice
+                  sessionId={sessionId}
+                  draftUpdatedAt={phase.draft.updatedAt}
+                  onResume={() => setEditing(true)}
+                  onStatusChange={setRecoveryStatus}
+                />
                 <IntakeNotePreview note={intakeNote} verbosity={verbosity} />
                 <NoteFooter
                   costInr={phase.draft.totalCostInr}
@@ -863,6 +935,7 @@ export function NotesTab({
                 <NoteReadiness items={checkIntakeNoteReadiness(intakeNote)} />
                 <NoteActions
                   showSign={!focusedReview}
+                  recoveryBlocked={recoveryStatus !== 'none'}
                   signing={signing}
                   generating={generating}
                   translating={translating}
@@ -880,6 +953,7 @@ export function NotesTab({
               onBusyChange={setModifying}
               disabled={false}
               busy={translating || editing || signing}
+              recoveryBlocked={recoveryStatus !== 'none'}
               sessionId={sessionId}
               clientName={clientName}
               templateLabel={aiDocLabel}
@@ -897,6 +971,8 @@ export function NotesTab({
           <SignAndSendBar
             focusedReview={focusedReview}
             blocked={translating || modifying || generating}
+            recoveryStatus={recoveryStatus}
+            onReviewEdits={() => setEditing(true)}
             signing={signing}
             reopened={reopened}
             riskSeverity={intakeNote.riskFlags?.severity ?? null}
@@ -931,14 +1007,14 @@ export function NotesTab({
                   <TemplatePicker
                     sessionId={sessionId}
                     currentTemplateId={noteTemplateId}
-                    disabled={generating || translating || editing}
+                    disabled={generating || translating || editing || recoveryStatus !== 'none'}
                     onApply={triggerGeneration}
                   />
                 )}
                 <LanguagePicker
                   value={noteLang}
                   onChange={translateTo}
-                  disabled={translating || generating || editing}
+                  disabled={translating || generating || editing || recoveryStatus !== 'none'}
                 />
                 <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
               </>
@@ -949,21 +1025,33 @@ export function NotesTab({
           )}
           <RiskBanner riskFlags={note.riskFlags} />
           {editing ? (
-            <>
-              <NoteTranscriptReference draft={phase.draft} />
+            <NoteEditingLayout reference={<NoteTranscriptReference draft={phase.draft} />}>
               <NoteEditor
+                key={phase.draft.id + phase.draft.updatedAt}
                 note={note}
+                recoveryTarget={{
+                  sessionId,
+                  baseUpdatedAt: phase.draft.updatedAt,
+                  kind: 'TREATMENT',
+                }}
                 saving={savingEdit}
                 error={editError}
                 onSave={saveEdit}
                 onCancel={() => {
+                  setRecoveryStatus('loading');
                   setEditing(false);
                   setEditError(null);
                 }}
               />
-            </>
+            </NoteEditingLayout>
           ) : (
             <>
+              <NoteRecoveryNotice
+                sessionId={sessionId}
+                draftUpdatedAt={phase.draft.updatedAt}
+                onResume={() => setEditing(true)}
+                onStatusChange={setRecoveryStatus}
+              />
               <NotePreview note={note} verbosity={verbosity} />
               <NoteFooter
                 costInr={phase.draft.totalCostInr}
@@ -974,6 +1062,7 @@ export function NotesTab({
               <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
               <NoteActions
                 showSign={!focusedReview}
+                recoveryBlocked={recoveryStatus !== 'none'}
                 signing={signing}
                 generating={generating}
                 translating={translating}
@@ -991,6 +1080,7 @@ export function NotesTab({
             onBusyChange={setModifying}
             disabled={false}
             busy={translating || editing || signing}
+            recoveryBlocked={recoveryStatus !== 'none'}
             sessionId={sessionId}
             clientName={clientName}
             templateLabel={aiDocLabel}
@@ -1008,6 +1098,8 @@ export function NotesTab({
         <SignAndSendBar
           focusedReview={focusedReview}
           blocked={translating || modifying || generating}
+          recoveryStatus={recoveryStatus}
+          onReviewEdits={() => setEditing(true)}
           signing={signing}
           reopened={reopened}
           riskSeverity={note.riskFlags?.severity ?? null}
@@ -1022,23 +1114,16 @@ export function NotesTab({
 
 function NoteTranscriptReference({ draft }: { draft: NoteDraft }) {
   return (
-    <details className="mb-5 rounded-xl border border-[var(--color-line)] p-4">
-      <summary className="cursor-pointer text-sm font-medium">
-        Check the transcript without leaving this edit
-      </summary>
-      <div className="mt-4 max-h-80 overflow-y-auto">
-        <TranscriptTab
-          data={{
-            status: draft.status,
-            segments: draft.speakerSegments,
-            transcript: draft.transcript,
-            totalCostInr: draft.totalCostInr,
-            backend: null,
-            errorMessage: draft.errorMessage,
-          }}
-        />
-      </div>
-    </details>
+    <TranscriptTab
+      data={{
+        status: draft.status,
+        segments: draft.speakerSegments,
+        transcript: draft.transcript,
+        totalCostInr: draft.totalCostInr,
+        backend: null,
+        errorMessage: draft.errorMessage,
+      }}
+    />
   );
 }
 
@@ -1108,8 +1193,8 @@ function GeneratingState({
             <span className="inline-block animate-pulse">●</span> Writing your note…
           </p>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            Turning the recording into a clear, written note. This usually takes 10–30 seconds. Your
-            recording is saved, so you may safely return to{' '}
+            Preparing your note from the saved session material. Longer sessions and busy services
+            can take more time. You can return to{' '}
             <Link
               href="/app/today"
               className="font-medium text-[var(--color-accent)] hover:underline"
@@ -1149,9 +1234,9 @@ function GeneratingState({
             This is taking longer than usual.
           </p>
           <p className="mt-1 max-w-xl text-sm text-[var(--color-ink-2)]">
-            The hand-off to note generation may have been interrupted. Your recording and transcript
-            are saved — resuming re-drafts the note from the saved audio. Nothing you recorded is
-            lost.
+            Note generation has not finished. Resume uses the audio or transcript that reached the
+            server. It cannot recover audio that was never saved or words that were never
+            transcribed. Review the transcript for gaps before signing.
           </p>
           <div className="mt-3">
             <Button onClick={onResume} disabled={resuming}>
@@ -1187,6 +1272,8 @@ function SignAndSendBar({
   signError,
   onSignAndSend,
   onSignOnly,
+  recoveryStatus = 'none',
+  onReviewEdits,
 }: {
   focusedReview?: boolean;
   blocked?: boolean;
@@ -1196,6 +1283,8 @@ function SignAndSendBar({
   signError: string | null;
   onSignAndSend: () => void;
   onSignOnly: () => void;
+  recoveryStatus?: NoteRecoveryStatus;
+  onReviewEdits?: () => void;
 }) {
   const risky = riskSeverity !== null && riskSeverity !== 'none';
   return (
@@ -1213,7 +1302,7 @@ function SignAndSendBar({
             <button
               type="button"
               onClick={onSignOnly}
-              disabled={signing || blocked}
+              disabled={signing || blocked || recoveryStatus !== 'none'}
               className="text-xs text-[var(--color-ink-2)] underline-offset-2 hover:underline"
             >
               {reopened ? 'Sign & re-lock' : 'Sign without sending'}
@@ -1221,17 +1310,23 @@ function SignAndSendBar({
           )}
         </div>
         <Button
-          onClick={focusedReview ? onSignOnly : onSignAndSend}
-          disabled={signing || blocked}
+          onClick={
+            recoveryStatus !== 'none' ? onReviewEdits : focusedReview ? onSignOnly : onSignAndSend
+          }
+          disabled={signing || blocked || recoveryStatus === 'loading'}
           className="w-full text-base"
         >
-          {signing
-            ? 'Signing…'
-            : reopened
-              ? 'Sign & re-lock'
-              : focusedReview
-                ? 'Sign this note'
-                : 'Sign & send'}
+          {recoveryStatus === 'loading'
+            ? 'Checking saved edits…'
+            : recoveryStatus !== 'none'
+              ? 'Review saved edits before signing'
+              : signing
+                ? 'Signing…'
+                : reopened
+                  ? 'Sign & re-lock'
+                  : focusedReview
+                    ? 'Sign this note'
+                    : 'Sign & send'}
         </Button>
         {focusedReview && (
           <p className="mt-2 text-center text-xs text-[var(--color-ink-2)]">
@@ -1250,6 +1345,7 @@ function SignAndSendBar({
 
 function NoteActions({
   showSign = true,
+  recoveryBlocked = false,
   signing,
   generating,
   translating,
@@ -1260,6 +1356,7 @@ function NoteActions({
   onRegenerate,
 }: {
   showSign?: boolean;
+  recoveryBlocked?: boolean;
   signing: boolean;
   generating: boolean;
   translating: boolean;
@@ -1273,7 +1370,7 @@ function NoteActions({
     <>
       <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
         {showSign && (
-          <Button onClick={onSign} disabled={signing}>
+          <Button onClick={onSign} disabled={signing || recoveryBlocked}>
             {signing ? 'Signing…' : reopened ? 'Sign & re-lock' : 'Sign off'}
           </Button>
         )}
@@ -1281,7 +1378,11 @@ function NoteActions({
           Edit note
         </Button>
         {!reopened && (
-          <Button variant="secondary" onClick={onRegenerate} disabled={generating}>
+          <Button
+            variant="secondary"
+            onClick={onRegenerate}
+            disabled={generating || recoveryBlocked}
+          >
             Re-generate
           </Button>
         )}
@@ -1388,6 +1489,7 @@ const QUICK_INSTRUCTIONS: { label: string; icon: SuggestKind }[] = [
  */
 function ModifyPanel({
   disabled,
+  recoveryBlocked = false,
   onBusyChange,
   busy,
   sessionId,
@@ -1396,6 +1498,7 @@ function ModifyPanel({
   onModified,
 }: {
   disabled: boolean;
+  recoveryBlocked?: boolean;
   onBusyChange?: (busy: boolean) => void;
   /** Another note-mutating op (e.g. a translation) is in flight — gate
    *  edits so two concurrent /note/modify calls can't clobber each other. */
@@ -1412,11 +1515,11 @@ function ModifyPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastChanged, setLastChanged] = useState<string[] | null>(null);
-  const blocked = disabled || Boolean(busy);
+  const blocked = disabled || Boolean(busy) || recoveryBlocked;
 
   const submit = useCallback(
     async (text: string) => {
-      if (!text.trim() || disabled || busy || !onModified) return;
+      if (!text.trim() || disabled || busy || recoveryBlocked || !onModified) return;
       setPending(true);
       onBusyChange?.(true);
       setError(null);
@@ -1456,7 +1559,7 @@ function ModifyPanel({
         onBusyChange?.(false);
       }
     },
-    [disabled, busy, onModified, sessionId, onBusyChange],
+    [disabled, busy, onModified, sessionId, onBusyChange, recoveryBlocked],
   );
 
   function reset(): void {
@@ -1557,13 +1660,15 @@ function ModifyPanel({
           <input
             type="text"
             placeholder={
-              disabled
-                ? 'Signed — use “Edit note” below'
-                : busy
-                  ? 'Translating…'
-                  : pending
-                    ? 'Modifying…'
-                    : 'Make modifications to your note here'
+              recoveryBlocked
+                ? 'Apply or discard saved edits before asking AI to rewrite the note'
+                : disabled
+                  ? 'Signed — use “Edit note” below'
+                  : busy
+                    ? 'Translating…'
+                    : pending
+                      ? 'Modifying…'
+                      : 'Make modifications to your note here'
             }
             disabled={blocked || pending}
             value={instruction}

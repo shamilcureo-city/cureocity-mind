@@ -1018,6 +1018,7 @@ model Session {
   transcriptSegments        TranscriptSegment[]
   geminiCallLogs            GeminiCallLog[]
   noteDraft                 NoteDraft?
+  noteEditRecovery          NoteEditRecovery?
   therapyNote               TherapyNote?
   clinicalReport            ClinicalReport?
   treatmentPlans            TreatmentPlan[]
@@ -1418,6 +1419,25 @@ model NoteDraft {
 
   @@index([status, createdAt])
   @@map("note_drafts")
+}
+
+/// Acknowledged manual-edit checkpoint, never a canonical or signable note.
+/// Null ciphertext is a revisioned tombstone, preventing delayed resurrection.
+model NoteEditRecovery {
+  sessionId             String       @id
+  encryptedFields       String?      @db.Text
+  revision              Int          @default(0)
+  baseDraftUpdatedAt    DateTime?
+  kind                  SessionKind?
+  lastMutationId        String?      @db.Uuid
+  lastMutationRevision  Int?
+  lastMutationOperation String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("note_edit_recoveries")
 }
 
 // ============================================================================

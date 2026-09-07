@@ -17,6 +17,7 @@
     "typecheck": {
       "executor": "nx:run-commands",
       "cache": true,
+      "inputs": ["default", "^production", "{workspaceRoot}/services/test-support/**/*.ts"],
       "options": {
         "command": "tsc --noEmit",
         "cwd": "services/patient-model-service"
@@ -25,14 +26,25 @@
     "lint": {
       "executor": "nx:run-commands",
       "cache": true,
+      "inputs": [
+        "default",
+        "{workspaceRoot}/eslint.config.mjs",
+        "{workspaceRoot}/services/test-support/**/*.ts"
+      ],
       "options": {
-        "command": "eslint src test --max-warnings 0",
+        "command": "eslint src test ../test-support --max-warnings 0",
         "cwd": "services/patient-model-service"
       }
     },
     "test": {
       "executor": "nx:run-commands",
       "cache": true,
+      "inputs": [
+        "default",
+        "^production",
+        "{workspaceRoot}/services/test-support/**/*.ts",
+        { "env": "RUN_INTEGRATION_TESTS" }
+      ],
       "options": {
         "command": "vitest run",
         "cwd": "services/patient-model-service"

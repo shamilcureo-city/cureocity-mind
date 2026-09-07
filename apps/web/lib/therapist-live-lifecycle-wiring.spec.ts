@@ -11,6 +11,7 @@ const harness = vi.hoisted(() => ({
   registerEffects: true,
   push: vi.fn(),
   sockets: [] as Socket[],
+  onFrame: (_pcm: Uint8Array) => {},
   stream: { state: 'idle', error: null, start: vi.fn(async () => {}), stop: vi.fn(async () => {}) },
 }));
 vi.mock('react', async (original) => ({
@@ -40,7 +41,12 @@ vi.mock('react', async (original) => ({
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: harness.push }) }));
 vi.mock('next/link', () => ({ default: 'a' }));
-vi.mock('@/lib/audio/use-live-stream', () => ({ useLiveStream: () => harness.stream }));
+vi.mock('@/lib/audio/use-live-stream', () => ({
+  useLiveStream: (opts: { onFrame: (pcm: Uint8Array) => void }) => {
+    harness.onFrame = opts.onFrame;
+    return harness.stream;
+  },
+}));
 vi.mock('@/lib/audio/use-wake-lock', () => ({ useWakeLock: () => {} }));
 vi.mock('../components/app/GatewayMockBanner', () => ({ GatewayMockBanner: () => null }));
 vi.mock('../components/app/TherapyCopilotRail', () => ({ TherapyCopilotRail: () => null }));
@@ -144,9 +150,115 @@ beforeEach(() => {
     vi.fn(async () => new Response('{"token":"fixture-token"}', { status: 200 })),
   );
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe('real TherapistLiveSession attempt lifecycle wiring', () => {
+  async function listening() {
+    mount();
+    click('Start session');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledOnce());
+    socket.status('listening');
+    render();
+    return socket;
+  }
+  async function pause(socket: Socket) {
+    click('Pause recording');
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledTimes(2));
+    return JSON.parse(socket.send.mock.calls[1][0] as string) as {
+      type: string;
+      requestId: string;
+    };
+  }
+
+  it('Start stays in the header before the guide/rails and sends buffered audio only after listening', async () => {
+    mount();
+    const header = elements(render()).find((el) => el.type === 'header');
+    expect(text(header)).toContain('Start session');
+    click('Start session');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledOnce());
+    const audio = new Uint8Array([1, 2]);
+    harness.onFrame(audio);
+    expect(socket.send).toHaveBeenCalledOnce();
+    socket.status('listening');
+    expect(socket.send).toHaveBeenNthCalledWith(2, audio);
+  });
+
+  it('pause waits for matching acknowledgement, sends no stop, blocks new audio, and explicitly reauthorizes resume', async () => {
+    const socket = await listening();
+    const command = await pause(socket);
+    expect(command.type).toBe('pause');
+    expect(text(render())).toContain('Microphone off');
+    expect(text(render())).not.toContain('Resume recording');
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'capturePaused', requestId: crypto.randomUUID() }),
+    });
+    expect(text(render())).not.toContain('Resume recording');
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'capturePaused', requestId: command.requestId }),
+    });
+    await vi.waitFor(() => expect(text(render())).toContain('Resume recording'));
+    harness.onFrame(new Uint8Array([3, 4]));
+    expect(socket.send).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(harness.push).not.toHaveBeenCalled();
+    click('Resume recording');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(socket.close).toHaveBeenCalledOnce();
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    const replacement = harness.sockets[1];
+    replacement.open();
+    await vi.waitFor(() => expect(harness.stream.start).toHaveBeenCalledTimes(2));
+  });
+
+  it('unsupported old gateway never produces a confirmed pause; End remains explicit', async () => {
+    const socket = await listening();
+    vi.useFakeTimers();
+    click('Pause recording');
+    await vi.advanceTimersByTimeAsync(30_001);
+    expect(text(render())).toContain('pause not confirmed');
+    expect(text(render())).toContain('pause-support update');
+    expect(text(render())).not.toContain('Resume recording');
+    expect(harness.push).not.toHaveBeenCalled();
+    click('End session');
+    click('End & save');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.send).toHaveBeenLastCalledWith(JSON.stringify({ type: 'stop' }));
+  });
+
+  it('paused authorization expiry keeps the microphone off until explicit resume', async () => {
+    const socket = await listening();
+    const command = await pause(socket);
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'capturePaused', requestId: command.requestId }),
+    });
+    await vi.waitFor(() => expect(text(render())).toContain('Resume recording'));
+    socket.status('unauthorized');
+    socket.onclose?.();
+    expect(text(render())).toContain('Resume recording');
+    expect(text(render())).toContain('Microphone off');
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('a failed local final-frame flush cannot be retried into a falsely safe pause or resumed microphone', async () => {
+    await listening();
+    harness.stream.stop.mockRejectedValueOnce(new Error('worklet timeout'));
+    click('Pause recording');
+    await vi.waitFor(() => expect(text(render())).toContain('final audio frame was not confirmed'));
+    expect(text(render())).not.toContain('Resume recording');
+    expect(text(render())).not.toContain('Retry pause confirmation');
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+  });
   it('effect cleanup/replay cancels the first auto-start and permits only its replacement', async () => {
     autoStart = true;
     let finishFirst!: (response: Response) => void;
