@@ -20,6 +20,7 @@ import {
 import { drugNameKey } from '@cureocity/clinical';
 import { useRouter } from 'next/navigation';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
+import { LiveTokenRenewal, type LiveTokenLease } from '@/lib/audio/live-token-renewal';
 import { GatewayMockBanner } from './GatewayMockBanner';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -42,7 +43,14 @@ import { TurnoverBar } from './TurnoverBar';
  */
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
-type Phase = 'idle' | 'connecting' | 'listening' | 'finalizing' | 'done' | 'error';
+type Phase =
+  | 'idle'
+  | 'connecting'
+  | 'listening'
+  | 'finalizing'
+  | 'done'
+  | 'error'
+  | 'authorization-paused';
 
 // ============================================================================
 // Batch A — "never lose a consult".
@@ -195,8 +203,12 @@ export function DoctorLiveEncounter({
   /** Mirror of the live partial note, so a salvage can build a draft from it. */
   const noteRef = useRef<PartialStructuredNote>({});
   noteRef.current = note;
-  /** The live token + server context, reused across reconnect attempts. */
-  const startArgsRef = useRef<{ token?: string; activeMeds?: string[]; allergies?: string[] }>({});
+  const renewalRef = useRef<LiveTokenRenewal | null>(null);
+  const connectAttemptRef = useRef(0);
+  const connectAbortRef = useRef<AbortController | null>(null);
+  const unmountedRef = useRef(false);
+  const socketReadyRef = useRef(false);
+  const captureBlockedRef = useRef(true);
 
   const live = phase === 'listening' || phase === 'finalizing';
 
@@ -468,6 +480,7 @@ export function DoctorLiveEncounter({
 
   /** Drain the queued frames onto an open socket, respecting back-pressure. */
   function flushAudioQueue(ws: WebSocket): void {
+    if (!socketReadyRef.current || wsRef.current !== ws || ws.readyState !== ws.OPEN) return;
     while (audioQueueRef.current.length > 0 && ws.bufferedAmount < MAX_WS_BUFFERED_BYTES) {
       const frame = audioQueueRef.current.shift();
       if (!frame) break;
@@ -479,8 +492,9 @@ export function DoctorLiveEncounter({
 
   const stream = useLiveStream({
     onFrame: (pcm) => {
+      if (captureBlockedRef.current) return;
       const ws = wsRef.current;
-      const open = ws && ws.readyState === ws.OPEN;
+      const open = socketReadyRef.current && ws && ws.readyState === ws.OPEN;
       // Fast path: socket up, nothing queued, and the send buffer isn't
       // backed up — hand the frame straight over.
       if (open && audioQueueRef.current.length === 0 && ws.bufferedAmount < MAX_WS_BUFFERED_BYTES) {
@@ -507,14 +521,26 @@ export function DoctorLiveEncounter({
   const streamRef = useRef(stream);
   streamRef.current = stream;
   useEffect(() => {
+    unmountedRef.current = false;
     return () => {
+      unmountedRef.current = true;
+      autoStartedRef.current = false;
+      phaseRef.current = 'idle';
+      captureBlockedRef.current = true;
+      socketReadyRef.current = false;
+      ++connectAttemptRef.current;
+      connectAbortRef.current?.abort();
+      renewalRef.current?.dispose();
+      renewalRef.current = null;
       if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       // Batch A — an unmount is a deliberate close, not a drop: suppress the
       // reconnect path so navigating away doesn't spin up a doomed retry loop.
       intentionalCloseRef.current = true;
-      wsRef.current?.close();
-      void streamRef.current.stop();
+      const socket = wsRef.current;
+      wsRef.current = null;
+      socket?.close();
+      void streamRef.current.stop().catch(() => {});
     };
   }, []);
 
@@ -530,6 +556,11 @@ export function DoctorLiveEncounter({
   }, [autoStart, phase]);
 
   async function start(): Promise<void> {
+    if (
+      unmountedRef.current ||
+      ['connecting', 'listening', 'finalizing'].includes(phaseRef.current)
+    )
+      return;
     setError(null);
     setUtterances([]);
     setPartialText(''); // DS13 — clear the provisional streaming line
@@ -567,13 +598,14 @@ export function DoctorLiveEncounter({
     reconnectAttemptRef.current = 0;
     intentionalCloseRef.current = false;
     finalHandledRef.current = false;
-    startArgsRef.current = {};
     setConnState('ok');
     setPhase('connecting');
+    phaseRef.current = 'connecting';
 
     // DS11.4 — a ws:// gateway can never connect from an https page
     // (mixed content); fail honestly instead of a dead socket error.
     if (window.location.protocol === 'https:' && GATEWAY_URL.startsWith('ws://')) {
+      phaseRef.current = 'error';
       setPhase('error');
       setError(
         'The live gateway is not configured for secure connections (wss://). Dictate the consult instead, or contact support.',
@@ -584,6 +616,35 @@ export function DoctorLiveEncounter({
     await connect({ resume: false });
   }
 
+  /** Authorization loss never restarts a microphone or clears captured clinical context. */
+  function stopForAuthorization(message: string, canResume: boolean): void {
+    captureBlockedRef.current = true;
+    socketReadyRef.current = false;
+    intentionalCloseRef.current = true;
+    ++connectAttemptRef.current;
+    connectAbortRef.current?.abort();
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+    const socket = wsRef.current;
+    wsRef.current = null;
+    void streamRef.current.stop().catch(() => {});
+    socket?.close();
+    setConnState('lost');
+    phaseRef.current = canResume ? 'authorization-paused' : 'error';
+    setPhase(phaseRef.current);
+    setError(message);
+  }
+
+  function resumeAuthorizedCapture(): void {
+    if (phaseRef.current !== 'authorization-paused' || unmountedRef.current) return;
+    intentionalCloseRef.current = false;
+    phaseRef.current = 'connecting';
+    setPhase('connecting');
+    void connect({ resume: true, restartCapture: true });
+  }
+
   /**
    * Batch A — open (or RE-open) the gateway socket.
    *
@@ -591,51 +652,122 @@ export function DoctorLiveEncounter({
    * screen already shows a transcript, and we replay that transcript to the
    * gateway so it rebuilds its state instead of starting the consult over.
    */
-  async function connect({ resume }: { resume: boolean }): Promise<void> {
-    // Sprint DV8 hardening — mint a short-lived token so the gateway can
-    // verify we own this session. In dev the gateway runs open, so a failed
-    // mint is non-fatal. Re-minted per attempt: the token is short-lived, so
-    // a reconnect several minutes in would otherwise present an expired one.
-    // DOC-3 — the route also resolves the patient's confirmed active meds
-    // server-side (the browser can't) for the cross-visit interaction check.
+  async function connect({
+    resume,
+    restartCapture = false,
+  }: {
+    resume: boolean;
+    restartCapture?: boolean;
+  }): Promise<void> {
+    if (unmountedRef.current) return;
+    const attempt = ++connectAttemptRef.current;
+    connectAbortRef.current?.abort();
+    const abort = new AbortController();
+    connectAbortRef.current = abort;
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
+    socketReadyRef.current = false;
+    const previousSocket = wsRef.current;
+    wsRef.current = null;
+    previousSocket?.close();
+    const isCurrentAttempt = () => !unmountedRef.current && connectAttemptRef.current === attempt;
+    let token: string;
+    let activeMeds: string[] | undefined;
+    let allergies: string[] | undefined;
+    let initialLease: LiveTokenLease;
+    // Never reuse a previous token/context after a failed authorization request.
     try {
-      const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, { method: 'POST' });
-      if (r.ok) {
-        const body = (await r.json()) as {
-          token?: string;
-          patientContext?: { activeMeds?: string[]; allergies?: string[] };
-        };
-        startArgsRef.current = {
-          ...(body.token ? { token: body.token } : {}),
-          ...(body.patientContext?.activeMeds?.length
-            ? { activeMeds: body.patientContext.activeMeds }
-            : {}),
-          // Batch B — the recorded drug allergies the gateway checks the
-          // prescription against. Absent ⇒ nothing recorded (NOT "none").
-          ...(body.patientContext?.allergies?.length
-            ? { allergies: body.patientContext.allergies }
-            : {}),
-        };
+      const requestedAtMs = Date.now();
+      const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, {
+        method: 'POST',
+        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(20_000)]),
+      });
+      if (!isCurrentAttempt()) return;
+      if (!r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { error?: string };
+        throw new Error(
+          body.error ??
+            'Could not authorize this live consult. Check your sign-in and consent before retrying.',
+        );
       }
-    } catch {
-      /* dev gateway runs open; on a reconnect we fall back to the last args */
+      const body = (await r.json()) as {
+        token?: unknown;
+        expiresInSec?: unknown;
+        patientContext?: { activeMeds?: string[]; allergies?: string[] };
+      };
+      if (!isCurrentAttempt()) return;
+      if (
+        typeof body.token !== 'string' ||
+        !body.token.length ||
+        body.token.length > 8192 ||
+        typeof body.expiresInSec !== 'number' ||
+        !Number.isFinite(body.expiresInSec) ||
+        body.expiresInSec <= 0 ||
+        body.expiresInSec > 86_400 ||
+        requestedAtMs + body.expiresInSec * 1000 <= Date.now()
+      )
+        throw new Error('Could not verify live authorization. Retry before recording.');
+      token = body.token;
+      initialLease = { requestedAtMs, expiresInSec: body.expiresInSec };
+      activeMeds = body.patientContext?.activeMeds;
+      allergies = body.patientContext?.allergies;
+    } catch (reason) {
+      if (!isCurrentAttempt()) return;
+      stopForAuthorization((reason as Error).message, resume);
+      return;
     }
-    const { token, activeMeds, allergies } = startArgsRef.current;
+    if (!isCurrentAttempt()) return;
 
     let ws: WebSocket;
     try {
       ws = new WebSocket(GATEWAY_URL);
     } catch (e) {
-      if (resume) scheduleReconnect();
-      else {
-        setPhase('error');
-        setError((e as Error).message);
-      }
+      stopForAuthorization(`The live connection could not open. ${(e as Error).message}`, resume);
       return;
     }
     wsRef.current = ws;
+    const ownsSocket = () => isCurrentAttempt() && wsRef.current === ws;
+    let listeningHandled = false;
+    // Reconnect may hold microphone audio, but cannot wait indefinitely for
+    // a gateway that never acknowledges the newly authorized session.
+    const readyTimer = setTimeout(
+      () => {
+        if (!ownsSocket()) return;
+        stopForAuthorization(
+          'The live gateway did not confirm capture readiness. Microphone stopped. Check the connection and resume explicitly; captured words remain available.',
+          resume,
+        );
+      },
+      Math.max(
+        0,
+        Math.min(
+          20_000,
+          initialLease.requestedAtMs + initialLease.expiresInSec * 1000 - Date.now(),
+        ),
+      ),
+    );
+    const clearReadyTimer = () => clearTimeout(readyTimer);
+    abort.signal.addEventListener('abort', clearReadyTimer, { once: true });
+    const renewal = new LiveTokenRenewal({
+      sessionId,
+      initialLease,
+      send: (command) => {
+        if (!ownsSocket() || ws.readyState !== WebSocket.OPEN)
+          throw new Error('Live connection closed.');
+        ws.send(JSON.stringify(command));
+      },
+      onFailure: () => {
+        if (!ownsSocket()) return;
+        stopForAuthorization(
+          'Live authorization could not be renewed. Microphone stopped. Captured transcript remains on this page; check access and consent before resuming, or review the captured note.',
+          true,
+        );
+      },
+    });
+    renewalRef.current = renewal;
 
     ws.onopen = () => {
+      if (!ownsSocket()) return;
       // Batch A — on a resume, hand back the transcript we already hold so the
       // gateway's note + reasoning continue from the whole consult, not just
       // what it hears after the drop. (`utterancesRef` is the live mirror.)
@@ -657,39 +789,37 @@ export function DoctorLiveEncounter({
           ...(replay.length > 0 ? { resume: { utterances: replay } } : {}),
         }),
       );
-      if (resume) {
-        // Recovered. Push the buffered audio and drop the warning banner.
-        reconnectAttemptRef.current = 0;
-        setConnState('ok');
-        setError(null);
-        flushAudioQueue(ws);
-        return;
-      }
-      void stream.start().catch((e: Error) => {
-        // DS11.4 — the StartPanel (with its Start button) is the recovery
-        // path: the next tap is the browser gesture that unlocks the mic.
-        setError(`Microphone unavailable: ${e.message}. Tap Start to try again.`);
-        setPhase('idle');
-        intentionalCloseRef.current = true;
-        ws.close();
-      });
     };
     ws.onerror = () => {
+      clearReadyTimer();
+      renewal.dispose();
+      if (!ownsSocket()) return;
       // Batch A — an error is always followed by a close; let onclose decide
       // between "retry" and "give up" so we never contradict ourselves. Only
       // the very first connect reports the dev-gateway hint.
       if (!resume && phaseRef.current === 'connecting') {
-        setPhase('error');
-        setError(
-          `Couldn't reach the live gateway at ${GATEWAY_URL}. Start it with: pnpm --filter @cureocity/live-gateway dev`,
+        stopForAuthorization(
+          'The live gateway could not connect. Microphone off. Check the connection before retrying.',
+          false,
         );
       }
     };
     ws.onclose = () => {
-      if (wsRef.current === ws) wsRef.current = null;
+      clearReadyTimer();
+      renewal.dispose();
+      if (!ownsSocket()) return;
+      wsRef.current = null;
+      socketReadyRef.current = false;
       // Expected closes: we asked for it, or the consult already finished.
       if (intentionalCloseRef.current || finalHandledRef.current) return;
       const p = phaseRef.current;
+      if (p === 'connecting') {
+        stopForAuthorization(
+          'The live connection closed before capture was ready. Microphone off. Retry before continuing.',
+          resume,
+        );
+        return;
+      }
       if (p !== 'listening' && p !== 'finalizing') return;
       // Batch A — an UNEXPECTED drop mid-consult. Previously this line was the
       // whole handler: the UI kept saying REC, the mic kept running, and every
@@ -697,6 +827,7 @@ export function DoctorLiveEncounter({
       scheduleReconnect();
     };
     ws.onmessage = (ev) => {
+      if (!ownsSocket()) return;
       let raw: unknown;
       try {
         raw = JSON.parse(ev.data as string);
@@ -706,11 +837,38 @@ export function DoctorLiveEncounter({
       const parsed = LiveGatewayEventSchema.safeParse(raw);
       if (!parsed.success) return;
       const event = parsed.data;
+      renewal.handleEvent(event);
+      if (!ownsSocket()) return;
       switch (event.type) {
         case 'status':
-          if (event.state === 'listening') setPhase('listening');
-          else if (event.state === 'finalizing') setPhase('finalizing');
-          else if (event.state === 'done') {
+          if (event.state === 'listening' && !listeningHandled && !intentionalCloseRef.current) {
+            listeningHandled = true;
+            clearReadyTimer();
+            renewal.start();
+            if (!ownsSocket()) return;
+            socketReadyRef.current = true;
+            reconnectAttemptRef.current = 0;
+            setConnState('ok');
+            setError(null);
+            flushAudioQueue(ws);
+            phaseRef.current = 'listening';
+            setPhase('listening');
+            if (!resume || restartCapture) {
+              captureBlockedRef.current = false;
+              void streamRef.current.start().catch((e: Error) => {
+                if (!ownsSocket()) return;
+                renewal.dispose();
+                stopForAuthorization(
+                  `Microphone unavailable: ${e.message}. Resume explicitly to try again.`,
+                  true,
+                );
+              });
+            }
+          } else if (event.state === 'finalizing') {
+            renewal.dispose();
+            setPhase('finalizing');
+          } else if (event.state === 'done') {
+            renewal.dispose();
             if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
             setPhase('done');
             // Batch A — `done` WITHOUT a preceding `final` used to be a dead
@@ -723,11 +881,13 @@ export function DoctorLiveEncounter({
               void salvageConsult('empty-final');
             }
           } else if (event.state === 'unauthorized') {
-            intentionalCloseRef.current = true;
-            void stream.stop();
-            setPhase('error');
-            setError('The live session could not be authorised. Reload the page and try again.');
+            renewal.dispose();
+            stopForAuthorization(
+              'The live session could not be authorised. Microphone stopped. Check access and consent before resuming.',
+              resume || listeningHandled,
+            );
           } else if (event.state === 'busy') {
+            renewal.dispose();
             // Sprint DS8 — the gateway node is at its session cap; shed cleanly.
             // Batch A — mid-consult (a node draining for a deploy, say) this is
             // a transient shed, not a dead end: keep the mic and retry, because
@@ -819,6 +979,7 @@ export function DoctorLiveEncounter({
           if (event.command.kind === 'SHOW_DATA') void resolveShowData(event.command.measure);
           break;
         case 'final': {
+          renewal.dispose();
           // Batch A — the consult is closed: a socket close from here on is
           // expected, so the reconnect loop must never arm.
           finalHandledRef.current = true;
@@ -891,6 +1052,7 @@ export function DoctorLiveEncounter({
    * costs latency rather than the words spoken during it.
    */
   function scheduleReconnect(): void {
+    if (unmountedRef.current || intentionalCloseRef.current || finalHandledRef.current) return;
     if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     const attempt = reconnectAttemptRef.current;
     const delay = RECONNECT_DELAYS_MS[attempt];
@@ -919,6 +1081,16 @@ export function DoctorLiveEncounter({
    * bad; losing all of it silently is what this whole path exists to prevent.
    */
   async function salvageConsult(reason: 'dropped' | 'empty-final'): Promise<void> {
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
+    intentionalCloseRef.current = true;
+    captureBlockedRef.current = true;
+    socketReadyRef.current = false;
+    ++connectAttemptRef.current;
+    connectAbortRef.current?.abort();
+    const socket = wsRef.current;
+    wsRef.current = null;
+    socket?.close();
     if (reason === 'dropped') setConnState('lost');
     void stream.stop();
     const salvaged: MedicalEncounterNoteV1 = {
@@ -951,6 +1123,9 @@ export function DoctorLiveEncounter({
   }
 
   function stop(): void {
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
+    connectAbortRef.current?.abort();
     void stream.stop();
     // Batch A — a manual End is an intentional close: don't let the socket's
     // eventual `close` kick off the reconnect loop.
@@ -966,6 +1141,8 @@ export function DoctorLiveEncounter({
       flushAudioQueue(ws);
       ws.send(JSON.stringify({ type: 'stop' }));
     } else {
+      ++connectAttemptRef.current;
+      wsRef.current = null;
       // Batch A — the socket is already gone (or still mid-reconnect), so no
       // `final` is ever coming. Close the in-flight attempt first — otherwise
       // its onopen still fires, starts a gateway session nobody will ever
@@ -1107,6 +1284,8 @@ export function DoctorLiveEncounter({
                 {startingNew ? 'Starting…' : 'New consult'}
               </Button>
             ) : null
+          ) : phase === 'authorization-paused' ? (
+            <Button onClick={resumeAuthorizedCapture}>Resume live consult</Button>
           ) : live ? (
             <Button onClick={attemptEnd} className="bg-[var(--color-warn)] hover:bg-[#a25b30]">
               End &amp; review note
@@ -1139,7 +1318,16 @@ export function DoctorLiveEncounter({
 
       {error && (
         <Card className="border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-5 text-sm text-[var(--color-warn)]">
-          {error}
+          <p>{error}</p>
+          {phase === 'authorization-paused' && (
+            <Button
+              className="mt-3"
+              variant="secondary"
+              onClick={() => void salvageConsult('dropped')}
+            >
+              Review captured note
+            </Button>
+          )}
         </Card>
       )}
 

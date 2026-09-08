@@ -38,6 +38,7 @@ import {
   type Utterance,
 } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
+import { LiveTokenRenewal, type LiveTokenLease } from '@/lib/audio/live-token-renewal';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import {
   browserRecoveryStorage,
@@ -355,6 +356,7 @@ export function TherapistLiveSession({
   }, [copilot, seedReasoning, resolvedIds]);
 
   const wsRef = useRef<WebSocket | null>(null);
+  const renewalRef = useRef<LiveTokenRenewal | null>(null);
   const meterRef = useRef<MeterSummary | null>(null);
   const meteredRef = useRef(false);
   const finalHandledRef = useRef(false);
@@ -471,6 +473,8 @@ export function TherapistLiveSession({
       autoStartedRef.current = false;
       ++liveAttemptRef.current;
       attemptAbortRef.current?.abort();
+      renewalRef.current?.dispose();
+      renewalRef.current = null;
       const socket = wsRef.current;
       wsRef.current = null;
       socket?.close();
@@ -626,6 +630,8 @@ export function TherapistLiveSession({
     ++liveAttemptRef.current;
     attemptAbortRef.current?.abort();
     startingRef.current = false;
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
     try {
       await streamRef.current.stop();
       // Recovery uses captured words; it never reacquires a microphone or fabricates a note.
@@ -690,6 +696,8 @@ export function TherapistLiveSession({
     attemptAbortRef.current = abort;
     const isCurrentAttempt = () => !unmountedRef.current && liveAttemptRef.current === attempt;
     const previousSocket = wsRef.current;
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
     wsRef.current = null;
     previousSocket?.close();
     audioDeliveryRef.current = 'off';
@@ -730,15 +738,31 @@ export function TherapistLiveSession({
       return;
     }
 
-    let token: string | undefined;
+    let token: string;
+    let initialLease: LiveTokenLease;
     try {
+      const requestedAtMs = Date.now();
       const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, {
         method: 'POST',
         signal: AbortSignal.any([AbortSignal.timeout(20_000), abort.signal]),
       });
       if (!isCurrentAttempt()) return;
       if (r.ok) {
-        token = ((await r.json()) as { token?: string }).token;
+        const body = (await r.json()) as { token?: unknown; expiresInSec?: unknown };
+        if (!isCurrentAttempt()) return;
+        if (
+          typeof body.token !== 'string' ||
+          !body.token.length ||
+          body.token.length > 8192 ||
+          typeof body.expiresInSec !== 'number' ||
+          !Number.isFinite(body.expiresInSec) ||
+          body.expiresInSec <= 0 ||
+          body.expiresInSec > 86_400 ||
+          requestedAtMs + body.expiresInSec * 1000 <= Date.now()
+        )
+          throw new Error('Could not verify live authorization. Retry before recording.');
+        token = body.token;
+        initialLease = { requestedAtMs, expiresInSec: body.expiresInSec };
       } else if (r.status === 409) {
         // The one refusal the therapist can actually fix here: the client's
         // consents on record don't cover the live scribe (or were withdrawn).
@@ -782,6 +806,46 @@ export function TherapistLiveSession({
     const assertOwnsSocket = () => {
       if (!ownsSocket()) throw new Error('Live capture start was cancelled.');
     };
+    const renewal = new LiveTokenRenewal({
+      sessionId,
+      initialLease,
+      send: (command) => {
+        assertOwnsSocket();
+        if (ws.readyState !== WebSocket.OPEN) throw new Error('Live connection closed.');
+        ws.send(JSON.stringify(command));
+      },
+      onFailure: () => {
+        if (!ownsSocket()) return;
+        audioDeliveryRef.current = 'off';
+        ++liveAttemptRef.current;
+        abort.abort();
+        wsRef.current = null;
+        startingRef.current = false;
+        pauseReplyRef.current?.reject(new Error('Live authorization could not be renewed.'));
+        void streamRef.current.stop().catch(() => {});
+        ws.close();
+        if (phaseRef.current === 'paused') {
+          setPauseWarning(
+            'Microphone off. Live authorization could not be renewed. Resume explicitly to recheck access and consent. Captured transcript remains available.',
+          );
+        } else if (['pausing', 'pause-unconfirmed'].includes(phaseRef.current)) {
+          phaseRef.current = 'pause-unconfirmed';
+          setPhase('pause-unconfirmed');
+          setPauseWarning(
+            'Microphone off. Live authorization could not be renewed before pause was confirmed. Review captured words before continuing.',
+          );
+          setConnectionLost(true);
+        } else {
+          phaseRef.current = 'error';
+          setPhase('error');
+          setConnectionLost(true);
+          setError(
+            'Live authorization could not be renewed. Microphone stopped. Reconnect explicitly after checking access and consent, or recover the captured transcript below.',
+          );
+        }
+      },
+    });
+    renewalRef.current = renewal;
 
     ws.onopen = () => {
       if (!ownsSocket()) return;
@@ -866,6 +930,7 @@ export function TherapistLiveSession({
     };
 
     ws.onerror = () => {
+      renewal.dispose();
       if (!ownsSocket()) return;
       audioDeliveryRef.current = 'off';
       pauseReplyRef.current?.reject(
@@ -888,6 +953,7 @@ export function TherapistLiveSession({
     // were mid-session and no final note arrived, stop the mic and surface a
     // recovery card (reconnect, or continue the classic recorded way).
     ws.onclose = () => {
+      renewal.dispose();
       if (!ownsSocket()) return;
       audioDeliveryRef.current = 'off';
       pauseReplyRef.current?.reject(
@@ -933,9 +999,13 @@ export function TherapistLiveSession({
       const parsed = LiveGatewayEventSchema.safeParse(raw);
       if (!parsed.success) return;
       const event = parsed.data;
+      renewal.handleEvent(event);
+      if (!ownsSocket()) return;
       switch (event.type) {
         case 'status':
           if (event.state === 'listening' && phaseRef.current === 'connecting') {
+            renewal.start();
+            if (!ownsSocket()) return;
             for (const pcm of startupAudioRef.current) ws.send(pcm);
             startupAudioRef.current = [];
             startupAudioBytesRef.current = 0;
@@ -943,6 +1013,7 @@ export function TherapistLiveSession({
             phaseRef.current = 'listening';
             setPhase('listening');
           } else if (event.state === 'finalizing') {
+            renewal.dispose();
             if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) {
               setPauseWarning(
                 'Microphone off. This gateway started closing while paused; it may need the pause-support update. No note will be saved automatically.',
@@ -952,6 +1023,7 @@ export function TherapistLiveSession({
             setPhase('finalizing');
             setFinalStage('generating-note');
           } else if (event.state === 'done') {
+            renewal.dispose();
             if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) break;
             setPhase('done');
             // The gateway always sends `done` after a therapyFinal. If we get
@@ -959,6 +1031,7 @@ export function TherapistLiveSession({
             // surface a recovery panel instead of hanging on "Finishing…".
             if (!finalHandledRef.current) setNoteFailed(true);
           } else if (event.state === 'unauthorized' || event.state === 'busy') {
+            renewal.dispose();
             audioDeliveryRef.current = 'off';
             pauseReplyRef.current?.reject(
               new Error('The live connection is no longer authorized.'),
@@ -1006,6 +1079,7 @@ export function TherapistLiveSession({
           meterRef.current = event.summary;
           break;
         case 'therapyFinal':
+          renewal.dispose();
           if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) {
             finalPayloadRef.current = {
               kind: event.kind,
@@ -1048,6 +1122,8 @@ export function TherapistLiveSession({
       return;
     setEndConfirmOpen(false);
     setFinalStage('stopping');
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
     setPhase('finalizing');
     phaseRef.current = 'finalizing';
     try {

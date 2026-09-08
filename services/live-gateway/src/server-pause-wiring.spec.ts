@@ -59,6 +59,24 @@ const signals = new Map(
   (['SIGTERM', 'SIGINT'] as const).map((signal) => [signal, process.listeners(signal)]),
 );
 const authorized = () => new Response(JSON.stringify({ authorized: true, capabilities }));
+function token(exp: number, overrides: object = {}) {
+  const body = Buffer.from(
+    JSON.stringify({
+      sessionId: 'fictional-session',
+      psychologistId: 'fictional-owner',
+      vertical: 'THERAPIST',
+      capabilities,
+      exp,
+      ...overrides,
+    }),
+  ).toString('base64url');
+  return `${body}.${createHmac('sha256', secret).update(body).digest('hex')}`;
+}
+function audioFrame() {
+  const audio = Buffer.alloc(9_600);
+  for (let i = 0; i < audio.length; i += 2) audio.writeInt16LE(8000, i);
+  return audio;
+}
 
 beforeAll(async () => {
   vi.stubEnv('LIVE_GATEWAY_SECRET', secret);
@@ -71,6 +89,10 @@ beforeAll(async () => {
 });
 afterEach(() => {
   sockets.splice(0).forEach((socket) => socket.close());
+  if (vi.isFakeTimers()) {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
   verifier.mockReset();
   vi.restoreAllMocks();
 });
@@ -89,18 +111,13 @@ async function connect() {
     headers: {},
     socket: { remoteAddress: '127.0.0.1' },
   });
-  const exp = Math.floor(Date.now() / 1000) + 600;
-  const body = Buffer.from(
-    JSON.stringify({
-      sessionId: 'fictional-session',
-      psychologistId: 'fictional-owner',
-      vertical: 'THERAPIST',
-      capabilities,
-      exp,
-    }),
-  ).toString('base64url');
-  const token = `${body}.${createHmac('sha256', secret).update(body).digest('hex')}`;
-  socket.command({ type: 'start', sessionId: 'fictional-session', token, vertical: 'THERAPIST' });
+  const exp = Math.floor(Date.now() / 1000) + 300;
+  socket.command({
+    type: 'start',
+    sessionId: 'fictional-session',
+    token: token(exp),
+    vertical: 'THERAPIST',
+  });
   await vi.waitFor(() =>
     expect(socket.events).toContainEqual({ type: 'status', state: 'listening' }),
   );
@@ -154,5 +171,206 @@ describe('actual gateway pause command/authorization wiring', () => {
     socket.command({ type: 'pause', requestId });
     await vi.waitFor(() => expect(socket.readyState).toBe(3));
     expect(socket.events.some((e) => e.type === 'capturePaused')).toBe(false);
+  });
+});
+
+describe('actual gateway in-place token renewal wiring', () => {
+  it('retains queued audio and elapsed time beyond the original expiry without starting a second session', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(2_000_000_000_000);
+    const { socket, exp } = await connect();
+    socket.emit('message', audioFrame(), true);
+    now.mockReturnValue((exp - 60) * 1000);
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 240) });
+    await vi.waitFor(() =>
+      expect(socket.events).toContainEqual({
+        type: 'tokenRenewed',
+        requestId,
+        expiresAt: exp + 240,
+      }),
+    );
+    now.mockReturnValue((exp + 50) * 1000);
+    socket.emit('message', audioFrame(), true);
+    socket.command({ type: 'pause', requestId });
+    await vi.waitFor(() =>
+      expect(socket.events).toContainEqual({ type: 'capturePaused', requestId }),
+    );
+    const utterances = socket.events.flatMap((event) =>
+      event.type === 'utterance' ? [event.utterance] : [],
+    );
+    expect(Math.max(...utterances.map((utterance) => utterance.tEndMs))).toBe(600);
+    expect(
+      socket.events.filter((event) => event.type === 'status' && event.state === 'listening'),
+    ).toHaveLength(1);
+    expect(socket.events).toContainEqual(
+      expect.objectContaining({
+        type: 'meter',
+        summary: expect.objectContaining({ elapsedMs: 350_000 }),
+      }),
+    );
+    expect(socket.readyState).toBe(1);
+  });
+
+  it('keeps pause acknowledged and microphone-independent capture paused through renewal', async () => {
+    const { socket, exp } = await connect();
+    socket.emit('message', audioFrame(), true);
+    socket.command({ type: 'pause', requestId });
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 240) });
+    await vi.waitFor(() =>
+      expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(true),
+    );
+    await vi.waitFor(() =>
+      expect(socket.events).toContainEqual({ type: 'capturePaused', requestId }),
+    );
+    const pauseIndex = socket.events.findIndex((event) => event.type === 'capturePaused');
+    const wordIndex = socket.events.findIndex((event) => event.type === 'utterance');
+    // Renewal is auth-only. Its ACK need not wait behind clinical output, but
+    // capturePaused must still come after every acknowledged captured word.
+    expect(wordIndex).toBeGreaterThan(-1);
+    expect(pauseIndex).toBeGreaterThan(wordIndex);
+    const priorWords = socket.events.filter((event) => event.type === 'utterance');
+    socket.emit('message', audioFrame(), true);
+    socket.command({ type: 'stop' });
+    await vi.waitFor(() => expect(socket.events).toContainEqual({ type: 'status', state: 'done' }));
+    expect(socket.events.filter((event) => event.type === 'utterance')).toEqual(priorWords);
+  });
+
+  it('gates audio and pause behind the in-flight renewal verifier without changing their order', async () => {
+    const { socket, exp } = await connect();
+    let approve!: (response: Response) => void;
+    verifier.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as { tokenExpiresAt: number };
+      if (body.tokenExpiresAt === exp + 240)
+        return new Promise<Response>((resolve) => (approve = resolve));
+      return authorized();
+    });
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 240) });
+    await vi.waitFor(() => expect(approve).toBeTypeOf('function'));
+    socket.emit('message', audioFrame(), true);
+    socket.command({ type: 'pause', requestId });
+    expect(socket.events.some((event) => event.type === 'capturePaused')).toBe(false);
+    verifier.mockImplementation(async () => authorized());
+    approve(authorized());
+    await vi.waitFor(() =>
+      expect(socket.events).toContainEqual({ type: 'capturePaused', requestId }),
+    );
+    const renewalIndex = socket.events.findIndex((event) => event.type === 'tokenRenewed');
+    const wordIndex = socket.events.findIndex((event) => event.type === 'utterance');
+    const pauseIndex = socket.events.findIndex((event) => event.type === 'capturePaused');
+    expect(renewalIndex).toBeGreaterThan(-1);
+    expect(wordIndex).toBeGreaterThan(renewalIndex);
+    expect(pauseIndex).toBeGreaterThan(wordIndex);
+  });
+
+  it('does not acknowledge pending renewal after stop intent and still flushes the ordered audio tail', async () => {
+    const { socket, exp } = await connect();
+    let approve!: (response: Response) => void;
+    verifier.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as { tokenExpiresAt: number };
+      if (body.tokenExpiresAt === exp + 240)
+        return new Promise<Response>((resolve) => (approve = resolve));
+      return authorized();
+    });
+    socket.emit('message', audioFrame(), true);
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 240) });
+    await vi.waitFor(() => expect(approve).toBeTypeOf('function'));
+    socket.emit('message', audioFrame(), true);
+    socket.command({ type: 'stop' });
+    approve(authorized());
+    await vi.waitFor(() => expect(socket.events).toContainEqual({ type: 'status', state: 'done' }));
+    expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
+    expect(
+      Math.max(
+        ...socket.events.flatMap((event) =>
+          event.type === 'utterance' ? [event.utterance.tEndMs] : [],
+        ),
+      ),
+    ).toBe(600);
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 480) });
+    await vi.waitFor(() => expect(verifier).toHaveBeenCalled());
+    expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
+  });
+
+  it.each([
+    ['identity mismatch', (exp: number) => token(exp + 240, { psychologistId: 'other-owner' })],
+    ['same-expiry replay', (exp: number) => token(exp)],
+    ['invalid signature', () => 'invalid'],
+  ])('closes the actual socket on %s renewal', async (_label, makeToken) => {
+    const { socket, exp } = await connect();
+    socket.command({ type: 'renewToken', requestId, token: makeToken(exp) });
+    await vi.waitFor(() => expect(socket.readyState).toBe(3));
+    expect(socket.events).toContainEqual({ type: 'status', state: 'unauthorized' });
+    expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
+  });
+
+  it('fails closed for malformed renewal instead of leaving its sender waiting for an acknowledgement', async () => {
+    const { socket, exp } = await connect();
+    socket.command({ type: 'renewToken', requestId: 'not-a-uuid', token: token(exp + 240) });
+    expect(socket.readyState).toBe(3);
+    expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
+  });
+
+  it('rejects revoked current authority even when the renewed token is correctly signed', async () => {
+    const { socket, exp } = await connect();
+    verifier.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as { tokenExpiresAt: number };
+      return body.tokenExpiresAt === exp + 240 ? new Response('{}', { status: 403 }) : authorized();
+    });
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 240) });
+    await vi.waitFor(() => expect(socket.readyState).toBe(3));
+    expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
+  });
+
+  it('cannot send a late acknowledgement after disposal', async () => {
+    const { socket, exp } = await connect();
+    let approve!: (response: Response) => void;
+    verifier.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as { tokenExpiresAt: number };
+      return body.tokenExpiresAt === exp + 240
+        ? new Promise<Response>((resolve) => (approve = resolve))
+        : authorized();
+    });
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 240) });
+    await vi.waitFor(() => expect(approve).toBeTypeOf('function'));
+    socket.close();
+    approve(authorized());
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
+  });
+
+  // SIGTERM is terminal for this imported server; keep this fixture last.
+  it('drain prevents pending renewal without finalizing an intentionally paused session', async () => {
+    vi.useFakeTimers();
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const { socket, exp } = await connect();
+    socket.command({ type: 'pause', requestId });
+    await vi.waitFor(() =>
+      expect(socket.events).toContainEqual({ type: 'capturePaused', requestId }),
+    );
+    let approve!: (response: Response) => void;
+    verifier.mockImplementation(async (_url, options) => {
+      const body = JSON.parse(String(options?.body)) as { tokenExpiresAt: number };
+      return body.tokenExpiresAt === exp + 240
+        ? new Promise<Response>((resolve) => (approve = resolve))
+        : authorized();
+    });
+    socket.command({ type: 'renewToken', requestId, token: token(exp + 240) });
+    await vi.waitFor(() => expect(approve).toBeTypeOf('function'));
+    const drain = process
+      .listeners('SIGTERM')
+      .find((listener) => !signals.get('SIGTERM')?.includes(listener));
+    expect(drain).toBeDefined();
+    drain?.('SIGTERM');
+    approve(authorized());
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(exit).toHaveBeenCalledExactlyOnceWith(0);
+    expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
+    expect(
+      socket.events.some(
+        (event) =>
+          event.type === 'therapyFinal' ||
+          (event.type === 'status' && event.state === 'finalizing'),
+      ),
+    ).toBe(false);
   });
 });

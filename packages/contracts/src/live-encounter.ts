@@ -247,6 +247,13 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
       .optional(),
   }),
   z.object({ type: z.literal('stop') }),
+  // Replace only the current socket's short-lived authorization, never its
+  // session, capture state, transcript, or elapsed time.
+  z.object({
+    type: z.literal('renewToken'),
+    requestId: z.string().uuid(),
+    token: z.string().min(1).max(8192),
+  }),
   // Pause is not stop/finalize. The gateway acknowledges only after the
   // ordered audio preceding this command has been transcribed.
   z.object({ type: z.literal('pause'), requestId: z.string().uuid() }),
@@ -276,6 +283,11 @@ export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 /// recognised voice commands.
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
+  z.object({
+    type: z.literal('tokenRenewed'),
+    requestId: z.string().uuid(),
+    expiresAt: z.number().int().positive().safe(),
+  }),
   z.object({ type: z.literal('capturePaused'), requestId: z.string().uuid() }),
   z.object({ type: z.literal('capturePauseFailed'), requestId: z.string().uuid() }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),

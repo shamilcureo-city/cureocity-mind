@@ -63,12 +63,12 @@ Why each one matters:
 | `--cpu-always-allocated` | off     | The 1s `pump()` tick is not request-driven work; throttled CPU stalls transcription between frames.                           |
 
 The service handles `SIGTERM` by **draining**: it stops accepting new
-consults and finalizes every live one (so each browser receives its `final`
-and persists a note) before exiting. Give it room —
-`LIVE_GATEWAY_DRAIN_TIMEOUT_MS` (default 25s) should be ≤ the revision's
-termination grace period. The browser also reconnects and **replays its
-transcript** (`start.resume`), so a consult that can't finish during the
-drain resumes on the new instance instead of starting over.
+consults and attempts to finalize active ones before exiting. Intentional
+pauses are not automatically finalized. `LIVE_GATEWAY_DRAIN_TIMEOUT_MS`
+(default 25s) is an application budget, not an extension of the platform's
+shutdown grace; the request `--timeout` does not change that grace either.
+Use a quiet deployment window. Reconnect can replay acknowledged transcript
+(`start.resume`), but cannot guarantee recovery of unacknowledged audio.
 
 Authenticated sessions also require
 `LIVE_AUTHZ_REVALIDATE_URL=https://<app-host>/api/v1/internal/live-authority`.
@@ -88,10 +88,33 @@ same secret on Vercel (`apps/web`) and Cloud Run (`live-gateway`), never in a
 Shared, validated schemas live in `@cureocity/contracts`
 (`live-encounter.ts`):
 
-- Client → gateway: a JSON `LiveGatewayCommand` (`start` / `stop`), plus
+- Client → gateway: a JSON `LiveGatewayCommand` (`start` / `stop` / `pause` /
+  `renewToken`), plus
   **binary** messages carrying streamed PCM audio frames while listening.
 - Gateway → client: `LiveGatewayEvent` (`status` / `transcript` / `note`
   / `gap` / `final`).
+
+### Long sessions and short-lived authorization
+
+Mind and Scribe retain five-minute signed tokens. Each connected client requests
+a fresh token before expiry and sends `renewToken` with a UUID request ID. The
+gateway checks signature, unchanged session/practitioner/vertical, a later expiry,
+and current server-side consent/capabilities before replying `tokenRenewed` with
+the same ID and accepted expiry. This changes only the authorization deadline:
+the existing audio buffer, transcript, elapsed time, and billing state remain.
+
+The old deadline stays enforced while renewal is pending. A failed mint, missing
+acknowledgement, revoked authority, or expired lease stops capture and requires
+explicit recovery. Late replies cannot revive stopped or replaced sockets.
+Renewal never starts a paused microphone. Stop and shutdown prevent further
+renewal while allowing still-authorized finalization work.
+
+Deploy the matching gateway and web clients in a quiet window. Stage the new
+gateway revision without traffic, verify its image digest and readiness, and
+coordinate the traffic switch with the web release. An older gateway cannot
+acknowledge renewal, and an older client cannot request it. Health checks alone
+do not prove renewal or Pause/Resume behavior; validate with a fictional session
+longer than five minutes before using real patient sessions.
 
 ## What's next (latency)
 
