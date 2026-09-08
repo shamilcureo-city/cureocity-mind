@@ -59,6 +59,33 @@ unsigned and unshared unless separately authorized. Correlate control timing
 by request ID without collecting tokens, audio, or transcript in logs. Local
 regressions and health endpoints do not replace this device-level check.
 
+### Mind transcription latency check
+
+The local fast-path policy is Mind-only: 2 s minimum / 4 s maximum windows,
+250 ms pump, and zero thinking budget on explicitly marked live windows for
+the exact `gemini-2.5-flash` backend. Existing environment window overrides
+take precedence. Doctor/Scribe, batch uploads, final-tail transcription and
+clinical note/reasoning policies are unchanged. There is no schema migration,
+new provider or region change. Vercel deployment alone does not update this
+standalone gateway; inspect the actual deployed revision and environment.
+
+After an authorized gateway rollout, measure **speech end to visible words**
+separately from speech start to first words. Use known fictional short phrases,
+continuous speech and code-mixed Malayalam/English, including after five minutes
+and after explicit Pause/Resume. Record the speech-end observation and browser
+arrival, and compare multiple samples rather than timing one sentence. Keep
+raw audio, transcripts, tokens and identifiers out of operational timing logs.
+
+Check that latency does not grow over a long session, no phrase disappears or
+duplicates, silence does not produce invented words, and cost remains acceptable.
+The gateway's model-call meter excludes outbound authorization/browser delivery;
+its speech-to-transcript estimate is not a direct speech-end measurement. Mock
+PCM tests prove local window/pump timing and byte ownership, not model speed,
+accuracy, or production p95. If either quality or backlog regresses, stop the
+rollout and use the approved rollback procedure, not larger retry/concurrency
+budgets or weaker authorization. Known provider `ERROR`/empty-output handling
+still needs separate hardening; this tuning does not certify lossless recovery.
+
 ## What it does
 
 - Accepts a browser WebSocket, receives streamed PCM audio, runs the real

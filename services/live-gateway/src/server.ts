@@ -425,7 +425,7 @@ wss.on('connection', (ws, req) => {
             cmd.specialty ?? null,
             backends,
             forward,
-            windowOptionsFromEnv(), // Sprint 74 — latency-tuned, env-overridable
+            windowOptionsFromEnv(process.env, vertical), // Mind-only defaults; explicit env wins.
             scopePatientContext(cmd.context, capabilities),
             undefined, // noteRefreshMs — the constructor picks the per-vertical default
             vertical,

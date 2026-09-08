@@ -3,6 +3,7 @@ import {
   bytesToMs,
   classifyFrames,
   DEFAULT_WINDOW_OPTIONS,
+  MIND_WINDOW_OPTIONS,
   isSilent,
   msToBytes,
   nextWindowBoundary,
@@ -224,6 +225,44 @@ describe('nextWindowBoundary', () => {
 });
 
 describe('windowOptionsFromEnv', () => {
+  it('selects a Mind-only shorter profile without changing noise gates or Doctor defaults', () => {
+    expect(windowOptionsFromEnv({}, 'THERAPIST')).toEqual(MIND_WINDOW_OPTIONS);
+    expect(MIND_WINDOW_OPTIONS).toEqual({
+      ...DEFAULT_WINDOW_OPTIONS,
+      minWindowMs: 2_000,
+      maxWindowMs: 4_000,
+    });
+    expect(windowOptionsFromEnv({}, 'DOCTOR')).toEqual(DEFAULT_WINDOW_OPTIONS);
+    expect(
+      nextWindowBoundary(
+        Buffer.concat([pcm(1_600, SPEECH), pcm(400, SILENCE)]),
+        MIND_WINDOW_OPTIONS,
+      ),
+    ).toEqual({ endByte: msToBytes(2_000), durationMs: 2_000, reason: 'silence' });
+    expect(nextWindowBoundary(pcm(4_000, SPEECH), MIND_WINDOW_OPTIONS)).toEqual({
+      endByte: msToBytes(4_000),
+      durationMs: 4_000,
+      reason: 'max',
+    });
+  });
+
+  it('preserves explicit env overrides and validation for Mind', () => {
+    const env = {
+      LIVE_MIN_WINDOW_MS: '3500',
+      LIVE_MAX_WINDOW_MS: '9000',
+      LIVE_SILENCE_MS: '800',
+      LIVE_VAD_THRESHOLD: '0.025',
+      LIVE_MIN_SPEECH_FRACTION: '0.15',
+    };
+    expect(windowOptionsFromEnv(env, 'THERAPIST')).toEqual(windowOptionsFromEnv(env, 'DOCTOR'));
+    expect(windowOptionsFromEnv({ LIVE_MIN_WINDOW_MS: '6000' }, 'THERAPIST').maxWindowMs).toBe(
+      7_000,
+    );
+    expect(
+      windowOptionsFromEnv({ LIVE_MIN_WINDOW_MS: 'bad', LIVE_MAX_WINDOW_MS: '2' }, 'THERAPIST'),
+    ).toEqual(MIND_WINDOW_OPTIONS);
+  });
+
   it('returns the latency-tuned defaults with no env set', () => {
     const o = windowOptionsFromEnv({});
     expect(o).toEqual(DEFAULT_WINDOW_OPTIONS);

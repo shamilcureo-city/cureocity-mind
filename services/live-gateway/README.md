@@ -138,8 +138,29 @@ longer than five minutes before using real patient sessions.
 
 ## What's next (latency)
 
-The clinical substance is real today; the remaining optimisation is
-true token-streaming ASR (so Rail 1 updates word-by-word instead of on
-the rolling-window cadence) and persisting the final note through the
-existing medical-note route. Confirm the streaming-ASR engine +
-asia-south1 residency first (see `docs/DOCTOR_VERTICAL.md` §4.3, §14).
+Mind's windowed live transcription uses a 2 s minimum, 4 s maximum and
+250 ms pump cadence. Doctor/Scribe defaults stay at 2.5 s, 6 s and 1 s.
+Both retain the 400 ms confirmed-silence requirement, noise gates, ordered
+transcription and authorization checks. Valid explicit `LIVE_MIN_WINDOW_MS`
+and `LIVE_MAX_WINDOW_MS` settings still override the per-vertical defaults.
+
+Mind's rolling windows explicitly request `latencyMode: 'realtime'`. For the
+exact `gemini-2.5-flash` model, the backend uses `thinkingBudget: 0`; other
+models, batch/upload callers, Doctor/Scribe and final-note reasoning retain
+their existing policies. The final-tail transcription is also unchanged.
+The transcript prompt, full output limit, validation and region are unchanged.
+Google documents zero thinking budget as the lower-latency option for this
+model: [Gemini thinking controls](https://ai.google.dev/gemini-api/docs/generate-content/thinking).
+
+These numbers bound buffering and scheduling, not speech-to-screen latency.
+Seven seconds **after speech ends** can include model time, existing window
+backlog, outbound authority checks, transport and rendering. Smaller windows
+also increase call frequency (up to 50% more calls during continuous speech
+than 6 s windows). A model slower than the window cadence can still fall
+behind; validate throughput, cost and multilingual accuracy before broad use.
+
+True word-by-word interim transcription needs a streaming ASR path. The
+optional streaming display rail remains disabled by default; do not enable
+it or move raw audio outside India as part of a latency tweak. Confirm the
+engine, supported region, consent and data-handling requirements first
+(see `docs/DOCTOR_VERTICAL.md` §4.3, §14).
