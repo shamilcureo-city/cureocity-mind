@@ -102,6 +102,16 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           systemInstruction: systemPrompt,
           responseMimeType: 'application/json',
           temperature: 0.1,
+          // The windowed Mind display already waits for audio plus the full
+          // structured response. Gemini 2.5 Flash otherwise uses automatic
+          // thinking before returning words. Disable only that extra work for
+          // explicitly opted-in Mind live windows; do not change batch, doctor,
+          // other models, prompts, or the downstream clinical reasoning pass.
+          ...(input.latencyMode === 'realtime' &&
+            input.vertical === 'THERAPIST' &&
+            this.modelName === 'gemini-2.5-flash' && {
+              thinkingConfig: { thinkingBudget: 0 },
+            }),
           // A full transcript + per-utterance diarization + affect JSON
           // for a long session easily exceeds 8192 output tokens; hitting
           // the ceiling truncates the JSON → parse throws → empty

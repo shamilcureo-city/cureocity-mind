@@ -119,6 +119,12 @@ export interface Pass1Input {
    * Defaults to THERAPIST so existing callers are unchanged.
    */
   vertical?: 'THERAPIST' | 'DOCTOR';
+  /**
+   * Explicit opt-in for short, latency-sensitive Mind live windows. Batch
+   * transcription and doctor callers omit this and keep their model defaults.
+   * Backends must ignore it for models that do not support the fast policy.
+   */
+  latencyMode?: 'realtime';
 }
 
 // ============================================================================

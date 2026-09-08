@@ -143,6 +143,29 @@ async function connect() {
 }
 
 describe('actual gateway pause command/authorization wiring', () => {
+  it('uses the verified Mind vertical for the shorter window and realtime transcription hint', async () => {
+    vi.useFakeTimers();
+    const pass1 = vi.spyOn(MockGeminiPass1Backend.prototype, 'run');
+    const { socket } = await connect();
+    const continuous = Buffer.concat(Array.from({ length: 14 }, audioFrame)).subarray(
+      0,
+      4_000 * 32,
+    );
+    socket.emit('message', continuous, true);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(pass1).toHaveBeenCalledOnce();
+    expect(pass1.mock.calls[0][0]).toMatchObject({
+      vertical: 'THERAPIST',
+      durationMs: 4_000,
+      latencyMode: 'realtime',
+    });
+    socket.command({ type: 'pause', requestId });
+    await vi.waitFor(() =>
+      expect(socket.events).toContainEqual({ type: 'capturePaused', requestId }),
+    );
+    expect(pass1).toHaveBeenCalledOnce();
+  });
+
   it('retains no Pause telemetry for pre-start traffic', () => {
     const socket = new Socket();
     sockets.push(socket);

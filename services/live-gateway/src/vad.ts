@@ -61,6 +61,14 @@ export const DEFAULT_WINDOW_OPTIONS: WindowOptions = {
   minSpeechFraction: 0.05,
 };
 
+/** Mind's live-only profile. Keep the doctor's shipped defaults unchanged and
+ * retain the same silence/noise gates; shorter windows still need quality validation. */
+export const MIND_WINDOW_OPTIONS: WindowOptions = {
+  ...DEFAULT_WINDOW_OPTIONS,
+  minWindowMs: 2_000,
+  maxWindowMs: 4_000,
+};
+
 /**
  * Window options with env overrides (LIVE_MIN_WINDOW_MS, LIVE_MAX_WINDOW_MS,
  * LIVE_SILENCE_MS, LIVE_VAD_THRESHOLD, LIVE_MIN_SPEECH_FRACTION). Each value
@@ -75,7 +83,9 @@ export const DEFAULT_WINDOW_OPTIONS: WindowOptions = {
  */
 export function windowOptionsFromEnv(
   env: Record<string, string | undefined> = process.env,
+  vertical: 'DOCTOR' | 'THERAPIST' = 'DOCTOR',
 ): WindowOptions {
+  const defaults = vertical === 'THERAPIST' ? MIND_WINDOW_OPTIONS : DEFAULT_WINDOW_OPTIONS;
   const readMs = (key: string, fallback: number, lo: number, hi: number): number => {
     const raw = env[key];
     if (!raw) return fallback;
@@ -90,26 +100,21 @@ export function windowOptionsFromEnv(
     if (!Number.isFinite(n) || n < lo || n > hi) return fallback;
     return n;
   };
-  const minWindowMs = readMs(
-    'LIVE_MIN_WINDOW_MS',
-    DEFAULT_WINDOW_OPTIONS.minWindowMs,
-    2_000,
-    60_000,
-  );
+  const minWindowMs = readMs('LIVE_MIN_WINDOW_MS', defaults.minWindowMs, 2_000, 60_000);
   const maxWindowMs = Math.max(
     minWindowMs + 1_000,
-    readMs('LIVE_MAX_WINDOW_MS', DEFAULT_WINDOW_OPTIONS.maxWindowMs, 3_000, 120_000),
+    readMs('LIVE_MAX_WINDOW_MS', defaults.maxWindowMs, 3_000, 120_000),
   );
-  const silenceMs = readMs('LIVE_SILENCE_MS', DEFAULT_WINDOW_OPTIONS.silenceMs, 200, 3_000);
-  const threshold = readFloat('LIVE_VAD_THRESHOLD', DEFAULT_WINDOW_OPTIONS.threshold, 0.005, 0.2);
+  const silenceMs = readMs('LIVE_SILENCE_MS', defaults.silenceMs, 200, 3_000);
+  const threshold = readFloat('LIVE_VAD_THRESHOLD', defaults.threshold, 0.005, 0.2);
   const minSpeechFraction = readFloat(
     'LIVE_MIN_SPEECH_FRACTION',
-    DEFAULT_WINDOW_OPTIONS.minSpeechFraction,
+    defaults.minSpeechFraction,
     0,
     0.9,
   );
   return {
-    ...DEFAULT_WINDOW_OPTIONS,
+    ...defaults,
     minWindowMs,
     maxWindowMs,
     silenceMs,

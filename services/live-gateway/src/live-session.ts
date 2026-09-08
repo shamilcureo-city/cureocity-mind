@@ -81,6 +81,7 @@ import {
  * slow Pass 1; a no-op tick is just a cheap buffer-length check.
  */
 const CYCLE_MS = 1_000;
+const MIND_CYCLE_MS = 250;
 // Leave room for forwarding the result before the browser's 30s pause timer.
 // This bounds an acknowledgement attempt, not ownership of in-flight audio.
 const PAUSE_REPLY_BUDGET_MS = 25_000;
@@ -324,7 +325,10 @@ export class LiveSession {
   start(): void {
     this.startedAtMs = Date.now();
     this.emit({ type: 'status', state: 'listening' });
-    this.timer = setInterval(() => void this.pump(), CYCLE_MS);
+    this.timer = setInterval(
+      () => void this.pump(),
+      this.vertical === 'THERAPIST' ? MIND_CYCLE_MS : CYCLE_MS,
+    );
   }
 
   /** Per-window Pass-1 input tokens, in order (telemetry + O(n) tests). */
@@ -533,6 +537,7 @@ export class LiveSession {
       audioBytes: windowPcm,
       durationMs,
       vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
+      ...(this.vertical === 'THERAPIST' ? { latencyMode: 'realtime' as const } : {}),
     });
     this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
     if (this.terminal) return;
