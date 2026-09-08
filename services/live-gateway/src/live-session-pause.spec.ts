@@ -113,6 +113,169 @@ describe('intentional live pause boundaries', () => {
     session.dispose();
   });
 
+  it('bounds a slow pause attempt while a retry joins the same owned tail without a late old acknowledgement', async () => {
+    vi.useFakeTimers();
+    const { session, events, run } = fixture();
+    const mock = new MockGeminiPass1Backend();
+    let finish!: () => void;
+    run.mockImplementationOnce(async (input: Pass1Input) => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return mock.run(input);
+    });
+    session.start();
+    session.pushAudio(pcm(300));
+    const first = session.pause(requestId);
+    await vi.advanceTimersByTimeAsync(25_001);
+    expect(events).toContainEqual({ type: 'capturePauseFailed', requestId });
+    await first;
+    expect(events.some((e) => e.type === 'capturePaused')).toBe(false);
+
+    const retryId = '00000000-0000-4000-8000-000000000002';
+    const retry = session.pause(retryId);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledOnce();
+    session.pushAudio(pcm(400));
+    finish();
+    await retry;
+    expect(run).toHaveBeenCalledOnce();
+    expect(events.filter((e) => e.type === 'capturePaused')).toEqual([
+      { type: 'capturePaused', requestId: retryId },
+    ]);
+    expect(run.mock.calls[0][0].audioBytes.length).toBe(pcm(300).length);
+    session.dispose();
+  });
+
+  it('drains a queued pause tail in bounded audio windows instead of one oversized model request', async () => {
+    const { session, events, run } = fixture();
+    session.pushAudio(pcm(14_000));
+    await session.pause(requestId);
+    expect(run).toHaveBeenCalledTimes(3);
+    expect(run.mock.calls.map(([input]) => input.durationMs)).toEqual([6_000, 6_000, 2_000]);
+    expect(run.mock.calls.reduce((sum, [input]) => sum + input.audioBytes.length, 0)).toBe(
+      pcm(14_000).length,
+    );
+    expect(events.at(-1)).toEqual({ type: 'capturePaused', requestId });
+    session.dispose();
+  });
+
+  it('keeps completed windows when a later pause window fails and retries only remaining bytes', async () => {
+    const { session, events, run } = fixture();
+    const mock = new MockGeminiPass1Backend();
+    run.mockImplementationOnce((input: Pass1Input) => mock.run(input));
+    run.mockRejectedValueOnce(new Error('fictional second window failure'));
+    session.pushAudio(pcm(14_000));
+    await session.pause(requestId);
+    expect(events.at(-1)).toEqual({ type: 'capturePauseFailed', requestId });
+    await session.pause(requestId);
+    expect(run.mock.calls.map(([input]) => input.durationMs)).toEqual([6_000, 6_000, 6_000, 2_000]);
+    // The fixture returns two utterances per successful window. Their starts
+    // must advance only once per consumed window, even after the retry.
+    expect(
+      events.filter((event) => event.type === 'utterance').map((event) => event.utterance.tStartMs),
+    ).toEqual([0, 5_000, 6_000, 11_000, 12_000, 14_000]);
+    expect(events.at(-1)).toEqual({ type: 'capturePaused', requestId });
+    session.dispose();
+  });
+
+  it('does not turn a timed-out attempt into a late successful pause without an explicit retry', async () => {
+    vi.useFakeTimers();
+    const { session, events, run } = fixture();
+    const mock = new MockGeminiPass1Backend();
+    let finish!: () => void;
+    run.mockImplementationOnce(async (input: Pass1Input) => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return mock.run(input);
+    });
+    session.pushAudio(pcm(300));
+    const pausing = session.pause(requestId);
+    await vi.advanceTimersByTimeAsync(25_001);
+    await pausing;
+    finish();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(events.some((event) => event.type === 'utterance')).toBe(true);
+    expect(events.some((event) => event.type === 'capturePaused')).toBe(false);
+    await session.pause(requestId);
+    expect(events.at(-1)).toEqual({ type: 'capturePaused', requestId });
+    expect(run).toHaveBeenCalledOnce();
+    session.dispose();
+  });
+
+  it('refuses incomplete End when a pre-pause pump stays busy beyond its idle budget', async () => {
+    vi.useFakeTimers();
+    const { session, events, run } = fixture();
+    const mock = new MockGeminiPass1Backend();
+    let finish!: () => void;
+    run.mockImplementationOnce(async (input: Pass1Input) => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return mock.run(input);
+    });
+    session.pushAudio(pcm(6_000));
+    const pumping = session.pump();
+    const pausing = session.pause(requestId);
+    await vi.advanceTimersByTimeAsync(15_001);
+    await pausing;
+    expect(events.at(-1)).toEqual({ type: 'capturePauseFailed', requestId });
+    const refused = expect(session.finalize()).rejects.toThrow('paused audio');
+    await vi.advanceTimersByTimeAsync(15_001);
+    await refused;
+    const beforeLateResult = [...events];
+    finish();
+    await pumping;
+    expect(events).toEqual(beforeLateResult);
+    expect(run).toHaveBeenCalledOnce();
+    expect(events.some((event) => event.type === 'therapyFinal')).toBe(false);
+    session.dispose();
+  });
+
+  it('bounds shutdown of a stuck paused tail without treating shutdown as explicit End', async () => {
+    vi.useFakeTimers();
+    const { session, events, run } = fixture();
+    run.mockImplementationOnce(() => new Promise(() => {}));
+    session.pushAudio(pcm(300));
+    const pausing = session.pause(requestId);
+    const shutdown = session.finalizeForShutdown();
+    await vi.advanceTimersByTimeAsync(25_001);
+    await Promise.all([pausing, shutdown]);
+    expect(events).toEqual([{ type: 'capturePauseFailed', requestId }]);
+    expect(run).toHaveBeenCalledOnce();
+    session.dispose();
+  });
+
+  it('bounds explicit End after a stuck pause and suppresses late audio rather than finalizing incomplete content', async () => {
+    vi.useFakeTimers();
+    const { session, events, run } = fixture();
+    const mock = new MockGeminiPass1Backend();
+    let finish!: () => void;
+    run.mockImplementationOnce(async (input: Pass1Input) => {
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      return mock.run(input);
+    });
+    session.pushAudio(pcm(300));
+    const pausing = session.pause(requestId);
+    await vi.advanceTimersByTimeAsync(25_001);
+    expect(events).toContainEqual({ type: 'capturePauseFailed', requestId });
+    await pausing;
+    const ending = session.finalize();
+    const refused = expect(ending).rejects.toThrow('paused audio');
+    await vi.advanceTimersByTimeAsync(25_001);
+    await refused;
+    const beforeLateResult = [...events];
+    finish();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(events).toEqual(beforeLateResult);
+    expect(run).toHaveBeenCalledOnce();
+    expect(events.some((e) => e.type === 'therapyFinal')).toBe(false);
+    session.dispose();
+  });
+
   it('disposal while tail transcription is pending suppresses stale pause acknowledgement', async () => {
     const { session, events, run } = fixture();
     let finish!: () => void;

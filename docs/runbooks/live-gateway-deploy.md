@@ -40,6 +40,25 @@ always verify against `https://gateway.cureo.city/healthz`.
   side can reintroduce renewal/expiry incompatibility; coordinate web/gateway
   versions, preserve transcript recovery, and require clinician review.
 
+### Slow-Pause regression check
+
+In the local harness, hold a final transcription call across the client's
+20-second renewal-acknowledgement deadline. Confirm `tokenRenewed` arrives
+independently, while `capturePaused` still waits for every accepted utterance.
+If audio processing exceeds the gateway's 25-second pause budget, expect a
+recoverable pause failure, not a final note or a reopened microphone. Retry
+must join the existing work without duplicate transcription. Also cover a
+never-settling browser audio-context close, late stop callbacks, Stop/shutdown,
+revoked consent, and expiry while renewal is pending.
+
+For an explicitly authorized fictional live check after rollout, speak a known
+non-clinical phrase after five minutes and verify it appears; a running timer
+or successful HTTP token mint alone does not prove WebSocket renewal. Then test
+Pause, explicit Resume, another known phrase, and explicit End. Keep the note
+unsigned and unshared unless separately authorized. Correlate control timing
+by request ID without collecting tokens, audio, or transcript in logs. Local
+regressions and health endpoints do not replace this device-level check.
+
 ## What it does
 
 - Accepts a browser WebSocket, receives streamed PCM audio, runs the real
