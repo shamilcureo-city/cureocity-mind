@@ -72,6 +72,7 @@ const DRAIN_TIMEOUT_MS = Number(process.env['LIVE_GATEWAY_DRAIN_TIMEOUT_MS'] ?? 
 // Batch A — every LiveSession currently streaming, so a drain can finalize
 // them all. Registered on start, removed on dispose/close.
 const liveSessions = new Set<LiveSession>();
+const liveAuthorities = new Set<LiveAuthority>();
 
 const backends = buildBackends();
 // Sprint DS8 — concurrent-session cap (graceful shed above it).
@@ -161,6 +162,7 @@ wss.on('connection', (ws, req) => {
   let session: LiveSession | null = null;
   let authority: LiveAuthority | null = null;
   let started = false;
+  let finalizationRequested = false;
   // Sprint DS8 — one pool slot per connection, taken on the first start,
   // returned exactly once on close/error.
   let acquired = false;
@@ -189,6 +191,26 @@ wss.on('connection', (ws, req) => {
   const inputQueue = new OrderedSocketInput(() => ws.close());
   ws.on('message', (raw: RawData, isBinary: boolean) => {
     armIdle(started ? IDLE_TIMEOUT_MS : STARTUP_GRACE_MS);
+    const rawCommand = isBinary ? null : safeJson(raw);
+    const parsed = isBinary ? null : LiveGatewayCommandSchema.safeParse(rawCommand);
+    if (parsed?.success && parsed.data.type === 'stop') {
+      // Preserve ordered audio/stop execution below, but make the user's stop
+      // intent visible to a renewal whose verifier request is still pending.
+      finalizationRequested = true;
+      authority?.preventRenewal();
+    }
+    if (
+      parsed &&
+      !parsed.success &&
+      rawCommand &&
+      typeof rawCommand === 'object' &&
+      'type' in rawCommand &&
+      rawCommand.type === 'renewToken'
+    ) {
+      send(ws, { type: 'status', state: 'unauthorized' });
+      ws.close();
+      return;
+    }
     // Start revalidation on receipt (coalesces concurrent frames), but apply
     // the result in arrival order. Do not let a slow old authority survive
     // teardown or a pause overtake its preceding audio.
@@ -209,8 +231,7 @@ wss.on('connection', (ws, req) => {
         }
         return;
       }
-      const parsed = LiveGatewayCommandSchema.safeParse(safeJson(raw));
-      if (!parsed.success) return;
+      if (!parsed?.success) return;
       const cmd = parsed.data;
       if (cmd.type === 'start') {
         // One socket owns one authorization/session lifecycle. This also keeps a
@@ -265,6 +286,10 @@ wss.on('connection', (ws, req) => {
         let lastMeterInr = 0;
         let outputQueue = Promise.resolve();
         const forward = (event: LiveGatewayEvent): void => {
+          if (event.type === 'status' && (event.state === 'finalizing' || event.state === 'done')) {
+            finalizationRequested = true;
+            authority?.preventRenewal();
+          }
           outputQueue = outputQueue
             .then(async () => {
               const authorized = authority ? await authority.authorizeEvent(event) : event;
@@ -358,6 +383,8 @@ wss.on('connection', (ws, req) => {
             },
           });
           authority = pendingAuthority;
+          liveAuthorities.add(pendingAuthority);
+          if (finalizationRequested) pendingAuthority.preventRenewal();
           void pendingAuthority.revalidate().then((authorized) => {
             if (!authorized || authority !== pendingAuthority) return;
             pendingAuthority.start();
@@ -368,6 +395,24 @@ wss.on('connection', (ws, req) => {
         }
       } else if (authority !== inputAuthority || (authorized && !(await authorized))) {
         return;
+      } else if (cmd.type === 'renewToken') {
+        if (draining || finalizationRequested) return;
+        if (!started || !session || !authority) {
+          send(ws, { type: 'status', state: 'unauthorized' });
+          ws.close();
+          return;
+        }
+        const renewingAuthority = authority;
+        const expiresAt = await renewingAuthority.renewToken(cmd.token);
+        if (
+          expiresAt === null ||
+          authority !== renewingAuthority ||
+          draining ||
+          finalizationRequested ||
+          !renewingAuthority.authorizeInput()
+        )
+          return;
+        send(ws, { type: 'tokenRenewed', requestId: cmd.requestId, expiresAt });
       } else if (cmd.type === 'pause') {
         await session?.pause(cmd.requestId);
       } else if (cmd.type === 'stop') {
@@ -385,6 +430,7 @@ wss.on('connection', (ws, req) => {
   const teardown = (): void => {
     inputQueue.dispose();
     clearTimeout(idleTimer);
+    if (authority) liveAuthorities.delete(authority);
     authority?.dispose();
     authority = null;
     if (session) {
@@ -414,6 +460,7 @@ let draining = false;
 function drain(signal: string): void {
   if (draining) return;
   draining = true;
+  for (const authority of liveAuthorities) authority.preventRenewal();
   console.log(`[live-gateway] ${signal} — draining ${liveSessions.size} live consult(s)`);
   // Stop accepting new connections; existing sockets stay open to finish.
   httpServer.close();

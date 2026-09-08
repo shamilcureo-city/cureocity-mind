@@ -147,7 +147,9 @@ beforeEach(() => {
   vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response('{"token":"fixture-token"}', { status: 200 })),
+    vi.fn(
+      async () => new Response('{"token":"fixture-token","expiresInSec":300}', { status: 200 }),
+    ),
   );
 });
 afterEach(() => {
@@ -156,6 +158,39 @@ afterEach(() => {
 });
 
 describe('real TherapistLiveSession attempt lifecycle wiring', () => {
+  it.each([
+    { token: 'fixture-token' },
+    { token: '', expiresInSec: 300 },
+    { token: 'fixture-token', expiresInSec: 0 },
+    { token: 'fixture-token', expiresInSec: '300' },
+  ])(
+    'requires a valid initial authorization lease before socket or mic ($expiresInSec)',
+    async (lease) => {
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify(lease), { status: 200 }));
+      mount();
+      click('Start session');
+      await vi.waitFor(() =>
+        expect(text(render())).toContain('Could not verify live authorization'),
+      );
+      expect(harness.sockets).toHaveLength(0);
+      expect(harness.stream.start).not.toHaveBeenCalled();
+    },
+  );
+
+  it('measures the initial lease from before the token request, not its delayed response', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-08T00:00:00Z'));
+    vi.mocked(fetch).mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date('2026-09-08T00:00:06Z'));
+      return new Response('{"token":"already-expired","expiresInSec":5}', { status: 200 });
+    });
+    mount();
+    click('Start session');
+    await vi.waitFor(() => expect(text(render())).toContain('Could not verify live authorization'));
+    expect(harness.sockets).toHaveLength(0);
+    expect(harness.stream.start).not.toHaveBeenCalled();
+  });
+
   async function listening() {
     mount();
     click('Start session');

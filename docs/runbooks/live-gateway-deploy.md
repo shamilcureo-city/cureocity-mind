@@ -13,6 +13,33 @@ section below is the fallback alternative, not the deployed path. Note
 the bare `*.run.app` URL 404s (traffic is fronted by the load balancer) —
 always verify against `https://gateway.cureo.city/healthz`.
 
+## Release safety: pause and authorization renewal
+
+- Build from a clean archive of the exact reviewed commit, not a working folder:
+  the Dockerfile copies the whole context, and local environment files must not
+  enter the image. Record the Cloud Build ID, source commit, immutable image
+  digest, and both old/new Cloud Run revision names. Do not use a mutable tag as
+  proof of the deployed source.
+- Preserve the existing service's port, service account, environment, secrets,
+  ingress, resources, and scaling. The service name above is `live-gateway`;
+  README examples are not authoritative infrastructure discovery.
+- Stage the tested container using `--no-traffic`; verify readiness before
+  coordinating its traffic switch with the matching web release. The web app
+  and gateway must both support correlated `renewToken`/`tokenRenewed` so that
+  a five-minute token does not impose a five-minute encounter limit.
+- Inspect fleet activity and use a quiet rollout window. `/healthz.activeSessions`
+  is only the responding process's count, not proof that all instances are idle.
+  Request timeout does not extend Cloud Run's shutdown grace; do not promise
+  lossless recovery of unacknowledged audio during a rollout.
+- Verify HTTP health and rejection of an invalid no-audio WebSocket start.
+  Those checks are not positive proof of current consent, valid credentials,
+  model access, or pause/renewal support. A fictional, authorized encounter must
+  cover more than five minutes, Pause/Resume, and explicit End. Never use a real
+  patient's session as a deployment probe.
+- Retain the prior revision for operational rollback. Rolling back only one
+  side can reintroduce renewal/expiry incompatibility; coordinate web/gateway
+  versions, preserve transcript recovery, and require clinician review.
+
 ## What it does
 
 - Accepts a browser WebSocket, receives streamed PCM audio, runs the real
