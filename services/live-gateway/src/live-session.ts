@@ -81,6 +81,9 @@ import {
  * slow Pass 1; a no-op tick is just a cheap buffer-length check.
  */
 const CYCLE_MS = 1_000;
+// Leave room for forwarding the result before the browser's 30s pause timer.
+// This bounds an acknowledgement attempt, not ownership of in-flight audio.
+const PAUSE_REPLY_BUDGET_MS = 25_000;
 const DEFAULT_CAPABILITIES = new Set<PractitionerCapability>([
   'LIVE_ENCOUNTER',
   'BEHAVIORAL_HEALTH_DOCUMENTATION',
@@ -190,7 +193,7 @@ export class LiveSession {
   /** Set once a ceiling trips, so pump auto-finalizes exactly once. */
   private autoFinalizing = false;
   private pausedAtMs: number | null = null;
-  private pauseInFlight: Promise<void> | null = null;
+  private pauseInFlight: Promise<boolean> | null = null;
 
   /**
    * Sprint DS13 — the optional streaming display rail. Attached by the
@@ -422,35 +425,59 @@ export class LiveSession {
     if (this.autoFinalizing && !this.stopped && this.pausedAtMs === null) void this.finalize();
   }
 
-  /** Flush accepted audio without finalizing. Resume uses a newly authorized
-   * socket seeded with acknowledged utterances; paused never renews authority. */
+  /** Flush accepted audio without finalizing. Authorization may renew while
+   * paused, but only an explicit Resume may open a newly authorized capture. */
   async pause(requestId: string): Promise<void> {
-    if (this.pauseInFlight) await this.pauseInFlight;
     if (this.stopped || this.terminal) {
       if (!this.terminal) this.emit({ type: 'capturePauseFailed', requestId });
       return;
     }
     this.pausedAtMs ??= Date.now();
-    const work = (async () => {
-      try {
-        if (!(await this.waitIdle())) throw new Error('Capture is still processing');
-        if (this.stopped || this.terminal) return;
-        if (this.pending.length) {
-          const tail = this.pending;
-          await this.processWindow(tail, bytesToMs(tail.length), tail.length);
-        }
-        if (!this.stopped && !this.terminal) this.emit({ type: 'capturePaused', requestId });
-      } catch {
-        // No raw transcription/provider error goes over the wire. Pending
-        // audio remains available for an explicit retry or finalization.
-        if (!this.stopped && !this.terminal) this.emit({ type: 'capturePauseFailed', requestId });
-      }
-    })();
-    this.pauseInFlight = work;
+    if (!this.pauseInFlight) {
+      const work = this.flushPausedAudio().finally(() => {
+        if (this.pauseInFlight === work) this.pauseInFlight = null;
+      });
+      this.pauseInFlight = work;
+    }
+    const confirmed = await this.waitForPausedAudio(this.pauseInFlight);
+    if (!this.stopped && !this.terminal) {
+      this.emit({ type: confirmed ? 'capturePaused' : 'capturePauseFailed', requestId });
+    }
+  }
+
+  /** A timed-out attempt keeps the same worker; retry cannot transcribe the
+   * same bytes concurrently. Late work may add captured words, never a stale ACK. */
+  private async flushPausedAudio(): Promise<boolean> {
+    if (!(await this.waitIdle()) || this.stopped || this.terminal) return false;
+    this.busy = true;
     try {
-      await work;
+      while (this.pending.length && !this.stopped && !this.terminal) {
+        // A slow pump may have accumulated minutes of audio. Keep the ordinary
+        // window bound, including a final short window, instead of one giant request.
+        const boundary = nextWindowBoundary(this.pending, this.windowOpts);
+        const consumed = boundary?.endByte ?? this.pending.length;
+        await this.processWindow(this.pending.subarray(0, consumed), bytesToMs(consumed), consumed);
+      }
+      return !this.stopped && !this.terminal;
+    } catch {
+      // Provider errors never cross the wire; the unconsumed tail can be retried.
+      return false;
     } finally {
-      if (this.pauseInFlight === work) this.pauseInFlight = null;
+      this.busy = false;
+    }
+  }
+
+  private async waitForPausedAudio(work: Promise<boolean>): Promise<boolean> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        work,
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => resolve(false), PAUSE_REPLY_BUDGET_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -1166,14 +1193,22 @@ export class LiveSession {
   /** Doctor ended the consult: flush the tail, close the note, report. */
   async finalize(): Promise<void> {
     // Explicit End or shutdown can race the pause tail worker. Join it before
-    // starting another transcription of the same bytes.
-    if (this.pauseInFlight) await this.pauseInFlight;
+    // starting another transcription of the same bytes, but never hang End.
+    // The server closes on this failure; the browser retains captured-word recovery.
+    if (this.pauseInFlight && !(await this.waitForPausedAudio(this.pauseInFlight))) {
+      this.dispose();
+      throw new Error('Unconfirmed paused audio; recover the captured transcript');
+    }
     if (this.stopped) return;
     // DS13 — the display rail ends with the consult; failures here are moot.
     this.streamTranscriber?.stop();
     this.streamTranscriber = null;
     this.stopAudio(); // sets `stopped` → any in-flight pump loop exits after its window
     const idle = await this.waitIdle();
+    if (this.pausedAtMs !== null && !idle) {
+      this.dispose();
+      throw new Error('Unconfirmed paused audio; recover the captured transcript');
+    }
     this.emit({ type: 'status', state: 'finalizing' });
     let timer: NodeJS.Timeout | undefined;
     try {
@@ -1382,7 +1417,7 @@ export class LiveSession {
    * require an explicit, newly authorized Resume on the replacement node. */
   async finalizeForShutdown(): Promise<void> {
     if (this.pausedAtMs !== null) {
-      await this.pauseInFlight;
+      if (this.pauseInFlight) await this.waitForPausedAudio(this.pauseInFlight);
       return;
     }
     await this.finalize();

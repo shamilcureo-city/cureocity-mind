@@ -163,6 +163,23 @@ wss.on('connection', (ws, req) => {
   let authority: LiveAuthority | null = null;
   let started = false;
   let finalizationRequested = false;
+  let renewalInFlight = false;
+  let connectionDisposed = false;
+  // Control-only timing: validated request IDs are safe correlation handles;
+  // never include the command object, token, session, identity, or clinical data.
+  const pauseReceivedAt = new Map<string, number>();
+  const traceControl = (event: string, requestId: string, receivedAt: number): void => {
+    console.info(
+      '[live-control]',
+      JSON.stringify({ event, requestId, elapsedMs: Math.max(0, Date.now() - receivedAt) }),
+    );
+  };
+  const tracePause = (event: string, requestId: string, settled = false): void => {
+    const receivedAt = pauseReceivedAt.get(requestId);
+    if (receivedAt === undefined) return;
+    traceControl(event, requestId, receivedAt);
+    if (settled) pauseReceivedAt.delete(requestId);
+  };
   // Sprint DS8 — one pool slot per connection, taken on the first start,
   // returned exactly once on close/error.
   let acquired = false;
@@ -190,9 +207,20 @@ wss.on('connection', (ws, req) => {
 
   const inputQueue = new OrderedSocketInput(() => ws.close());
   ws.on('message', (raw: RawData, isBinary: boolean) => {
+    if (connectionDisposed) return;
     armIdle(started ? IDLE_TIMEOUT_MS : STARTUP_GRACE_MS);
     const rawCommand = isBinary ? null : safeJson(raw);
     const parsed = isBinary ? null : LiveGatewayCommandSchema.safeParse(rawCommand);
+    if (parsed?.success && parsed.data.type === 'pause' && started && session) {
+      // Diagnostics are not protocol state: never allocate them for pre-start
+      // traffic, and bound retained IDs even when clinical output is stalled.
+      if (!pauseReceivedAt.has(parsed.data.requestId) && pauseReceivedAt.size >= 64) {
+        const oldest = pauseReceivedAt.keys().next().value;
+        if (oldest !== undefined) pauseReceivedAt.delete(oldest);
+      }
+      pauseReceivedAt.set(parsed.data.requestId, Date.now());
+      tracePause('pause.received', parsed.data.requestId);
+    }
     if (parsed?.success && parsed.data.type === 'stop') {
       // Preserve ordered audio/stop execution below, but make the user's stop
       // intent visible to a renewal whose verifier request is still pending.
@@ -209,6 +237,52 @@ wss.on('connection', (ws, req) => {
     ) {
       send(ws, { type: 'status', state: 'unauthorized' });
       ws.close();
+      return;
+    }
+    if (parsed?.success && parsed.data.type === 'renewToken') {
+      const cmd = parsed.data;
+      const receivedAt = Date.now();
+      traceControl('renewToken.received', cmd.requestId, receivedAt);
+      // Authorization-only control must not wait behind a Pause's transcription
+      // tail. Clinical input remains ordered below; this neither resumes capture
+      // nor recreates the session/meter. Stop intent is fenced on receipt above.
+      if (draining || finalizationRequested || ws.readyState !== ws.OPEN) {
+        traceControl('renewToken.failed', cmd.requestId, receivedAt);
+        return;
+      }
+      if (!started || !session || !authority || renewalInFlight) {
+        traceControl('renewToken.failed', cmd.requestId, receivedAt);
+        send(ws, { type: 'status', state: 'unauthorized' });
+        ws.close();
+        return;
+      }
+      const renewingAuthority = authority;
+      let acknowledged = false;
+      const mayRenew = (): boolean =>
+        authority === renewingAuthority &&
+        ws.readyState === ws.OPEN &&
+        !draining &&
+        !finalizationRequested &&
+        renewingAuthority.authorizeInput();
+      renewalInFlight = true;
+      void (async () => {
+        if (!(await renewingAuthority.authorizeCurrentInput()) || !mayRenew()) return;
+        const expiresAt = await renewingAuthority.renewToken(cmd.token);
+        if (expiresAt === null || !mayRenew()) return;
+        send(ws, { type: 'tokenRenewed', requestId: cmd.requestId, expiresAt });
+        acknowledged = true;
+        traceControl('tokenRenewed.sent', cmd.requestId, receivedAt);
+      })()
+        .catch(() => {
+          // Never log a token or allow an unexpected verifier failure to leave
+          // a connection apparently authorized.
+          send(ws, { type: 'status', state: 'unauthorized' });
+          ws.close();
+        })
+        .finally(() => {
+          renewalInFlight = false;
+          if (!acknowledged) traceControl('renewToken.failed', cmd.requestId, receivedAt);
+        });
       return;
     }
     // Start revalidation on receipt (coalesces concurrent frames), but apply
@@ -286,6 +360,34 @@ wss.on('connection', (ws, req) => {
         let lastMeterInr = 0;
         let outputQueue = Promise.resolve();
         const forward = (event: LiveGatewayEvent): void => {
+          if (event.type === 'capturePaused' || event.type === 'capturePauseFailed') {
+            tracePause(`${event.type}.ready`, event.requestId);
+          }
+          if (event.type === 'capturePauseFailed') {
+            // Failure makes no assertion that preceding words were delivered.
+            // Reauthorize it independently so a backlog of clinical outputs
+            // cannot hide the bounded Pause failure. A successful capturePaused
+            // still stays in outputQueue after all preceding captured words.
+            const eventAuthority = authority;
+            void (async () => {
+              const authorized = eventAuthority
+                ? await eventAuthority.authorizeEvent(event)
+                : event;
+              if (
+                !authorized ||
+                connectionDisposed ||
+                authority !== eventAuthority ||
+                ws.readyState !== ws.OPEN
+              )
+                return;
+              send(ws, authorized);
+              tracePause('capturePauseFailed.sent', event.requestId, true);
+            })().catch(() => {
+              send(ws, { type: 'status', state: 'unauthorized' });
+              ws.close();
+            });
+            return;
+          }
           if (event.type === 'status' && (event.state === 'finalizing' || event.state === 'done')) {
             finalizationRequested = true;
             authority?.preventRenewal();
@@ -299,6 +401,12 @@ wss.on('connection', (ws, req) => {
                 lastMeterInr = Math.max(lastMeterInr, authorized.summary.costInr);
               }
               send(ws, authorized);
+              if (
+                ws.readyState === ws.OPEN &&
+                (authorized.type === 'capturePaused' || authorized.type === 'capturePauseFailed')
+              ) {
+                tracePause(`${authorized.type}.sent`, authorized.requestId, true);
+              }
             })
             .catch(() => {
               // Keep the queue usable and fail closed if an unexpected verifier
@@ -395,28 +503,14 @@ wss.on('connection', (ws, req) => {
         }
       } else if (authority !== inputAuthority || (authorized && !(await authorized))) {
         return;
-      } else if (cmd.type === 'renewToken') {
-        if (draining || finalizationRequested) return;
-        if (!started || !session || !authority) {
-          send(ws, { type: 'status', state: 'unauthorized' });
-          ws.close();
-          return;
-        }
-        const renewingAuthority = authority;
-        const expiresAt = await renewingAuthority.renewToken(cmd.token);
-        if (
-          expiresAt === null ||
-          authority !== renewingAuthority ||
-          draining ||
-          finalizationRequested ||
-          !renewingAuthority.authorizeInput()
-        )
-          return;
-        send(ws, { type: 'tokenRenewed', requestId: cmd.requestId, expiresAt });
       } else if (cmd.type === 'pause') {
+        tracePause('pause.processing', cmd.requestId);
         await session?.pause(cmd.requestId);
       } else if (cmd.type === 'stop') {
-        void session?.finalize();
+        // A retained Pause tail can fail its bounded finalization wait. Leave
+        // recovery to the client rather than silently dropping audio, emitting
+        // a false final note, or leaking an unhandled rejection.
+        void session?.finalize().catch(() => ws.close());
       } else if (cmd.type === 'dismiss') {
         // Sprint DS3 — the doctor dismissed an ask-next question.
         session?.dismissQuestion(cmd.questionId);
@@ -428,7 +522,10 @@ wss.on('connection', (ws, req) => {
   });
 
   const teardown = (): void => {
+    if (connectionDisposed) return;
+    connectionDisposed = true;
     inputQueue.dispose();
+    for (const requestId of pauseReceivedAt.keys()) tracePause('pause.closed', requestId, true);
     clearTimeout(idleTimer);
     if (authority) liveAuthorities.delete(authority);
     authority?.dispose();

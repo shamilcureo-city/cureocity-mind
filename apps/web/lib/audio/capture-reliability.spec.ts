@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AudioPersistenceQueue } from './persistence-queue';
 import { stopWorklet } from './stop-worklet';
+import { AUDIO_CONTEXT_CLOSE_TIMEOUT_MS } from './live-stream-cleanup';
 import type { PersistedChunk, PersistedSession } from './idb-chunk-store';
 
 const data = vi.hoisted(() => ({
@@ -110,7 +111,7 @@ class AudioContextMock extends EventTarget {
     }),
   };
   createMediaStreamSource() {
-    return { connect: vi.fn() };
+    return { connect: vi.fn(), disconnect: vi.fn() };
   }
   async close() {
     this.state = 'closed';
@@ -408,6 +409,85 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     await live.stop();
     expect(interrupted).not.toHaveBeenCalled();
     expect(data.tracks[0].stopped).toBe(true);
+  });
+
+  it('shared Mind/Scribe live stop bounds a hung context close after a real final-frame acknowledgement', async () => {
+    vi.useFakeTimers();
+    const onFrame = vi.fn();
+    const interrupted = vi.fn();
+    const live = useLiveStream({ onFrame, onInterrupted: interrupted });
+    await live.start();
+    const oldContext = data.contexts[0];
+    let rejectClose!: (error: Error) => void;
+    const close = vi.spyOn(oldContext, 'close').mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectClose = reject;
+        }),
+    );
+    const oldPort = data.worklet.port;
+    const lateFrame = oldPort.onmessage;
+    vi.spyOn(oldPort, 'postMessage').mockImplementation(() => {});
+    const stopped = vi.fn();
+    const stopping = live.stop().then(stopped);
+    expect(data.tracks[0].stopped).toBe(true);
+    // The physical mic is off, but the worklet tail must still be delivered in port order.
+    lateFrame({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
+    expect(onFrame).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+    oldPort.dispatchEvent(new MessageEvent('message', { data: { type: 'stopped' } }));
+    await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_CLOSE_TIMEOUT_MS - 1);
+    expect(stopped).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await stopping;
+    expect(stopped).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    await live.start();
+    rejectClose(new Error('old browser release failed late'));
+    oldContext.state = 'suspended';
+    oldContext.dispatchEvent(new Event('statechange'));
+    lateFrame({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(data.tracks[1].stopped).toBe(false);
+    expect(interrupted).not.toHaveBeenCalled();
+    expect(onFrame).toHaveBeenCalledOnce();
+    await live.stop();
+  });
+
+  it('a missing final-frame acknowledgement still rejects when browser context close also hangs', async () => {
+    vi.useFakeTimers();
+    const onFrame = vi.fn();
+    const live = useLiveStream({ onFrame });
+    await live.start();
+    vi.spyOn(data.contexts[0], 'close').mockImplementation(() => new Promise(() => {}));
+    const port = data.worklet.port;
+    const lateFrame = port.onmessage;
+    vi.spyOn(port, 'postMessage').mockImplementation(() => {});
+    const failed = expect(live.stop()).rejects.toThrow('final audio frame');
+    expect(data.tracks[0].stopped).toBe(true);
+    await vi.advanceTimersByTimeAsync(2_000 + AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
+    await failed;
+    // A delayed acknowledgement/frame cannot revise the rejected stop or deliver new speech.
+    port.dispatchEvent(new MessageEvent('message', { data: { type: 'stopped' } }));
+    lateFrame({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
+    expect(onFrame).not.toHaveBeenCalled();
+  });
+
+  it('unmount detaches live input immediately despite a context that never closes', async () => {
+    vi.useFakeTimers();
+    const onFrame = vi.fn();
+    const live = useLiveStream({ onFrame });
+    const unmount = data.effects.at(-1)!();
+    await live.start();
+    vi.spyOn(data.contexts[0], 'close').mockImplementation(() => new Promise(() => {}));
+    const lateFrame = data.worklet.port.onmessage;
+    unmount?.();
+    expect(data.tracks[0].stopped).toBe(true);
+    lateFrame({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
+    expect(onFrame).not.toHaveBeenCalled();
+    await expect(live.start()).rejects.toThrow('no longer available');
+    await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   const prepareFileBoundaries = () => {

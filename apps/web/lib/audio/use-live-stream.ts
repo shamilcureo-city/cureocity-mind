@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PolyphaseDecimator, float32ToInt16Le } from '@cureocity/audio';
 import { stopWorklet } from './stop-worklet';
+import { closeDetachedAudioContext } from './live-stream-cleanup';
 
 export type LiveStreamState = 'idle' | 'preparing' | 'streaming' | 'error';
 
@@ -41,8 +42,10 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
   type Capture = {
     stream?: MediaStream;
     ctx?: AudioContext;
+    source?: MediaStreamAudioSourceNode;
     worklet?: AudioWorkletNode;
     decimator?: PolyphaseDecimator;
+    closing?: Promise<void>;
     stopping: boolean;
   };
   const captureRef = useRef<Capture | null>(null);
@@ -57,10 +60,16 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     if (!capture) return;
     capture.stopping = true;
     if (captureRef.current === capture) captureRef.current = null;
-    capture.worklet?.disconnect();
     capture.stream?.getTracks().forEach((t) => t.stop());
+    // Detach only this capture. Late port/context events cannot reach a replacement.
+    if (capture.worklet) capture.worklet.port.onmessage = null;
+    capture.source?.disconnect();
+    capture.worklet?.disconnect();
     capture.decimator?.reset();
-    if (capture.ctx && capture.ctx.state !== 'closed') await capture.ctx.close();
+    if (capture.ctx) {
+      capture.closing ??= closeDetachedAudioContext(capture.ctx);
+      await capture.closing;
+    }
   }, []);
 
   const start = useCallback(async (): Promise<void> => {
@@ -120,6 +129,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
       });
 
       const source = ctx.createMediaStreamSource(stream);
+      capture.source = source;
       const worklet = new AudioWorkletNode(ctx, 'cureocity-recorder');
       capture.worklet = worklet;
 

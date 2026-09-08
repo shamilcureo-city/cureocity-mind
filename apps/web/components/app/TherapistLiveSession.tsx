@@ -38,6 +38,7 @@ import {
   type Utterance,
 } from '@cureocity/contracts';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
+import { waitForLiveCaptureStop } from '@/lib/audio/live-stream-cleanup';
 import { LiveTokenRenewal, type LiveTokenLease } from '@/lib/audio/live-token-renewal';
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import {
@@ -1121,21 +1122,42 @@ export function TherapistLiveSession({
     )
       return;
     setEndConfirmOpen(false);
+    const attempt = liveAttemptRef.current;
+    const socket = wsRef.current;
+    const ownsAttempt = () =>
+      !unmountedRef.current && liveAttemptRef.current === attempt && wsRef.current === socket;
+    let stopConfirmed = false;
     setFinalStage('stopping');
     renewalRef.current?.dispose();
     renewalRef.current = null;
     setPhase('finalizing');
     phaseRef.current = 'finalizing';
     try {
-      await stream.stop();
+      await waitForLiveCaptureStop(() => streamRef.current.stop());
+      if (!ownsAttempt()) return;
+      stopConfirmed = true;
       audioDeliveryRef.current = 'off';
-      if (wsRef.current?.readyState !== WebSocket.OPEN)
+      if (!socket || socket.readyState !== WebSocket.OPEN)
         throw new Error('The live connection closed. Recover the captured transcript below.');
-      wsRef.current.send(JSON.stringify({ type: 'stop' }));
+      socket.send(JSON.stringify({ type: 'stop' }));
     } catch (reason) {
+      if (!ownsAttempt()) return;
+      audioDeliveryRef.current = 'off';
       setConnectionLost(true);
+      phaseRef.current = 'error';
       setPhase('error');
-      setError((reason as Error).message);
+      if (!stopConfirmed) {
+        captureIntegrityErrorRef.current = true;
+        ++liveAttemptRef.current;
+        attemptAbortRef.current?.abort();
+        wsRef.current = null;
+        socket?.close();
+        setError(
+          'Microphone off, but the final audio frame was not confirmed. Known transcript words remain available; missing speech must be documented manually.',
+        );
+      } else {
+        setError((reason as Error).message);
+      }
     }
   }
 
@@ -1144,20 +1166,25 @@ export function TherapistLiveSession({
       return;
     const attempt = liveAttemptRef.current;
     const socket = wsRef.current;
+    const ownsAttempt = () =>
+      !unmountedRef.current && liveAttemptRef.current === attempt && wsRef.current === socket;
+    let stopFailed = false;
     phaseRef.current = 'pausing';
     setPhase('pausing');
     setPauseWarning(null);
     try {
       try {
-        await streamRef.current.stop();
+        await waitForLiveCaptureStop(() => streamRef.current.stop());
       } catch {
+        if (!ownsAttempt()) return;
+        stopFailed = true;
         captureIntegrityErrorRef.current = true;
         throw new Error(
           'Microphone off, but the final audio frame was not confirmed. Known transcript words remain available; missing speech must be documented manually.',
         );
       }
+      if (!ownsAttempt()) return;
       audioDeliveryRef.current = 'off';
-      if (unmountedRef.current || liveAttemptRef.current !== attempt) return;
       if (!socket || socket.readyState !== WebSocket.OPEN)
         throw new Error(
           'The live connection is closed. The last audio was not confirmed transcribed.',
@@ -1187,17 +1214,32 @@ export function TherapistLiveSession({
             reject(error);
           },
         };
-        socket.send(JSON.stringify({ type: 'pause', requestId }));
+        try {
+          socket.send(JSON.stringify({ type: 'pause', requestId }));
+        } catch {
+          pauseReplyRef.current.reject(
+            new Error('The live connection could not request pause. Your microphone is off.'),
+          );
+        }
       });
-      if (unmountedRef.current || liveAttemptRef.current !== attempt) return;
+      if (!ownsAttempt()) return;
       phaseRef.current = 'paused';
       setPhase('paused');
     } catch (reason) {
-      if (unmountedRef.current || liveAttemptRef.current !== attempt) return;
+      if (!ownsAttempt()) return;
       audioDeliveryRef.current = 'off';
       phaseRef.current = 'pause-unconfirmed';
       setPhase('pause-unconfirmed');
       setPauseWarning((reason as Error).message);
+      if (stopFailed) {
+        // A late flush must never turn this terminal capture into a safe pause.
+        ++liveAttemptRef.current;
+        attemptAbortRef.current?.abort();
+        renewalRef.current?.dispose();
+        renewalRef.current = null;
+        wsRef.current = null;
+        socket?.close();
+      }
     }
   }
 

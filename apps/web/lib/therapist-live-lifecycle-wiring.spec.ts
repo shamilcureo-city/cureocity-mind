@@ -54,6 +54,7 @@ vi.mock('../components/app/MindTherapyGuide', () => ({ MindTherapyGuide: () => n
 vi.mock('../components/ui/Button', () => ({ Button: 'button' }));
 vi.mock('../components/ui/Card', () => ({ Card: 'div' }));
 import { TherapistLiveSession } from '../components/app/TherapistLiveSession';
+import { LIVE_CAPTURE_STOP_TIMEOUT_MS } from './audio/live-stream-cleanup';
 
 class Socket {
   static OPEN = 1;
@@ -292,6 +293,134 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
     await vi.waitFor(() => expect(text(render())).toContain('final audio frame was not confirmed'));
     expect(text(render())).not.toContain('Resume recording');
     expect(text(render())).not.toContain('Retry pause confirmation');
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+  });
+
+  it('a hung local stop becomes recoverable instead of waiting indefinitely or confirming pause', async () => {
+    const socket = await listening();
+    vi.useFakeTimers();
+    let finishStop!: () => void;
+    harness.stream.stop.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishStop = resolve;
+        }),
+    );
+    click('Pause recording');
+    expect(text(render())).toContain('confirming the last audio');
+    await vi.advanceTimersByTimeAsync(LIVE_CAPTURE_STOP_TIMEOUT_MS);
+    expect(text(render())).toContain('final audio frame was not confirmed');
+    expect(text(render())).not.toContain('Resume recording');
+    expect(text(render())).not.toContain('Retry pause confirmation');
+    expect(socket.close).toHaveBeenCalledOnce();
+    finishStop();
+    socket.status('listening');
+    harness.onFrame(new Uint8Array([1, 2]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.send).toHaveBeenCalledOnce(); // only the original start, no pause/stop/audio
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    expect(harness.push).not.toHaveBeenCalled();
+  });
+
+  it.each(['resolve', 'reject'] as const)(
+    'a late old pause stop %s cannot mute or mark a replacement capture unsafe',
+    async (mode) => {
+      const first = await listening();
+      let resolveStop!: () => void;
+      let rejectStop!: (reason: Error) => void;
+      harness.stream.stop.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            resolveStop = resolve;
+            rejectStop = reject;
+          }),
+      );
+      click('Pause recording');
+      first.status('busy');
+      click('Try again');
+      await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+      const replacement = harness.sockets[1];
+      replacement.open();
+      await vi.waitFor(() => expect(replacement.send).toHaveBeenCalledOnce());
+      replacement.status('listening');
+      if (mode === 'resolve') resolveStop();
+      else rejectStop(new Error('old stop failed'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const audio = new Uint8Array([1, 2]);
+      harness.onFrame(audio);
+      expect(replacement.send).toHaveBeenLastCalledWith(audio);
+      expect(text(render())).not.toContain('final audio frame was not confirmed');
+      expect(replacement.close).not.toHaveBeenCalled();
+      expect(harness.push).not.toHaveBeenCalled();
+    },
+  );
+
+  it('End cannot silently finalize or resume after a stop timeout, even when stop resolves late', async () => {
+    const socket = await listening();
+    vi.useFakeTimers();
+    let finishStop!: () => void;
+    harness.stream.stop.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishStop = resolve;
+        }),
+    );
+    click('End session');
+    click('End & save');
+    await vi.advanceTimersByTimeAsync(LIVE_CAPTURE_STOP_TIMEOUT_MS);
+    expect(text(render())).toContain('final audio frame was not confirmed');
+    expect(text(render())).not.toContain('Resume recording');
+    expect(socket.close).toHaveBeenCalledOnce();
+    finishStop();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.send).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce(); // no finalization/save request
+    expect(harness.push).not.toHaveBeenCalled();
+  });
+
+  it('unmount during stop prevents late pause/finalization commands or state writes', async () => {
+    const unmount = mount();
+    click('Start session');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledOnce());
+    socket.status('listening');
+    let finishStop!: () => void;
+    harness.stream.stop.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishStop = resolve;
+        }),
+    );
+    click('Pause recording');
+    unmount();
+    const statesAfterUnmount = [...harness.states];
+    finishStop();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.states).toEqual(statesAfterUnmount);
+    expect(socket.send).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+  });
+
+  it('late pause acknowledgement cannot confirm a timed-out request or its retry', async () => {
+    const socket = await listening();
+    vi.useFakeTimers();
+    const first = await pause(socket);
+    await vi.advanceTimersByTimeAsync(30_000);
+    click('Retry pause confirmation');
+    await vi.advanceTimersByTimeAsync(0);
+    const retry = JSON.parse(socket.send.mock.calls[2][0] as string) as { requestId: string };
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'capturePaused', requestId: first.requestId }),
+    });
+    expect(text(render())).not.toContain('Resume recording');
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'capturePaused', requestId: retry.requestId }),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(text(render())).toContain('Resume recording');
     expect(harness.stream.start).toHaveBeenCalledOnce();
   });
   it('effect cleanup/replay cancels the first auto-start and permits only its replacement', async () => {

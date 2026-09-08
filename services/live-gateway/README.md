@@ -109,6 +109,26 @@ explicit recovery. Late replies cannot revive stopped or replaced sockets.
 Renewal never starts a paused microphone. Stop and shutdown prevent further
 renewal while allowing still-authorized finalization work.
 
+Authorization-only renewal runs independently of the ordered audio/Pause queue,
+so a slow final transcription cannot consume the client's renewal-ACK deadline.
+This does not bypass current consent, identity matching, the old expiry, or
+Stop/shutdown fences. Pause still processes preceding audio in order and sends
+`capturePaused` only after its captured utterances have been forwarded.
+
+A pause attempt has a 25-second gateway reply budget. A timeout reports
+`capturePauseFailed`, keeps capture off, and leaves the existing tail worker in
+ownership of its bytes. An explicit retry joins that worker rather than
+transcribing the same audio twice. Large tails use the normal bounded audio
+windows. Late completion can add captured words but cannot turn a failed attempt
+into a successful pause without a new request. An End that cannot safely join
+the paused audio closes for captured-transcript recovery rather than publishing
+an incomplete final note. Untranscribed audio is not guaranteed recoverable.
+
+The web client stops physical tracks before best-effort audio-context release;
+context cleanup is bounded separately from the final-frame acknowledgement.
+Control timing logs contain only command kind, validated request ID, phase and
+elapsed milliseconds, not clinical data or credentials.
+
 Deploy the matching gateway and web clients in a quiet window. Stage the new
 gateway revision without traffic, verify its image digest and readiness, and
 coordinate the traffic switch with the web release. An older gateway cannot
