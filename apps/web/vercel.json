@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
-  "buildCommand": "cd ../.. && pnpm install --frozen-lockfile && pnpm exec prisma generate && bash scripts/vercel-db-setup.sh && pnpm -r --filter \"@cureocity/web...\" build",
+  "buildCommand": "cd ../.. && node scripts/release-runtime-preflight.mjs && pnpm install --frozen-lockfile && node scripts/production-dependency-smoke.mjs && pnpm exec prisma generate && bash scripts/vercel-db-setup.sh && pnpm -r --filter \"@cureocity/web...\" build",
   "outputDirectory": ".next",
   "framework": "nextjs",
   "functions": {
