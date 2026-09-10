@@ -20,7 +20,10 @@ WORKDIR /app
 # --- deps + build -----------------------------------------------------------
 FROM base AS build
 COPY . .
-RUN pnpm install --frozen-lockfile
+# The final image inherits this exact Node binary and installed dependencies.
+RUN node scripts/release-runtime-preflight.mjs \
+    && pnpm install --frozen-lockfile \
+    && node scripts/production-dependency-smoke.mjs
 # The gateway runs from TS source (tsx) but its workspace deps resolve to
 # their built dist via package `main`, so build those three first.
 RUN pnpm --filter @cureocity/contracts --filter @cureocity/clinical --filter @cureocity/llm build

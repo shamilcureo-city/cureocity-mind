@@ -18,10 +18,10 @@ import { SessionModalitySchema } from './client';
 /**
  * The arc stage, mostly derived:
  *   INTAKE           — no completed session yet
- *   ASSESSMENT       — intake done, no confirmed primary diagnosis
+ *   ASSESSMENT       — shared understanding/assessment continuing; diagnosis is optional
  *   ACTIVE_TREATMENT — an active (non-superseded) treatment plan exists
- *   REVIEW_DUE       — active plan aged ≥8 completed sessions (re-eval cadence)
- *   DISCHARGE_READY  — instrument remission reached with a plan in place
+ *   REVIEW_DUE       — clinician review indicated by change or review cadence
+ *   DISCHARGE_READY  — legacy read compatibility only; never inferred from scores
  *   DISCHARGED       — the active episode was closed (Sprint 20 Phase 3);
  *                      terminal until the client returns for a new session
  */

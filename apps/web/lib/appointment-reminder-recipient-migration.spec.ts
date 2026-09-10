@@ -58,7 +58,9 @@ describe('recipient reminder delivery migration', () => {
     expect(migration).not.toMatch(/ADD COLUMN[^\n]*(?:email|address)/i);
   });
 
-  it('establishes recipient uniqueness before dropping legacy uniqueness and copies patients after', () => {
+  // Historical source ordering only: PostgreSQL truncates these long names to
+  // the same identifier. The forward repair has real-database regression tests.
+  it('records historical intended index/copy ordering, not proof of runtime uniqueness', () => {
     const recipientUnique = migration.indexOf(
       'CREATE UNIQUE INDEX IF NOT EXISTS "appointment_reminder_deliveries_appointmentId_scheduledStartAt_kind_recipient_key"',
     );

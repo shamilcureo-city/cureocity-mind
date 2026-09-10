@@ -31,23 +31,35 @@ export async function GET(
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     include: {
-      client: { select: { fullNameEncrypted: true } },
+      client: { select: { fullNameEncrypted: true, deletedAt: true } },
       therapyNote: true,
     },
   });
-  if (!session || session.psychologistId !== auth.value.psychologistId) {
+  if (
+    !session ||
+    session.psychologistId !== auth.value.psychologistId ||
+    session.client.deletedAt !== null
+  ) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
   const clientFullName = await decryptClientField(
     session.psychologistId,
     session.client.fullNameEncrypted,
   );
-  if (!session.therapyNote || !session.therapyNote.content) {
+  if (!session.therapyNote?.locked || !session.therapyNote.content) {
     return NextResponse.json(
       { error: 'Session has no signed therapy note yet — sign before downloading.' },
       { status: 404 },
     );
   }
+
+  // Resolve the recorded signer, never the downloading viewer. This is the
+  // account's current display name, not a historical signature-name snapshot.
+  const signer = await prisma.psychologist.findUnique({
+    where: { id: session.therapyNote.signedBy },
+    select: { fullName: true },
+  });
+  const signedByName = signer?.fullName.trim() || null;
 
   const durationMs =
     session.startedAt && session.endedAt
@@ -65,6 +77,7 @@ export async function GET(
         scheduledAt: session.scheduledAt.toISOString(),
         durationMs,
         signedBy: session.therapyNote.signedBy,
+        signedByName,
         signedAt: session.therapyNote.signedAt?.toISOString() ?? null,
       })
     : SignedNotePdf({
@@ -74,6 +87,7 @@ export async function GET(
         scheduledAt: session.scheduledAt.toISOString(),
         durationMs,
         signedBy: session.therapyNote.signedBy,
+        signedByName,
         signedAt: session.therapyNote.signedAt?.toISOString() ?? null,
       });
   const buffer = await renderToBuffer(pdfDocument);

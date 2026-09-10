@@ -79,7 +79,15 @@ export async function POST(
     });
     const parsed = CaseBriefingV1Schema.safeParse(result.output.caseBriefing);
     if (parsed.success) {
-      briefing = { ...parsed.data, source: 'llm' };
+      // Narrative refinement cannot erase source-labelled safety context or
+      // override clinician-led progress/ending rules with a score-only action.
+      briefing = {
+        ...parsed.data,
+        safety: deterministic.safety,
+        nextActions: deterministic.nextActions,
+        cadence: deterministic.cadence,
+        source: 'llm',
+      };
     }
     recordGeminiCall({
       pass: result.callLog.pass,

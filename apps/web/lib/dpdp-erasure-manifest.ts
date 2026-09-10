@@ -66,7 +66,7 @@ export const DPDP_ERASURE_MANIFEST = {
     'CONSENT_PROOF',
   ),
   Session: legalProof(
-    'retain the minimal signed-record parent; clear modality, language, phase and consent snapshots',
+    'retain the minimal signed-record parent; clear modality, language, phase, Mind purpose/documentation mode and consent snapshots',
   ),
   AudioChunk: clinicalDelete(
     'enqueue nonempty legacy references in the object-deletion outbox (unsupported providers remain unresolved), then delete database audio rows',
@@ -76,6 +76,15 @@ export const DPDP_ERASURE_MANIFEST = {
   NoteDraft: redact('retain signed-note FK parent; clear transcript, content, Rx and errors'),
   NoteEditRecovery: clinicalDelete(
     'delete encrypted manual-edit checkpoints, versions and mutation tombstones',
+  ),
+  MindManualNoteDraft: clinicalDelete(
+    'delete encrypted clinician-written draft fields, versions and mutation receipts',
+  ),
+  MindInstrumentDraft: clinicalDelete(
+    'delete encrypted unfinished questionnaire answers and submission/discard receipts',
+  ),
+  ClientMindCareRecord: clinicalDelete(
+    'delete all encrypted care agreement, feedback, ending and referral record versions',
   ),
   TherapyNote: legalProof(
     'retain hashes/timestamps/actor; redact content, Rx, payload and credentials',
@@ -93,7 +102,9 @@ export const DPDP_ERASURE_MANIFEST = {
   TreatmentPlan: clinicalDelete('delete treatment plan body and confirmation history'),
   TreatmentGoalProgress: clinicalDelete('delete goal-progress artifacts before treatment plans'),
   CaseFormulation: clinicalDelete('delete formulation body and provenance'),
-  SessionAgreement: clinicalDelete('delete carried agreement text and follow-up'),
+  SessionAgreement: clinicalDelete(
+    'delete carried agreement text, follow-up and full correction/amendment history',
+  ),
   MindSessionCloseoutState: redact(
     'clear patientTakeaway narrative and nextQuestionsSnapshot; retain non-PHI closeout completion evidence and follow-up linkage',
   ),

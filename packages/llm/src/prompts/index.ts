@@ -356,7 +356,8 @@ Laws (hard):
 
 PLACEHOLDER: refine verbatim wording before pilot.` as const;
 
-export const THERAPY_REASONING_PROMPT_VERSION = 'THERAPY_REASONING_SYSTEM_PROMPT_V1';
+export const THERAPY_REASONING_PROMPT_VERSION =
+  'THERAPY_REASONING_SYSTEM_PROMPT_V2_REVIEWED_BACKGROUND';
 
 /**
  * Returns the Pass-1 transcription prompt + version for a vertical.

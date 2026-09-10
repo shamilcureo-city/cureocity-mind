@@ -15,6 +15,7 @@ import {
 import { buildBackends } from './llm';
 import { LiveAuthority } from './live-authority';
 import { LiveSession } from './live-session';
+import { authorizeLiveSessionOutput } from './live-output-authority';
 import { OrderedSocketInput } from './ordered-socket-input';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
 import { initSentry } from './sentry';
@@ -360,6 +361,7 @@ wss.on('connection', (ws, req) => {
         let lastMeterInr = 0;
         let outputQueue = Promise.resolve();
         const forward = (event: LiveGatewayEvent): void => {
+          const eventOrigin = session;
           if (event.type === 'capturePaused' || event.type === 'capturePauseFailed') {
             tracePause(`${event.type}.ready`, event.requestId);
           }
@@ -394,8 +396,17 @@ wss.on('connection', (ws, req) => {
           }
           outputQueue = outputQueue
             .then(async () => {
-              const authorized = authority ? await authority.authorizeEvent(event) : event;
-              if (!authorized) return;
+              const authorized = await authorizeLiveSessionOutput(event, authority, eventOrigin);
+              // The await above adds one microtask turn after the helper's
+              // check. Recheck synchronously here; no await may follow before send.
+              if (
+                !authorized ||
+                connectionDisposed ||
+                session !== eventOrigin ||
+                ws.readyState !== ws.OPEN ||
+                (eventOrigin && !eventOrigin.isTherapyOutputCurrent(event))
+              )
+                return;
               if (tenantId && authorized.type === 'meter') {
                 tenantSpend.add(tenantId, authorized.summary.costInr - lastMeterInr);
                 lastMeterInr = Math.max(lastMeterInr, authorized.summary.costInr);
@@ -517,6 +528,8 @@ wss.on('connection', (ws, req) => {
       } else if (cmd.type === 'refreshNote') {
         // Sprint TS-B3 — "Update now" on the live note panel.
         session?.requestNoteRefresh();
+      } else if (cmd.type === 'reviewTherapyContext') {
+        session?.reviewTherapyContext(cmd.requestId, cmd.context);
       }
     });
   });

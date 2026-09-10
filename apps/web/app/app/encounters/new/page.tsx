@@ -218,12 +218,13 @@ interface DateGroup {
 function groupByDate(rows: SessionWithClient[]): DateGroup[] {
   const groups = new Map<string, DateGroup>();
   for (const r of rows) {
-    const key = r.scheduledAt.toISOString().slice(0, 10);
+    const key = new Date(r.scheduledAt.getTime() + 330 * 60_000).toISOString().slice(0, 10);
     const label = r.scheduledAt.toLocaleDateString('en-IN', {
       weekday: 'long',
       month: 'long',
       day: 'numeric',
       year: 'numeric',
+      timeZone: 'Asia/Kolkata',
     });
     const existing = groups.get(key);
     if (existing) existing.rows.push(r);
@@ -251,5 +252,9 @@ function statusLabel(status: SessionWithClient['status']): string {
 }
 
 function formatTime(d: Date): string {
-  return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleTimeString('en-IN', {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
+  });
 }

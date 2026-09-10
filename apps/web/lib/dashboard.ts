@@ -1,8 +1,8 @@
 import { computeInstrumentChange, type InstrumentKey } from '@cureocity/clinical';
 import type { JourneyStage } from '@cureocity/contracts';
-import { fetchOpenCrises } from './crisis-flags';
+import { fetchOpenCrises, type OpenCrisis } from './crisis-flags';
 import { decryptClientField } from './client-pii';
-import { computeDayBoundaries } from './ist';
+import { computeDayBoundaries, formatIstDate } from './ist';
 import { prisma } from './prisma';
 
 /**
@@ -60,6 +60,26 @@ export interface CrisisRow {
   kind: string;
   severity: 'high' | 'critical';
   lastSeenAt: string;
+  source?: OpenCrisis['source'];
+  sourceSessionId?: string;
+}
+
+/** Preserve the genuine clinician source without implying a current assessment. */
+export function dashboardCrisisPresentation(row: CrisisRow): { href: string; meta: string } {
+  const manual = row.source === 'CLINICIAN_NOTE' || row.source === 'CLINICIAN_NOTE_DRAFT';
+  const label =
+    row.source === 'CLINICIAN_NOTE_DRAFT'
+      ? 'Unfinished clinician-written draft — review'
+      : row.source === 'CLINICIAN_NOTE'
+        ? 'Clinician-written safety note — review'
+        : row.kind.replace(/_/g, ' ');
+  return {
+    href:
+      manual && row.sourceSessionId
+        ? `/app/sessions/${row.sourceSessionId}`
+        : `/app/clients/${row.clientId}`,
+    meta: `${label} · ${row.severity} · ${formatIstDate(row.lastSeenAt)}${manual ? ' · earlier documentation, not a current safety assessment' : ''}`,
+  };
 }
 export interface DeterioratingRow {
   clientId: string;
@@ -276,7 +296,12 @@ export async function buildDashboard(
   ]);
 
   // ---- Derive caseload pulse + attention (deterministic, in JS) ----------
-  const perClient = foldCandidateData(candidateIds, completedRows, planRows, instrumentRows);
+  const perClient = foldDashboardCandidateData(
+    candidateIds,
+    completedRows,
+    planRows,
+    instrumentRows,
+  );
 
   const stageCounts = emptyStageCounts();
   const change = { improving: 0, deteriorating: 0, remission: 0, tracked: 0 };
@@ -338,6 +363,8 @@ export async function buildDashboard(
         kind: f.kind,
         severity: f.severity,
         lastSeenAt: f.lastSeenAt,
+        source: f.source,
+        sourceSessionId: f.sourceSessionId,
       });
     }
   }
@@ -430,7 +457,7 @@ interface CandidateSignals {
   deteriorations: { key: InstrumentKey; delta: number }[];
 }
 
-function foldCandidateData(
+export function foldDashboardCandidateData(
   candidateIds: string[],
   completedRows: { clientId: string; endedAt: Date | null }[],
   planRows: { clientId: string; confirmedAt: Date }[],
@@ -487,7 +514,7 @@ function foldCandidateData(
     let anyImproving = false;
     let anyDeteriorating = false;
     let anyRemission = false;
-    let dischargeReady = false;
+    let progressReviewDue = false;
     let lastMeasureAt: Date | null = null;
     const deteriorations: { key: InstrumentKey; delta: number }[] = [];
 
@@ -506,12 +533,10 @@ function foldCandidateData(
           deteriorations.push({ key, delta: change.delta });
         }
         if (change.isRemission) anyRemission = true;
-        if (
-          change.isRemission &&
-          (change.verdict === 'reliable_improvement' || change.isResponse)
-        ) {
-          dischargeReady = true;
-        }
+        // A screener describes symptom change, not readiness to finish care.
+        // Review improvement with functioning, goals, safety and client preference.
+        if (change.verdict === 'reliable_improvement' || change.isResponse)
+          progressReviewDue = true;
       }
     }
 
@@ -519,7 +544,8 @@ function foldCandidateData(
       completedCount,
       hasActivePlan,
       sessionsSincePlan,
-      dischargeReady,
+      anyDeteriorating,
+      progressReviewDue,
     });
 
     out.set(id, {
@@ -537,8 +563,11 @@ function foldCandidateData(
 }
 
 /**
- * Lightweight stage derivation. Mirrors `deriveStage` in journey.ts (kept
- * in sync via REVIEW_THRESHOLD_SESSIONS). The DISCHARGED stage is never
+ * Lightweight stage derivation. Shares the review cadence with journey.ts.
+ * Deterioration deserves review even before a formal plan exists. Neither a
+ * diagnosis nor a baseline measure is a prerequisite for counselling here.
+ * DISCHARGE_READY is retained in the DTO only; scores never produce it.
+ * The DISCHARGED stage is never
  * produced here because the candidate set is OPEN episodes only — a
  * discharged client has no open episode and is out of the active caseload
  * the pulse describes.
@@ -547,11 +576,13 @@ function deriveStageLite(input: {
   completedCount: number;
   hasActivePlan: boolean;
   sessionsSincePlan: number;
-  dischargeReady: boolean;
+  anyDeteriorating: boolean;
+  progressReviewDue: boolean;
 }): JourneyStage {
+  if (input.anyDeteriorating) return 'REVIEW_DUE';
+  if (input.progressReviewDue) return 'REVIEW_DUE';
   if (input.completedCount === 0) return 'INTAKE';
   if (!input.hasActivePlan) return 'ASSESSMENT';
-  if (input.dischargeReady) return 'DISCHARGE_READY';
   if (input.sessionsSincePlan >= REVIEW_THRESHOLD_SESSIONS) return 'REVIEW_DUE';
   return 'ACTIVE_TREATMENT';
 }

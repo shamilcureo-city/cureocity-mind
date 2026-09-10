@@ -57,15 +57,16 @@ enum PractitionerVertical {
 }
 
 model Psychologist {
-  id            String             @id @default(cuid())
-  firebaseUid   String             @unique
-  email         String             @unique
-  fullName      String
-  phone         String             @unique
-  rciNumber     String             @unique
-  rciVerifiedAt DateTime?
-  status        PsychologistStatus @default(PENDING_VERIFICATION)
-  role          PsychologistRole   @default(THERAPIST)
+  mindCareRecords ClientMindCareRecord[]
+  id              String                 @id @default(cuid())
+  firebaseUid     String                 @unique
+  email           String                 @unique
+  fullName        String
+  phone           String                 @unique
+  rciNumber       String                 @unique
+  rciVerifiedAt   DateTime?
+  status          PsychologistStatus     @default(PENDING_VERIFICATION)
+  role            PsychologistRole       @default(THERAPIST)
 
   /// First-run welcome dismissed — durable, per-therapist replacement for
   /// the per-device localStorage flag. Set via POST /psychologists/me/welcome.
@@ -532,6 +533,8 @@ model Client {
   id             String @id @default(cuid())
   psychologistId String
 
+  mindCareRecords ClientMindCareRecord[]
+
   // Firebase UID for the CLIENT user (separate from Psychologist.firebaseUid).
   // Set when the client claims their account via QR/link (Sprint 8). Until then
   // null, and the patient-app side of continuity endpoints is unreachable.
@@ -604,34 +607,35 @@ model Client {
   // competency rollups, and the trial session cap.
   isDemo Boolean @default(false)
 
-  psychologist        Psychologist             @relation(fields: [psychologistId], references: [id])
-  consents            Consent[]
-  sessions            Session[]
-  modalityState       ModalityState?
-  exerciseAssignments ExerciseAssignment[]
-  moodLogs            MoodLog[]
-  journalEntries      JournalEntry[]
-  claimTokens         ClientClaimToken[]
-  pushSubscriptions   ClientPushSubscription[]
-  nominations         ClientNomination[]
-  erasureRequests     ClientErasureRequest[]
-  grievances          ClientGrievance[]
-  clinicalReports     ClinicalReport[]
-  diagnoses           ClientDiagnosis[]
-  treatmentPlans      TreatmentPlan[]
-  caseFormulations    CaseFormulation[]
-  sessionAgreements   SessionAgreement[]
-  therapyScripts      TherapyScript[]
-  patientShares       PatientShare[]
-  preSessionBriefs    PreSessionBrief[]
-  conceptualMaps      ClientConceptualMap[]
-  caseConsults        CaseConsult[]
-  instrumentResponses InstrumentResponse[]
-  safetyPlans         SafetyPlan[]
-  treatmentEpisodes   TreatmentEpisode[]
-  assessmentItems     AssessmentItem[]
+  psychologist         Psychologist             @relation(fields: [psychologistId], references: [id])
+  consents             Consent[]
+  sessions             Session[]
+  modalityState        ModalityState?
+  exerciseAssignments  ExerciseAssignment[]
+  moodLogs             MoodLog[]
+  journalEntries       JournalEntry[]
+  claimTokens          ClientClaimToken[]
+  pushSubscriptions    ClientPushSubscription[]
+  nominations          ClientNomination[]
+  erasureRequests      ClientErasureRequest[]
+  grievances           ClientGrievance[]
+  clinicalReports      ClinicalReport[]
+  diagnoses            ClientDiagnosis[]
+  treatmentPlans       TreatmentPlan[]
+  caseFormulations     CaseFormulation[]
+  sessionAgreements    SessionAgreement[]
+  therapyScripts       TherapyScript[]
+  patientShares        PatientShare[]
+  preSessionBriefs     PreSessionBrief[]
+  conceptualMaps       ClientConceptualMap[]
+  caseConsults         CaseConsult[]
+  instrumentResponses  InstrumentResponse[]
+  safetyPlans          SafetyPlan[]
+  treatmentEpisodes    TreatmentEpisode[]
+  assessmentItems      AssessmentItem[]
+  mindInstrumentDrafts MindInstrumentDraft[]
   // Doctor vertical — Sprint DV7. Chronic-disease reading series.
-  clinicalReadings    ClinicalReading[]
+  clinicalReadings     ClinicalReading[]
 
   @@index([psychologistId, status])
   @@index([psychologistId, deletedAt])
@@ -954,17 +958,21 @@ model Session {
   /// SessionModality.INTAKE) so the create route always has a value
   /// to write — but the column is nullable so older rows + future
   /// "decide later" flows aren't blocked at the DB level.
-  modality    SessionModality?
+  modality              SessionModality?
   /// Sprint DS11.3 — how the encounter was captured (doctor vertical).
   /// Written at capture start: LIVE by the live-token route; DICTATE /
   /// UPLOAD by the batch capture paths (DS11.7). Null = pre-DS11 rows
   /// and therapist sessions.
-  captureMode CaptureMode?
+  captureMode           CaptureMode?
   /// Sprint 19 — session classification driving Pass 2/3 prompt
   /// branches. Defaults to TREATMENT for back-compat with rows
   /// inserted before this migration.
-  kind        SessionKind      @default(TREATMENT)
-  status      SessionStatus    @default(SCHEDULED)
+  kind                  SessionKind      @default(TREATMENT)
+  /// Mind clinician-selected purpose; never inferred from visit count when supplied.
+  mindPurpose           String?
+  /// MANUAL explicitly forbids capture and AI for this session; null preserves legacy behavior.
+  mindDocumentationMode String?
+  status                SessionStatus    @default(SCHEDULED)
 
   /// Sprint 70 — the note template chosen for this session's note. Scalar FK
   /// (no relation, like Letter) to a NoteTemplate; null = the built-in SOAP
@@ -1019,6 +1027,7 @@ model Session {
   geminiCallLogs            GeminiCallLog[]
   noteDraft                 NoteDraft?
   noteEditRecovery          NoteEditRecovery?
+  mindManualNoteDraft       MindManualNoteDraft?
   therapyNote               TherapyNote?
   clinicalReport            ClinicalReport?
   treatmentPlans            TreatmentPlan[]
@@ -1438,6 +1447,20 @@ model NoteEditRecovery {
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@map("note_edit_recoveries")
+}
+
+/// Incomplete clinician-written notes are encrypted and never presented as generated notes.
+model MindManualNoteDraft {
+  sessionId                 String   @id
+  encryptedFields           String?  @db.Text
+  revision                  Int      @default(0)
+  lastMutationId            String?  @db.Uuid
+  lastMutationHashEncrypted String?  @db.Text
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+  session                   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@map("mind_manual_note_drafts")
 }
 
 // ============================================================================
@@ -1955,6 +1978,24 @@ enum AgreementFollowUp {
 // follow-up (done / partly / not yet).
 // ============================================================================
 
+/// Immutable clinician-authored counselling context. Every version is erased with the client.
+model ClientMindCareRecord {
+  id             String       @id @default(cuid())
+  clientId       String
+  psychologistId String
+  version        Int
+  operationId    String
+  bodyEncrypted  String       @db.Text
+  createdAt      DateTime     @default(now())
+  client         Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist   Psychologist @relation(fields: [psychologistId], references: [id])
+
+  @@unique([clientId, version], map: "mind_care_record_client_version_key")
+  @@unique([clientId, operationId], map: "mind_care_record_client_operation_key")
+  @@index([psychologistId, clientId], map: "mind_care_record_owner_client_idx")
+  @@map("client_mind_care_records")
+}
+
 model SessionAgreement {
   id             String @id @default(cuid())
   sessionId      String
@@ -1964,9 +2005,18 @@ model SessionAgreement {
   speaker AgreementSpeaker
   text    String
 
+  /// Canonical care decision revisions, separate from signed TherapyNote content.
+  /// Kept on the clinical row so client erasure removes the entire history.
+  revision            Int     @default(0)
+  revisions           Json?
+  creationOperationId String?
+
   /// Marked at the NEXT session's prepare step — never at creation.
-  followUp   AgreementFollowUp?
-  followUpAt DateTime?
+  followUp         AgreementFollowUp?
+  followUpAt       DateTime?
+  /// Explicitly retired commitments retain their wording and follow-up history.
+  retiredAt        DateTime?
+  retirementReason String?            @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1975,6 +2025,9 @@ model SessionAgreement {
   client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
   psychologist Psychologist @relation(fields: [psychologistId], references: [id])
 
+  homeworkAssignments ExerciseAssignment[]
+
+  @@unique([sessionId, creationOperationId])
   @@index([sessionId])
   @@index([clientId, createdAt])
   @@map("session_agreements")
@@ -2461,6 +2514,31 @@ model ClientConceptualMap {
 // pre-session brief.
 // ============================================================================
 
+// Unfinished in-session questionnaires. Answers and retry hashes use tenant
+// envelope encryption. SUBMITTED/DISCARDED rows are content-free tombstones:
+// their revision prevents a late autosave from resurrecting old answers.
+model MindInstrumentDraft {
+  clientId            String
+  psychologistId      String
+  instrumentKey       String
+  answersEncrypted    String?  @db.Text
+  revision            Int      @default(0)
+  status              String   @default("ACTIVE")
+  lastMutationId      String?
+  /// Tenant-encrypted hash, not a plaintext fingerprint of low-entropy answers.
+  lastMutationHash    String?  @db.Text
+  submittedResponseId String?
+  riskFlagged         Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @default(now()) @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([clientId, instrumentKey])
+  @@index([psychologistId, updatedAt], map: "mind_instrument_draft_owner_idx")
+  @@map("mind_instrument_drafts")
+}
+
 model InstrumentResponse {
   id                   String  @id @default(cuid())
   clientId             String
@@ -2599,11 +2677,13 @@ model ExerciseAssignment {
   exerciseId String?
 
   // Sprint 51 — provenance + free-text description for non-catalog rows.
-  source                ExerciseAssignmentSource @default(CATALOG)
-  customDescription     String?                  @db.Text
-  sourceTherapyScriptId String?
-  sourceSessionId       String?
-  idempotencyKey        String?                  @unique
+  source                  ExerciseAssignmentSource @default(CATALOG)
+  customDescription       String?                  @db.Text
+  sourceTherapyScriptId   String?
+  sourceSessionId         String?
+  sourceAgreementId       String?
+  sourceAgreementRevision Int?
+  idempotencyKey          String?                  @unique
 
   assignedAt      DateTime             @default(now())
   dueAt           DateTime?
@@ -2625,11 +2705,13 @@ model ExerciseAssignment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  client        Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  psychologist  Psychologist  @relation(fields: [psychologistId], references: [id])
-  sourceSession Session?      @relation("ExerciseAssignmentSourceSession", fields: [sourceSessionId], references: [id], onDelete: SetNull)
-  responseShare PatientShare? @relation("ExerciseAssignmentResponseShare", fields: [responseShareId], references: [id], onDelete: SetNull)
+  client          Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  psychologist    Psychologist      @relation(fields: [psychologistId], references: [id])
+  sourceSession   Session?          @relation("ExerciseAssignmentSourceSession", fields: [sourceSessionId], references: [id], onDelete: SetNull)
+  responseShare   PatientShare?     @relation("ExerciseAssignmentResponseShare", fields: [responseShareId], references: [id], onDelete: SetNull)
+  sourceAgreement SessionAgreement? @relation(fields: [sourceAgreementId], references: [id], onDelete: SetNull, map: "exercise_assignment_agreement_fkey")
 
+  @@unique([sourceAgreementId, sourceAgreementRevision], map: "exercise_assignment_agreement_revision_key")
   @@index([clientId, status])
   @@index([psychologistId, assignedAt])
   @@index([clientId, exerciseId, assignedAt])
@@ -2972,6 +3054,7 @@ enum AuditAction {
 
   // Sessions (scribe-service, Sprint 2)
   SESSION_CREATED
+  SESSION_PURPOSE_SELECTED
   SESSION_CONSENT_RECORDED
   SESSION_STARTED
   SESSION_ENDED
@@ -3106,6 +3189,9 @@ enum AuditAction {
   PRE_SESSION_BRIEF_VIEWED
   INSTRUMENT_ADMINISTERED
   INSTRUMENT_VIEWED
+  MIND_INSTRUMENT_DRAFT_SAVED
+  MIND_INSTRUMENT_DRAFT_DISCARDED
+  MIND_INSTRUMENT_DRAFT_VIEWED
   PATIENT_CHECKIN_SUBMITTED // Sprint 47 — client self-serve check-in
   SAFETY_PLAN_CREATED
   SAFETY_PLAN_UPDATED
@@ -3285,6 +3371,7 @@ enum AuditAction {
   PLAN_DICTATION_PROPOSED // Sprint DS12 — voice plan-edit proposal produced (apply lands RX_PAD_EDITED)
   FORMULATION_CONFIRMED // SL1 — a new living-formulation version confirmed (accepted suggestion or authored)
   AGREEMENT_RECORDED // SL1 — a session agreement recorded / follow-up marked
+  MIND_CARE_RECORD_SAVED
   SESSION_FEEDBACK_RECORDED // SL1 — one-tap alliance rating captured at close
   THERAPIST_PROFILE_PUBLISHED // Marketing V1 — public page went live
   THERAPIST_PROFILE_UNPUBLISHED // Marketing V1 — public page taken down
@@ -3421,7 +3508,7 @@ model AppointmentReminderDelivery {
   createdAt           DateTime                          @default(now())
   updatedAt           DateTime                          @updatedAt
 
-  @@unique([appointmentId, scheduledStartAt, kind, recipient])
+  @@unique([appointmentId, scheduledStartAt, kind, recipient], map: "appointment_reminder_delivery_identity_key")
   @@index([status, leaseExpiresAt])
   @@map("appointment_reminder_deliveries")
 }

@@ -23,6 +23,8 @@ export const CreateExerciseAssignmentInputSchema = z
   .object({
     clientId: CuidSchema,
     sourceSessionId: CuidSchema.optional(),
+    sourceAgreementId: CuidSchema.optional(),
+    sourceAgreementRevision: z.number().int().min(0).optional(),
     idempotencyKey: z.string().uuid().optional(),
     /** Legacy catalog assignment. */
     exerciseId: z
@@ -37,6 +39,19 @@ export const CreateExerciseAssignmentInputSchema = z
     therapistNote: z.string().max(2000).optional(),
   })
   .superRefine((value, ctx) => {
+    if (
+      (value.sourceAgreementId !== undefined || value.sourceAgreementRevision !== undefined) &&
+      (!value.sourceAgreementId ||
+        value.sourceAgreementRevision === undefined ||
+        !value.sourceSessionId ||
+        !value.task)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sourceAgreementId'],
+        message: 'Agreement homework requires its source session, revision and reviewed task.',
+      });
+    }
     if (value.exerciseId && value.task) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -101,6 +116,8 @@ export const ExerciseAssignmentSchema = z.object({
   /** Sprint 51 — FK to the source TherapyScript for dedupe + provenance. */
   sourceTherapyScriptId: CuidSchema.nullable().default(null),
   sourceSessionId: CuidSchema.nullable().default(null),
+  sourceAgreementId: CuidSchema.nullable().optional(),
+  sourceAgreementRevision: z.number().int().min(0).nullable().optional(),
   assignedAt: IsoDateTimeSchema,
   dueAt: IsoDateTimeSchema.nullable(),
   frequency: z.string().nullable().default(null),

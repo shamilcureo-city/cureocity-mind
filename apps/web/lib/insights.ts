@@ -65,6 +65,9 @@ export async function loadDoctorInsights(
     prisma.auditLog.findMany({
       where: {
         actorPsychologistId: psychologistId,
+        // UI cue review/Undo reuses audit enums but is not a model-suggestion
+        // lifecycle event or evidence of a clinical action.
+        targetType: 'LiveSuggestion',
         action: { in: SUGGESTION_ACTIONS as unknown as AuditAction[] },
         createdAt: { gte: from, lt: to },
       },

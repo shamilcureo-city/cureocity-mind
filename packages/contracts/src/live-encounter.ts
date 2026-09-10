@@ -3,7 +3,11 @@ import { CuidSchema } from './common';
 import { ClinicalFindingSchema, PatientContextSchema } from './case-state';
 import { SessionKindSchema, SessionModalitySchema } from './client';
 import { LiveReasoningSchema } from './live-reasoning';
-import { TherapyLiveContextSchema, TherapyReasoningV1Schema } from './live-therapy-reasoning';
+import {
+  TherapyLiveContextSchema,
+  TherapyReasoningV1Schema,
+  TherapyApprovedCaseContextSchema,
+} from './live-therapy-reasoning';
 import { EvidenceRefSchema, MedicalEncounterNoteV1Schema } from './medical-note';
 import { ClinicalOrderV1Schema, MedicationOrderV1Schema } from './medication-order';
 import { IntakeNoteV1Schema, TherapyNoteV1Schema } from './note';
@@ -263,6 +267,11 @@ export const LiveGatewayCommandSchema = z.discriminatedUnion('type', [
   // Sprint TS-B3 — "Update now": the practitioner asks for an interim note
   // refresh immediately instead of waiting out the note-refresh debounce.
   z.object({ type: z.literal('refreshNote') }),
+  z.object({
+    type: z.literal('reviewTherapyContext'),
+    requestId: z.string().uuid(),
+    context: TherapyApprovedCaseContextSchema.nullable(),
+  }),
 ]);
 export type LiveGatewayCommand = z.infer<typeof LiveGatewayCommandSchema>;
 
@@ -289,6 +298,12 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
     expiresAt: z.number().int().positive().safe(),
   }),
   z.object({ type: z.literal('capturePaused'), requestId: z.string().uuid() }),
+  z.object({
+    type: z.literal('therapyContextReviewed'),
+    requestId: z.string().uuid(),
+    accepted: z.boolean(),
+  }),
+  z.object({ type: z.literal('therapyContextCleared'), reason: z.literal('CAPABILITY_CHANGED') }),
   z.object({ type: z.literal('capturePauseFailed'), requestId: z.string().uuid() }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
   /**

@@ -13,8 +13,9 @@ describe('Mind Review & Close architecture', () => {
 
     expect(page).toContain('<MindSessionCloseout');
     expect(page).toContain('deriveMindSessionCloseout');
-    expect(tabs).toContain("{ key: 'note', label: 'Review & close' }");
-    expect(tabs).toContain("{ key: 'review', label: 'Clinical context' }");
+    expect(tabs).toContain("{ key: 'note', label: 'Review & finish' }");
+    expect(tabs).not.toContain("{ key: 'review'");
+    expect(page.match(/<AICopilotTab/g)).toHaveLength(1);
     // The note is now the primary surface; the clinical record remains reachable
     // as secondary context, not a second signing or closeout ceremony.
     expect(closeout.indexOf('{children}', closeout.indexOf('return ('))).toBeLessThan(
@@ -27,7 +28,9 @@ describe('Mind Review & Close architecture', () => {
 
     expect(copilot).not.toContain("import { postSignNote } from '@/lib/sign-note'");
     expect(copilot).not.toContain("'Sign and close'");
-    expect(copilot).toContain('Continue to Review &amp; Close');
+    expect(copilot).not.toContain('Wrap up decisions');
+    expect(copilot).not.toContain('function WrapUpSignStep');
+    expect(copilot).toContain('<AdditionalSessionDetails');
   });
 
   it('makes processing and completion return states explicit', () => {

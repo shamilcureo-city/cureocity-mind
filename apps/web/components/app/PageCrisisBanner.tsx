@@ -1,4 +1,5 @@
 import type { CaseBriefingV1 } from '@cureocity/contracts';
+import Link from 'next/link';
 
 interface Props {
   briefing: CaseBriefingV1 | null;
@@ -37,6 +38,20 @@ export function PageCrisisBanner({ briefing }: Props) {
     >
       <span className="font-semibold uppercase tracking-wide">Safety · {sev}</span>
       <span className="flex-1">{flagsText}</span>
+      {briefing.safety.clinicianDocumentedRisk && (
+        <span className="text-xs">
+          <Link
+            className="underline"
+            href={`/app/sessions/${briefing.safety.clinicianDocumentedRisk.sourceSessionId}`}
+          >
+            {briefing.safety.clinicianDocumentedRisk.sourceStatus === 'UNFINISHED'
+              ? 'Review unfinished clinician-written draft'
+              : 'Review clinician-written source note'}
+          </Link>
+          . Earlier documentation is not a current safety assessment; another visit does not mark it
+          resolved.
+        </span>
+      )}
       <span className="text-xs">
         {briefing.safety.hasSafetyPlan
           ? 'Safety plan on file — review it before this session.'

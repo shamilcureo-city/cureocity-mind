@@ -13,6 +13,7 @@ import { ProblemList } from '@/components/app/ProblemList';
 import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { ClientWorkspaceNav } from '@/components/app/ClientWorkspaceNav';
 import { PreparePanel } from '@/components/app/PreparePanel';
+import { MindCareRecordPanel } from '@/components/app/MindCareRecordPanel';
 import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
@@ -22,6 +23,7 @@ import { formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
 import { mindSessionDestination, mindStartEntryHref } from '@/lib/mind-session-start';
 import { clientSessionSummary } from '@/lib/client-session-summary';
+import { buildMindClientOverview } from '@/lib/mind-client-overview';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,6 +63,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
           modality: true,
           status: true,
           captureMode: true,
+          mindDocumentationMode: true,
           scheduledAt: true,
           therapyNote: { select: { id: true, locked: true, signedAt: true } },
           noteDraft: { select: { status: true } },
@@ -87,8 +90,13 @@ export default async function ClientDetailPage({ params }: PageProps) {
       },
     }),
   ]);
-  const latestCompletedSession = client.sessions.find((session) => session.status === 'COMPLETED');
-  const latestChange = latestCompletedSession?.scheduledAt ?? client.updatedAt;
+  const {
+    latestCompletedSession,
+    nextAppointment,
+    recentSessions,
+    completedCount,
+    totalRecordCount,
+  } = buildMindClientOverview(client.sessions);
 
   // Built only for the page-level crisis banner — the one clinical
   // signal that stays on the lean record for safety.
@@ -164,7 +172,7 @@ export default async function ClientDetailPage({ params }: PageProps) {
                 {pii.fullName || (
                   <span className="italic text-[var(--color-ink-3)]">Name unavailable</span>
                 )}
-                {!pii.fullName && <Badge tone="warn">needs encryption backfill</Badge>}
+                {!pii.fullName && <Badge tone="warn">Contact support to restore name</Badge>}
                 {client.isDemo && <Badge tone="warn">Example</Badge>}
               </h1>
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
@@ -204,53 +212,69 @@ export default async function ClientDetailPage({ params }: PageProps) {
                 initialClientId={client.id}
                 triggerLabelOverride="Schedule follow-up"
               />
-              <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>{client.status}</Badge>
-              {client.preferredModality && <Badge tone="muted">{client.preferredModality}</Badge>}
-              {client.isDemo && <DemoClientButton demoClientId={client.id} variant="inline" />}
-              <SendCheckinButton
-                clientId={client.id}
-                hasContactPhone={!!pii.contactPhone}
-                hasContactEmail={!!pii.contactEmail}
-              />
-              <ClientEditPanel
-                client={{
-                  id: client.id,
-                  fullName: pii.fullName,
-                  contactPhone: pii.contactPhone,
-                  contactEmail: pii.contactEmail,
-                  dateOfBirth: client.dateOfBirth
-                    ? client.dateOfBirth.toISOString().slice(0, 10)
-                    : null,
-                  presentingConcerns: client.presentingConcerns,
-                  preferredLanguage: client.preferredLanguage,
-                  spokenLanguages: client.spokenLanguages,
-                }}
-              />
-              <ArchivePatientButton
-                clientId={client.id}
-                redirectTo="/app/clients"
-                noun="client"
-                name={pii.fullName}
-              />
+              <details className="w-full text-right">
+                <summary className="cursor-pointer py-2 text-sm text-[var(--color-ink-2)]">
+                  Client settings
+                </summary>
+                <div className="mt-2 flex flex-wrap justify-end gap-2">
+                  <Badge tone={client.status === 'ACTIVE' ? 'accent' : 'muted'}>
+                    {client.status}
+                  </Badge>
+                  {client.preferredModality && (
+                    <Badge tone="muted">{client.preferredModality}</Badge>
+                  )}
+                  {client.isDemo && <DemoClientButton demoClientId={client.id} variant="inline" />}
+                  <SendCheckinButton
+                    clientId={client.id}
+                    hasContactPhone={!!pii.contactPhone}
+                    hasContactEmail={!!pii.contactEmail}
+                  />
+                  <ClientEditPanel
+                    client={{
+                      id: client.id,
+                      fullName: pii.fullName,
+                      contactPhone: pii.contactPhone,
+                      contactEmail: pii.contactEmail,
+                      dateOfBirth: client.dateOfBirth
+                        ? client.dateOfBirth.toISOString().slice(0, 10)
+                        : null,
+                      presentingConcerns: client.presentingConcerns,
+                      preferredLanguage: client.preferredLanguage,
+                      spokenLanguages: client.spokenLanguages,
+                    }}
+                  />
+                  <ArchivePatientButton
+                    clientId={client.id}
+                    redirectTo="/app/clients"
+                    noun="client"
+                    name={pii.fullName}
+                  />
+                </div>
+              </details>
             </div>
           </header>
 
           {/* UI truth pass — one empty-value treatment: a muted em-dash. A bare
               "Phone" label with nothing under it read as a rendering bug. */}
-          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <dt className="text-xs text-[var(--color-ink-3)]">Phone</dt>
-              <dd className="font-mono text-[var(--color-ink)]">
-                {pii.contactPhone || <span className="text-[var(--color-ink-3)]">—</span>}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-xs text-[var(--color-ink-3)]">Email</dt>
-              <dd className="text-[var(--color-ink)]">
-                {pii.contactEmail || <span className="text-[var(--color-ink-3)]">—</span>}
-              </dd>
-            </div>
-          </dl>
+          <details className="mt-4">
+            <summary className="cursor-pointer py-2 text-sm text-[var(--color-ink-2)]">
+              Contact details
+            </summary>
+            <dl className="mt-2 grid gap-3 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs text-[var(--color-ink-3)]">Phone</dt>
+                <dd className="font-mono text-[var(--color-ink)]">
+                  {pii.contactPhone || <span className="text-[var(--color-ink-3)]">—</span>}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-[var(--color-ink-3)]">Email</dt>
+                <dd className="text-[var(--color-ink)]">
+                  {pii.contactEmail || <span className="text-[var(--color-ink-3)]">—</span>}
+                </dd>
+              </div>
+            </dl>
+          </details>
 
           {client.presentingConcerns?.trim() && (
             <section className="mt-6">
@@ -269,16 +293,25 @@ export default async function ClientDetailPage({ params }: PageProps) {
         <ClientWorkspaceNav clientId={client.id} />
       </div>
       <Card className="mt-5 p-5">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <h2 className="mb-4 font-serif text-xl">For the next session</h2>
+        <div className="grid gap-4 sm:grid-cols-2">
           <section>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Stage</p>
-            <p className="mt-1 font-medium">{journey.stage.replace(/_/g, ' ').toLowerCase()}</p>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Next appointment
+            </p>
+            <p className="mt-1 font-medium">
+              {nextAppointment ? formatDateTime(nextAppointment.scheduledAt) : 'Not booked'}
+            </p>
           </section>
           <section>
             <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-              Latest change
+              Last completed session
             </p>
-            <p className="mt-1 text-sm">{formatDateTime(latestChange)}</p>
+            <p className="mt-1 text-sm">
+              {latestCompletedSession
+                ? formatDateTime(latestCompletedSession.scheduledAt)
+                : 'None yet'}
+            </p>
             <p className="mt-1 text-xs text-[var(--color-ink-3)]">
               {journey.instrumentChanges[0]
                 ? `${journey.instrumentChanges[0].instrumentKey} ${journey.instrumentChanges[0].baselineScore}→${journey.instrumentChanges[0].latestScore}`
@@ -294,31 +327,48 @@ export default async function ClientDetailPage({ params }: PageProps) {
             </p>
           </section>
           <section>
-            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">Next action</p>
-            <p className="mt-1 text-sm font-medium">
-              {journey.nextBestAction?.title ?? 'Continue care'}
+            <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Record-based suggestion · clinician review
             </p>
+            <p className="mt-1 text-sm font-medium">
+              {journey.nextBestAction?.title ?? 'No next step suggested'}
+            </p>
+            <p className="mt-2 text-xs leading-relaxed text-[var(--color-ink-2)]">
+              Based on the saved record, not a confirmed clinical outcome. Check its fit with the
+              client today; no diagnosis or action is required to finish a session.
+            </p>
+            <Link
+              href={`/app/clients/${client.id}/journey`}
+              className="mt-1 inline-block py-2 text-xs text-[var(--color-accent)] underline"
+            >
+              Review supporting care context
+            </Link>
           </section>
         </div>
         <div id="prepare">
-          <PreparePanel clientId={client.id} />
+          <PreparePanel clientId={client.id} summaryVisible />
         </div>
       </Card>
 
+      <MindCareRecordPanel key={client.id} clientId={client.id} />
+
       <div className="mt-6">
         <Card className="p-5">
-          <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Problem list
-          </h3>
-          <p className="mb-3 mt-1 text-sm text-[var(--color-ink-2)]">
-            The main difficulties you&apos;re working on — your own running list, kept across
-            sessions.
-          </p>
-          <ProblemList
-            clientId={client.id}
-            initialItems={initialProblems}
-            sessionCounts={sessionCounts}
-          />
+          <details>
+            <summary className="cursor-pointer py-2 text-sm font-medium">
+              Ongoing concerns ·{' '}
+              {initialProblems.filter((problem) => problem.status !== 'RESOLVED').length} unresolved
+            </summary>
+            <p className="mb-3 mt-1 text-sm text-[var(--color-ink-2)]">
+              The main difficulties you&apos;re working on — your own running list, kept across
+              sessions.
+            </p>
+            <ProblemList
+              clientId={client.id}
+              initialItems={initialProblems}
+              sessionCounts={sessionCounts}
+            />
+          </details>
         </Card>
       </div>
 
@@ -327,24 +377,24 @@ export default async function ClientDetailPage({ params }: PageProps) {
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line-soft)] px-5 py-4">
             <div>
               <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-                Sessions
+                Recent session records
               </h3>
               <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-                {client.sessions.length} session{client.sessions.length === 1 ? '' : 's'} recorded.
+                {completedCount} completed session{completedCount === 1 ? '' : 's'} ·{' '}
+                {totalRecordCount} total appointments and session records.
               </p>
             </div>
             <Link
-              href={`/app/clients/${client.id}/journey`}
+              href={`/app/clients/${client.id}/sessions`}
               className="rounded-full border border-[var(--color-line)] px-3.5 py-1.5 text-xs font-medium text-[var(--color-accent)] transition-colors hover:border-[var(--color-accent)]"
             >
-              View journey &amp; outcomes →
+              View all sessions →
             </Link>
           </header>
-          {client.sessions.length === 0 ? (
+          {recentSessions.length === 0 ? (
             <div className="px-5 py-8 text-center">
               <p className="text-sm text-[var(--color-ink-2)]">
-                No sessions yet. Record the first session, or add a PHQ-9 / GAD-7 baseline to start
-                tracking progress.
+                No recent session records yet. Your next booked appointment is shown above.
               </p>
               <p className="mt-3 text-xs text-[var(--color-ink-3)]">
                 Use Start session above when you are ready.
@@ -352,11 +402,11 @@ export default async function ClientDetailPage({ params }: PageProps) {
             </div>
           ) : (
             <ul className="divide-y divide-[var(--color-line-soft)]">
-              {client.sessions.map((s) => (
+              {recentSessions.map((s) => (
                 <li key={s.id}>
                   <Link
                     href={mindSessionDestination({ ...s, clientId: client.id }, defaultCapture)}
-                    className="grid grid-cols-[1.5fr_1fr_1.5fr_1fr] gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)]"
+                    className="grid grid-cols-2 gap-3 px-5 py-4 text-sm transition-colors hover:bg-[var(--color-surface-soft)] sm:grid-cols-[1.5fr_1fr_1.5fr_1fr]"
                   >
                     <span className="text-[var(--color-ink)]">{formatDateTime(s.scheduledAt)}</span>
                     <span className="text-[var(--color-ink-2)]">{s.modality ?? '—'}</span>
@@ -374,40 +424,45 @@ export default async function ClientDetailPage({ params }: PageProps) {
         </Card>
       </div>
 
-      <div className="mt-6">
-        <Card className="p-5">
-          <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-            Case documents
-          </h3>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            The whole chart — diagnoses, plan, scores and session history — as one PDF, for a
-            referral, supervision, or the client&apos;s own records.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <a
-              href={`/api/v1/clients/${client.id}/case-file/pdf`}
-              className="inline-block rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
-            >
-              Download case file (PDF)
-            </a>
-            {latestEpisode && (
+      <details className="mt-6 rounded-2xl border border-[var(--color-line)] bg-white p-5">
+        <summary className="cursor-pointer py-2 text-sm font-medium">
+          Documents &amp; data rights
+        </summary>
+        <div className="mt-4">
+          <Card className="p-5">
+            <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
+              Case documents
+            </h3>
+            <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+              The whole chart — diagnoses, plan, scores and session history — as one PDF, for a
+              referral, supervision, or the client&apos;s own records.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
               <a
-                href={`/api/v1/clients/${client.id}/discharge-summary/pdf`}
+                href={`/api/v1/clients/${client.id}/case-file/pdf`}
                 className="inline-block rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
               >
-                {episodeClosed
-                  ? 'Download discharge summary (PDF)'
-                  : 'Download treatment summary (PDF)'}
+                Download case file (PDF)
               </a>
-            )}
-            <LetterComposer clientId={client.id} />
-          </div>
-        </Card>
-      </div>
+              {latestEpisode && (
+                <a
+                  href={`/api/v1/clients/${client.id}/discharge-summary/pdf`}
+                  className="inline-block rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--color-surface-2)]"
+                >
+                  {episodeClosed
+                    ? 'Download discharge summary (PDF)'
+                    : 'Download treatment summary (PDF)'}
+                </a>
+              )}
+              <LetterComposer clientId={client.id} />
+            </div>
+          </Card>
+        </div>
 
-      <div className="mt-6">
-        <DataRightsCard clientId={client.id} clientName={pii.fullName} />
-      </div>
+        <div className="mt-6">
+          <DataRightsCard clientId={client.id} clientName={pii.fullName} />
+        </div>
+      </details>
     </Container>
   );
 }

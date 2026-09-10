@@ -8,7 +8,7 @@
  *   - a speaker-true CONVERSATION (one bubble per diarized segment — B1 made
  *     the gateway emit per-segment utterances) with timestamps, auto-scroll
  *     and a live talk-balance bar;
- *   - a LIVE NOTE that visibly assembles — every section always on screen,
+ *   - an optional LIVE NOTE that assembles behind Show draft,
  *     unfilled ones as placeholders, "Updated Xs ago" + an Update-now button
  *     (the `refreshNote` gateway command) instead of a silent 90s wait;
  *   - a RISK WATCH that is always present (calm state → escalates in place);
@@ -33,6 +33,8 @@ import {
   type SessionKind,
   type SessionModality,
   type TherapyCarriedQuestion,
+  type TherapyApprovedCaseContext,
+  mindSessionPurposeLabel,
   type TherapyReasoningV1,
   type TherapyNoteV1,
   type Utterance,
@@ -59,8 +61,30 @@ import { Card } from '../ui/Card';
 import { GatewayMockBanner } from './GatewayMockBanner';
 import { TherapyCopilotRail } from './TherapyCopilotRail';
 import { MindTherapyGuide, type PreparedMindGuide } from './MindTherapyGuide';
+import { CaptureStatusBar } from './CaptureStatusBar';
+import { useCaptureViewClock } from '@/lib/use-capture-view-clock';
+import { useMindCueReview } from '@/lib/use-mind-cue-review';
+import { useModalA11y } from '@/lib/use-modal-a11y';
+import { cueReviewKey } from '@/lib/mind-cue-review';
+import { MindConsentRecovery } from './MindConsentRecovery';
+import { isSessionConsentFailure, liveNoteStatus } from '@/lib/mind-consent-recovery-client';
+import { MindLiveCaseContext } from './MindLiveCaseContext';
 
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
+
+/** Discard model-derived content when its reviewed background changes. Keep
+ * clinician-carried questions, the deterministic safety check and pacing. */
+function withoutContextDerivedReasoning(
+  previous: TherapyReasoningV1 | null,
+): TherapyReasoningV1 | null {
+  if (!previous) return null;
+  return {
+    ...previous,
+    riskWatch: previous.riskWatch.filter((item) => item.source === 'CARRIED_RISK'),
+    askNext: previous.askNext.filter((item) => item.source === 'CARRIED'),
+    threads: [],
+  };
+}
 
 type Phase =
   | 'idle'
@@ -92,6 +116,8 @@ interface Props {
   selectedDeviceId?: string;
   preparedGuides?: PreparedMindGuide[];
   initialGuideId?: string;
+  caseContext?: TherapyApprovedCaseContext | null;
+  mindPurpose?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +268,8 @@ export function TherapistLiveSession({
   selectedDeviceId,
   preparedGuides = [],
   initialGuideId,
+  caseContext = null,
+  mindPurpose = null,
 }: Props) {
   const router = useRouter();
   const initialGuide = preparedGuides.find((guide) => guide.id === initialGuideId);
@@ -249,23 +277,42 @@ export function TherapistLiveSession({
     initialGuide ? 'guided' : 'quiet',
   );
   const [showTranscript, setShowTranscript] = useState(false);
+  const [showDraft, setShowDraft] = useState(false);
   const [guideId, setGuideId] = useState(initialGuide?.id ?? '');
   const [phase, setPhase] = useState<Phase>('idle');
+  const [caseStatus, setCaseStatus] = useState<'off' | 'pending' | 'using' | 'unconfirmed'>('off');
+  const [acknowledgedCaseKey, setAcknowledgedCaseKey] = useState<string | null>(null);
+  const caseReply = useRef<{
+    requestId: string;
+    using: boolean;
+    contextKey: string | null;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  useEffect(
+    () => () => {
+      if (caseReply.current) clearTimeout(caseReply.current.timer);
+    },
+    [],
+  );
   const [utterances, setUtterances] = useState<Utterance[]>([]);
   const [note, setNote] = useState<Record<string, unknown>>({});
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<number | null>(null);
   const [refreshingNote, setRefreshingNote] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [elapsed, setElapsed] = useState(0);
   const [saving, setSaving] = useState(false);
   // Sprint TS5 — the live copilot snapshot (risk / ask-next / threads / arc).
   const [copilot, setCopilot] = useState<TherapyReasoningV1 | null>(null);
-  // TS5.4 — ids the therapist resolved (asked/assessed/dismissed). Applied
-  // optimistically to whatever snapshot renders, so a card leaves the rail on
-  // tap instead of waiting for the gateway's next emission.
-  const [resolvedIds, setResolvedIds] = useState<Set<string>>(() => new Set());
-  // Ref mirror so ws.onopen (a closure) can replay pre-connection resolutions.
-  const resolvedRef = useRef<Set<string>>(new Set());
+  const cueLabelsRef = useRef<Record<string, string>>({});
+  const confirmedShownRef = useRef(new Set<string>());
+  const [cueDisclosureError, setCueDisclosureError] = useState<string | null>(null);
+  const [cueDisclosurePending, setCueDisclosurePending] = useState<string | null>(null);
+  const cueDisclosureBusyRef = useRef(false);
+  const lastCueActionRef = useRef<{
+    id: string;
+    kind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP';
+    event: 'acted' | 'dismissed';
+    label?: string;
+  } | null>(null);
   // Set when the consult ended but no note ever arrived (Pass 2 empty/blocked
   // upstream). Terminal, recoverable — never leave the user on "Finishing…".
   const [noteFailed, setNoteFailed] = useState(false);
@@ -292,11 +339,17 @@ export function TherapistLiveSession({
     reject: (error: Error) => void;
   } | null>(null);
   const [pauseWarning, setPauseWarning] = useState<string | null>(null);
-  // The live-token 409: the client's consents on record don't cover the live
-  // scribe. Rendered with the real reason + the path to capture consent,
-  // instead of the gateway's generic "could not be authorized".
+  // Only a consent-specific token refusal opens same-session recovery.
+  // A missing snapshot entry does not imply the client never consented.
   const [consentBlocked, setConsentBlocked] = useState<string | null>(null);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const consentResumeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (consentChecked) consentResumeRef.current?.focus();
+  }, [consentChecked]);
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const endDialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(endConfirmOpen, endDialogRef, () => setEndConfirmOpen(false));
   const [recoveryRestored, setRecoveryRestored] = useState(false);
   const [finalStage, setFinalStage] = useState<
     'stopping' | 'saving-transcript' | 'generating-note' | 'ready' | null
@@ -306,6 +359,7 @@ export function TherapistLiveSession({
   // always did this; the live scribe losing the screen ~30s in put the mic
   // and the socket at the OS's mercy on the exact device the pilot targets.
   useWakeLock(phase === 'listening' || phase === 'finalizing');
+  const elapsedMs = useCaptureViewClock(phase === 'listening', phase === 'done');
 
   // TS5.4 — the SESSION PLAN, rendered before the gateway says a word. Seeds
   // the rail with the carried/copilot questions and the deterministic prior-SI
@@ -341,18 +395,26 @@ export function TherapistLiveSession({
       version: 0,
     };
   }, [carriedQuestions, priorRisk]);
+  const cueReview = useMindCueReview(sessionId, copilot ?? seedReasoning);
+  const resolvedIds = cueReview.resolvedIds;
 
   // What the rail renders: the latest gateway snapshot, or the local seed
   // until one arrives — minus everything the therapist already resolved.
   const effectiveCopilot = useMemo<TherapyReasoningV1 | null>(() => {
     const base = copilot ?? seedReasoning;
     if (!base) return null;
+    for (const item of base.riskWatch)
+      cueLabelsRef.current[cueReviewKey('RED_FLAG', item.id)] ??= item.label;
+    for (const item of base.askNext)
+      cueLabelsRef.current[cueReviewKey('ASK_NEXT', item.id)] ??= item.question;
+    for (const item of base.threads)
+      cueLabelsRef.current[cueReviewKey('GAP', item.id)] ??= item.topic;
     if (resolvedIds.size === 0) return base;
     return {
       ...base,
-      riskWatch: base.riskWatch.filter((r) => !resolvedIds.has(r.id)),
-      askNext: base.askNext.filter((a) => !resolvedIds.has(a.id)),
-      threads: base.threads.filter((t) => !resolvedIds.has(t.id)),
+      riskWatch: base.riskWatch.filter((r) => !resolvedIds.has(cueReviewKey('RED_FLAG', r.id))),
+      askNext: base.askNext.filter((a) => !resolvedIds.has(cueReviewKey('ASK_NEXT', a.id))),
+      threads: base.threads.filter((t) => !resolvedIds.has(cueReviewKey('GAP', t.id))),
     };
   }, [copilot, seedReasoning, resolvedIds]);
 
@@ -484,13 +546,6 @@ export function TherapistLiveSession({
     };
   }, []);
 
-  // Elapsed timer while listening — also drives the "Updated Xs ago" ticker.
-  useEffect(() => {
-    if (phase !== 'listening') return;
-    const t = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(t);
-  }, [phase]);
-
   // Auto-scroll the conversation when new turns arrive, unless the therapist
   // has scrolled up to re-read (stay out of their way).
   useEffect(() => {
@@ -513,8 +568,15 @@ export function TherapistLiveSession({
   const shownIdsRef = useRef({ sessionId, ids: new Set<string>() });
   function reportShownCopilot(items: DisclosedCopilotSuggestion[]): void {
     for (const item of items) {
-      if (!markCopilotSuggestionShown(shownIdsRef.current, sessionId, item.id)) continue;
-      relaySuggestion('shown', item.id, item.kind, item.label);
+      if (
+        !markCopilotSuggestionShown(
+          shownIdsRef.current,
+          sessionId,
+          cueReviewKey(item.kind, item.id),
+        )
+      )
+        continue;
+      void relaySuggestion('shown', item.id, item.kind, item.label).catch(() => {});
     }
   }
 
@@ -713,13 +775,13 @@ export function TherapistLiveSession({
     setNoteFailed(false);
     setConnectionLost(false);
     setConsentBlocked(null);
+    setConsentChecked(false);
     setSaveFailed(null);
     setPauseWarning(null);
     if (!resume && !opts.resume) {
       setUtterances([]);
       setNote({});
       setNoteUpdatedAt(null);
-      setElapsed(0);
       meteredRef.current = false;
       meterRef.current = null;
     }
@@ -764,23 +826,23 @@ export function TherapistLiveSession({
           throw new Error('Could not verify live authorization. Retry before recording.');
         token = body.token;
         initialLease = { requestedAtMs, expiresInSec: body.expiresInSec };
-      } else if (r.status === 409) {
-        // The one refusal the therapist can actually fix here: the client's
-        // consents on record don't cover the live scribe (or were withdrawn).
-        // Surface the server's real reason + the capture path, instead of
-        // proceeding tokenless into the gateway's generic "unauthorized".
-        const body = (await r.json().catch(() => ({}))) as { error?: string };
-        if (!isCurrentAttempt()) return;
-        setPhase('error');
-        setConsentBlocked(
-          body.error ?? "The client's consents on record don't cover the live scribe.",
-        );
-        startingRef.current = false;
-        return;
       } else {
-        const body = await r.json().catch(() => ({}));
+        const body: unknown = await r.json().catch(() => null);
+        if (!isCurrentAttempt()) return;
+        // A lifecycle/concurrency 409 is not consent. Recovery never leaves
+        // this session or skips the next token/start authorization check.
+        if (isSessionConsentFailure(r.status, body)) {
+          abort.abort();
+          phaseRef.current = 'error';
+          setPhase('error');
+          setConsentBlocked('SESSION_CONSENT_INVALID');
+          startingRef.current = false;
+          return;
+        }
         throw new Error(
-          body.error ?? 'Could not authorize this session. Check your sign-in and try again.',
+          r.status === 409
+            ? 'This session changed or is no longer open for recording. Open its record to review the current status.'
+            : 'Could not authorize this session. Check your access and try again.',
         );
       }
     } catch (reason) {
@@ -914,9 +976,9 @@ export function TherapistLiveSession({
               ...(replay.length > 0 ? { resume: { utterances: replay } } : {}),
             }),
           );
-          for (const id of resolvedRef.current) {
-            ws.send(JSON.stringify({ type: 'dismiss', questionId: id }));
-          }
+          // Mind review marks only filter the browser's current, validated
+          // snapshot. Never send irreversible gateway dismissals: Undo must
+          // not require regenerating or reviving an older model suggestion.
         })
         .catch((reason: unknown) => {
           if (!ownsSocket()) return;
@@ -956,6 +1018,10 @@ export function TherapistLiveSession({
     ws.onclose = () => {
       renewal.dispose();
       if (!ownsSocket()) return;
+      if (caseReply.current) clearTimeout(caseReply.current.timer);
+      caseReply.current = null;
+      setCaseStatus('off');
+      setAcknowledgedCaseKey(null);
       audioDeliveryRef.current = 'off';
       pauseReplyRef.current?.reject(
         new Error('The live connection closed before pause was confirmed.'),
@@ -1055,6 +1121,24 @@ export function TherapistLiveSession({
           break;
         case 'capturePaused':
           if (pauseReplyRef.current?.requestId === event.requestId) pauseReplyRef.current.resolve();
+          break;
+        case 'therapyContextCleared':
+          setCopilot(withoutContextDerivedReasoning);
+          if (caseReply.current) clearTimeout(caseReply.current.timer);
+          caseReply.current = null;
+          setAcknowledgedCaseKey(null);
+          setCaseStatus('off');
+          break;
+        case 'therapyContextReviewed':
+          if (caseReply.current?.requestId === event.requestId) {
+            if (event.accepted) setCopilot(withoutContextDerivedReasoning);
+            clearTimeout(caseReply.current.timer);
+            setCaseStatus(
+              event.accepted ? (caseReply.current.using ? 'using' : 'off') : 'unconfirmed',
+            );
+            setAcknowledgedCaseKey(event.accepted ? caseReply.current.contextKey : null);
+            caseReply.current = null;
+          }
           break;
         case 'capturePauseFailed':
           if (pauseReplyRef.current?.requestId === event.requestId)
@@ -1254,46 +1338,67 @@ export function TherapistLiveSession({
     refreshTimerRef.current = setTimeout(() => setRefreshingNote(false), 12_000);
   }
 
-  /** Sprint TS5 — relay one copilot-suggestion lifecycle event to the audit
-   *  trail (best-effort; the gateway can't touch the DB, the browser relays). */
-  function relaySuggestion(
+  /** Relay visibility to the existing audit path. Automatic disclosure remains
+   * passive; an explicit review requires an acknowledged visibility receipt. */
+  async function relaySuggestion(
     event: 'shown' | 'acted' | 'dismissed',
     suggestionId: string,
     suggestionKind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
     label?: string,
-  ): void {
-    void fetch(`/api/v1/sessions/${sessionId}/live-suggestion`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        event,
-        suggestionId,
-        kind: suggestionKind,
-        ...(label ? { label } : {}),
-      }),
-    }).catch(() => {
-      /* audit is best-effort */
-    });
+  ): Promise<void> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12_000);
+    try {
+      const response = await fetch(`/api/v1/sessions/${sessionId}/live-suggestion`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          event,
+          suggestionId,
+          kind: suggestionKind,
+          ...(label ? { label } : {}),
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok)
+        throw new Error(
+          'Cue visibility could not be confirmed. Keep the cue visible and try its review action again.',
+        );
+      confirmedShownRef.current.add(cueReviewKey(suggestionKind, suggestionId));
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  /** Acted / dismissed a copilot card: stop the gateway re-suggesting it +
-   *  record the outcome. "acted" (Asked ✓ / Explore) and "dismissed" both
-   *  resolve the card so it leaves the rail. */
-  function resolveCopilot(
+  /** Save a UI review choice first. No clinical assessment is inferred. */
+  async function resolveCopilot(
     id: string,
     suggestionKind: 'ASK_NEXT' | 'RED_FLAG' | 'GAP',
     event: 'acted' | 'dismissed',
     label?: string,
-  ): void {
-    // Optimistic: the card leaves the rail immediately (also covers resolving
-    // a seeded plan item before the gateway is connected).
-    resolvedRef.current.add(id);
-    setResolvedIds((prev) => new Set(prev).add(id));
-    const ws = wsRef.current;
-    if (ws && ws.readyState === ws.OPEN) {
-      ws.send(JSON.stringify({ type: 'dismiss', questionId: id }));
+  ): Promise<void> {
+    if (cueDisclosureBusyRef.current || cueReview.blocked) return;
+    cueDisclosureBusyRef.current = true;
+    lastCueActionRef.current = { id, kind: suggestionKind, event, ...(label ? { label } : {}) };
+    if (label) cueLabelsRef.current[cueReviewKey(suggestionKind, id)] ??= label;
+    setCueDisclosureError(null);
+    setCueDisclosurePending(id);
+    try {
+      // Prepared cues previously had no shown audit. Register only their ID
+      // and kind after the explicit action; never add new client-label logging.
+      if (!confirmedShownRef.current.has(cueReviewKey(suggestionKind, id)))
+        await relaySuggestion('shown', id, suggestionKind);
+      if (unmountedRef.current) return;
+      cueReview.review(id, suggestionKind, event === 'acted' ? 'reviewed' : 'dismissed');
+      lastCueActionRef.current = null;
+    } catch {
+      setCueDisclosureError(
+        'Cue visibility could not be confirmed. Keep the cue visible and try its review action again.',
+      );
+    } finally {
+      cueDisclosureBusyRef.current = false;
+      setCueDisclosurePending(null);
     }
-    relaySuggestion(event, id, suggestionKind, label);
   }
 
   const sorted = [...utterances].sort((a, b) => a.tStartMs - b.tStartMs);
@@ -1305,23 +1410,62 @@ export function TherapistLiveSession({
   const balance = talkBalance(utterances);
   const hearing = hearingCodes(utterances);
   const clientFirst = clientName?.trim().split(/\s+/)[0] || 'Client';
-  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
-  const ss = String(elapsed % 60).padStart(2, '0');
   const updatedAgo =
     noteUpdatedAt !== null ? Math.max(0, Math.round((Date.now() - noteUpdatedAt) / 1000)) : null;
   const selectedGuide = preparedGuides.find((guide) => guide.id === guideId);
+  const reviewContext: TherapyApprovedCaseContext | null = caseContext
+    ? {
+        ...caseContext,
+        guide: selectedGuide
+          ? {
+              id: selectedGuide.id,
+              updatedAt: selectedGuide.updatedAt,
+              name: selectedGuide.body.therapyName,
+              purposes: selectedGuide.body.mainExercise.steps.map((s) => s.purpose),
+            }
+          : null,
+      }
+    : null;
+  function reviewCase(context: TherapyApprovedCaseContext | null) {
+    if (
+      !['listening', 'paused'].includes(phaseRef.current) ||
+      wsRef.current?.readyState !== WebSocket.OPEN
+    )
+      return;
+    if (caseReply.current) clearTimeout(caseReply.current.timer);
+    const requestId = globalThis.crypto.randomUUID();
+    setCaseStatus('pending');
+    caseReply.current = {
+      requestId,
+      using: context !== null,
+      contextKey: context ? JSON.stringify(context) : null,
+      timer: setTimeout(() => {
+        if (caseReply.current?.requestId === requestId) {
+          caseReply.current = null;
+          setCaseStatus('unconfirmed');
+        }
+      }, 10_000),
+    };
+    try {
+      wsRef.current.send(JSON.stringify({ type: 'reviewTherapyContext', requestId, context }));
+    } catch {
+      if (caseReply.current) clearTimeout(caseReply.current.timer);
+      caseReply.current = null;
+      setCaseStatus('unconfirmed');
+    }
+  }
   const hasGuide = workspaceMode === 'guided' && selectedGuide !== undefined;
-  const showConversation = showTranscript && phase !== 'idle';
+  const showConversation = showTranscript && (phase !== 'idle' || consentChecked);
 
   return (
     <div className="space-y-4">
       <GatewayMockBanner />
-      <header className="mind-live-header sticky top-0 z-30 flex flex-wrap items-start justify-between gap-3 bg-[var(--color-surface)]/95 backdrop-blur md:static">
+      <header className="mind-live-header flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="font-serif text-2xl">{clientName || 'Live session'}</h1>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
-              {kind === 'INTAKE' ? 'Intake' : kind === 'REVIEW' ? 'Review' : 'Treatment session'}
+              {mindSessionPurposeLabel(mindPurpose, kind)}
             </span>
             {modality && (
               <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
@@ -1338,49 +1482,92 @@ export function TherapistLiveSession({
             )}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          {phase === 'idle' && (
-            <Button onClick={() => void start({ resume: utterances.length > 0 })}>
-              Start session
-            </Button>
-          )}
-          {phase === 'connecting' && (
-            <span role="status" className="text-sm">
-              Connecting capture…
-            </span>
-          )}
-          {phase === 'listening' && (
-            <span className="flex items-center gap-2 text-sm tabular-nums text-[var(--color-ink-2)]">
-              <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
-              {mm}:{ss}
-            </span>
-          )}
-          {phase === 'listening' && (
-            <Button variant="secondary" onClick={() => void pauseCapture()}>
-              Pause recording
-            </Button>
-          )}
-          {phase === 'paused' && (
-            <Button onClick={() => void start({ resume: true })}>Resume recording</Button>
-          )}
-          {['listening', 'paused', 'pause-unconfirmed'].includes(phase) && (
-            <Button variant="secondary" onClick={end} disabled={captureIntegrityErrorRef.current}>
-              End session
-            </Button>
-          )}
-          {(phase === 'finalizing' || saving) && (
-            <span className="text-sm text-[var(--color-ink-3)]">
-              {finalStage === 'stopping'
-                ? 'Stopping capture…'
-                : finalStage === 'saving-transcript'
-                  ? 'Saving transcript…'
-                  : finalStage === 'ready'
-                    ? 'Ready to review'
-                    : 'Generating note…'}
-            </span>
-          )}
-        </div>
       </header>
+      <CaptureStatusBar
+        status={
+          consentBlocked
+            ? 'Microphone off · consent required'
+            : phase === 'listening'
+              ? 'Recording'
+              : phase === 'paused'
+                ? 'Paused · microphone off'
+                : phase === 'pausing'
+                  ? 'Microphone off · confirming pause'
+                  : phase === 'pause-unconfirmed'
+                    ? 'Microphone off · pause not confirmed'
+                    : phase === 'connecting'
+                      ? 'Connecting capture'
+                      : phase === 'idle'
+                        ? 'Ready when you are'
+                        : phase === 'done'
+                          ? 'Capture stopped'
+                          : phase === 'error'
+                            ? 'Capture interrupted'
+                            : 'Finishing session'
+        }
+        elapsedMs={elapsedMs}
+        detail={
+          consentBlocked
+            ? 'Confirm consent below. No new audio is being captured.'
+            : phase === 'listening'
+              ? 'Live transcription is running. Keep this page open until saving is confirmed.'
+              : phase === 'paused'
+                ? 'No new audio is captured. The session has not ended.'
+                : 'The clock describes this open view, not the length of saved audio.'
+        }
+      >
+        {phase === 'idle' && (
+          <Button
+            ref={consentResumeRef}
+            onClick={() => void start({ resume: consentChecked || utterances.length > 0 })}
+          >
+            {consentChecked
+              ? lifecycleStartedRef.current
+                ? 'Resume recording'
+                : 'Start recording'
+              : 'Start session'}
+          </Button>
+        )}
+        {phase === 'connecting' && (
+          <span role="status" className="text-sm">
+            Connecting capture…
+          </span>
+        )}
+        {phase === 'listening' && (
+          <Button variant="secondary" onClick={() => void pauseCapture()}>
+            Pause recording
+          </Button>
+        )}
+        {phase === 'paused' && (
+          <Button onClick={() => void start({ resume: true })}>Resume recording</Button>
+        )}
+        {['listening', 'paused', 'pause-unconfirmed'].includes(phase) && (
+          <Button variant="secondary" onClick={end} disabled={captureIntegrityErrorRef.current}>
+            End session
+          </Button>
+        )}
+        {(phase === 'finalizing' || saving) && (
+          <span className="text-sm text-[var(--color-ink-3)]">
+            {finalStage === 'stopping'
+              ? 'Stopping capture…'
+              : finalStage === 'saving-transcript'
+                ? 'Saving transcript…'
+                : finalStage === 'ready'
+                  ? 'Ready to review'
+                  : 'Generating note…'}
+          </span>
+        )}
+      </CaptureStatusBar>
+
+      {consentChecked && (
+        <p
+          role="status"
+          className="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-4 text-sm"
+        >
+          Consent checked for this session. Recording is still off. Choose Start or Resume when you
+          are ready; permission is checked again before capture.
+        </p>
+      )}
 
       {['pausing', 'paused', 'pause-unconfirmed'].includes(phase) && (
         <Card
@@ -1432,18 +1619,28 @@ export function TherapistLiveSession({
           </div>
           <p className="mind-capture-note mt-2">
             {workspaceMode === 'quiet'
-              ? 'Stay with the client. Your note builds alongside you.'
+              ? 'Stay with the client. Open the draft or transcript only when useful.'
               : 'Your questions, your chosen guide. Change direction whenever you need.'}
           </p>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          aria-expanded={showTranscript}
-          onClick={() => setShowTranscript((value) => !value)}
-        >
-          {showTranscript ? 'Hide transcript' : 'Show transcript'}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-expanded={showDraft}
+            onClick={() => setShowDraft((value) => !value)}
+          >
+            {showDraft ? 'Hide draft' : 'Show draft'}
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-expanded={showTranscript}
+            onClick={() => setShowTranscript((value) => !value)}
+          >
+            {showTranscript ? 'Hide transcript' : 'Show transcript'}
+          </Button>
+        </div>
       </div>
 
       {workspaceMode === 'guided' && preparedGuides.length > 0 && (
@@ -1454,7 +1651,10 @@ export function TherapistLiveSession({
           <select
             id={`guide-${sessionId}`}
             value={guideId}
-            onChange={(event) => setGuideId(event.target.value)}
+            onChange={(event) => {
+              setGuideId(event.target.value);
+              if (caseStatus !== 'off') reviewCase(null);
+            }}
             className="max-w-full rounded-xl border border-[var(--color-line)] bg-white px-3 py-2 text-sm"
           >
             <option value="">Choose a guide to review</option>
@@ -1474,6 +1674,21 @@ export function TherapistLiveSession({
             intervention.
           </p>
         </div>
+      )}
+
+      {reviewContext && (
+        <MindLiveCaseContext
+          key={sessionId + guideId + reviewContext.preparedAt}
+          context={reviewContext}
+          status={
+            caseStatus === 'using' && acknowledgedCaseKey !== JSON.stringify(reviewContext)
+              ? 'unconfirmed'
+              : caseStatus
+          }
+          ready={['listening', 'paused'].includes(phase)}
+          onUse={() => reviewCase(reviewContext)}
+          onClear={() => reviewCase(null)}
+        />
       )}
 
       {workspaceMode === 'guided' && preparedGuides.length === 0 && (
@@ -1531,6 +1746,7 @@ export function TherapistLiveSession({
 
       {endConfirmOpen && (
         <div
+          ref={endDialogRef}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
@@ -1595,23 +1811,20 @@ export function TherapistLiveSession({
       )}
 
       {consentBlocked && (
-        <Card className="border-amber-300 bg-amber-50 p-5 text-sm text-amber-900">
-          <strong className="block">Consent is missing for the live scribe.</strong>
-          <p className="mt-1">{consentBlocked}</p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            {clientId && (
-              <Button onClick={() => navigateAway(`/app?record=${clientId}`)}>
-                Capture consent &amp; start
-              </Button>
-            )}
-            <Button
-              variant="secondary"
-              onClick={() => void start({ resume: utterances.length > 0 })}
-            >
-              Try again
-            </Button>
-          </div>
-        </Card>
+        <MindConsentRecovery
+          key={sessionId}
+          sessionId={sessionId}
+          onOpenSession={() => navigateAway(`/app/sessions/${sessionId}`)}
+          onConfirmed={() => {
+            // A consent receipt is not permission to activate the microphone.
+            autoStartedRef.current = true;
+            setConsentBlocked(null);
+            setConsentChecked(true);
+            setError(null);
+            phaseRef.current = 'idle';
+            setPhase('idle');
+          }}
+        />
       )}
 
       {saveFailed && (
@@ -1709,13 +1922,27 @@ export function TherapistLiveSession({
       )}
 
       {/* Safety stays ahead of the guide in both modes, at every recording phase. */}
-      {effectiveCopilot && (
+      {(effectiveCopilot || cueReview.error || cueReview.records.length > 0) && (
         <TherapyCopilotRail
-          reasoning={effectiveCopilot}
+          reasoning={
+            effectiveCopilot ?? { riskWatch: [], askNext: [], threads: [], arc: null, version: 0 }
+          }
           onResolve={resolveCopilot}
           onShown={reportShownCopilot}
           mode={workspaceMode}
           guideActive={hasGuide}
+          reviewedCues={cueReview.records}
+          cueLabels={{ ...cueReview.labels, ...cueLabelsRef.current }}
+          pendingId={cueReview.pendingId ?? cueDisclosurePending}
+          reviewBlocked={cueReview.blocked}
+          reviewError={cueReview.error ?? cueDisclosureError}
+          onUndo={(record) => cueReview.review(record.id, record.kind, 'reopened')}
+          onRetry={() => {
+            const action = lastCueActionRef.current;
+            if (action) void resolveCopilot(action.id, action.kind, action.event, action.label);
+            else cueReview.retry();
+          }}
+          onReload={cueReview.reload}
         />
       )}
 
@@ -1768,7 +1995,11 @@ export function TherapistLiveSession({
 
             <div ref={convoRef} className="mt-3 flex max-h-[62vh] flex-col gap-3 overflow-y-auto">
               {sorted.length === 0 ? (
-                <p className="text-sm text-[var(--color-ink-3)]">Listening…</p>
+                <p className="text-sm text-[var(--color-ink-3)]">
+                  {phase === 'listening' && !consentBlocked
+                    ? 'Listening · waiting for transcribed speech'
+                    : 'No transcript yet. Capture is off until recording starts.'}
+                </p>
               ) : (
                 sorted.map((u) => {
                   const who =
@@ -1820,7 +2051,7 @@ export function TherapistLiveSession({
         <div
           className={`space-y-4 ${!showConversation && !hasGuide ? 'lg:col-span-12' : 'lg:col-span-5'}`}
         >
-          {phase === 'idle' ? (
+          {phase === 'idle' && !consentChecked ? (
             <Card className="p-8 text-center">
               <p className="mb-4 text-sm text-[var(--color-ink-2)]">
                 The conversation and note build in real time as you talk. Recording starts only when
@@ -1832,7 +2063,7 @@ export function TherapistLiveSession({
             </Card>
           ) : (
             <>
-              {!effectiveCopilot && (
+              {!effectiveCopilot && workspaceMode === 'guided' && (
                 <Card className="flex items-start gap-2.5 p-4">
                   <span className="mt-1.5 h-2 w-2 flex-none rounded-full bg-[var(--color-accent)]" />
                   <div>
@@ -1848,7 +2079,7 @@ export function TherapistLiveSession({
               )}
 
               {/* What to explore — intake coverage (B5) */}
-              {kind === 'INTAKE' && (
+              {kind === 'INTAKE' && showDraft && (
                 <Card className="p-4">
                   <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
                     What to explore
@@ -1875,74 +2106,87 @@ export function TherapistLiveSession({
               )}
 
               {/* Live note */}
-              <Card className="p-4">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                    Live note
-                  </h2>
-                  <span className="flex-1" />
-                  <span className="text-xs text-[var(--color-ink-3)]">
-                    {refreshingNote
-                      ? 'Updating…'
-                      : updatedAgo !== null
-                        ? `Updated ${updatedAgo}s ago`
-                        : 'Writing…'}
-                  </span>
-                  {phase === 'listening' && (
-                    <button
-                      type="button"
-                      onClick={updateNoteNow}
-                      disabled={refreshingNote}
-                      className="rounded-full border border-[var(--color-line)] px-2.5 py-0.5 text-xs font-semibold text-[var(--color-accent)] disabled:opacity-50"
-                    >
-                      Update now
-                    </button>
-                  )}
-                </div>
-
-                <div className="mt-3 flex max-h-[52vh] flex-col gap-3.5 overflow-y-auto">
-                  {sections.map((s) => (
-                    <div key={s.label}>
-                      <div className="text-[10.5px] font-bold uppercase tracking-wide text-[var(--color-accent)]">
-                        {s.label}
-                      </div>
-                      {s.value.trim() ? (
-                        <p className="mt-0.5 whitespace-pre-line text-sm text-[var(--color-ink)]">
-                          {s.value}
-                        </p>
-                      ) : (
-                        <div className="mt-1.5 space-y-1.5">
-                          <div className="h-2.5 animate-pulse rounded bg-[var(--color-line-soft)]" />
-                          <div className="h-2.5 w-3/5 animate-pulse rounded bg-[var(--color-line-soft)]" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                  {filledCount === 0 && (
-                    <p className="text-xs italic text-[var(--color-ink-3)]">
-                      Fills in as the session gives it material…
-                    </p>
-                  )}
-                </div>
-
-                {topics.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--color-line-soft)] pt-3">
-                    {topics.map((t) => (
-                      <span
-                        key={t}
-                        className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]"
+              {showDraft && (
+                <Card className="p-4">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
+                      Live note
+                    </h2>
+                    <span className="flex-1" />
+                    <span className="text-xs text-[var(--color-ink-3)]">
+                      {liveNoteStatus({
+                        phase,
+                        consentBlocked: !!consentBlocked,
+                        refreshing: refreshingNote,
+                        updatedAgo,
+                      })}
+                    </span>
+                    {phase === 'listening' && (
+                      <button
+                        type="button"
+                        onClick={updateNoteNow}
+                        disabled={refreshingNote}
+                        className="rounded-full border border-[var(--color-line)] px-2.5 py-0.5 text-xs font-semibold text-[var(--color-accent)] disabled:opacity-50"
                       >
-                        {t}
-                      </span>
-                    ))}
+                        Update now
+                      </button>
+                    )}
                   </div>
-                )}
-              </Card>
+
+                  <div className="mt-3 flex max-h-[52vh] flex-col gap-3.5 overflow-y-auto">
+                    {sections.map((s) => (
+                      <div key={s.label}>
+                        <div className="text-[10.5px] font-bold uppercase tracking-wide text-[var(--color-accent)]">
+                          {s.label}
+                        </div>
+                        {s.value.trim() ? (
+                          <p className="mt-0.5 whitespace-pre-line text-sm text-[var(--color-ink)]">
+                            {s.value}
+                          </p>
+                        ) : (
+                          <div className="mt-1.5 space-y-1.5">
+                            <div
+                              className={`h-2.5 rounded bg-[var(--color-line-soft)] ${phase === 'listening' && !consentBlocked ? 'animate-pulse' : ''}`}
+                            />
+                            <div
+                              className={`h-2.5 w-3/5 rounded bg-[var(--color-line-soft)] ${phase === 'listening' && !consentBlocked ? 'animate-pulse' : ''}`}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {filledCount === 0 && (
+                      <p className="text-xs italic text-[var(--color-ink-3)]">
+                        {phase === 'listening' && !consentBlocked
+                          ? 'A draft will appear as transcribed speech becomes available.'
+                          : 'No draft text yet. Recording has not supplied material for this view.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {topics.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-1.5 border-t border-[var(--color-line-soft)] pt-3">
+                      {topics.map((t) => (
+                        <span
+                          key={t}
+                          className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
 
               {meterRef.current && (
-                <p className="pr-1 text-right text-xs tabular-nums text-[var(--color-ink-3)]">
-                  ₹{meterRef.current.costInr.toFixed(2)} this session
-                </p>
+                <details className="text-sm text-[var(--color-ink-2)]">
+                  <summary className="min-h-11 cursor-pointer py-2">Connection details</summary>
+                  <p>
+                    ₹{meterRef.current.costInr.toFixed(2)} for this connection. This is not a
+                    whole-session total after reconnecting.
+                  </p>
+                </details>
               )}
             </>
           )}

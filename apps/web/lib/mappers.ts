@@ -101,6 +101,8 @@ export function toSession(row: SessionRow): Session {
     modality: row.modality,
     // Sprint 19 — session classification (INTAKE / TREATMENT / REVIEW).
     kind: row.kind,
+    mindPurpose: (row.mindPurpose ?? null) as Session['mindPurpose'],
+    mindDocumentationMode: row.mindDocumentationMode === 'MANUAL' ? 'MANUAL' : null,
     status: row.status,
     scheduledAt: row.scheduledAt.toISOString(),
     startedAt: row.startedAt?.toISOString() ?? null,
@@ -232,6 +234,8 @@ export function toExerciseAssignment(row: ExerciseAssignmentRow): ExerciseAssign
     customDescription: row.customDescription,
     sourceTherapyScriptId: row.sourceTherapyScriptId,
     sourceSessionId: row.sourceSessionId,
+    sourceAgreementId: row.sourceAgreementId ?? null,
+    sourceAgreementRevision: row.sourceAgreementRevision ?? null,
     assignedAt: row.assignedAt.toISOString(),
     dueAt: row.dueAt?.toISOString() ?? null,
     frequency: row.frequency,

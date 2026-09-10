@@ -15,6 +15,7 @@ export interface TodaySessionCardProps {
     id: string;
     status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'NO_SHOW' | 'RESCHEDULED';
     scheduledAt: string;
+    startedAt?: string | null;
     modality: string | null;
     kind: 'INTAKE' | 'TREATMENT' | 'REVIEW';
     clientId: string;
@@ -26,12 +27,13 @@ export interface TodaySessionCardProps {
     /** TS6 — how an IN_PROGRESS session was started (LIVE ⇒ resume the live
      *  scribe; anything else ⇒ resume via the batch record flow). */
     captureMode?: string | null;
+    mindDocumentationMode?: string | null;
   };
   /** TS6 — the therapist's preferred capture; picks the PRIMARY Start action
    *  (the other stays one tap away in the caret). Absent/LIVE ⇒ live. */
   defaultCapture?: 'LIVE' | 'BATCH';
-  /** TS7.2 — `hero` is the full-screen "Up next" treatment (prep brief
-   *  auto-open, thumb-sized Start); `row` is the compact timeline line for
+  /** `hero` is the next-session treatment (short safety/preparation summary,
+   *  reachable Start); `row` is the compact timeline line for
    *  everything else. */
   variant?: 'hero' | 'row';
   /** TS7.4 — an instrument (e.g. "GAD-7") whose re-measure is overdue for
@@ -44,7 +46,7 @@ export interface TodaySessionCardProps {
 /**
  * Sprint 45 — one entry on the Today screen; TS7.2 reshaped it around the
  * "Up next" hero. At any moment exactly one session matters — it gets the
- * name in large type, the pre-session brief already open, and a Start
+ * name in large type, a short safety/preparation summary, and a Start
  * button sized for a thumb. The rest of the day renders as quiet rows whose
  * right edge states the one true thing about each session (Start / Resume /
  * ✓ signed / Sign ▸).
@@ -192,10 +194,28 @@ export function TodaySessionCard({
                 </p>
               </div>
             </div>
-            <time className={styles.time} dateTime={session.scheduledAt}>
-              {formatTime(session.scheduledAt)}
+            <time
+              className={styles.time}
+              dateTime={
+                session.status === 'IN_PROGRESS' && session.startedAt
+                  ? session.startedAt
+                  : session.scheduledAt
+              }
+            >
               <small>
-                {new Date(session.scheduledAt).toLocaleDateString('en-IN', {
+                {session.status === 'IN_PROGRESS' && session.startedAt ? 'Started' : 'Booked'}
+              </small>
+              {formatTime(
+                session.status === 'IN_PROGRESS' && session.startedAt
+                  ? session.startedAt
+                  : session.scheduledAt,
+              )}
+              <small>
+                {new Date(
+                  session.status === 'IN_PROGRESS' && session.startedAt
+                    ? session.startedAt
+                    : session.scheduledAt,
+                ).toLocaleDateString('en-IN', {
                   day: 'numeric',
                   month: 'short',
                   timeZone: 'Asia/Kolkata',
@@ -216,12 +236,17 @@ export function TodaySessionCard({
             </li>
           </ol>
 
+          {session.status === 'IN_PROGRESS' && (
+            <p className="mt-3 text-sm text-[var(--color-ink-2)]">
+              This session has not ended. Recording activity is not verified on this page.
+            </p>
+          )}
           {session.status === 'IN_PROGRESS' ? (
             <Link
               href={resumeHref}
               className="mt-4 block rounded-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white hover:bg-[var(--color-accent-hover)]"
             >
-              Resume session
+              Review or resume session
             </Link>
           ) : (
             <div className="relative mt-4">
@@ -293,9 +318,9 @@ export function TodaySessionCard({
             </p>
           )}
 
-          {/* Keep preparation open, with the session action reachable before a long brief. */}
+          {/* Safety and a short brief stay visible; full preparation is optional. */}
           <div className="mt-4">
-            {preparation ?? <PreparePanel clientId={session.clientId} defaultOpen />}
+            {preparation ?? <PreparePanel clientId={session.clientId} summaryVisible />}
           </div>
         </Card>
         <RescheduleModal

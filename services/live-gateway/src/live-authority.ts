@@ -28,6 +28,7 @@ function optionalEventCapability(event: LiveGatewayEvent): PractitionerCapabilit
     case 'finding':
     case 'reasoning':
     case 'therapyReasoning':
+    case 'therapyContextReviewed':
       return 'CLINICAL_ANALYSIS';
     case 'rxDraft':
       return 'PRESCRIPTION_DRAFTING';

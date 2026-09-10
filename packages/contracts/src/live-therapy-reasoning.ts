@@ -123,6 +123,38 @@ export const TherapyCarriedQuestionSchema = z.object({
 });
 export type TherapyCarriedQuestion = z.infer<typeof TherapyCarriedQuestionSchema>;
 
+/** Explicitly reviewed historical context. Never transcript evidence or a
+ * instruction to diagnose/deliver treatment; bounded to minimise disclosure. */
+export const TherapyApprovedCaseContextSchema = z
+  .object({
+    version: z.literal('V1'),
+    preparedAt: z.string().datetime(),
+    formulation: z
+      .object({ version: z.number().int().positive(), narrative: z.string().max(1800) })
+      .nullable(),
+    goals: z.array(z.string().min(1).max(400)).max(8),
+    diagnoses: z.array(z.object({ code: z.string().max(40), label: z.string().max(160) })).max(6),
+    measures: z
+      .array(
+        z.object({
+          instrument: z.enum(['PHQ9', 'GAD7']),
+          score: z.number().int().min(0).max(27),
+          recordedAt: z.string().datetime(),
+        }),
+      )
+      .max(2),
+    guide: z
+      .object({
+        id: z.string().max(100),
+        updatedAt: z.string().datetime(),
+        name: z.string().max(120),
+        purposes: z.array(z.string().max(400)).max(15),
+      })
+      .nullable(),
+  })
+  .strict();
+export type TherapyApprovedCaseContext = z.infer<typeof TherapyApprovedCaseContextSchema>;
+
 /// Therapist-specific live context passed to the gateway at connect: the
 /// planned questions + whether prior suicidal ideation is on file + the
 /// session's planned length. The gateway has no DB — the browser supplies it.

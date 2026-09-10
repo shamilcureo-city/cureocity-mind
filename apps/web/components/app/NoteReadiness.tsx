@@ -5,17 +5,15 @@ import type { ReadinessItem } from '../../lib/note-readiness';
 /**
  * Sprint 62 — the "Is this note ready?" panel, shown above Sign off.
  *
- * Calm and never blocking: if the note looks complete it offers a quiet
- * reassurance; otherwise it lists a few friendly things to check, each
- * with a "why". The therapist can act on them or sign anyway — they're
- * suggestions, not gates.
+ * These deterministic checks inspect text presence/length and recorded risk
+ * flags. They never establish factual accuracy or clinical completeness.
  */
 export function NoteReadiness({ items }: { items: ReadinessItem[] }) {
   if (items.length === 0) {
     return (
-      <div className="mt-6 flex items-center gap-2 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-accent-soft)]/40 px-4 py-3 text-sm text-[var(--color-ink)]">
-        <span aria-hidden>✓</span>
-        <span>This note looks complete. You’re good to sign.</span>
+      <div className="mt-6 rounded-xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] px-4 py-3 text-sm text-[var(--color-ink)]">
+        <p>Basic completeness checks passed. Review accuracy before signing.</p>
+        <CheckScope />
       </div>
     );
   }
@@ -26,7 +24,7 @@ export function NoteReadiness({ items }: { items: ReadinessItem[] }) {
         <span aria-hidden>💡</span>A few things to check before you sign
       </p>
       <p className="mt-0.5 text-xs text-[var(--color-ink-3)]">
-        These are just suggestions — you can fix them now, or sign anyway.
+        Review these points against the session. The checks do not verify clinical accuracy.
       </p>
       <ul className="mt-3 space-y-2.5">
         {items.map((item, i) => (
@@ -44,6 +42,20 @@ export function NoteReadiness({ items }: { items: ReadinessItem[] }) {
           </li>
         ))}
       </ul>
+      <CheckScope />
     </div>
+  );
+}
+
+function CheckScope() {
+  return (
+    <details className="mt-2 text-xs text-[var(--color-ink-2)]">
+      <summary className="cursor-pointer">What was checked?</summary>
+      <p className="mt-2 max-w-prose leading-relaxed">
+        Basic text presence and length in selected note sections, and whether a high or critical
+        risk flag is recorded. These checks do not verify what happened, diagnose the client, or
+        establish that a safety assessment was completed.
+      </p>
+    </details>
   );
 }

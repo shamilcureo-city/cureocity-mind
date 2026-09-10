@@ -120,6 +120,7 @@ export type AgreementFollowUp = z.infer<typeof AgreementFollowUpSchema>;
 export const CreateAgreementInputSchema = z.object({
   text: z.string().min(1).max(500),
   speaker: AgreementSpeakerSchema,
+  operationId: z.string().uuid().optional(),
 });
 export type CreateAgreementInput = z.infer<typeof CreateAgreementInputSchema>;
 
@@ -127,18 +128,88 @@ export type CreateAgreementInput = z.infer<typeof CreateAgreementInputSchema>;
 /// follow-up marking (from the Prepare card).
 export const UpdateAgreementInputSchema = z.object({
   followUp: AgreementFollowUpSchema,
+  /** Older uncorrected records may omit this; corrected records require a matching revision. */
+  expectedRevision: z.number().int().min(0).optional(),
 });
 export type UpdateAgreementInput = z.infer<typeof UpdateAgreementInputSchema>;
+
+export const AgreementCorrectionInputSchema = z
+  .object({
+    operation: z.enum(['correct', 'amend']),
+    operationId: z.string().uuid(),
+    expectedRevision: z.number().int().min(0),
+    text: z.string().trim().min(1).max(500),
+    speaker: AgreementSpeakerSchema,
+    reason: z.enum(['CORRECTION', 'ATTRIBUTION', 'CLARIFICATION']),
+  })
+  .strict();
+
+export const AgreementRevisionSchema = z
+  .object({
+    revision: z.number().int().positive(),
+    operationId: z.string().uuid(),
+    operation: z.enum(['correct', 'amend']),
+    reason: z.enum(['CORRECTION', 'ATTRIBUTION', 'CLARIFICATION']),
+    previousText: z.string().min(1).max(500),
+    previousSpeaker: AgreementSpeakerSchema,
+    previousFollowUp: AgreementFollowUpSchema.nullable(),
+    previousFollowUpAt: z.string().datetime().nullable(),
+    previousRetiredAt: z.string().datetime().nullable().optional(),
+    previousRetirementReason: z.string().nullable().optional(),
+    text: z.string().min(1).max(500),
+    speaker: AgreementSpeakerSchema,
+    recordedAt: z.string().datetime(),
+    recordedBy: z.string(),
+    signedNoteId: z.string().nullable(),
+  })
+  .strict();
+export const AgreementRevisionHistorySchema = z.array(AgreementRevisionSchema).max(100);
+export type AgreementRevision = z.infer<typeof AgreementRevisionSchema>;
+
+export const RetireAgreementInputSchema = z
+  .object({
+    operation: z.literal('retire'),
+    expectedRevision: z.number().int().min(0),
+    reason: z.string().trim().min(1).max(500),
+  })
+  .strict();
 
 export const SessionAgreementDtoSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
+  clientId: z.string().optional(),
+  sourceSessionAt: z.string().optional(),
   text: z.string(),
   speaker: AgreementSpeakerSchema,
   followUp: AgreementFollowUpSchema.nullable(),
   createdAt: z.string(),
+  revision: z.number().int().min(0).optional(),
+  revisions: AgreementRevisionHistorySchema.optional(),
+  retiredAt: z.string().nullable().optional(),
+  retirementReason: z.string().nullable().optional(),
+  canUseAsHomework: z.boolean().optional(),
+  homeworkAssignments: z
+    .array(
+      z.object({
+        id: z.string(),
+        sourceAgreementRevision: z.number().int().min(0),
+        customDescription: z.string().nullable(),
+        dueAt: z.string().nullable(),
+        status: z.enum(['PENDING', 'IN_PROGRESS', 'COMPLETED', 'SKIPPED', 'EXPIRED']),
+      }),
+    )
+    .optional(),
 });
 export type SessionAgreementDto = z.infer<typeof SessionAgreementDtoSchema>;
+
+export const ActiveAgreementQuerySchema = z.object({
+  cursor: z.string().min(1).max(100).optional(),
+});
+export const ActiveAgreementPageSchema = z.object({
+  agreements: z.array(SessionAgreementDtoSchema).max(20),
+  total: z.number().int().min(0),
+  nextCursor: z.string().nullable(),
+});
 
 // ---------------------------------------------------------------------------
 // Session feedback — one-tap alliance read ("how did the session land?").

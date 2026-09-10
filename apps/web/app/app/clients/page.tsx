@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { Prisma } from '@prisma/client';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
-import { Badge } from '@/components/ui/Badge';
+import { MindClientRosterRows } from '@/components/app/MindClientRosterRows';
 import { ClientsHeader } from '@/components/app/ClientsHeader';
 import { ArchivePatientButton } from '@/components/app/ArchivePatientButton';
 import { ClientSearchControls } from '@/components/app/ClientSearchControls';
@@ -165,13 +165,6 @@ export default async function ClientsPage({
             {cursor ? ' · more pages' : ''}
           </span>
         </div>
-        <div className="grid grid-cols-[2fr_1fr_1fr_1fr_1.5fr] gap-3 border-b border-[var(--color-line-soft)] px-5 py-3 text-xs font-medium uppercase tracking-wider text-[var(--color-ink-3)]">
-          <span>Name</span>
-          <span>Status</span>
-          <span>Client since</span>
-          <span className="text-right tabular-nums">Total sessions</span>
-          <span>Last completed / next</span>
-        </div>
         {pageRows.length === 0 ? (
           filtered ? (
             <p className="px-5 py-8 text-center text-sm text-[var(--color-ink-3)]">
@@ -191,60 +184,25 @@ export default async function ClientsPage({
             </div>
           )
         ) : (
-          <ul className="divide-y divide-[var(--color-line-soft)]">
-            {pageRows.map((c, i) => (
-              <li
-                key={c.id}
-                className="flex items-center transition-colors hover:bg-[var(--color-surface-soft)]"
-              >
-                <Link
-                  href={`/app/clients/${c.id}`}
-                  className="grid min-w-0 flex-1 grid-cols-[2fr_1fr_1fr_1fr_1.5fr] items-center gap-3 px-5 py-4 text-sm"
-                >
-                  <span className="flex flex-wrap items-center gap-2 font-medium text-[var(--color-ink)]">
-                    {/* UI truth pass — an undecryptable name must never render as a
-                        blank ghost row. Label it and say how to fix it. */}
-                    {names[i] || (
-                      <span className="italic text-[var(--color-ink-3)]">Name unavailable</span>
-                    )}
-                    {!names[i] && <Badge tone="warn">needs encryption backfill</Badge>}
-                    {c.isDemo && <Badge tone="warn">Example</Badge>}
-                  </span>
-                  <span>
-                    <Badge tone={c.status === 'ACTIVE' ? 'accent' : 'muted'}>
-                      {c.status.toLowerCase()}
-                    </Badge>
-                  </span>
-                  <span className="text-[var(--color-ink-2)]">{formatMonth(c.createdAt)}</span>
-                  <span className="text-right tabular-nums text-[var(--color-ink-2)]">
-                    {c._count.sessions}
-                  </span>
-                  <span className="text-[var(--color-ink-2)]">
-                    <span className="block">
-                      Last:{' '}
-                      {lastByClient.get(c.id)
-                        ? formatDateTime(lastByClient.get(c.id)!)
-                        : 'None yet'}
-                    </span>
-                    <span className="mt-1 block text-xs text-[var(--color-ink-3)]">
-                      Next:{' '}
-                      {nextByClient.get(c.id)
-                        ? formatDateTime(nextByClient.get(c.id)!)
-                        : 'Not booked'}
-                    </span>
-                  </span>
-                </Link>
-                <div className="shrink-0 pr-4">
-                  <ArchivePatientButton
-                    clientId={c.id}
-                    noun="client"
-                    name={names[i]}
-                    variant="row"
-                  />
-                </div>
-              </li>
-            ))}
-          </ul>
+          <MindClientRosterRows
+            rows={pageRows.map((c, i) => ({
+              id: c.id,
+              name: names[i] ?? '',
+              status: c.status,
+              isDemo: c.isDemo,
+              clientSinceLabel: formatMonth(c.createdAt),
+              totalRecords: c._count.sessions,
+              lastCompletedLabel: lastByClient.get(c.id)
+                ? formatDateTime(lastByClient.get(c.id)!)
+                : 'None yet',
+              nextAppointmentLabel: nextByClient.get(c.id)
+                ? formatDateTime(nextByClient.get(c.id)!)
+                : 'Not booked',
+              action: (
+                <ArchivePatientButton clientId={c.id} noun="client" name={names[i]} variant="row" />
+              ),
+            }))}
+          />
         )}
       </Card>
 

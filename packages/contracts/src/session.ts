@@ -5,8 +5,35 @@ import { SessionStatusSchema } from './briefing';
 import { ClinicalLocaleSchema } from './clinical';
 import { ConsentScopeSchema } from './consent';
 
+export const MindSessionPurposeSchema = z.enum(['ASSESSMENT', 'COUNSELLING', 'THERAPY', 'REVIEW']);
+export type MindSessionPurpose = z.infer<typeof MindSessionPurposeSchema>;
+export const MIND_SESSION_PURPOSE_LABELS: Record<MindSessionPurpose, string> = {
+  ASSESSMENT: 'Understand / continue assessment',
+  COUNSELLING: 'Supportive counselling',
+  THERAPY: 'Therapy work',
+  REVIEW: 'Review progress together',
+};
+/** Persisted clinician intent wins over the technical note-format discriminator. */
+export function mindSessionPurposeLabel(purpose: unknown, kind: string): string {
+  const parsed = MindSessionPurposeSchema.safeParse(purpose);
+  if (parsed.success) return MIND_SESSION_PURPOSE_LABELS[parsed.data];
+  return kind === 'INTAKE'
+    ? 'Assessment session'
+    : kind === 'REVIEW'
+      ? 'Progress review'
+      : 'Session';
+}
+export function sessionKindForMindPurpose(
+  purpose: MindSessionPurpose,
+): z.infer<typeof SessionKindSchema> {
+  return purpose === 'ASSESSMENT' ? 'INTAKE' : purpose === 'REVIEW' ? 'REVIEW' : 'TREATMENT';
+}
+
 export const CreateSessionInputSchema = z.object({
   clientId: CuidSchema,
+  /** Mind-only clinician intent. Assessment may continue beyond the first visit. */
+  mindPurpose: MindSessionPurposeSchema.optional(),
+  mindDocumentationMode: z.literal('MANUAL').optional(),
   /// Sprint 19 — modality is now OPTIONAL on create. When absent
   /// the session-defaults cascade picks one (TreatmentPlan.modality
   /// → Client.preferredModality → Psychologist.defaultModality →
@@ -85,6 +112,8 @@ export const SessionSchema = z.object({
   /// Sprint 19 — session kind drives Pass 2/3 prompt branches +
   /// UI labels (Intake vs Treatment).
   kind: SessionKindSchema.default('TREATMENT'),
+  mindPurpose: MindSessionPurposeSchema.nullable().optional(),
+  mindDocumentationMode: z.literal('MANUAL').nullable().optional(),
   status: SessionStatusSchema,
   scheduledAt: IsoDateTimeSchema,
   startedAt: IsoDateTimeSchema.nullable(),

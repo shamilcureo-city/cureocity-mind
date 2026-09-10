@@ -167,7 +167,8 @@ interface CareFacts {
   baselineMeasured: boolean;
   hasActivePlan: boolean;
   planStalled: boolean;
-  dischargeReady: boolean;
+  measureWorsened: boolean;
+  improvementObserved: boolean;
   reviewReached: boolean;
   remeasureDue: boolean;
   isDischarged: boolean;
@@ -191,31 +192,37 @@ function deriveFacts(input: CareEngineInput): CareFacts {
   const baselineMeasured = input.instruments.some((i) => i.count >= 1);
   const hasActivePlan = input.activePlan !== null;
 
+  const measureWorsened = input.instruments.some((i) => i.change?.verdict === 'deterioration');
   const planStalled =
     hasActivePlan &&
-    input.instruments.some(
-      (i) =>
-        i.change !== null &&
-        i.change.administrationCount >= CARE_ENGINE_CONSTANTS.NOT_IMPROVING_MIN_ADMINISTRATIONS &&
-        i.change.verdict !== 'reliable_improvement',
-    );
+    (measureWorsened ||
+      input.instruments.some(
+        (i) =>
+          i.change !== null &&
+          i.change.administrationCount >= CARE_ENGINE_CONSTANTS.NOT_IMPROVING_MIN_ADMINISTRATIONS &&
+          i.change.verdict !== 'reliable_improvement',
+      ));
 
-  const dischargeReady = input.instruments.some(
+  // Improvement is a reason for a shared review, never evidence that the
+  // person is ready to end care. Other measures, goals, functioning, risk,
+  // client preferences and clinician judgment are not captured by one score.
+  const improvementObserved = input.instruments.some(
     (i) =>
-      i.change !== null &&
-      i.change.isRemission &&
-      (i.change.verdict === 'reliable_improvement' || i.change.isResponse),
+      i.change !== null && (i.change.verdict === 'reliable_improvement' || i.change.isResponse),
   );
 
   const reviewReached =
     hasActivePlan &&
-    (input.sessionsSincePlan >= CARE_ENGINE_CONSTANTS.REVIEW_AT_SESSIONS || dischargeReady);
+    (input.sessionsSincePlan >= CARE_ENGINE_CONSTANTS.REVIEW_AT_SESSIONS ||
+      improvementObserved ||
+      measureWorsened);
 
   const isDischarged = input.discharged !== null;
 
   const currentStage = deriveStage({
     firstSessionDone,
-    assessmentDone: hasPrimaryDiagnosis && safetyAddressed && baselineMeasured,
+    safetyAddressed,
+    hasPrimaryDiagnosis,
     hasActivePlan,
     reviewReached,
   });
@@ -238,7 +245,8 @@ function deriveFacts(input: CareEngineInput): CareFacts {
     baselineMeasured,
     hasActivePlan,
     planStalled,
-    dischargeReady,
+    measureWorsened,
+    improvementObserved,
     reviewReached,
     remeasureDue,
     isDischarged,
@@ -248,13 +256,16 @@ function deriveFacts(input: CareEngineInput): CareFacts {
 
 function deriveStage(f: {
   firstSessionDone: boolean;
-  assessmentDone: boolean;
+  safetyAddressed: boolean;
+  hasPrimaryDiagnosis: boolean;
   hasActivePlan: boolean;
   reviewReached: boolean;
 }): CareStage {
   if (!f.firstSessionDone) return 'INTAKE';
-  if (!f.assessmentDone) return 'ASSESSMENT';
-  if (!f.hasActivePlan) return 'FORMULATION';
+  if (!f.safetyAddressed) return 'ASSESSMENT';
+  // A confirmed plan supports counselling without a diagnosis or a screener.
+  // This is a workflow location, not an assessment-completion assertion.
+  if (!f.hasActivePlan) return f.hasPrimaryDiagnosis ? 'FORMULATION' : 'ASSESSMENT';
   if (f.reviewReached) return 'REVIEW';
   return 'ACTIVE_TREATMENT';
 }
@@ -304,26 +315,10 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
     return out;
   }
 
-  // Pre-first-session: the whole picture is "record the intake".
-  if (!f.firstSessionDone) {
-    return [
-      {
-        id: 'record-intake',
-        priority: 'DIAGNOSE',
-        title: 'Record the intake session',
-        why: 'This client has no completed session yet — everything downstream needs the intake first.',
-        unlocks: 'Intake · first session',
-        when: 'this_session',
-        ctaLabel: 'Go to Record',
-        ctaHref: '/app',
-      },
-    ];
-  }
-
   // The queue renders ON the journey page, so a bare journeySub link just
   // reloads the same URL and jumps to the top. Anchor the measure + consult
   // CTAs to the on-page zone they mean (the instrument runner / the consult).
-  const measuresHref = input.hrefs.journeySub ? `${input.hrefs.journeySub}#care-measures` : null;
+  const measuresHref = input.hrefs.journeySub ? `${input.hrefs.journeySub}#measure-phq9` : null;
   const consultHref = input.hrefs.journeySub ? `${input.hrefs.journeySub}#care-consult` : null;
   const out: CareAction[] = [];
 
@@ -346,16 +341,32 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
     });
   }
 
+  // Safety is visible even before the first completed session. Documentation
+  // can be clinician-written; recording is not a prerequisite to beginning care.
+  if (!f.firstSessionDone) {
+    out.push({
+      id: 'record-intake',
+      priority: 'DIAGNOSE',
+      title: 'Start the first session',
+      why: 'Agree the purpose with the client and begin understanding their priorities. Choose the appropriate documentation mode; recording is optional.',
+      unlocks: 'Intake · first session',
+      when: 'this_session',
+      ctaLabel: 'Prepare session',
+      ctaHref: `/app/encounters/new?record=${encodeURIComponent(input.clientId)}`,
+    });
+    return out;
+  }
+
   // MEASURE — baseline first, then a due re-measure.
   if (!f.baselineMeasured) {
     out.push({
       id: 'baseline',
       priority: 'MEASURE',
-      title: 'Administer PHQ-9 + GAD-7',
-      why: 'No starting point exists — nothing after this can show change.',
-      unlocks: 'Assessment gate · Baseline measured',
+      title: 'Consider a relevant questionnaire',
+      why: 'PHQ-9 and GAD-7 are available if relevant to the client’s concerns. Goals, functioning and client feedback also inform progress; a score is not required to continue counselling.',
+      unlocks: null,
       when: 'this_session',
-      ctaLabel: 'Administer now',
+      ctaLabel: 'Review questionnaires',
       ctaHref: measuresHref,
     });
   } else if (f.remeasureDue) {
@@ -396,8 +407,8 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
         id: 'continue-assessment',
         priority: 'DIAGNOSE',
         title: 'Continue the assessment',
-        why: 'No diagnosis is accepted yet and no open questions remain — run a session to gather more, then accept from the decision board.',
-        unlocks: 'Assessment gate · Working diagnosis',
+        why: 'Explore the client’s priorities, context, strengths and any remaining uncertainty. Consider a diagnosis only when appropriate; no diagnosis is required to agree counselling goals.',
+        unlocks: null,
         when: 'next_session',
         ctaLabel: null,
         ctaHref: null,
@@ -405,16 +416,15 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
     }
   }
 
-  // PLAN — confirm a plan once the assessment gate is met, or review a
-  // stalled one. Plan-confirm belongs to the FORMULATION stage (you don't
-  // plan before safety + a baseline exist).
-  if (f.currentStage === 'FORMULATION') {
+  // A clinician can confirm counselling goals without first accepting a
+  // diagnosis or administering a questionnaire. Safety retains precedence.
+  if (!f.hasActivePlan && f.safetyAddressed) {
     out.push({
       id: 'plan-confirm',
       priority: 'PLAN',
-      title: 'Confirm a treatment plan',
-      why: 'A working diagnosis is accepted but there is no plan — confirm one so the next sessions have structure.',
-      unlocks: 'Formulation gate · Plan accepted',
+      title: 'Agree goals and a care plan',
+      why: 'Review the shared understanding with the client and confirm an appropriate plan. Assessment can continue alongside counselling.',
+      unlocks: 'Shared goals · Clinician-confirmed plan',
       when: 'this_session',
       ctaLabel: 'Open the decision board',
       ctaHref: input.hrefs.sessionSub,
@@ -423,8 +433,12 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
     out.push({
       id: 'plan-review',
       priority: 'PLAN',
-      title: 'Review the plan — not improving as expected',
-      why: 'The screener has shown no reliable improvement across several administrations; an early change of course helps most.',
+      title: f.measureWorsened
+        ? 'Review worsening alongside the whole case'
+        : 'Review the plan — not improving as expected',
+      why: f.measureWorsened
+        ? 'At least one questionnaire shows reliable deterioration, even if another improved. Review safety, functioning, goals and the client’s experience before deciding next steps.'
+        : 'A questionnaire has not shown reliable improvement across several administrations. Review it alongside goals, functioning and the client’s experience; it does not determine whether care is helping on its own.',
       unlocks: null,
       when: 'next_session',
       ctaLabel: consultHref ? 'Get a case consult' : null,
@@ -432,19 +446,20 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
     });
   }
 
-  // OUTCOME — discharge when remitted, else book a review.
-  if (f.hasActivePlan && f.dischargeReady) {
+  // One coherent review action: never offer an improvement-led ending next
+  // to a warning that another measure worsened or stalled.
+  if (f.hasActivePlan && f.improvementObserved && !f.planStalled) {
     out.push({
-      id: 'discharge',
+      id: 'progress-review',
       priority: 'OUTCOME',
-      title: 'Consider discharge + share an outcome report',
-      why: 'The latest screener is in the remission range with a reliable improvement from baseline.',
+      title: 'Review progress together',
+      why: 'A questionnaire shows improvement. Review all available measures, agreed goals, functioning, safety and the client’s preferences together. The psychologist and client decide whether to continue, adapt or plan an ending.',
       unlocks: null,
       when: 'this_session',
       ctaLabel: null,
       ctaHref: null,
     });
-  } else if (f.reviewReached && f.hasActivePlan) {
+  } else if (f.reviewReached && f.hasActivePlan && !f.planStalled) {
     out.push({
       id: 'book-review',
       priority: 'OUTCOME',
@@ -460,7 +475,13 @@ function buildQueue(input: CareEngineInput, f: CareFacts): CareAction[] {
   // Stable sort by priority (insertion order preserved within a priority).
   return out
     .map((a, i) => ({ a, i }))
-    .sort((x, y) => PRIORITY_RANK[x.a.priority] - PRIORITY_RANK[y.a.priority] || x.i - y.i)
+    .sort((x, y) => {
+      // Deterioration review precedes routine measuring/diagnostic suggestions,
+      // but never a safety action. It is not itself a crisis classification.
+      const rank = (a: CareAction) =>
+        f.measureWorsened && a.id === 'plan-review' ? 0.5 : PRIORITY_RANK[a.priority];
+      return rank(x.a) - rank(y.a) || x.i - y.i;
+    })
     .map(({ a }) => a);
 }
 
@@ -478,13 +499,19 @@ function buildArc(input: CareEngineInput, f: CareFacts, queue: CareAction[]): Ca
   const stages: CareStageNode[] = STAGE_ORDER.map((key, idx) => {
     let status: CareStageStatus;
     if (f.isDischarged) status = 'done';
+    else if (key === 'ASSESSMENT' && idx < currentIdx) status = 'ongoing';
     else if (idx < currentIdx) status = 'done';
     else if (idx === currentIdx) status = 'current';
     else status = 'upcoming';
 
     const gate =
       !f.isDischarged && status === 'current' ? buildGate(key, input, f, actionId) : null;
-    return { key, label: STAGE_LABEL[key], status, gate };
+    return {
+      key,
+      label: status === 'ongoing' ? 'Assessment continues' : STAGE_LABEL[key],
+      status,
+      gate,
+    };
   });
 
   return {
@@ -509,7 +536,7 @@ function buildGate(
   if (stage === 'INTAKE') {
     criteria.push({
       key: 'first-session',
-      label: 'First session recorded',
+      label: 'First session documented',
       met: f.firstSessionDone,
       evidence: null,
       why: f.firstSessionDone ? null : 'no completed session yet',
@@ -517,14 +544,12 @@ function buildGate(
     });
   } else if (stage === 'ASSESSMENT') {
     criteria.push({
-      key: 'diagnosis',
-      label: 'Working diagnosis accepted',
-      met: f.hasPrimaryDiagnosis,
-      evidence: input.workingDiagnosis
-        ? `${input.workingDiagnosis.icd11Code} · accepted ${fmtDay(input.workingDiagnosis.confirmedAt)}`
-        : null,
-      why: f.hasPrimaryDiagnosis ? null : 'no diagnosis accepted yet',
-      unlocksActionId: actionId('diagnose') ?? actionId('continue-assessment'),
+      key: 'understanding-and-goals',
+      label: 'Shared understanding and goals',
+      met: false,
+      evidence: null,
+      why: 'Keep assessment open as needed; agree the focus and goals with the client. A diagnosis or questionnaire is not required for every counselling journey.',
+      unlocksActionId: actionId('plan-confirm') ?? actionId('continue-assessment'),
     });
     criteria.push({
       key: 'safety',
@@ -540,21 +565,13 @@ function buildGate(
         : `${input.crisis.highestSeverity}-severity flag open, ${input.hasSafetyPlan ? 'safety plan predates it' : 'no safety plan on file'}`,
       unlocksActionId: actionId('safety-plan'),
     });
-    criteria.push({
-      key: 'baseline',
-      label: 'Baseline measured',
-      met: f.baselineMeasured,
-      evidence: f.baselineMeasured ? 'PHQ-9 / GAD-7 on file' : null,
-      why: f.baselineMeasured ? null : 'PHQ-9 + GAD-7 never administered',
-      unlocksActionId: actionId('baseline'),
-    });
   } else if (stage === 'FORMULATION') {
     criteria.push({
       key: 'plan',
       label: 'Treatment plan accepted',
       met: f.hasActivePlan,
       evidence: input.activePlan ? `plan v${input.activePlan.version}` : null,
-      why: f.hasActivePlan ? null : 'diagnosis accepted, no plan yet',
+      why: f.hasActivePlan ? null : 'no clinician-confirmed plan yet; assessment can continue',
       unlocksActionId: actionId('plan-confirm'),
     });
   } else if (stage === 'ACTIVE_TREATMENT') {
@@ -570,19 +587,18 @@ function buildGate(
     // REVIEW
     criteria.push({
       key: 'outcome',
-      label: 'Outcome decided',
+      label: 'Shared progress review',
       met: false,
       evidence: null,
-      why: f.dischargeReady
-        ? 'remission reached — discharge or set new goals'
-        : 'review the plan against the outcome data',
-      unlocksActionId: actionId('discharge') ?? actionId('book-review'),
+      why: 'Review goals, functioning, safety, client preferences and all available outcomes. Only the clinician and client decide whether and how to end care.',
+      unlocksActionId:
+        actionId('plan-review') ?? actionId('progress-review') ?? actionId('book-review'),
     });
   }
 
   const metCount = criteria.filter((c) => c.met).length;
   return {
-    label: `To finish ${STAGE_LABEL[stage]}`,
+    label: `Focus for ${STAGE_LABEL[stage]}`,
     metCount,
     totalCount: criteria.length,
     criteria,
@@ -606,7 +622,7 @@ function deriveMeasureDue(
 ): { dueState: CareMeasureDueState; dueLabel: string } {
   const activePhase = stage === 'ACTIVE_TREATMENT' || stage === 'REVIEW';
   if (inst.count === 0) {
-    return { dueState: 'DUE_NOW', dueLabel: 'due now · baseline' };
+    return { dueState: 'DUE_SOON', dueLabel: 'optional · choose if relevant' };
   }
   const days = daysSince(inst.lastAt, now);
   if (inst.count === 1) {
@@ -729,13 +745,20 @@ function buildCadence(input: CareEngineInput, f: CareFacts) {
   const stillSymptomatic = latestSeverityKeys.some(
     (k) => k === 'moderate' || k === 'moderately_severe' || k === 'severe',
   );
-  const improving = input.instruments.some((i) => i.change?.verdict === 'reliable_improvement');
+  const improving =
+    !f.measureWorsened &&
+    !f.planStalled &&
+    input.instruments.some((i) => i.change?.verdict === 'reliable_improvement');
 
   let intervalDays = 7;
   let rationale = 'Weekly contact is standard while the picture is still forming.';
   if (f.currentStage === 'INTAKE' || f.currentStage === 'ASSESSMENT') {
     intervalDays = 7;
-    rationale = 'Weekly during assessment keeps the differential narrowing.';
+    rationale =
+      'Discuss the next appointment with the client while understanding and goals develop; weekly is a suggested starting point, not a requirement.';
+  } else if (f.measureWorsened) {
+    rationale =
+      'Review the worsening and agree an appropriate follow-up with the client; an improved score elsewhere should not automatically space sessions out.';
   } else if (improving && !stillSymptomatic) {
     intervalDays = 21;
     rationale = 'Symptoms have eased and are improving — spacing sessions out consolidates gains.';

@@ -54,6 +54,8 @@ vi.mock('react', async (importOriginal) => ({
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: harness.push }) }));
 vi.mock('@/lib/audio/use-session-recorder', () => ({ useSessionRecorder: () => harness.recorder }));
 vi.mock('@/lib/audio/use-wake-lock', () => ({ useWakeLock: () => {} }));
+vi.mock('@/lib/use-capture-view-clock', () => ({ useCaptureViewClock: () => 0 }));
+vi.mock('@/lib/use-modal-a11y', () => ({ useModalA11y: () => {} }));
 vi.mock('@/lib/audio/idb-chunk-store', () => ({ SessionStore: { clear: harness.clear } }));
 vi.mock('@cureocity/audio', () => ({
   flushPendingWithRetries: (drain: () => Promise<number>) => drain(),

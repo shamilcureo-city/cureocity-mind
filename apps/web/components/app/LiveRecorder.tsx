@@ -11,6 +11,9 @@ import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import { InRoomDirection } from './InRoomDirection';
 import { coordinateMindSessionStart } from '@/lib/mind-session-start';
 import { SessionStore } from '@/lib/audio/idb-chunk-store';
+import { CaptureStatusBar } from './CaptureStatusBar';
+import { useCaptureViewClock } from '@/lib/use-capture-view-clock';
+import { useModalA11y } from '@/lib/use-modal-a11y';
 
 const MODE_LABEL: Record<CaptureSource, string> = {
   mic: 'In-person',
@@ -75,6 +78,12 @@ export function LiveRecorder({
   const [endError, setEndError] = useState<string | null>(null);
   const [captureAuthorizationError, setCaptureAuthorizationError] = useState<string | null>(null);
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const endDialogRef = useRef<HTMLDivElement>(null);
+  useModalA11y(endConfirmOpen, endDialogRef, () => setEndConfirmOpen(false));
+  const captureViewElapsedMs = useCaptureViewClock(
+    recorder.state === 'recording',
+    recorder.state === 'idle',
+  );
   const [finalStage, setFinalStage] = useState<
     'stopping' | 'saving-recording' | 'generating-note' | 'ready' | null
   >(null);
@@ -285,9 +294,50 @@ export function LiveRecorder({
   const isRecording = recorder.state === 'recording';
   const isPreparing = recorder.state === 'preparing';
   const errored = recorder.state === 'error' || recorder.error !== null;
+  const captureActions = (
+    <>
+      {clientId && (isRecording || recorder.state === 'pausing') && (
+        <Button
+          variant="secondary"
+          onClick={() => void pauseCapture()}
+          disabled={ending || !captureAuthorized || recorder.state === 'pausing'}
+        >
+          {recorder.state === 'pausing' ? 'Pausing…' : 'Pause recording'}
+        </Button>
+      )}
+      {clientId && recorder.state === 'paused' && (
+        <Button
+          variant="secondary"
+          onClick={() => void resumeCapture()}
+          disabled={resuming || ending}
+        >
+          {resuming ? 'Resuming…' : 'Resume recording'}
+        </Button>
+      )}
+      <Button
+        onClick={() => setEndConfirmOpen(true)}
+        disabled={
+          ending ||
+          resuming ||
+          isPreparing ||
+          recorder.state === 'pausing' ||
+          recorder.state === 'finishing' ||
+          !captureAuthorized
+        }
+        variant={clientId ? 'secondary' : 'primary'}
+        className={clientId ? undefined : 'bg-[var(--color-warn)] hover:bg-[#a25b30]'}
+      >
+        {uploadingLeft !== null && uploadingLeft > 0
+          ? `Uploading… (${uploadingLeft})`
+          : ending
+            ? 'Ending…'
+            : 'End session'}
+      </Button>
+    </>
+  );
 
   return (
-    <Card className="overflow-hidden">
+    <Card className={clientId ? '' : 'overflow-hidden'}>
       <div
         className={`border-b border-[var(--color-line-soft)] px-6 py-4 ${
           isRecording ? 'bg-[#fbe9dc]/40' : 'bg-[var(--color-surface-soft)]'
@@ -315,25 +365,63 @@ export function LiveRecorder({
         </div>
       </div>
 
-      <div className="grid gap-4 px-6 py-5 sm:grid-cols-3">
-        <StatTile
-          label="Session elapsed · includes breaks"
-          value={formatElapsed(elapsedMs)}
-          mono
-          tone={isRecording ? 'warn' : 'default'}
-        />
-        <StatTile
-          label="Audio parts captured"
-          value={String(Math.max(recorder.lastChunkIndex + 1, 0))}
-          mono
-        />
-        <StatTile
-          label="Pending upload"
-          value={`${recorder.pendingCount}${recorder.draining ? ' • syncing' : ''}`}
-          mono
-          tone={recorder.pendingCount > 0 ? 'accent' : 'default'}
-        />
-      </div>
+      {clientId && (
+        <CaptureStatusBar
+          status={
+            isRecording
+              ? 'Recording'
+              : resuming
+                ? 'Reconnecting capture'
+                : recorder.state === 'paused'
+                  ? 'Paused · microphone off'
+                  : recorder.state === 'pausing'
+                    ? 'Capture off · saving the last audio'
+                    : isPreparing
+                      ? 'Preparing capture'
+                      : 'Capture stopped'
+          }
+          elapsedMs={captureViewElapsedMs}
+          detail={
+            recorder.pendingCount > 0
+              ? 'Some captured audio is still uploading. Keep this page open until saving is confirmed.'
+              : isRecording
+                ? 'Recording only. A draft will be prepared after you end and save.'
+                : 'No new audio is captured. Keep this page open if saving is unfinished.'
+          }
+        >
+          {captureActions}
+        </CaptureStatusBar>
+      )}
+
+      {clientId ? (
+        <details className="px-6 py-3 text-sm text-[var(--color-ink-2)]">
+          <summary className="min-h-11 cursor-pointer py-2">Recording details</summary>
+          <p>
+            {Math.max(recorder.lastChunkIndex + 1, 0)} audio parts captured; {recorder.pendingCount}{' '}
+            pending upload{recorder.draining ? ' · syncing' : ''}.
+          </p>
+        </details>
+      ) : (
+        <div className="grid gap-4 px-6 py-5 sm:grid-cols-3">
+          <StatTile
+            label="Session elapsed · includes breaks"
+            value={formatElapsed(elapsedMs)}
+            mono
+            tone={isRecording ? 'warn' : 'default'}
+          />
+          <StatTile
+            label="Audio parts captured"
+            value={String(Math.max(recorder.lastChunkIndex + 1, 0))}
+            mono
+          />
+          <StatTile
+            label="Pending upload"
+            value={`${recorder.pendingCount}${recorder.draining ? ' • syncing' : ''}`}
+            mono
+            tone={recorder.pendingCount > 0 ? 'accent' : 'default'}
+          />
+        </div>
+      )}
 
       {(recorder.state === 'paused' || recorder.state === 'pausing' || resuming || pauseError) && (
         <div
@@ -430,6 +518,7 @@ export function LiveRecorder({
 
       {endConfirmOpen && (
         <div
+          ref={endDialogRef}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
           role="dialog"
           aria-modal="true"
@@ -457,7 +546,13 @@ export function LiveRecorder({
         </div>
       )}
 
-      <div className="sticky bottom-0 z-20 flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] bg-white/95 px-6 py-4 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur">
+      <div
+        className={
+          clientId
+            ? 'flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-line-soft)] px-6 py-4'
+            : 'sticky bottom-0 z-20 flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] bg-white/95 px-6 py-4 shadow-[0_-4px_12px_rgba(0,0,0,0.06)] backdrop-blur'
+        }
+      >
         <p className="text-xs text-[var(--color-ink-3)]">
           {finalStage === 'stopping'
             ? 'Stopping capture…'
@@ -467,44 +562,7 @@ export function LiveRecorder({
                 ? 'Audio uploaded. Opening the session to review note generation…'
                 : 'Saved audio parts can resume after reopening this session. Keep this page open while recording or saving.'}
         </p>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {clientId && (isRecording || recorder.state === 'pausing') && (
-            <Button
-              variant="secondary"
-              onClick={() => void pauseCapture()}
-              disabled={ending || !captureAuthorized || recorder.state === 'pausing'}
-            >
-              {recorder.state === 'pausing' ? 'Pausing…' : 'Pause recording'}
-            </Button>
-          )}
-          {clientId && recorder.state === 'paused' && (
-            <Button
-              variant="secondary"
-              onClick={() => void resumeCapture()}
-              disabled={resuming || ending}
-            >
-              {resuming ? 'Resuming…' : 'Resume recording'}
-            </Button>
-          )}
-          <Button
-            onClick={() => setEndConfirmOpen(true)}
-            disabled={
-              ending ||
-              resuming ||
-              isPreparing ||
-              recorder.state === 'pausing' ||
-              recorder.state === 'finishing' ||
-              !captureAuthorized
-            }
-            className="bg-[var(--color-warn)] hover:bg-[#a25b30]"
-          >
-            {uploadingLeft !== null && uploadingLeft > 0
-              ? `Uploading… (${uploadingLeft})`
-              : ending
-                ? 'Ending…'
-                : 'End session'}
-          </Button>
-        </div>
+        {!clientId && <div className="flex shrink-0 flex-wrap gap-2">{captureActions}</div>}
       </div>
     </Card>
   );

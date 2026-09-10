@@ -84,8 +84,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
 
       if (body.value.sourceSessionId) {
-        const lockedSourceSessions = await tx.$queryRaw<Array<{ id: string }>>`
-          SELECT "id"
+        const lockedSourceSessions = await tx.$queryRaw<Array<{ id: string; status: string }>>`
+          SELECT "id", "status"
           FROM "sessions"
           WHERE "id" = ${body.value.sourceSessionId}
             AND "clientId" = ${body.value.clientId}
@@ -93,6 +93,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           FOR UPDATE
         `;
         if (!lockedSourceSessions[0]) throw new AssignmentTargetNotFound('Session');
+        if (
+          body.value.sourceAgreementId &&
+          !['IN_PROGRESS', 'COMPLETED'].includes(lockedSourceSessions[0].status)
+        )
+          throw new AssignmentIdempotencyConflict();
       }
 
       if (body.value.idempotencyKey) {
@@ -107,6 +112,42 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           return existing;
         }
       }
+      if (body.value.sourceAgreementId) {
+        // Shared client lock serializes correction, retirement and erasure.
+        const agreement = await tx.sessionAgreement.findFirst({
+          where: {
+            id: body.value.sourceAgreementId,
+            sessionId: body.value.sourceSessionId,
+            clientId: body.value.clientId,
+            psychologistId: auth.value.psychologistId,
+          },
+        });
+        if (!agreement) throw new AssignmentTargetNotFound('Agreement');
+        const existing = await tx.exerciseAssignment.findFirst({
+          where: {
+            sourceAgreementId: agreement.id,
+            sourceAgreementRevision: body.value.sourceAgreementRevision,
+            clientId: body.value.clientId,
+            psychologistId: auth.value.psychologistId,
+          },
+        });
+        if (existing) {
+          if (
+            !assignmentPayloadMatches(
+              existing,
+              normalizedAssignmentPayload(body.value, auth.value.psychologistId),
+            )
+          )
+            throw new AssignmentIdempotencyConflict();
+          return existing;
+        }
+        if (
+          agreement.revision !== body.value.sourceAgreementRevision ||
+          agreement.retiredAt !== null ||
+          agreement.followUp === 'DONE'
+        )
+          throw new AssignmentIdempotencyConflict();
+      }
       const row = await tx.exerciseAssignment.create({
         data: {
           clientId: body.value.clientId,
@@ -114,6 +155,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           exerciseId: body.value.exerciseId ?? null,
           source: body.value.task ? 'CUSTOM' : 'CATALOG',
           sourceSessionId: body.value.sourceSessionId ?? null,
+          sourceAgreementId: body.value.sourceAgreementId ?? null,
+          sourceAgreementRevision: body.value.sourceAgreementRevision ?? null,
           idempotencyKey: body.value.idempotencyKey ?? null,
           ...(body.value.task && { customDescription: body.value.task }),
           ...(body.value.frequency && { frequency: body.value.frequency }),
@@ -136,6 +179,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             clientId: body.value.clientId,
             exerciseId: body.value.exerciseId ?? null,
             source: body.value.task ? 'CUSTOM' : 'CATALOG',
+            ...(body.value.sourceAgreementId && {
+              sourceAgreementId: body.value.sourceAgreementId,
+              sourceAgreementRevision: body.value.sourceAgreementRevision,
+            }),
             ...(body.value.deliveryChannel && { deliveryChannel: body.value.deliveryChannel }),
           },
         },
@@ -148,7 +195,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: `${error.target} not found` }, { status: 404 });
     }
     if (error instanceof AssignmentIdempotencyConflict) {
-      return NextResponse.json({ error: 'Assignment conflict' }, { status: 409 });
+      return NextResponse.json(
+        {
+          error:
+            'The homework or source agreement has changed. Reload and review the saved wording and existing homework before retrying.',
+        },
+        { status: 409 },
+      );
     }
     throw error;
   }
@@ -159,7 +212,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 class AssignmentIdempotencyConflict extends Error {}
 
 class AssignmentTargetNotFound extends Error {
-  constructor(readonly target: 'Client' | 'Session') {
+  constructor(readonly target: 'Client' | 'Session' | 'Agreement') {
     super(`${target} not found`);
   }
 }
@@ -172,6 +225,8 @@ function normalizedAssignmentPayload(
     exerciseId?: string | null;
     task?: string;
     sourceSessionId?: string;
+    sourceAgreementId?: string;
+    sourceAgreementRevision?: number;
     frequency?: string;
     deliveryChannel?: string;
     dueAt?: string;
@@ -186,6 +241,8 @@ function normalizedAssignmentPayload(
     source: value.task ? 'CUSTOM' : 'CATALOG',
     customDescription: value.task ?? null,
     sourceSessionId: value.sourceSessionId ?? null,
+    sourceAgreementId: value.sourceAgreementId ?? null,
+    sourceAgreementRevision: value.sourceAgreementRevision ?? null,
     frequency: value.frequency ?? null,
     deliveryChannel: value.deliveryChannel ?? null,
     dueAt: value.dueAt ? new Date(value.dueAt).toISOString() : null,
@@ -201,6 +258,8 @@ function assignmentPayloadMatches(
     source: string;
     customDescription: string | null;
     sourceSessionId: string | null;
+    sourceAgreementId?: string | null;
+    sourceAgreementRevision?: number | null;
     frequency: string | null;
     deliveryChannel: string | null;
     dueAt: Date | null;
@@ -215,6 +274,8 @@ function assignmentPayloadMatches(
     existing.source === requested.source &&
     existing.customDescription === requested.customDescription &&
     existing.sourceSessionId === requested.sourceSessionId &&
+    (existing.sourceAgreementId ?? null) === requested.sourceAgreementId &&
+    (existing.sourceAgreementRevision ?? null) === requested.sourceAgreementRevision &&
     existing.frequency === requested.frequency &&
     existing.deliveryChannel === requested.deliveryChannel &&
     assignmentDueAtMatches(existing.dueAt, requested.dueAt) &&

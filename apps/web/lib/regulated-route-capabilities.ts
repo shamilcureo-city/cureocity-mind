@@ -79,6 +79,30 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   policy('api/v1/sessions', ['POST'], ['VERTICAL_DOCUMENTATION'], 'write'),
   policy('api/v1/sessions/[id]', ['GET'], ['VERTICAL_DOCUMENTATION'], 'disclosure'),
   policy(
+    'api/v1/sessions/[id]/manual-note',
+    ['GET', 'POST'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
+  policy(
+    'api/v1/sessions/[id]/consent-recovery',
+    ['GET', 'POST'],
+    ['LIVE_ENCOUNTER', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
+  policy(
+    'api/v1/sessions/[id]/agreements',
+    ['GET', 'POST'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
+  policy(
+    'api/v1/sessions/[id]/agreements/[agreementId]',
+    ['PATCH', 'DELETE'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
+  policy(
     'api/v1/sessions/[id]/mind-closeout',
     ['PATCH'],
     ['BEHAVIORAL_HEALTH_DOCUMENTATION', 'CLINICAL_ANALYSIS'],
@@ -217,12 +241,25 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     'write',
   ),
   policy('api/v1/clients/[id]/assignments', ['GET'], ['THERAPY_WORKFLOWS'], 'read'),
+  policy('api/v1/clients/[id]/agreements', ['GET'], ['THERAPY_WORKFLOWS'], 'read'),
+  policy(
+    'api/v1/clients/[id]/care-record',
+    ['GET', 'POST'],
+    ['THERAPY_WORKFLOWS', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
   policy('api/v1/assignments', ['POST'], ['THERAPY_WORKFLOWS'], 'write'),
   policy('api/v1/assignments/[id]', ['PATCH'], ['THERAPY_WORKFLOWS'], 'write'),
   policy('api/v1/treatment-plans/[id]/goals/[index]', ['PATCH'], ['THERAPY_WORKFLOWS'], 'write'),
 
   // Measurement-based care and safety planning.
   policy('api/v1/clients/[id]/instruments', ['GET', 'POST'], ['MEASUREMENT_BASED_CARE'], 'write'),
+  policy(
+    'api/v1/clients/[id]/instruments/[instrumentKey]/draft',
+    ['GET', 'POST'],
+    ['MEASUREMENT_BASED_CARE', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
   policy('api/v1/clients/[id]/journey', ['GET'], ['MEASUREMENT_BASED_CARE'], 'disclosure'),
   policy('api/v1/clients/[id]/discharge', ['POST'], ['MEASUREMENT_BASED_CARE'], 'write'),
   policy(
@@ -276,6 +313,7 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     'live',
   ),
   policy('api/v1/sessions/[id]/live-suggestion', ['POST'], ['LIVE_ENCOUNTER'], 'live'),
+  policy('api/v1/sessions/[id]/mind-cue-review', ['GET', 'POST'], ['LIVE_ENCOUNTER'], 'live'),
   policy(
     'api/v1/sessions/[id]/recovery-transcript',
     ['POST'],

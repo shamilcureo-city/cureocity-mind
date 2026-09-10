@@ -185,6 +185,31 @@
   align-items: baseline;
   gap: 0.75rem;
 }
+.supportLead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem 0;
+  border-top: 1px solid var(--color-line-soft);
+}
+.supportLead h2 {
+  font-family: var(--font-fraunces), Georgia, serif;
+  font-size: 1.4rem;
+}
+.supportLead p {
+  max-width: 62ch;
+  margin-top: 0.35rem;
+  font-size: 0.875rem;
+  color: var(--color-ink-2);
+}
+.supportBody {
+  padding: clamp(1rem, 3vw, 1.5rem);
+  border: 1px solid var(--color-line-soft);
+  border-radius: 1rem;
+  background: var(--color-surface-soft);
+}
 .sectionIntro h2 {
   font-family: var(--font-fraunces), Georgia, serif;
   font-size: 1.65rem;

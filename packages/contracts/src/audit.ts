@@ -14,6 +14,7 @@ export const AuditActionSchema = z.enum([
   'CONSENT_WITHDRAWN',
   'CONSENT_EXPIRED',
   'SESSION_CREATED',
+  'SESSION_PURPOSE_SELECTED',
   'SESSION_CONSENT_RECORDED',
   'SESSION_STARTED',
   'SESSION_ENDED',
@@ -135,6 +136,9 @@ export const AuditActionSchema = z.enum([
   'PRE_SESSION_BRIEF_VIEWED',
   'INSTRUMENT_ADMINISTERED',
   'INSTRUMENT_VIEWED',
+  'MIND_INSTRUMENT_DRAFT_SAVED',
+  'MIND_INSTRUMENT_DRAFT_DISCARDED',
+  'MIND_INSTRUMENT_DRAFT_VIEWED',
   // Sprint 47 — client completed a self-serve check-in from the portal.
   'PATIENT_CHECKIN_SUBMITTED',
   'SAFETY_PLAN_CREATED',
@@ -278,6 +282,7 @@ export const AuditActionSchema = z.enum([
   // one-tap alliance feedback.
   'FORMULATION_CONFIRMED',
   'AGREEMENT_RECORDED',
+  'MIND_CARE_RECORD_SAVED',
   'SESSION_FEEDBACK_RECORDED',
   // Marketing V1 — public therapist pages + real-slot booking.
   'THERAPIST_PROFILE_PUBLISHED',

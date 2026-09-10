@@ -19,6 +19,8 @@ export interface IntakeNotePdfProps {
   scheduledAt: string;
   durationMs: number | null;
   signedBy: string | null;
+  /** Current account name for signedBy, not a historical signature snapshot. */
+  signedByName: string | null;
   signedAt: string | null;
 }
 
@@ -115,6 +117,7 @@ function riskStyle(severity: string) {
 
 export function IntakeNotePdf(props: IntakeNotePdfProps) {
   const { note } = props;
+  const signerName = props.signedByName?.trim() || null;
   const durationMin = props.durationMs ? Math.round(props.durationMs / 60_000) : null;
   // Sprint 72 — a templated intake renders its template's sections here; the
   // authoritative eight intake fields stay in the record underneath.
@@ -122,7 +125,7 @@ export function IntakeNotePdf(props: IntakeNotePdfProps) {
   return (
     <Document
       title={`Intake note — ${props.clientFullName}`}
-      author={props.signedBy ?? 'Cureocity Mind'}
+      author={signerName ?? 'Cureocity Mind'}
       creator="Cureocity Mind"
     >
       <Page size="A4" style={styles.page}>
@@ -215,7 +218,12 @@ export function IntakeNotePdf(props: IntakeNotePdfProps) {
           {props.signedBy && props.signedAt ? (
             <>
               <Text>
-                Signed by {props.signedBy} on {new Date(props.signedAt).toLocaleString('en-GB')}
+                Signed by {signerName ?? 'Clinician name unavailable'} on{' '}
+                {new Date(props.signedAt).toLocaleString('en-GB')}
+              </Text>
+              <Text style={{ marginTop: 2 }}>
+                Clinician ID: {props.signedBy}
+                {signerName ? ' · Name from current account' : ''}
               </Text>
               <Text style={{ marginTop: 2 }}>
                 Cureocity Mind · therapeutic documentation system

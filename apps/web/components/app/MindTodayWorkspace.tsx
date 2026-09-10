@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { Container } from '@/components/ui/Container';
 import { Card } from '@/components/ui/Card';
 import { TodaySessionCard, type TodaySessionCardProps } from './TodaySessionCard';
-import { TodayAttentionQueue } from './TodayAttentionQueue';
+import { TodayAttentionQueue, TodayRecoveryQueue } from './TodayAttentionQueue';
 import { MindTodayMilestones } from './MindTodayMilestones';
 import type { buildMindTodayProgress } from './MindTodayProgress';
 import type { TodayAttentionItem } from '@/lib/today-priority';
@@ -44,7 +44,7 @@ export function MindTodayWorkspace({
       <header className={styles.header}>
         <div>
           <p className={styles.date}>{dateLabel}</p>
-          <h1 className={styles.title}>Your day, with room to focus.</h1>
+          <h1 className={styles.title}>Today</h1>
           <p className={styles.intro}>
             Prepare for the person in front of you. Keep the next step clear.
           </p>
@@ -53,19 +53,21 @@ export function MindTodayWorkspace({
       </header>
 
       {firstRun}
-      <MindTodayMilestones progress={progress} />
+      <TodayRecoveryQueue items={attentionItems} />
 
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
           <section aria-labelledby="next-session-heading">
             <div className={styles.sectionHeading}>
               <h2 id="next-session-heading">
-                {hero?.status === 'IN_PROGRESS' ? 'Your session is open' : 'Your next session'}
+                {hero?.status === 'IN_PROGRESS'
+                  ? 'Return to your unfinished session'
+                  : 'Your next appointment'}
               </h2>
               {hero && (
                 <span>
                   {hero.status === 'IN_PROGRESS'
-                    ? 'Pick up where you left off'
+                    ? 'Review or resume saved work'
                     : 'A moment to prepare'}
                 </span>
               )}
@@ -81,8 +83,8 @@ export function MindTodayWorkspace({
               <Card className={styles.empty}>
                 <h3>Space for what comes next.</h3>
                 <p>
-                  No upcoming session is booked. Schedule a follow-up or start a walk-in when your
-                  next client arrives. Any unfinished work stays in your attention list.
+                  No upcoming session is booked. Schedule a follow-up or start a session when your
+                  next client arrives. Unfinished sessions remain available above.
                 </p>
                 <Link href="/app/clients" className={styles.textLink}>
                   Open your clients
@@ -119,6 +121,8 @@ export function MindTodayWorkspace({
 
         <TodayAttentionQueue items={attentionItems} />
       </div>
+
+      <MindTodayMilestones progress={progress} />
 
       <section className={styles.lookAhead} aria-labelledby="look-ahead-heading">
         <div className={styles.sectionHeading}>

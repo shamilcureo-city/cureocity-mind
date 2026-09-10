@@ -92,11 +92,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     select: {
       psychologistId: true,
       status: true,
+      mindDocumentationMode: true,
       noteDraft: { select: { status: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  }
+  if (session.mindDocumentationMode === 'MANUAL') {
+    return NextResponse.json(
+      { error: 'Recording is disabled for a clinician-written session.' },
+      { status: 409 },
+    );
   }
   // REL-1 — accept late tail chunks after "End session". The recorder flushes
   // its last window(s) asynchronously, so a chunk can land just after the

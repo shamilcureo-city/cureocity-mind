@@ -4,7 +4,7 @@ import { assertAuditedSessionCapabilities } from './capabilities';
 import { writeAudit } from './audit';
 import { prisma } from './prisma';
 
-export type ScribeAuthorityDenialReason = 'CLIENT' | 'CONSENT' | 'SESSION_STATE';
+export type ScribeAuthorityDenialReason = 'CLIENT' | 'CONSENT' | 'SESSION_STATE' | 'MANUAL_SESSION';
 
 export class ScribeAuthorityError extends Error {
   constructor(readonly reason: ScribeAuthorityDenialReason) {
@@ -86,6 +86,7 @@ export async function assertCurrentScribeAuthority(
           psychologistId: true,
           clientId: true,
           status: true,
+          mindDocumentationMode: true,
           client: { select: { status: true, deletedAt: true } },
           psychologist: { select: { vertical: true } },
         },
@@ -112,6 +113,10 @@ export async function assertCurrentScribeAuthority(
     throw new Error('Session authorization context mismatch');
   }
   const allowedStates: readonly SessionStatus[] = ALLOWED_SESSION_STATES[boundary.source];
+  if (session.mindDocumentationMode === 'MANUAL') {
+    await auditScribeDenial(sessionId, boundary, 'MANUAL_SESSION');
+    throw new ScribeAuthorityError('MANUAL_SESSION');
+  }
   if (!allowedStates.includes(session.status)) {
     await auditScribeDenial(sessionId, boundary, 'SESSION_STATE');
     throw new ScribeAuthorityError('SESSION_STATE');

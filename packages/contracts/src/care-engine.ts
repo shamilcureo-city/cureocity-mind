@@ -45,7 +45,9 @@ export const CareStageSchema = z.enum([
 ]);
 export type CareStage = z.infer<typeof CareStageSchema>;
 
-export const CareStageStatusSchema = z.enum(['done', 'current', 'upcoming']);
+// Assessment can continue alongside a confirmed counselling plan; advancing
+// the working focus must not imply the psychologist completed assessment.
+export const CareStageStatusSchema = z.enum(['done', 'current', 'upcoming', 'ongoing']);
 export type CareStageStatus = z.infer<typeof CareStageStatusSchema>;
 
 /// One exit-gate criterion for the current stage. `met` with evidence, or

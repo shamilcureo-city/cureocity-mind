@@ -71,6 +71,15 @@ export const CaseBriefingSafetySchema = z.object({
   highestSeverity: z.enum(['none', 'low', 'medium', 'high', 'critical']),
   openCrisisFlags: z.array(z.string()),
   hasSafetyPlan: z.boolean(),
+  clinicianDocumentedRisk: z
+    .object({
+      severity: z.enum(['high', 'critical']),
+      sourceSessionId: z.string(),
+      recordedAt: z.string().datetime(),
+      sourceStatus: z.enum(['COMPLETED', 'UNFINISHED']).optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export const CaseBriefingV1Schema = z.object({

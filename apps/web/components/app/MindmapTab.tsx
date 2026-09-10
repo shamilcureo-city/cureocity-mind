@@ -7,6 +7,7 @@ import { Badge } from '../ui/Badge';
 
 interface Props {
   note: TherapyNoteV1;
+  sourceState?: 'draft' | 'signed';
 }
 
 // Scoped keyframes for the mindmap: a staggered entrance pop, a gentle idle
@@ -42,7 +43,7 @@ interface Branch {
  * angular layout produces readable output without dynamic force
  * simulation. Resizes responsively via SVG viewBox.
  */
-export function MindmapTab({ note }: Props) {
+export function MindmapTab({ note, sourceState = 'draft' }: Props) {
   const branches = useMemo(() => buildBranches(note), [note]);
   const layout = useMemo(() => computeLayout(branches), [branches]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -74,8 +75,8 @@ export function MindmapTab({ note }: Props) {
           <Badge tone="muted">{note.modality}</Badge>
         </header>
         <p className="px-7 pt-2 text-sm text-[var(--color-ink-2)]">
-          A topic map of the signed note. Hover to highlight; click a topic to open its full
-          contents.
+          A topic map of the {sourceState === 'signed' ? 'signed note' : 'unsigned draft note'}.
+          Hover to highlight; click a topic to open its full contents.
         </p>
         {/* Warm radial wash behind the map for depth. */}
         <div

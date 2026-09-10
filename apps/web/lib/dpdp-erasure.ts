@@ -166,6 +166,8 @@ export async function eraseClientPhi(
   await tx.preSessionBrief.deleteMany({ where: { clientId } });
   await tx.caseConsult.deleteMany({ where: { clientId } });
   await tx.clientConceptualMap.deleteMany({ where: { clientId } });
+  await tx.mindInstrumentDraft.deleteMany({ where: { clientId } });
+  await tx.clientMindCareRecord.deleteMany({ where: { clientId } });
   await tx.instrumentResponse.deleteMany({ where: { clientId } });
   await tx.safetyPlan.deleteMany({ where: { clientId } });
   await tx.exerciseAssignment.deleteMany({ where: { clientId } });
@@ -226,6 +228,7 @@ export async function eraseClientPhi(
 
   await tx.consent.updateMany({ where: { clientId }, data: { notes: null } });
   await tx.noteEditRecovery.deleteMany({ where: { sessionId: { in: sessionIds } } });
+  await tx.mindManualNoteDraft.deleteMany({ where: { sessionId: { in: sessionIds } } });
   await tx.noteDraft.updateMany({
     where: { sessionId: { in: sessionIds } },
     data: {
@@ -243,6 +246,8 @@ export async function eraseClientPhi(
     data: {
       modality: null,
       captureMode: null,
+      mindPurpose: null,
+      mindDocumentationMode: null,
       phaseSnapshot: Prisma.DbNull,
       consentSnapshot: Prisma.DbNull,
       language: 'und',

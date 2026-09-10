@@ -88,6 +88,15 @@ describe('DPDP appointment erasure invariant', () => {
     expect(calls.indexOf('noteEditRecovery.deleteMany')).toBeLessThan(
       calls.indexOf('noteDraft.updateMany'),
     );
+    expect(calls).toContain('mindManualNoteDraft.deleteMany');
+    expect(calls).toContain('mindInstrumentDraft.deleteMany');
+    expect(calls).toContain('clientMindCareRecord.deleteMany');
+    expect(calls.indexOf('mindManualNoteDraft.deleteMany')).toBeLessThan(
+      calls.indexOf('session.updateMany'),
+    );
+    expect(calls.indexOf('exerciseAssignment.deleteMany')).toBeLessThan(
+      calls.indexOf('sessionAgreement.deleteMany'),
+    );
     expect(appointmentUpdates[0]).toMatchObject({
       where: { OR: [{ clientId: 'client-1' }, { sessionId: { in: [] } }] },
       data: { status: 'CANCELLED', startAt: now, endAt: now },

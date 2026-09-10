@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { enforceSameOriginMutation } from '@/lib/same-origin-mutation';
+import { enforceManualSessionBoundary } from './mind-manual-boundary';
 import type {
   PractitionerCapability,
   PractitionerCredentialKind,
@@ -342,6 +343,8 @@ export async function requirePsychologistId(
       };
     }
   }
+  const manualBoundary = await enforceManualSessionBoundary(req, resolved.value.psychologistId);
+  if (manualBoundary) return { ok: false, response: manualBoundary };
   return {
     ok: true,
     value: { user: resolved.value, psychologistId: resolved.value.psychologistId },

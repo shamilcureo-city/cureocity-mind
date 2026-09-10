@@ -6,14 +6,16 @@ const root = join(import.meta.dirname, '..');
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
 
 describe('Mind session workspace v2', () => {
-  it('exposes only four session-owned tabs', () => {
+  it('exposes a note-first route and two evidence tabs, with clinical support on demand', () => {
     const tabs = read('components/app/SessionWorkspaceTabs.tsx');
-    for (const label of ['Review & close', 'Clinical context', 'Transcript', 'Session details']) {
+    for (const label of ['Review & finish', 'Transcript', 'Session details']) {
       expect(tabs).toContain(`label: '${label}'`);
     }
     expect(tabs).not.toContain("label: 'AI Copilot'");
     expect(tabs).not.toContain("label: 'Plan of care'");
     expect(tabs).not.toContain("label: 'Client'");
+    expect(tabs).not.toContain("label: 'Clinical context'");
+    expect(tabs.match(/key: '/g)).toHaveLength(3);
   });
 
   it('keeps Review & Close as the sole note signing ceremony', () => {
@@ -24,7 +26,7 @@ describe('Mind session workspace v2', () => {
     expect(page).toContain("tab === 'note'");
     expect(page).toContain('showSubTabs={false}');
     expect(page).toContain('<MindSessionCloseout');
-    expect(closeout).toContain('Review &amp; Close');
+    expect(closeout).toContain('Review &amp; finish');
     expect(copilot).not.toContain('<NoteSignPanel');
   });
 
@@ -45,7 +47,10 @@ describe('Mind session workspace v2', () => {
       "rawTab === 'copilot' && (!rawSub || ['session', 'review'].includes(rawSub))",
     );
     expect(page).toContain("rawTab === 'copilot' && rawSub === 'close'");
-    expect(page).toContain('redirect(`/app/sessions/${id}?tab=review`)');
+    expect(page).toContain(
+      'redirect(`/app/sessions/${id}?tab=note&support=clinical#session-support`)',
+    );
+    expect(page).toContain("initialReviewOpen={canReviewClinical && support === 'clinical'}");
     expect(page).toContain("rawTab === 'clinical-brief'");
     expect(page).toContain("rawTab === 'notes'");
     expect(page).toContain('redirect(`/app/sessions/${id}?tab=note`)');
@@ -75,7 +80,8 @@ describe('Mind session workspace v2', () => {
     const todayPage = read('app/app/today/page.tsx');
     const unsignedDigest = read('app/api/v1/cron/unsigned-digest/route.ts');
 
-    expect(decisions).toContain('href={`/app/sessions/${sessionId}?tab=note`}');
+    expect(decisions).not.toContain('function WrapUpSignStep');
+    expect(decisions).not.toContain('<ShareModal');
     expect(today).toContain('href={`/app/sessions/${session.id}?tab=note`}');
     expect(dashboard).toContain('href={`/app/sessions/${n.sessionId}?tab=note`}');
     expect(notesDue).toContain('href={`/app/sessions/${r.id}?tab=note`}');

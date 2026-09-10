@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   noteSafeParse: vi.fn(),
   rxSafeParse: vi.fn(),
   recoveryFindUnique: vi.fn(),
+  manualDraftFindUnique: vi.fn(),
 }));
 
 vi.mock('@cureocity/contracts', () => {
@@ -104,6 +105,7 @@ const tx = {
   noteEdit: { createMany: mocks.editsCreateMany },
   webAuthnCredential: { update: mocks.webAuthnUpdate },
   noteEditRecovery: { findUnique: mocks.recoveryFindUnique },
+  mindManualNoteDraft: { findUnique: mocks.manualDraftFindUnique },
 };
 
 function sqlText(strings: TemplateStringsArray): string {
@@ -144,6 +146,7 @@ beforeEach(() => {
   });
   mocks.noteFindUnique.mockResolvedValue(null);
   mocks.recoveryFindUnique.mockResolvedValue(null);
+  mocks.manualDraftFindUnique.mockResolvedValue(null);
   mocks.persistedEdits.mockResolvedValue([]);
   mocks.noteCreate.mockImplementation(({ data }) =>
     Promise.resolve({
@@ -226,6 +229,39 @@ beforeEach(() => {
 afterAll(() => vi.useRealTimers());
 
 describe('medical signing route transaction behavior', () => {
+  it.each([true, false])(
+    'clinician-written signing respects pending encrypted draft state (%s)',
+    async (pending) => {
+      mocks.signableKind = 'THERAPY';
+      const baseQuery = mocks.queryRaw.getMockImplementation()!;
+      mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+        sqlText(strings).includes('FROM "sessions"')
+          ? Promise.resolve([
+              {
+                id: 'session-1',
+                psychologistId: 'psy-1',
+                status: 'COMPLETED',
+                kind: 'TREATMENT',
+                vertical: 'THERAPIST',
+                mindDocumentationMode: 'MANUAL',
+              },
+            ])
+          : baseQuery(strings, ...values),
+      );
+      mocks.manualDraftFindUnique.mockResolvedValue({
+        encryptedFields: pending ? 'opaque-manual-draft' : null,
+      });
+      const response = await POST(request() as never, {
+        params: Promise.resolve({ id: 'session-1' }),
+      });
+      expect(response.status).toBe(pending ? 409 : 201);
+      expect(mocks.noteCreate).toHaveBeenCalledTimes(pending ? 0 : 1);
+      expect(mocks.manualDraftFindUnique).toHaveBeenCalledWith({
+        where: { sessionId: 'session-1' },
+        select: { encryptedFields: true },
+      });
+    },
+  );
   it('refuses an unapplied Mind checkpoint under the signature lock, without signing or clearing it', async () => {
     mocks.signableKind = 'THERAPY';
     const baseQuery = mocks.queryRaw.getMockImplementation()!;

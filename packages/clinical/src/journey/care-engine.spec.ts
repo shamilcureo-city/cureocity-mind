@@ -80,7 +80,7 @@ describe('computeCareEngine — stages', () => {
     expect(e.queue.map((a) => a.id)).toEqual(['record-intake']);
   });
 
-  it('ASSESSMENT until diagnosis + safety + baseline are all met', () => {
+  it('keeps unresolved safety in assessment without making diagnosis or measures exit gates', () => {
     // diagnosis accepted, but crisis open with no plan, and no baseline.
     const e = computeCareEngine(
       makeInput({
@@ -91,16 +91,16 @@ describe('computeCareEngine — stages', () => {
     );
     expect(e.arc.stage).toBe('ASSESSMENT');
     const gate = e.arc.stages.find((s) => s.status === 'current')!.gate!;
-    expect(gate.label).toBe('To finish Assessment');
+    expect(gate.label).toBe('Focus for Assessment');
     const byKey = Object.fromEntries(gate.criteria.map((c) => [c.key, c]));
-    expect(byKey['diagnosis']!.met).toBe(true);
+    expect(byKey['diagnosis']).toBeUndefined();
     expect(byKey['safety']!.met).toBe(false);
-    expect(byKey['baseline']!.met).toBe(false);
-    expect(gate.metCount).toBe(1);
-    expect(gate.totalCount).toBe(3);
+    expect(byKey['baseline']).toBeUndefined();
+    expect(gate.metCount).toBe(0);
+    expect(gate.totalCount).toBe(2);
   });
 
-  it('FORMULATION when assessment is done but no plan exists', () => {
+  it('FORMULATION when a diagnosis is recorded but no plan exists, with assessment ongoing', () => {
     const e = computeCareEngine(
       makeInput({
         workingDiagnosis: DX,
@@ -110,7 +110,29 @@ describe('computeCareEngine — stages', () => {
       }),
     );
     expect(e.arc.stage).toBe('FORMULATION');
+    expect(e.arc.stages.find((s) => s.key === 'ASSESSMENT')!.status).toBe('ongoing');
     expect(e.arc.stages.find((s) => s.status === 'current')!.gate!.criteria[0]!.key).toBe('plan');
+  });
+
+  it('supports a confirmed counselling plan without a diagnosis or baseline', () => {
+    const e = computeCareEngine(makeInput({ activePlan: PLAN }));
+    expect(e.arc.stage).toBe('ACTIVE_TREATMENT');
+    expect(e.workingDiagnosis).toBeNull();
+    expect(e.arc.stages.find((s) => s.key === 'ASSESSMENT')).toMatchObject({
+      status: 'ongoing',
+      label: 'Assessment continues',
+    });
+    expect(e.queue.find((a) => a.id === 'baseline')).toMatchObject({ unlocks: null });
+    expect(e.queue.find((a) => a.id === 'continue-assessment')).toBeUndefined();
+  });
+
+  it('offers agreeing goals without demanding a diagnosis when no plan exists', () => {
+    const e = computeCareEngine(makeInput());
+    expect(e.arc.stage).toBe('ASSESSMENT');
+    expect(e.queue.find((a) => a.id === 'plan-confirm')).toBeDefined();
+    expect(e.queue.find((a) => a.id === 'continue-assessment')!.why).toContain(
+      'only when appropriate',
+    );
   });
 
   it('ACTIVE_TREATMENT with a plan and no review reached', () => {
@@ -162,6 +184,17 @@ describe('computeCareEngine — the action queue', () => {
     );
     expect(e.queue[0]!.id).toBe('safety-plan');
     expect(e.queue[0]!.priority).toBe('SAFETY');
+  });
+
+  it('does not hide a known safety concern before the first completed session', () => {
+    const e = computeCareEngine(
+      makeInput({
+        sessionsCompleted: 0,
+        crisis: { highestSeverity: 'critical', labels: ['new concern'] },
+      }),
+    );
+    expect(e.queue.map((a) => a.id)).toEqual(['safety-plan', 'record-intake']);
+    expect(e.queue[1]!.why).toContain('recording is optional');
   });
 
   it('the Rashid scenario: safety → baseline → one diagnostic question, deduplicated', () => {
@@ -295,7 +328,7 @@ describe('computeCareEngine — the action queue', () => {
     expect(e.queue.some((a) => a.id === 'share-outcome')).toBe(true);
   });
 
-  it('remission + response → discharge action', () => {
+  it('remission + response invites a shared whole-case review, never discharge readiness', () => {
     const e = computeCareEngine(
       makeInput({
         workingDiagnosis: DX,
@@ -318,17 +351,94 @@ describe('computeCareEngine — the action queue', () => {
       }),
     );
     expect(e.arc.stage).toBe('REVIEW');
-    expect(e.queue.some((a) => a.id === 'discharge')).toBe(true);
+    expect(e.queue.some((a) => a.id === 'discharge')).toBe(false);
+    expect(e.queue.find((a) => a.id === 'progress-review')!.why).toContain(
+      'all available measures',
+    );
+    expect(e.activePlan!.goalsAchieved).toBe(0);
+    expect(e.arc.discharged).toBeNull();
+  });
+
+  it('prioritizes a worsened second measure over improvement and routine measurement', () => {
+    const e = computeCareEngine(
+      makeInput({
+        activePlan: PLAN,
+        instruments: [
+          inst({
+            key: 'PHQ9',
+            count: 2,
+            change: change('PHQ9', {
+              verdict: 'reliable_improvement',
+              isRemission: true,
+              isResponse: true,
+            }),
+          }),
+          inst({
+            key: 'GAD7',
+            count: 2,
+            change: change('GAD7', { verdict: 'deterioration' }),
+          }),
+        ],
+      }),
+    );
+    expect(e.arc.stage).toBe('REVIEW');
+    expect(e.queue[0]!.id).toBe('plan-review');
+    expect(e.queue[0]!.why).toContain('even if another improved');
+    expect(
+      e.queue.some((a) => ['discharge', 'progress-review', 'book-review'].includes(a.id)),
+    ).toBe(false);
+    expect(e.cadence.recommendedIntervalDays).toBe(7);
+    expect(e.cadence.rationale).toContain('should not automatically space sessions out');
+  });
+
+  it('keeps safety above a discordant-measure review', () => {
+    const e = computeCareEngine(
+      makeInput({
+        activePlan: PLAN,
+        crisis: { highestSeverity: 'critical', labels: ['new concern'] },
+        instruments: [
+          inst({
+            key: 'GAD7',
+            count: 2,
+            change: change('GAD7', { verdict: 'deterioration' }),
+          }),
+        ],
+      }),
+    );
+    expect(e.queue.slice(0, 2).map((a) => a.id)).toEqual(['safety-plan', 'plan-review']);
+    expect(e.arc.stage).toBe('ASSESSMENT');
+  });
+
+  it('does not pair stalled progress with improvement-led ending suggestions', () => {
+    const e = computeCareEngine(
+      makeInput({
+        activePlan: PLAN,
+        instruments: [
+          inst({
+            key: 'PHQ9',
+            count: 3,
+            change: change('PHQ9', {
+              administrationCount: 3,
+              verdict: 'reliable_improvement',
+              isRemission: true,
+            }),
+          }),
+          inst({ key: 'GAD7', count: 3, change: change('GAD7', { administrationCount: 3 }) }),
+        ],
+      }),
+    );
+    expect(e.queue.some((a) => a.id === 'plan-review')).toBe(true);
+    expect(e.queue.some((a) => ['discharge', 'progress-review'].includes(a.id))).toBe(false);
   });
 });
 
 describe('computeCareEngine — measures + cadence', () => {
-  it('no administrations → DUE_NOW baseline', () => {
+  it('no administrations → optional measure, not a mandatory overdue baseline', () => {
     const e = computeCareEngine(makeInput());
     const phq = e.measures.find((m) => m.instrumentKey === 'PHQ9')!;
     expect(phq.hasBaseline).toBe(false);
-    expect(phq.dueState).toBe('DUE_NOW');
-    expect(phq.dueLabel).toContain('baseline');
+    expect(phq.dueState).toBe('DUE_SOON');
+    expect(phq.dueLabel).toContain('choose if relevant');
     expect(phq.verdict).toBeNull();
   });
 

@@ -8,6 +8,7 @@ import type {
   InstrumentResponse,
   JourneyActivePlan,
   TreatmentGoalStatus,
+  InstrumentKey,
 } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
@@ -17,6 +18,8 @@ import { ShareModal } from './ShareModal';
 import { severityLabel, phq9Plain, gad7Plain } from '../../lib/instrument-plain-language';
 import { buildShareDeliveryInput } from '../../lib/share-delivery-input';
 import { isDeliveredShareStatus } from '../../lib/sprint5-final-behavior';
+import { useMindInstrumentDrafts } from '../../lib/use-mind-instrument-drafts';
+import { useSubmittedInstrumentRiskAlert } from '../../lib/use-submitted-instrument-risk-alert';
 
 interface CatalogItem {
   id: string;
@@ -82,6 +85,7 @@ export function CareMeasurePanel({
   hasContactEmail = false,
 }: Props) {
   const router = useRouter();
+  const drafts = useMindInstrumentDrafts(clientId, !disabled);
   const [catalog, setCatalog] = useState<Instrument[]>([]);
   // TS7.4 — one-tap "Send now": per-instrument busy / sent / failed state,
   // plus the ShareModal fallback for when no channel can be resolved.
@@ -161,8 +165,7 @@ export function CareMeasurePanel({
     }
   }
   const [history, setHistory] = useState<InstrumentResponse[]>([]);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [responses, setResponses] = useState<Record<string, number>>({});
+  const [activeKey, setActiveKey] = useState<InstrumentKey | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -172,6 +175,8 @@ export function CareMeasurePanel({
     instrumentKey: string;
     itemNumber: number | null;
   } | null>(null);
+  useSubmittedInstrumentRiskAlert(clientId, drafts.entry('PHQ9').saved, setRiskAlert);
+  useSubmittedInstrumentRiskAlert(clientId, drafts.entry('GAD7').saved, setRiskAlert);
 
   const loadHistory = useCallback(async () => {
     const res = await fetch(`/api/v1/clients/${clientId}/instruments`, { cache: 'no-store' });
@@ -206,18 +211,10 @@ export function CareMeasurePanel({
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`/api/v1/clients/${clientId}/instruments`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ instrumentKey: active.key, responses }),
-      });
-      const body = (await res.json().catch(() => ({}))) as { risk?: boolean; error?: string };
-      if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
-      setRiskAlert(
-        body.risk ? { instrumentKey: active.key, itemNumber: active.riskItemNumber } : null,
-      );
+      const receipt = await drafts.finish(active.key, 'SUBMIT');
+      if (receipt.riskFlagged)
+        setRiskAlert({ instrumentKey: active.key, itemNumber: active.riskItemNumber });
       setActiveKey(null);
-      setResponses({});
       await loadHistory();
       // The score changes the engine's facts (baseline / due / verdict) —
       // refresh so the board's checklist above updates in the same view.
@@ -227,15 +224,15 @@ export function CareMeasurePanel({
     } finally {
       setSubmitting(false);
     }
-  }, [activeKey, catalog, clientId, loadHistory, responses, router]);
+  }, [activeKey, catalog, drafts, loadHistory, router]);
 
   return (
-    <div id="care-measures" className="scroll-mt-24">
+    <div className="scroll-mt-24">
       <Card className="p-6">
         <header>
           <h2 className="font-serif text-2xl">Is it working?</h2>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            Scores, plan goals and emotional tone — everything that shows change lives here.
+            Review relevant scores alongside goals, functioning and the client’s experience.
           </p>
         </header>
 
@@ -268,11 +265,18 @@ export function CareMeasurePanel({
         )}
 
         {/* One row per tracked instrument; the form expands inline. */}
+        {!activeKey && error && (
+          <p role="alert" className="mt-3 text-sm text-[var(--color-warn)]">
+            {error}
+          </p>
+        )}
         <ul className="mt-4 space-y-3">
           {measures.map((m) => {
             const cat = catalog.find((c) => c.key === m.instrumentKey);
             const latest = latestByKey.get(m.instrumentKey);
             const isActive = activeKey === m.instrumentKey;
+            const draft = drafts.entry(m.instrumentKey);
+            const responses = draft.answers;
             return (
               <li
                 id={`measure-${m.instrumentKey.toLowerCase()}`}
@@ -308,13 +312,36 @@ export function CareMeasurePanel({
                     {cat && !disabled && (
                       <Button
                         variant="secondary"
-                        onClick={() => {
-                          setActiveKey(isActive ? null : m.instrumentKey);
-                          setResponses({});
-                          setError(null);
-                        }}
+                        disabled={submitting || draft.commandBusy || draft.loading}
+                        onClick={() =>
+                          void (async () => {
+                            try {
+                              if (activeKey) {
+                                const receipt = await drafts.flush(activeKey);
+                                if (receipt.status === 'SUBMITTED') {
+                                  if (receipt.riskFlagged)
+                                    setRiskAlert({
+                                      instrumentKey: activeKey,
+                                      itemNumber: activeKey === 'PHQ9' ? 9 : null,
+                                    });
+                                  await loadHistory();
+                                  router.refresh();
+                                }
+                              }
+                              if (!draft.saved) await drafts.load(m.instrumentKey);
+                              setActiveKey(isActive ? null : m.instrumentKey);
+                              setError(null);
+                            } catch (e) {
+                              setError((e as Error).message);
+                            }
+                          })()
+                        }
                       >
-                        {isActive ? 'Cancel' : 'Do it in-session'}
+                        {isActive
+                          ? 'Save & close'
+                          : Object.keys(responses).length > 0
+                            ? 'Resume questionnaire'
+                            : 'Do it in-session'}
                       </Button>
                     )}
                   </div>
@@ -378,6 +405,34 @@ export function CareMeasurePanel({
                 {isActive && cat && (
                   <div className="mt-4 border-t border-[var(--color-line-soft)] pt-4">
                     <p className="text-sm text-[var(--color-ink-2)]">{cat.recallWindow.en}</p>
+                    <p
+                      role="status"
+                      aria-live="polite"
+                      className="mt-2 text-xs text-[var(--color-ink-3)]"
+                    >
+                      {draft.saving
+                        ? 'Saving answers securely…'
+                        : draft.dirty || draft.error
+                          ? 'Answers are not confirmed saved. Keep this page open and retry.'
+                          : Object.keys(responses).length > 0
+                            ? 'Answers saved securely. You can close this questionnaire and resume later.'
+                            : 'Partial answers save securely. Only Score + save creates a scored result.'}
+                    </p>
+                    {draft.saved?.updatedAt && Object.keys(responses).length > 0 && (
+                      <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                        Saved {new Date(draft.saved.updatedAt).toLocaleString('en-IN')}. Check that
+                        resumed answers still describe the recall period above before scoring.
+                      </p>
+                    )}
+                    {m.instrumentKey === 'PHQ9' && (responses['phq9_9'] ?? 0) > 0 && (
+                      <p
+                        role="alert"
+                        className="mt-3 rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-sm text-[var(--color-warn)]"
+                      >
+                        The self-harm item is endorsed in these unfinished answers. Review safety
+                        with the client now; do not wait for a complete score.
+                      </p>
+                    )}
                     <ol className="mt-3 space-y-4">
                       {cat.items.map((it) => (
                         <li
@@ -394,7 +449,14 @@ export function CareMeasurePanel({
                                 <button
                                   key={s.value}
                                   type="button"
-                                  onClick={() => setResponses((r) => ({ ...r, [it.id]: s.value }))}
+                                  aria-pressed={selected}
+                                  disabled={
+                                    submitting ||
+                                    draft.commandBusy ||
+                                    draft.completionPending ||
+                                    !draft.saved
+                                  }
+                                  onClick={() => drafts.answer(m.instrumentKey, it.id, s.value)}
                                   className={`rounded-lg border px-3 py-1.5 text-left text-sm transition-colors ${
                                     selected
                                       ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
@@ -412,16 +474,96 @@ export function CareMeasurePanel({
                         </li>
                       ))}
                     </ol>
-                    {error && (
+                    {(error || draft.error) && (
                       <p className="mt-3 rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-sm text-[var(--color-warn)]">
-                        {error}
+                        {error || draft.error}
                       </p>
                     )}
-                    <div className="mt-4 flex justify-end">
+                    <div className="mt-4 flex flex-wrap justify-end gap-2">
+                      {draft.error && (
+                        <>
+                          <Button
+                            variant="secondary"
+                            disabled={draft.saving || submitting}
+                            onClick={() =>
+                              void drafts
+                                .flush(m.instrumentKey)
+                                .then(async (receipt) => {
+                                  setError(null);
+                                  if (receipt.status === 'SUBMITTED') {
+                                    if (receipt.riskFlagged)
+                                      setRiskAlert({
+                                        instrumentKey: m.instrumentKey,
+                                        itemNumber: m.instrumentKey === 'PHQ9' ? 9 : null,
+                                      });
+                                    setActiveKey(null);
+                                    await loadHistory();
+                                    router.refresh();
+                                  }
+                                })
+                                .catch(() => undefined)
+                            }
+                          >
+                            Retry save
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            disabled={draft.saving || submitting}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  'Replace the answers in this tab with the last saved server copy? Unsaved changes in this tab will be lost.',
+                                )
+                              )
+                                void drafts
+                                  .load(m.instrumentKey, true)
+                                  .then(async () => {
+                                    setError(null);
+                                    await loadHistory();
+                                    router.refresh();
+                                  })
+                                  .catch(() => undefined);
+                            }}
+                          >
+                            Use saved copy
+                          </Button>
+                        </>
+                      )}
+                      <Button
+                        variant="secondary"
+                        disabled={
+                          draft.commandBusy ||
+                          draft.completionPending ||
+                          submitting ||
+                          !draft.saved ||
+                          Object.keys(responses).length === 0
+                        }
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              'Discard these unfinished answers? This will not delete any scored results.',
+                            )
+                          )
+                            return;
+                          void drafts
+                            .finish(m.instrumentKey, 'DISCARD')
+                            .then(() => {
+                              setActiveKey(null);
+                              setError(null);
+                            })
+                            .catch((e) => setError((e as Error).message));
+                        }}
+                      >
+                        Discard draft
+                      </Button>
                       <Button
                         onClick={() => void submit()}
                         disabled={
-                          cat.items.some((it) => responses[it.id] === undefined) || submitting
+                          cat.items.some((it) => responses[it.id] === undefined) ||
+                          submitting ||
+                          draft.commandBusy ||
+                          draft.completionPending ||
+                          !draft.saved
                         }
                       >
                         {submitting ? 'Scoring…' : 'Score + save'}

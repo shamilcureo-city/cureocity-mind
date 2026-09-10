@@ -19,6 +19,11 @@ const CRISIS_LABEL: Record<string, string> = {
   psychosis: 'possible psychosis',
   substance_emergency: 'substance emergency',
   other: 'unrecognised risk',
+  clinician_documented_risk: 'earlier clinician-written safety context — review source note',
+  clinician_draft_documented_risk:
+    'unfinished clinician-written safety context — review source note',
+  clinician_administered_suicidality:
+    'clinician-administered questionnaire safety response — review with client',
 };
 
 /**

@@ -7,9 +7,18 @@ import type {
   PrepareSummaryV1,
   SessionAgreementDto,
 } from '@cureocity/contracts';
+import { ActiveAgreementPageSchema, SessionAgreementDtoSchema } from '@cureocity/contracts';
+import { AgreementHomework } from './AgreementHomework';
+import { RetireAgreement } from './RetireAgreement';
 import { Badge } from '../ui/Badge';
 import { preparationFreshness } from '@/lib/preparation-freshness';
 import { DiagnosisChips, QuestionsChecklist } from './SessionDirection';
+import { prepareIntentKey } from '@/lib/prepare-intent';
+import {
+  AgreementFollowUpConflictError,
+  saveAgreementFollowUp,
+} from '@/lib/agreement-follow-up-save';
+import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
 
 /**
  * Sprint 50 — Prepare panel on the Today screen.
@@ -28,14 +37,22 @@ interface Props {
   clientId: string;
   /** Optional initial open state — defaults to closed (fetch on click). */
   defaultOpen?: boolean;
+  /** Load safety and a short recap without expanding the full clinical brief. */
+  summaryVisible?: boolean;
 }
 
-export function PreparePanel({ clientId, defaultOpen = false }: Props) {
+export function PreparePanel({ clientId, defaultOpen = false, summaryVisible = false }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [data, setData] = useState<PrepareSummaryV1 | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [followUpPending, setFollowUpPending] = useState(false);
+  const [followUpSaving, setFollowUpSaving] = useState(false);
+  const updateFollowUpState = useCallback((pending: boolean, busy: boolean) => {
+    setFollowUpPending(pending);
+    setFollowUpSaving(busy);
+  }, []);
   const requestRef = useRef<AbortController | null>(null);
   const generationRef = useRef<AbortController | null>(null);
 
@@ -64,12 +81,12 @@ export function PreparePanel({ clientId, defaultOpen = false }: Props) {
   }, [clientId]);
 
   useEffect(() => {
-    if (open) void load();
+    if (open || summaryVisible) void load();
     return () => {
       requestRef.current?.abort();
       generationRef.current?.abort();
     };
-  }, [open, load]);
+  }, [open, summaryVisible, load]);
 
   async function generateFreshBrief() {
     generationRef.current?.abort();
@@ -97,23 +114,52 @@ export function PreparePanel({ clientId, defaultOpen = false }: Props) {
 
   return (
     <div className="mt-3 border-t border-[var(--color-line-soft)] pt-3">
+      {summaryVisible && data && (
+        <div className="mb-3 space-y-3">
+          <PrepareSafety openCrises={data.openCrises} />
+          <p className="line-clamp-3 text-sm leading-relaxed text-[var(--color-ink-2)]">
+            {data.cachedBrief?.lastSessionRecap || 'No previous session recap is available.'}
+          </p>
+          <p className="text-xs text-[var(--color-ink-3)]">
+            {preparationFreshness(data.briefGeneratedAt, data.briefIsStale).label} · Full context is
+            available below.
+          </p>
+        </div>
+      )}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        disabled={followUpSaving}
+        onClick={() => {
+          if (
+            open &&
+            followUpPending &&
+            !window.confirm(
+              'This follow-up has not been saved. Discard the unsaved choice and close preparation?',
+            )
+          )
+            return;
+          setFollowUpPending(false);
+          setOpen((v) => !v);
+        }}
         aria-expanded={open}
         className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
         <span aria-hidden>{open ? '▾' : '▸'}</span>
-        Prepare
+        {open ? 'Hide full preparation' : 'Full preparation (optional)'}
       </button>
-      {open && (
+      {(open || summaryVisible) && (
         <div className="mt-3 space-y-4">
           {loading && !data && (
-            <p className="text-sm text-[var(--color-ink-3)]">Pulling the prep view…</p>
+            <p className="text-sm text-[var(--color-ink-3)]" role="status">
+              Loading preparation and safety context…
+            </p>
           )}
           {error && (
-            <p className="rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-xs text-[var(--color-warn)]">
-              {error}
+            <p
+              role="alert"
+              className="rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-xs text-[var(--color-warn)]"
+            >
+              Preparation and safety context could not be loaded. {error}
               <button
                 type="button"
                 onClick={() => void load()}
@@ -124,8 +170,15 @@ export function PreparePanel({ clientId, defaultOpen = false }: Props) {
               </button>
             </p>
           )}
-          {data && (
-            <PrepareBody data={data} onGenerate={generateFreshBrief} generating={generating} />
+          {data && open && (
+            <PrepareBody
+              data={data}
+              onGenerate={generateFreshBrief}
+              generating={generating}
+              safetyVisible={!summaryVisible}
+              onFollowUpPending={updateFollowUpState}
+              refreshDisabled={followUpPending || followUpSaving}
+            />
           )}
         </div>
       )}
@@ -137,42 +190,23 @@ function PrepareBody({
   data,
   onGenerate,
   generating,
+  safetyVisible,
+  onFollowUpPending,
+  refreshDisabled,
 }: {
   data: PrepareSummaryV1;
   onGenerate: () => void | Promise<void>;
   generating: boolean;
+  safetyVisible: boolean;
+  onFollowUpPending: (pending: boolean, busy: boolean) => void;
+  refreshDisabled: boolean;
 }) {
   const { cachedBrief, briefIsStale, journey, homework, openCrises } = data;
   const freshness = preparationFreshness(data.briefGeneratedAt, briefIsStale);
 
   return (
     <div className="space-y-4 text-sm">
-      <section aria-labelledby="prepare-safety">
-        <p
-          id="prepare-safety"
-          className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]"
-        >
-          Safety
-        </p>
-        {openCrises.length > 0 ? (
-          <div className="mt-1.5 rounded-xl border-2 border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-xs text-[var(--color-warn)]">
-            <strong>Open crisis flag(s) — start with a safety check:</strong>
-            <ul className="mt-1 list-disc pl-5">
-              {openCrises.map((crisis) => (
-                <li key={crisis.kind}>
-                  {crisis.kind.replace(/_/g, ' ')} · {crisis.severity} · last seen{' '}
-                  {new Date(crisis.lastSeenAt).toLocaleDateString('en-IN', {
-                    month: 'short',
-                    day: 'numeric',
-                  })}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <p className="mt-1 text-xs text-[var(--color-ink-3)]">No open high-risk crisis flag.</p>
-        )}
-      </section>
+      {safetyVisible && <PrepareSafety openCrises={openCrises} />}
 
       <section aria-labelledby="prepare-change">
         <p
@@ -210,7 +244,16 @@ function PrepareBody({
           Decisions already made
         </p>
         <div className="mt-2 space-y-3">
-          {data.lastAgreements.length > 0 && <AgreementsThread agreements={data.lastAgreements} />}
+          {(data.activeAgreements ?? data.lastAgreements).length > 0 && (
+            <AgreementsThread
+              key={data.clientId}
+              clientId={data.clientId}
+              agreements={data.activeAgreements ?? data.lastAgreements}
+              total={data.activeAgreementCount ?? data.lastAgreements.length}
+              initialCursor={data.activeAgreementsNextCursor ?? null}
+              onPendingChange={onFollowUpPending}
+            />
+          )}
           {data.formulationSnapshot && (
             <div className="rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
               <p className="text-xs font-medium">Formulation v{data.formulationSnapshot.version}</p>
@@ -228,7 +271,9 @@ function PrepareBody({
           )}
           <DiagnosisChips diagnoses={data.confirmedDiagnoses} />
           <div className="flex flex-wrap items-baseline gap-2">
-            <Badge tone="muted">{journey.stage.replace(/_/g, ' ').toLowerCase()}</Badge>
+            <Badge tone="muted">
+              Suggested care stage: {journey.stage.replace(/_/g, ' ').toLowerCase()}
+            </Badge>
             {journey.activePlan && (
               <span className="text-xs text-[var(--color-ink-3)]">
                 Plan v{journey.activePlan.version} · {journey.activePlan.goalsAchieved}/
@@ -291,7 +336,7 @@ function PrepareBody({
             <button
               type="button"
               onClick={onGenerate}
-              disabled={generating}
+              disabled={generating || refreshDisabled}
               className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-medium text-[var(--color-ink-2)] hover:text-[var(--color-ink)] disabled:opacity-60"
             >
               {generating ? 'Refreshing…' : 'Refresh'}
@@ -300,6 +345,9 @@ function PrepareBody({
         </div>
         {journey.nextBestAction && (
           <div className="mt-2 rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+            <p className="mb-1 text-xs text-[var(--color-ink-3)]">
+              Record-based suggestion — review its fit, not a confirmed outcome.
+            </p>
             <p className="font-medium text-[var(--color-ink)]">{journey.nextBestAction.title}</p>
             <p className="mt-0.5 text-xs text-[var(--color-ink-2)]">
               {journey.nextBestAction.detail}
@@ -340,34 +388,144 @@ function PrepareBody({
 /**
  * SL2 — "Last time you both agreed". Each agreement carries a three-state
  * follow-up (done / partly / not yet) persisted via
- * PATCH /sessions/[id]/agreements/[agreementId]. Optimistic with rollback.
+ * PATCH /sessions/[id]/agreements/[agreementId]. A mark is shown only after acknowledgment.
  */
-function AgreementsThread({ agreements }: { agreements: SessionAgreementDto[] }) {
+function AgreementsThread({
+  clientId,
+  agreements,
+  total,
+  initialCursor,
+  onPendingChange,
+}: {
+  clientId: string;
+  agreements: SessionAgreementDto[];
+  total: number;
+  initialCursor: string | null;
+  onPendingChange: (pending: boolean, busy: boolean) => void;
+}) {
   const [rows, setRows] = useState(agreements);
+  const [nextCursor, setNextCursor] = useState(initialCursor);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [remainingTotal, setRemainingTotal] = useState(total);
   const [error, setError] = useState<string | null>(null);
-
-  const mark = useCallback(
-    async (a: SessionAgreementDto, followUp: AgreementFollowUp): Promise<void> => {
-      setError(null);
-      const prev = rows;
-      setRows((cur) => cur.map((r) => (r.id === a.id ? { ...r, followUp } : r)));
-      const res = await fetch(`/api/v1/sessions/${a.sessionId}/agreements/${a.id}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ followUp }),
-      }).catch(() => null);
-      if (!res || !res.ok) {
-        setRows(prev);
-        setError('Could not save the follow-up — try again.');
-      }
-    },
-    [rows],
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+  const [conflict, setConflict] = useState(false);
+  const [pending, setPending] = useState<{
+    agreement: SessionAgreementDto;
+    followUp: AgreementFollowUp;
+    originalText: string;
+    reloaded?: boolean;
+  } | null>(null);
+  useUnsavedWorkGuard(
+    !!pending,
+    'This follow-up choice has not been saved. Leave without saving it?',
+    busy,
   );
+  useEffect(() => {
+    onPendingChange(!!pending, busy);
+  }, [pending, busy, onPendingChange]);
+  useEffect(() => () => onPendingChange(false, false), [onPendingChange]);
+
+  async function mark(a: SessionAgreementDto, followUp: AgreementFollowUp): Promise<void> {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    setPending({ agreement: a, followUp, originalText: a.text });
+    setError(null);
+    setReceipt(null);
+    setConflict(false);
+    try {
+      await saveAgreementFollowUp(a, followUp);
+      setRows((current) => current.map((row) => (row.id === a.id ? { ...row, followUp } : row)));
+      setPending(null);
+      setReceipt(`Follow-up saved: ${followUpLabel(followUp)}.`);
+    } catch (cause) {
+      setConflict(cause instanceof AgreementFollowUpConflictError);
+      setError(
+        cause instanceof AgreementFollowUpConflictError
+          ? cause.message
+          : 'The follow-up could not be confirmed. Your unsaved choice is still here; the saved status has not changed.',
+      );
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function reloadPending() {
+    if (!pending || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/v1/sessions/${pending.agreement.sessionId}/agreements`, {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error();
+      const body = (await response.json()) as { agreements?: unknown[] };
+      const latest = body.agreements
+        ?.map((row) => SessionAgreementDtoSchema.safeParse(row))
+        .find(
+          (result) =>
+            result.success &&
+            result.data.id === pending.agreement.id &&
+            result.data.sessionId === pending.agreement.sessionId,
+        );
+      if (!latest?.success) throw new Error();
+      setRows((current) => current.map((row) => (row.id === latest.data.id ? latest.data : row)));
+      setPending({ ...pending, agreement: latest.data, reloaded: true });
+      setConflict(false);
+      setError(
+        'Latest wording loaded. Review it above before saving the follow-up choice you kept. Nothing has been changed by reloading.',
+      );
+    } catch {
+      setError(
+        'Could not reload this agreement. It may have been removed or changed. Your unsaved choice is still here; retry reload or discard the choice.',
+      );
+      setConflict(true);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `/api/v1/clients/${clientId}/agreements?cursor=${encodeURIComponent(nextCursor)}`,
+        { cache: 'no-store', signal: AbortSignal.timeout(15_000) },
+      );
+      const parsed = ActiveAgreementPageSchema.safeParse(await response.json());
+      if (!response.ok || !parsed.success) throw new Error();
+      const page = parsed.data;
+      setRows((existing) => [
+        ...existing,
+        ...page.agreements.filter((a) => !existing.some((row) => row.id === a.id)),
+      ]);
+      setNextCursor(page.nextCursor);
+      setRemainingTotal(page.total);
+    } catch {
+      setError(
+        'Could not load the remaining commitments. The ones shown are not the full list; retry loading more.',
+      );
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   return (
     <section>
       <p className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-        Last time you both agreed
+        Active commitments across sessions
+      </p>
+      <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+        {remainingTotal} unfinished commitments at last check. Oldest first; completing or retiring
+        one keeps its history.
       </p>
       <ul className="mt-1.5 space-y-2">
         {rows.map((a) => (
@@ -378,6 +536,14 @@ function AgreementsThread({ agreements }: { agreements: SessionAgreementDto[] })
             <p className="text-xs text-[var(--color-ink)]">
               {a.speaker === 'CLIENT' ? <>&ldquo;{a.text}&rdquo;</> : a.text}
             </p>
+            <Link
+              href={`/app/sessions/${a.sessionId}#session-agreements`}
+              className="mt-1 inline-block text-xs text-[var(--color-accent)] underline"
+            >
+              From {new Date(a.sourceSessionAt ?? a.createdAt).toLocaleDateString()} · open source
+              session
+            </Link>
+            {a.retiredAt && <p className="mt-1 text-xs">Retired · {a.retirementReason}</p>}
             <div className="mt-2 flex flex-wrap gap-1.5">
               {(
                 [
@@ -391,6 +557,7 @@ function AgreementsThread({ agreements }: { agreements: SessionAgreementDto[] })
                   <button
                     key={key}
                     type="button"
+                    disabled={busy || !!pending || !!a.retiredAt}
                     onClick={() => void mark(a, key)}
                     className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
                       active
@@ -404,12 +571,90 @@ function AgreementsThread({ agreements }: { agreements: SessionAgreementDto[] })
                 );
               })}
             </div>
+            <AgreementHomework agreement={a} disabled={busy || !!pending} />
+            <RetireAgreement
+              agreement={a}
+              disabled={busy || !!pending}
+              onSaved={(saved) =>
+                setRows((current) =>
+                  current.map((row) => (row.id === saved.id ? { ...row, ...saved } : row)),
+                )
+              }
+            />
           </li>
         ))}
       </ul>
-      {error && <p className="mt-1.5 text-[11px] text-[var(--color-warn)]">{error}</p>}
+      {nextCursor && (
+        <button
+          type="button"
+          className="mt-3 py-2 text-sm text-[var(--color-accent)] underline"
+          disabled={loadingMore || busy || !!pending}
+          onClick={() => void loadMore()}
+        >
+          {loadingMore ? 'Loading commitments…' : 'Load more active commitments'}
+        </button>
+      )}
+      {busy && (
+        <p role="status" className="mt-2 text-sm">
+          Saving or checking your follow-up…
+        </p>
+      )}
+      {receipt && (
+        <p role="status" className="mt-2 text-sm text-[var(--color-ink-2)]">
+          {receipt}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-[var(--color-warn)]">
+          {error}
+        </p>
+      )}
+      {pending && !busy && (
+        <div className="mt-3 rounded-xl border border-[var(--color-warn-border)] p-3 text-sm">
+          <p>Unsaved choice: {followUpLabel(pending.followUp)}.</p>
+          <p className="mt-1 text-xs text-[var(--color-ink-2)]">
+            Originally selected for: {pending.originalText}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-3">
+            {conflict ? (
+              <button
+                type="button"
+                className="py-2 text-[var(--color-accent)] underline"
+                onClick={() => void reloadPending()}
+              >
+                Reload latest wording
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="py-2 text-[var(--color-accent)] underline"
+                onClick={() => void mark(pending.agreement, pending.followUp)}
+              >
+                {pending.reloaded
+                  ? `Save ${followUpLabel(pending.followUp)} for this wording`
+                  : 'Retry the same follow-up'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="py-2 text-[var(--color-ink-2)] underline"
+              onClick={() => {
+                setPending(null);
+                setError(null);
+                setConflict(false);
+              }}
+            >
+              Discard unsaved choice
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
+}
+
+function followUpLabel(followUp: AgreementFollowUp) {
+  return followUp === 'DONE' ? 'Done' : followUp === 'PARTLY' ? 'Partly' : 'Not yet';
 }
 
 /**
@@ -418,16 +663,46 @@ function AgreementsThread({ agreements }: { agreements: SessionAgreementDto[] })
  * thought, not a record.
  */
 function TodayIntent({ clientId }: { clientId: string }) {
-  const storageKey = `prepare-intent-${clientId}`;
+  const [storageKey, setStorageKey] = useState(() => prepareIntentKey(clientId));
   const [value, setValue] = useState('');
+  const [legacyValue, setLegacyValue] = useState('');
+  const [savedKey, setSavedKey] = useState(storageKey);
+  const [persisted, setPersisted] = useState(true);
+
+  useEffect(() => {
+    const refreshDay = () => setStorageKey(prepareIntentKey(clientId));
+    refreshDay();
+    const timer = window.setInterval(refreshDay, 60_000);
+    window.addEventListener('focus', refreshDay);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshDay);
+    };
+  }, [clientId]);
 
   useEffect(() => {
     try {
       setValue(window.localStorage.getItem(storageKey) ?? '');
+      setLegacyValue(window.localStorage.getItem(`prepare-intent-${clientId}`) ?? '');
+      setSavedKey(storageKey);
+      setPersisted(true);
     } catch {
-      // Private mode / storage disabled — the scratch just doesn't persist.
+      setValue('');
+      setLegacyValue('');
+      setSavedKey(storageKey);
+      setPersisted(false);
     }
-  }, [storageKey]);
+  }, [storageKey, clientId]);
+
+  function save(nextValue: string) {
+    setValue(nextValue);
+    try {
+      window.localStorage.setItem(storageKey, nextValue);
+      setPersisted(true);
+    } catch {
+      setPersisted(false);
+    }
+  }
 
   return (
     <section>
@@ -440,22 +715,81 @@ function TodayIntent({ clientId }: { clientId: string }) {
       <input
         id={`intent-${clientId}`}
         type="text"
-        value={value}
+        value={savedKey === storageKey ? value : ''}
         maxLength={200}
         onChange={(e) => {
-          setValue(e.target.value);
-          try {
-            window.localStorage.setItem(storageKey, e.target.value);
-          } catch {
-            /* non-fatal */
-          }
+          save(e.target.value);
         }}
         placeholder="e.g. test the Saturday prediction; stay out of advice mode"
         className="mt-1.5 w-full rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-xs outline-none focus:border-[var(--color-accent)]"
       />
       <p className="mt-1 text-[10px] text-[var(--color-ink-3)]">
-        Stays on this device — a scratch thought, not part of the record.
+        For today (IST) only. Stays on this device — a scratch thought, not part of the record.
       </p>
+      {!persisted && (
+        <p role="status" className="mt-1 text-xs text-[var(--color-warn)]">
+          Device storage is unavailable. This scratch intention will not be retained when you leave.
+        </p>
+      )}
+      {legacyValue && (
+        <details className="mt-2 text-xs text-[var(--color-ink-2)]">
+          <summary className="cursor-pointer py-2">
+            Older undated intention — not carried forward
+          </summary>
+          <p className="whitespace-pre-wrap">{legacyValue}</p>
+          <button
+            type="button"
+            className="py-2 text-[var(--color-accent)] underline"
+            onClick={() => save(legacyValue)}
+          >
+            Use this intention today
+          </button>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function PrepareSafety({ openCrises }: { openCrises: PrepareSummaryV1['openCrises'] }) {
+  return (
+    <section aria-label="Preparation safety context">
+      {openCrises.length ? (
+        <div className="rounded-xl border-2 border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-sm text-[var(--color-warn)]">
+          <strong>Safety context — review before proceeding:</strong>
+          <ul className="mt-1 list-disc pl-5">
+            {openCrises.map((crisis) => (
+              <li key={crisis.kind}>
+                {crisis.source === 'CLINICIAN_NOTE_DRAFT'
+                  ? 'Unfinished clinician-written draft — review'
+                  : crisis.source === 'CLINICIAN_NOTE'
+                    ? 'Clinician-written note'
+                    : crisis.kind.replace(/_/g, ' ')}{' '}
+                · {crisis.severity} · recorded{' '}
+                {new Date(crisis.lastSeenAt).toLocaleDateString('en-IN', {
+                  timeZone: 'Asia/Kolkata',
+                  year: 'numeric',
+                  month: 'short',
+                  day: 'numeric',
+                })}
+                {crisis.source && crisis.sourceSessionId && (
+                  <>
+                    {' '}
+                    ·{' '}
+                    <Link href={`/app/sessions/${crisis.sourceSessionId}`} className="underline">
+                      Review source note
+                    </Link>
+                    . This is earlier documentation, not a current safety assessment.
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="text-xs text-[var(--color-ink-3)]">
+          No open high-risk flags in this record. This is not a safety assessment.
+        </p>
+      )}
     </section>
   );
 }
