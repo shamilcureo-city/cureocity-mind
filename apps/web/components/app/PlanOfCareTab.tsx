@@ -267,11 +267,8 @@ export async function ClientPlanOfCareContent({
       })
     : [];
 
-  const instrumentNames = outcomes.map((o) => o.label);
   const dischargeLine =
-    instrumentNames.length > 0
-      ? `${instrumentNames.join(' + ')} in remission at two administrations ≥ 2 weeks apart · plan goals achieved · agreed together.`
-      : 'Plan goals achieved · sustained improvement · agreed together.';
+    'Review goals, everyday functioning, safety, the client’s preferences and support for setbacks together. Measures can inform that conversation; scores alone do not decide when care ends.';
 
   // º provenance — applied copilot suggestions with the client's words.
   // A suggestion counts as applied when its content is now in the active

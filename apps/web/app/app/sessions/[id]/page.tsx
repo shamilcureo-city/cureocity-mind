@@ -12,6 +12,7 @@ import { Container } from '@/components/ui/Container';
 import { AICopilotTab } from '@/components/app/AICopilotTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
+import { MindManualSession } from '@/components/app/MindManualSession';
 import { MindSessionCloseout } from '@/components/app/MindSessionCloseout';
 import { MindSessionReviewHeader } from '@/components/app/MindSessionReviewHeader';
 import { selectedQuestionsForSession } from '@/components/app/MindSessionCloseoutEvidence';
@@ -39,7 +40,7 @@ export const dynamic = 'force-dynamic';
 
 interface PageProps {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; sub?: string }>;
+  searchParams: Promise<{ tab?: string; sub?: string; support?: string }>;
 }
 
 const VALID_TABS: ReadonlySet<TabKey> = new Set(['review', 'note', 'transcript', 'details']);
@@ -69,12 +70,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   const canReviewClinical = effective.capabilities.has('CLINICAL_ANALYSIS');
 
   const { id } = await params;
-  const { tab: rawTab, sub: rawSub } = await searchParams;
+  const { tab: rawTab, sub: rawSub, support } = await searchParams;
   const tab = parseTab(rawTab);
   if (tab === 'review' && !canReviewClinical) notFound();
 
   const session = await prisma.session.findFirst({
-    where: { id, psychologistId: therapist.id },
+    where: { id, psychologistId: therapist.id, client: { deletedAt: null } },
     include: {
       client: {
         select: {
@@ -89,6 +90,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
     },
   });
   if (!session) notFound();
+  if (tab === 'review') redirect(`/app/sessions/${id}?tab=note&support=clinical#session-support`);
   if (
     rawTab === 'plan-of-care' ||
     (rawTab === 'copilot' && ['plan', 'formulation'].includes(rawSub ?? ''))
@@ -103,12 +105,13 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
     redirect(`/app/clients/${session.clientId}/journey`);
   }
   if (rawTab === 'copilot' && (!rawSub || ['session', 'review'].includes(rawSub))) {
-    redirect(`/app/sessions/${id}?tab=review`);
+    redirect(`/app/sessions/${id}?tab=note&support=clinical#session-support`);
   }
   if (rawTab === 'copilot' && rawSub === 'close') {
     redirect(`/app/sessions/${id}?tab=note`);
   }
-  if (rawTab === 'clinical-brief') redirect(`/app/sessions/${id}?tab=review`);
+  if (rawTab === 'clinical-brief')
+    redirect(`/app/sessions/${id}?tab=note&support=clinical#session-support`);
   if (rawTab === 'notes' || rawTab === 'reflection') {
     redirect(`/app/sessions/${id}?tab=note`);
   }
@@ -116,6 +119,31 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   if (rawTab === 'mindmap') redirect(`/app/sessions/${id}?tab=transcript`);
 
   const pii = await resolveClientPii({ ...session.client, psychologistId: session.psychologistId });
+  if (session.mindDocumentationMode === 'MANUAL') {
+    const closeout = await prisma.mindSessionCloseoutState.findUnique({
+      where: { sessionId: id },
+      select: { followUpSession: { select: { id: true, scheduledAt: true } } },
+    });
+    return (
+      <Container>
+        <MindManualSession
+          key={id}
+          sessionId={id}
+          clientId={session.clientId}
+          clientName={pii.fullName}
+          canShare={canShare}
+          followUpSession={
+            closeout?.followUpSession
+              ? {
+                  id: closeout.followUpSession.id,
+                  scheduledAt: closeout.followUpSession.scheduledAt.toISOString(),
+                }
+              : null
+          }
+        />
+      </Container>
+    );
+  }
 
   const sessionKind: SessionKind = session.kind;
 
@@ -146,6 +174,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         clientName={pii.fullName}
         sessionDate={formatIstDateTime(session.scheduledAt)}
         sessionKind={sessionKind}
+        mindPurpose={session.mindPurpose}
         status={session.status}
         isDemo={session.client.isDemo}
         spokenLanguageLabel={languageNames(session.spokenLanguages)}
@@ -183,37 +212,8 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
             canUseWorkflows={canUseWorkflows}
             canUseMeasures={canUseMeasures}
             canReviewClinical={canReviewClinical}
+            initialReviewOpen={canReviewClinical && support === 'clinical'}
           />
-        )}
-        {tab === 'review' && (
-          <section>
-            <div className={styles.sectionIntro}>
-              <div>
-                <h2>Clinical context</h2>
-                <p>
-                  Review the evidence, keep useful suggestions and choose what carries into the next
-                  session.
-                </p>
-              </div>
-              <Link className={styles.contextLink} href={`/app/sessions/${id}?tab=note`}>
-                Return to your note
-              </Link>
-            </div>
-            <AICopilotTab
-              sessionId={id}
-              clientId={session.clientId}
-              psychologistId={session.psychologistId}
-              clientName={pii.fullName}
-              clientHasContactPhone={!!pii.contactPhone}
-              clientHasContactEmail={!!pii.contactEmail}
-              preferredLanguage={session.client.preferredLanguage}
-              sessionKind={sessionKind}
-              sub="session"
-              showSubTabs={false}
-              canUseMeasures={canUseMeasures}
-              canShare={canShare}
-            />
-          </section>
         )}
         {tab === 'transcript' && (
           <TranscriptTabPanel sessionId={id} psychologistId={therapist.id} />
@@ -245,6 +245,7 @@ async function NotesTabPanel({
   canUseWorkflows,
   canUseMeasures,
   canReviewClinical,
+  initialReviewOpen,
 }: {
   sessionId: string;
   psychologistId: string;
@@ -266,6 +267,7 @@ async function NotesTabPanel({
   canUseWorkflows: boolean;
   canUseMeasures: boolean;
   canReviewClinical: boolean;
+  initialReviewOpen: boolean;
 }) {
   const [draftRow, signedRow, closeoutState, agreementCount, clientQuestionState, shareRows] =
     await Promise.all([
@@ -372,6 +374,8 @@ async function NotesTabPanel({
       sessionCompleted={sessionStatus === 'COMPLETED'}
       canShare={canShare}
       canReviewClinical={canReviewClinical}
+      initialReviewOpen={initialReviewOpen}
+      hasSignedNote={signedRow != null}
       clinicalReview={
         canReviewClinical ? (
           <AICopilotTab
@@ -465,7 +469,10 @@ async function TranscriptTabPanel({
         content: true,
       },
     }),
-    prisma.therapyNote.findUnique({ where: { sessionId }, select: { content: true } }),
+    prisma.therapyNote.findUnique({
+      where: { sessionId },
+      select: { content: true, locked: true },
+    }),
     prisma.geminiCallLog.findFirst({
       where: { sessionId },
       orderBy: { createdAt: 'desc' },
@@ -485,7 +492,10 @@ async function TranscriptTabPanel({
   const segments = (draftRow.speakerSegments as SpeakerSegment[] | null) ?? null;
   // Mindmap moved here (R1) — it's a view OF the note, so it belongs beside
   // the transcript, not in the copilot decision flow.
-  const noteJson = (signedRow?.content ?? draftRow.content ?? null) as TherapyNoteV1 | null;
+  const sourceSigned = signedRow?.locked === true;
+  const noteJson = (
+    sourceSigned ? signedRow.content : (draftRow.content ?? signedRow?.content ?? null)
+  ) as TherapyNoteV1 | null;
 
   return (
     <div className="space-y-6">
@@ -505,7 +515,7 @@ async function TranscriptTabPanel({
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
             Session mindmap
           </h3>
-          <MindmapTab note={noteJson} />
+          <MindmapTab note={noteJson} sourceState={sourceSigned ? 'signed' : 'draft'} />
         </section>
       )}
     </div>

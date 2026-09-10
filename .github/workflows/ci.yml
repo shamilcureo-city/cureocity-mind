@@ -137,6 +137,51 @@ jobs:
       - name: Run all tests (unit + integration)
         run: pnpm test
 
+      # These suites require PostgreSQL itself to accept on loopback, not a
+      # bridge-network address behind a published Docker port. Keep the
+      # existing 5432 service for the standard integration suite unchanged.
+      - name: Start isolated Mind PostgreSQL
+        timeout-minutes: 1
+        run: |
+          docker run --detach --name cureocity-mind-postgres-ci --network host \
+            --env POSTGRES_USER=cureocity --env POSTGRES_PASSWORD=cureocity \
+            --env POSTGRES_DB=cureocity_mind_test \
+            postgres:16-alpine postgres -p 55439 -c listen_addresses=127.0.0.1
+          for attempt in {1..30}; do
+            if docker exec cureocity-mind-postgres-ci pg_isready -h 127.0.0.1 -p 55439 -U cureocity -d cureocity_mind_test; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs cureocity-mind-postgres-ci
+          exit 1
+
+      - name: Migrate isolated Mind PostgreSQL
+        env:
+          DATABASE_URL: postgresql://cureocity:cureocity@127.0.0.1:55439/cureocity_mind_test
+        run: |
+          pnpm db:prepare-fresh-ci
+          pnpm db:migrate:deploy
+
+      - name: Run Mind PostgreSQL persistence tests
+        env:
+          RUN_MIND_POSTGRES_TESTS: '1'
+          MIND_TEST_DATABASE_URL: postgresql://cureocity:cureocity@127.0.0.1:55439/cureocity_mind_test
+          DATABASE_URL: postgresql://cureocity:cureocity@127.0.0.1:55439/cureocity_mind_test
+        run: |
+          pnpm --filter @cureocity/web exec vitest run \
+            lib/appointment-reminder-uniqueness-postgres.spec.ts \
+            lib/mind-consent-recovery-postgres.spec.ts \
+            lib/mind-counselling-postgres.spec.ts \
+            --maxWorkers=1
+
+      - name: Stop isolated Mind PostgreSQL
+        if: ${{ always() }}
+        run: |
+          if docker container inspect cureocity-mind-postgres-ci >/dev/null 2>&1; then
+            docker rm --force cureocity-mind-postgres-ci
+          fi
+
   # NEXT5 — the gateway ships as a container to Cloud Run, but nothing in CI
   # built that image, so a broken Dockerfile (or a workspace change the image
   # can't install) surfaced only at deploy time in Cloud Build. Build it here

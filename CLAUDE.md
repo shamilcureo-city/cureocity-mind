@@ -410,11 +410,18 @@ throwing — the UI keeps rendering.
 
 ### Session kinds + nullable modality (Sprint 19)
 
-- `Session.kind: SessionKind` (`INTAKE | TREATMENT | REVIEW`) is
-  inferred server-side from cumulative state at session-create time —
-  therapists can't override it. It drives Pass 2 / Pass 3 prompt
+- `Session.kind: SessionKind` (`INTAKE | TREATMENT | REVIEW`) defaults to
+  server inference from cumulative state. Mind now offers explicit
+  `mindPurpose` (`ASSESSMENT | COUNSELLING | THERAPY | REVIEW`) at creation
+  or guarded scheduled-visit start, mapped through `sessionKindForMindPurpose`.
+  Do not force a diagnosis or completed baseline before counselling. Kind drives Pass 2 / Pass 3 prompt
   branches (intake-note + initial-assessment-brief vs SOAP + clinical-
   brief vs review-verdict).
+- `mindDocumentationMode='MANUAL'` is an explicit clinician-written path:
+  encrypted/versioned partial drafts, canonical note completion and existing
+  signing/PDF, without capture or session AI. Session AI/capture execution and
+  alternate generic note editors are denied; clinician-authored care decisions
+  remain available. See `docs/MIND_COUNSELLING_WORKFLOW.md` for release gates.
 - `Session.modality` is **nullable**. The cascade in
   `apps/web/lib/session-defaults.ts` picks one (TreatmentPlan → Client
   → Psychologist → INTAKE fallback → SUPPORTIVE last-resort); the

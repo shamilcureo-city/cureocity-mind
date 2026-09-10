@@ -156,7 +156,9 @@ describe('Mind Quiet mode clinical boundary', () => {
       expect(html).toContain(risk.label);
       expect(html).toContain(risk.why);
     }
-    expect(html.match(/Assessed ✓/g)).toHaveLength(reasoning.riskWatch.length);
+    expect(html.match(/Mark cue reviewed/g)).toHaveLength(reasoning.riskWatch.length);
+    expect(html).not.toContain('Assessed ✓');
+    expect(html).toContain('does not document a safety assessment');
     expect(html).not.toContain('<details');
     expect(onResolve).not.toHaveBeenCalled();
   });

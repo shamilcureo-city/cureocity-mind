@@ -54,7 +54,7 @@ export default async function TodayPage() {
     rawTodayRows,
     rawUpcomingRows,
     rawClients,
-    rawActiveSession,
+    rawActiveSessions,
     rawNextFutureSession,
     rawAttentionSessions,
     rawNoteWork,
@@ -100,13 +100,13 @@ export default async function TodayPage() {
       orderBy: { createdAt: 'asc' },
       select: { id: true, fullNameEncrypted: true, preferredModality: true },
     }),
-    prisma.session.findFirst({
+    prisma.session.findMany({
       where: {
         psychologistId: therapist.id,
         status: 'IN_PROGRESS',
         client: { deletedAt: null },
       },
-      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ startedAt: { sort: 'desc', nulls: 'last' } }, { id: 'desc' }],
       select: sessionSelect,
     }),
     prisma.session.findFirst({
@@ -122,11 +122,11 @@ export default async function TodayPage() {
     prisma.session.findMany({
       where: {
         psychologistId: therapist.id,
-        status: { in: ['IN_PROGRESS', 'SCHEDULED'] },
+        status: 'SCHEDULED',
+        scheduledAt: { lt: now },
         client: { deletedAt: null },
       },
       orderBy: { scheduledAt: 'asc' },
-      take: 12,
       select: {
         id: true,
         status: true,
@@ -164,7 +164,6 @@ export default async function TodayPage() {
             client: { deletedAt: null },
           },
           orderBy: { administeredAt: 'desc' },
-          take: 5,
           select: {
             id: true,
             instrumentKey: true,
@@ -189,7 +188,6 @@ export default async function TodayPage() {
             client: { deletedAt: null },
           },
           orderBy: { dueAt: 'asc' },
-          take: 5,
           select: {
             id: true,
             dueAt: true,
@@ -210,7 +208,6 @@ export default async function TodayPage() {
             client: { deletedAt: null },
           },
           orderBy: { refreshRequestedAt: 'desc' },
-          take: 5,
           select: {
             id: true,
             clientId: true,
@@ -232,7 +229,6 @@ export default async function TodayPage() {
             client: { deletedAt: null },
           },
           orderBy: { updatedAt: 'desc' },
-          take: 5,
           select: {
             id: true,
             clientId: true,
@@ -281,11 +277,9 @@ export default async function TodayPage() {
           where: {
             psychologistId: therapist.id,
             client: { deletedAt: null },
-            createdAt: { gte: responseCutoff },
             status: { in: ['TRANSIENT_FAILURE', 'PERMANENT_FAILURE'] },
           },
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          take: 24,
           select: {
             id: true,
             shareBatchId: true,
@@ -311,7 +305,7 @@ export default async function TodayPage() {
       fullName: await decryptClientField(therapist.id, s.client.fullNameEncrypted),
     },
   });
-  const [todayRows, upcomingRows, clients, activeSession, nextFutureSession] = await Promise.all([
+  const [todayRows, upcomingRows, clients, activeSessions, nextFutureSession] = await Promise.all([
     Promise.all(rawTodayRows.map(decSessionName)),
     Promise.all(rawUpcomingRows.map(decSessionName)),
     Promise.all(
@@ -320,27 +314,29 @@ export default async function TodayPage() {
         fullName: await decryptClientField(therapist.id, c.fullNameEncrypted),
       })),
     ).then((list) => list.sort((a, b) => a.fullName.localeCompare(b.fullName))),
-    rawActiveSession ? decSessionName(rawActiveSession) : null,
+    Promise.all(rawActiveSessions.map(decSessionName)),
     rawNextFutureSession ? decSessionName(rawNextFutureSession) : null,
   ]);
 
   const queuedAttentionItems: TodayAttentionItem[] = prioritizeTodayItems(
     dedupeTodayCrossSource(
       await Promise.all([
-        ...[rawActiveSession, rawNextFutureSession]
+        ...[...rawActiveSessions, rawNextFutureSession]
           .filter((session): session is NonNullable<typeof session> => session !== null)
           .map(async (session) => ({
             id: session.id,
             kind: (session.status === 'IN_PROGRESS'
               ? 'ACTIVE_SESSION'
               : 'FUTURE_SESSION') as TodayAttentionItem['kind'],
-            occurredAt: session.scheduledAt.toISOString(),
+            occurredAt: (session.startedAt ?? session.scheduledAt).toISOString(),
+            dateLabel: session.status === 'IN_PROGRESS' && session.startedAt ? 'Started' : 'Booked',
             title: await decryptClientField(therapist.id, session.client.fullNameEncrypted),
-            href:
+            href: mindSessionDestination(session, defaultCapture),
+            ctaLabel: session.status === 'IN_PROGRESS' ? 'Review or resume' : 'Prepare for session',
+            detail:
               session.status === 'IN_PROGRESS'
-                ? `/app/sessions/${session.id}/live`
-                : `/app/sessions/${session.id}`,
-            ctaLabel: session.status === 'IN_PROGRESS' ? 'Resume session' : 'Prepare for session',
+                ? 'Unfinished session. Recording activity is not verified here.'
+                : undefined,
           })),
         ...rawNoteWork.map(async (session) => {
           const journey = noteProcessingJourney(session.noteDraft!.status);
@@ -396,28 +392,32 @@ export default async function TodayPage() {
           href: `/app/clients/${assignment.clientId}/shared`,
           ctaLabel: 'Review homework',
         })),
-        ...dedupeLatestShareActivity([...rawShareActivity, ...rawFailedShareActivity], 8).map(
-          async (share) => ({
-            id: `share:${share.id}`,
-            clientId: share.clientId,
-            shareId: share.id,
-            shareBatchId: share.shareBatchId ?? undefined,
-            event: share.hasFailure ? ('SHARE_FAILURE' as const) : ('SHARE_OPEN' as const),
-            kind: 'CLIENT_RESPONSE' as const,
-            occurredAt: (share.openedAt ?? share.createdAt).toISOString(),
-            title: await decryptClientField(therapist.id, share.client.fullNameEncrypted),
-            detail: share.hasFailure
-              ? share.hasOpened
-                ? 'Shared item opened; another delivery channel failed'
-                : 'Shared-item delivery failed'
-              : 'Client opened a shared item',
-            href: `/app/clients/${share.clientId}/shared`,
-            ctaLabel: 'Review shared items',
-          }),
-        ),
+        ...dedupeLatestShareActivity(
+          [...rawShareActivity, ...rawFailedShareActivity],
+          Number.MAX_SAFE_INTEGER,
+        ).map(async (share) => ({
+          id: `share:${share.id}`,
+          clientId: share.clientId,
+          shareId: share.id,
+          shareBatchId: share.shareBatchId ?? undefined,
+          event: share.hasFailure ? ('SHARE_FAILURE' as const) : ('SHARE_OPEN' as const),
+          kind: share.hasFailure ? ('SHARE_FAILURE' as const) : ('RECENT_ACTIVITY' as const),
+          occurredAt: (share.hasFailure
+            ? share.createdAt
+            : (share.openedAt ?? share.createdAt)
+          ).toISOString(),
+          dateLabel: share.hasFailure ? 'Link created' : 'Opened',
+          title: await decryptClientField(therapist.id, share.client.fullNameEncrypted),
+          detail: share.hasFailure
+            ? share.hasOpened
+              ? 'Shared item opened; another delivery channel failed'
+              : 'Shared-item delivery failed'
+            : 'Client opened a shared item',
+          href: `/app/clients/${share.clientId}/shared`,
+          ctaLabel: 'Review shared items',
+        })),
         ...rawAttentionSessions
           .filter((session) => session.status === 'SCHEDULED' && session.scheduledAt < now)
-          .slice(0, 3)
           .map(async (session) => ({
             id: session.id,
             kind: 'OVERDUE_WORK' as const,
@@ -444,12 +444,16 @@ export default async function TodayPage() {
     now,
   );
 
-  // TS7.2 — at any moment exactly one session matters: the authoritative
-  // in-progress one, else the authoritative next scheduled session. It may
-  // sit outside today's display boundary, so do not derive it from todayRows.
-  const { hero } = selectAuthoritativeTodayHero(activeSession, nextFutureSession, todayRows);
+  // A session started today stays easy to return to. Historical or undated
+  // unfinished work has its own prominent recovery area; no heartbeat is inferred.
+  const { hero } = selectAuthoritativeTodayHero(
+    activeSessions[0] ?? null,
+    nextFutureSession,
+    todayRows,
+    now,
+  );
   const restOfDay = todayRows
-    .filter((session) => session.id !== hero?.id)
+    .filter((session) => session.id !== hero?.id && session.status !== 'IN_PROGRESS')
     .sort((a, b) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
   // The authoritative session has one home. All other returned work remains
   // visible; in particular, note failures cannot fall behind a display limit.
@@ -520,9 +524,11 @@ const sessionSelect = {
   id: true,
   status: true,
   scheduledAt: true,
+  startedAt: true,
   modality: true,
   kind: true,
   captureMode: true,
+  mindDocumentationMode: true,
   clientId: true,
   client: { select: { id: true, fullNameEncrypted: true, isDemo: true } },
   noteDraft: { select: { status: true } },
@@ -533,9 +539,11 @@ function toCardProps(row: {
   id: string;
   status: string;
   scheduledAt: Date;
+  startedAt: Date | null;
   modality: string | null;
   kind: string;
   captureMode: string | null;
+  mindDocumentationMode: string | null;
   clientId: string;
   client: { fullName: string; isDemo: boolean };
   noteDraft: { status: string } | null;
@@ -551,6 +559,7 @@ function toCardProps(row: {
       | 'NO_SHOW'
       | 'RESCHEDULED',
     scheduledAt: row.scheduledAt.toISOString(),
+    startedAt: row.startedAt?.toISOString() ?? null,
     modality: row.modality,
     kind: row.kind as 'INTAKE' | 'TREATMENT' | 'REVIEW',
     clientId: row.clientId,
@@ -559,5 +568,6 @@ function toCardProps(row: {
     hasSignedNote: isFinalizedMindNote(row.therapyNote),
     draftStatus: row.noteDraft?.status ?? null,
     captureMode: row.captureMode,
+    mindDocumentationMode: row.mindDocumentationMode,
   };
 }

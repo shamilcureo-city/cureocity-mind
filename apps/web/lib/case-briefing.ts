@@ -6,11 +6,15 @@ import {
   type CaseBriefingV1,
   type CaseBriefingWhen,
   type FivePFormulation,
-  type InstrumentChange,
   type JourneySummary,
 } from '@cureocity/contracts';
 import { computeClientJourney } from './journey';
 import { prisma } from './prisma';
+import {
+  fetchClinicianDocumentedRisk,
+  withClinicianRisk,
+  type ClinicianDocumentedRisk,
+} from './clinician-documented-risk';
 
 /**
  * Sprint 22 — deterministic Case Briefing builder.
@@ -35,6 +39,7 @@ export interface CaseBriefingInputs {
   intakeNote: ReturnType<typeof parseIntake>;
   latestReportBody: unknown;
   hasSafetyPlan: boolean;
+  clinicianDocumentedRisk?: ClinicianDocumentedRisk | null;
   clientId: string;
   /** Sprint 75 — active problem list + how many sessions worked on each. */
   problems: { title: string; sessionCount: number }[];
@@ -73,6 +78,7 @@ export async function gatherInputs(
     problemRows,
     instrumentRows,
     diagnosisRows,
+    clinicianDocumentedRisk,
   ] = await Promise.all([
     prisma.assessmentItem.findMany({
       where: { clientId, status: { in: ['OPEN', 'ADDRESSED'] } },
@@ -119,6 +125,7 @@ export async function gatherInputs(
       take: 8,
       select: { icd11Code: true, icd11Label: true, confirmedAt: true, supersededAt: true },
     }),
+    fetchClinicianDocumentedRisk(clientId, psychologistId),
   ]);
 
   const seriesByKey = new Map<string, { score: number; at: Date }[]>();
@@ -135,6 +142,7 @@ export async function gatherInputs(
     intakeNote: parseIntake(latestIntakeDraft?.noteDraft?.content),
     latestReportBody: latestReport?.body ?? null,
     hasSafetyPlan: safetyPlan !== null,
+    clinicianDocumentedRisk,
     clientId,
     problems: problemRows.map((p) => ({ title: p.title, sessionCount: p._count.sessionLinks })),
     instrumentSeries: [...seriesByKey.entries()].map(([instrumentKey, points]) => ({
@@ -223,6 +231,12 @@ export function serialiseContext(inputs: CaseBriefingInputs): string {
     for (const i of inputs.openItems) lines.push(`  - (${i.kind}) ${i.question} — ${i.rationale}`);
   }
   lines.push(`Safety plan on file: ${inputs.hasSafetyPlan ? 'yes' : 'no'}`);
+  if (inputs.clinicianDocumentedRisk) {
+    const risk = inputs.clinicianDocumentedRisk;
+    lines.push(
+      `Clinician-written ${risk.sourceStatus === 'UNFINISHED' ? 'unfinished draft' : 'note'} records ${risk.severity} risk (${risk.recordedAt}; source session ${risk.sourceSessionId}). Historical documentation requires review, not an AI-confirmed or current risk assessment.`,
+    );
+  }
   return lines.join('\n');
 }
 
@@ -233,29 +247,23 @@ function isoDay(d: Date): string {
 export function composeBriefing(inputs: CaseBriefingInputs): CaseBriefingV1 {
   const { journey } = inputs;
   const reportFormulation = readReportFormulation(inputs.latestReportBody);
-  const crisis = readCrisis(inputs.latestReportBody);
+  const crisis = withClinicianRisk(
+    readCrisis(inputs.latestReportBody),
+    inputs.clinicianDocumentedRisk,
+  );
 
   const formulation = buildFivePs(inputs, reportFormulation);
   const headline = buildHeadline(journey, reportFormulation);
 
-  // Open items, plus deterministic synthetic items the journey implies.
+  // Only authored assessment items are open questions. A questionnaire is
+  // optional clinical support, never a synthetic counselling prerequisite.
   const openItems = [...inputs.openItems];
-  const hasInstruments = journey.instrumentChanges.length > 0;
-  if (!hasInstruments && journey.sessionsCompleted > 0) {
-    openItems.unshift({
-      id: 'synthetic-baseline',
-      kind: 'INSTRUMENT',
-      question: 'Administer PHQ-9 + GAD-7 to set a baseline',
-      rationale: 'Progress can only be measured against a starting point.',
-      icd11Code: null,
-    });
-  }
   if (crisis.highestSeverity !== 'none' && !inputs.hasSafetyPlan) {
     openItems.unshift({
       id: 'synthetic-safety',
       kind: 'SAFETY',
-      question: 'Complete a safety plan with the client',
-      rationale: 'Crisis indicators are present and no safety plan is on file.',
+      question: 'Review safety context with the client and agree appropriate support',
+      rationale: 'Documented safety concerns need clinical review; no safety plan is on file.',
       icd11Code: null,
     });
   }
@@ -288,6 +296,7 @@ export function composeBriefing(inputs: CaseBriefingInputs): CaseBriefingV1 {
       highestSeverity: crisis.highestSeverity,
       openCrisisFlags: crisis.labels,
       hasSafetyPlan: inputs.hasSafetyPlan,
+      clinicianDocumentedRisk: inputs.clinicianDocumentedRisk ?? null,
     },
     generatedAt: new Date().toISOString(),
     source: 'deterministic',
@@ -332,8 +341,11 @@ function buildHeadline(journey: JourneySummary, reportFormulation: string | null
     );
   }
   if (reportFormulation) return clip(reportFormulation, 800);
-  if (journey.stage === 'INTAKE') return 'Intake recorded — assessment is the next step.';
-  return 'Assessment in progress — narrow the differential over the next sessions.';
+  if (journey.activePlan)
+    return 'Continue from the client’s priorities and agreed plan; review what is helping.';
+  if (journey.sessionsCompleted === 0)
+    return 'Begin with the client’s concerns, priorities and agreement about working together.';
+  return 'Build a shared understanding and agree the next helpful step. A diagnosis is not required for counselling.';
 }
 
 // ============================================================================
@@ -352,8 +364,10 @@ function buildNextActions(
   // 1. Safety always first.
   if (crisis.highestSeverity === 'high' || crisis.highestSeverity === 'critical') {
     actions.push({
-      title: 'Address the active crisis flag',
-      detail: `Crisis indicators (${crisis.labels.join(', ')}) are present. ${
+      title: inputs.clinicianDocumentedRisk
+        ? 'Review documented safety concerns with the client'
+        : 'Address the active crisis flag',
+      detail: `${inputs.clinicianDocumentedRisk ? 'Saved safety context requires clinical review' : 'Crisis indicators are present'} (${crisis.labels.join(', ')}). ${
         inputs.hasSafetyPlan
           ? 'Review the safety plan with the client.'
           : 'Complete a safety plan this session.'
@@ -365,14 +379,28 @@ function buildNextActions(
     });
   }
 
-  // 2. Baseline measurement.
+  // Worsening takes precedence over an improved score on another measure.
+  const deteriorating = journey.instrumentChanges.find((c) => c.verdict === 'deterioration');
+  if (deteriorating) {
+    actions.push({
+      title: 'Review worsening with the client',
+      detail: `${deteriorating.instrumentKey} shows reliable deterioration, even if another measure improved. Explore the client’s experience, functioning and safety before agreeing any change of course.`,
+      why: 'One improved score must not obscure a worsening concern.',
+      when: 'this_session',
+      ctaLabel: null,
+      ctaHref: null,
+    });
+  }
+
+  // Optional measurement supports, but never blocks, a counselling plan.
   if (journey.instrumentChanges.length === 0 && journey.sessionsCompleted > 0) {
     actions.push({
-      title: 'Set a baseline — administer PHQ-9 + GAD-7',
-      detail: 'Administer the recommended screeners so every later session measures change.',
-      why: 'You can only show progress against a starting point.',
+      title: 'Agree how to review progress together',
+      detail:
+        'Use the client’s goals, everyday functioning and feedback. A relevant questionnaire is optional when clinically useful; no baseline is required to continue counselling.',
+      why: 'Progress includes the changes that matter to this client, not only scores.',
       when: 'this_session',
-      ctaLabel: 'Administer now',
+      ctaLabel: 'Optional questionnaires',
       ctaHref: anchor,
     });
   }
@@ -390,13 +418,13 @@ function buildNextActions(
     });
   }
 
-  // 4. Confirm diagnosis + plan once enough is known.
-  if (actions.length < 3 && !journey.activePlan && journey.workingDiagnosis) {
+  // A shared plan may be useful with or without a diagnosis.
+  if (actions.length < 3 && !journey.activePlan && journey.sessionsCompleted > 0) {
     actions.push({
-      title: 'Confirm a treatment plan',
+      title: 'Agree goals and a plan together',
       detail:
-        'A working diagnosis is on record — confirm a plan from the Clinical Brief so the next sessions have a structure.',
-      why: 'Treatment without a confirmed plan drifts; the plan sets the phase sequence + goals.',
+        'Review the client’s priorities, preferences and the support that fits. A counselling plan can be agreed without a diagnosis.',
+      why: 'Shared goals make the next step and the review point clear.',
       when: 'this_session',
       ctaLabel: null,
       ctaHref: null,
@@ -405,9 +433,9 @@ function buildNextActions(
 
   // 5. Not-on-track review.
   const stalled = journey.instrumentChanges.find(
-    (c) => c.administrationCount >= 3 && c.verdict !== 'reliable_improvement',
+    (c) => c.administrationCount >= 3 && c.verdict === 'no_reliable_change',
   );
-  if (actions.length < 3 && journey.activePlan && stalled) {
+  if (actions.length < 3 && journey.activePlan && stalled && !deteriorating) {
     actions.push({
       title: 'Review the plan — not improving as expected',
       detail: `${stalled.instrumentKey} has shown no reliable improvement across ${stalled.administrationCount} administrations.`,
@@ -418,32 +446,30 @@ function buildNextActions(
     });
   }
 
-  // 6. Discharge when remission reached.
-  const remitted = journey.instrumentChanges.some(
-    (c: InstrumentChange) =>
-      c.isRemission && (c.verdict === 'reliable_improvement' || c.isResponse),
-  );
-  if (actions.length < 3 && journey.activePlan && remitted) {
+  // Score improvement invites a whole-case review, never a discharge verdict.
+  const improved = journey.instrumentChanges.some((c) => c.verdict === 'reliable_improvement');
+  if (actions.length < 3 && journey.activePlan && improved && !deteriorating && !stalled) {
     actions.push({
-      title: 'Consider discharge + share an outcome report',
+      title: 'Review progress together',
       detail:
-        'The latest screener is in the remission range with a reliable improvement from baseline.',
-      why: 'Closing the episode well + sharing the result is part of evidence-based care.',
+        'Review all relevant measures, agreed goals, everyday functioning, the client’s preference and safety. Improved scores alone do not establish readiness to end care.',
+      why: 'Continuing, adapting or planning an ending is a shared whole-case decision.',
       when: 'this_session',
       ctaLabel: null,
       ctaHref: null,
     });
   }
 
-  // 7. Fallback — keep the assessment moving.
+  // First contact does not require audio recording or a diagnostic workflow.
   if (actions.length === 0 && journey.sessionsCompleted === 0) {
     actions.push({
-      title: 'Record the intake session',
-      detail: 'No completed session yet — record an intake to start the clinical picture.',
-      why: 'Everything downstream needs the intake history first.',
+      title: 'Start the first conversation',
+      detail:
+        'Explore the client’s concerns and priorities, discuss working together, and document what was actually discussed. Audio recording is optional.',
+      why: 'A shared understanding comes before deciding which support fits.',
       when: 'this_session',
-      ctaLabel: 'Go to Record',
-      ctaHref: '/app',
+      ctaLabel: 'Open client',
+      ctaHref: `/app/clients/${inputs.clientId}`,
     });
   }
 
@@ -462,12 +488,18 @@ function buildCadence(journey: JourneySummary): CaseBriefingV1['cadence'] {
     (k) => k === 'moderate' || k === 'moderately_severe' || k === 'severe',
   );
   const improving = journey.instrumentChanges.some((c) => c.verdict === 'reliable_improvement');
+  const worsening = journey.instrumentChanges.some((c) => c.verdict === 'deterioration');
 
   let intervalDays = 7;
-  let rationale = 'Weekly contact is standard while the picture is still forming.';
-  if (journey.stage === 'INTAKE' || journey.stage === 'ASSESSMENT') {
+  let rationale =
+    'Discuss timing with the client based on their goals, preference, functioning and safety; this is a planning suggestion.';
+  if (worsening) {
+    rationale =
+      'Review worsening and safety with the client before agreeing the next contact; improvement on another measure does not justify longer gaps.';
+  } else if (journey.stage === 'INTAKE' || journey.stage === 'ASSESSMENT') {
     intervalDays = 7;
-    rationale = 'Weekly during assessment keeps the differential narrowing.';
+    rationale =
+      'Agree the next contact together while building a shared understanding; timing depends on clinical need and client preference.';
   } else if (improving && !stillSymptomatic) {
     intervalDays = 21;
     rationale = 'Symptoms have eased and are improving — spacing sessions out consolidates gains.';

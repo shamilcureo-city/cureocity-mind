@@ -3,6 +3,7 @@ import {
   CreateSessionInputSchema,
   planTierLabel,
   selectReusableSession,
+  sessionKindForMindPurpose,
 } from '@cureocity/contracts';
 import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
@@ -17,6 +18,8 @@ import {
 import { parseJson } from '@/lib/validate';
 import { DEFAULT_BUILTIN_TEMPLATE_ID } from '@/lib/builtin-templates';
 import { istDayRange, nextClinicToken } from '@/lib/clinic-queue';
+import { MindPurposeConflict, selectMindSessionPurpose } from '@/lib/mind-session-purpose';
+import { ClientPhiWriteForbiddenError } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,15 +32,40 @@ export const dynamic = 'force-dynamic';
  * Psychologist → INTAKE / SUPPORTIVE) and writes a
  * SESSION_MODALITY_INFERRED audit. When the therapist passes a value
  * that differs from what the cascade would pick, writes
- * SESSION_MODALITY_OVERRIDDEN. session.kind is always inferred
- * server-side from cumulative state — therapists can't override it
- * directly (drives Pass 2/3 prompt branches).
+ * SESSION_MODALITY_OVERRIDDEN. Mind's explicit clinician-selected purpose
+ * overrides the suggested kind, including assessment on later visits. Doctor
+ * encounters retain their existing inferred behavior.
  */
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const dto = await parseJson(req, CreateSessionInputSchema);
   if (!dto.ok) return dto.response;
+  if (dto.value.mindPurpose || dto.value.mindDocumentationMode) {
+    if (auth.value.user.vertical !== 'THERAPIST')
+      return NextResponse.json(
+        { error: 'Mind session purpose is not available for doctor encounters.' },
+        { status: 400 },
+      );
+    const capability = await requireCapability(req, 'BEHAVIORAL_HEALTH_DOCUMENTATION', auth);
+    if (!capability.ok) return capability.response;
+  }
+  const reuseResponse = async (row: Parameters<typeof selectMindSessionPurpose>[0]) => {
+    try {
+      return NextResponse.json(
+        toSession(
+          await selectMindSessionPurpose(row, auth.value.psychologistId, dto.value.mindPurpose),
+        ),
+        { status: 200 },
+      );
+    } catch (error) {
+      if (error instanceof MindPurposeConflict)
+        return NextResponse.json({ error: error.message }, { status: 409 });
+      if (error instanceof ClientPhiWriteForbiddenError)
+        return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+      throw error;
+    }
+  };
   if (dto.value.expectedSessionId) {
     if (auth.value.user.vertical !== 'THERAPIST') {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
@@ -88,7 +116,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
     // Read-only selection, including a future booking explicitly opened early.
     // Consent and capture activation still happen on their existing endpoints.
-    return NextResponse.json(toSession(booked), { status: 200 });
+    return reuseResponse(booked);
   }
 
   const sourceSession = dto.value.sourceSessionId
@@ -133,7 +161,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
     const reuse = selectReusableSession(candidates, range);
     if (reuse) {
-      return NextResponse.json(toSession(reuse), { status: 200 });
+      return reuseResponse(reuse);
     }
   }
 
@@ -225,7 +253,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const submittedModality = dto.value.modality ?? null;
-  const resolvedModality = submittedModality ?? defaults.modality;
+  const resolvedKind = dto.value.mindPurpose
+    ? sessionKindForMindPurpose(dto.value.mindPurpose)
+    : defaults.kind;
+  const resolvedModality =
+    dto.value.mindPurpose === 'ASSESSMENT'
+      ? null
+      : dto.value.mindPurpose === 'COUNSELLING'
+        ? 'SUPPORTIVE'
+        : (submittedModality ?? defaults.modality);
   const overridden = modalityWasOverridden(defaults.modality, submittedModality);
 
   // Sprint 70 — default the session's note template to the therapist's
@@ -240,7 +276,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     select: { id: true },
   });
   const defaultNoteTemplateId =
-    defaults.kind === 'INTAKE' ? null : (defaultTemplate?.id ?? DEFAULT_BUILTIN_TEMPLATE_ID);
+    resolvedKind === 'INTAKE' ? null : (defaultTemplate?.id ?? DEFAULT_BUILTIN_TEMPLATE_ID);
 
   const scheduledAt = new Date(dto.value.scheduledAt);
   if (sourceSession && scheduledAt.getTime() <= Date.now()) {
@@ -270,7 +306,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         clientId: dto.value.clientId,
         psychologistId: auth.value.psychologistId,
         modality: resolvedModality,
-        kind: defaults.kind,
+        kind: resolvedKind,
+        mindPurpose: dto.value.mindPurpose ?? null,
+        mindDocumentationMode: dto.value.mindDocumentationMode ?? null,
         status: 'SCHEDULED',
         scheduledAt,
         // FLOW-3 — persist the note language the therapist chose (or the
@@ -299,7 +337,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           ...auditMetadataFromRequest(req),
           clientId: dto.value.clientId,
           modality: resolvedModality,
-          kind: defaults.kind,
+          kind: resolvedKind,
+          mindPurpose: dto.value.mindPurpose ?? null,
         },
       },
       tx,

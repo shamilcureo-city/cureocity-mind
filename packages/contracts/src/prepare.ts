@@ -50,6 +50,8 @@ export const PrepareCrisisFlagSchema = z.object({
   kind: z.string().min(1),
   severity: z.enum(['high', 'critical']),
   lastSeenAt: IsoDateTimeSchema,
+  source: z.enum(['CLINICIAN_NOTE', 'CLINICIAN_NOTE_DRAFT']).optional(),
+  sourceSessionId: z.string().optional(),
 });
 export type PrepareCrisisFlag = z.infer<typeof PrepareCrisisFlagSchema>;
 
@@ -101,6 +103,10 @@ export const PrepareSummaryV1Schema = z.object({
    * client walks in. Optional + defaulted (zero-regression additive).
    */
   lastAgreements: z.array(SessionAgreementDtoSchema).max(8).default([]),
+  /** All-session unfinished commitments, oldest first; pagination is explicit. */
+  activeAgreements: z.array(SessionAgreementDtoSchema).max(20).optional(),
+  activeAgreementCount: z.number().int().min(0).optional(),
+  activeAgreementsNextCursor: z.string().nullable().optional(),
   /**
    * SL2 — one-glance snapshot of the ACTIVE living formulation (version +
    * the narrative's first sentence + the maintaining-cycle chain). Null

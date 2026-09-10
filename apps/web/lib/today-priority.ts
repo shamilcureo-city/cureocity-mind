@@ -5,6 +5,8 @@ export type TodayAttentionKind =
   | 'NOTE_REVIEW'
   | 'NOTE_GENERATING'
   | 'CLIENT_RESPONSE'
+  | 'SHARE_FAILURE'
+  | 'RECENT_ACTIVITY'
   | 'OVERDUE_WORK';
 
 export interface TodayAttentionItem {
@@ -15,6 +17,7 @@ export interface TodayAttentionItem {
   href: string;
   ctaLabel: string;
   detail?: string;
+  dateLabel?: string;
 }
 
 const rank: Record<TodayAttentionKind, number> = {
@@ -24,6 +27,8 @@ const rank: Record<TodayAttentionKind, number> = {
   NOTE_REVIEW: 3,
   NOTE_GENERATING: 4,
   CLIENT_RESPONSE: 5,
+  SHARE_FAILURE: 2,
+  RECENT_ACTIVITY: 7,
   OVERDUE_WORK: 6,
 };
 

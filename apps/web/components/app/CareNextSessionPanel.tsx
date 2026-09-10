@@ -98,7 +98,7 @@ export function CareNextSessionPanel({ questions, cadence, clientId, carried, re
 
         {shown.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--color-ink-3)]">
-            Nothing outstanding — the picture is clear enough to proceed.
+            No open questions recorded. Continue assessment as needed.
           </p>
         ) : (
           <ul className="mt-2 space-y-2">

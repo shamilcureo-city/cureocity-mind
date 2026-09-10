@@ -37,12 +37,18 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     select: {
       psychologistId: true,
       status: true,
+      mindDocumentationMode: true,
       psychologist: { select: { vertical: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+  if (session.mindDocumentationMode === 'MANUAL')
+    return NextResponse.json(
+      { error: 'This session is clinician-written. AI note generation is disabled.' },
+      { status: 409 },
+    );
   if (session.status !== 'COMPLETED') {
     return NextResponse.json(
       { error: `Cannot generate a note for a session in ${session.status} state` },

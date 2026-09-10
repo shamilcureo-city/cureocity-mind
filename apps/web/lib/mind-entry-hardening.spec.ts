@@ -7,7 +7,7 @@ const read = (path: string) => readFileSync(join(import.meta.dirname, '..', path
 describe('Mind entry interaction wiring', () => {
   it('keeps failed preparation stable until explicit retry or reopening', () => {
     const source = read('components/app/PreparePanel.tsx');
-    expect(source).toContain('}, [open, load])');
+    expect(source).toContain('}, [open, summaryVisible, load])');
     expect(source).not.toContain('[open, data, loading, load]');
     expect(source).toContain('Retry preparation');
     expect(source).toContain('controller.signal.aborted');
@@ -30,6 +30,8 @@ describe('Mind entry interaction wiring', () => {
     expect(roster).toContain("status: 'SCHEDULED'");
     expect(roster).toContain('_max: { endedAt: true, scheduledAt: true }');
     expect(roster).toContain('_min: { scheduledAt: true }');
-    expect(roster).toContain('Last completed / next');
+    expect(roster).toContain('<MindClientRosterRows');
+    expect(roster).toContain('lastCompletedLabel:');
+    expect(roster).toContain('nextAppointmentLabel:');
   });
 });

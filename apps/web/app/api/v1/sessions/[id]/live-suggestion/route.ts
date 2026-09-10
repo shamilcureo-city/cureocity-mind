@@ -4,6 +4,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import { ClientPhiWriteForbiddenError, lockActiveClientForSession } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -30,8 +31,12 @@ export async function POST(
   if (!parsed.ok) return parsed.response;
   const ev = parsed.value;
 
-  const session = await prisma.session.findUnique({
-    where: { id: sessionId },
+  const session = await prisma.session.findFirst({
+    where: {
+      id: sessionId,
+      psychologistId: auth.value.psychologistId,
+      client: { is: { deletedAt: null } },
+    },
     select: {
       id: true,
       psychologistId: true,
@@ -62,14 +67,23 @@ export async function POST(
 
   // Literal action per branch so the audit-coverage chaos test discovers each
   // writer (a ternary would not match its regex — CLAUDE.md §4).
-  if (ev.event === 'shown') {
-    await writeAudit({ ...base, action: 'LIVE_SUGGESTION_SHOWN' });
-  } else if (ev.event === 'acted') {
-    await writeAudit({ ...base, action: 'LIVE_SUGGESTION_ACTED' });
-  } else if (ev.event === 'dismissed') {
-    await writeAudit({ ...base, action: 'LIVE_SUGGESTION_DISMISSED' });
-  } else {
-    await writeAudit({ ...base, action: 'LIVE_SUGGESTION_AUTORESOLVED' });
+  try {
+    await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      if (ev.event === 'shown') {
+        await writeAudit({ ...base, action: 'LIVE_SUGGESTION_SHOWN' }, tx);
+      } else if (ev.event === 'acted') {
+        await writeAudit({ ...base, action: 'LIVE_SUGGESTION_ACTED' }, tx);
+      } else if (ev.event === 'dismissed') {
+        await writeAudit({ ...base, action: 'LIVE_SUGGESTION_DISMISSED' }, tx);
+      } else {
+        await writeAudit({ ...base, action: 'LIVE_SUGGESTION_AUTORESOLVED' }, tx);
+      }
+    });
+  } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError)
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    throw error;
   }
 
   return NextResponse.json({ ok: true }, { status: 201 });

@@ -68,7 +68,9 @@ describe('Mind-only focused review boundaries', () => {
     const load = page.indexOf('prisma.session.findFirst');
     expect(page.indexOf("therapist.vertical === 'DOCTOR'")).toBeLessThan(load);
     expect(page.indexOf("canOpenMindPage('session'")).toBeLessThan(load);
-    expect(page).toContain('where: { id, psychologistId: therapist.id }');
+    expect(page).toMatch(
+      /where:\s*\{\s*id,\s*psychologistId:\s*therapist\.id,\s*client:\s*\{\s*deletedAt:\s*null\s*\}/,
+    );
     expect(page).toContain("effective.capabilities.has('PATIENT_SHARING')");
   });
 

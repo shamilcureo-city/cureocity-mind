@@ -76,9 +76,10 @@ describe('Sprint 1 Mind reliable session journey integration', () => {
 
   it('keeps the essential recording status and End action sticky on mobile', () => {
     const live = webSource('components/app/TherapistLiveSession.tsx');
-    expect(live).toContain('sticky top-0');
+    expect(live).toContain('<CaptureStatusBar');
     const batch = webSource('components/app/LiveRecorder.tsx');
-    expect(batch).toContain('sticky bottom-0');
+    expect(batch).toContain('<CaptureStatusBar');
+    expect(webSource('components/app/CaptureStatusBar.tsx')).toContain('sticky top-0');
     expect(batch).toContain('aria-label="End session?"');
   });
 });

@@ -9,6 +9,7 @@ import { PrivacyModeToggle } from '@/components/app/PrivacyModeToggle';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import {
   buildDashboard,
+  dashboardCrisisPresentation,
   greetingNameFrom,
   type AttentionData,
   type CaseloadPulse,
@@ -122,9 +123,9 @@ function _AttentionSection({ attention }: { attention: AttentionData }) {
             {crises.map((c, i) => (
               <AttentionRow
                 key={`${c.clientId}-${c.kind}-${i}`}
-                href={`/app/clients/${c.clientId}`}
+                href={dashboardCrisisPresentation(c).href}
                 name={c.clientName}
-                meta={`${c.kind} · ${c.severity}`}
+                meta={dashboardCrisisPresentation(c).meta}
                 tone="warn"
               />
             ))}
@@ -170,11 +171,15 @@ function _AttentionSection({ attention }: { attention: AttentionData }) {
             {measuresDue.map((m, i) => (
               <AttentionRow
                 key={`${m.clientId}-${i}`}
-                href={`/app/clients/${m.clientId}/journey#measure-phq9`}
+                href={
+                  m.reason === 'REVIEW_DUE'
+                    ? `/app/clients/${m.clientId}?section=care-plan`
+                    : `/app/clients/${m.clientId}/journey#measure-phq9`
+                }
                 name={m.clientName}
                 meta={
                   m.reason === 'REVIEW_DUE'
-                    ? 'Plan due for review'
+                    ? 'Review progress, goals and safety together'
                     : m.lastAdministeredAt
                       ? `Last measured ${formatDayShort(new Date(m.lastAdministeredAt))}`
                       : 'Measure overdue'
@@ -269,7 +274,11 @@ function MetricStrip({ metrics }: { metrics: DashboardMetrics }) {
         warn={metrics.unsignedNotes > 0}
       />
       <StatTile label="Open crises" value={metrics.openCrises} warn={metrics.openCrises > 0} />
-      <StatTile label="Measures due" value={metrics.measuresDue} warn={metrics.measuresDue > 0} />
+      <StatTile
+        label="Reviews & measures"
+        value={metrics.measuresDue}
+        warn={metrics.measuresDue > 0}
+      />
     </section>
   );
 }
@@ -293,13 +302,7 @@ function StatTile({ label, value, warn }: { label: string; value: number; warn?:
 // Caseload pulse (clinical differentiator).
 // ---------------------------------------------------------------------------
 
-const STAGE_ORDER: JourneyStage[] = [
-  'INTAKE',
-  'ASSESSMENT',
-  'ACTIVE_TREATMENT',
-  'REVIEW_DUE',
-  'DISCHARGE_READY',
-];
+const STAGE_ORDER: JourneyStage[] = ['INTAKE', 'ASSESSMENT', 'ACTIVE_TREATMENT', 'REVIEW_DUE'];
 const STAGE_LABEL: Record<JourneyStage, string> = {
   INTAKE: 'Intake',
   ASSESSMENT: 'Assessment',

@@ -29,7 +29,7 @@ interface Props {
 const PRIORITY_META: Record<CareActionPriority, { label: string; chip: string }> = {
   SAFETY: { label: 'Safety', chip: 'bg-[#a03b34] text-white' },
   MEASURE: { label: 'Measure', chip: 'bg-[var(--color-warn-soft)] text-[var(--color-warn)]' },
-  DIAGNOSE: { label: 'Diagnose', chip: 'bg-[#f6efdc] text-[#8a7434]' },
+  DIAGNOSE: { label: 'Understand', chip: 'bg-[#f6efdc] text-[#8a7434]' },
   PLAN: { label: 'Plan', chip: 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' },
   OUTCOME: {
     label: 'Outcome',

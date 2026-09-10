@@ -22,6 +22,7 @@ export * from './share';
 export * from './brief';
 export * from './prepare';
 export * from './instrument';
+export * from './mind-instrument-draft';
 export * from './journey';
 // Sprint JE1 — the Care Engine (imports from journey + instrument above).
 export * from './care-engine';
@@ -70,8 +71,10 @@ export * from './problem';
 export * from './note-review';
 // The Session Loop (SL1) — living formulation + agreements + feedback.
 export * from './formulation';
+export * from './mind-care-record';
 // Marketing V1 — public therapist pages + real-slot booking.
 export * from './marketing';
 export * from './orbit-capability';
 export * from './mind-recovery';
 export * from './note-edit-recovery';
+export * from './mind-manual-note';

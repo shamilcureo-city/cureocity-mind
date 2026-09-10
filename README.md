@@ -114,7 +114,7 @@ Latest sprint highlights:
 
 ## Prerequisites
 
-- **Node.js 22 LTS** — run `nvm use` to pick up `.nvmrc`
+- **Node.js 22.23.2 LTS or later compatible security patch** — run `nvm install`, then `nvm use` to pick up the tested `.nvmrc` version. Node 22.23.0 has an HTTP regression caught by `pnpm smoke:prod-dependencies`.
 - **pnpm 10+** — `corepack enable` or `npm install -g pnpm`
 - **Docker 24+ with Compose v2** — for local Postgres / Redis / MinIO
 

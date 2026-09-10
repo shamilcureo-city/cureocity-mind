@@ -1,5 +1,6 @@
 import type {
   TherapyAskNextItem,
+  TherapyApprovedCaseContext,
   TherapyCarriedQuestion,
   TherapyLiveContext,
   TherapyReasoningModelOutput,
@@ -31,6 +32,21 @@ import type {
  * phase), so the session only emits a `therapyReasoning` event on real change.
  */
 export class TherapyReasoningStore {
+  private background: TherapyApprovedCaseContext | null = null;
+  get approvedCaseContext(): TherapyApprovedCaseContext | null {
+    return this.background;
+  }
+  setApprovedCaseContext(context: TherapyApprovedCaseContext | null): void {
+    this.background = context;
+    // Model-derived items may incorporate the previous reviewed background.
+    // Do not recycle them into prompts or snapshots after replacement/revocation.
+    // Raw utterances, clinician-carried questions, prior-risk checks, their
+    // review/dismissal state and the deterministic pacing clock remain intact.
+    this.liveRisk.clear();
+    this.liveAsk.clear();
+    this.threads.clear();
+    this.lastKey = '';
+  }
   private readonly carried: TherapyCarriedQuestion[];
   private readonly _priorRisk: boolean;
   private readonly plannedMin: number;

@@ -1,4 +1,5 @@
 import { notFound, redirect } from 'next/navigation';
+import Link from 'next/link';
 import { z } from 'zod';
 import { CarriedQuestionSchema, type TherapyCarriedQuestion } from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
@@ -10,6 +11,7 @@ import { fetchOpenCrises } from '@/lib/crisis-flags';
 import { loadPreparedMindGuides } from '@/lib/load-prepared-mind-guides';
 import { canOpenMindPage, loadOptionalCapabilityData } from '@/lib/mind-page-capabilities';
 import { prisma } from '@/lib/prisma';
+import { loadMindLiveCaseContext } from '@/lib/mind-live-case-context';
 
 export const dynamic = 'force-dynamic';
 
@@ -44,6 +46,8 @@ export default async function TherapistLivePage({
       modality: true,
       language: true,
       status: true,
+      mindDocumentationMode: true,
+      mindPurpose: true,
       client: {
         select: {
           psychologistId: true,
@@ -63,6 +67,7 @@ export default async function TherapistLivePage({
     notFound();
   // A completed session has nothing left to record — send to the workspace.
   if (session.status === 'COMPLETED') redirect(`/app/sessions/${id}`);
+  if (session.mindDocumentationMode === 'MANUAL') redirect(`/app/sessions/${id}`);
 
   const clientName = await decryptClientField(therapist.id, session.client.fullNameEncrypted);
 
@@ -132,11 +137,40 @@ export default async function TherapistLivePage({
   const priorRisk = openCrises.some(
     (c) => c.kind === 'suicidal_ideation' || c.kind === 'suicidal_plan',
   );
+  const caseContext = await loadMindLiveCaseContext({
+    clientId: session.clientId,
+    psychologistId: therapist.id,
+    capabilities,
+  });
 
   return (
     <Container className="py-8">
+      {openCrises
+        .filter((c) => c.source === 'CLINICIAN_NOTE' || c.source === 'CLINICIAN_NOTE_DRAFT')
+        .map((c) => (
+          <aside
+            key={c.sourceSessionId}
+            role="alert"
+            className="mb-4 rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4 text-sm text-[var(--color-warn)]"
+          >
+            <p className="font-medium">
+              Previous clinician-written {c.source === 'CLINICIAN_NOTE_DRAFT' ? 'unfinished ' : ''}
+              note records {c.severity} risk.
+            </p>
+            <p>
+              Review the source and the client’s current situation. This historical note is not a
+              current safety assessment.
+            </p>
+            {c.sourceSessionId && (
+              <Link className="underline" href={`/app/sessions/${c.sourceSessionId}`}>
+                Review source note
+              </Link>
+            )}
+          </aside>
+        ))}
       <TherapistLiveSession
         sessionId={session.id}
+        mindPurpose={session.mindPurpose}
         sessionStatus={session.status as 'SCHEDULED' | 'IN_PROGRESS'}
         clientId={session.clientId}
         kind={session.kind}
@@ -149,6 +183,7 @@ export default async function TherapistLivePage({
         priorRisk={priorRisk}
         preparedGuides={preparedGuides}
         initialGuideId={sp.guide}
+        caseContext={caseContext}
       />
     </Container>
   );

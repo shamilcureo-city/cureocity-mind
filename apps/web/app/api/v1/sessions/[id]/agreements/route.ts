@@ -1,10 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { CreateAgreementInputSchema, type SessionAgreementDto } from '@cureocity/contracts';
+import { AgreementRevisionHistorySchema, CreateAgreementInputSchema } from '@cureocity/contracts';
 import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 import { ClientPhiWriteForbiddenError, lockActiveClientForSession } from '@/lib/phi-write-lock';
+import { toSessionAgreementDto, withAgreementHomeworkAccess } from '@/lib/session-agreement-view';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,16 +40,30 @@ export async function GET(
   try {
     const rows = await prisma.$transaction(async (tx) => {
       await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-      return tx.sessionAgreement.findMany({ where: { sessionId }, orderBy: { createdAt: 'asc' } });
+      return tx.sessionAgreement.findMany({
+        where: { sessionId },
+        orderBy: { createdAt: 'asc' },
+        include: {
+          session: { select: { scheduledAt: true } },
+          homeworkAssignments: {
+            select: {
+              id: true,
+              sourceAgreementRevision: true,
+              customDescription: true,
+              dueAt: true,
+              status: true,
+            },
+            orderBy: { assignedAt: 'asc' },
+          },
+        },
+      });
     });
-    const agreements: SessionAgreementDto[] = rows.map((r) => ({
-      id: r.id,
-      sessionId: r.sessionId,
-      text: r.text,
-      speaker: r.speaker,
-      followUp: r.followUp,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    const agreements = rows.map((row) =>
+      withAgreementHomeworkAccess(
+        toSessionAgreementDto(row),
+        auth.value.user?.capabilities?.includes('THERAPY_WORKFLOWS') ?? false,
+      ),
+    );
     return NextResponse.json({ agreements });
   } catch (error) {
     if (error instanceof ClientPhiWriteForbiddenError)
@@ -81,22 +96,46 @@ export async function POST(
   try {
     const saved = await prisma.$transaction(async (tx) => {
       const client = await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      // Stable creation receipts survive later corrections and follow-up marks.
+      // A retry returns the same canonical agreement, not a new stale copy.
+      if (body.value.operationId) {
+        const receipt = await tx.sessionAgreement.findFirst({
+          where: {
+            sessionId,
+            clientId: client.id,
+            psychologistId: auth.value.psychologistId,
+            creationOperationId: body.value.operationId,
+          },
+        });
+        if (receipt) {
+          const history = AgreementRevisionHistorySchema.safeParse(receipt.revisions ?? []);
+          if (!history.success || history.data.length !== receipt.revision)
+            throw new AgreementCreationConflictError();
+          const originalText = history.data[0]?.previousText ?? receipt.text;
+          const originalSpeaker = history.data[0]?.previousSpeaker ?? receipt.speaker;
+          if (originalText !== body.value.text || originalSpeaker !== body.value.speaker)
+            throw new AgreementCreationConflictError();
+          return { row: receipt, created: false };
+        }
+      }
       // Creation has followUp=null. Compare the schema-parsed text exactly:
       // retries cannot consume quota or emit another audit, while different
       // speakers/text and already-followed-up agreements remain distinct.
       // This lookup must happen under the same lock as quota/insert and before
       // the eight-row limit, including when the first attempt filled the quota.
-      const existing = await tx.sessionAgreement.findFirst({
-        where: {
-          sessionId,
-          clientId: client.id,
-          psychologistId: auth.value.psychologistId,
-          text: body.value.text,
-          speaker: body.value.speaker,
-          followUp: null,
-        },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      });
+      const existing = body.value.operationId
+        ? null
+        : await tx.sessionAgreement.findFirst({
+            where: {
+              sessionId,
+              clientId: client.id,
+              psychologistId: auth.value.psychologistId,
+              text: body.value.text,
+              speaker: body.value.speaker,
+              followUp: null,
+            },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          });
       if (existing) return { row: existing, created: false };
       // Serialize quota and insert with erasure and other agreement writers.
       const count = await tx.sessionAgreement.count({ where: { sessionId } });
@@ -108,6 +147,7 @@ export async function POST(
           psychologistId: auth.value.psychologistId,
           speaker: body.value.speaker,
           text: body.value.text,
+          creationOperationId: body.value.operationId,
         },
       });
       await writeAudit(
@@ -135,18 +175,27 @@ export async function POST(
         { status: 422 },
       );
     const { row } = saved;
-    const dto: SessionAgreementDto = {
-      id: row.id,
-      sessionId: row.sessionId,
-      text: row.text,
-      speaker: row.speaker,
-      followUp: row.followUp,
-      createdAt: row.createdAt.toISOString(),
-    };
-    return NextResponse.json({ agreement: dto }, { status: saved.created ? 201 : 200 });
+    const dto = withAgreementHomeworkAccess(
+      toSessionAgreementDto(row),
+      auth.value.user?.capabilities?.includes('THERAPY_WORKFLOWS') ?? false,
+    );
+    return NextResponse.json(
+      { agreement: dto, operationId: body.value.operationId },
+      { status: saved.created ? 201 : 200 },
+    );
   } catch (error) {
+    if (error instanceof AgreementCreationConflictError)
+      return NextResponse.json(
+        {
+          error:
+            'This save identifier was used for a different agreement. Reload before trying again.',
+        },
+        { status: 409 },
+      );
     if (error instanceof ClientPhiWriteForbiddenError)
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     throw error;
   }
 }
+
+class AgreementCreationConflictError extends Error {}

@@ -25,6 +25,8 @@ interface Props {
   children: React.ReactNode;
   clinicalReview?: React.ReactNode;
   canReviewClinical?: boolean;
+  initialReviewOpen?: boolean;
+  hasSignedNote?: boolean;
 }
 
 export function MindSessionCloseout({
@@ -41,46 +43,47 @@ export function MindSessionCloseout({
   children,
   clinicalReview,
   canReviewClinical = true,
+  initialReviewOpen = false,
+  hasSignedNote,
 }: Props) {
   if (!sessionCompleted) return <>{children}</>;
   const suggestedFollowUp = suggestFollowUp(sessionAt);
   const signed = closeout.steps.signed === 'COMPLETE';
-  const complete = Object.entries(closeout.steps)
-    .filter(([key]) => canShare || key !== 'shared')
-    .filter(
-      ([key]) =>
-        canReviewClinical || !['clinicalSuggestions', 'nextSessionQuestions'].includes(key),
-    )
-    .every(([, state]) => state !== 'PENDING');
   return (
     <section className="space-y-6" aria-labelledby="mind-closeout-title">
       <div className={styles.noteLead}>
         <div>
-          <h2 id="mind-closeout-title">Review &amp; Close</h2>
+          <h2 id="mind-closeout-title">Review &amp; finish</h2>
           <p>
             {signed
               ? 'Your signed note is saved. Its signature does not send anything to the client.'
-              : 'Review your note and next-step decisions below. Sign the note when it accurately reflects the session.'}
+              : 'Check the note against the session. Sign when it is accurate, or keep a saved unsigned draft to return to later.'}
           </p>
         </div>
         {canReviewClinical && (
-          <Link href={`/app/sessions/${sessionId}?tab=review`} className={styles.contextLink}>
-            Consult the clinical context
+          <Link href="#session-support" className={styles.contextLink}>
+            Session support
           </Link>
         )}
       </div>
       {children}
+      <MindCloseoutDecisionActions
+        key={sessionId}
+        sessionId={sessionId}
+        steps={closeout.steps}
+        canShare={canShare}
+        clinicalReview={clinicalReview}
+        canReviewClinical={canReviewClinical}
+        initialReviewOpen={initialReviewOpen}
+      />
       <div className={styles.finish} id="session-next-steps">
-        <h2 className={styles.finishTitle}>
-          {complete ? 'Ready for the next chapter.' : 'What should happen next?'}
-        </h2>
+        <h2 className={styles.finishTitle}>Next steps, if useful</h2>
         <p className={styles.finishIntro}>
-          {complete
-            ? 'The note is signed and your next-step decisions are saved. You can return to Today.'
-            : 'Keep what matters from this session. Choose an action when it is useful, or record that it is not needed today.'}
+          There is no checklist to complete here. Save only what you and the client chose. Leaving
+          an option untouched does not record a clinical decision or mark it completed.
         </p>
         <div className={styles.evidence} aria-label="Saved session decisions">
-          <span>{signed ? 'Note signed' : 'Signature pending'}</span>
+          <span>{signed ? 'Note signed' : 'Note not signed'}</span>
           <span>
             {agreementCount} {agreementCount === 1 ? 'agreement saved' : 'agreements saved'}
           </span>
@@ -92,40 +95,39 @@ export function MindSessionCloseout({
             </span>
           )}
         </div>
-        <MindCloseoutDecisionActions
-          sessionId={sessionId}
-          steps={closeout.steps}
-          canShare={canShare}
-          clinicalReview={clinicalReview}
-          canReviewClinical={canReviewClinical}
-        />
-        <div className={styles.finishGrid}>
-          <section className={styles.finishSection} aria-labelledby="care-decisions-title">
-            <h3 id="care-decisions-title">Carry the care forward</h3>
-            <p>
-              {canReviewClinical
-                ? 'Clinical suggestions stay separate from your decisions until you review them.'
-                : 'Record the next practical steps you and the client agreed.'}
-            </p>
-            <MindSessionAgreements sessionId={sessionId} signed={signed} />
-          </section>
-          <section className={styles.finishSection} aria-labelledby="follow-up-title">
-            <h3 id="follow-up-title">The next appointment</h3>
-            <p className="mb-4">
-              One week at the same time is suggested. Change it to suit your care plan, or record
-              that a follow-up is not needed.
-            </p>
-            <ScheduleSessionPanel
-              clients={[client]}
-              initialClientId={client.id}
-              initialDate={suggestedFollowUp.date}
-              initialTime={suggestedFollowUp.time}
-              closeoutMode
-              sourceSessionId={sessionId}
-              followUpState={closeout.steps.followUp}
-              followUpSession={followUpSession}
-            />
-          </section>
+        <div className="mt-5 space-y-3">
+          <details className={styles.disclosure}>
+            <summary>
+              Agreements or homework{agreementCount > 0 ? ` (${agreementCount} saved)` : ''}
+            </summary>
+            <div className={styles.disclosureBody}>
+              <MindSessionAgreements
+                key={sessionId}
+                sessionId={sessionId}
+                signed={signed}
+                hasSignedNote={hasSignedNote}
+              />
+            </div>
+          </details>
+          <details className={styles.disclosure}>
+            <summary>The next appointment{followUpSession ? ' · scheduled' : ''}</summary>
+            <div className={styles.disclosureBody}>
+              <p className="mb-4">
+                If another appointment is useful, choose a time to suit your care plan. The form
+                starts one week later; nothing is booked until you save it.
+              </p>
+              <ScheduleSessionPanel
+                clients={[client]}
+                initialClientId={client.id}
+                initialDate={suggestedFollowUp.date}
+                initialTime={suggestedFollowUp.time}
+                closeoutMode
+                sourceSessionId={sessionId}
+                followUpState={closeout.steps.followUp}
+                followUpSession={followUpSession}
+              />
+            </div>
+          </details>
         </div>
         {canShare && (
           <p className={`${styles.finishIntro} mt-5`}>
@@ -137,7 +139,7 @@ export function MindSessionCloseout({
             Copying a note does not sign or send it. Creating a link does not confirm delivery.
           </p>
         )}
-        {complete && (
+        {signed && (
           <p className="mt-5">
             <Link href="/app/today" className={styles.contextLink}>
               Return to Today

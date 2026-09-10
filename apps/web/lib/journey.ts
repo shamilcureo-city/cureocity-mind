@@ -24,7 +24,9 @@ import { prisma } from './prisma';
  *   ASSESSMENT       — ≥1 completed session, no active treatment plan
  *   ACTIVE_TREATMENT — active (non-superseded) plan exists
  *   REVIEW_DUE       — active plan aged ≥8 completed sessions
- *   DISCHARGE_READY  — instrument remission reached on a plan
+ *   REVIEW_DUE       — improvement/deterioration invites whole-case review
+ * A score never establishes readiness for discharge. DISCHARGE_READY stays
+ * in historical DTOs for compatibility but is not emitted by this composer.
  */
 
 const TRACKED_INSTRUMENTS: InstrumentKey[] = ['PHQ9', 'GAD7'];
@@ -128,8 +130,8 @@ export async function computeClientJourney(
     });
   }
 
-  const dischargeReady = instrumentChanges.some(
-    (c) => c.isRemission && (c.verdict === 'reliable_improvement' || c.isResponse),
+  const progressReviewDue = instrumentChanges.some(
+    (c) => c.verdict === 'reliable_improvement' || c.verdict === 'deterioration' || c.isResponse,
   );
 
   const workingDiagnosis: JourneyWorkingDiagnosis | null = primaryDiagnosis
@@ -147,25 +149,24 @@ export async function computeClientJourney(
 
   const stage: JourneyStage = isDischarged
     ? 'DISCHARGED'
-    : deriveStage({
+    : deriveJourneyStage({
         completedCount,
         hasActivePlan: activePlanRow !== null,
         sessionsSincePlan,
-        dischargeReady,
+        progressReviewDue,
       });
 
   const nextBestAction = isDischarged
     ? dischargedAction(clientId, instrumentChanges.length > 0)
-    : deriveNextBestAction({
+    : deriveJourneyNextBestAction({
         clientId,
         lastCompletedSessionId: lastSession?.id ?? null,
         stage,
         completedCount,
-        hasInstruments: instrumentRows.length > 0,
+        hasInstruments: episodeScoped.length > 0,
         hasPrimaryDiagnosis: primaryDiagnosis !== null,
         hasActivePlan: activePlanRow !== null,
         instrumentChanges,
-        dischargeReady,
       });
 
   return {
@@ -217,20 +218,20 @@ function dischargedAction(clientId: string, canShareReport: boolean): NextBestAc
 // Stage + action derivation (pure given the gathered inputs).
 // ============================================================================
 
-function deriveStage(input: {
+export function deriveJourneyStage(input: {
   completedCount: number;
   hasActivePlan: boolean;
   sessionsSincePlan: number;
-  dischargeReady: boolean;
+  progressReviewDue: boolean;
 }): JourneyStage {
   if (input.completedCount === 0) return 'INTAKE';
   if (!input.hasActivePlan) return 'ASSESSMENT';
-  if (input.dischargeReady) return 'DISCHARGE_READY';
+  if (input.progressReviewDue) return 'REVIEW_DUE';
   if (input.sessionsSincePlan >= REVIEW_THRESHOLD_SESSIONS) return 'REVIEW_DUE';
   return 'ACTIVE_TREATMENT';
 }
 
-function deriveNextBestAction(input: {
+export function deriveJourneyNextBestAction(input: {
   clientId: string;
   /** Sprint 52 — fed to the not-improving CTA so it deep-links to the AI Copilot Briefing sub-tab. */
   lastCompletedSessionId: string | null;
@@ -240,7 +241,6 @@ function deriveNextBestAction(input: {
   hasPrimaryDiagnosis: boolean;
   hasActivePlan: boolean;
   instrumentChanges: InstrumentChange[];
-  dischargeReady: boolean;
 }): NextBestAction | null {
   const instrumentsAnchor = `/app/clients/${input.clientId}/journey#measure-phq9`;
 
@@ -249,46 +249,24 @@ function deriveNextBestAction(input: {
     return {
       kind: 'CONTINUE',
       tone: 'info',
-      title: 'Record the intake session',
+      title: 'Start the first session',
       detail:
-        'This client has no completed session yet. Record an intake to start the clinical picture.',
-      ctaLabel: 'Go to Record',
-      ctaHref: '/app',
+        'Agree the purpose with the client and begin understanding their priorities. Choose the appropriate documentation mode; recording is optional.',
+      ctaLabel: 'Prepare session',
+      ctaHref: `/app/encounters/new?record=${encodeURIComponent(input.clientId)}`,
     };
   }
 
-  // 2. Baseline measurement is the foundation of measurement-based care.
-  if (!input.hasInstruments) {
-    return {
-      kind: 'ADMINISTER_BASELINE',
-      tone: 'info',
-      title: 'Set a baseline — administer PHQ-9 + GAD-7',
-      detail:
-        'You can only show progress against a starting point. Administer the recommended screeners now so every later session measures change.',
-      ctaLabel: 'Administer now',
-      ctaHref: instrumentsAnchor,
-    };
-  }
-
-  // 3. Discharge signal takes priority over routine continuation.
-  if (input.dischargeReady) {
-    return {
-      kind: 'CONSIDER_DISCHARGE',
-      tone: 'positive',
-      title: 'Remission reached — consider discharge',
-      detail:
-        'The latest screener is in the remission range with a reliable improvement from baseline. Review goals and plan an outcome summary for the client.',
-      ctaLabel: null,
-      ctaHref: null,
-    };
-  }
-
-  // 4. Not-on-track alert — the highest-value MBC signal.
-  const stalled = input.instrumentChanges.find(
-    (c) =>
-      c.administrationCount >= NOT_IMPROVING_MIN_ADMINISTRATIONS &&
-      c.verdict !== 'reliable_improvement',
-  );
+  // A worsening measure outranks improvement elsewhere, including after just
+  // two administrations (the existing reliable-change verdict is sufficient).
+  const worsened = input.instrumentChanges.find((c) => c.verdict === 'deterioration');
+  const stalled =
+    worsened ??
+    input.instrumentChanges.find(
+      (c) =>
+        c.administrationCount >= NOT_IMPROVING_MIN_ADMINISTRATIONS &&
+        c.verdict !== 'reliable_improvement',
+    );
   if (input.hasActivePlan && stalled) {
     // Sprint 52 → TSC-V2 — link the "not improving" action to the Case
     // Consult, now in the Journey page's "story so far" section. That's
@@ -297,46 +275,62 @@ function deriveNextBestAction(input: {
     return {
       kind: 'REVIEW_PLAN_NOT_IMPROVING',
       tone: 'warn',
-      title: 'Not improving as expected — review the plan',
-      detail: `${stalled.instrumentKey} has shown no reliable improvement across ${stalled.administrationCount} administrations. Clients who aren't on track benefit most from an early change of course — revisit the formulation or step up the plan.`,
+      title: worsened
+        ? 'Review worsening alongside the whole case'
+        : 'Not improving as expected — review the plan',
+      detail: worsened
+        ? `${worsened.instrumentKey} shows reliable deterioration, even if another measure improved. Review safety, functioning, goals and the client’s experience before deciding next steps.`
+        : `${stalled.instrumentKey} has shown no reliable improvement across ${stalled.administrationCount} administrations. Review alongside goals, functioning and the client’s experience; the score alone does not determine whether care is helping.`,
       ctaLabel: consultHref ? 'Get a case consult' : null,
       ctaHref: consultHref,
     };
   }
 
-  // 5. Confirmed diagnosis but no plan → confirm one.
-  if (input.hasPrimaryDiagnosis && !input.hasActivePlan) {
+  // No clinical readiness inference: the clinician/client decide next steps.
+  if (input.hasActivePlan && input.stage === 'REVIEW_DUE') {
     return {
-      kind: 'CONFIRM_PLAN',
+      kind: 'CONTINUE',
       tone: 'info',
-      title: 'Confirm a treatment plan',
+      title: 'Review progress together',
       detail:
-        'A primary diagnosis is on record but there is no active treatment plan. Confirm one from the Clinical Brief so the next sessions have a structure.',
+        'Review all available measures, goals, functioning, safety and client preferences. The psychologist and client decide whether to continue, adapt or plan an ending; improvement on a questionnaire is not discharge readiness.',
       ctaLabel: null,
       ctaHref: null,
     };
   }
 
-  // 6. Assessment in progress — close the gaps to reach a diagnosis.
-  if (!input.hasActivePlan && !input.hasPrimaryDiagnosis) {
+  // Counselling can have an agreed plan without a psychiatric diagnosis.
+  if (!input.hasActivePlan) {
     return {
-      kind: 'BOOK_ASSESSMENT',
+      kind: 'CONFIRM_PLAN',
       tone: 'info',
-      title: 'Continue the assessment',
+      title: 'Agree goals and a care plan',
       detail:
-        'No diagnosis is confirmed yet. Run an assessment session to close the open questions, then confirm a primary diagnosis from the Clinical Brief.',
-      ctaLabel: 'Go to Record',
-      ctaHref: '/app',
+        'Review the client’s priorities and shared understanding, continue assessment where needed, and agree a plan together. A diagnosis is not required for every counselling journey.',
+      ctaLabel: null,
+      ctaHref: null,
     };
   }
 
-  // 7. On track — nothing to nudge.
+  if (!input.hasInstruments) {
+    return {
+      kind: 'ADMINISTER_BASELINE',
+      tone: 'info',
+      title: 'Consider a relevant questionnaire',
+      detail:
+        'PHQ-9 and GAD-7 are available if relevant. Goals, functioning and client feedback also inform progress; a questionnaire is optional and does not block counselling.',
+      ctaLabel: 'Review questionnaires',
+      ctaHref: instrumentsAnchor,
+    };
+  }
+
+  // The absence of an alert is not proof that the client is on track.
   return {
     kind: 'CONTINUE',
-    tone: 'positive',
-    title: 'On track',
+    tone: 'info',
+    title: 'Check in on the agreed plan',
     detail:
-      'Continue with the current plan. Re-administer screeners every few sessions to keep the trend live.',
+      'Review how the client is experiencing the work and progress towards their goals. Use relevant measures alongside clinical judgment to decide whether to continue or adapt.',
     ctaLabel: null,
     ctaHref: null,
   };

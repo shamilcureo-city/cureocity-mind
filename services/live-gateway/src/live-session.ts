@@ -13,6 +13,7 @@ import type {
   SessionKind,
   SessionModality,
   TherapyLiveContext,
+  TherapyApprovedCaseContext,
   TherapyNoteV1,
   Utterance,
   VoiceCommand,
@@ -186,6 +187,7 @@ export class LiveSession {
   private therapyNoteRequested = false;
   private therapyForceNoteRequested = false;
   private therapyAuthorityVersion = 0;
+  private readonly therapyOutputVersions = new WeakMap<LiveGatewayEvent, number>();
   /** One-shot guard so `final` is emitted at most once (real note or fallback). */
   private finalEmitted = false;
   private startedAtMs = 0;
@@ -270,7 +272,14 @@ export class LiveSession {
     this.specialty = specialty;
     this.backends = backends;
     this.emit = (event) => {
-      if (!this.terminal) emit(event);
+      if (this.terminal) return;
+      if (
+        event.type === 'therapyReasoning' ||
+        event.type === 'therapyContextReviewed' ||
+        event.type === 'therapyContextCleared'
+      )
+        this.therapyOutputVersions.set(event, this.therapyAuthorityVersion);
+      emit(event);
     };
     this.windowOpts = windowOpts;
     this.vertical = vertical;
@@ -338,10 +347,59 @@ export class LiveSession {
 
   /** Replace optional scopes after trusted server-side live reauthorization. */
   updateCapabilities(capabilities: ReadonlySet<PractitionerCapability>): void {
-    if (this.has('CLINICAL_ANALYSIS') !== capabilities.has('CLINICAL_ANALYSIS')) {
+    const contextAuthorityLost = (
+      ['CLINICAL_ANALYSIS', 'MEASUREMENT_BASED_CARE', 'THERAPY_WORKFLOWS'] as const
+    ).some((capability) => this.has(capability) && !capabilities.has(capability));
+    // A plain grant must not stale the queued clear receipt from the loss.
+    // No clinical pass can start while that capability is absent, and history
+    // is restored only through another explicit review (which advances epoch).
+    if (contextAuthorityLost) {
       this.therapyAuthorityVersion += 1;
     }
     this.capabilities = capabilities;
+    if (contextAuthorityLost && this.therapyStore) {
+      this.therapyStore.setApprovedCaseContext(null);
+      // This event contains no clinical data and remains deliverable after an
+      // optional scope is revoked. Never leave the UI claiming an old approval.
+      this.emit({ type: 'therapyContextCleared', reason: 'CAPABILITY_CHANGED' });
+      this.emitResetTherapySnapshot();
+    }
+  }
+
+  /** Final send-side check: reauthorization can invalidate already queued output. */
+  isTherapyOutputCurrent(event: LiveGatewayEvent): boolean {
+    if (
+      event.type !== 'therapyReasoning' &&
+      event.type !== 'therapyContextReviewed' &&
+      event.type !== 'therapyContextCleared'
+    )
+      return true;
+    return !this.terminal && this.therapyOutputVersions.get(event) === this.therapyAuthorityVersion;
+  }
+
+  private emitResetTherapySnapshot(): void {
+    if (!this.therapyStore || !this.has('CLINICAL_ANALYSIS')) return;
+    const { snapshot } = this.therapyStore.recompute(this.elapsedMs());
+    this.emit({ type: 'therapyReasoning', reasoning: snapshot });
+  }
+
+  reviewTherapyContext(requestId: string, context: TherapyApprovedCaseContext | null): void {
+    const accepted =
+      !this.terminal &&
+      !this.finalEmitted &&
+      !this.stopped &&
+      this.vertical === 'THERAPIST' &&
+      this.has('CLINICAL_ANALYSIS') &&
+      this.therapyStore !== null &&
+      (!context?.measures.length || this.has('MEASUREMENT_BASED_CARE')) &&
+      (!context?.guide || this.has('THERAPY_WORKFLOWS'));
+    if (accepted) {
+      // Pending results under an earlier background may not publish afterward.
+      this.therapyAuthorityVersion += 1;
+      this.therapyStore!.setApprovedCaseContext(context);
+    }
+    this.emit({ type: 'therapyContextReviewed', requestId, accepted });
+    if (accepted) this.emitResetTherapySnapshot();
   }
 
   /**
@@ -778,6 +836,7 @@ export class LiveSession {
         newUtterances,
         recentUtterances,
         carriedQuestions: store.carriedQuestions,
+        approvedCaseContext: store.approvedCaseContext,
         previousThreads: store.previousThreads(),
         openQuestions: store.openLiveQuestions(),
         priorRisk: store.priorRisk,

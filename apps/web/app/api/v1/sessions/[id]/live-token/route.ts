@@ -89,9 +89,13 @@ export async function POST(
       withClientConsentLock(tx, session.clientId, async () => {
         const current = await tx.session.findUnique({
           where: { id: sessionId },
-          select: { status: true, consentSnapshot: true },
+          select: { status: true, consentSnapshot: true, mindDocumentationMode: true },
         });
         if (!current) throw new ConsentAuthorizationError('Session changed during authorization');
+        if (current.mindDocumentationMode === 'MANUAL')
+          throw new ConsentAuthorizationError(
+            'This session is clinician-written. Audio and AI processing are disabled.',
+          );
         assertLiveTokenSessionStatus(current.status);
 
         await assertValidScribeConsent(current.consentSnapshot, session.clientId, tx);

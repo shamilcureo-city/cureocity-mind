@@ -37,6 +37,7 @@ import {
   TherapyReasoningModelOutputSchema,
   type TherapyReasoningModelOutput,
   type TherapyCarriedQuestion,
+  type TherapyApprovedCaseContext,
 } from '@cureocity/contracts';
 
 // Re-export the cross-service schemas so existing imports from
@@ -564,6 +565,7 @@ export type PassReasoningOutput = z.infer<typeof PassReasoningOutputSchema>;
 // about the session cites utterance ids; the gateway drops uncited items.
 // ============================================================================
 export interface PassTherapyReasoningInput {
+  approvedCaseContext?: TherapyApprovedCaseContext | null;
   sessionId: string;
   /** Only the utterances added since the last pass — incremental. */
   newUtterances: Utterance[];

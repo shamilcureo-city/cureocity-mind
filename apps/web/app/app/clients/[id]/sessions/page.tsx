@@ -31,6 +31,7 @@ export default async function ClientSessionsPage({ params }: PageProps) {
           modality: true,
           status: true,
           captureMode: true,
+          mindDocumentationMode: true,
           therapyNote: { select: { id: true, locked: true, signedAt: true } },
           noteDraft: { select: { status: true } },
         },
@@ -50,7 +51,9 @@ export default async function ClientSessionsPage({ params }: PageProps) {
     >
       <Card className="overflow-hidden">
         {client.sessions.length === 0 ? (
-          <p className="p-6 text-sm text-[var(--color-ink-3)]">No sessions recorded yet.</p>
+          <p className="p-6 text-sm text-[var(--color-ink-3)]">
+            No appointments or session records yet.
+          </p>
         ) : (
           <ul className="divide-y divide-[var(--color-line-soft)]">
             {client.sessions.map((session) => (

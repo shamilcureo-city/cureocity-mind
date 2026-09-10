@@ -49,6 +49,21 @@ beforeEach(() => {
 });
 
 describe('current scribe authority', () => {
+  it.each([
+    'pass2BeforeModel',
+    'clinicalAnalysisBeforeModel',
+    'transcribeChunkBeforeModel',
+  ] as const)('denies manual sessions even with standing consent at %s', async (source) => {
+    mocks.findSession.mockResolvedValue({
+      ...session,
+      mindDocumentationMode: 'MANUAL',
+      status: 'COMPLETED',
+    });
+    await expect(
+      assertCurrentScribeAuthority('session-1', { psychologistId: 'psy-1', source }),
+    ).rejects.toMatchObject({ reason: 'MANUAL_SESSION' });
+    expect(mocks.assertCapabilities).not.toHaveBeenCalled();
+  });
   it('requires active client, all current consents, active practitioner, ambient capture and vertical documentation', async () => {
     await expect(
       assertCurrentScribeAuthority('session-1', {

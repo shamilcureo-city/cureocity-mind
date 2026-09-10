@@ -108,6 +108,7 @@ type LockedSession = {
   status: string;
   kind: string;
   vertical: string;
+  mindDocumentationMode: string | null;
 };
 type LockedDraft = {
   id: string;
@@ -177,7 +178,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     result = await prisma.$transaction(async (tx) => {
       await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
       const sessions = await tx.$queryRaw<LockedSession[]>`
-        SELECT s."id", s."psychologistId", s."status", s."kind", p."vertical"
+        SELECT s."id", s."psychologistId", s."status", s."kind", s."mindDocumentationMode", p."vertical"
         FROM "sessions" s
         INNER JOIN "psychologists" p ON p."id" = s."psychologistId"
         WHERE s."id" = ${sessionId}
@@ -223,6 +224,17 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       // The client PHI lock is also held by autosave, discard and canonical
       // save. A signature must never silently omit an unapplied checkpoint.
       if (session.vertical === 'THERAPIST') {
+        if (session.mindDocumentationMode === 'MANUAL') {
+          const manualDraft = await tx.mindManualNoteDraft.findUnique({
+            where: { sessionId },
+            select: { encryptedFields: true },
+          });
+          if (manualDraft?.encryptedFields != null)
+            throw new SigningHttpError(
+              409,
+              'Your clinician-written draft has unapplied changes. Finish and review it before signing.',
+            );
+        }
         const recovery = await tx.noteEditRecovery.findUnique({
           where: { sessionId },
           select: { encryptedFields: true },

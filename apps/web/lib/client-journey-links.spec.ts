@@ -15,6 +15,14 @@ function sourceFiles(path: string): string[] {
 }
 
 describe('client-owned journey and plan links', () => {
+  it('does not imply a diagnosis requirement or assessment clearance from an empty ledger', () => {
+    const board = read('components/app/CareBoard.tsx');
+    const nextSession = read('components/app/CareNextSessionPanel.tsx');
+    expect(board).toContain("DIAGNOSE: { label: 'Understand'");
+    expect(nextSession).toContain('No open questions recorded. Continue assessment as needed.');
+    expect(nextSession).not.toContain('clear enough to proceed');
+  });
+
   it('eliminates missing historical client anchors everywhere', () => {
     const offenders = sourceFiles(root)
       .filter((path) => !path.endsWith('client-journey-links.spec.ts'))

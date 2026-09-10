@@ -70,6 +70,7 @@ export async function POST(
       clientId: true,
       scheduledAt: true,
       status: true,
+      mindDocumentationMode: true,
       language: true,
       kind: true,
       modality: true,
@@ -83,6 +84,11 @@ export async function POST(
   if (!session || session.psychologistId !== auth.value.psychologistId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
+  if (session.mindDocumentationMode === 'MANUAL')
+    return NextResponse.json(
+      { error: 'This session is clinician-written. Live note ingestion is disabled.' },
+      { status: 409 },
+    );
 
   const documentationCapability =
     session.psychologist.vertical === 'DOCTOR'

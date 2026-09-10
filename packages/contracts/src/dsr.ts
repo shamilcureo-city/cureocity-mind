@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { CuidSchema, IndianPhoneSchema, IsoDateTimeSchema } from './common';
 import { ConsentScopeSchema } from './consent';
+import { SessionAgreementDtoSchema } from './formulation';
+import { MindManualNoteFieldsSchema } from './mind-manual-note';
+import { MindInstrumentDraftStateSchema } from './mind-instrument-draft';
+import { MindCareRecordDtoSchema } from './mind-care-record';
 
 // ============================================================================
 // DPDP Act Data Subject Rights — § 11 access, § 12 correction,
@@ -41,6 +45,32 @@ export const DsrDataExportSchema = z.object({
   ),
   /** Counts only — full session content is exported separately for size. */
   sessionCount: z.number().int().nonnegative(),
+  /** Current care decisions with their preserved correction/amendment history. */
+  sessionAgreements: z.array(SessionAgreementDtoSchema).optional(),
+  /** Unfinished records are included too; cryptographic retry receipts are not disclosures. */
+  mindManualNoteDrafts: z
+    .array(
+      z.object({
+        sessionId: z.string(),
+        mindPurpose: z.string().nullable(),
+        revision: z.number().int(),
+        updatedAt: IsoDateTimeSchema,
+        fields: MindManualNoteFieldsSchema.nullable(),
+      }),
+    )
+    .optional(),
+  mindInstrumentDrafts: z.array(MindInstrumentDraftStateSchema).optional(),
+  mindCareRecords: z.array(MindCareRecordDtoSchema.omit({ operationId: true })).optional(),
+  assignmentProvenance: z
+    .array(
+      z.object({
+        id: z.string(),
+        sourceAgreementId: z.string().nullable(),
+        sourceAgreementRevision: z.number().int().nullable(),
+      }),
+    )
+    .optional(),
+  omittedMindSections: z.array(z.string()).optional(),
   moodLogCount: z.number().int().nonnegative(),
   journalEntryCount: z.number().int().nonnegative(),
   exerciseAssignmentCount: z.number().int().nonnegative(),

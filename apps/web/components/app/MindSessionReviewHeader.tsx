@@ -1,9 +1,11 @@
 import styles from './MindSessionReview.module.css';
+import { mindSessionPurposeLabel } from '@cureocity/contracts';
 
 export interface MindSessionReviewHeaderProps {
   clientName: string;
   sessionDate: string;
   sessionKind: string;
+  mindPurpose?: string | null;
   status: string;
   isDemo?: boolean;
   spokenLanguageLabel?: string;
@@ -14,6 +16,7 @@ export function MindSessionReviewHeader({
   clientName,
   sessionDate,
   sessionKind,
+  mindPurpose,
   status,
   isDemo,
   spokenLanguageLabel,
@@ -25,7 +28,7 @@ export function MindSessionReviewHeader({
         <h1>{clientName}</h1>
         <div className={styles.metadata}>
           <span>{sessionDate}</span>
-          <span>{sessionKind.toLowerCase().replace(/_/g, ' ')} session</span>
+          <span>{mindSessionPurposeLabel(mindPurpose, sessionKind)}</span>
           {spokenLanguageLabel && <span>Spoken in {spokenLanguageLabel}</span>}
           {isDemo && <span>Example client</span>}
         </div>

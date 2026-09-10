@@ -34,12 +34,10 @@ export function MindTodayMilestones({
         </svg>
       </div>
       <div className={styles.milestoneCopy}>
-        <h2 id="documentation-heading">
-          {allSigned ? 'Today’s session records are signed.' : 'A little less to carry home.'}
-        </h2>
+        <h2 id="documentation-heading">Today’s documentation</h2>
         <p>
           {progress.completed === 0
-            ? 'Your documentation progress appears here after a real session.'
+            ? 'No completed non-example sessions on today’s agenda.'
             : `${progress.signed} of ${progress.completed} completed session${progress.completed === 1 ? '' : 's'} on today’s agenda signed${progress.ready > 0 ? ` · ${progress.ready} ready to review` : ''}.`}
         </p>
         {progress.completed > 0 && (

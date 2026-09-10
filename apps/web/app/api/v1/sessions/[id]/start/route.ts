@@ -6,6 +6,7 @@ import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
 import {
   assertValidScribeConsent,
+  ConsentAuthorizationError,
   consentAuthorizationResponse,
   withClientConsentLock,
 } from '@/lib/consent-gate';
@@ -54,8 +55,12 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       withClientConsentLock(tx, existing.clientId, async () => {
         const current = await tx.session.findUnique({
           where: { id: sessionId },
-          select: { consentSnapshot: true },
+          select: { consentSnapshot: true, mindDocumentationMode: true },
         });
+        if (current?.mindDocumentationMode === 'MANUAL')
+          throw new ConsentAuthorizationError(
+            'This session is clinician-written. Audio and AI processing are disabled.',
+          );
         await assertValidScribeConsent(current?.consentSnapshot ?? null, existing.clientId, tx);
 
         const row = await conditionalSessionTransition(tx, {

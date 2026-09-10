@@ -1150,8 +1150,8 @@ function CloseoutReceipt({ clientId }: { clientId: string }) {
     <Card className="mb-6 border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-5">
       <p className="font-serif text-xl">Note signed</p>
       <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-        The signed note is saved. Complete any remaining Review &amp; Close decisions, continue with
-        today’s work, or return to this client.
+        The signed note is saved. Next steps are optional. Return to today’s work or this client;
+        signing has not sent anything.
       </p>
       <div className="mt-3 flex flex-wrap gap-3 text-sm font-medium">
         <Link href="/app/today" className="text-[var(--color-accent)] hover:underline">
@@ -1329,9 +1329,17 @@ function SignAndSendBar({
                     : 'Sign & send'}
         </Button>
         {focusedReview && (
-          <p className="mt-2 text-center text-xs text-[var(--color-ink-2)]">
-            Signing saves your clinical record. Sharing is a separate choice.
-          </p>
+          <div className="mt-2 text-center text-xs text-[var(--color-ink-2)]">
+            <p>Signing saves your clinical record. Sharing is a separate choice.</p>
+            {!blocked && !signing && recoveryStatus === 'none' && (
+              <Link
+                href="/app/today"
+                className="mt-3 inline-block text-sm text-[var(--color-accent)] underline underline-offset-4"
+              >
+                Leave as a saved unsigned draft
+              </Link>
+            )}
+          </div>
         )}
         {signError && (
           <p className="mt-2 px-1 text-xs text-[var(--color-warn)]" role="alert">

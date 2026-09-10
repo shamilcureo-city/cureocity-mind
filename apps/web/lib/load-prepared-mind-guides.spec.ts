@@ -247,11 +247,45 @@ function loadPage() {
 
 async function liveProps() {
   const element = await loadPage();
-  return (element.props as { children: React.ReactElement<Record<string, unknown>> }).children
-    .props;
+  const children = [element.props.children].flat(Infinity) as React.ReactElement<
+    Record<string, unknown>
+  >[];
+  const live = children.find((child) => child?.props?.sessionId === session.id);
+  expect(live, 'live workspace remains available beside historical safety context').toBeDefined();
+  return live!.props;
 }
 
 describe('live Mind page prepared-guide boundary', () => {
+  it('shows prior clinician-written risk as a historical source, without inventing a suicidal-ideation flag', async () => {
+    mocks.crises.mockResolvedValue([
+      {
+        kind: 'clinician_documented_risk',
+        severity: 'critical',
+        source: 'CLINICIAN_NOTE_DRAFT',
+        sourceSessionId: 'prior-manual-visit',
+      },
+    ]);
+    const element = await loadPage();
+    const children = React.Children.toArray(element.props.children) as React.ReactElement<
+      Record<string, unknown>
+    >[];
+    const banner = children.find((child) => child.type === 'aside');
+    expect(banner?.props.role).toBe('alert');
+    const content = React.Children.toArray(
+      banner?.props.children as React.ReactNode,
+    ) as React.ReactElement<Record<string, unknown>>[];
+    expect(content.some((child) => child.props.href === '/app/sessions/prior-manual-visit')).toBe(
+      true,
+    );
+    expect(
+      content.some(
+        (child) =>
+          typeof child.props.children === 'string' &&
+          child.props.children.includes('not a current safety assessment'),
+      ),
+    ).toBe(true);
+    expect(await liveProps()).toMatchObject({ priorRisk: false });
+  });
   it('redirects doctors before resolving client or guide data', async () => {
     mocks.authenticate.mockResolvedValue({ id: 'doctor-1', vertical: 'DOCTOR' });
     await expect(loadPage()).rejects.toThrow('REDIRECT:/app/clinic');

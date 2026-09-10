@@ -4,6 +4,9 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
+import { loadClientAgreementExport } from '@/lib/session-agreement-export';
+import { ClientPhiWriteForbiddenError } from '@/lib/phi-write-lock';
+import { loadMindCareDataExport } from '@/lib/mind-care-data-export';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -85,6 +88,29 @@ export async function GET(
 
   const exportedAt = new Date().toISOString();
 
+  let sessionAgreements;
+  let mindData;
+  try {
+    const exported = await prisma.$transaction(async (tx) => ({
+      sessionAgreements: await loadClientAgreementExport(tx, clientId, auth.value.psychologistId),
+      mindData: await loadMindCareDataExport(
+        tx,
+        clientId,
+        auth.value.psychologistId,
+        new Set(auth.value.user.capabilities ?? []),
+      ),
+    }));
+    sessionAgreements = exported.sessionAgreements;
+    mindData = exported.mindData;
+  } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError)
+      return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    return NextResponse.json(
+      { error: 'The clinical export could not be prepared. Please retry.' },
+      { status: 503 },
+    );
+  }
+
   await writeAudit({
     actorType: 'PSYCHOLOGIST',
     actorPsychologistId: auth.value.psychologistId,
@@ -123,6 +149,8 @@ export async function GET(
       withdrawnAt: c.withdrawnAt?.toISOString() ?? null,
     })),
     sessionCount,
+    sessionAgreements,
+    ...mindData,
     moodLogCount,
     journalEntryCount,
     exerciseAssignmentCount,
@@ -150,6 +178,7 @@ export async function GET(
 
   return NextResponse.json(body, {
     headers: {
+      'Cache-Control': 'private, no-store',
       'Content-Disposition': `attachment; filename="dsr-export-${clientId.slice(0, 8)}-${exportedAt.slice(0, 10)}.json"`,
     },
   });

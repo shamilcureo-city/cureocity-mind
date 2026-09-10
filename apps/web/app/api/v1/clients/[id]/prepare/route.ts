@@ -15,6 +15,7 @@ import { fetchOpenCrises } from '@/lib/crisis-flags';
 import { computeClientJourney, JourneyError } from '@/lib/journey';
 import { privateJson, privateResponse } from '@/lib/private-response';
 import { prisma } from '@/lib/prisma';
+import { loadActiveSessionAgreements } from '@/lib/active-session-agreements';
 
 /** TE2 — stored `Client.carriedQuestions` JSON, parsed defensively. */
 const CarriedQuestionsArraySchema = z.array(CarriedQuestionSchema).max(8);
@@ -123,8 +124,8 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   const briefIsStale =
     cachedBrief !== null && cachedBriefRow?.lastSessionId !== (lastCompleted?.id ?? null);
 
-  const [assignments, openCrises, agreementRows, formulationRow, diagnosisRows] = await Promise.all(
-    [
+  const [assignments, openCrises, agreementRows, formulationRow, diagnosisRows, activeCommitments] =
+    await Promise.all([
       hasCapability('THERAPY_WORKFLOWS')
         ? prisma.exerciseAssignment.findMany({
             where: { clientId },
@@ -166,8 +167,8 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
         take: 6,
         select: { icd11Code: true, icd11Label: true, isPrimary: true },
       }),
-    ],
-  );
+      loadActiveSessionAgreements(prisma, clientId, auth.value.psychologistId),
+    ]);
 
   const homework: PrepareHomeworkEntry[] = assignments.map((a) => {
     const response = a.response as {
@@ -197,6 +198,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     text: r.text,
     speaker: r.speaker,
     followUp: r.followUp,
+    revision: r.revision,
     createdAt: r.createdAt.toISOString(),
   }));
 
@@ -236,6 +238,9 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     openCrises,
     lastCompletedSessionId: lastCompleted?.id ?? null,
     lastAgreements,
+    activeAgreements: activeCommitments.agreements,
+    activeAgreementCount: activeCommitments.total,
+    activeAgreementsNextCursor: activeCommitments.nextCursor,
     formulationSnapshot,
     // TE2 — the Record screen's in-room checklist + case glance. Both are
     // read-only echoes of state the therapist already confirmed; a parse

@@ -32,6 +32,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           psychologistId: true,
           status: true,
           captureMode: true,
+          mindDocumentationMode: true,
           clientId: true,
           psychologist: { select: { vertical: true } },
         },
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       body.tokenExpiresAt <= Math.floor(Date.now() / 1_000) ||
       session.status !== 'IN_PROGRESS' ||
       session.captureMode !== 'LIVE' ||
+      session.mindDocumentationMode === 'MANUAL' ||
       SCRIBE_CONSENT_SCOPES.some((scope) => !currentConsentScopes.has(scope))
     ) {
       throw new Error('denied');

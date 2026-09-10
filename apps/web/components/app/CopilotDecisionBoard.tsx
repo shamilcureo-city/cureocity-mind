@@ -1,10 +1,8 @@
 'use client';
-
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type {
-  AgreementSpeaker,
   AllianceRating,
   AssessmentGapPurpose,
   CarriedQuestion,
@@ -30,7 +28,6 @@ import { describePassError } from '@/lib/pass-error';
 import { isSuggestionApplied } from '@/lib/formulation-applied';
 import { Card } from '../ui/Card';
 import { PlanEditor } from './PlanEditor';
-import { ShareModal } from './ShareModal';
 
 // ============================================================================
 // Sprint TSC — the copilot decision board.
@@ -158,12 +155,9 @@ export function CopilotDecisionBoard({
   sessionKind,
   initialReport,
   initialBrief,
-  reviewedAt,
   record,
   closeout,
-  canShare,
   canUseMeasures,
-  embeddedCloseout = false,
 }: Props) {
   const router = useRouter();
   const isIntake = sessionKind === 'INTAKE';
@@ -595,11 +589,10 @@ export function CopilotDecisionBoard({
           {safetyStep}
           <Card className="border-dashed p-8 text-center">
             <p className="text-sm font-semibold text-[var(--color-ink-2)]">
-              Remaining steps unlock after the safety review above
+              Other suggestions are available after the safety review above
             </p>
             <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-              Impression · Ask next · Plan · Wrap up &amp; sign — nothing is lost, it&rsquo;s
-              waiting.
+              Diagnostic suggestions, questions and plan support remain available after this review.
             </p>
           </Card>
         </div>
@@ -636,83 +629,83 @@ export function CopilotDecisionBoard({
           <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
             {/* ================= AI lane ================= */}
             <div className="space-y-4">
-              <LaneLabel>AI suggests — in the order you&rsquo;d work</LaneLabel>
+              <LaneLabel>AI suggestions — choose what is useful</LaneLabel>
 
               {safetyStep}
 
-              <ImpressionStep
-                sessionId={sessionId}
-                clientId={clientId}
-                isIntake={isIntake}
-                impression={data.impression}
-                fullFormulation={data.fullFormulation}
-                candidates={data.candidates}
-                confirmation={confirmations?.diagnosis ?? null}
-                recordDiagnoses={record.diagnoses}
-                formulationSuggestions={closeout.formulationSuggestions}
-                formulationBody={closeout.formulationBody}
-                onAcceptFormulation={acceptFormulationSuggestion}
-                onAcceptTreatment={(selected, primaryInSelected, reason, keepCodes) =>
-                  patchSection('diagnosis', {
-                    action: 'modify',
-                    reason,
-                    edits: {
-                      diagnosisCandidates: selected,
-                      primaryDiagnosisIndex: primaryInSelected,
-                      keepDiagnosisCodes: keepCodes,
-                    },
-                  })
-                }
-                onAcceptIntake={acceptIntakeDiagnosis}
-              />
-
-              <AskNextStep
-                sessionId={sessionId}
-                clientId={clientId}
-                gaps={data.gaps}
-                carried={record.carriedQuestions}
-                resolvedLabel={
-                  record.diagnoses.find((d) => d.isPrimary)?.icd11Label ??
-                  (data.primaryIndex !== null
-                    ? (data.candidates[data.primaryIndex]?.icd11Label ?? null)
-                    : null)
-                }
-                onSaved={() => router.refresh()}
-              />
-
-              <PlanStep
-                isIntake={isIntake}
-                decision={report?.planSuggestionDecision ?? null}
-                plan={data.plan}
-                planSuggestions={data.planSuggestions}
-                therapies={data.therapies}
-                confirmation={confirmations?.plan ?? null}
-                recordPlan={record.plan}
-                planHref={`/app/clients/${clientId}/plan`}
-                onAccept={() => patchSection('plan', { action: 'accept' })}
-                onModify={(edits, reason) =>
-                  patchSection('plan', { action: 'modify', reason, edits })
-                }
-                onApplySuggestions={applyPlanSuggestions}
-                onDraftPlan={acceptIntakePlan}
-              />
-
-              {!embeddedCloseout && (
-                <WrapUpSignStep
+              <details className="rounded-xl border border-[var(--color-line-soft)] bg-white">
+                <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                  Explore diagnostic evidence and formulation
+                </summary>
+                <ImpressionStep
                   sessionId={sessionId}
                   clientId={clientId}
                   isIntake={isIntake}
-                  hasCrisis={data.crisisFlags.length > 0}
-                  crisisAcknowledged={crisisAcknowledged}
-                  record={record}
-                  reviewedAt={reviewedAt}
-                  measuresHref={measuresHref}
-                  recommendedInstruments={data.recommendedInstruments}
-                  closeout={closeout}
-                  canShare={canShare}
-                  canUseMeasures={canUseMeasures}
+                  impression={data.impression}
+                  fullFormulation={data.fullFormulation}
+                  candidates={data.candidates}
+                  confirmation={confirmations?.diagnosis ?? null}
+                  recordDiagnoses={record.diagnoses}
+                  formulationSuggestions={closeout.formulationSuggestions}
+                  formulationBody={closeout.formulationBody}
+                  onAcceptFormulation={acceptFormulationSuggestion}
+                  onAcceptTreatment={(selected, primaryInSelected, reason, keepCodes) =>
+                    patchSection('diagnosis', {
+                      action: 'modify',
+                      reason,
+                      edits: {
+                        diagnosisCandidates: selected,
+                        primaryDiagnosisIndex: primaryInSelected,
+                        keepDiagnosisCodes: keepCodes,
+                      },
+                    })
+                  }
+                  onAcceptIntake={acceptIntakeDiagnosis}
                 />
-              )}
+              </details>
+
+              <details className="rounded-xl border border-[var(--color-line-soft)] bg-white">
+                <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                  Choose next-session questions
+                </summary>
+                <AskNextStep
+                  sessionId={sessionId}
+                  clientId={clientId}
+                  gaps={data.gaps}
+                  carried={record.carriedQuestions}
+                  onSaved={() => router.refresh()}
+                />
+              </details>
+
+              <details className="rounded-xl border border-[var(--color-line-soft)] bg-white">
+                <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
+                  Review plan suggestions
+                </summary>
+                <PlanStep
+                  isIntake={isIntake}
+                  decision={report?.planSuggestionDecision ?? null}
+                  plan={data.plan}
+                  planSuggestions={data.planSuggestions}
+                  therapies={data.therapies}
+                  confirmation={confirmations?.plan ?? null}
+                  recordPlan={record.plan}
+                  planHref={`/app/clients/${clientId}/plan`}
+                  onAccept={() => patchSection('plan', { action: 'accept' })}
+                  onModify={(edits, reason) =>
+                    patchSection('plan', { action: 'modify', reason, edits })
+                  }
+                  onApplySuggestions={applyPlanSuggestions}
+                  onDraftPlan={acceptIntakePlan}
+                />
+              </details>
+
+              <AdditionalSessionDetails
+                sessionId={sessionId}
+                measuresHref={measuresHref}
+                recommendedInstruments={data.recommendedInstruments}
+                closeout={closeout}
+                canUseMeasures={canUseMeasures}
+              />
             </div>
 
             {/* ================= Your record lane ================= */}
@@ -754,14 +747,12 @@ function AiChip({ inline = false }: { inline?: boolean }) {
 }
 
 function Step({
-  no,
   title,
   titleExtra,
   sub,
   tone = 'ai',
   children,
 }: {
-  no: number;
   title: string;
   titleExtra?: React.ReactNode;
   sub: string;
@@ -776,15 +767,6 @@ function Step({
     >
       <AiChip />
       <div className="flex gap-3 p-5">
-        <span
-          className={`mt-0.5 grid h-7 w-7 flex-none place-items-center rounded-full text-[13px] font-bold ${
-            tone === 'risk'
-              ? 'bg-[var(--color-warn-soft)] text-[var(--color-warn)]'
-              : 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
-          }`}
-        >
-          {no}
-        </span>
         <div className="min-w-0 flex-1">
           <p className="flex flex-wrap items-center gap-2 text-[15.5px] font-semibold">
             {title}
@@ -879,7 +861,11 @@ function SafetyStep({
 
   if (flags.length === 0) {
     return (
-      <Step no={1} title="Safety first" sub="Checked on every reading." tone="ai">
+      <Step
+        title="Safety suggestions"
+        sub="AI-generated flags are not a completed safety assessment."
+        tone="ai"
+      >
         <p className="text-sm text-[var(--color-ink-2)]">
           No safety flags detected in this session.
           {safetyPlanConfirmedAt && (
@@ -894,7 +880,6 @@ function SafetyStep({
 
   return (
     <Step
-      no={1}
       title="Safety first"
       titleExtra={
         <span className="rounded-full bg-[var(--color-warn)] px-2.5 py-px text-[10.5px] font-bold tracking-[0.06em] text-white">
@@ -1161,7 +1146,6 @@ function ImpressionStep({
 
   return (
     <Step
-      no={2}
       title="Working impression"
       sub={
         isIntake
@@ -1481,16 +1465,12 @@ function AskNextStep({
   clientId,
   gaps,
   carried,
-  resolvedLabel,
   onSaved,
 }: {
   sessionId: string;
   clientId: string;
   gaps: ClinicalAssessmentGap[];
   carried: CarriedQuestion[];
-  /// Primary confirmed/candidate label, shown in the "assessment complete"
-  /// state so it reads "resolved to X".
-  resolvedLabel: string | null;
   onSaved: () => void;
 }) {
   const initialSelected = useMemo(
@@ -1602,22 +1582,20 @@ function AskNextStep({
 
   return (
     <Step
-      no={3}
       title="Ask next session"
       sub={
         gaps.length === 0
-          ? 'The AI found nothing material still open.'
-          : `${gaps.length} still open · saves as you tick — nothing else to press. Regenerated each session; shrinks as your assessment completes.`
+          ? 'No additional questions were generated. This is not an assessment-completion check.'
+          : `${gaps.length} suggested questions. Select only what you want to carry forward; each choice is saved.`
       }
     >
       {gaps.length === 0 ? (
         <div className="rounded-xl border border-dashed border-[var(--color-line)] bg-white/30 p-4 text-[13px]">
-          <b className="text-[var(--color-accent)]">✓ Assessment complete</b>
+          <b>No further questions suggested by this draft.</b>
           <span className="text-[var(--color-ink-2)]">
             {' '}
-            — the differential has resolved
-            {resolvedLabel ? ` to ${resolvedLabel}` : ''}. Nothing material is open; carry a
-            question only if you want to revisit it.
+            This does not mean the assessment is complete or that a diagnosis is established. Carry
+            a question only if you want to revisit it.
           </span>
         </div>
       ) : (
@@ -1888,7 +1866,6 @@ function PlanStep({
   if (confirmed) {
     return (
       <Step
-        no={4}
         title="Plan"
         sub="This session's plan decision is in your record — the plan itself lives on the Plan of care tab."
       >
@@ -1947,7 +1924,6 @@ function PlanStep({
 
   return (
     <Step
-      no={4}
       title="Plan"
       sub="No plan on record yet — accepting versions this suggestion as plan v1, yours to edit, and every future session builds on it."
     >
@@ -2072,7 +2048,6 @@ function PlanDiffStep({
   if (suggestions.length === 0) {
     return (
       <Step
-        no={4}
         title="Plan"
         sub="This client already has a plan — the copilot only suggests changes when a session warrants one."
       >
@@ -2097,7 +2072,6 @@ function PlanDiffStep({
 
   return (
     <Step
-      no={4}
       title="Plan"
       sub="Suggested edits to your existing plan — apply the ones you agree with. Your plan is never replaced wholesale."
     >
@@ -2261,7 +2235,6 @@ function IntakePlanStep({
 
   return (
     <Step
-      no={4}
       title="Plan"
       sub="Tick the approaches you'd start with — drafting opens the plan editor pre-filled, and saving creates treatment plan v1."
     >
@@ -2391,11 +2364,8 @@ const ADMINISTERABLE: { key: string; label: string }[] = [
 ];
 
 // ============================================================================
-// Step 5 — Wrap up decisions. The board remains the place to resolve
-// clinical suggestions, agreements, and alliance. The authoritative signature
-// ceremony lives only in Review & Close; this card links there when unfinished.
-// ============================================================================
-
+// Optional measures and clinician reflection, not a completion checklist.
+// Agreements have one canonical editor alongside the note.
 const ALLIANCE_OPTIONS: { key: AllianceRating; label: string; hint: string }[] = [
   { key: 'ROUGH', label: 'Rough', hint: 'strained today' },
   { key: 'FLAT', label: 'Flat', hint: 'went through the motions' },
@@ -2403,396 +2373,90 @@ const ALLIANCE_OPTIONS: { key: AllianceRating; label: string; hint: string }[] =
   { key: 'STRONG', label: 'Strong', hint: 'real work happened' },
 ];
 
-function WrapUpSignStep({
+function AdditionalSessionDetails({
   sessionId,
-  clientId,
-  isIntake,
-  hasCrisis,
-  crisisAcknowledged,
-  record,
-  reviewedAt,
+  closeout,
+  canUseMeasures,
   measuresHref,
   recommendedInstruments,
-  closeout,
-  canShare,
-  canUseMeasures,
 }: {
   sessionId: string;
-  clientId: string;
-  isIntake: boolean;
-  hasCrisis: boolean;
-  crisisAcknowledged: boolean;
-  record: CaseRecordSnapshot;
-  reviewedAt: string | null;
+  closeout: CloseoutData;
+  canUseMeasures: boolean;
   measuresHref: string;
   recommendedInstruments: string[];
-  closeout: CloseoutData;
-  canShare: boolean;
-  canUseMeasures: boolean;
 }) {
-  // ----- agreements (in the client's words; next session's Prepare reads these)
-  const [agreements, setAgreements] = useState<SessionAgreementDto[]>(closeout.agreements);
-  const [agreementText, setAgreementText] = useState('');
-  const [agreementSpeaker, setAgreementSpeaker] = useState<AgreementSpeaker>('CLIENT');
-  const [agreementBusy, setAgreementBusy] = useState(false);
-  const [agreementError, setAgreementError] = useState<string | null>(null);
-
-  const addAgreement = async (): Promise<void> => {
-    const text = agreementText.trim();
-    if (!text) return;
-    setAgreementBusy(true);
-    setAgreementError(null);
-    try {
-      const res = await fetch(`/api/v1/sessions/${sessionId}/agreements`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, speaker: agreementSpeaker }),
-      });
-      if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Could not record the agreement (${res.status})`);
-      }
-      const body = (await res.json()) as { agreement: SessionAgreementDto };
-      setAgreements((prev) => [...prev, body.agreement]);
-      setAgreementText('');
-    } catch (e) {
-      setAgreementError((e as Error).message);
-    } finally {
-      setAgreementBusy(false);
-    }
-  };
-
-  const removeAgreement = async (agreementId: string): Promise<void> => {
-    setAgreementError(null);
-    const prev = agreements;
-    setAgreements((cur) => cur.filter((a) => a.id !== agreementId));
-    const res = await fetch(`/api/v1/sessions/${sessionId}/agreements/${agreementId}`, {
-      method: 'DELETE',
-    }).catch(() => null);
-    if (!res || !res.ok) {
-      setAgreements(prev);
-      setAgreementError('Could not remove the agreement — try again.');
-    }
-  };
-
-  // ----- alliance (one tap; drift shows here before it shows in scores)
   const [alliance, setAlliance] = useState<AllianceRating | null>(closeout.alliance);
-  const [allianceError, setAllianceError] = useState<string | null>(null);
-
-  const rateAlliance = async (rating: AllianceRating): Promise<void> => {
-    setAllianceError(null);
-    const prev = alliance;
-    setAlliance(rating);
-    const res = await fetch(`/api/v1/sessions/${sessionId}/feedback`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ alliance: rating }),
-    }).catch(() => null);
-    if (!res || !res.ok) {
-      setAlliance(prev);
-      setAllianceError('Could not save — try again.');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function rateAlliance(rating: AllianceRating) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/v1/sessions/${sessionId}/feedback`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ alliance: rating }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error('Save not confirmed');
+      setAlliance(rating);
+    } catch {
+      setError('The rating could not be confirmed. Please retry; no new saved rating is shown.');
+    } finally {
+      setBusy(false);
     }
-  };
-
-  const signed = closeout.signed;
-  const [shareOpen, setShareOpen] = useState(false);
-
-  const hasBaseline = record.instruments.some((i) =>
-    ADMINISTERABLE.some((a) => a.key === i.instrumentKey),
-  );
-  const otherRecommendations = recommendedInstruments.filter(
-    (k) => !ADMINISTERABLE.some((a) => a.key === normaliseInstrumentKey(k)),
-  );
-
-  const rows: { label: string; done: boolean; detail: string; href?: string }[] = [
-    {
-      label: 'Safety review',
-      done: !hasCrisis || crisisAcknowledged,
-      detail: !hasCrisis ? 'no flags' : crisisAcknowledged ? 'reviewed' : 'acknowledge in step 1',
-    },
-    {
-      label: 'Working diagnosis',
-      done: record.diagnoses.length > 0,
-      detail:
-        record.diagnoses.length > 0
-          ? `${record.diagnoses.find((d) => d.isPrimary)?.icd11Code ?? record.diagnoses[0]!.icd11Code} accepted`
-          : 'none accepted yet',
-    },
-    {
-      label: 'Questions for next session',
-      done: record.carriedQuestions.length > 0,
-      detail:
-        record.carriedQuestions.length > 0
-          ? `${record.carriedQuestions.length} carried`
-          : 'none carried',
-    },
-    {
-      label: 'Treatment plan',
-      done: record.plan !== null,
-      detail: record.plan
-        ? `v${record.plan.version} created`
-        : isIntake
-          ? 'draft v1 in step 4'
-          : 'not accepted',
-    },
-    ...(canUseMeasures
-      ? [
-          {
-            label: 'Measures',
-            done: hasBaseline,
-            detail: hasBaseline
-              ? 'on file'
-              : `administer now${otherRecommendations.length > 0 ? ` · also suggested: ${otherRecommendations.join(', ')}` : ''}`,
-            href: hasBaseline ? undefined : measuresHref,
-          },
-        ]
-      : []),
-  ];
-
-  const firstName = closeout.clientName.split(' ')[0] ?? closeout.clientName;
-
+  }
   return (
-    <Card className="relative border-t-[3px] border-t-[var(--color-accent)]">
-      <div className="flex gap-3 p-5">
-        <span className="mt-0.5 grid h-7 w-7 flex-none place-items-center rounded-full bg-[var(--color-accent-soft)] text-[13px] font-bold text-[var(--color-accent)]">
-          5
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[15.5px] font-semibold">Wrap up decisions</p>
-          <p className="mb-3 mt-0.5 text-xs text-[var(--color-ink-3)]">
-            Resolve the clinical decisions here, then finish once in Review &amp; Close.
-          </p>
-
-          <div className="space-y-1.5">
-            {rows.map((r) => (
-              <div
-                key={r.label}
-                className="flex items-center gap-2 rounded-xl border border-[var(--color-line-soft)] px-3 py-2 text-[13.5px]"
-              >
-                <span
-                  className={r.done ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-3)]'}
-                >
-                  {r.done ? '✓' : '○'}
-                </span>
-                <span className="font-medium">{r.label}</span>
-                <span className="ml-auto text-right text-xs text-[var(--color-ink-3)]">
-                  {r.detail}
-                </span>
-                {r.href && (
-                  <Link
-                    href={r.href}
-                    className="text-xs font-semibold text-[var(--color-accent)] underline"
-                  >
-                    do it →
-                  </Link>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {/* What we agreed — the client's words where possible. */}
-          <div className="mt-4">
-            <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
-              What we agreed
+    <details className="rounded-xl border border-[var(--color-line-soft)] bg-white p-4">
+      <summary className="cursor-pointer text-sm font-medium">
+        Optional measures and session reflection
+      </summary>
+      {canUseMeasures && (
+        <div className="mt-4 text-sm">
+          <Link href={measuresHref} className="text-[var(--color-accent)] underline">
+            Review or administer measures
+          </Link>
+          {recommendedInstruments.length > 0 && (
+            <p className="mt-1 text-xs text-[var(--color-ink-2)]">
+              Suggested in this draft: {recommendedInstruments.join(', ')}. Check suitability before
+              use.
             </p>
-            {agreements.length > 0 && (
-              <ul className="mt-2 flex flex-wrap gap-1.5">
-                {agreements.map((a) => (
-                  <li
-                    key={a.id}
-                    className="inline-flex items-center gap-2 rounded-full bg-[var(--color-accent-soft)] px-3 py-1.5 text-xs"
-                  >
-                    <span>{a.speaker === 'CLIENT' ? `\u201c${a.text}\u201d` : a.text}</span>
-                    {!signed && (
-                      <button
-                        type="button"
-                        onClick={() => void removeAgreement(a.id)}
-                        className="text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
-                        aria-label="Remove agreement"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {!signed && (
-              <div className="mt-2 space-y-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <SpeakerChip
-                    active={agreementSpeaker === 'CLIENT'}
-                    onClick={() => setAgreementSpeaker('CLIENT')}
-                    label="Client's words"
-                  />
-                  <SpeakerChip
-                    active={agreementSpeaker === 'THERAPIST'}
-                    onClick={() => setAgreementSpeaker('THERAPIST')}
-                    label="Mine"
-                  />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    type="text"
-                    value={agreementText}
-                    onChange={(e) => setAgreementText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        void addAgreement();
-                      }
-                    }}
-                    maxLength={500}
-                    placeholder={
-                      agreementSpeaker === 'CLIENT'
-                        ? 'e.g. "I\u2019ll text Priya before Saturday, even if I don\u2019t feel like it"'
-                        : 'e.g. Bring the sleep diary next session'
-                    }
-                    className="min-w-0 flex-1 rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
-                  />
-                  <Act
-                    onClick={() => void addAgreement()}
-                    disabled={agreementBusy || agreementText.trim() === ''}
-                  >
-                    {agreementBusy ? 'Adding…' : 'Add'}
-                  </Act>
-                </div>
-              </div>
-            )}
-            {agreementError && (
-              <p className="mt-2 text-xs text-[var(--color-warn)]">{agreementError}</p>
-            )}
-          </div>
-
-          {/* One-tap alliance read. */}
-          <div className="mt-4">
-            <p className="text-[10.5px] font-bold uppercase tracking-[0.1em] text-[var(--color-ink-3)]">
-              How did it feel
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {ALLIANCE_OPTIONS.map((o) => {
-                const active = alliance === o.key;
-                return (
-                  <button
-                    key={o.key}
-                    type="button"
-                    onClick={() => void rateAlliance(o.key)}
-                    className={`rounded-full border px-3.5 py-1.5 text-sm transition-colors ${
-                      active
-                        ? 'border-[var(--color-accent)] bg-[var(--color-accent)] font-medium text-white'
-                        : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)] hover:border-[var(--color-accent)]'
-                    }`}
-                    aria-pressed={active}
-                    title={o.hint}
-                  >
-                    {o.label}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-1.5 text-[11px] text-[var(--color-ink-3)]">
-              Your read, one tap — alliance drift shows here before it shows in the scores.
-            </p>
-            {allianceError && (
-              <p className="mt-1 text-xs text-[var(--color-warn)]">{allianceError}</p>
-            )}
-          </div>
-
-          {/* The signature. */}
-          <div className="mt-5 border-t border-[var(--color-line-soft)] pt-4">
-            {signed && closeout.noteUnlocked ? (
-              // The signed note was re-opened for editing — the session is
-              // NOT closed right now, and sharing the superseded signed
-              // content would be wrong.
-              <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
-                <b>Note re-opened for editing.</b> The earlier signature is superseded until you
-                re-sign — finish the edit and sign again on the{' '}
-                <Link
-                  href={`/app/sessions/${sessionId}?tab=note`}
-                  className="font-semibold underline underline-offset-2"
-                >
-                  Notes tab →
-                </Link>
-              </div>
-            ) : signed ? (
-              <div className="flex flex-wrap items-center gap-3">
-                <DoneChip>
-                  Note signed
-                  {signed.signerName ? ` — signed by ${signed.signerName}` : ''} ·{' '}
-                  {formatDate(signed.signedAt)}
-                </DoneChip>
-                {canShare && <Act onClick={() => setShareOpen(true)}>Share with {firstName}…</Act>}
-                <span className="text-[11px] text-[var(--color-ink-3)]">
-                  Decisions above stay revisable — a change after signing is versioned.
-                </span>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href={`/app/sessions/${sessionId}?tab=note`}
-                  className="inline-flex h-10 items-center justify-center rounded-full bg-[var(--color-accent)] px-5 text-sm font-semibold text-white"
-                >
-                  Continue to Review &amp; Close
-                </Link>
-                <span className="max-w-md text-[11px] text-[var(--color-ink-3)]">
-                  {closeout.noteReady
-                    ? 'Review the note and use the one completion checklist there.'
-                    : 'The note is still being prepared; Review & Close will update automatically.'}
-                </span>
-              </div>
-            )}
-            {reviewedAt && !signed && (
-              <p className="mt-2 text-[11px] text-[var(--color-ink-3)]">
-                Clinical suggestions reviewed {formatDate(reviewedAt)}.
-              </p>
-            )}
-          </div>
+          )}
         </div>
-      </div>
-
-      {canShare && (
-        <ShareModal
-          open={shareOpen}
-          onClose={() => setShareOpen(false)}
-          clientId={clientId}
-          hasContactPhone={closeout.hasContactPhone}
-          hasContactEmail={closeout.hasContactEmail}
-          artefact={
-            isIntake
-              ? { artefactType: 'SIGNED_INTAKE_NOTE', sessionId }
-              : { artefactType: 'SIGNED_NOTE', sessionId }
-          }
-          artefactLabel={isIntake ? 'Signed intake summary' : 'Session summary'}
-          defaultLanguage={closeout.preferredLanguage}
-          mindSessionId={sessionId}
-        />
       )}
-    </Card>
-  );
-}
-
-function SpeakerChip({
-  active,
-  onClick,
-  label,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-        active
-          ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] font-medium text-[var(--color-accent)]'
-          : 'border-[var(--color-line)] bg-white text-[var(--color-ink-2)]'
-      }`}
-      aria-pressed={active}
-    >
-      {label}
-    </button>
+      <p className="mt-4 text-sm font-medium">How did the session feel?</p>
+      <p className="mt-1 text-xs text-[var(--color-ink-2)]">
+        Optional clinician reflection, separate from the client's feedback.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {ALLIANCE_OPTIONS.map((option) => (
+          <Button
+            key={option.key}
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            aria-pressed={alliance === option.key}
+            onClick={() => void rateAlliance(option.key)}
+            title={option.hint}
+          >
+            {option.label}
+            {alliance === option.key ? ' · saved' : ''}
+          </Button>
+        ))}
+      </div>
+      {busy && (
+        <p role="status" className="mt-2 text-xs">
+          Saving reflection…
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-2 text-sm text-[var(--color-warn)]">
+          {error}
+        </p>
+      )}
+    </details>
   );
 }
 
@@ -2868,7 +2532,7 @@ function RecordLane({
             </span>
           </p>
         ) : (
-          <RecEmpty>No safety concerns on file.</RecEmpty>
+          <RecEmpty>No safety flags in this draft.</RecEmpty>
         )}
       </RecBlock>
       <RecBlock label="Measures">
@@ -2891,7 +2555,7 @@ function RecordLane({
       </RecBlock>
       <RecBlock label="Next session will open with">
         {record.carriedQuestions.length === 0 ? (
-          <RecEmpty>Nothing carried yet — tick questions in step 3.</RecEmpty>
+          <RecEmpty>No questions selected. Choose one only if useful.</RecEmpty>
         ) : (
           <div className="text-[12.5px] text-[var(--color-ink-2)]">
             <ul className="list-disc space-y-0.5 pl-4">
@@ -2983,9 +2647,4 @@ function formatDate(iso: string | null): string {
 
 function capitalise(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-/** "PHQ-9" / "phq9" → "PHQ9" so recommended keys match the registry. */
-function normaliseInstrumentKey(key: string): string {
-  return key.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }

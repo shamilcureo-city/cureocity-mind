@@ -23,6 +23,7 @@
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { INDEX_NAME_CUTOFF, overlongMigrationIndexNames } from './migration-index-names.mjs';
 
 const MIGRATIONS_DIR = 'prisma/migrations';
 // Enforced from the review-followups migration onward. Everything earlier
@@ -41,7 +42,14 @@ for (const dir of readdirSync(MIGRATIONS_DIR).sort()) {
   if (!existsSync(file)) continue;
 
   // Strip line comments so a comment mentioning "CREATE TABLE" can't trip us.
-  const sql = readFileSync(file, 'utf8').replace(/--[^\n]*/g, '');
+  const source = readFileSync(file, 'utf8');
+  const sql = source.replace(/--[^\n]*/g, '');
+
+  for (const { name, bytes } of overlongMigrationIndexNames(source, match[1])) {
+    problems.push(
+      `${dir}: CREATE INDEX ${JSON.stringify(name)} is ${bytes} UTF-8 bytes (PostgreSQL limit: 63); use a shorter explicit name`,
+    );
+  }
 
   if (/\bCREATE TABLE\b(?!\s+IF NOT EXISTS)/i.test(sql)) {
     problems.push(`${dir}: CREATE TABLE without "IF NOT EXISTS"`);
@@ -128,11 +136,12 @@ if (!existsSync(orbitPath)) {
 }
 
 if (problems.length > 0) {
-  console.error('✖ Non-idempotent migration DDL (must be replay-safe):\n');
+  console.error('✖ Unsafe migration DDL (must be replay-safe without identifier truncation):\n');
   for (const p of problems) console.error('  - ' + p);
   console.error(
     '\nGuard new DDL so the P3009 self-heal can replay it:\n' +
       '  • CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS / ADD COLUMN IF NOT EXISTS\n' +
+      `  • Explicit CREATE INDEX names must be at most 63 UTF-8 bytes from ${INDEX_NAME_CUTOFF}\n` +
       '  • ALTER TYPE … ADD VALUE IF NOT EXISTS (for new enum values)\n' +
       '  • CREATE TYPE inside:\n' +
       '      DO $$ BEGIN CREATE TYPE "Foo" AS ENUM (...);\n' +
@@ -144,3 +153,4 @@ if (problems.length > 0) {
 }
 
 console.log(`✓ Migrations on/after ${CUTOFF} use idempotent (replay-safe) DDL.`);
+console.log(`✓ Explicit index names on/after ${INDEX_NAME_CUTOFF} fit PostgreSQL's 63-byte limit.`);

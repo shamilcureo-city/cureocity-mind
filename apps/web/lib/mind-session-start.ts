@@ -3,9 +3,17 @@ export type MindStartSource = 'TODAY' | 'WALK_IN' | 'RECORD' | 'CLIENT';
 
 /** A visit's current state determines its destination, not the list it appears in. */
 export function mindSessionDestination(
-  session: { id: string; clientId: string; status: string; captureMode?: string | null },
+  session: {
+    id: string;
+    clientId: string;
+    status: string;
+    captureMode?: string | null;
+    mindDocumentationMode?: string | null;
+  },
   defaultCapture: MindCaptureMode = 'LIVE',
 ): string {
+  if (session.mindDocumentationMode === 'MANUAL')
+    return `/app/sessions/${encodeURIComponent(session.id)}`;
   if (session.status === 'IN_PROGRESS' && session.captureMode === 'LIVE') {
     return `/app/sessions/${encodeURIComponent(session.id)}/live`;
   }

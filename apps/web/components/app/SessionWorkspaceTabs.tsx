@@ -17,8 +17,7 @@ interface Props {
 }
 
 const TABS: TabSpec[] = [
-  { key: 'note', label: 'Review & close' },
-  { key: 'review', label: 'Clinical context' },
+  { key: 'note', label: 'Review & finish' },
   { key: 'transcript', label: 'Transcript' },
   { key: 'details', label: 'Session details' },
 ];

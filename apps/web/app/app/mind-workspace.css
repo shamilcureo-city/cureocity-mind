@@ -6,7 +6,7 @@
   --color-surface-soft: #f0eef9;
   --color-ink: #232339;
   --color-ink-2: #5e5e74;
-  --color-ink-3: #717187;
+  --color-ink-3: #626278;
   --color-line: #dcdbea;
   --color-line-soft: #e9e7f2;
   --color-accent: #6659c9;
@@ -222,6 +222,7 @@
   border-radius: 14px;
 }
 .mind-workspace-shell .mind-mode-picker button {
+  min-height: 44px;
   border-radius: 11px;
   padding: 10px 16px;
   font-size: 13px;
@@ -251,6 +252,18 @@
   font-size: 13px;
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* Keep focus targets readable without enlarging inline clinical links. These
+   are navigation/actions, never clinical status or validation indicators. */
+.mind-workspace-shell .mind-nav-link {
+  min-height: 44px;
+}
+.mind-workspace-shell .mind-content :where(h1, h2, h3, h4) {
+  overflow-wrap: anywhere;
+}
+.mind-workspace-shell .mind-content :where(input, textarea, select) {
+  scroll-margin-block: 6rem;
 }
 
 @media (max-width: 767px) {
