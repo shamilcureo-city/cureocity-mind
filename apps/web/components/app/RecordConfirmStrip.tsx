@@ -28,6 +28,13 @@ import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-s
 import { MindSessionPreflight } from './MindSessionPreflight';
 import { PreparePanel } from './PreparePanel';
 import { formatIstDate } from '@/lib/ist';
+import { mindCaptureRetentionCopy } from '@/lib/mind-capture-copy';
+import {
+  MindVisitResolutionError,
+  MindVisitSelection,
+  type SelectedMindVisit,
+} from '@/lib/mind-visit-selection';
+import { SessionPreparationPanel } from './SessionPreparationPanel';
 
 type ConfirmMode = 'live-capture' | 'dictation' | 'upload';
 
@@ -53,6 +60,7 @@ interface Props {
    */
   videoEnabled?: boolean;
   expectedSessionId?: string | null;
+  sessionPreparationEnabled?: boolean;
   initialGuideId?: string;
   onCancel: () => void;
   onReady: (result: RecordReady) => void;
@@ -144,6 +152,7 @@ export function RecordConfirmStrip({
   defaultCapture = 'LIVE',
   videoEnabled = true,
   expectedSessionId = null,
+  sessionPreparationEnabled = false,
   initialGuideId,
   onCancel,
   onReady,
@@ -183,6 +192,14 @@ export function RecordConfirmStrip({
   const startingRef = useRef<AbortController | null>(null);
   useEffect(() => () => startingRef.current?.abort(), []);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [visitSelection] = useState(() => new MindVisitSelection(clientId, expectedSessionId));
+  const [preparationSessionId, setPreparationSessionId] = useState(expectedSessionId);
+  const [preparationPending, setPreparationPending] = useState(false);
+  const [preparationDirty, setPreparationDirty] = useState(false);
+  const [savedManualMode, setSavedManualMode] = useState(false);
+  const [selectedVisitSettings, setSelectedVisitSettings] = useState<SelectedMindVisit | null>(
+    null,
+  );
   const [preflightReady, setPreflightReady] = useState(false);
   const [confirmedToday, setConfirmedToday] = useState(false);
   const [manual, setManual] = useState(false);
@@ -233,22 +250,32 @@ export function RecordConfirmStrip({
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     void (async () => {
       setLoading(true);
       setLoadError(null);
       try {
         const res = await fetch(`/api/v1/clients/${clientId}/session-defaults`, {
           cache: 'no-store',
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `Could not load defaults (${res.status})`);
         }
         const payload = (await res.json()) as { defaults: SessionDefaults };
+        const booked = expectedSessionId
+          ? await visitSelection.read(
+              AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
+            )
+          : null;
         if (cancelled) return;
         setDefaults(payload.defaults);
-        setModality(payload.defaults.modality);
-        setLanguage(payload.defaults.language);
+        setSelectedVisitSettings(booked);
+        setModality(booked ? booked.modality : payload.defaults.modality);
+        setLanguage(booked ? (booked.language ?? '') : payload.defaults.language);
+        setSavedManualMode(booked?.mindDocumentationMode === 'MANUAL');
+        if (booked?.mindDocumentationMode === 'MANUAL') setManual(true);
         const missing: Record<string, boolean> = {};
         for (const scope of payload.defaults.consentsNeeded) {
           // ALL required scopes are surfaced — including
@@ -266,72 +293,66 @@ export function RecordConfirmStrip({
     })();
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [clientId]);
+  }, [clientId, expectedSessionId, visitSelection]);
 
-  async function start(): Promise<void> {
-    if (!defaults || startingRef.current) return;
+  async function start(prepareOnly = false): Promise<void> {
+    if (!defaults || startingRef.current || preparationPending) return;
+    if (
+      !prepareOnly &&
+      preparationDirty &&
+      !window.confirm(
+        'Your preparation edits are not saved. Start this visit without saving those edits?',
+      )
+    )
+      return;
     const controller = new AbortController();
     startingRef.current = controller;
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]);
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const createRes = await fetch('/api/v1/sessions', {
-        method: 'POST',
-        signal,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId,
+      const sessionRow = await visitSelection.resolve(
+        {
           modality: modality ?? undefined,
           // FLOW-3 — send the chosen note language so it's persisted on the
           // session (was dropped, so every note generated in English).
-          language,
+          ...(language ? { language } : {}),
           ...(purpose ? { mindPurpose: purpose } : {}),
-          ...(manual ? { mindDocumentationMode: 'MANUAL' } : {}),
-          scheduledAt: new Date().toISOString(),
-          // TS3 (F1) — starting now: reuse today's booked session for this
-          // client instead of minting a duplicate that orphans the slot.
-          startNow: true,
-          ...(expectedSessionId ? { expectedSessionId } : {}),
-        }),
-      });
-      signal.throwIfAborted();
-      if (!createRes.ok) {
-        const body = (await createRes.json().catch(() => ({}))) as {
-          error?: string;
-          code?: string;
-          entitlement?: BillingEntitlement;
-        };
-        if (
-          createRes.status === 402 &&
-          (body.code === 'TRIAL_CAP_REACHED' || body.code === 'PLAN_CAP_REACHED') &&
-          body.entitlement
-        ) {
-          // Sprint 53/56 — soft cap. Show the in-product upgrade modal
-          // and stop the create flow without writing a generic error.
-          setUpgradePrompt({
-            variant: body.code === 'TRIAL_CAP_REACHED' ? 'TRIAL_CAP' : 'PLAN_CAP',
-            entitlement: body.entitlement,
-          });
+          ...(manual && !prepareOnly ? { mindDocumentationMode: 'MANUAL' } : {}),
+        },
+        signal,
+      );
+      setPreparationSessionId(sessionRow.id);
+      setSelectedVisitSettings(sessionRow);
+      setModality(sessionRow.modality);
+      setLanguage(sessionRow.language ?? '');
+      setSavedManualMode(sessionRow.mindDocumentationMode === 'MANUAL');
+      if (
+        !prepareOnly &&
+        !selectedVisitSettings &&
+        (sessionRow.modality !== modality ||
+          (sessionRow.language !== undefined && sessionRow.language !== language))
+      ) {
+        setSubmitError(
+          'This selected visit has saved settings. Review the therapy style and note language below, then start when ready.',
+        );
+        setShowDetails(true);
+        return;
+      }
+      if (sessionRow.mindDocumentationMode === 'MANUAL' && !manual) {
+        setManual(true);
+        if (!prepareOnly) {
+          setSubmitError(
+            'This visit uses a clinician-written note. Select Start without recording to continue.',
+          );
           return;
         }
-        throw new Error(body.error ?? `Create session failed (${createRes.status})`);
       }
-      const sessionRow = (await createRes.json()) as {
-        id: string;
-        kind: SessionKind;
-        modality: SessionModality | null;
-        status?: string;
-        updatedAt: string;
-        mindDocumentationMode?: string | null;
-      };
-      signal.throwIfAborted();
-      if (expectedSessionId && sessionRow.id !== expectedSessionId) {
-        throw new Error(
-          'The booked session changed while preflight was open. Return to Today and try again.',
-        );
-      }
+      // Explicit optional preparation selects a visit only. Consent, capture
+      // and manual-note start are reached only by the separate Start action.
+      if (prepareOnly) return;
 
       // Manual visits never acknowledge technology consent, mint a live token,
       // ask for a microphone or call the audio/AI lifecycle.
@@ -448,7 +469,24 @@ export function RecordConfirmStrip({
         ...(startAfterCaptureActive ? { startAfterCaptureActive: true } : {}),
       });
     } catch (err) {
-      if (!controller.signal.aborted) setSubmitError((err as Error).message);
+      if (!controller.signal.aborted) {
+        if (
+          err instanceof MindVisitResolutionError &&
+          err.status === 402 &&
+          (err.body.code === 'TRIAL_CAP_REACHED' || err.body.code === 'PLAN_CAP_REACHED') &&
+          err.body.entitlement
+        ) {
+          setUpgradePrompt({
+            variant: err.body.code === 'TRIAL_CAP_REACHED' ? 'TRIAL_CAP' : 'PLAN_CAP',
+            entitlement: err.body.entitlement as BillingEntitlement,
+          });
+        } else
+          setSubmitError(
+            visitSelection.needsVisitLookup
+              ? 'The visit may have been created. Open Today to select it before continuing; do not create another visit.'
+              : (err as Error).message,
+          );
+      }
     } finally {
       startingRef.current = null;
       if (!controller.signal.aborted) setSubmitting(false);
@@ -465,21 +503,29 @@ export function RecordConfirmStrip({
 
   // Build the kind-aware chip line ("Treatment session · CBT · English").
   // INTAKE intentionally omits the modality chip.
-  const selectedKind = purpose ? sessionKindForMindPurpose(purpose) : defaults?.kind;
+  const selectedKind = purpose
+    ? sessionKindForMindPurpose(purpose)
+    : (selectedVisitSettings?.kind ?? defaults?.kind);
   const isIntake = selectedKind === 'INTAKE';
   const chipParts: string[] = [];
   if (defaults) {
     chipParts.push(mindSessionPurposeLabel(purpose, selectedKind ?? defaults.kind));
     if (!isIntake && modality) chipParts.push(MODALITY_LABEL[modality]);
-    chipParts.push(LANGUAGE_LABEL[language] ?? language);
+    chipParts.push(language ? (LANGUAGE_LABEL[language] ?? language) : 'Saved visit language');
   }
 
   return (
     <Card className="p-7">
       <button
         type="button"
-        onClick={onCancel}
-        disabled={submitting}
+        onClick={() => {
+          if (
+            !preparationDirty ||
+            window.confirm('Your preparation edits are not saved. Discard them and go back?')
+          )
+            onCancel();
+        }}
+        disabled={submitting || preparationPending}
         className="mb-5 text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
         ← Back
@@ -498,7 +544,50 @@ export function RecordConfirmStrip({
               : KIND_SUBLINE[defaults.kind](defaults)}
           </p>
 
-          {mode === 'live-capture' && <PreparePanel clientId={clientId} summaryVisible />}
+          {mode === 'live-capture' && (
+            <PreparePanel
+              clientId={clientId}
+              summaryVisible
+              hideDeviceScratch={sessionPreparationEnabled}
+            />
+          )}
+
+          {sessionPreparationEnabled && mode === 'live-capture' && (
+            <div className="mt-5 space-y-2">
+              {preparationSessionId ? (
+                <SessionPreparationPanel
+                  key={preparationSessionId}
+                  sessionId={preparationSessionId}
+                  clientId={clientId}
+                  clientName={clientName}
+                  readOnly={submitting}
+                  onPendingChange={setPreparationPending}
+                  onDirtyChange={setPreparationDirty}
+                />
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className="py-2 text-sm text-[var(--color-accent)] underline"
+                    disabled={submitting || visitSelection.needsVisitLookup}
+                    onClick={() => void start(true)}
+                  >
+                    Select a visit to prepare (optional)
+                  </button>
+                  <p className="text-xs text-[var(--color-ink-3)]">
+                    Uses an open visit for today, or creates one if none exists. You will see the
+                    selected visit before saving a focus. Nothing records or starts here.
+                  </p>
+                </>
+              )}
+              <Link
+                href="/app/today"
+                className="inline-block py-2 text-xs text-[var(--color-accent)] underline"
+              >
+                Choose a different visit in Today
+              </Link>
+            </div>
+          )}
 
           <details className="mt-5 rounded-2xl border border-[var(--color-line)] p-4">
             <summary className="cursor-pointer text-sm font-medium">
@@ -533,6 +622,7 @@ export function RecordConfirmStrip({
                 groupName="documentation"
                 checked={!manual}
                 onSelect={() => setManual(false)}
+                disabled={savedManualMode}
                 title="Use the scribe"
                 description="Record with the client’s permission and review AI-assisted notes."
               />
@@ -544,6 +634,13 @@ export function RecordConfirmStrip({
                 description="No recording. No AI processing. Save securely and sign when ready."
               />
             </div>
+          )}
+
+          {savedManualMode && (
+            <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+              This selected visit uses a clinician-written note. No recording or AI processing
+              starts here.
+            </p>
           )}
 
           {!manual && mode === 'live-capture' && (
@@ -724,9 +821,9 @@ export function RecordConfirmStrip({
 
           {!manual && (
             <p className="mt-5 text-xs leading-relaxed text-[var(--color-ink-3)]">
-              {defaults.consentsAlreadyGranted.length > 0
-                ? 'Recording and AI notes were agreed at signup. Audio is processed in India and deleted after 30 days; AI note analysis may process the transcript outside India, under the consent on file.'
-                : 'Consent is pending — please tick the boxes above before you start.'}
+              {mindCaptureRetentionCopy({ mode, method, capture })} AI note processing may use the
+              transcript outside India only under the required consent. Confirm today’s permissions
+              before starting.
             </p>
           )}
           {manual && (
@@ -747,7 +844,12 @@ export function RecordConfirmStrip({
             >
               {showDetails ? 'Hide details' : 'Change details'}
             </button>
-            <Button onClick={start} disabled={!ready || submitting}>
+            <Button
+              onClick={() => void start()}
+              disabled={
+                !ready || submitting || preparationPending || visitSelection.needsVisitLookup
+              }
+            >
               {submitting
                 ? 'Starting…'
                 : manual
@@ -771,10 +873,16 @@ export function RecordConfirmStrip({
                   <Select
                     id="rcs-modality"
                     value={modality ?? ''}
+                    disabled={!!selectedVisitSettings}
                     onChange={(e) =>
                       setModality((e.target.value || null) as SessionModality | null)
                     }
                   >
+                    {selectedVisitSettings && (modality === null || modality === 'INTAKE') && (
+                      <option value={modality ?? ''}>
+                        {modality === 'INTAKE' ? 'Assessment' : 'Not selected'}
+                      </option>
+                    )}
                     {MODALITY_OPTIONS.map((m) => (
                       <option key={m.value} value={m.value}>
                         {m.label}
@@ -782,7 +890,9 @@ export function RecordConfirmStrip({
                     ))}
                   </Select>
                   <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                    {SOURCE_PHRASE[defaults.modalitySource]}
+                    {selectedVisitSettings
+                      ? 'Saved for this visit. Changing today’s purpose may determine its therapy style.'
+                      : SOURCE_PHRASE[defaults.modalitySource]}
                   </p>
                 </div>
               )}
@@ -791,15 +901,23 @@ export function RecordConfirmStrip({
                 <Select
                   id="rcs-language"
                   value={language}
+                  disabled={!!selectedVisitSettings}
                   onChange={(e) => setLanguage(e.target.value)}
                 >
+                  {selectedVisitSettings && !language && (
+                    <option value="">Saved visit language</option>
+                  )}
                   {LANGUAGE_OPTIONS.map((l) => (
                     <option key={l.value} value={l.value}>
                       {l.label}
                     </option>
                   ))}
                 </Select>
-                <p className="mt-1 text-xs text-[var(--color-ink-3)]">Their preferred language.</p>
+                <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                  {selectedVisitSettings
+                    ? 'Uses the saved note language for this visit. It cannot be changed from this start screen.'
+                    : 'Choose before selecting or preparing this visit.'}
+                </p>
               </div>
             </div>
           )}

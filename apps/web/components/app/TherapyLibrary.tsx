@@ -13,13 +13,19 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { ShareModal } from './ShareModal';
 import { MindTherapyGuide } from './MindTherapyGuide';
+import {
+  EMDR_GUIDE_TRAINING_NOTICE,
+  MIND_THERAPY_GUIDE_KIND_LABELS,
+  mindTherapyGuideChoice,
+  type MindTherapyGuideChoice,
+} from '@/lib/mind-therapy-catalog';
 
 interface TherapyLibraryProps {
   clientId: string;
   /** Preserve the case rationale where the psychologist chooses an approach. */
   recommendedTherapies: ClinicalRecommendedTherapy[];
-  /** Always-available fallback list for browse mode. */
-  libraryTherapies: string[];
+  /** Existing browse choices, classified without implying approved content. */
+  libraryTherapies: readonly MindTherapyGuideChoice[];
   defaultLanguage: 'en' | 'ml' | 'hi' | 'ta' | 'bn';
   /** Id of the client's currently active treatment plan, if any. */
   activeTreatmentPlanId: string | null;
@@ -116,9 +122,7 @@ export function TherapyLibrary({
   // "Recommended" only.
   const visibleLibrary = useMemo(
     () =>
-      libraryTherapies
-        .filter((t) => !recommendedTherapies.some((item) => item.name === t))
-        .map((name) => ({ name })),
+      libraryTherapies.filter((t) => !recommendedTherapies.some((item) => item.name === t.name)),
     [libraryTherapies, recommendedTherapies],
   );
 
@@ -128,12 +132,12 @@ export function TherapyLibrary({
         <div>
           <h2 className="font-serif text-2xl">Session guides</h2>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            Choose an approach to prepare a case-specific draft. Review its fit, then open your
-            step-by-step companion. Your judgment leads the session.
+            Choose an approach, technique or protocol stage to prepare a case-specific draft. Review
+            its fit before use. Your judgment leads the session.
           </p>
           <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-2)]">
-            These are AI drafts, not approved therapy protocols. A diagnosis is not required. Choose
-            an approach within your training and review its suitability with the client.
+            These are AI drafts, not reviewed therapy protocols. A diagnosis is not required.
+            Choosing a guide does not change the client’s diagnosis, plan or protocol stage.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -157,14 +161,14 @@ export function TherapyLibrary({
       {activeTherapy === null ? (
         <div className="space-y-5">
           <TherapyList
-            title="Suggested approaches to consider"
-            empty="No suggestions yet. You can explore an approach below; a disorder diagnosis is not required to prepare a draft."
+            title="Suggested guides to consider"
+            empty="No suggestions yet. You can explore a guide below; a disorder diagnosis is not required to prepare a draft."
             therapies={recommendedTherapies}
             onPick={(t) => void loadScript(t)}
           />
           <TherapyList
             title="Explore the library"
-            empty="No library therapies configured."
+            empty="No additional guide choices."
             therapies={visibleLibrary}
             onPick={(t) => void loadScript(t)}
           />
@@ -180,6 +184,9 @@ export function TherapyLibrary({
             >
               ← back to library
             </button>
+          </div>
+          <div className="mt-3">
+            <TherapyGuideClassification name={activeTherapy} />
           </div>
           {loading && (
             <p role="status" className="mt-4 text-sm text-[var(--color-ink-2)]">
@@ -292,7 +299,7 @@ export function TherapyLibrary({
   );
 }
 
-function TherapyList({
+export function TherapyList({
   title,
   empty,
   therapies,
@@ -300,7 +307,12 @@ function TherapyList({
 }: {
   title: string;
   empty: string;
-  therapies: { name: string; rationale?: string; evidenceSummary?: string; whenInPlan?: string }[];
+  therapies: readonly {
+    name: string;
+    rationale?: string;
+    evidenceSummary?: string;
+    whenInPlan?: string;
+  }[];
   onPick: (t: string) => void;
 }) {
   return (
@@ -312,10 +324,11 @@ function TherapyList({
         <ul className="mt-2 grid gap-2 sm:grid-cols-2">
           {therapies.map((t) => (
             <li
-              key={t.name}
+              key={mindTherapyGuideChoice(t.name)?.id ?? t.name}
               className="flex flex-col gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5 text-sm"
             >
               <h4 className="font-semibold">{t.name}</h4>
+              <TherapyGuideClassification name={t.name} />
               {t.rationale && (
                 <p className="leading-relaxed text-[var(--color-ink-2)]">{t.rationale}</p>
               )}
@@ -344,5 +357,27 @@ function TherapyList({
         </ul>
       )}
     </section>
+  );
+}
+
+/** A guide category describes the choice, not its suitability or clinical approval. */
+export function TherapyGuideClassification({ name }: { name: string }) {
+  const choice = mindTherapyGuideChoice(name);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <Badge tone="muted">
+          {choice ? MIND_THERAPY_GUIDE_KIND_LABELS[choice.kind] : 'AI-suggested guide'}
+        </Badge>
+        <Badge tone="muted">AI-drafted guide</Badge>
+      </div>
+      <p className="text-xs text-[var(--color-ink-2)]">
+        Not a reviewed protocol.
+        {choice?.kind === 'protocol_stage' && ' One stage, not a complete course of therapy.'}
+      </p>
+      {choice?.emdrTrainingNotice && (
+        <p className="text-xs text-[var(--color-ink-2)]">{EMDR_GUIDE_TRAINING_NOTICE}</p>
+      )}
+    </div>
   );
 }

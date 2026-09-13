@@ -3,6 +3,7 @@ import type { MindSessionCloseout } from '@cureocity/contracts';
 import { ScheduleSessionPanel } from './ScheduleSessionPanel';
 import { MindCloseoutDecisionActions } from './MindCloseoutDecisionActions';
 import { MindSessionAgreements } from './MindSessionAgreements';
+import { MindCareRecordPanel } from './MindCareRecordPanel';
 import { ShareReceiptList, type ShareReceiptView } from './ShareReceiptList';
 import { suggestFollowUp } from '../../lib/follow-up-suggestion';
 import styles from './MindSessionReview.module.css';
@@ -96,6 +97,13 @@ export function MindSessionCloseout({
           )}
         </div>
         <div className="mt-5 space-y-3">
+          {canReviewClinical && (
+            <MindCareRecordPanel
+              key={`session-work-${sessionId}`}
+              clientId={client.id}
+              sessionContext={{ sessionId, scheduledAt: sessionAt.toISOString() }}
+            />
+          )}
           <details className={styles.disclosure}>
             <summary>
               Agreements or homework{agreementCount > 0 ? ` (${agreementCount} saved)` : ''}

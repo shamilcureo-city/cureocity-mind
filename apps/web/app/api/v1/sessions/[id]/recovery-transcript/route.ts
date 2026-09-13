@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { MindRecoveryInputSchema } from '@cureocity/contracts';
+import { MindRecoveryInputSchema, containsTranscriptionArtifact } from '@cureocity/contracts';
+import { encodeSavedTranscript, TRANSCRIPTION_REVIEW_WARNING } from '@/lib/saved-transcript';
 import { requireCapability } from '@/lib/auth-server';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
@@ -25,13 +26,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: 'Mind recovery only' }, { status: 409 });
   const input = await parseJson(req, MindRecoveryInputSchema);
   if (!input.ok) return input.response;
+  if (input.value.utterances.some((u) => containsTranscriptionArtifact(u.text)))
+    return NextResponse.json(
+      {
+        error:
+          'The captured words contain invalid transcription text. Keep this session unsigned and review the transcript.',
+        code: 'TRANSCRIPTION_ARTIFACT',
+      },
+      { status: 422 },
+    );
   const { id: sessionId } = await params;
   const prefix = buildRecoveryPrefix(input.value.utterances);
+  prefix.transcriptionWarning = input.value.transcriptionWarning === true;
   try {
     const encrypted = await encryptForTenant(auth.value.psychologistId, JSON.stringify(prefix));
     const transcriptEncrypted = await encryptForTenant(
       auth.value.psychologistId,
-      prefix.transcript,
+      encodeSavedTranscript(prefix.transcript, prefix.speakerSegments, prefix.transcriptionWarning),
     );
     await prisma.$transaction(async (tx) => {
       await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
@@ -73,12 +84,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           status: 'PENDING',
           recoveryTranscriptEncrypted: encrypted,
           transcriptEncrypted,
+          errorMessage: prefix.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
         },
         update: {
           recoveryTranscriptEncrypted: encrypted,
           transcriptEncrypted,
           status: 'PENDING',
-          errorMessage: null,
+          errorMessage: prefix.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
         },
       });
       await writeAudit(

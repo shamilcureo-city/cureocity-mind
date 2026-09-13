@@ -176,6 +176,151 @@ describe.skipIf(process.env['RUN_MIND_POSTGRES_TESTS'] !== '1')(
       expect(await db.clientMindCareRecord.count({ where: { clientId: first.client.id } })).toBe(0);
     });
 
+    it('enforces exact-visit preparation ownership, positive unique revisions and immutability in PostgreSQL', async () => {
+      const first = await fixture();
+      const other = await fixture();
+      const data = {
+        sessionId: first.session.id,
+        psychologistId: first.client.psychologistId,
+        revision: 1,
+        operationId: randomUUID(),
+        bodyEncrypted: 'fixture-ciphertext',
+      };
+      await expect(
+        db.mindSessionPreparation.create({
+          data: { ...data, psychologistId: other.client.psychologistId },
+        }),
+      ).rejects.toThrow();
+      await expect(
+        db.mindSessionPreparation.create({ data: { ...data, revision: 0 } }),
+      ).rejects.toThrow();
+      const saved = await db.mindSessionPreparation.create({ data });
+      const sameOwnerClient = await db.client.create({
+        // One demo client per practitioner is an existing database invariant;
+        // this second fictional client tests reassignment, not demo creation.
+        data: { psychologistId: first.client.psychologistId, isDemo: false },
+      });
+      await expect(
+        db.session.update({
+          where: { id: first.session.id },
+          data: { clientId: sameOwnerClient.id },
+        }),
+      ).rejects.toThrow();
+      await expect(
+        db.session.update({
+          where: { id: first.session.id },
+          data: { psychologistId: other.client.psychologistId },
+        }),
+      ).rejects.toThrow();
+      await expect(
+        db.mindSessionPreparation.create({ data: { ...data, operationId: randomUUID() } }),
+      ).rejects.toThrow();
+      await expect(
+        db.mindSessionPreparation.create({ data: { ...data, revision: 2 } }),
+      ).rejects.toThrow();
+      await expect(
+        db.mindSessionPreparation.update({
+          where: { id: saved.id },
+          data: { bodyEncrypted: 'changed' },
+        }),
+      ).rejects.toThrow();
+      await db.client.update({ where: { id: first.client.id }, data: { deletedAt: new Date() } });
+      await expect(
+        db.mindSessionPreparation.create({
+          data: { ...data, revision: 2, operationId: randomUUID() },
+        }),
+      ).rejects.toThrow();
+      expect(
+        await db.mindSessionPreparation.count({ where: { sessionId: first.session.id } }),
+      ).toBe(1);
+    });
+
+    it.each(['write-first', 'erasure-first'] as const)(
+      'serializes preparation against erasure with actual Client row locks (%s)',
+      async (ordering) => {
+        const { client, session } = await fixture();
+        const owner = client.psychologistId;
+        const erasure = await db.clientErasureRequest.create({
+          data: { clientId: client.id, reason: 'Fictional preparation erasure race' },
+        });
+        let releaseFirst!: () => void;
+        const firstCanFinish = new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        let firstReady!: () => void;
+        const firstHasLock = new Promise<void>((resolve) => {
+          firstReady = resolve;
+        });
+        let secondPid = 0;
+        const write = async (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => {
+          await lockActiveClient(tx, client.id, owner);
+          await tx.$queryRaw`SELECT "id" FROM "sessions" WHERE "id" = ${session.id} FOR UPDATE`;
+          await tx.mindSessionPreparation.create({
+            data: {
+              sessionId: session.id,
+              psychologistId: owner,
+              revision: 1,
+              operationId: randomUUID(),
+              bodyEncrypted: 'fictional-encrypted-preparation',
+            },
+          });
+        };
+        const erase = async (tx: Parameters<Parameters<typeof db.$transaction>[0]>[0]) => {
+          await lockActiveClient(tx, client.id, owner);
+          await eraseClientPhi(tx, {
+            clientId: client.id,
+            erasureRequestId: erasure.id,
+            psychologistId: owner,
+            now: new Date(),
+          });
+        };
+        const first = db.$transaction(
+          async (tx) => {
+            await (ordering === 'write-first' ? write(tx) : erase(tx));
+            firstReady();
+            await firstCanFinish;
+          },
+          { timeout: 20_000 },
+        );
+        await firstHasLock;
+        const second = db.$transaction(
+          async (tx) => {
+            const [backend] = await tx.$queryRaw<
+              Array<{ pid: number }>
+            >`SELECT pg_backend_pid() AS "pid"`;
+            secondPid = backend!.pid;
+            await (ordering === 'write-first' ? erase(tx) : write(tx));
+          },
+          { timeout: 20_000 },
+        );
+        // Attach rejection handling before unlocking the first transaction.
+        const secondOutcome = second.then(
+          () => ({ ok: true }),
+          (error: unknown) => ({ ok: false, error }),
+        );
+        try {
+          await vi.waitFor(
+            async () => {
+              expect(secondPid).toBeGreaterThan(0);
+              const [activity] = await db.$queryRaw<
+                Array<{ waitType: string | null }>
+              >`SELECT wait_event_type AS "waitType" FROM pg_stat_activity WHERE pid = ${secondPid}`;
+              expect(activity?.waitType).toBe('Lock');
+            },
+            { timeout: 3000, interval: 25 },
+          );
+        } finally {
+          releaseFirst();
+        }
+        await first;
+        expect((await secondOutcome).ok).toBe(ordering === 'write-first');
+        expect(await db.mindSessionPreparation.count({ where: { sessionId: session.id } })).toBe(0);
+        expect(
+          (await db.client.findUniqueOrThrow({ where: { id: client.id } })).deletedAt,
+        ).not.toBeNull();
+      },
+    );
+
     it('starts without consent/audio, recovers an encrypted draft and completes without model artifacts', async () => {
       const { client, session } = await fixture();
       expect(
@@ -296,6 +441,26 @@ describe.skipIf(process.env['RUN_MIND_POSTGRES_TESTS'] !== '1')(
     });
     it('exports drafts and versions then erases the new clinical rows without resurrecting them', async () => {
       const { client, session } = await fixture();
+      const preparationBody = {
+        version: 1,
+        source: 'CLINICIAN_WRITTEN',
+        scheduledAt: session.scheduledAt.toISOString(),
+        focus: 'Fictional preparation',
+      };
+      for (const [revision, focus] of [
+        [1, preparationBody.focus],
+        [2, null],
+      ] as const) {
+        await db.mindSessionPreparation.create({
+          data: {
+            sessionId: session.id,
+            psychologistId: identity.id,
+            revision,
+            operationId: randomUUID(),
+            bodyEncrypted: `fixture:${identity.id}:${Buffer.from(JSON.stringify({ ...preparationBody, focus })).toString('base64')}`,
+          },
+        });
+      }
       await manual(session.id, {
         operation: 'start',
         expectedUpdatedAt: session.updatedAt.toISOString(),
@@ -331,6 +496,17 @@ describe.skipIf(process.env['RUN_MIND_POSTGRES_TESTS'] !== '1')(
       );
       expect(exported.mindCareRecords).toHaveLength(1);
       expect(exported.mindInstrumentDrafts).toHaveLength(1);
+      expect(
+        exported.mindSessionPreparations?.map((record) => [
+          record.sessionId,
+          record.revision,
+          record.body.focus,
+        ]),
+      ).toEqual([
+        [session.id, 1, 'Fictional preparation'],
+        [session.id, 2, null],
+      ]);
+      expect(JSON.stringify(exported.mindSessionPreparations)).not.toContain('operationId');
       const erasure = await db.clientErasureRequest.create({
         data: { clientId: client.id, reason: 'Fictional erasure test' },
       });
@@ -349,6 +525,7 @@ describe.skipIf(process.env['RUN_MIND_POSTGRES_TESTS'] !== '1')(
       expect(await db.mindManualNoteDraft.count({ where: { sessionId: session.id } })).toBe(0);
       expect(await db.mindInstrumentDraft.count({ where: { clientId: client.id } })).toBe(0);
       expect(await db.clientMindCareRecord.count({ where: { clientId: client.id } })).toBe(0);
+      expect(await db.mindSessionPreparation.count({ where: { sessionId: session.id } })).toBe(0);
       expect(
         (await care(client.id, { expectedVersion: 0, operationId: randomUUID(), body: careBody }))
           .status,

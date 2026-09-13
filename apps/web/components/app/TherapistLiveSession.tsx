@@ -26,8 +26,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { LiveCostEstimate } from './LiveCostEstimate';
 import {
   LiveGatewayEventSchema,
+  containsTranscriptionArtifact,
   type IntakeNoteV1,
   type MeterSummary,
   type SessionKind,
@@ -69,6 +71,7 @@ import { cueReviewKey } from '@/lib/mind-cue-review';
 import { MindConsentRecovery } from './MindConsentRecovery';
 import { isSessionConsentFailure, liveNoteStatus } from '@/lib/mind-consent-recovery-client';
 import { MindLiveCaseContext } from './MindLiveCaseContext';
+import { TRANSCRIPTION_REVIEW_WARNING } from '@/lib/saved-transcript';
 
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
@@ -295,6 +298,12 @@ export function TherapistLiveSession({
     [],
   );
   const [utterances, setUtterances] = useState<Utterance[]>([]);
+  const [transcriptionWarning, setTranscriptionWarning] = useState(false);
+  const transcriptionWarningRef = useRef(false);
+  function flagTranscriptionWarning(): void {
+    transcriptionWarningRef.current = true;
+    setTranscriptionWarning(true);
+  }
   const [note, setNote] = useState<Record<string, unknown>>({});
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<number | null>(null);
   const [refreshingNote, setRefreshingNote] = useState(false);
@@ -329,9 +338,14 @@ export function TherapistLiveSession({
   const liveAttemptRef = useRef(0);
   const attemptAbortRef = useRef<AbortController | null>(null);
   const unmountedRef = useRef(false);
-  const audioDeliveryRef = useRef<'off' | 'buffering' | 'sending'>('off');
+  const audioDeliveryRef = useRef<'off' | 'buffering' | 'holding' | 'sending'>('off');
   const startupAudioRef = useRef<Uint8Array[]>([]);
   const startupAudioBytesRef = useRef(0);
+  const preserveStartupAudioRef = useRef(false);
+  const startupAudioDrainRef = useRef<Promise<void> | null>(null);
+  const [startupAudioDraining, setStartupAudioDraining] = useState(false);
+  const startupAudioTailUnconfirmedRef = useRef(false);
+  const [startupAudioTailUnconfirmed, setStartupAudioTailUnconfirmed] = useState(false);
   const captureIntegrityErrorRef = useRef(false);
   const pauseReplyRef = useRef<{
     requestId: string;
@@ -438,6 +452,13 @@ export function TherapistLiveSession({
   // the final durable note/transcript write.
   useEffect(() => {
     const recovered = loadRecoveryDraft(browserRecoveryStorage(), sessionId);
+    if (
+      recovered &&
+      (recovered.transcriptionWarning ||
+        containsTranscriptionArtifact(recovered.transcript) ||
+        recovered.utterances.some((u) => containsTranscriptionArtifact(u.text)))
+    )
+      flagTranscriptionWarning();
     if (!recovered || recovered.utterances.length === 0) return;
     const restored = recovered.utterances as Utterance[];
     utterancesRef.current = restored;
@@ -445,7 +466,7 @@ export function TherapistLiveSession({
     setRecoveryRestored(true);
   }, [sessionId]);
   useEffect(() => {
-    if (utterances.length === 0) return;
+    if (utterances.length === 0 && !transcriptionWarning) return;
     durableRef.current = false;
     const saved = saveRecoveryDraft(browserRecoveryStorage(), {
       version: 1,
@@ -453,24 +474,35 @@ export function TherapistLiveSession({
       savedAt: new Date().toISOString(),
       utterances,
       transcript: buildTranscript(utterances),
+      transcriptionWarning,
       captureMode: 'LIVE',
       durable: false,
     });
     setLocalRecoveryFailed(!saved);
-  }, [sessionId, utterances]);
+  }, [sessionId, utterances, transcriptionWarning]);
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (durableRef.current || (!utterancesRef.current.length && !finalPayloadRef.current)) return;
+      if (
+        !startupAudioDrainRef.current &&
+        !startupAudioBytesRef.current &&
+        (durableRef.current || (!utterancesRef.current.length && !finalPayloadRef.current))
+      )
+        return;
       event.preventDefault();
       event.returnValue = '';
     };
     const onDocumentClick = (event: MouseEvent) => {
       const anchor = (event.target as Element | null)?.closest('a[href]');
       if (!anchor) return;
-      if (durableRef.current || (!utterancesRef.current.length && !finalPayloadRef.current)) return;
+      if (
+        !startupAudioDrainRef.current &&
+        !startupAudioBytesRef.current &&
+        (durableRef.current || (!utterancesRef.current.length && !finalPayloadRef.current))
+      )
+        return;
       if (
         window.confirm(
-          'This session has transcript content that is not saved on the server yet. Leave anyway?',
+          'This session has captured audio or transcript that is not saved on the server yet. Leave anyway?',
         )
       )
         return;
@@ -489,14 +521,35 @@ export function TherapistLiveSession({
     kind: SessionKind;
     note: TherapyNoteV1 | IntakeNoteV1;
     transcript: string;
+    utterances: Utterance[];
+    transcriptionWarning: boolean;
   } | null>(null);
 
   const stream = useLiveStream({
     ...(selectedDeviceId ? { selectedDeviceId } : {}),
     onFrame: (pcm) => {
       const ws = wsRef.current;
+      if (audioDeliveryRef.current === 'holding') {
+        // Physical capture is stopped, but its already-posted worklet tail
+        // must remain local until the ordered stop acknowledgement settles.
+        if (startupAudioBytesRef.current + pcm.byteLength > 1_048_576) {
+          startupAudioTailUnconfirmedRef.current = true;
+          setStartupAudioTailUnconfirmed(true);
+          flagTranscriptionWarning();
+          return;
+        }
+        startupAudioRef.current.push(pcm);
+        startupAudioBytesRef.current += pcm.byteLength;
+        preserveStartupAudioRef.current = true;
+        return;
+      }
       if (audioDeliveryRef.current === 'buffering') {
         if (startupAudioBytesRef.current + pcm.byteLength > 1_048_576) {
+          if (preserveStartupAudioRef.current) {
+            startupAudioTailUnconfirmedRef.current = true;
+            setStartupAudioTailUnconfirmed(true);
+            flagTranscriptionWarning();
+          }
           audioDeliveryRef.current = 'off';
           setError(
             'The live connection did not become ready. Capture stopped; the startup audio was not transcribed. Retry before continuing the conversation.',
@@ -612,10 +665,18 @@ export function TherapistLiveSession({
     finalKind: SessionKind,
     finalNote: TherapyNoteV1 | IntakeNoteV1,
     transcript: string,
+    finalUtterances = [...utterancesRef.current],
+    finalWarning = transcriptionWarningRef.current,
   ): Promise<void> {
     if (finalHandledRef.current) return;
     finalHandledRef.current = true;
-    finalPayloadRef.current = { kind: finalKind, note: finalNote, transcript };
+    finalPayloadRef.current = {
+      kind: finalKind,
+      note: finalNote,
+      transcript,
+      utterances: finalUtterances,
+      transcriptionWarning: finalWarning,
+    };
     setSaveFailed(null);
     setSaving(true);
     setFinalStage('saving-transcript');
@@ -627,6 +688,8 @@ export function TherapistLiveSession({
           kind: finalKind,
           note: finalNote,
           ...(transcript ? { transcript } : {}),
+          utterances: finalUtterances,
+          transcriptionWarning: finalWarning,
         }),
       });
       if (!res.ok) {
@@ -655,7 +718,7 @@ export function TherapistLiveSession({
   function retrySave(): void {
     const p = finalPayloadRef.current;
     if (!p) return;
-    void persistAndFinish(p.kind, p.note, p.transcript);
+    void persistAndFinish(p.kind, p.note, p.transcript, p.utterances, p.transcriptionWarning);
   }
 
   async function copyHeldTranscript(): Promise<void> {
@@ -677,6 +740,16 @@ export function TherapistLiveSession({
   }
 
   function navigateAway(href: string): void {
+    if (startupAudioDrainRef.current) {
+      setError('Microphone off. Wait while the last startup audio is kept in this tab.');
+      return;
+    }
+    if (preserveStartupAudioRef.current && startupAudioBytesRef.current) {
+      setError(
+        'Startup audio is still held only in this tab. Retry live or explicitly discard it before leaving.',
+      );
+      return;
+    }
     if (!durableRef.current && (utterancesRef.current.length || finalPayloadRef.current)) {
       setError(
         'This session has unsaved work. Save the transcript or finish saving before leaving this page.',
@@ -687,7 +760,13 @@ export function TherapistLiveSession({
   }
 
   async function recoverTranscript(action: 'CONTINUE_RECORDING' | 'FINALIZE'): Promise<void> {
-    if (saving) return;
+    if (saving || startupAudioDrainRef.current) return;
+    if (preserveStartupAudioRef.current && startupAudioBytesRef.current) {
+      setError(
+        'Startup audio has not been transcribed. Retry live to process it, or explicitly discard it before changing recording modes. Existing transcript stays available.',
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
     ++liveAttemptRef.current;
@@ -696,7 +775,9 @@ export function TherapistLiveSession({
     renewalRef.current?.dispose();
     renewalRef.current = null;
     try {
-      await streamRef.current.stop();
+      if (startupAudioTailUnconfirmedRef.current)
+        await waitForLiveCaptureStop(() => streamRef.current.stop());
+      else await streamRef.current.stop();
       // Recovery uses captured words; it never reacquires a microphone or fabricates a note.
       finalHandledRef.current = true;
       wsRef.current?.close();
@@ -705,7 +786,11 @@ export function TherapistLiveSession({
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           signal: AbortSignal.timeout(30_000),
-          body: JSON.stringify({ action, utterances: utterancesRef.current }),
+          body: JSON.stringify({
+            action,
+            utterances: utterancesRef.current,
+            transcriptionWarning: transcriptionWarningRef.current,
+          }),
         });
         if (!response.ok) {
           const body = await response.json().catch(() => ({}));
@@ -745,7 +830,8 @@ export function TherapistLiveSession({
   }
 
   async function start(opts: { resume?: boolean } = {}): Promise<void> {
-    if (unmountedRef.current || startingRef.current || saving) return;
+    if (unmountedRef.current || startingRef.current || saving || startupAudioDrainRef.current)
+      return;
     if (captureIntegrityErrorRef.current) {
       setError(
         'The last audio frame was not confirmed. Document any missing speech manually before continuing; reconnect cannot recover it.',
@@ -765,7 +851,20 @@ export function TherapistLiveSession({
     previousSocket?.close();
     audioDeliveryRef.current = 'off';
     pauseReplyRef.current?.reject(new Error('A new connection was requested.'));
-    await streamRef.current.stop().catch(() => {});
+    if (startupAudioTailUnconfirmedRef.current) {
+      try {
+        await waitForLiveCaptureStop(() => streamRef.current.stop());
+      } catch {
+        if (!isCurrentAttempt()) return;
+        startingRef.current = false;
+        phaseRef.current = 'error';
+        setPhase('error');
+        setError(
+          'Microphone cleanup is still unconfirmed. Keep this tab open and retry before recording again, or explicitly discard the held audio to leave.',
+        );
+        return;
+      }
+    } else await streamRef.current.stop().catch(() => {});
     if (!isCurrentAttempt()) return;
     // Reconnect path: the browser still holds the transcript — keep it on
     // screen and replay it to the gateway (`resume`) so the consult continues
@@ -789,8 +888,10 @@ export function TherapistLiveSession({
     finalHandledRef.current = false;
     setPhase('connecting');
     phaseRef.current = 'connecting';
-    startupAudioRef.current = [];
-    startupAudioBytesRef.current = 0;
+    if (!preserveStartupAudioRef.current) {
+      startupAudioRef.current = [];
+      startupAudioBytesRef.current = 0;
+    }
 
     if (window.location.protocol === 'https:' && GATEWAY_URL.startsWith('ws://')) {
       setPhase('error');
@@ -995,7 +1096,7 @@ export function TherapistLiveSession({
     ws.onerror = () => {
       renewal.dispose();
       if (!ownsSocket()) return;
-      audioDeliveryRef.current = 'off';
+      if (audioDeliveryRef.current !== 'holding') audioDeliveryRef.current = 'off';
       pauseReplyRef.current?.reject(
         new Error('The live connection failed before pause was confirmed.'),
       );
@@ -1022,7 +1123,7 @@ export function TherapistLiveSession({
       caseReply.current = null;
       setCaseStatus('off');
       setAcknowledgedCaseKey(null);
-      audioDeliveryRef.current = 'off';
+      if (audioDeliveryRef.current !== 'holding') audioDeliveryRef.current = 'off';
       pauseReplyRef.current?.reject(
         new Error('The live connection closed before pause was confirmed.'),
       );
@@ -1069,6 +1170,46 @@ export function TherapistLiveSession({
       renewal.handleEvent(event);
       if (!ownsSocket()) return;
       switch (event.type) {
+        case 'usageUnavailable':
+          // Gateway registration failed before any billable work. Frames have
+          // stayed in this tab, not reached the gateway. Do not silently drop
+          // them on an explicit, reauthorized retry or auto-reconnect.
+          renewal.dispose();
+          if (startupAudioDrainRef.current) break;
+          audioDeliveryRef.current = 'holding';
+          preserveStartupAudioRef.current = startupAudioBytesRef.current > 0;
+          startingRef.current = false;
+          phaseRef.current = 'error';
+          setPhase('error');
+          setStartupAudioDraining(true);
+          setError(
+            'Live processing could not start because usage tracking is unavailable. The microphone is off; keeping the last startup audio in this tab.',
+          );
+          // stop() turns physical tracks off immediately, then drains the
+          // worklet port. Socket close/error must not switch this local-only
+          // holding mode off before the tail arrives.
+          startupAudioDrainRef.current = (async () => {
+            try {
+              await waitForLiveCaptureStop(() => streamRef.current.stop());
+            } catch {
+              if (unmountedRef.current) return;
+              startupAudioTailUnconfirmedRef.current = true;
+              setStartupAudioTailUnconfirmed(true);
+              flagTranscriptionWarning();
+            } finally {
+              startupAudioDrainRef.current = null;
+              if (!unmountedRef.current) {
+                audioDeliveryRef.current = 'off';
+                preserveStartupAudioRef.current = startupAudioBytesRef.current > 0;
+                setStartupAudioDraining(false);
+                setError(
+                  'Live processing could not start because usage tracking is unavailable. The microphone is off. Retry live, or use Record only after reviewing any held startup audio.',
+                );
+              }
+            }
+          })();
+          ws.close();
+          break;
         case 'status':
           if (event.state === 'listening' && phaseRef.current === 'connecting') {
             renewal.start();
@@ -1076,6 +1217,7 @@ export function TherapistLiveSession({
             for (const pcm of startupAudioRef.current) ws.send(pcm);
             startupAudioRef.current = [];
             startupAudioBytesRef.current = 0;
+            preserveStartupAudioRef.current = false;
             audioDeliveryRef.current = 'sending';
             phaseRef.current = 'listening';
             setPhase('listening');
@@ -1148,16 +1290,32 @@ export function TherapistLiveSession({
               ),
             );
           break;
+        case 'transcriptionWarning':
+          flagTranscriptionWarning();
+          break;
         case 'utterance':
+          if (containsTranscriptionArtifact(event.utterance.text)) {
+            flagTranscriptionWarning();
+            break;
+          }
           utterancesRef.current = [...utterancesRef.current, event.utterance];
           setUtterances((prev) => [...prev, event.utterance]);
           break;
         case 'therapyNote':
+          if (containsTranscriptionArtifact(JSON.stringify(event.note))) {
+            flagTranscriptionWarning();
+            setRefreshingNote(false);
+            break;
+          }
           setNote(event.note as Record<string, unknown>);
           setNoteUpdatedAt(Date.now());
           setRefreshingNote(false);
           break;
         case 'therapyReasoning':
+          if (containsTranscriptionArtifact(JSON.stringify(event.reasoning))) {
+            flagTranscriptionWarning();
+            break;
+          }
           setCopilot(event.reasoning);
           break;
         case 'meter':
@@ -1165,18 +1323,23 @@ export function TherapistLiveSession({
           break;
         case 'therapyFinal':
           renewal.dispose();
+          if (event.transcriptionWarning || containsTranscriptionArtifact(JSON.stringify(event)))
+            flagTranscriptionWarning();
           if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) {
             finalPayloadRef.current = {
               kind: event.kind,
               note: event.note,
               transcript: event.transcript ?? buildTranscript(utterancesRef.current),
+              utterances: [...utterancesRef.current],
+              transcriptionWarning: transcriptionWarningRef.current,
             };
             setSaveFailed(
               'The gateway finished while capture was paused. Review the captured transcript; use Retry save only if you intend to end this session.',
             );
             break;
           }
-          setNote(event.note as unknown as Record<string, unknown>);
+          if (!containsTranscriptionArtifact(JSON.stringify(event.note)))
+            setNote(event.note as unknown as Record<string, unknown>);
           setNoteUpdatedAt(Date.now());
           void persistAndFinish(
             event.kind,
@@ -1743,6 +1906,15 @@ export function TherapistLiveSession({
           clearing those words.
         </Card>
       )}
+      {transcriptionWarning && (
+        <Card
+          role="status"
+          className="border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]"
+        >
+          <strong>Transcript needs review</strong>
+          <p className="mt-1">{TRANSCRIPTION_REVIEW_WARNING}</p>
+        </Card>
+      )}
 
       {endConfirmOpen && (
         <div
@@ -1780,21 +1952,87 @@ export function TherapistLiveSession({
         </Card>
       )}
 
+      {(startupAudioDraining ||
+        startupAudioTailUnconfirmed ||
+        (preserveStartupAudioRef.current && startupAudioBytesRef.current > 0)) && (
+        <Card
+          className="space-y-2 border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]"
+          role="status"
+          aria-live="polite"
+        >
+          <strong>
+            {startupAudioDraining
+              ? 'Microphone off · keeping the last startup audio'
+              : 'Startup audio needs review'}
+          </strong>
+          {startupAudioDraining && (
+            <p>
+              Wait while the last audio reaches this tab. Retry and discard are available after this
+              check.
+            </p>
+          )}
+          {preserveStartupAudioRef.current && startupAudioBytesRef.current > 0 && (
+            <>
+              <p>
+                Startup audio is held only in this tab and has not been transcribed. Retry live to
+                include it. It will not follow you into Record only.
+              </p>
+              <Button
+                variant="secondary"
+                disabled={startupAudioDraining || phase === 'connecting'}
+                onClick={() => {
+                  if (startupAudioDrainRef.current || phaseRef.current === 'connecting') return;
+                  if (
+                    !window.confirm(
+                      'Discard the untranscribed startup audio held in this tab? It cannot be recovered after discarding. Existing transcript is kept.',
+                    )
+                  )
+                    return;
+                  startupAudioRef.current = [];
+                  startupAudioBytesRef.current = 0;
+                  preserveStartupAudioRef.current = false;
+                  setError(
+                    'Startup audio discarded. Existing transcript is kept. You can retry live or use Record only.',
+                  );
+                }}
+              >
+                Discard untranscribed startup audio
+              </Button>
+            </>
+          )}
+          {startupAudioTailUnconfirmed && (
+            <p>
+              The final startup audio frame was not confirmed. Retry can include only the audio kept
+              here; check for missing speech and document it manually before relying on the
+              transcript.
+            </p>
+          )}
+        </Card>
+      )}
+
       {error && (
         <Card className="border-red-200 bg-red-50 p-4 text-sm text-red-700">
           {error}
           {phase === 'error' && !connectionLost && (
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button onClick={() => void start({ resume: utterances.length > 0 })}>
+              <Button
+                onClick={() => void start({ resume: utterances.length > 0 })}
+                disabled={startupAudioDraining}
+              >
                 Try again
               </Button>
               {clientId && (
-                <Button variant="secondary" onClick={continueAsBatch} disabled={saving}>
+                <Button
+                  variant="secondary"
+                  onClick={continueAsBatch}
+                  disabled={saving || startupAudioDraining}
+                >
                   Record the classic way
                 </Button>
               )}
               <Button
                 variant="secondary"
+                disabled={startupAudioDraining}
                 onClick={() => navigateAway(`/app/sessions/${sessionId}`)}
               >
                 Open session
@@ -2182,10 +2420,7 @@ export function TherapistLiveSession({
               {meterRef.current && (
                 <details className="text-sm text-[var(--color-ink-2)]">
                   <summary className="min-h-11 cursor-pointer py-2">Connection details</summary>
-                  <p>
-                    ₹{meterRef.current.costInr.toFixed(2)} for this connection. This is not a
-                    whole-session total after reconnecting.
-                  </p>
+                  <LiveCostEstimate summary={meterRef.current} />
                 </details>
               )}
             </>

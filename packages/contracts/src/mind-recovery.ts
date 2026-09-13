@@ -14,6 +14,7 @@ export const MindRecoveryInputSchema = z
   .object({
     action: z.enum(['CONTINUE_RECORDING', 'FINALIZE']),
     utterances: z.array(MindRecoveryUtteranceSchema).min(1).max(2000),
+    transcriptionWarning: z.boolean().optional(),
   })
   .superRefine(({ utterances }, ctx) => {
     if (new Set(utterances.map((row) => row.id)).size !== utterances.length)

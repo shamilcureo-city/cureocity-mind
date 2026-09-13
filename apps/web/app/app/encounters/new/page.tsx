@@ -12,6 +12,7 @@ import { livekitConfigured } from '@/lib/livekit';
 import { prisma } from '@/lib/prisma';
 import type { Session as SessionPrismaRow } from '@prisma/client';
 import { mindSessionDestination } from '@/lib/mind-session-start';
+import { isMindSessionPreparationEnabled } from '@/lib/mind-session-preparation-feature';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,6 +116,7 @@ export default async function RecordPage({
               : 'LIVE'
           }
           videoEnabled={livekitConfigured()}
+          sessionPreparationEnabled={isMindSessionPreparationEnabled()}
         />
 
         <FirstRunChecklist psychologistId={therapist.id} />

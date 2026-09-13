@@ -5,6 +5,8 @@ import { SessionAgreementDtoSchema } from './formulation';
 import { MindManualNoteFieldsSchema } from './mind-manual-note';
 import { MindInstrumentDraftStateSchema } from './mind-instrument-draft';
 import { MindCareRecordDtoSchema } from './mind-care-record';
+import { MindSessionPreparationSchema } from './mind-session-preparation';
+import { SessionUsageConnectionExportSchema } from './session-usage';
 
 // ============================================================================
 // DPDP Act Data Subject Rights — § 11 access, § 12 correction,
@@ -45,6 +47,8 @@ export const DsrDataExportSchema = z.object({
   ),
   /** Counts only — full session content is exported separately for size. */
   sessionCount: z.number().int().nonnegative(),
+  /** Latest reported per-connection usage, including registered-but-unreported connections. */
+  sessionUsageConnections: z.array(SessionUsageConnectionExportSchema).optional(),
   /** Current care decisions with their preserved correction/amendment history. */
   sessionAgreements: z.array(SessionAgreementDtoSchema).optional(),
   /** Unfinished records are included too; cryptographic retry receipts are not disclosures. */
@@ -61,6 +65,10 @@ export const DsrDataExportSchema = z.object({
     .optional(),
   mindInstrumentDrafts: z.array(MindInstrumentDraftStateSchema).optional(),
   mindCareRecords: z.array(MindCareRecordDtoSchema.omit({ operationId: true })).optional(),
+  /** Every confirmed revision, including explicit clears; no retry operation identifiers. */
+  mindSessionPreparations: z
+    .array(MindSessionPreparationSchema.omit({ operationId: true }))
+    .optional(),
   assignmentProvenance: z
     .array(
       z.object({

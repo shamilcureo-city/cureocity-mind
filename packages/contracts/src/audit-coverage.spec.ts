@@ -116,6 +116,10 @@ const KNOWN_NON_AUDIT_ACTION_LITERALS = new Set<string>([
   // any route body literals).
   'ADD',
   'REVISE',
+  // SaveMindSessionPreparationInput.action — explicit preparation operations,
+  // distinct from the MIND_SESSION_PREPARATION_SAVED audit event.
+  'SAVE',
+  'CLEAR',
 ]);
 
 function listSourceFiles(dir: string): string[] {

@@ -5,6 +5,12 @@ const calls: string[] = [];
 let activeShareSubmission = false;
 const patientShareFindFirstArgs: unknown[] = [];
 const recoveryDeletionArgs: unknown[] = [];
+const preparationDeletionArgs: unknown[] = [];
+let preparationTableExists = true;
+let preparationDeletionFails = false;
+let usageTableExists = true;
+let usageDeletionFails = false;
+const usageDeletionArgs: unknown[] = [];
 let sessionRows: Array<{ id: string }> = [];
 
 function model(name: string) {
@@ -16,6 +22,14 @@ function model(name: string) {
           calls.push(`${name}.${operation}`);
           if (name === 'noteEditRecovery' && operation === 'deleteMany')
             recoveryDeletionArgs.push(args);
+          if (name === 'mindSessionPreparation' && operation === 'deleteMany') {
+            preparationDeletionArgs.push(args);
+            if (preparationDeletionFails) throw new Error('preparation deletion failed');
+          }
+          if (name === 'sessionUsageConnection' && operation === 'deleteMany') {
+            usageDeletionArgs.push(args);
+            if (usageDeletionFails) throw new Error('usage deletion failed');
+          }
           if (name === 'session' && operation === 'findMany') return sessionRows;
           if (name === 'therapyNote' && operation === 'findMany') return [];
           if (name === 'audioChunk' && operation === 'findMany') return [];
@@ -43,6 +57,14 @@ const tx = new Proxy(
       if (property === '$queryRaw') {
         return vi.fn(async (strings: TemplateStringsArray) => {
           const sql = Array.from(strings).join('?');
+          if (sql.includes('session_usage_connections')) {
+            calls.push('usage.discover');
+            return [{ exists: usageTableExists }];
+          }
+          if (sql.includes('mind_session_preparations')) {
+            calls.push('preparation.discover');
+            return [{ exists: preparationTableExists }];
+          }
           calls.push(sql.includes('to_regclass') ? 'reminders.discover' : 'audit.find');
           return sql.includes('to_regclass') ? [{ exists: true }] : [];
         });
@@ -70,6 +92,12 @@ describe('DPDP appointment erasure invariant', () => {
     activeShareSubmission = false;
     patientShareFindFirstArgs.length = 0;
     recoveryDeletionArgs.length = 0;
+    preparationDeletionArgs.length = 0;
+    preparationTableExists = true;
+    preparationDeletionFails = false;
+    usageTableExists = true;
+    usageDeletionFails = false;
+    usageDeletionArgs.length = 0;
     sessionRows = [];
   });
 
@@ -91,6 +119,21 @@ describe('DPDP appointment erasure invariant', () => {
     expect(calls).toContain('mindManualNoteDraft.deleteMany');
     expect(calls).toContain('mindInstrumentDraft.deleteMany');
     expect(calls).toContain('clientMindCareRecord.deleteMany');
+    expect(calls).toContain('mindSessionPreparation.deleteMany');
+    expect(calls).toContain('sessionUsageConnection.deleteMany');
+    expect(usageDeletionArgs).toEqual([{ where: { clientId: 'client-1' } }]);
+    expect(calls.indexOf('client.update')).toBeLessThan(
+      calls.indexOf('sessionUsageConnection.deleteMany'),
+    );
+    expect(calls.indexOf('sessionUsageConnection.deleteMany')).toBeLessThan(
+      calls.indexOf('session.updateMany'),
+    );
+    expect(calls.indexOf('client.update')).toBeLessThan(
+      calls.indexOf('mindSessionPreparation.deleteMany'),
+    );
+    expect(calls.indexOf('mindSessionPreparation.deleteMany')).toBeLessThan(
+      calls.indexOf('session.updateMany'),
+    );
     expect(calls.indexOf('mindManualNoteDraft.deleteMany')).toBeLessThan(
       calls.indexOf('session.updateMany'),
     );
@@ -141,6 +184,34 @@ describe('DPDP appointment erasure invariant', () => {
     expect(recoveryDeletionArgs).toEqual([
       { where: { sessionId: { in: ['session-1', 'session-2'] } } },
     ]);
+    expect(preparationDeletionArgs).toEqual([
+      { where: { sessionId: { in: ['session-1', 'session-2'] } } },
+    ]);
+  });
+
+  it('skips only confirmed absent pre-migration preparation storage', async () => {
+    preparationTableExists = false;
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now: new Date('2026-09-13T09:00:00Z'),
+    });
+    expect(calls).toContain('preparation.discover');
+    expect(preparationDeletionArgs).toEqual([]);
+  });
+
+  it('propagates preparation deletion failure so fulfilment cannot commit', async () => {
+    preparationDeletionFails = true;
+    await expect(
+      eraseClientPhi(tx as never, {
+        clientId: 'client-1',
+        erasureRequestId: 'erasure-1',
+        psychologistId: 'psy-1',
+        now: new Date('2026-09-13T09:00:00Z'),
+      }),
+    ).rejects.toThrow('preparation deletion failed');
+    expect(calls).not.toContain('session.updateMany');
   });
 
   it('does not treat an expired or missing dispatch lease as an active submission', async () => {
@@ -161,5 +232,28 @@ describe('DPDP appointment erasure invariant', () => {
       },
     });
     expect(calls).toContain('client.update');
+  });
+  it('skips usage deletion only for confirmed absence, never the reporting flag', async () => {
+    usageTableExists = false;
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now: new Date(),
+    });
+    expect(calls).toContain('usage.discover');
+    expect(usageDeletionArgs).toEqual([]);
+  });
+  it('propagates usage deletion failure so erasure cannot claim fulfilment', async () => {
+    usageDeletionFails = true;
+    await expect(
+      eraseClientPhi(tx as never, {
+        clientId: 'client-1',
+        erasureRequestId: 'erasure-1',
+        psychologistId: 'psy-1',
+        now: new Date(),
+      }),
+    ).rejects.toThrow('usage deletion failed');
+    expect(calls).not.toContain('session.updateMany');
   });
 });

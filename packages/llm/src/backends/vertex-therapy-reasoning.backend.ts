@@ -7,7 +7,7 @@ import {
   type PassTherapyReasoningOutput,
 } from '../types';
 import { THERAPY_REASONING_PROMPT_VERSION, THERAPY_REASONING_SYSTEM_PROMPT_V1 } from '../prompts';
-import { computeCostInr, FLASH_PRICING } from '../pricing';
+import { estimateVertexUsageCostInr, FLASH_PRICING, type VertexUsageForCost } from '../pricing';
 import { normaliseTherapyReasoningOutput } from './therapy-reasoning-normalise';
 
 export interface VertexGeminiTherapyReasoningOptions {
@@ -54,6 +54,19 @@ export class VertexGeminiTherapyReasoningBackend implements IPassTherapyReasonin
     const start = Date.now();
     const userMessage = buildUserMessage(input);
 
+    let usage: VertexUsageForCost | undefined;
+    let responseText = '';
+    const costEstimate = (requestError?: unknown) =>
+      estimateVertexUsageCostInr({
+        model: this.modelName,
+        usage,
+        fallbackInputTokens: Math.ceil(
+          (THERAPY_REASONING_SYSTEM_PROMPT_V1.length + userMessage.length) / 4,
+        ),
+        fallbackOutputTokens: Math.ceil(responseText.length / 4),
+        fallbackPricing: FLASH_PRICING,
+        requestError,
+      });
     try {
       const res = await this.ai.models.generateContent({
         model: this.modelName,
@@ -81,13 +94,13 @@ export class VertexGeminiTherapyReasoningBackend implements IPassTherapyReasonin
         },
       });
 
+      usage = res.usageMetadata;
       const text = res.text ?? '{}';
+      responseText = text;
       const parsed: unknown = normaliseTherapyReasoningOutput(JSON.parse(text));
       const output: PassTherapyReasoningOutput = PassTherapyReasoningOutputSchema.parse(parsed);
 
-      const usage = res.usageMetadata;
-      const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
-      const outputTokens = usage?.candidatesTokenCount ?? Math.ceil(text.length / 4);
+      const { inputTokens, outputTokens, costInr } = costEstimate();
 
       return {
         output,
@@ -99,13 +112,13 @@ export class VertexGeminiTherapyReasoningBackend implements IPassTherapyReasonin
           promptVersion: THERAPY_REASONING_PROMPT_VERSION,
           inputTokens,
           outputTokens,
-          costInr: computeCostInr(inputTokens, outputTokens, FLASH_PRICING),
+          costInr,
           latencyMs: Date.now() - start,
           status: 'SUCCESS',
         },
       };
-    } catch {
-      const fallbackTokens = Math.ceil(userMessage.length / 4);
+    } catch (error) {
+      const { inputTokens, outputTokens, costInr } = costEstimate(error);
       // Vendor/validation errors can echo clinical background or model output.
       // Persist only a bounded operational code, never their raw message.
       throw new TherapyReasoningBackendError('Therapy support could not be generated.', {
@@ -114,9 +127,9 @@ export class VertexGeminiTherapyReasoningBackend implements IPassTherapyReasonin
         model: this.modelName,
         region: this.region,
         promptVersion: THERAPY_REASONING_PROMPT_VERSION,
-        inputTokens: fallbackTokens,
-        outputTokens: 0,
-        costInr: computeCostInr(fallbackTokens, 0, FLASH_PRICING),
+        inputTokens,
+        outputTokens,
+        costInr,
         latencyMs: Date.now() - start,
         status: 'ERROR',
         errorMessage: 'THERAPY_REASONING_FAILED',

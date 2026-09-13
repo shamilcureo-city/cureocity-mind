@@ -3,17 +3,20 @@ import {
   MindManualNoteFieldsSchema,
   MindInstrumentDraftStateSchema,
   MindCareRecordBodySchema,
+  MindSessionPreparationSchema,
   type DsrDataExport,
   type PractitionerCapability,
 } from '@cureocity/contracts';
 import { decryptForTenant } from './tenant-crypto';
 import { lockActiveClient } from './phi-write-lock';
+import { hasMindSessionPreparationStorage } from './mind-session-preparation-storage';
 
 type MindExport = Pick<
   DsrDataExport,
   | 'mindManualNoteDrafts'
   | 'mindInstrumentDrafts'
   | 'mindCareRecords'
+  | 'mindSessionPreparations'
   | 'assignmentProvenance'
   | 'omittedMindSections'
 >;
@@ -55,6 +58,27 @@ export async function loadMindCareDataExport(
           : null,
       })),
     );
+    // Include every revision and explicit clear even while editing is disabled.
+    // Before the additive migration, confirmed absence is an empty history.
+    result.mindSessionPreparations = [];
+    if (await hasMindSessionPreparationStorage(tx)) {
+      const preparations = await tx.mindSessionPreparation.findMany({
+        where: { psychologistId, session: where },
+        orderBy: [{ sessionId: 'asc' }, { revision: 'asc' }],
+      });
+      result.mindSessionPreparations = await Promise.all(
+        preparations.map(async (row) =>
+          MindSessionPreparationSchema.omit({ operationId: true }).parse({
+            id: row.id,
+            sessionId: row.sessionId,
+            psychologistId: row.psychologistId,
+            revision: row.revision,
+            createdAt: row.createdAt.toISOString(),
+            body: await clinicalJson(psychologistId, row.bodyEncrypted),
+          }),
+        ),
+      );
+    }
     if (capabilities.has('THERAPY_WORKFLOWS')) {
       const records = await tx.clientMindCareRecord.findMany({
         where,
@@ -72,7 +96,12 @@ export async function loadMindCareDataExport(
         })),
       );
     } else result.omittedMindSections!.push('mindCareRecords');
-  } else result.omittedMindSections!.push('mindManualNoteDrafts', 'mindCareRecords');
+  } else
+    result.omittedMindSections!.push(
+      'mindManualNoteDrafts',
+      'mindCareRecords',
+      'mindSessionPreparations',
+    );
   if (
     capabilities.has('MEASUREMENT_BASED_CARE') &&
     capabilities.has('BEHAVIORAL_HEALTH_DOCUMENTATION')

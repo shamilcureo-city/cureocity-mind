@@ -10,6 +10,7 @@ export * from './session';
 export * from './mind-session-closeout';
 export * from './session-reuse';
 export * from './note';
+export * from './transcription-quality';
 export * from './workflow';
 export * from './prescription';
 export * from './emdr';
@@ -72,6 +73,9 @@ export * from './note-review';
 // The Session Loop (SL1) — living formulation + agreements + feedback.
 export * from './formulation';
 export * from './mind-care-record';
+export * from './mind-session-preparation';
+export * from './session-usage';
+export * from './session-usage-summary';
 // Marketing V1 — public therapist pages + real-slot booking.
 export * from './marketing';
 export * from './orbit-capability';

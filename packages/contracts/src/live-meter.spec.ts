@@ -20,6 +20,23 @@ const valid = {
 };
 
 describe('final live meter telemetry', () => {
+  it('accepts optional categorized estimates while preserving old gateway compatibility', () => {
+    expect(MeterSummarySchema.safeParse(valid).success).toBe(true);
+    expect(
+      MeterSummarySchema.safeParse({
+        ...valid,
+        reasoningCalls: 1,
+        costBreakdown: { transcriptionInr: 0.1, notesInr: 0.1, reasoningInr: 0.05 },
+      }).success,
+    ).toBe(true);
+    expect(MeterSummarySchema.safeParse({ ...valid, reasoningCalls: -1 }).success).toBe(false);
+    expect(
+      MeterSummarySchema.safeParse({
+        ...valid,
+        costBreakdown: { transcriptionInr: -1, notesInr: 0, reasoningInr: 0 },
+      }).success,
+    ).toBe(false);
+  });
   it('accepts bounded real spend and zero-cost mock telemetry', () => {
     expect(MeterSummarySchema.safeParse(valid).success).toBe(true);
     expect(MeterSummarySchema.safeParse({ ...valid, backend: 'mock', costInr: 0 }).success).toBe(
@@ -37,5 +54,34 @@ describe('final live meter telemetry', () => {
       false,
     );
     expect(MeterSummarySchema.safeParse({ ...valid, elapsedMs: 86_400_001 }).success).toBe(false);
+  });
+
+  it('requires a categorized estimate to reconcile with its total', () => {
+    expect(
+      MeterSummarySchema.safeParse({
+        ...valid,
+        costBreakdown: { transcriptionInr: 0.25, notesInr: 0.25, reasoningInr: 0 },
+      }).success,
+    ).toBe(false);
+    expect(
+      MeterSummarySchema.safeParse({
+        ...valid,
+        backend: 'mock',
+        costInr: 0,
+        costBreakdown: { transcriptionInr: 0.1, notesInr: 0, reasoningInr: 0 },
+      }).success,
+    ).toBe(false);
+    expect(
+      MeterSummarySchema.safeParse({
+        ...valid,
+        costBreakdown: { transcriptionInr: Number.POSITIVE_INFINITY, notesInr: 0, reasoningInr: 0 },
+      }).success,
+    ).toBe(false);
+    expect(
+      MeterSummarySchema.safeParse({
+        ...valid,
+        costBreakdown: { transcriptionInr: 0.1, notesInr: 0.1, reasoningInr: 0.0501 },
+      }).success,
+    ).toBe(true);
   });
 });

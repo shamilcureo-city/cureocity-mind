@@ -57,16 +57,18 @@ enum PractitionerVertical {
 }
 
 model Psychologist {
-  mindCareRecords ClientMindCareRecord[]
-  id              String                 @id @default(cuid())
-  firebaseUid     String                 @unique
-  email           String                 @unique
-  fullName        String
-  phone           String                 @unique
-  rciNumber       String                 @unique
-  rciVerifiedAt   DateTime?
-  status          PsychologistStatus     @default(PENDING_VERIFICATION)
-  role            PsychologistRole       @default(THERAPIST)
+  sessionUsageConnections SessionUsageConnection[]
+  mindSessionPreparations MindSessionPreparation[]
+  mindCareRecords         ClientMindCareRecord[]
+  id                      String                   @id @default(cuid())
+  firebaseUid             String                   @unique
+  email                   String                   @unique
+  fullName                String
+  phone                   String                   @unique
+  rciNumber               String                   @unique
+  rciVerifiedAt           DateTime?
+  status                  PsychologistStatus       @default(PENDING_VERIFICATION)
+  role                    PsychologistRole         @default(THERAPIST)
 
   /// First-run welcome dismissed — durable, per-therapist replacement for
   /// the per-device localStorage flag. Set via POST /psychologists/me/welcome.
@@ -530,8 +532,9 @@ enum ClientStatus {
 }
 
 model Client {
-  id             String @id @default(cuid())
-  psychologistId String
+  sessionUsageConnections SessionUsageConnection[]
+  id                      String                   @id @default(cuid())
+  psychologistId          String
 
   mindCareRecords ClientMindCareRecord[]
 
@@ -1028,6 +1031,8 @@ model Session {
   noteDraft                 NoteDraft?
   noteEditRecovery          NoteEditRecovery?
   mindManualNoteDraft       MindManualNoteDraft?
+  mindPreparations          MindSessionPreparation[]
+  usageConnections          SessionUsageConnection[]
   therapyNote               TherapyNote?
   clinicalReport            ClinicalReport?
   treatmentPlans            TreatmentPlan[]
@@ -1994,6 +1999,24 @@ model ClientMindCareRecord {
   @@unique([clientId, operationId], map: "mind_care_record_client_operation_key")
   @@index([psychologistId, clientId], map: "mind_care_record_owner_client_idx")
   @@map("client_mind_care_records")
+}
+
+/// Immutable, encrypted preparation confirmed for one exact visit; erased with its client.
+model MindSessionPreparation {
+  id             String       @id @default(cuid())
+  sessionId      String
+  psychologistId String
+  revision       Int
+  operationId    String
+  bodyEncrypted  String       @db.Text
+  createdAt      DateTime     @default(now())
+  session        Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "mind_preparation_session_fkey")
+  psychologist   Psychologist @relation(fields: [psychologistId], references: [id], map: "mind_preparation_owner_fkey")
+
+  @@unique([sessionId, revision], map: "mind_preparation_session_revision_key")
+  @@unique([sessionId, operationId], map: "mind_preparation_session_operation_key")
+  @@index([psychologistId, sessionId], map: "mind_preparation_owner_session_idx")
+  @@map("mind_session_preparations")
 }
 
 model SessionAgreement {
@@ -2992,11 +3015,38 @@ model NoteReview {
   @@map("note_reviews")
 }
 
-/// Sprint DS0 — per-consult token / cost / latency meter for the doctor
-/// live copilot. The streaming gateway can't touch the DB, so the browser
-/// relays the gateway's meter summary to POST /sessions/:id/live-metric,
-/// which writes one row per consult. Telemetry only (scalar keys, no FK) —
-/// it holds the unit economics honest: ≤ ₹2 / consult, transcript p95 ≤ 2s.
+/// Latest service-authenticated cumulative receipt per actual live connection.
+/// Registration is durable before provider work; null usage is not zero cost.
+/// Erased explicitly with Client even when retained Session parents remain.
+model SessionUsageConnection {
+  connectionId    String       @id @db.Uuid
+  sessionId       String
+  psychologistId  String
+  clientId        String
+  vertical        String
+  backend         String
+  startedAt       DateTime
+  registeredAt    DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  endedAt         DateTime?
+  state           String       @default("OPEN")
+  lastSequence    Int          @default(0)
+  lastPayloadHash String?
+  lastReceipt     Json?
+  /// Null means no usage receipt, not a known zero. Only latest cumulative receipt counts.
+  costInr         Decimal?     @db.Decimal(14, 4)
+  session         Session      @relation(fields: [sessionId], references: [id], onDelete: Cascade, map: "session_usage_session_fkey")
+  psychologist    Psychologist @relation(fields: [psychologistId], references: [id], map: "session_usage_owner_fkey")
+  client          Client       @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "session_usage_client_fkey")
+
+  @@index([psychologistId, startedAt], map: "session_usage_owner_started_idx")
+  @@index([sessionId, registeredAt], map: "session_usage_session_registered_idx")
+  @@index([clientId], map: "session_usage_client_idx")
+  @@map("session_usage_connections")
+}
+
+/// Legacy browser-relayed, per-session live latency/usage telemetry. This is
+/// not the durable per-connection ledger and is not an independent addend.
 model LiveConsultMetric {
   id             String @id @default(cuid())
   sessionId      String @unique
@@ -3372,6 +3422,9 @@ enum AuditAction {
   FORMULATION_CONFIRMED // SL1 — a new living-formulation version confirmed (accepted suggestion or authored)
   AGREEMENT_RECORDED // SL1 — a session agreement recorded / follow-up marked
   MIND_CARE_RECORD_SAVED
+  MIND_SESSION_PREPARATION_SAVED
+  SESSION_USAGE_REGISTERED
+  SESSION_USAGE_REPORTED
   SESSION_FEEDBACK_RECORDED // SL1 — one-tap alliance rating captured at close
   THERAPIST_PROFILE_PUBLISHED // Marketing V1 — public page went live
   THERAPIST_PROFILE_UNPUBLISHED // Marketing V1 — public page taken down

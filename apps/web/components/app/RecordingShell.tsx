@@ -24,6 +24,7 @@ interface Props {
   defaultCapture?: 'LIVE' | 'BATCH';
   /** VS1 — server-computed livekitConfigured(); gates the Virtual option. */
   videoEnabled?: boolean;
+  sessionPreparationEnabled?: boolean;
 }
 
 type Intent = 'live' | 'dictation' | 'upload';
@@ -76,6 +77,7 @@ export function RecordingShell({
   initialGuideId,
   defaultCapture,
   videoEnabled = true,
+  sessionPreparationEnabled = false,
 }: Props) {
   const router = useRouter();
   const [shell, setShell] = useState<ShellState>(() => {
@@ -169,7 +171,7 @@ export function RecordingShell({
     });
     return (
       <RecordConfirmStrip
-        key={shell.client.id}
+        key={`${shell.client.id}:${context.sessionId ?? ''}`}
         clientId={shell.client.id}
         clientName={shell.client.fullName}
         mode={mode}
@@ -177,6 +179,7 @@ export function RecordingShell({
         expectedSessionId={context.sessionId}
         initialGuideId={context.guideId}
         videoEnabled={videoEnabled}
+        sessionPreparationEnabled={sessionPreparationEnabled}
         onCancel={() => setShell({ kind: 'pick', intent: 'live' })}
         onReady={(ready) => handleReady(ready, mode)}
       />

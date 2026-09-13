@@ -69,8 +69,8 @@ export async function POST(
     // so phase-2-or-later transitions are blocked until those endpoints land.
     const emdrState = (state.state as Record<string, unknown>) ?? {};
     const check = checkEmdrTransition(state.currentPhase, body.value.toPhase, {
-      preparationComplete: Boolean(emdrState['preparationComplete']),
-      hasTargets: Boolean(emdrState['hasTargets']),
+      preparationComplete: emdrState['preparationComplete'] === true,
+      hasTargets: emdrState['hasTargets'] === true,
     });
     if (!check.allowed) {
       return NextResponse.json(

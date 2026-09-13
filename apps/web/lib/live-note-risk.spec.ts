@@ -45,6 +45,7 @@ vi.mock('@cureocity/observability/metrics', () => ({ recordCrisisFlag: mocks.met
 
 import { POST } from '../app/api/v1/sessions/[id]/live-note/route';
 import { ClientPhiWriteForbiddenError } from './phi-write-lock';
+import { decodeSavedTranscript, TRANSCRIPTION_REVIEW_WARNING } from './saved-transcript';
 
 const auth = {
   ok: true,
@@ -225,6 +226,107 @@ describe.each(['INTAKE', 'TREATMENT', 'REVIEW'] as const)('Mind live %s note ris
 });
 
 describe('Mind live risk persistence boundaries', () => {
+  it('also rejects artifact text introduced by the post-transcription note translator', async () => {
+    mocks.translate.mockResolvedValue({
+      ...therapyNote('TREATMENT', 'low'),
+      subjective:
+        'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).',
+    });
+    expect((await post(payload())).status).toBe(422);
+    expect(mocks.encrypt).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.after).not.toHaveBeenCalled();
+  });
+  it('preserves finalized turns and quality warning inside tenant ciphertext, never a new plaintext segment copy', async () => {
+    const text = 'Fictional question. Fictional reply.';
+    const utterances = [
+      { id: 'u1', speaker: 'doctor', text: 'Fictional question.', tStartMs: 100, tEndMs: 1200 },
+      { id: 'u2', speaker: 'patient', text: 'Fictional reply.', tStartMs: 1400, tEndMs: 2400 },
+    ];
+    expect(
+      (await post({ ...payload(), transcript: text, utterances, transcriptionWarning: true }))
+        .status,
+    ).toBe(201);
+    const encryptedPayload = decodeSavedTranscript(mocks.encrypt.mock.calls[0]![1]);
+    expect(encryptedPayload).toMatchObject({ transcript: text, transcriptionWarning: true });
+    expect(encryptedPayload.speakerSegments).toEqual([
+      { speaker: 'therapist', text: 'Fictional question.', startMs: 100, endMs: 1200 },
+      { speaker: 'client', text: 'Fictional reply.', startMs: 1400, endMs: 2400 },
+    ]);
+    expect(storedDraft).not.toHaveProperty('speakerSegments');
+    expect(storedDraft?.errorMessage).toBe(TRANSCRIPTION_REVIEW_WARNING);
+    expect(JSON.stringify(mocks.upsert.mock.calls)).not.toContain('Fictional question.');
+  });
+  it('does not hide extra transcript words behind an incomplete speaker timeline', async () => {
+    expect(
+      (
+        await post({
+          ...payload(),
+          utterances: [
+            { id: 'u1', speaker: 'patient', text: 'Different text', tStartMs: 0, tEndMs: 1000 },
+          ],
+        })
+      ).status,
+    ).toBe(201);
+    expect(decodeSavedTranscript(mocks.encrypt.mock.calls[0]![1])).toMatchObject({
+      transcript: 'Synthetic transcript',
+      speakerSegments: [],
+    });
+  });
+  it.each(['transcript', 'note', 'utterance'] as const)(
+    'rejects invalid AI text in %s before translation or persistence',
+    async (field) => {
+      const artifact =
+        'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
+      const body = {
+        ...payload(),
+        ...(field === 'transcript' ? { transcript: artifact } : {}),
+        ...(field === 'note'
+          ? { note: { ...therapyNote('TREATMENT', 'low'), subjective: artifact } }
+          : {}),
+        ...(field === 'utterance'
+          ? {
+              utterances: [
+                { id: 'u1', speaker: 'unknown', text: artifact, tStartMs: 0, tEndMs: 1000 },
+              ],
+            }
+          : {}),
+      };
+      expect((await post(body)).status).toBe(422);
+      expect(mocks.translate).not.toHaveBeenCalled();
+      expect(mocks.encrypt).not.toHaveBeenCalled();
+      expect(mocks.upsert).not.toHaveBeenCalled();
+      expect(mocks.after).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects duplicate utterance IDs and inverted times at the API boundary', async () => {
+    const utterance = {
+      id: 'u1',
+      speaker: 'unknown',
+      text: 'Synthetic',
+      tStartMs: 0,
+      tEndMs: 1000,
+    };
+    expect((await post({ ...payload(), utterances: [utterance, utterance] })).status).toBe(400);
+    expect(
+      (await post({ ...payload(), utterances: [{ ...utterance, tEndMs: 0, tStartMs: 10 }] }))
+        .status,
+    ).toBe(400);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+  it('also rejects artifact-containing Scribe notes without changing valid doctor behavior', async () => {
+    session.psychologist = { vertical: 'DOCTOR', specialty: null };
+    expect(
+      (
+        await post({
+          note: { version: 'V1', chiefComplaint: 'Synthetic concern' },
+          transcript:
+            'PLACEHOLDER: This is a placeholder for the audio transcription. The actual transcription will be generated based on the audio input.',
+        })
+      ).status,
+    ).toBe(422);
+    expect(mocks.upsert).not.toHaveBeenCalled();
+  });
   it('does not duplicate draft/crisis/lifecycle effects or metrics on replay', async () => {
     expect((await post(payload())).status).toBe(201);
     expect((await post(payload())).status).toBe(409);

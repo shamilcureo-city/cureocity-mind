@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import {
   DifferentialDiagnosisV1Schema,
   MedicalEncounterNoteV1Schema,
+  containsTranscriptionArtifact,
   type ClinicalLocale,
   type DifferentialResponse,
 } from '@cureocity/contracts';
@@ -9,7 +10,7 @@ import type { Differential } from '@prisma/client';
 import { requireCapability } from '@/lib/auth-server';
 import { runDifferential } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
-import { hasTranscript, resolveNoteTranscript } from '@/lib/note-transcript';
+import { hasTranscript, resolveNoteTranscriptData } from '@/lib/note-transcript';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -68,7 +69,19 @@ export async function POST(
       { status: 409 },
     );
   }
+  const savedTranscript = await resolveNoteTranscriptData(session.psychologistId, draft);
+  if (!savedTranscript) {
+    return NextResponse.json(
+      {
+        error:
+          'The source needs review: its saved transcript could not be read. Restore access before generating a differential.',
+        code: 'TRANSCRIPT_NEEDS_REVIEW',
+      },
+      { status: 409 },
+    );
+  }
   const segments =
+    savedTranscript.speakerSegments ??
     (draft.speakerSegments as
       | {
           speaker: 'therapist' | 'client' | 'unknown';
@@ -76,9 +89,24 @@ export async function POST(
           endMs: number;
           text: string;
         }[]
-      | null) ?? [];
+      | null) ??
+    [];
 
-  const transcript = (await resolveNoteTranscript(session.psychologistId, draft)) ?? '';
+  const transcript = savedTranscript.transcript;
+  if (
+    containsTranscriptionArtifact(transcript) ||
+    segments.some((segment) => containsTranscriptionArtifact(segment.text)) ||
+    containsTranscriptionArtifact(JSON.stringify(draft.content))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'The source needs review: its transcript or note contains invalid generated text. Review and correct the source before generating a differential.',
+        code: 'TRANSCRIPT_NEEDS_REVIEW',
+      },
+      { status: 409 },
+    );
+  }
 
   await runDifferential({
     sessionId: session.id,

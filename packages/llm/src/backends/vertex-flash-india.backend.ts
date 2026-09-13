@@ -7,7 +7,11 @@ import {
   type Pass1Output,
 } from '../types';
 import { transcribePromptFor } from '../prompts';
-import { computeCostInr, FLASH_AUDIO_PRICING, estimateAudioInputTokens } from '../pricing';
+import {
+  estimateVertexUsageCostInr,
+  FLASH_AUDIO_PRICING,
+  estimateAudioInputTokens,
+} from '../pricing';
 
 export interface VertexGeminiFlashIndiaOptions {
   projectId: string;
@@ -77,6 +81,22 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
     const { prompt: systemPrompt, version: promptVersion } = transcribePromptFor(
       input.vertical ?? 'THERAPIST',
     );
+    const hintText = buildHintsBlock(input.hints);
+    const pricingInput = {
+      model: this.modelName,
+      fallbackInputTokens:
+        inputTokensEstimate + Math.ceil((systemPrompt.length + hintText.length) / 4),
+      fallbackAudioInputTokens: inputTokensEstimate,
+      fallbackPricing: FLASH_AUDIO_PRICING,
+    };
+    const fallbackUsage = estimateVertexUsageCostInr(pricingInput);
+    let receivedResponse = false;
+    let validationErrorCode = 'INVALID_TRANSCRIPTION_OUTPUT';
+    let billedUsage = {
+      inputTokens: fallbackUsage.inputTokens,
+      outputTokens: fallbackUsage.outputTokens,
+      costInr: fallbackUsage.costInr,
+    };
 
     try {
       const wavBytes = wrapPcmInWav(input.audioBytes, 16000, 1, 16);
@@ -93,7 +113,7 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
                 },
               },
               {
-                text: buildHintsBlock(input.hints),
+                text: hintText,
               },
             ],
           },
@@ -140,6 +160,18 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
         },
       });
 
+      receivedResponse = true;
+      // A rejected response still consumed model tokens. Capture its usage
+      // before parsing/validation, without retaining raw output in the call log.
+      const estimatedUsage = estimateVertexUsageCostInr({
+        ...pricingInput,
+        usage: res.usageMetadata,
+      });
+      billedUsage = {
+        inputTokens: estimatedUsage.inputTokens,
+        outputTokens: estimatedUsage.outputTokens,
+        costInr: estimatedUsage.costInr,
+      };
       const text = res.text ?? '{}';
       const finishReason = res.candidates?.[0]?.finishReason;
       const blockReason = res.promptFeedback?.blockReason;
@@ -149,16 +181,19 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
         );
       }
       const parsed: unknown = JSON.parse(text);
-      const output = Pass1OutputSchema.parse(parsed);
+      const validated = Pass1OutputSchema.safeParse(parsed);
+      if (!validated.success) {
+        if (validated.error.issues.some((issue) => issue.message === 'TRANSCRIPTION_ARTIFACT')) {
+          validationErrorCode = 'TRANSCRIPTION_ARTIFACT';
+        }
+        throw new Error(validationErrorCode);
+      }
+      const output = validated.data;
       if (output.transcript.length === 0) {
         console.warn(
-          `[vertex-flash] sessionId=${input.sessionId} EMPTY transcript on validated response. finishReason=${finishReason} blockReason=${blockReason} rawTextPreview=${text.slice(0, 300)}`,
+          `[vertex-flash] sessionId=${input.sessionId} EMPTY transcript on validated response. finishReason=${finishReason} blockReason=${blockReason} segmentCount=${output.speakerSegments.length}`,
         );
       }
-
-      const usage = res.usageMetadata;
-      const inputTokens = usage?.promptTokenCount ?? inputTokensEstimate;
-      const outputTokens = usage?.candidatesTokenCount ?? 0;
 
       return {
         output,
@@ -168,14 +203,20 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           model: this.modelName,
           region: this.region,
           promptVersion,
-          inputTokens,
-          outputTokens,
-          costInr: computeCostInr(inputTokens, outputTokens, FLASH_AUDIO_PRICING),
+          ...billedUsage,
           latencyMs: Date.now() - start,
           status: 'SUCCESS',
         },
       };
     } catch (e) {
+      if (!receivedResponse) {
+        const failedUsage = estimateVertexUsageCostInr({ ...pricingInput, requestError: e });
+        billedUsage = {
+          inputTokens: failedUsage.inputTokens,
+          outputTokens: failedUsage.outputTokens,
+          costInr: failedUsage.costInr,
+        };
+      }
       return {
         output: {
           transcript: '',
@@ -189,12 +230,10 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
           model: this.modelName,
           region: this.region,
           promptVersion,
-          inputTokens: inputTokensEstimate,
-          outputTokens: 0,
-          costInr: computeCostInr(inputTokensEstimate, 0, FLASH_AUDIO_PRICING),
+          ...billedUsage,
           latencyMs: Date.now() - start,
           status: 'ERROR',
-          errorMessage: (e as Error).message,
+          errorMessage: receivedResponse ? validationErrorCode : (e as Error).message,
         },
       };
     }

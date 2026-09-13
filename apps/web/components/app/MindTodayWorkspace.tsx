@@ -24,6 +24,7 @@ export interface MindTodayWorkspaceProps {
   firstRun?: ReactNode;
   actions?: ReactNode;
   preparation?: ReactNode;
+  sessionPreparationEnabled?: boolean;
 }
 
 /** Presentation only. The Today page owns authentication, capability checks and data. */
@@ -38,6 +39,7 @@ export function MindTodayWorkspace({
   firstRun,
   actions,
   preparation,
+  sessionPreparationEnabled = false,
 }: MindTodayWorkspaceProps) {
   return (
     <Container className={styles.studio}>
@@ -78,6 +80,7 @@ export function MindTodayWorkspace({
                 defaultCapture={defaultCapture}
                 variant="hero"
                 preparation={preparation}
+                sessionPreparationEnabled={sessionPreparationEnabled}
               />
             ) : (
               <Card className={styles.empty}>

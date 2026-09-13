@@ -24,6 +24,7 @@ import { computeClientJourney, JourneyError } from '@/lib/journey';
 import { isSuggestionApplied } from '@/lib/formulation-applied';
 import { prisma } from '@/lib/prisma';
 import { getEffectiveCapabilities } from '@/lib/capabilities';
+import { MIND_THERAPY_GUIDE_CATALOG } from '@/lib/mind-therapy-catalog';
 
 interface Props {
   sessionId: string | null;
@@ -35,19 +36,6 @@ interface Props {
   preferredLanguage: string;
   sessionKind?: SessionKind;
 }
-
-const LIBRARY_THERAPIES: string[] = [
-  'Cognitive Restructuring',
-  'Behavioural Activation',
-  'Graded Exposure',
-  'Mindfulness-Based Cognitive Therapy',
-  'Acceptance and Commitment Therapy',
-  'Problem-Solving Therapy',
-  'Sleep Hygiene + Stimulus Control',
-  'EMDR Phase 3 — Assessment',
-  'EMDR Phase 4 — Desensitisation',
-  'Motivational Interviewing',
-];
 
 /** Remission cutoffs mirrored from packages/clinical change-score. */
 const REMISSION_CUTOFF: Record<string, number> = { PHQ9: 4, GAD7: 4 };
@@ -388,7 +376,7 @@ export async function ClientPlanOfCareContent({
           <TherapyLibrary
             clientId={clientId}
             recommendedTherapies={recommendedTherapies}
-            libraryTherapies={LIBRARY_THERAPIES}
+            libraryTherapies={MIND_THERAPY_GUIDE_CATALOG}
             defaultLanguage={defaultLanguage}
             activeTreatmentPlanId={activePlan?.id ?? null}
             clientHasContactPhone={clientHasContactPhone}

@@ -45,6 +45,7 @@ import { checkIntakeNoteReadiness, checkTreatmentNoteReadiness } from '../../lib
 import { NoteReviewPanel } from './NoteReviewPanel';
 import { NoteRecoveryNotice, type NoteRecoveryStatus } from './NoteRecoveryNotice';
 import { NoteEditingLayout } from './NoteEditingLayout';
+import { SavedNoteProcessingDetails as NoteFooter } from './SavedNoteProcessingDetails';
 import { mindSessionDestination } from '../../lib/mind-session-start';
 
 type SessionStatus =
@@ -925,7 +926,12 @@ export function NotesTab({
                   onResume={() => setEditing(true)}
                   onStatusChange={setRecoveryStatus}
                 />
-                <IntakeNotePreview note={intakeNote} verbosity={verbosity} />
+                <NoteEditingLayout
+                  mode="review"
+                  reference={<NoteTranscriptReference draft={phase.draft} />}
+                >
+                  <IntakeNotePreview note={intakeNote} verbosity={verbosity} />
+                </NoteEditingLayout>
                 <NoteFooter
                   costInr={phase.draft.totalCostInr}
                   chunkCount={phase.draft.speakerSegments?.length ?? 0}
@@ -1052,7 +1058,12 @@ export function NotesTab({
                 onResume={() => setEditing(true)}
                 onStatusChange={setRecoveryStatus}
               />
-              <NotePreview note={note} verbosity={verbosity} />
+              <NoteEditingLayout
+                mode="review"
+                reference={<NoteTranscriptReference draft={phase.draft} />}
+              >
+                <NotePreview note={note} verbosity={verbosity} />
+              </NoteEditingLayout>
               <NoteFooter
                 costInr={phase.draft.totalCostInr}
                 chunkCount={phase.draft.speakerSegments?.length ?? 0}
@@ -1441,41 +1452,6 @@ function VerbosityDropdown({
         ▾
       </span>
     </label>
-  );
-}
-
-function NoteFooter({
-  costInr,
-  chunkCount,
-  transcriptChars,
-  region,
-}: {
-  costInr: string;
-  chunkCount: number;
-  transcriptChars: number;
-  region: string;
-}) {
-  return (
-    <details className="mt-6 border-t border-[var(--color-line-soft)] pt-4 text-xs text-[var(--color-ink-3)]">
-      <summary className="cursor-pointer select-none font-medium text-[var(--color-ink-3)] hover:text-[var(--color-ink-2)]">
-        Session details
-      </summary>
-      <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Cost" value={costInr === '—' ? '—' : `₹${costInr}`} />
-        <Stat label="Audio segments" value={String(chunkCount)} />
-        <Stat label="Characters" value={`${transcriptChars} characters`} />
-        <Stat label="Mode" value={region} />
-      </dl>
-    </details>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="font-medium uppercase tracking-wider">{label}</dt>
-      <dd className="mt-1 font-mono text-[13px] text-[var(--color-ink)]">{value}</dd>
-    </div>
   );
 }
 

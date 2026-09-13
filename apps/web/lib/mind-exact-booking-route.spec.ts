@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(),
   defaults: vi.fn(),
   billing: vi.fn(),
+  query: vi.fn(),
+  lockedSession: vi.fn(),
+  update: vi.fn(),
 }));
 vi.mock('./auth-server', () => ({
   requirePsychologistId: mocks.auth,
@@ -35,6 +38,10 @@ import { POST } from '../app/api/v1/sessions/route';
 
 const CLIENT = 'cm00000000000000000000001';
 const SESSION = 'cm00000000000000000000002';
+const tx = {
+  $queryRaw: mocks.query,
+  session: { findUnique: mocks.lockedSession, update: mocks.update },
+};
 const call = (extra = {}) =>
   POST(
     new NextRequest('https://example.test/api/v1/sessions', {
@@ -55,13 +62,19 @@ beforeEach(() => {
   mocks.auth.mockResolvedValue(auth);
   mocks.capability.mockResolvedValue(auth);
   mocks.client.mockResolvedValue({ id: CLIENT, psychologistId: 'psy-1', deletedAt: null });
-  mocks.session.mockResolvedValue({ id: SESSION, clientId: CLIENT, status: 'SCHEDULED' });
+  const row = { id: SESSION, clientId: CLIENT, psychologistId: 'psy-1', status: 'SCHEDULED' };
+  mocks.session.mockResolvedValue(row);
+  mocks.lockedSession.mockResolvedValue(row);
+  mocks.query.mockResolvedValue([{ id: CLIENT, psychologistId: 'psy-1' }]);
+  mocks.transaction.mockImplementation((run) => run(tx));
 });
 describe('exact Mind booking selection never creates a replacement', () => {
   it.each(['SCHEDULED', 'IN_PROGRESS'])(
     'returns an owned %s booking before billing or generic reuse',
     async (status) => {
-      mocks.session.mockResolvedValue({ id: SESSION, clientId: CLIENT, status });
+      const row = { id: SESSION, clientId: CLIENT, psychologistId: 'psy-1', status };
+      mocks.session.mockResolvedValue(row);
+      mocks.lockedSession.mockResolvedValue(row);
       const response = await call();
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ id: SESSION, clientId: CLIENT });
@@ -74,11 +87,34 @@ describe('exact Mind booking selection never creates a replacement', () => {
         },
       });
       expect(mocks.candidates).not.toHaveBeenCalled();
-      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(mocks.transaction).toHaveBeenCalledTimes(1);
+      expect(mocks.update).not.toHaveBeenCalled();
       expect(mocks.billing).not.toHaveBeenCalled();
       expect(mocks.defaults).not.toHaveBeenCalled();
     },
   );
+  it.each(['erased', 'new-owner'])(
+    'rechecks the active client after the booking lookup when it is %s',
+    async (change) => {
+      mocks.query.mockResolvedValue(
+        change === 'erased' ? [] : [{ id: CLIENT, psychologistId: 'another' }],
+      );
+      expect((await call()).status).toBe(404);
+      expect(mocks.lockedSession).not.toHaveBeenCalled();
+      expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.billing).not.toHaveBeenCalled();
+    },
+  );
+  it('does not return a booking reassigned after its first ownership lookup', async () => {
+    mocks.lockedSession.mockResolvedValue({
+      id: SESSION,
+      clientId: CLIENT,
+      psychologistId: 'another',
+      status: 'SCHEDULED',
+    });
+    expect((await call()).status).toBe(404);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
   it.each(['COMPLETED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULED'])(
     'rejects a %s booking without mutation',
     async (status) => {

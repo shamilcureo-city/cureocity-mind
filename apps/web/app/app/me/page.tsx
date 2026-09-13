@@ -3,6 +3,7 @@ import { Card } from '@/components/ui/Card';
 import { Container } from '@/components/ui/Container';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { prisma } from '@/lib/prisma';
+import { groupRecordedUsage, loadRecordedUsage, totalRecordedUsage } from '@/lib/session-usage';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,28 +129,15 @@ export default async function MeOverviewPage() {
 
   const medianMs = computeMedianConfirmationLatencyMs(confirmationLatencies);
 
-  // Sprint 74 — the COGS readout: what the AI actually cost in the last 30
-  // days, per pass, from the logged actuals (GeminiCallLog.costInr). This is
-  // the ground truth every cost/pricing decision tunes against — estimates
-  // live in docs/COST_EFFICIENCY_SPRINTS.md, this number is real.
-  const aiUsage = await prisma.geminiCallLog.groupBy({
-    by: ['pass'],
-    where: {
-      createdAt: { gte: since30d },
-      session: { is: { psychologistId: therapist.id } },
-    },
-    _sum: { costInr: true },
-    _count: { _all: true },
-  });
-  const aiTotalInr = aiUsage.reduce((acc, row) => acc + Number(row._sum.costInr ?? 0), 0);
-  const aiPerPass = aiUsage
+  const aiUsage = await loadRecordedUsage({ psychologistId: therapist.id, from: since30d });
+  const aiTotalInr = totalRecordedUsage(aiUsage.entries).toNumber();
+  const aiPerPass = groupRecordedUsage(aiUsage.entries, 'pass')
     .map((row) => ({
-      pass: row.pass,
-      calls: row._count._all,
-      costInr: Number(row._sum.costInr ?? 0),
+      pass: row.key,
+      calls: row.records,
+      costInr: row.costInr.toNumber(),
     }))
     .sort((a, b) => b.costInr - a.costInr);
-  const aiPerSession = sessions30d > 0 ? aiTotalInr / sessions30d : null;
 
   return (
     <Container className="py-10">
@@ -200,7 +188,9 @@ export default async function MeOverviewPage() {
             AI usage · last 30 days
           </h2>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            What the AI passes actually cost, from the call log — not an estimate.
+            Recorded AI processing estimates, not an invoice or subscription charge. Connection
+            amounts are allocated by their start time; web calls by their logged time. Coverage is
+            partial.
           </p>
           {aiPerPass.length === 0 ? (
             <p className="mt-4 text-sm text-[var(--color-ink-3)]">
@@ -212,11 +202,6 @@ export default async function MeOverviewPage() {
                 <p className="text-2xl font-semibold text-[var(--color-ink)]">
                   ₹{aiTotalInr.toFixed(2)}
                 </p>
-                {aiPerSession !== null && (
-                  <p className="text-sm text-[var(--color-ink-2)]">
-                    ≈ ₹{aiPerSession.toFixed(2)} per completed session
-                  </p>
-                )}
               </div>
               <ul className="mt-4 space-y-1.5 text-sm">
                 {aiPerPass.map((row) => (
@@ -233,6 +218,11 @@ export default async function MeOverviewPage() {
                   </li>
                 ))}
               </ul>
+              <p className="mt-3 text-xs leading-relaxed text-[var(--color-ink-3)]">
+                Counts are records, not minutes or physical provider attempts. Live connection
+                subtotals are grouped separately; old/new overlap uses only the larger subtotal as a
+                lower bound. Client-level activity without an owner cannot be attributed here.
+              </p>
             </>
           )}
         </Card>

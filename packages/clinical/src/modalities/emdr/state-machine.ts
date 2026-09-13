@@ -1,4 +1,4 @@
-import { EMDR_PHASES, isEmdrPhase } from './phases';
+import { EMDR_INITIAL_PHASE, EMDR_PHASES, isEmdrPhase } from './phases';
 
 export interface EmdrTransitionResult {
   allowed: boolean;
@@ -12,14 +12,65 @@ export interface EmdrTransitionContext {
   /**
    * True if the client has completed Phase 2 prerequisites (safe-place
    * installation + resource development + dissociation screen).
-   * Required for any transition INTO `assessment` or later.
+   * Required for assessment, desensitization, installation and body_scan.
    */
   preparationComplete: boolean;
   /**
    * True if at least one target memory has been added to the workflow.
-   * Required for any transition INTO `desensitization` or later.
+   * Required for desensitization, installation and body_scan.
    */
   hasTargets: boolean;
+}
+
+/** Existing destination gates, shared by transitions, creation and review. */
+export function checkEmdrPhasePrerequisites(
+  phase: string,
+  ctx: EmdrTransitionContext,
+): EmdrTransitionResult {
+  if (!isEmdrPhase(phase)) {
+    return { allowed: false, reason: `Unknown destination phase "${phase}"` };
+  }
+  const preparationGated: readonly string[] = [
+    'assessment',
+    'desensitization',
+    'installation',
+    'body_scan',
+  ];
+  const targetsGated: readonly string[] = ['desensitization', 'installation', 'body_scan'];
+
+  if (preparationGated.includes(phase) && !ctx.preparationComplete) {
+    return {
+      allowed: false,
+      reason: `Preparation completion is not recorded for phase "${phase}".`,
+    };
+  }
+  if (targetsGated.includes(phase) && !ctx.hasTargets) {
+    return {
+      allowed: false,
+      reason: `A target memory is not recorded for phase "${phase}".`,
+    };
+  }
+  return { allowed: true };
+}
+
+/**
+ * New workflows have no recorded prerequisites. Prior-care entry is not
+ * supported: it needs a separately reviewed evidence policy, not supplied flags.
+ * This restricts creation only; it does not reclassify historical workflows.
+ */
+export function checkEmdrWorkflowStart(phase: string): EmdrTransitionResult {
+  const prerequisites = checkEmdrPhasePrerequisites(phase, {
+    preparationComplete: false,
+    hasTargets: false,
+  });
+  if (!prerequisites.allowed) return prerequisites;
+  if (phase !== EMDR_INITIAL_PHASE) {
+    return {
+      allowed: false,
+      reason: 'New EMDR workflows must start at history taking. Prior-care entry is not available.',
+    };
+  }
+  return { allowed: true };
 }
 
 /**
@@ -58,26 +109,8 @@ export function checkEmdrTransition(
     return { allowed: false, reason: 'Source and destination phases are the same' };
   }
 
-  const PREPARATION_GATED: ReadonlyArray<string> = [
-    'assessment',
-    'desensitization',
-    'installation',
-    'body_scan',
-  ];
-  const TARGETS_GATED: ReadonlyArray<string> = ['desensitization', 'installation', 'body_scan'];
-
-  if (PREPARATION_GATED.includes(to) && !ctx.preparationComplete) {
-    return {
-      allowed: false,
-      reason: `Phase 2 (preparation) must be marked complete before transitioning to "${to}"`,
-    };
-  }
-  if (TARGETS_GATED.includes(to) && !ctx.hasTargets) {
-    return {
-      allowed: false,
-      reason: `At least one target memory must be added before transitioning to "${to}"`,
-    };
-  }
+  const prerequisites = checkEmdrPhasePrerequisites(to, ctx);
+  if (!prerequisites.allowed) return prerequisites;
 
   const fromIdx = EMDR_PHASES.indexOf(from);
   const toIdx = EMDR_PHASES.indexOf(to);

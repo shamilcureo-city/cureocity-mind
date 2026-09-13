@@ -15,8 +15,8 @@ export const dynamic = 'force-dynamic';
  * The streaming gateway meters every live consult (tokens / cost / latency
  * per window) but can't touch the DB, so the browser relays the gateway's
  * final `meter` summary here. We persist one LiveConsultMetric row per
- * consult — the record that keeps the unit economics honest (≤ ₹2 / consult,
- * transcript p95 ≤ 2s). Doctor-only, tenant-checked, POST-only (a side
+ * consult. This is a connection-scoped AI estimate, not an invoice or a
+ * subscription charge. Both verticals, tenant-checked, POST-only (a side
  * effect must never be reachable by a prefetched GET — see docs/AUTH_SESSION.md).
  */
 export async function POST(
@@ -123,6 +123,10 @@ export async function POST(
               windows: summary.windows,
               costInr: summary.costInr,
               transcriptP95Ms: summary.transcriptP95Ms,
+              ...(summary.reasoningCalls !== undefined
+                ? { reasoningCalls: summary.reasoningCalls }
+                : {}),
+              ...(summary.costBreakdown ? { costBreakdown: summary.costBreakdown } : {}),
               ...auditMetadataFromRequest(req),
             },
           },

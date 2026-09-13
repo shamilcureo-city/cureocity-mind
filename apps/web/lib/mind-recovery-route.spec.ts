@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildRecoveryPrefix, mergeRecoveryPrefix } from './mind-recovery-prefix';
+import { decodeSavedTranscript, TRANSCRIPTION_REVIEW_WARNING } from './saved-transcript';
 
 const state = vi.hoisted(() => ({
   vertical: 'THERAPIST',
@@ -129,6 +130,44 @@ describe('recovery POST adapter', () => {
     expect(JSON.stringify(state.draft)).not.toContain('Original live words');
     expect(state.updates).not.toHaveBeenCalled();
     expect(JSON.stringify(state.audit.mock.calls)).not.toContain('Original live words');
+    const saved = decodeSavedTranscript(
+      state.ciphertexts.get(state.draft?.transcriptEncrypted as string)!,
+    );
+    expect(saved.speakerSegments).toEqual([
+      { speaker: 'client', text: 'Original live words.', startMs: 0, endMs: 1000 },
+    ]);
+  });
+  it('rejects known artifacts before encryption, storage or generation', async () => {
+    const response = await run(
+      request('FINALIZE', [
+        {
+          ...utterances[0],
+          text: 'PLACEHOLDER: This is a placeholder for the audio transcription. The actual transcription will be generated based on the audio input.',
+        },
+      ]),
+    );
+    expect(response.status).toBe(422);
+    expect(state.encrypt).not.toHaveBeenCalled();
+    expect(state.draft).toBeNull();
+    expect(state.updates).not.toHaveBeenCalled();
+  });
+  it('keeps the missing-window warning in encrypted checkpoint and draft review status', async () => {
+    expect(
+      (
+        await run(
+          new NextRequest('https://mind.example/api/v1/sessions/session-1/recovery-transcript', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'FINALIZE', utterances, transcriptionWarning: true }),
+          }),
+        )
+      ).status,
+    ).toBe(200);
+    expect(state.draft?.errorMessage).toBe(TRANSCRIPTION_REVIEW_WARNING);
+    const prefix = JSON.parse(
+      state.ciphertexts.get(state.draft?.recoveryTranscriptEncrypted as string)!,
+    );
+    expect(prefix.transcriptionWarning).toBe(true);
   });
   it('finalize checkpoints then ends once; a repeated request is idempotent', async () => {
     expect((await run(request('FINALIZE'))).status).toBe(200);

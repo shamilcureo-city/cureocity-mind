@@ -44,6 +44,8 @@ describe('dedicated Mind PostgreSQL CI coverage', () => {
     expect(beforeSteps).toContain("RUN_INTEGRATION_TESTS: '1'");
     expect(beforeSteps).not.toContain('RUN_MIND_POSTGRES_TESTS');
     expect(beforeSteps).not.toContain('MIND_TEST_DATABASE_URL');
+    expect(beforeSteps).not.toContain('RUN_SESSION_USAGE_POSTGRES_TESTS');
+    expect(beforeSteps).not.toContain('SESSION_USAGE_TEST_DATABASE_URL');
     expect(step('Run all tests (unit + integration)')).toContain('run: pnpm test');
   });
 
@@ -74,10 +76,12 @@ describe('dedicated Mind PostgreSQL CI coverage', () => {
     );
   });
 
-  it('explicitly enables and executes exactly the three real suites serially rather than silently skipping', () => {
+  it('explicitly enables and executes all four real suites serially rather than silently skipping', () => {
     const block = step('Run Mind PostgreSQL persistence tests');
     expect(block).toContain("RUN_MIND_POSTGRES_TESTS: '1'");
     expect(block).toContain(`MIND_TEST_DATABASE_URL: ${fixtureUrl}`);
+    expect(block).toContain("RUN_SESSION_USAGE_POSTGRES_TESTS: '1'");
+    expect(block).toContain(`SESSION_USAGE_TEST_DATABASE_URL: ${fixtureUrl}`);
     expect(block).toContain(`DATABASE_URL: ${fixtureUrl}`);
     expect(command(block)).toEqual([
       'pnpm',
@@ -89,6 +93,7 @@ describe('dedicated Mind PostgreSQL CI coverage', () => {
       'lib/appointment-reminder-uniqueness-postgres.spec.ts',
       'lib/mind-consent-recovery-postgres.spec.ts',
       'lib/mind-counselling-postgres.spec.ts',
+      'lib/session-usage-postgres.spec.ts',
       '--maxWorkers=1',
     ]);
     expect(block).not.toContain('continue-on-error');

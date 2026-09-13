@@ -6,6 +6,7 @@ import type {
   ExerciseAssignment,
   ModalityStateWithHistory,
 } from '@cureocity/contracts';
+import { checkEmdrPhasePrerequisites } from '@cureocity/clinical';
 import { hasSuccessfulDelivery } from '@/lib/share-receipts';
 import { buildShareDeliveryInput } from '@/lib/share-delivery-input';
 import { Badge } from '../ui/Badge';
@@ -310,6 +311,7 @@ export function WorkflowSection({ clientId, sessionId, scribeBase = '/api/v1' }:
 
   return (
     <section className="space-y-4">
+      <EmdrPrerequisiteNotice workflow={workflow} />
       <div className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-6">
         <header className="flex flex-wrap items-baseline justify-between gap-3">
           <h3 className="text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
@@ -552,6 +554,34 @@ export function WorkflowSection({ clientId, sessionId, scribeBase = '/api/v1' }:
         </div>
       )}
     </section>
+  );
+}
+
+/** Read-only review of recorded prerequisites, never a clinical backfill. */
+export function EmdrPrerequisiteNotice({
+  workflow,
+}: {
+  workflow: Pick<ModalityStateWithHistory, 'modality' | 'currentPhase' | 'state'>;
+}) {
+  if (workflow.modality !== 'EMDR') return null;
+  const prerequisites = checkEmdrPhasePrerequisites(workflow.currentPhase, {
+    preparationComplete: workflow.state.preparationComplete === true,
+    hasTargets: workflow.state.hasTargets === true,
+  });
+  if (prerequisites.allowed) return null;
+  return (
+    <aside
+      aria-label="EMDR prerequisite review"
+      className="rounded-2xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]"
+    >
+      <h4 className="font-medium">This workflow needs prerequisite review</h4>
+      <p className="mt-1">{prerequisites.reason}</p>
+      <p className="mt-1">
+        Review the recorded prerequisites before continuing phase-based work. This notice does not
+        establish what happened in earlier care. Existing records are unchanged and remain
+        available.
+      </p>
+    </aside>
   );
 }
 

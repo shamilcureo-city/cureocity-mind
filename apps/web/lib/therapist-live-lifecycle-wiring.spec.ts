@@ -164,6 +164,7 @@ beforeEach(() => {
   vi.stubGlobal('React', React);
   vi.stubGlobal('WebSocket', Socket);
   vi.stubGlobal('window', {
+    confirm: vi.fn(() => true),
     location: { protocol: 'http:' },
     localStorage: { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() },
     addEventListener: vi.fn(),
@@ -180,6 +181,213 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+});
+
+describe('usage-registration startup failure', () => {
+  async function failWithHeldAudio(beforeFailure?: () => void, waitForDrain = true) {
+    const unmount = mount();
+    click('Start session');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledOnce());
+    const pcm = new Uint8Array([0, 1, 2, 3]);
+    harness.onFrame(pcm);
+    beforeFailure?.();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'usageUnavailable' }) });
+    socket.onclose?.();
+    if (waitForDrain)
+      await vi.waitFor(() =>
+        expect(
+          elements(render()).find(
+            (el) => el.type === 'button' && text(el.props.children) === 'Try again',
+          )?.props.disabled,
+        ).not.toBe(true),
+      );
+    return { unmount, pcm, socket };
+  }
+
+  it('stops microphone without sending held audio, restarting, or generating a note', async () => {
+    const { unmount, socket } = await failWithHeldAudio();
+    await vi.waitFor(() => expect(harness.stream.stop).toHaveBeenCalled());
+    expect(text(render())).toContain('usage tracking is unavailable');
+    expect(text(render())).toContain('held only in this tab and has not been transcribed');
+    expect(socket.send.mock.calls.every(([payload]) => typeof payload === 'string')).toBe(true);
+    expect(harness.sockets).toHaveLength(1);
+    expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual([
+      '/api/v1/sessions/s-1/live-token',
+    ]);
+    unmount();
+  });
+
+  it('preserves held audio for one explicit newly authorized retry and sends it only after listening', async () => {
+    const { unmount, pcm } = await failWithHeldAudio();
+    click('Try again');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    const retry = harness.sockets[1];
+    retry.open();
+    await vi.waitFor(() => expect(retry.send).toHaveBeenCalledOnce());
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+    expect(retry.send.mock.calls.some(([payload]) => payload instanceof Uint8Array)).toBe(false);
+    retry.status('listening');
+    expect(retry.send.mock.calls.filter(([payload]) => payload instanceof Uint8Array)).toEqual([
+      [pcm],
+    ]);
+    retry.status('listening');
+    expect(retry.send.mock.calls.filter(([payload]) => payload instanceof Uint8Array)).toHaveLength(
+      1,
+    );
+    unmount();
+  });
+
+  it('blocks mode changes and leaving until held audio is explicitly discarded, even after a retry authorization failure', async () => {
+    const { unmount } = await failWithHeldAudio();
+    click('Record the classic way');
+    expect(text(render())).toContain('Startup audio has not been transcribed');
+    expect(harness.push).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+    click('Open session');
+    expect(harness.push).not.toHaveBeenCalled();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response('{"error":"unavailable"}', { status: 503 }),
+    );
+    click('Try again');
+    await vi.waitFor(() => expect(text(render())).toContain('Discard untranscribed startup audio'));
+    await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2));
+    vi.mocked(window.confirm).mockReturnValueOnce(false);
+    click('Discard untranscribed startup audio');
+    click('Open session');
+    expect(harness.push).not.toHaveBeenCalled();
+    click('Discard untranscribed startup audio');
+    expect(text(render())).toContain('Existing transcript is kept');
+    click('Open session');
+    expect(harness.push).toHaveBeenCalledWith('/app/sessions/s-1');
+    unmount();
+  });
+
+  it('keeps the worklet stop tail locally through socket close and blocks actions until drain settles', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const { unmount, pcm, socket } = await failWithHeldAudio(() => {
+      harness.stream.stop.mockImplementation(() => held);
+    }, false);
+    const tail = new Uint8Array([4, 5, 6, 7]);
+    harness.onFrame(tail);
+    socket.onclose?.();
+    for (const label of [
+      'Try again',
+      'Discard untranscribed startup audio',
+      'Record the classic way',
+      'Open session',
+    ]) {
+      const action = elements(render()).find(
+        (el) => el.type === 'button' && text(el.props.children) === label,
+      )!;
+      expect(action.props.disabled).toBe(true);
+      action.props.onClick?.(); // A stale DOM callback is fenced by refs too.
+    }
+    expect(window.confirm).not.toHaveBeenCalled();
+    expect(harness.push).not.toHaveBeenCalled();
+    expect(harness.sockets).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(socket.send.mock.calls.every(([payload]) => typeof payload === 'string')).toBe(true);
+    release();
+    await vi.waitFor(() =>
+      expect(text(render())).not.toContain('Wait while the last audio reaches this tab'),
+    );
+    click('Try again');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    const retry = harness.sockets[1];
+    retry.open();
+    await vi.waitFor(() => expect(retry.send).toHaveBeenCalledOnce());
+    retry.status('listening');
+    expect(retry.send.mock.calls.filter(([payload]) => payload instanceof Uint8Array)).toEqual([
+      [pcm],
+      [tail],
+    ]);
+    unmount();
+  });
+
+  it('retains a tail that arrives after failure even when no full startup frame was buffered', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const unmount = mount();
+    click('Start session');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    await vi.waitFor(() => expect(socket.send).toHaveBeenCalledOnce());
+    harness.stream.stop.mockImplementation(() => held);
+    socket.onmessage?.({ data: JSON.stringify({ type: 'usageUnavailable' }) });
+    socket.onclose?.();
+    harness.onFrame(new Uint8Array([6, 7]));
+    release();
+    await vi.waitFor(() =>
+      expect(text(render())).not.toContain('Wait while the last audio reaches this tab'),
+    );
+    expect(text(render())).toContain('Startup audio is held only in this tab');
+    click('Open session');
+    expect(harness.push).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('bounds a stalled stop and reports missing tail without automatically retrying or dropping known held audio', async () => {
+    const { unmount } = await failWithHeldAudio(() => {
+      vi.useFakeTimers();
+      harness.stream.stop.mockImplementation(() => new Promise<void>(() => {}));
+    }, false);
+    await vi.advanceTimersByTimeAsync(LIVE_CAPTURE_STOP_TIMEOUT_MS + 1);
+    expect(text(render())).toContain('The final startup audio frame was not confirmed');
+    expect(text(render())).toContain('Startup audio is held only in this tab');
+    expect(harness.sockets).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledOnce();
+    click('Try again');
+    await vi.advanceTimersByTimeAsync(LIVE_CAPTURE_STOP_TIMEOUT_MS + 1);
+    expect(text(render())).toContain('Microphone cleanup is still unconfirmed');
+    expect(harness.sockets).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledOnce();
+    click('Discard untranscribed startup audio');
+    click('Open session');
+    expect(harness.push).toHaveBeenCalledWith('/app/sessions/s-1');
+    unmount();
+  });
+
+  it('keeps held-audio recovery visible when consent recovery clears the general error', async () => {
+    const { unmount } = await failWithHeldAudio();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response('{"code":"SESSION_CONSENT_INVALID"}', { status: 409 }),
+    );
+    click('Try again');
+    await vi.waitFor(() =>
+      expect(elements(render()).some((element) => element.type === MindConsentRecovery)).toBe(true),
+    );
+    expect(text(render())).toContain('Startup audio is held only in this tab');
+    const panel = elements(render()).find((element) => element.type === MindConsentRecovery)!;
+    (panel.props as unknown as { onConfirmed(): void }).onConfirmed();
+    expect(text(render())).toContain('Startup audio is held only in this tab');
+    click('Discard untranscribed startup audio');
+    expect(text(render())).toContain('Existing transcript is kept');
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    unmount();
+  });
+
+  it('marks a dropped frame if a repeated startup retry exceeds the bounded held-audio queue', async () => {
+    const { unmount } = await failWithHeldAudio();
+    click('Try again');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    const retry = harness.sockets[1];
+    retry.open();
+    await vi.waitFor(() => expect(retry.send).toHaveBeenCalledOnce());
+    harness.onFrame(new Uint8Array(1_048_576));
+    expect(text(render())).toContain('The final startup audio frame was not confirmed');
+    expect(text(render())).toContain('Startup audio is held only in this tab');
+    expect(retry.send.mock.calls.some(([payload]) => payload instanceof Uint8Array)).toBe(false);
+    unmount();
+  });
 });
 
 describe('same-session consent recovery wiring', () => {
@@ -390,6 +598,113 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
       requestId: string;
     };
   }
+
+  it('shows rejected transcription as a separate quality warning, never a conversation utterance', async () => {
+    const socket = await listening();
+    const artifact =
+      'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'utterance',
+        utterance: {
+          id: 'bad-u1',
+          text: artifact,
+          speaker: 'unknown',
+          tStartMs: 0,
+          tEndMs: 1000,
+        },
+      }),
+    });
+    const content = text(render());
+    expect(content).toContain('Transcript needs review');
+    expect(content).toContain('Some speech could not be transcribed reliably');
+    expect(content).not.toContain(artifact);
+    expect(
+      harness.states.some((state) => Array.isArray(state) && state.some((u) => u?.id === 'bad-u1')),
+    ).toBe(false);
+  });
+
+  it('retains an explicit gateway missing-window warning even after later good speech', async () => {
+    const socket = await listening();
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'transcriptionWarning', startMs: 0, endMs: 1000 }),
+    });
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'utterance',
+        utterance: {
+          id: 'good-u1',
+          text: 'Fictional later speech.',
+          speaker: 'patient',
+          tStartMs: 1000,
+          tEndMs: 2000,
+        },
+      }),
+    });
+    expect(text(render())).toContain('Transcript needs review');
+    expect(text(render())).toContain('Fictional later speech.');
+  });
+
+  it('relays actual final utterances and missing-window flag with the note, including retry-safe payload', async () => {
+    const socket = await listening();
+    const utterance = {
+      id: 'saved-u1',
+      text: 'Fictional speech.',
+      speaker: 'patient',
+      tStartMs: 100,
+      tEndMs: 1100,
+    };
+    socket.onmessage?.({ data: JSON.stringify({ type: 'utterance', utterance }) });
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'therapyFinal',
+        kind: 'TREATMENT',
+        transcriptionWarning: true,
+        transcript: 'Fictional speech.',
+        note: {
+          version: 'V1',
+          modality: 'CBT',
+          subjective: 'Fictional statement',
+          objective: 'Fictional observation',
+          assessment: 'Clinician review required',
+          plan: 'Clinician to review',
+          riskFlags: { severity: 'none', indicators: [], details: '' },
+        },
+      }),
+    });
+    await vi.waitFor(() =>
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/live-note'))).toBe(
+        true,
+      ),
+    );
+    const [, options] = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).endsWith('/live-note'))!;
+    expect(JSON.parse(options!.body as string)).toMatchObject({
+      transcript: 'Fictional speech.',
+      utterances: [utterance],
+      transcriptionWarning: true,
+    });
+  });
+
+  it('flags pre-fix browser recovery artifacts immediately without changing the stored record', () => {
+    const artifact =
+      'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
+    const stored = JSON.stringify({
+      version: 1,
+      sessionId: 's-1',
+      savedAt: '2026-09-12T08:00:00.000Z',
+      captureMode: 'LIVE',
+      durable: false,
+      transcript: artifact,
+      utterances: [{ id: 'old-u1', text: artifact, speaker: 'unknown', tStartMs: 0, tEndMs: 1000 }],
+    });
+    window.localStorage.getItem = () => stored;
+    mount();
+    expect(text(render())).toContain('Transcript needs review');
+    expect(window.localStorage.getItem('any')).toBe(stored);
+    expect(harness.stream.start).not.toHaveBeenCalled();
+  });
 
   it('clears displayed context-derived reasoning on revocation without removing deterministic safety or transcript', async () => {
     priorRisk = true;

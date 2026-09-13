@@ -204,6 +204,25 @@ async function runWith(capabilities: PractitionerCapability[]) {
 }
 
 describe('runNoteGeneration medical optional-output authorization', () => {
+  it('rejects cached or alternate-backend transcript artifacts before writing a note', async () => {
+    const artifact =
+      'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
+    mocks.pass1.mockResolvedValue({
+      output: {
+        transcript: artifact,
+        speakerSegments: [],
+        affectFeatures: [],
+        detectedLanguages: [],
+      },
+      callLog: callLog('PASS_1_TRANSCRIBE_AND_ANALYSE'),
+    });
+    await expect(runWith(['MEDICAL_DOCUMENTATION'])).resolves.toMatchObject({
+      status: 'FAILED',
+      errorMessage: expect.stringContaining('invalid generated text'),
+    });
+    expect(mocks.pass2).not.toHaveBeenCalled();
+    expect(JSON.stringify(mocks.noteDraftUpdate.mock.calls)).not.toContain(artifact);
+  });
   it('does not invoke Pass 2 when consent is withdrawn immediately before the model call', async () => {
     mocks.assertCurrentScribeAuthority.mockImplementation(async (_sessionId, boundary) => {
       if (boundary.source === 'pass2BeforeModel') throw new Error('authority denied');

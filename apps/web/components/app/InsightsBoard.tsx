@@ -94,10 +94,9 @@ export function InsightsBoard({ insights, days }: { insights: DoctorInsights; da
           accent
         />
         <Tile
-          label="Cost / consult"
+          label="Legacy sample estimate"
           value={insights.avgCostInr == null ? '—' : `₹${insights.avgCostInr.toFixed(2)}`}
-          sub="≤ ₹3 ceiling"
-          hit={insights.avgCostInr != null && insights.avgCostInr <= 3}
+          sub="First connection sample, not a whole-session bill"
         />
         <Tile
           label="Ask-next act-rate"

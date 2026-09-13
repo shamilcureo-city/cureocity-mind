@@ -53,6 +53,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     'windows',
     'transcript_p95_ms',
     'note_p95_ms',
+    'cost_scope',
   ];
   const rows = metrics.map((m, i) =>
     [
@@ -64,6 +65,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       m.windows,
       m.transcriptP95Ms,
       m.noteP95Ms,
+      'LEGACY_FIRST_CONNECTION_ESTIMATE',
     ].join(','),
   );
   const csv = [header.join(','), ...rows].join('\n') + '\n';

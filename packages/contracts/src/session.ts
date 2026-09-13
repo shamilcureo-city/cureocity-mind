@@ -112,6 +112,8 @@ export const SessionSchema = z.object({
   /// Sprint 19 — session kind drives Pass 2/3 prompt branches +
   /// UI labels (Intake vs Treatment).
   kind: SessionKindSchema.default('TREATMENT'),
+  /** Additive: older clients may omit it; never infer a booked visit's language from client defaults. */
+  language: ClinicalLocaleSchema.optional(),
   mindPurpose: MindSessionPurposeSchema.nullable().optional(),
   mindDocumentationMode: z.literal('MANUAL').nullable().optional(),
   status: SessionStatusSchema,

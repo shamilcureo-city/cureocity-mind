@@ -18,6 +18,8 @@ export interface AsrFixture {
   id: string;
   domain: 'cardio' | 'endo' | 'gp';
   language: 'en' | 'hi' | 'ml';
+  /** Optional explicit hint for a code-mixed actor recording. */
+  spokenLanguages?: string[];
   /** Ground-truth transcript (code-mixed; clinical terms in English). */
   reference: string;
   /** Safety-critical drug names that MUST survive transcription. */

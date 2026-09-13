@@ -1,14 +1,15 @@
 import { MockAsrEngine, VertexAsrEngine, type IAsrEngine } from './engine';
 import { asrGate } from './scorer';
 import { formatAsrReport, runAsrEval } from './runner';
+import { AsrEvaluationUnavailableError } from './wav';
 
 /**
  * Sprint DS8 — `pnpm eval:asr`. Scores the code-mix seed set through an ASR
  * engine and prints the report + the drug-name gate verdict.
- *   ASR_ENGINE=vertex → the REAL benchmark (needs actor-recorded audio +
- *                       creds; see docs/asr-benchmark.md). Exits non-zero if
- *                       the drug-name gate would relax unsafely — it never
- *                       will here because the engine refuses without audio.
+ *   ASR_ENGINE=vertex + ASR_ALLOW_PROVIDER_CALLS=true → an authorized real
+ *                       WAV benchmark. Scribe's existing drug-name policy is
+ *                       advisory and unchanged; unavailable input exits 2.
+ *                       Mind has a separate failing command, eval:mind.
  *   mock (default)    → deterministic smoke run over the representative
  *                       hypotheses so the harness stays covered in CI.
  */
@@ -16,7 +17,13 @@ async function main(): Promise<void> {
   const engineName = process.env['ASR_ENGINE'] ?? 'mock';
   const engine: IAsrEngine =
     engineName === 'vertex'
-      ? new VertexAsrEngine(process.env['ASR_AUDIO_DIR'])
+      ? new VertexAsrEngine(process.env['ASR_AUDIO_DIR'], {
+          projectId: process.env['VERTEX_PROJECT_ID'],
+          model: process.env['VERTEX_FLASH_MODEL'],
+          location: process.env['VERTEX_FLASH_REGION'] ?? 'asia-south1',
+          allowProviderCalls: process.env['ASR_ALLOW_PROVIDER_CALLS'] === 'true',
+          vertical: 'DOCTOR',
+        })
       : new MockAsrEngine();
 
   const report = await runAsrEval(engine);
@@ -35,4 +42,9 @@ async function main(): Promise<void> {
   console.log(`\nvoiceRxConfirmOnly=${gate.voiceRxConfirmOnly}`);
 }
 
-void main();
+void main().catch((error: unknown) => {
+  console.error(
+    `NOT_EVALUATED: ${error instanceof AsrEvaluationUnavailableError ? error.code : 'ASR_EVALUATION_FAILED'}`,
+  );
+  process.exitCode = 2;
+});
