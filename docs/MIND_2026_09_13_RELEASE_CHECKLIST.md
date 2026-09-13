@@ -1,15 +1,16 @@
 # Mind release candidate — 13 September 2026
 
-**Not deployed.** This checklist covers the accumulated transcript, counselling,
+**Production not deployed; preview validation in progress.** This checklist covers the accumulated transcript, counselling,
 preparation and usage work, not only the latest cost panel. See the
 [implementation ledger](MIND_SPRINT_IMPLEMENTATION_LEDGER.md) for feature limits.
 
 ## Verified baseline
 
 - GitHub `main`: `8af631f8c7ae3b368f967660fddd4ebac9f6be64`.
-- Local committed HEAD: `561888581257c61f6a22f0e584a9d87efd7a45ad`.
-  Their source trees are identical. All candidate changes are uncommitted;
-  ancestry divergence alone is not an unreleased feature diff.
+- Original local HEAD: `561888581257c61f6a22f0e584a9d87efd7a45ad`.
+  Its source tree was identical to main; ancestry divergence alone was not an
+  unreleased feature diff. The reviewed candidate was subsequently published as
+  `567de4ad8e57d0d7ea4c19cb37aacf6cae9d769c` in PR #157.
 - Vercel project `cureocity-mind-web`, root `apps/web`, Node `22.x`:
   production deployment `dpl_HnbbBgVsoi5YKcckyWBdLzcimZwT` is READY at the
   verified main SHA. Its aliases include Mind, Scribe and Care. Shared source
@@ -99,18 +100,18 @@ tests and public health do not prove audio latency or clinical quality.
 
 ## Final local verification
 
-| Check | Result |
-| --- | --- |
-| Full web suite | 256 files; 2,247 passed, 37 opt-in database cases skipped |
-| Full contracts suite | 38 files; 455 passed |
-| Full AI package suite | 22 files; 226 passed |
-| Full clinical suite | 24 files; 301 passed |
-| Full gateway suite | 25 files; 318 passed |
-| Four isolated PostgreSQL suites | 63 passed, zero skipped; includes the opt-in database cases above |
-| CI persistence-suite guard | 6 passed; also included in the full web suite |
-| Workspace package lint and typechecks | Passed via direct recursive package scripts |
-| Full source formatting; whitespace checks | Passed |
-| Contracts, AI, clinical and gateway TypeScript builds | Passed |
+| Check                                                 | Result                                                            |
+| ----------------------------------------------------- | ----------------------------------------------------------------- |
+| Full web suite                                        | 256 files; 2,247 passed, 37 opt-in database cases skipped         |
+| Full contracts suite                                  | 38 files; 455 passed                                              |
+| Full AI package suite                                 | 22 files; 226 passed                                              |
+| Full clinical suite                                   | 24 files; 301 passed                                              |
+| Full gateway suite                                    | 25 files; 318 passed                                              |
+| Four isolated PostgreSQL suites                       | 63 passed, zero skipped; includes the opt-in database cases above |
+| CI persistence-suite guard                            | 6 passed; also included in the full web suite                     |
+| Workspace package lint and typechecks                 | Passed via direct recursive package scripts                       |
+| Full source formatting; whitespace checks             | Passed                                                            |
+| Contracts, AI, clinical and gateway TypeScript builds | Passed                                                            |
 
 The isolated PostgreSQL 16.14 cluster applied the 146 source migrations using
 the existing guarded fresh-CI reconciliation. Both new SQL files also replayed
@@ -122,18 +123,36 @@ runs overlap and must not be summed as independent new tests.
 The standard Nx wrapper could not initialize a cache lock at the separate saved
 checkout path under this sandbox. Running each workspace package's existing
 lint/typecheck script directly passed; no cache reset or other checkout change
-was made. CI itself has not run for this unpublished candidate. Hosted web build,
-gateway container build and authenticated runtime/audio verification remain
-separate pending checks, not inferred from TypeScript builds or unit tests.
+was made. Hosted checks are tracked separately below; none establishes
+authenticated runtime/audio verification by itself.
 
 ## Handoff status
 
-No candidate commit, push, PR, merge, preview/production migration, deployment,
-cloud configuration change, paid provider call or microphone use occurred.
+The candidate is published in [PR #157](https://github.com/shamilcureo-city/cureocity-mind/pull/157).
+No main merge, production migration, production deployment, cloud configuration
+change, paid provider call or microphone use has occurred as of this update.
 Owner reauthentication to the existing business Google Cloud account is now
 verified. The owner explicitly approved public GitHub publication, main merge,
 the two migrations and coordinated web/gateway deployment, with new features
 remaining off until runtime validation. The release branch is
-`codex/mind-product-release-20260913`, based on verified main. Publication still
-requires the database-target and migration checks above; approval is not a claim
-that a deployment has completed. Refresh gateway settings immediately before rollout.
+`codex/mind-product-release-20260913`, based on verified main. Approval is not a
+claim that a deployment has completed. Refresh gateway settings immediately before rollout.
+
+### Hosted preflight evidence — 13 September
+
+- Production's read-only migration check returned zero unresolved rows and
+  144 source entries, with fingerprint `f9156ad6f94c12b4b0932f1f76695819`, matching
+  current main. The known historical July Care entry was excluded from both the
+  comparison and source count; no migration history was changed.
+- Preview is a separate Neon branch. Its known historical checksum exceptions
+  were investigated read-only: closeout differs only in replay guards; corrected
+  ORBIT/name-removal successors match and current constraints are valid. No
+  schema or ledger repair was indicated or performed.
+- Preview deployment `dpl_D7zYVWqEYi1KC7atGoi7LgayKRrF` logs confirm both new
+  migrations applied successfully. Hosted web build and post-migration checks
+  are still in progress at this update.
+- PR CI's gateway Docker build passed. Its formatting job caught this checklist;
+  the document is being formatted before the next checked commit. Remaining
+  CI results and final checked SHA must be recorded separately.
+- Existing Cloud Shell credential selection now works for the business account;
+  no new OAuth credentials, IAM grants, keys or gateway traffic changes were made.
