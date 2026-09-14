@@ -13,6 +13,7 @@ import { ClinicalOrderV1Schema, MedicationOrderV1Schema } from './medication-ord
 import { IntakeNoteV1Schema, TherapyNoteV1Schema } from './note';
 import { PractitionerVerticalSchema } from './psychologist';
 import { RxPadDraftSchema, RxPadV1Schema } from './rx-pad';
+import { MindRecoveryUtteranceSchema } from './mind-recovery';
 
 /**
  * Sprint DV1 scaffold — the streaming / live contracts (Rails 1–3 of the
@@ -154,9 +155,17 @@ export const MeterSummarySchema = z
     windows: LiveMeterCountSchema,
     pass1Calls: LiveMeterCountSchema,
     pass2Calls: LiveMeterCountSchema,
+    reasoningCalls: LiveMeterCountSchema.optional(),
     inputTokens: LiveMeterCountSchema,
     outputTokens: LiveMeterCountSchema,
     costInr: z.number().finite().nonnegative().max(999_999).multipleOf(0.0001),
+    costBreakdown: z
+      .object({
+        transcriptionInr: z.number().finite().nonnegative().max(999_999).multipleOf(0.0001),
+        notesInr: z.number().finite().nonnegative().max(999_999).multipleOf(0.0001),
+        reasoningInr: z.number().finite().nonnegative().max(999_999).multipleOf(0.0001),
+      })
+      .optional(),
     /** Pass-1 (transcription) latency percentiles across windows. */
     transcriptP50Ms: LiveMeterLatencySchema,
     transcriptP95Ms: LiveMeterLatencySchema,
@@ -179,6 +188,22 @@ export const MeterSummarySchema = z
     elapsedMs: LiveMeterLatencySchema,
   })
   .superRefine((summary, ctx) => {
+    if (summary.costBreakdown) {
+      const parts = summary.costBreakdown;
+      const difference = Math.abs(
+        parts.transcriptionInr + parts.notesInr + parts.reasoningInr - summary.costInr,
+      );
+      if (
+        difference > 0.000100001 ||
+        (summary.backend === 'mock' && Object.values(parts).some((cost) => cost !== 0))
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['costBreakdown'],
+          message: 'Cost breakdown must match the total estimate',
+        });
+      }
+    }
     if (summary.backend === 'mock' && summary.costInr !== 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -292,6 +317,8 @@ export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 /// recognised voice commands.
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
+  // Operational start failure only; no provider work has been allowed to begin.
+  z.object({ type: z.literal('usageUnavailable') }).strict(),
   z.object({
     type: z.literal('tokenRenewed'),
     requestId: z.string().uuid(),
@@ -306,6 +333,12 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('therapyContextCleared'), reason: z.literal('CAPABILITY_CHANGED') }),
   z.object({ type: z.literal('capturePauseFailed'), requestId: z.string().uuid() }),
   z.object({ type: z.literal('transcript'), delta: LiveTranscriptDeltaSchema }),
+  // A missing/unreliable window is a quality warning, never invented speech.
+  z.object({
+    type: z.literal('transcriptionWarning'),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().nonnegative(),
+  }),
   /**
    * Sprint DS13 — the STREAMING display rail (flag-gated, doctor path).
    * A provisional, undiarized live transcription of the in-flight speech,
@@ -373,6 +406,7 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
     kind: SessionKindSchema,
     note: z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]),
     transcript: z.string().optional(),
+    transcriptionWarning: z.boolean().optional(),
   }),
 ]);
 export type LiveGatewayEvent = z.infer<typeof LiveGatewayEventSchema>;
@@ -404,11 +438,22 @@ export type LiveNoteInput = z.infer<typeof LiveNoteInputSchema>;
  * none of the doctor-only meds / orders / Rx. The route persists it as a
  * COMPLETED NoteDraft — the same provenance as the batch therapist path.
  */
-export const TherapyLiveNoteInputSchema = z.object({
-  kind: SessionKindSchema,
-  note: z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]),
-  transcript: z.string().max(200_000).optional(),
-});
+export const TherapyLiveNoteInputSchema = z
+  .object({
+    kind: SessionKindSchema,
+    note: z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]),
+    transcript: z.string().max(200_000).optional(),
+    // Preserve only the actual finalized utterances, not display-only partials.
+    utterances: z.array(MindRecoveryUtteranceSchema).max(4000).optional(),
+    transcriptionWarning: z.boolean().optional(),
+  })
+  .superRefine(({ utterances }, ctx) => {
+    if (!utterances) return;
+    if (new Set(utterances.map((row) => row.id)).size !== utterances.length)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Duplicate utterance IDs' });
+    if (utterances.reduce((size, row) => size + row.text.length, 0) > 200_000)
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Transcript is too large' });
+  });
 export type TherapyLiveNoteInput = z.infer<typeof TherapyLiveNoteInputSchema>;
 
 /**

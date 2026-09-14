@@ -16,6 +16,7 @@ import { planAmountInr } from '@/lib/billing';
 import { computeDayBoundaries, formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
 import { requirePageAdmin } from '@/lib/auth-page';
+import { loadRecordedUsage, totalRecordedUsage } from '@/lib/session-usage';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,14 +60,8 @@ export default async function AdminOverviewPage() {
     prisma.session.count({
       where: { createdAt: { gte: weekAgo }, client: { isDemo: false } },
     }),
-    prisma.geminiCallLog.aggregate({
-      where: { createdAt: { gte: dayStart } },
-      _sum: { costInr: true },
-    }),
-    prisma.geminiCallLog.aggregate({
-      where: { createdAt: { gte: monthAgo } },
-      _sum: { costInr: true },
-    }),
+    loadRecordedUsage({ from: dayStart }),
+    loadRecordedUsage({ from: monthAgo }),
     prisma.billingAccount.findMany({
       select: { psychologistId: true, plan: true, paidThroughAt: true },
     }),
@@ -107,8 +102,8 @@ export default async function AdminOverviewPage() {
     }
   }
 
-  const costTodayInr = Number(costToday._sum.costInr ?? 0);
-  const costMonthInr = Number(costMonth._sum.costInr ?? 0);
+  const costTodayInr = totalRecordedUsage(costToday.entries).toNumber();
+  const costMonthInr = totalRecordedUsage(costMonth.entries).toNumber();
   const attentionCount = openErasures + openGrievances + pendingVerification;
 
   return (
@@ -134,9 +129,9 @@ export default async function AdminOverviewPage() {
           href="/console/billing"
         />
         <StatTile
-          label="AI cost · today"
+          label="Recorded AI estimate · today"
           value={inr(costTodayInr)}
-          sub={`${inr(costMonthInr)} last 30d`}
+          sub={`${inr(costMonthInr)} last 30d · partial, unreconciled`}
           href="/console/costs"
         />
         <StatTile

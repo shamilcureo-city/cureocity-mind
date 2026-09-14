@@ -13,13 +13,20 @@ import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { ShareModal } from './ShareModal';
 import { MindTherapyGuide } from './MindTherapyGuide';
+import {
+  EMDR_GUIDE_TRAINING_NOTICE,
+  MIND_THERAPY_GUIDE_KIND_LABELS,
+  mindTherapyGuideChoice,
+  groupMindTherapyGuideChoices,
+  type MindTherapyGuideChoice,
+} from '@/lib/mind-therapy-catalog';
 
 interface TherapyLibraryProps {
   clientId: string;
   /** Preserve the case rationale where the psychologist chooses an approach. */
   recommendedTherapies: ClinicalRecommendedTherapy[];
-  /** Always-available fallback list for browse mode. */
-  libraryTherapies: string[];
+  /** Existing browse choices, classified without implying approved content. */
+  libraryTherapies: readonly MindTherapyGuideChoice[];
   defaultLanguage: 'en' | 'ml' | 'hi' | 'ta' | 'bn';
   /** Id of the client's currently active treatment plan, if any. */
   activeTreatmentPlanId: string | null;
@@ -116,9 +123,7 @@ export function TherapyLibrary({
   // "Recommended" only.
   const visibleLibrary = useMemo(
     () =>
-      libraryTherapies
-        .filter((t) => !recommendedTherapies.some((item) => item.name === t))
-        .map((name) => ({ name })),
+      libraryTherapies.filter((t) => !recommendedTherapies.some((item) => item.name === t.name)),
     [libraryTherapies, recommendedTherapies],
   );
 
@@ -128,13 +133,19 @@ export function TherapyLibrary({
         <div>
           <h2 className="font-serif text-2xl">Session guides</h2>
           <p className="mt-1 text-sm text-[var(--color-ink-2)]">
-            Choose an approach to prepare a case-specific draft. Review its fit, then open your
-            step-by-step companion. Your judgment leads the session.
+            Choose an approach, technique or protocol stage to prepare a case-specific draft. Review
+            its fit before use. Your judgment leads the session.
           </p>
           <p className="mt-2 max-w-prose text-sm text-[var(--color-ink-2)]">
-            These are AI drafts, not approved therapy protocols. A diagnosis is not required. Choose
-            an approach within your training and review its suitability with the client.
+            These are AI drafts, not reviewed therapy protocols. A diagnosis is not required.
+            Choosing a guide does not change the client’s diagnosis, plan or protocol stage.
           </p>
+          {libraryTherapies.length > 0 && (
+            <p className="mt-2 text-sm font-medium text-[var(--color-ink)]">
+              {libraryTherapies.length} library starting points — not {libraryTherapies.length}{' '}
+              complete therapies.
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {canShare && activeTreatmentPlanId && (
@@ -157,16 +168,17 @@ export function TherapyLibrary({
       {activeTherapy === null ? (
         <div className="space-y-5">
           <TherapyList
-            title="Suggested approaches to consider"
-            empty="No suggestions yet. You can explore an approach below; a disorder diagnosis is not required to prepare a draft."
+            title="Suggested guides to consider"
+            empty="No suggestions yet. You can explore a guide below; a disorder diagnosis is not required to prepare a draft."
             therapies={recommendedTherapies}
             onPick={(t) => void loadScript(t)}
           />
           <TherapyList
             title="Explore the library"
-            empty="No library therapies configured."
+            empty="No additional guide choices."
             therapies={visibleLibrary}
             onPick={(t) => void loadScript(t)}
+            groupByKind
           />
         </div>
       ) : (
@@ -176,10 +188,13 @@ export function TherapyLibrary({
             <button
               type="button"
               onClick={close}
-              className="text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
+              className="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]"
             >
-              ← back to library
+              Back to guide choices
             </button>
+          </div>
+          <div className="mt-3">
+            <TherapyGuideClassification name={activeTherapy} />
           </div>
           {loading && (
             <p role="status" className="mt-4 text-sm text-[var(--color-ink-2)]">
@@ -292,57 +307,109 @@ export function TherapyLibrary({
   );
 }
 
-function TherapyList({
+export function TherapyList({
   title,
   empty,
   therapies,
   onPick,
+  groupByKind = false,
 }: {
   title: string;
   empty: string;
-  therapies: { name: string; rationale?: string; evidenceSummary?: string; whenInPlan?: string }[];
+  therapies: readonly {
+    name: string;
+    rationale?: string;
+    evidenceSummary?: string;
+    whenInPlan?: string;
+  }[];
   onPick: (t: string) => void;
+  groupByKind?: boolean;
 }) {
+  const choices = (items: typeof therapies) => (
+    <ul className="mt-2 grid gap-2 sm:grid-cols-2">
+      {items.map((t) => (
+        <li
+          key={mindTherapyGuideChoice(t.name)?.id ?? t.name}
+          className="flex min-w-0 flex-col gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5 text-sm"
+        >
+          <h4 className="font-semibold">{t.name}</h4>
+          <TherapyGuideClassification name={t.name} />
+          {t.rationale && (
+            <p className="leading-relaxed text-[var(--color-ink-2)]">{t.rationale}</p>
+          )}
+          {t.whenInPlan && (
+            <p className="text-[var(--color-ink-2)]">Suggested timing: {t.whenInPlan}</p>
+          )}
+          {t.evidenceSummary && (
+            <details className="text-[var(--color-ink-2)]">
+              <summary className="min-h-11 cursor-pointer py-3 font-medium">
+                AI evidence summary
+              </summary>
+              <p className="mt-2 leading-relaxed">{t.evidenceSummary}</p>
+              <p className="mt-2">
+                Check the supporting sources before using this as a clinical rationale.
+              </p>
+            </details>
+          )}
+          <Button
+            variant="secondary"
+            className="mt-auto min-h-11"
+            onClick={() => onPick(t.name)}
+            aria-label={`Prepare draft guide: ${t.name}`}
+          >
+            Prepare draft guide
+          </Button>
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <section>
       <h3 className="text-sm font-medium text-[var(--color-ink-2)]">{title}</h3>
       {therapies.length === 0 ? (
-        <p className="mt-2 text-sm text-[var(--color-ink-3)]">{empty}</p>
-      ) : (
-        <ul className="mt-2 grid gap-2 sm:grid-cols-2">
-          {therapies.map((t) => (
-            <li
-              key={t.name}
-              className="flex flex-col gap-3 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5 text-sm"
+        <p className="mt-2 text-sm text-[var(--color-ink-2)]">{empty}</p>
+      ) : groupByKind ? (
+        <div className="mt-3 space-y-3">
+          {groupMindTherapyGuideChoices(therapies).map((group) => (
+            <details
+              key={group.kind}
+              className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-4"
             >
-              <h4 className="font-semibold">{t.name}</h4>
-              {t.rationale && (
-                <p className="leading-relaxed text-[var(--color-ink-2)]">{t.rationale}</p>
-              )}
-              {t.whenInPlan && (
-                <p className="text-[var(--color-ink-2)]">Suggested timing: {t.whenInPlan}</p>
-              )}
-              {t.evidenceSummary && (
-                <details className="text-[var(--color-ink-2)]">
-                  <summary className="cursor-pointer font-medium">AI evidence summary</summary>
-                  <p className="mt-2 leading-relaxed">{t.evidenceSummary}</p>
-                  <p className="mt-2">
-                    Check the supporting sources before using this as a clinical rationale.
-                  </p>
-                </details>
-              )}
-              <Button
-                variant="secondary"
-                className="mt-auto min-h-11"
-                onClick={() => onPick(t.name)}
-                aria-label={`Prepare draft guide: ${t.name}`}
-              >
-                Prepare draft guide
-              </Button>
-            </li>
+              <summary className="min-h-11 cursor-pointer rounded-lg py-2 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
+                {group.title} ({group.choices.length})
+              </summary>
+              <p className="mb-3 max-w-prose text-sm leading-relaxed text-[var(--color-ink-2)]">
+                {group.description}
+              </p>
+              {choices(group.choices)}
+            </details>
           ))}
-        </ul>
+        </div>
+      ) : (
+        choices(therapies)
       )}
     </section>
+  );
+}
+
+/** A guide category describes the choice, not its suitability or clinical approval. */
+export function TherapyGuideClassification({ name }: { name: string }) {
+  const choice = mindTherapyGuideChoice(name);
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <Badge tone="muted">
+          {choice ? MIND_THERAPY_GUIDE_KIND_LABELS[choice.kind] : 'AI-suggested guide'}
+        </Badge>
+        <Badge tone="muted">AI-drafted guide</Badge>
+      </div>
+      <p className="text-xs text-[var(--color-ink-2)]">
+        Not a reviewed protocol.
+        {choice?.kind === 'protocol_stage' && ' One stage, not a complete course of therapy.'}
+      </p>
+      {choice?.emdrTrainingNotice && (
+        <p className="text-xs text-[var(--color-ink-2)]">{EMDR_GUIDE_TRAINING_NOTICE}</p>
+      )}
+    </div>
   );
 }

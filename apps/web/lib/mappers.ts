@@ -101,6 +101,7 @@ export function toSession(row: SessionRow): Session {
     modality: row.modality,
     // Sprint 19 — session classification (INTAKE / TREATMENT / REVIEW).
     kind: row.kind,
+    language: row.language as Session['language'],
     mindPurpose: (row.mindPurpose ?? null) as Session['mindPurpose'],
     mindDocumentationMode: row.mindDocumentationMode === 'MANUAL' ? 'MANUAL' : null,
     status: row.status,

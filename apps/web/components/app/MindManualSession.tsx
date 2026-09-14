@@ -6,29 +6,22 @@ import {
   MindManualNoteFieldsSchema,
   MIND_SESSION_PURPOSE_LABELS,
   type MindManualNoteFields,
-  type MindSessionPurpose,
 } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { FieldError, Label, Select } from '../ui/Field';
 import { postSignNote } from '@/lib/sign-note';
 import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
+import {
+  MindManualAutosave,
+  readManualNoteSnapshot,
+  type ManualAutosaveState,
+  type ManualNoteSnapshot,
+} from '@/lib/mind-manual-autosave';
 import { MindSessionAgreements } from './MindSessionAgreements';
 import { ScheduleSessionPanel } from './ScheduleSessionPanel';
+import { MindCareRecordPanel } from './MindCareRecordPanel';
 
-type State = {
-  sessionId: string;
-  kind: string;
-  purpose: MindSessionPurpose | null;
-  status: string;
-  revision: number;
-  noteUpdatedAt: string | null;
-  fields: MindManualNoteFields;
-  hasUnappliedDraft: boolean;
-  note: unknown | null;
-  signed: boolean;
-  signedAt: string | null;
-};
 const INTAKE_FIELDS = [
   ['presentingConcerns', 'What brought the client here?'],
   ['historyOfPresentingIllness', 'How has this developed and affected everyday life?'],
@@ -53,129 +46,172 @@ export function MindManualSession({
   clientName,
   canShare,
   followUpSession,
+  sessionScheduledAt,
 }: {
   sessionId: string;
   clientId: string;
   clientName: string;
   canShare: boolean;
   followUpSession?: { id: string; scheduledAt: string } | null;
+  sessionScheduledAt?: string;
 }) {
-  const [loaded, setLoaded] = useState<State | null>(null);
+  const [loaded, setLoaded] = useState<ManualNoteSnapshot | null>(null);
   const [fields, setFields] = useState<MindManualNoteFields>(() =>
     MindManualNoteFieldsSchema.parse({}),
   );
-  const [dirty, setDirty] = useState(false);
+  const [saveState, setSaveState] = useState<ManualAutosaveState>({
+    status: 'ready',
+    message: null,
+    protected: true,
+    pendingOperation: null,
+    finishing: false,
+  });
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [needsReload, setNeedsReload] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
-  const pendingWrite = useRef<{
-    operation: 'save' | 'complete';
-    expectedRevision: number;
-    expectedNoteUpdatedAt: string | null;
-    mutationId: string;
-    fields: MindManualNoteFields;
-  } | null>(null);
+  const autosave = useRef<MindManualAutosave | null>(null);
+  const fieldsRef = useRef(fields);
+  const busyRef = useRef(false);
+  const readAttempt = useRef(0);
   const mounted = useRef(true);
-  const apply = useCallback((next: State) => {
+  const currentSessionId = useRef(sessionId);
+  currentSessionId.current = sessionId;
+  const apply = useCallback((next: ManualNoteSnapshot) => {
+    autosave.current?.dispose();
     setLoaded(next);
     setFields(next.fields);
-    setDirty(false);
+    fieldsRef.current = next.fields;
     setEditing(!next.note || next.hasUnappliedDraft);
     setNeedsReload(false);
+    const controller = new MindManualAutosave(next, setSaveState, (saved, operation) => {
+      setLoaded(saved);
+      // Saving a checkpoint must not replace text typed while its request was in flight.
+      if (operation === 'complete') {
+        fieldsRef.current = saved.fields;
+        setFields(saved.fields);
+        setEditing(false);
+        setMessage('Session finished. Review your note, then sign when ready.');
+      }
+    });
+    autosave.current = controller;
+    setSaveState(controller.getState());
   }, []);
   const load = useCallback(async () => {
+    // An unknown write must be retried with its receipt before replacing this view.
+    if (autosave.current?.getState().pendingOperation) return null;
+    const attempt = ++readAttempt.current;
+    autosave.current?.dispose();
+    busyRef.current = true;
     setBusy(true);
+    setNeedsReload(true);
     setError(null);
+    setMessage('');
     try {
       const response = await fetch(`/api/v1/sessions/${sessionId}/manual-note`, {
         cache: 'no-store',
         signal: AbortSignal.timeout(15_000),
       });
-      const body = (await response.json()) as State & { error?: string };
+      const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? 'Could not load the saved note.');
-      if (mounted.current) {
-        apply(body);
-        pendingWrite.current = null;
-        return body;
+      const saved = readManualNoteSnapshot(body, sessionId);
+      if (mounted.current && attempt === readAttempt.current) {
+        apply(saved);
+        return saved;
       }
     } catch (cause) {
-      if (mounted.current) setError((cause as Error).message);
+      if (mounted.current && attempt === readAttempt.current) setError((cause as Error).message);
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current && attempt === readAttempt.current) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
     return null;
   }, [sessionId, apply]);
   useEffect(() => {
     mounted.current = true;
+    setLoaded(null);
     void load();
     return () => {
       mounted.current = false;
+      ++readAttempt.current;
+      autosave.current?.dispose();
+      autosave.current = null;
     };
   }, [load]);
+  const dirty = !saveState.protected;
   useUnsavedWorkGuard(
-    dirty || !!pendingWrite.current,
+    dirty,
     'Some note changes may not be saved. Copy your text or save before leaving this view.',
     busy,
   );
 
+  function changeFields(patch: Partial<MindManualNoteFields>) {
+    const next = { ...fieldsRef.current, ...patch };
+    if (!autosave.current?.update(next)) return;
+    fieldsRef.current = next;
+    setFields(next);
+    setMessage('');
+  }
+
   async function write(operation: 'save' | 'complete') {
-    if (!loaded || busy || needsReload) return;
-    const body = pendingWrite.current ?? {
-      operation,
-      expectedRevision: loaded.revision,
-      expectedNoteUpdatedAt: loaded.noteUpdatedAt,
-      mutationId: crypto.randomUUID(),
-      fields: structuredClone(fields),
-    };
-    pendingWrite.current = body;
-    setBusy(true);
+    const controller = autosave.current;
+    if (!loaded || !controller || busyRef.current || needsReload) return;
+    // Normal autosaves keep the editor usable. Completion is an explicit, text-locking action.
+    if (operation === 'complete') {
+      busyRef.current = true;
+      setBusy(true);
+    }
     setError(null);
     setMessage('');
     try {
-      const response = await fetch(`/api/v1/sessions/${sessionId}/manual-note`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(20_000),
-      });
-      const result = (await response.json()) as State & { error?: string };
-      if (!response.ok) {
-        // A validation/conflict refusal is definitive. A proxy/server 5xx may
-        // arrive after commit, so retain its exact receipt for an idempotent retry.
-        if (response.status < 500) pendingWrite.current = null;
-        throw new Error(result.error ?? 'Could not save your note.');
+      if (operation === 'complete') await controller.complete();
+      else {
+        const saved = await controller.flush();
+        if (
+          mounted.current &&
+          autosave.current === controller &&
+          saved?.hasUnappliedDraft &&
+          controller.getState().protected
+        )
+          setMessage('Draft saved securely. It is not signed.');
       }
-      if (mounted.current) {
-        pendingWrite.current = null;
-        apply(result);
-        setMessage(
-          body.operation === 'save'
-            ? 'Draft saved securely. It is not signed.'
-            : 'Session finished. Review your note, then sign when ready.',
-        );
-      }
-    } catch (cause) {
-      if (mounted.current) setError((cause as Error).message);
     } finally {
-      if (mounted.current) setBusy(false);
+      if (mounted.current && autosave.current === controller && operation === 'complete') {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   }
   async function sign() {
-    if (!loaded?.note || dirty || loaded.hasUnappliedDraft || busy || needsReload) return;
+    const controller = autosave.current;
+    if (!loaded?.note || !controller || loaded.hasUnappliedDraft || busyRef.current || needsReload)
+      return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setMessage('');
     // A lost response can follow a committed signature. Do not expose the
     // obsolete draft again until an authoritative read establishes its state.
-    setNeedsReload(true);
     try {
+      const current = await controller.flush();
+      if (
+        !current?.note ||
+        current.hasUnappliedDraft ||
+        current.signed ||
+        !controller.getState().protected ||
+        !mounted.current ||
+        autosave.current !== controller
+      )
+        return;
+      setNeedsReload(true);
       const response = await postSignNote(
         sessionId,
         {
-          note: loaded.note,
-          draftContent: loaded.note,
+          note: current.note,
+          draftContent: current.note,
           edits: [],
           signedAt: new Date().toISOString(),
           rxPad: null,
@@ -183,18 +219,24 @@ export function MindManualSession({
         { requestTimeoutMs: 20_000 },
       );
       const result = (await response.json()) as { error?: string };
+      if (!mounted.current || currentSessionId.current !== sessionId) return;
       if (!response.ok) throw new Error(result.error ?? 'Could not sign the note.');
       const refreshed = await load();
       if (mounted.current && refreshed?.signed)
         setMessage('Your clinical note is signed. Nothing has been shared.');
     } catch (cause) {
-      setError((cause as Error).message);
+      if (mounted.current && currentSessionId.current === sessionId)
+        setError((cause as Error).message);
     } finally {
-      setBusy(false);
+      if (mounted.current && currentSessionId.current === sessionId) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   }
   async function reopen() {
-    if (!loaded?.signed || busy || needsReload) return;
+    if (!loaded?.signed || busyRef.current || needsReload) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     setMessage('');
@@ -205,17 +247,24 @@ export function MindManualSession({
         signal: AbortSignal.timeout(20_000),
       });
       const result = (await response.json()) as { error?: string };
+      if (!mounted.current || currentSessionId.current !== sessionId) return;
       if (!response.ok) throw new Error(result.error ?? 'Could not reopen the signed note.');
       const refreshed = await load();
       if (mounted.current && refreshed && !refreshed.signed) setEditing(true);
     } catch (cause) {
-      setError((cause as Error).message);
+      if (mounted.current && currentSessionId.current === sessionId)
+        setError((cause as Error).message);
     } finally {
-      setBusy(false);
+      if (mounted.current && currentSessionId.current === sessionId) {
+        busyRef.current = false;
+        setBusy(false);
+      }
     }
   }
   const activeFields = loaded?.kind === 'INTAKE' ? INTAKE_FIELDS : THERAPY_FIELDS;
-  const readOnly = loaded?.signed || !editing || needsReload;
+  const conflicted = saveState.status === 'conflict' || saveState.status === 'blocked';
+  const readOnly = loaded?.signed || !editing || needsReload || conflicted;
+  const editorDisabled = busy || saveState.finishing || saveState.pendingOperation === 'complete';
   return (
     <div className="mx-auto max-w-4xl space-y-6 py-8">
       <Link href={`/app/clients/${clientId}`} className="text-sm text-[var(--color-ink-3)]">
@@ -236,6 +285,7 @@ export function MindManualSession({
         </p>
       </Card>
       <FieldError message={error} />
+      <FieldError message={saveState.message} />
       {!loaded && (
         <Button onClick={load} disabled={busy}>
           {busy ? 'Loading your note…' : 'Try loading again'}
@@ -251,25 +301,31 @@ export function MindManualSession({
                   ? 'Your working note'
                   : 'Review your clinical note'}
             </h2>
-            <span className="text-sm text-[var(--color-ink-3)]" role="status">
+            <span className="text-sm text-[var(--color-ink-3)]" role="status" aria-live="off">
               {busy
                 ? 'Working…'
                 : needsReload
                   ? 'Reload to check the saved note status'
-                  : dirty
-                    ? 'Unsaved changes'
-                    : loaded.signed
-                      ? 'Signed and locked'
-                      : loaded.hasUnappliedDraft
-                        ? 'Draft saved · not signed'
-                        : 'Not signed'}
+                  : conflicted
+                    ? 'Changes need checking'
+                    : saveState.status === 'error'
+                      ? 'Save not confirmed'
+                      : saveState.status === 'saving'
+                        ? 'Saving…'
+                        : dirty
+                          ? 'Changes waiting to save'
+                          : loaded.signed
+                            ? 'Signed and locked'
+                            : loaded.hasUnappliedDraft
+                              ? 'Saved securely · not signed'
+                              : 'Not signed'}
             </span>
           </div>
           {editing && (
             <p className="text-sm text-[var(--color-ink-3)]">
-              Write what you actually explored, observed or agreed. Save an incomplete draft at any
-              point. Before review, document required areas in your own words—including what remains
-              unknown.
+              Write what you actually explored, observed or agreed. Changes save securely as you
+              write. Before review, document required areas in your own words—including what remains
+              unknown. Keep this page open until saving is confirmed.
             </p>
           )}
           {activeFields.map(([key, label]) => (
@@ -285,12 +341,8 @@ export function MindManualSession({
                   value={fields[key]}
                   maxLength={6000}
                   rows={key === 'pastPsychiatricHistory' || key === 'familyHistory' ? 2 : 4}
-                  disabled={busy || !!pendingWrite.current}
-                  onChange={(event) => {
-                    setFields((prior) => ({ ...prior, [key]: event.target.value }));
-                    setDirty(true);
-                    setMessage('');
-                  }}
+                  readOnly={editorDisabled}
+                  onChange={(event) => changeFields({ [key]: event.target.value })}
                   className="w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-bg)] p-3 text-sm leading-7 focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
                 />
               )}
@@ -303,16 +355,14 @@ export function MindManualSession({
             ) : (
               <Select
                 id="manual-risk"
-                disabled={busy || !!pendingWrite.current}
+                disabled={editorDisabled}
                 value={fields.riskSeverity ?? ''}
                 onChange={(event) => {
-                  setFields((prior) => ({
-                    ...prior,
+                  changeFields({
                     riskSeverity: event.target.value
                       ? (event.target.value as MindManualNoteFields['riskSeverity'])
                       : null,
-                  }));
-                  setDirty(true);
+                  });
                 }}
               >
                 <option value="">Not yet documented</option>
@@ -334,11 +384,8 @@ export function MindManualSession({
                 value={fields.riskDetails}
                 maxLength={6000}
                 rows={3}
-                disabled={busy || !!pendingWrite.current}
-                onChange={(event) => {
-                  setFields((prior) => ({ ...prior, riskDetails: event.target.value }));
-                  setDirty(true);
-                }}
+                readOnly={editorDisabled}
+                onChange={(event) => changeFields({ riskDetails: event.target.value })}
                 className="w-full rounded-xl border border-[var(--color-line)] p-3 text-sm leading-7"
               />
             )}
@@ -350,6 +397,10 @@ export function MindManualSession({
             {needsReload ? (
               <p className="text-sm text-[var(--color-ink-2)]">
                 The saved note status needs checking. Reload before editing, signing or downloading.
+              </p>
+            ) : conflicted ? (
+              <p className="text-sm text-[var(--color-ink-2)]">
+                Nothing in this view has been overwritten. Copy any text you need before reloading.
               </p>
             ) : loaded.signed ? (
               <>
@@ -366,10 +417,14 @@ export function MindManualSession({
               </>
             ) : editing ? (
               <>
-                <Button variant="secondary" onClick={() => write('save')} disabled={busy}>
-                  {pendingWrite.current ? 'Retry the pending save' : 'Save draft'}
+                <Button
+                  variant="secondary"
+                  onClick={() => write('save')}
+                  disabled={busy || saveState.status === 'saving'}
+                >
+                  {saveState.status === 'error' ? 'Retry saving' : 'Save now'}
                 </Button>
-                {!pendingWrite.current && (
+                {saveState.pendingOperation !== 'complete' && (
                   <Button onClick={() => write('complete')} disabled={busy}>
                     Finish session & review note
                   </Button>
@@ -385,7 +440,7 @@ export function MindManualSession({
                 </Button>
               </>
             )}
-            {(error || needsReload) && loaded && !pendingWrite.current && (
+            {(error || needsReload || conflicted) && loaded && !saveState.pendingOperation && (
               <Button
                 variant="secondary"
                 onClick={() => {
@@ -421,6 +476,13 @@ export function MindManualSession({
             signed={loaded.signed}
             hasSignedNote={loaded.signedAt !== null}
           />
+          {sessionScheduledAt && (
+            <MindCareRecordPanel
+              key={`manual-work-${sessionId}`}
+              clientId={clientId}
+              sessionContext={{ sessionId, scheduledAt: sessionScheduledAt }}
+            />
+          )}
           <ScheduleSessionPanel
             clients={[{ id: clientId, fullName: clientName, preferredModality: null }]}
             initialClientId={clientId}

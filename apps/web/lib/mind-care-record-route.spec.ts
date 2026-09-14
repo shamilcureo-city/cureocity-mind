@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   auth: vi.fn(),
   query: vi.fn(),
   client: vi.fn(),
+  session: vi.fn(),
   read: vi.fn(),
   create: vi.fn(),
   audit: vi.fn(),
@@ -77,6 +78,7 @@ beforeEach(() => {
   });
   m.query.mockResolvedValue([{ id: 'client-1', psychologistId: 'psy-1' }]);
   m.client.mockResolvedValue({ id: 'client-1', status: 'ACTIVE' });
+  m.session.mockResolvedValue({ id: 'visit-1', scheduledAt: new Date('2026-09-10T09:00:00Z') });
   const encrypted = new Map<string, string>();
   m.encrypt.mockImplementation(async (_owner: string, plaintext: string) => {
     const cipher = `opaque-envelope-${encrypted.size}`;
@@ -116,6 +118,7 @@ beforeEach(() => {
       return await fn({
         $queryRaw: m.query,
         client: { findFirst: m.client },
+        session: { findFirst: m.session },
         clientMindCareRecord: { findFirst: m.read, create: m.create },
       });
     } catch (error) {
@@ -128,6 +131,108 @@ beforeEach(() => {
 });
 
 describe('encrypted clinician-authored care record', () => {
+  const work = {
+    sessionId: 'visit-1',
+    scheduledAt: '2026-09-10T09:00:00.000Z',
+    disposition: 'ADAPTED',
+    workDone: 'Fictional clinician-confirmed work adapted to the agreed focus.',
+    clientResponse: '',
+  };
+  it('saves explicit work with unknown response encrypted, validates its source under lifecycle lock and never changes notes', async () => {
+    const response = await save({ ...input, body: { ...body, sessionWork: work } });
+    expect(response.status).toBe(201);
+    expect(m.session).toHaveBeenCalledWith({
+      where: {
+        id: 'visit-1',
+        clientId: 'client-1',
+        psychologistId: 'psy-1',
+        status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+      },
+      select: { id: true, scheduledAt: true },
+    });
+    expect(m.query.mock.invocationCallOrder[0]).toBeLessThan(m.session.mock.invocationCallOrder[0]);
+    expect(await response.json()).toMatchObject({ record: { body: { sessionWork: work } } });
+    expect(JSON.stringify(rows)).not.toContain(work.workDone);
+    expect(JSON.stringify(m.audit.mock.calls)).not.toContain(work.workDone);
+    // The transaction offers no note, guide, assignment, share or episode writer.
+    expect(m.create).toHaveBeenCalledOnce();
+  });
+  it.each(['another client or owner', 'cancelled or unstarted', 'missing source'])(
+    'refuses a %s visit as the source of newly confirmed work',
+    async () => {
+      m.session.mockResolvedValue(null);
+      expect((await save({ ...input, body: { ...body, sessionWork: work } })).status).toBe(409);
+      expect(rows).toHaveLength(0);
+    },
+  );
+  it('rejects a stale or fabricated source visit date', async () => {
+    expect(
+      (
+        await save({
+          ...input,
+          body: { ...body, sessionWork: { ...work, scheduledAt: '2026-09-11T09:00:00.000Z' } },
+        })
+      ).status,
+    ).toBe(409);
+    expect(rows).toHaveLength(0);
+  });
+  it('preserves the additive section when a legacy UI updates another section, including replay of that receipt', async () => {
+    await save({ ...input, body: { ...body, sessionWork: work } });
+    const legacy = {
+      ...input,
+      expectedVersion: 1,
+      operationId: '42ed94db-c64f-43ea-9df7-4d594305c1f5',
+      body: {
+        ...body,
+        clientVoice: { ...body.clientVoice, whatHelped: 'An independently recorded reflection' },
+      },
+    };
+    const update = await save(legacy);
+    expect(update.status).toBe(201);
+    expect(await update.json()).toMatchObject({
+      record: { version: 2, body: { sessionWork: work } },
+    });
+    const replay = await save(legacy);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({
+      record: { version: 2, body: { sessionWork: work } },
+    });
+    expect(rows).toHaveLength(2);
+  });
+  it('keeps old work in readable version history when another visit is explicitly confirmed', async () => {
+    await save({ ...input, body: { ...body, sessionWork: work } });
+    m.session.mockResolvedValue({ id: 'visit-2', scheduledAt: new Date(work.scheduledAt) });
+    const newerWork = {
+      ...work,
+      sessionId: 'visit-2',
+      disposition: 'NOT_USED',
+      workDone: 'Planned activity not used; discussed another focus.',
+    };
+    await save({
+      expectedVersion: 1,
+      operationId: '42ed94db-c64f-43ea-9df7-4d594305c1f5',
+      body: { ...body, sessionWork: newerWork },
+    });
+    expect(await (await GET(req('GET', undefined, '?version=1'), context)).json()).toMatchObject({
+      record: { body: { sessionWork: work } },
+    });
+    expect(await (await GET(req('GET'), context)).json()).toMatchObject({
+      record: { body: { sessionWork: newerWork } },
+    });
+  });
+  it('does not change confirmed work via a stale concurrent care-record update', async () => {
+    await save({ ...input, body: { ...body, sessionWork: work } });
+    expect(
+      (
+        await save({
+          ...input,
+          operationId: '42ed94db-c64f-43ea-9df7-4d594305c1f5',
+          body: { ...body, sessionWork: { ...work, workDone: 'Stale wording' } },
+        })
+      ).status,
+    ).toBe(409);
+    expect(rows).toHaveLength(1);
+  });
   it('encrypts every clinical field and audits metadata only', async () => {
     const response = await save();
     expect(response.status).toBe(201);

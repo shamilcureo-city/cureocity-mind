@@ -18,7 +18,13 @@ import type {
   Utterance,
   VoiceCommand,
 } from '@cureocity/contracts';
-import type { SpeakerSegment } from '@cureocity/llm';
+import {
+  Pass2BackendError,
+  ReasoningBackendError,
+  TherapyReasoningBackendError,
+  type SpeakerSegment,
+} from '@cureocity/llm';
+import { containsTranscriptionArtifact } from '@cureocity/contracts';
 import {
   checkAllergies,
   checkInteractions,
@@ -34,6 +40,7 @@ import { CaseStateStore } from './case-state';
 import { detectGaps } from './gaps';
 import type { LiveBackends } from './llm';
 import { ConsultMeter } from './meter';
+import type { UsageLifecycle } from './usage-reporter';
 import { reportError } from './sentry';
 import { ReasoningScheduler, schedulerOptionsFromEnv } from './reasoning-loop';
 import { TherapyReasoningStore } from './therapy-reasoning';
@@ -190,6 +197,8 @@ export class LiveSession {
   private readonly therapyOutputVersions = new WeakMap<LiveGatewayEvent, number>();
   /** One-shot guard so `final` is emitted at most once (real note or fallback). */
   private finalEmitted = false;
+  /** Never turn a rejected model response into speech or hide the resulting gap. */
+  private transcriptionWarning = false;
   private startedAtMs = 0;
   /** DOC-5 — runaway-consult guards (silence skip + duration/cost ceilings). */
   private readonly guards = runawayGuardsFromEnv();
@@ -267,6 +276,7 @@ export class LiveSession {
     // risk + planned length). Null for doctors and for a thin therapist start.
     therapyContext: TherapyLiveContext | null = null,
     capabilities: ReadonlySet<PractitionerCapability> = DEFAULT_CAPABILITIES,
+    private readonly usageLifecycle?: UsageLifecycle,
   ) {
     this.sessionId = sessionId;
     this.specialty = specialty;
@@ -310,12 +320,18 @@ export class LiveSession {
     let maxIndex = this.windowIndex;
     let maxEnd = this.timeOffsetMs;
     for (const u of utterances) {
-      this.utterances.push(u);
-      // Register so a finding citing a pre-drop utterance still passes the gate.
-      this.caseStore.registerUtterance(u.id);
       const n = Number(/^u(\d+)$/.exec(u.id)?.[1] ?? 0);
       if (Number.isFinite(n) && n > maxIndex) maxIndex = n;
       if (u.tEndMs > maxEnd) maxEnd = u.tEndMs;
+      // Old browser checkpoints may predate prompt hardening. Retain their
+      // time/id boundary, but never reintroduce an artifact into model context.
+      if (containsTranscriptionArtifact(u.text)) {
+        this.warnTranscription(u.tStartMs, u.tEndMs);
+        continue;
+      }
+      this.utterances.push(u);
+      // Register so a finding citing a pre-drop utterance still passes the gate.
+      this.caseStore.registerUtterance(u.id);
       if (u.text.trim().length > 0) {
         this.segments.push({
           speaker: unmapSpeaker(u.speaker),
@@ -459,12 +475,19 @@ export class LiveSession {
         // Snapshot the window before any await; pushAudio only appends past it.
         const windowPcm = this.pending.subarray(0, boundary.endByte);
         await this.processWindow(windowPcm, boundary.durationMs, boundary.endByte);
+        if (this.overBudgetReason()) {
+          this.autoFinalizing = true;
+          break;
+        }
       }
     } catch (err) {
       reportError('window failed', err);
     } finally {
       this.busy = false;
     }
+    // Invalid/empty responses still incur recorded usage, and silence does not
+    // reset the duration ceiling. Neither path reaches processWindow's tail.
+    if (this.overBudgetReason()) this.autoFinalizing = true;
     // Also service coalesced reasoning during silence, without holding the
     // transcription lane or running extra notes on every timer tick.
     this.scheduleTherapyAnalysis();
@@ -555,6 +578,19 @@ export class LiveSession {
     return Math.min(86_400_000, this.timeOffsetMs + activeMs);
   }
 
+  private skipAudioWindow(pcm: Buffer): boolean {
+    return (
+      this.guards.skipSilentWindows &&
+      (isSilent(pcm, this.windowOpts) ||
+        speechFraction(pcm, this.windowOpts) < this.windowOpts.minSpeechFraction)
+    );
+  }
+
+  private warnTranscription(startMs: number, endMs: number): void {
+    this.transcriptionWarning = true;
+    this.emit({ type: 'transcriptionWarning', startMs, endMs });
+  }
+
   /**
    * Transcribe one finalized window (Pass 1 on JUST this window), append
    * the utterance, then rebuild the note + flags on the cumulative
@@ -577,11 +613,7 @@ export class LiveSession {
     // by frame count (speechFraction < minSpeechFraction). The default (5%) is
     // low enough it never drops a real utterance — raise LIVE_MIN_SPEECH_FRACTION
     // for a noisy room.
-    if (
-      this.guards.skipSilentWindows &&
-      (isSilent(windowPcm, this.windowOpts) ||
-        speechFraction(windowPcm, this.windowOpts) < this.windowOpts.minSpeechFraction)
-    ) {
+    if (this.skipAudioWindow(windowPcm)) {
       this.flushedBytes += consumedBytes;
       this.pending = this.pending.subarray(consumedBytes);
       return;
@@ -606,6 +638,19 @@ export class LiveSession {
     this.flushedBytes += consumedBytes;
     this.pending = this.pending.subarray(consumedBytes);
     const tEndMs = bytesToMs(this.flushedBytes);
+
+    // Validate here too: alternate backends must not bypass the Vertex parser.
+    // Consume the failed window once (already metered), and tell the clinician
+    // about missing speech instead of retrying forever or inventing a substitute.
+    if (
+      pass1.callLog.status === 'ERROR' ||
+      containsTranscriptionArtifact(pass1.output.transcript) ||
+      pass1.output.speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text))
+    ) {
+      this.warnTranscription(tStartMs + this.timeOffsetMs, tEndMs + this.timeOffsetMs);
+      this.emit({ type: 'meter', summary: this.meterSummary() });
+      return;
+    }
 
     // Anti-hallucination (TS-fix): Pass 1 now returns an EMPTY transcript for a
     // window that carried no discernible speech (silence/room-noise that cleared
@@ -808,6 +853,7 @@ export class LiveSession {
         this.caseStore.markAskEmitted();
       }
     } catch (err) {
+      if (err instanceof ReasoningBackendError) this.meter.recordReasoning(err.callLog);
       reportError('reasoning pass failed', err);
     }
   }
@@ -853,6 +899,7 @@ export class LiveSession {
       const { changed, snapshot } = store.apply(res.output, this.elapsedMs());
       if (changed) this.emit({ type: 'therapyReasoning', reasoning: snapshot });
     } catch (err) {
+      if (err instanceof TherapyReasoningBackendError) this.meter.recordReasoning(err.callLog);
       reportError('therapy reasoning pass failed', err);
     }
   }
@@ -1036,19 +1083,31 @@ export class LiveSession {
       : this.backends.pass2;
 
     const t0 = Date.now();
-    const pass2 = await backend.run({
-      sessionId: this.sessionId,
-      transcript,
-      // Transcription can append while Mind's backend is working. Keep the
-      // note input and debounce cursor tied to this exact transcript snapshot.
-      speakerSegments: [...this.segments],
-      kind: this.vertical === 'DOCTOR' ? 'TREATMENT' : this.sessionKind,
-      modality: this.vertical === 'DOCTOR' ? null : this.sessionModality,
-      vertical: this.vertical,
-      clientContext: {},
-    });
+    const pass2 = await backend
+      .run({
+        sessionId: this.sessionId,
+        transcript,
+        // Transcription can append while Mind's backend is working. Keep the
+        // note input and debounce cursor tied to this exact transcript snapshot.
+        speakerSegments: [...this.segments],
+        kind: this.vertical === 'DOCTOR' ? 'TREATMENT' : this.sessionKind,
+        modality: this.vertical === 'DOCTOR' ? null : this.sessionModality,
+        vertical: this.vertical,
+        clientContext: {},
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Pass2BackendError) {
+          this.meter.recordNote(error.callLog, Date.now() - t0);
+        }
+        throw error;
+      });
     this.meter.recordNote(pass2.callLog, Date.now() - t0);
     if (this.terminal || this.finalEmitted) return;
+    if (containsTranscriptionArtifact(JSON.stringify(pass2.output))) {
+      this.warnTranscription(this.timeOffsetMs, transcriptEndMs + this.timeOffsetMs);
+      if (isFinal) this.emitFinalFromLatest();
+      return;
+    }
     this.lastNoteTranscriptEndMs = transcriptEndMs;
 
     // Sprint TS1 — therapist branch: a SOAP/intake note (no meds/orders/Rx),
@@ -1084,6 +1143,7 @@ export class LiveSession {
           kind,
           note: tnote,
           transcript: this.cumulativeTranscript(),
+          transcriptionWarning: this.transcriptionWarning,
         });
         return;
       }
@@ -1275,6 +1335,8 @@ export class LiveSession {
     }
     this.emit({ type: 'status', state: 'finalizing' });
     let timer: NodeJS.Timeout | undefined;
+    let usageFinished = false;
+    let usageTimedOut = false;
     try {
       // A slow or hung final note (Pass 2 on Vertex) must never trap the
       // doctor on "Finishing…". Cap the finalize work; on overrun, fall back
@@ -1294,7 +1356,9 @@ export class LiveSession {
           );
         }),
       ]);
+      usageFinished = idle;
     } catch (err) {
+      usageTimedOut = err instanceof Error && err.message === 'finalize budget exceeded';
       reportError('finalize failed', err);
       this.emitFinalFromLatest();
     } finally {
@@ -1302,6 +1366,10 @@ export class LiveSession {
       this.emit({ type: 'meter', summary: this.meterSummary() });
       this.emit({ type: 'status', state: 'done' });
       this.terminal = true;
+      this.usageLifecycle?.terminate(
+        usageFinished ? 'FINAL_REPORTED' : 'INCOMPLETE',
+        usageFinished ? undefined : usageTimedOut ? 'FINALIZATION_TIMEOUT' : 'INTERRUPTED',
+      );
     }
   }
 
@@ -1321,24 +1389,38 @@ export class LiveSession {
     if (this.therapyAnalysis) await this.therapyAnalysis;
     if (this.terminal) return;
     // Transcribe whatever remains as the final window (may be short).
-    if (this.pending.length > 0 && idle) {
-      const tail = this.pending;
+    while (this.pending.length > 0 && idle) {
+      const boundary = nextWindowBoundary(this.pending, this.windowOpts);
+      const consumed = boundary?.endByte ?? this.pending.length;
+      const tail = this.pending.subarray(0, consumed);
       const durationMs = bytesToMs(tail.length);
-      const consumed = tail.length;
-      this.pending = Buffer.alloc(0);
+      this.pending = this.pending.subarray(consumed);
       const tStartMs = bytesToMs(this.flushedBytes);
+      if (this.skipAudioWindow(tail)) {
+        this.flushedBytes += consumed;
+        continue;
+      }
       const t0 = Date.now();
       const pass1 = await this.backends.pass1.run({
         sessionId: this.sessionId,
         audioBytes: tail,
         durationMs,
         vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
+        ...(this.vertical === 'THERAPIST' ? { latencyMode: 'realtime' as const } : {}),
       });
       this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
       if (this.terminal) return;
       this.meter.markWindow();
       this.flushedBytes += consumed;
       const tEndMs = bytesToMs(this.flushedBytes);
+      if (
+        pass1.callLog.status === 'ERROR' ||
+        containsTranscriptionArtifact(pass1.output.transcript) ||
+        pass1.output.speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text))
+      ) {
+        this.warnTranscription(tStartMs + this.timeOffsetMs, tEndMs + this.timeOffsetMs);
+        continue;
+      }
       // Anti-hallucination (TS-fix): skip a silent tail window — no blank
       // utterance, no hallucinated closing line.
       if (pass1.output.transcript.trim().length > 0) {
@@ -1435,6 +1517,7 @@ export class LiveSession {
         kind: this.latestTherapyKind,
         note: this.latestTherapyNote,
         transcript: this.cumulativeTranscript(),
+        transcriptionWarning: this.transcriptionWarning,
       });
       return;
     }
@@ -1482,6 +1565,7 @@ export class LiveSession {
   async finalizeForShutdown(): Promise<void> {
     if (this.pausedAtMs !== null) {
       if (this.pauseInFlight) await this.waitForPausedAudio(this.pauseInFlight);
+      this.usageLifecycle?.terminate('INCOMPLETE', 'PROCESS_SHUTDOWN');
       return;
     }
     await this.finalize();
@@ -1489,6 +1573,7 @@ export class LiveSession {
 
   dispose(): void {
     this.terminal = true;
+    this.usageLifecycle?.terminate('INCOMPLETE', 'INTERRUPTED');
     this.stopAudio();
     this.streamTranscriber?.stop();
     this.streamTranscriber = null;

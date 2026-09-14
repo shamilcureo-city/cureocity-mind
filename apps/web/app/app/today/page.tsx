@@ -2,6 +2,7 @@ import { notFound, redirect } from 'next/navigation';
 import { Prisma } from '@prisma/client';
 import { CARE_ENGINE_CONSTANTS } from '@cureocity/clinical';
 import { MindTodayWorkspace } from '@/components/app/MindTodayWorkspace';
+import { isMindSessionPreparationEnabled } from '@/lib/mind-session-preparation-feature';
 import { buildMindTodayProgress, isFinalizedMindNote } from '@/components/app/MindTodayProgress';
 import { FirstRunChecklist } from '@/components/app/FirstRunChecklist';
 import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
@@ -351,7 +352,7 @@ export default async function TodayPage() {
               journey.state === 'NEEDS_ATTENTION'
                 ? 'Resume generation'
                 : journey.state === 'READY_TO_REVIEW'
-                  ? 'Review & Close'
+                  ? 'Review & finish'
                   : 'View progress',
           };
         }),
@@ -500,6 +501,7 @@ export default async function TodayPage() {
       upcoming={upcomingRows.filter((session) => session.id !== hero?.id).map(toCardProps)}
       attentionItems={attentionItems}
       defaultCapture={defaultCapture}
+      sessionPreparationEnabled={isMindSessionPreparationEnabled()}
       progress={progress}
       firstRun={<FirstRunChecklist psychologistId={therapist.id} />}
       actions={

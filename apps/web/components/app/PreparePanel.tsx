@@ -19,6 +19,7 @@ import {
   saveAgreementFollowUp,
 } from '@/lib/agreement-follow-up-save';
 import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
+import { MindCareContinuitySummary } from './MindCareContinuitySummary';
 
 /**
  * Sprint 50 — Prepare panel on the Today screen.
@@ -39,9 +40,20 @@ interface Props {
   defaultOpen?: boolean;
   /** Load safety and a short recap without expanding the full clinical brief. */
   summaryVisible?: boolean;
+  /** Legacy scratch remains on device but is not silently adopted into a visit. */
+  hideDeviceScratch?: boolean;
 }
 
-export function PreparePanel({ clientId, defaultOpen = false, summaryVisible = false }: Props) {
+export function PreparePanel(props: Props) {
+  return <PreparePanelForClient key={props.clientId} {...props} />;
+}
+
+function PreparePanelForClient({
+  clientId,
+  defaultOpen = false,
+  summaryVisible = false,
+  hideDeviceScratch = false,
+}: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [data, setData] = useState<PrepareSummaryV1 | null>(null);
   const [loading, setLoading] = useState(false);
@@ -170,6 +182,7 @@ export function PreparePanel({ clientId, defaultOpen = false, summaryVisible = f
               </button>
             </p>
           )}
+          {data && <MindCareContinuitySummary key={clientId} clientId={clientId} />}
           {data && open && (
             <PrepareBody
               data={data}
@@ -178,6 +191,7 @@ export function PreparePanel({ clientId, defaultOpen = false, summaryVisible = f
               safetyVisible={!summaryVisible}
               onFollowUpPending={updateFollowUpState}
               refreshDisabled={followUpPending || followUpSaving}
+              hideDeviceScratch={hideDeviceScratch}
             />
           )}
         </div>
@@ -193,6 +207,7 @@ function PrepareBody({
   safetyVisible,
   onFollowUpPending,
   refreshDisabled,
+  hideDeviceScratch,
 }: {
   data: PrepareSummaryV1;
   onGenerate: () => void | Promise<void>;
@@ -200,6 +215,7 @@ function PrepareBody({
   safetyVisible: boolean;
   onFollowUpPending: (pending: boolean, busy: boolean) => void;
   refreshDisabled: boolean;
+  hideDeviceScratch: boolean;
 }) {
   const { cachedBrief, briefIsStale, journey, homework, openCrises } = data;
   const freshness = preparationFreshness(data.briefGeneratedAt, briefIsStale);
@@ -379,7 +395,7 @@ function PrepareBody({
             Refresh to generate a grounded pre-session brief.
           </p>
         )}
-        <TodayIntent clientId={data.clientId} />
+        {!hideDeviceScratch && <TodayIntent clientId={data.clientId} />}
       </section>
     </div>
   );

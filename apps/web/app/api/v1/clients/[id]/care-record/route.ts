@@ -91,7 +91,8 @@ export async function POST(req: NextRequest, { params }: Context) {
     select: { id: true },
   });
   if (!client) return notFound();
-  // KMS work is outside the write transaction; the active-client lock is rechecked afterwards.
+  // Encrypt the normal payload before taking the lifecycle lock. Only an older writer that
+  // omits an existing additive section needs a second encryption of its merged body inside it.
   const serialized = JSON.stringify(input.body);
   const bodyEncrypted = await encryptForTenant(auth.value.psychologistId, serialized);
   try {
@@ -113,8 +114,12 @@ export async function POST(req: NextRequest, { params }: Context) {
         });
         if (receipt) {
           const record = await toMindCareRecordDto(receipt);
+          const comparedBody = { ...record.body };
+          // A legacy writer did not know this additive section. Its receipt includes inherited
+          // work, but the original operation is still identified by the submitted fields/version.
+          if (input.body.sessionWork === undefined) delete comparedBody.sessionWork;
           if (
-            JSON.stringify(record.body) !== serialized ||
+            JSON.stringify(comparedBody) !== serialized ||
             record.version !== input.expectedVersion + 1
           )
             return privateJson(
@@ -133,14 +138,46 @@ export async function POST(req: NextRequest, { params }: Context) {
             },
             { status: 409 },
           );
-        if (latest) await toMindCareRecordDto(latest); // unreadable history is never silently replaced
+        const previous = latest ? await toMindCareRecordDto(latest) : null;
+        // Unreadable history is never silently replaced, and older UI writers cannot clear a
+        // newer section simply because their payload schema did not yet include it.
+        const savedBody =
+          input.body.sessionWork === undefined && previous?.body.sessionWork
+            ? { ...input.body, sessionWork: previous.body.sessionWork }
+            : input.body;
+        const workChanged =
+          JSON.stringify(savedBody.sessionWork) !== JSON.stringify(previous?.body.sessionWork);
+        if (savedBody.sessionWork && workChanged) {
+          await tx.$queryRaw`SELECT "id" FROM "sessions" WHERE "id" = ${savedBody.sessionWork.sessionId} AND "clientId" = ${clientId} AND "psychologistId" = ${auth.value.psychologistId} FOR UPDATE`;
+          const session = await tx.session.findFirst({
+            where: {
+              id: savedBody.sessionWork.sessionId,
+              clientId,
+              psychologistId: auth.value.psychologistId,
+              status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+            },
+            select: { id: true, scheduledAt: true },
+          });
+          if (!session || session.scheduledAt.toISOString() !== savedBody.sessionWork.scheduledAt)
+            return privateJson(
+              {
+                error:
+                  'The source visit could not be confirmed for this client. Keep your wording and reopen the visit before saving.',
+              },
+              { status: 409 },
+            );
+        }
+        const savedEncrypted =
+          savedBody === input.body
+            ? bodyEncrypted
+            : await encryptForTenant(auth.value.psychologistId, JSON.stringify(savedBody));
         const row = await tx.clientMindCareRecord.create({
           data: {
             clientId,
             psychologistId: auth.value.psychologistId,
             version: input.expectedVersion + 1,
             operationId: input.operationId,
-            bodyEncrypted,
+            bodyEncrypted: savedEncrypted,
           },
         });
         await writeAudit(
@@ -167,7 +204,7 @@ export async function POST(req: NextRequest, { params }: Context) {
               version: row.version,
               operationId: row.operationId,
               createdAt: row.createdAt.toISOString(),
-              body: input.body,
+              body: savedBody,
             },
             latestVersion: row.version,
           },

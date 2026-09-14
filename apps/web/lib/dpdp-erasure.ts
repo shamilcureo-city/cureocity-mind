@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { lockClientShareDispatch } from './share-dispatch-safety';
 import { activeShareSubmissionWhere } from './sprint5-final-behavior';
 import { legacyAudioReferenceProvider } from './dpdp-object-storage-config';
+import { hasMindSessionPreparationStorage } from './mind-session-preparation-storage';
+import { hasSessionUsageConnectionStorage } from './session-usage-storage';
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -106,6 +108,14 @@ export async function eraseClientPhi(
 
   const sessions = await tx.session.findMany({ where: { clientId }, select: { id: true } });
   const sessionIds = sessions.map(({ id }) => id);
+  // Privacy support outlives the editing flag. An absent pre-migration table
+  // cannot contain PHI; all failures for a present table abort this transaction.
+  if (await hasMindSessionPreparationStorage(tx)) {
+    await tx.mindSessionPreparation.deleteMany({ where: { sessionId: { in: sessionIds } } });
+  }
+  if (await hasSessionUsageConnectionStorage(tx)) {
+    await tx.sessionUsageConnection.deleteMany({ where: { clientId } });
+  }
   // Closeout rows are retained as non-PHI workflow proof with their required
   // Session parents. The patient-authored narrative is not part of that proof.
   await tx.mindSessionCloseoutState.updateMany({

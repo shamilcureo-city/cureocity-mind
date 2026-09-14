@@ -12,6 +12,7 @@
     "lint": "eslint src --max-warnings 0 --no-error-on-unmatched-pattern",
     "eval:reasoning": "tsx src/evals/reasoning/run.ts",
     "eval:asr": "tsx src/evals/asr/run.ts",
+    "eval:mind": "tsx src/evals/mind/run.ts",
     "eval:note": "tsx src/evals/note/run.ts"
   },
   "dependencies": {

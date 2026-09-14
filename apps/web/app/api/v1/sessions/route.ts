@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import {
   CreateSessionInputSchema,
   planTierLabel,
@@ -19,10 +20,31 @@ import { parseJson } from '@/lib/validate';
 import { DEFAULT_BUILTIN_TEMPLATE_ID } from '@/lib/builtin-templates';
 import { istDayRange, nextClinicToken } from '@/lib/clinic-queue';
 import { MindPurposeConflict, selectMindSessionPurpose } from '@/lib/mind-session-purpose';
-import { ClientPhiWriteForbiddenError } from '@/lib/phi-write-lock';
+import { ClientPhiWriteForbiddenError, lockActiveClient } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/** Caller holds Client then the existing source-session advisory lock. */
+async function readOwnedFollowUp(
+  tx: Prisma.TransactionClient,
+  sourceSessionId: string,
+  clientId: string,
+  psychologistId: string,
+) {
+  await tx.$queryRaw`SELECT "id" FROM "sessions" WHERE "id" = ${sourceSessionId} FOR UPDATE`;
+  const source = await tx.session.findFirst({
+    where: { id: sourceSessionId, clientId, psychologistId, status: 'COMPLETED' },
+    select: { mindCloseout: { select: { followUpSessionId: true } } },
+  });
+  if (!source) throw new ClientPhiWriteForbiddenError();
+  if (!source.mindCloseout?.followUpSessionId) return null;
+  const followUp = await tx.session.findFirst({
+    where: { id: source.mindCloseout.followUpSessionId, clientId, psychologistId },
+  });
+  if (!followUp) throw new ClientPhiWriteForbiddenError();
+  return followUp;
+}
 
 /**
  * POST /api/v1/sessions — create a session row in SCHEDULED state.
@@ -134,10 +156,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Source session not found' }, { status: 404 });
   }
   if (sourceSession?.mindCloseout?.followUpSessionId) {
-    const existingFollowUp = await prisma.session.findUnique({
-      where: { id: sourceSession.mindCloseout.followUpSessionId },
-    });
-    if (existingFollowUp) return NextResponse.json(toSession(existingFollowUp), { status: 200 });
+    try {
+      const existingFollowUp = await prisma.$transaction(async (tx) => {
+        await lockActiveClient(tx, client.id, auth.value.psychologistId);
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sourceSession.id}))`;
+        return readOwnedFollowUp(tx, sourceSession.id, client.id, auth.value.psychologistId);
+      });
+      if (existingFollowUp) return NextResponse.json(toSession(existingFollowUp), { status: 200 });
+    } catch (error) {
+      if (error instanceof ClientPhiWriteForbiddenError)
+        return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+      throw error;
+    }
   }
 
   // Sprint TS3 (F1) — "start now" reuse. When the therapist is starting a
@@ -285,132 +315,142 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       { status: 400 },
     );
   }
-  const created = await prisma.$transaction(async (tx) => {
-    if (sourceSession) {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sourceSession.id}))`;
-      const linked = await tx.mindSessionCloseoutState.findUnique({
-        where: { sessionId: sourceSession.id },
-        select: { followUpSessionId: true },
-      });
-      if (linked?.followUpSessionId) {
-        return tx.session.findUniqueOrThrow({ where: { id: linked.followUpSessionId } });
+  let created;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      // Serialize all dependent writes against erasure and ownership changes.
+      // Client must precede source-session locks, token allocation and FK writes.
+      await lockActiveClient(tx, dto.value.clientId, auth.value.psychologistId);
+      if (sourceSession) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sourceSession.id}))`;
+        const linked = await readOwnedFollowUp(
+          tx,
+          sourceSession.id,
+          dto.value.clientId,
+          auth.value.psychologistId,
+        );
+        if (linked) return linked;
       }
-    }
-    // Sprint DS7 — doctor encounters join the clinic queue with a
-    // today-scoped OPD token; therapist sessions carry none.
-    const tokenNumber = isDoctor
-      ? await nextClinicToken(tx, auth.value.psychologistId, scheduledAt)
-      : null;
-    const row = await tx.session.create({
-      data: {
-        clientId: dto.value.clientId,
-        psychologistId: auth.value.psychologistId,
-        modality: resolvedModality,
-        kind: resolvedKind,
-        mindPurpose: dto.value.mindPurpose ?? null,
-        mindDocumentationMode: dto.value.mindDocumentationMode ?? null,
-        status: 'SCHEDULED',
-        scheduledAt,
-        // FLOW-3 — persist the note language the therapist chose (or the
-        // cascade default). Previously never written, so every note generated
-        // in English despite the code-mix-first positioning.
-        language: dto.value.language ?? defaults.language,
-        noteTemplateId: defaultNoteTemplateId,
-        ...(tokenNumber !== null && { tokenNumber }),
-      },
-    });
-    if (sourceSession) {
-      await tx.mindSessionCloseoutState.upsert({
-        where: { sessionId: sourceSession.id },
-        create: { sessionId: sourceSession.id, followUpSessionId: row.id },
-        update: { followUpSessionId: row.id, followUpSkippedAt: null },
-      });
-    }
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'SESSION_CREATED',
-        targetType: 'Session',
-        targetId: row.id,
-        metadata: {
-          ...auditMetadataFromRequest(req),
+      // Sprint DS7 — doctor encounters join the clinic queue with a
+      // today-scoped OPD token; therapist sessions carry none.
+      const tokenNumber = isDoctor
+        ? await nextClinicToken(tx, auth.value.psychologistId, scheduledAt)
+        : null;
+      const row = await tx.session.create({
+        data: {
           clientId: dto.value.clientId,
+          psychologistId: auth.value.psychologistId,
           modality: resolvedModality,
           kind: resolvedKind,
           mindPurpose: dto.value.mindPurpose ?? null,
+          mindDocumentationMode: dto.value.mindDocumentationMode ?? null,
+          status: 'SCHEDULED',
+          scheduledAt,
+          // FLOW-3 — persist the note language the therapist chose (or the
+          // cascade default). Previously never written, so every note generated
+          // in English despite the code-mix-first positioning.
+          language: dto.value.language ?? defaults.language,
+          noteTemplateId: defaultNoteTemplateId,
+          ...(tokenNumber !== null && { tokenNumber }),
         },
-      },
-      tx,
-    );
-    // Sprint 19 — record the cascade decision so the competency
-    // dashboard can attribute auto vs manual. The two actions are
-    // mutually exclusive: inferred when modality came from the
-    // cascade alone, overridden when the therapist supplied a value
-    // that differs from what the cascade picked.
-    if (overridden) {
+      });
+      if (sourceSession) {
+        await tx.mindSessionCloseoutState.upsert({
+          where: { sessionId: sourceSession.id },
+          create: { sessionId: sourceSession.id, followUpSessionId: row.id },
+          update: { followUpSessionId: row.id, followUpSkippedAt: null },
+        });
+      }
       await writeAudit(
         {
           actorType: 'PSYCHOLOGIST',
           actorPsychologistId: auth.value.psychologistId,
-          action: 'SESSION_MODALITY_OVERRIDDEN',
+          action: 'SESSION_CREATED',
           targetType: 'Session',
           targetId: row.id,
           metadata: {
-            cascadeModality: defaults.modality,
-            cascadeSource: defaults.modalitySource,
-            submittedModality,
-          },
-        },
-        tx,
-      );
-    } else {
-      await writeAudit(
-        {
-          actorType: 'SYSTEM',
-          action: 'SESSION_MODALITY_INFERRED',
-          targetType: 'Session',
-          targetId: row.id,
-          metadata: {
-            cascadeModality: defaults.modality,
-            cascadeSource: defaults.modalitySource,
-          },
-        },
-        tx,
-      );
-    }
-
-    // Sprint 20 Phase 3 — ensure the client has an OPEN treatment
-    // episode. A new client (or one who returned after discharge)
-    // starts a fresh episode of care here so the journey arc has a
-    // durable container with a real openedAt.
-    const openEpisode = await tx.treatmentEpisode.findFirst({
-      where: { clientId: dto.value.clientId, status: 'OPEN' },
-      select: { id: true },
-    });
-    if (!openEpisode) {
-      const episode = await tx.treatmentEpisode.create({
-        data: {
-          clientId: dto.value.clientId,
-          psychologistId: auth.value.psychologistId,
-          status: 'OPEN',
-        },
-      });
-      await writeAudit(
-        {
-          actorType: 'SYSTEM',
-          action: 'TREATMENT_EPISODE_OPENED',
-          targetType: 'TreatmentEpisode',
-          targetId: episode.id,
-          metadata: {
+            ...auditMetadataFromRequest(req),
             clientId: dto.value.clientId,
-            sessionId: row.id,
+            modality: resolvedModality,
+            kind: resolvedKind,
+            mindPurpose: dto.value.mindPurpose ?? null,
           },
         },
         tx,
       );
-    }
-    return row;
-  });
+      // Sprint 19 — record the cascade decision so the competency
+      // dashboard can attribute auto vs manual. The two actions are
+      // mutually exclusive: inferred when modality came from the
+      // cascade alone, overridden when the therapist supplied a value
+      // that differs from what the cascade picked.
+      if (overridden) {
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'SESSION_MODALITY_OVERRIDDEN',
+            targetType: 'Session',
+            targetId: row.id,
+            metadata: {
+              cascadeModality: defaults.modality,
+              cascadeSource: defaults.modalitySource,
+              submittedModality,
+            },
+          },
+          tx,
+        );
+      } else {
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'SESSION_MODALITY_INFERRED',
+            targetType: 'Session',
+            targetId: row.id,
+            metadata: {
+              cascadeModality: defaults.modality,
+              cascadeSource: defaults.modalitySource,
+            },
+          },
+          tx,
+        );
+      }
+
+      // Sprint 20 Phase 3 — ensure the client has an OPEN treatment
+      // episode. A new client (or one who returned after discharge)
+      // starts a fresh episode of care here so the journey arc has a
+      // durable container with a real openedAt.
+      const openEpisode = await tx.treatmentEpisode.findFirst({
+        where: { clientId: dto.value.clientId, status: 'OPEN' },
+        select: { id: true },
+      });
+      if (!openEpisode) {
+        const episode = await tx.treatmentEpisode.create({
+          data: {
+            clientId: dto.value.clientId,
+            psychologistId: auth.value.psychologistId,
+            status: 'OPEN',
+          },
+        });
+        await writeAudit(
+          {
+            actorType: 'SYSTEM',
+            action: 'TREATMENT_EPISODE_OPENED',
+            targetType: 'TreatmentEpisode',
+            targetId: episode.id,
+            metadata: {
+              clientId: dto.value.clientId,
+              sessionId: row.id,
+            },
+          },
+          tx,
+        );
+      }
+      return row;
+    });
+  } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError)
+      return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    throw error;
+  }
   return NextResponse.json(toSession(created), { status: 201 });
 }

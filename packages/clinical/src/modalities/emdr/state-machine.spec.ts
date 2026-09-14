@@ -6,10 +6,58 @@ import {
   isEmdrPhase,
   nextEmdrPhase,
 } from './phases';
-import { checkEmdrTransition } from './state-machine';
+import {
+  checkEmdrPhasePrerequisites,
+  checkEmdrTransition,
+  checkEmdrWorkflowStart,
+} from './state-machine';
 
 const PREP_DONE = { preparationComplete: true, hasTargets: true };
 const PREP_NOT_DONE = { preparationComplete: false, hasTargets: false };
+
+describe('EMDR workflow entry and recorded prerequisite review', () => {
+  it.each(EMDR_PHASES)('only allows the canonical phase when creating at %s', (phase) => {
+    expect(checkEmdrWorkflowStart(phase).allowed).toBe(phase === EMDR_INITIAL_PHASE);
+  });
+
+  it('rejects an unknown starting phase', () => {
+    expect(checkEmdrWorkflowStart('unknown').allowed).toBe(false);
+  });
+
+  it('shares existing prerequisite rules across all transitions and review', () => {
+    for (const preparationComplete of [false, true]) {
+      for (const hasTargets of [false, true]) {
+        const context = { preparationComplete, hasTargets };
+        for (const phase of EMDR_PHASES) {
+          const needsPreparation = [
+            'assessment',
+            'desensitization',
+            'installation',
+            'body_scan',
+          ].includes(phase);
+          const needsTargets = ['desensitization', 'installation', 'body_scan'].includes(phase);
+          const expected =
+            (!needsPreparation || preparationComplete) && (!needsTargets || hasTargets);
+          expect(checkEmdrPhasePrerequisites(phase, context).allowed).toBe(expected);
+          for (const from of EMDR_PHASES) {
+            if (from !== phase)
+              expect(checkEmdrTransition(from, phase, context).allowed).toBe(expected);
+          }
+        }
+      }
+    }
+  });
+
+  it('only flags historical missing information without filling prerequisites', () => {
+    const historical = Object.freeze({ preparationComplete: false, hasTargets: false });
+    expect(checkEmdrPhasePrerequisites('desensitization', historical)).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining('not recorded'),
+    });
+    expect(historical).toEqual(PREP_NOT_DONE);
+    expect(checkEmdrPhasePrerequisites('closure', historical).allowed).toBe(true);
+  });
+});
 
 describe('EMDR phases', () => {
   it('has exactly 8 phases starting with history_taking and ending with reevaluation', () => {

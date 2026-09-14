@@ -4,10 +4,25 @@ import { IsoDateSchema } from './common';
 const CareText = z.string().trim().max(2000);
 const CareDate = IsoDateSchema.nullable();
 
+/** Explicit clinician-authored delivery, never derived from reading/selecting a guide. */
+export const MindSessionWorkSchema = z
+  .object({
+    sessionId: z.string().min(1).max(200),
+    scheduledAt: z.string().datetime(),
+    disposition: z.enum(['USED', 'ADAPTED', 'PAUSED', 'NOT_USED']),
+    workDone: CareText.min(1),
+    clientResponse: CareText.default(''),
+  })
+  .strict();
+export type MindSessionWork = z.infer<typeof MindSessionWorkSchema>;
+
 /** Clinician-authored context only. Not recording consent, a score, diagnosis or discharge. */
 export const MindCareRecordBodySchema = z
   .object({
     version: z.literal('V1'),
+    // Optional preserves decoding of every earlier encrypted V1 record. Omission in a legacy
+    // write preserves the current section; it is not an instruction to erase confirmed work.
+    sessionWork: MindSessionWorkSchema.optional(),
     agreement: z
       .object({
         scope: CareText,

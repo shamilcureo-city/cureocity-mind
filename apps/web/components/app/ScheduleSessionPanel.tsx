@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { BillingEntitlement } from '@cureocity/contracts';
@@ -19,6 +19,8 @@ import {
   type ScheduleReceipt,
 } from '@/lib/schedule-client-options';
 import { useModalA11y } from '@/lib/use-modal-a11y';
+import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
+import { useMindCloseoutTaskStatus } from '@/lib/mind-closeout-task-status';
 import { formatIstDateTime } from '@/lib/ist';
 
 export interface ClientOption {
@@ -37,6 +39,7 @@ interface Props {
   followUpState?: 'PENDING' | 'COMPLETE' | 'SKIPPED';
   followUpSession?: { id: string; scheduledAt: string } | null;
   triggerLabelOverride?: string;
+  canSkipFollowUp?: boolean;
 }
 
 /**
@@ -60,6 +63,7 @@ export function ScheduleSessionPanel({
   followUpState = 'PENDING',
   followUpSession = null,
   triggerLabelOverride,
+  canSkipFollowUp = true,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -67,7 +71,7 @@ export function ScheduleSessionPanel({
     followUpState === 'COMPLETE' ? 'scheduled' : followUpState === 'SKIPPED' ? 'skipped' : null,
   );
   const [receipt, setReceipt] = useState(followUpSession);
-  const [confirmationMissing, setConfirmationMissing] = useState(false);
+  const [unconfirmedBooking, setUnconfirmedBooking] = useState(false);
   const triggerLabel =
     triggerLabelOverride ??
     (outcome === 'scheduled'
@@ -85,7 +89,11 @@ export function ScheduleSessionPanel({
           onClick={() => setOpen(true)}
           disabled={scheduleTriggerDisabled(closeoutMode, outcome)}
         >
-          {outcome === 'skipped' ? 'Change follow-up' : triggerLabel}
+          {unconfirmedBooking
+            ? 'Review unconfirmed booking'
+            : outcome === 'skipped'
+              ? 'Change follow-up'
+              : triggerLabel}
         </Button>
         {outcome === 'skipped' && (
           <span className="text-xs text-[var(--color-ink-3)]">Follow-up intentionally skipped</span>
@@ -102,35 +110,53 @@ export function ScheduleSessionPanel({
           </Link>
         </p>
       )}
-      {confirmationMissing && (
+      {unconfirmedBooking && !open && (
         <p className="mt-2 text-sm text-[var(--color-warn)]" role="status">
-          The booking was saved, but its confirmation could not be read. Check{' '}
-          <Link href="/app/today" className="underline">
-            Today
+          The booking could not be confirmed. Its form is kept in this page. Check{' '}
+          <Link href="/app/today" className="underline" target="_blank" rel="noopener noreferrer">
+            Today in a new tab
           </Link>{' '}
           before booking again.
         </p>
       )}
-      {open && (
+      {(open || unconfirmedBooking) && (
         <ScheduleModal
+          open={open}
+          onUnconfirmedBookingChange={setUnconfirmedBooking}
           clients={clients}
           initialClientId={initialClientId}
           initialDate={initialDate}
           initialTime={initialTime}
           closeoutMode={closeoutMode}
           sourceSessionId={sourceSessionId}
+          canSkipFollowUp={canSkipFollowUp}
           onSkip={async () => {
+            if (!canSkipFollowUp)
+              throw new Error('Follow-up decisions are not available for this account.');
             if (!sourceSessionId)
               throw new Error('This session could not be identified. Refresh and try again.');
             const res = await fetch(`/api/v1/sessions/${sourceSessionId}/mind-closeout`, {
               method: 'PATCH',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ step: 'followUp', outcome: 'SKIPPED' }),
+              signal: AbortSignal.timeout(15_000),
             });
-            if (!res.ok) {
-              const body = (await res.json().catch(() => null)) as { error?: string } | null;
+            const body = (await res.json().catch(() => null)) as {
+              error?: string;
+              sessionId?: string;
+              followUpSkippedAt?: string;
+              followUpSessionId?: string | null;
+            } | null;
+            if (
+              !res.ok ||
+              body?.sessionId !== sourceSessionId ||
+              body.followUpSessionId ||
+              typeof body.followUpSkippedAt !== 'string' ||
+              !Number.isFinite(Date.parse(body.followUpSkippedAt))
+            ) {
               throw new Error(
-                body?.error ?? 'Could not save the follow-up decision. Please try again.',
+                body?.error ??
+                  'The follow-up decision could not be confirmed. Check its saved state before trying again.',
               );
             }
             setOutcome('skipped');
@@ -140,7 +166,7 @@ export function ScheduleSessionPanel({
           onClose={() => setOpen(false)}
           onScheduled={(saved) => {
             setReceipt(saved);
-            setConfirmationMissing(saved === null);
+            setUnconfirmedBooking(false);
             setOutcome('scheduled');
             setOpen(false);
             router.refresh();
@@ -152,25 +178,31 @@ export function ScheduleSessionPanel({
 }
 
 function ScheduleModal({
+  open,
+  onUnconfirmedBookingChange,
   clients,
   initialClientId,
   initialDate,
   initialTime,
   closeoutMode,
   sourceSessionId,
+  canSkipFollowUp,
   onSkip,
   onClose,
   onScheduled,
 }: {
+  open: boolean;
+  onUnconfirmedBookingChange: (value: boolean) => void;
   clients: ClientOption[];
   initialClientId?: string;
   initialDate?: string;
   initialTime?: string;
   closeoutMode: boolean;
   sourceSessionId?: string;
+  canSkipFollowUp: boolean;
   onSkip: () => Promise<void>;
   onClose: () => void;
-  onScheduled: (receipt: ScheduleReceipt | null) => void;
+  onScheduled: (receipt: ScheduleReceipt) => void;
 }) {
   const tomorrow = useMemo(() => seedTomorrow(), []);
   const [clientOptions, setClientOptions] = useState(clients);
@@ -181,7 +213,38 @@ function ScheduleModal({
   const [time, setTime] = useState(initialTime ?? '10:00');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unconfirmedBooking, setUnconfirmedBooking] = useState(false);
   const dialogRef = useRef<HTMLDivElement>(null);
+  const initialDraft = useRef({ clientId, date, time });
+  const busyRef = useRef(false);
+  const dirty =
+    clientId !== initialDraft.current.clientId ||
+    date !== initialDraft.current.date ||
+    time !== initialDraft.current.time;
+  useMindCloseoutTaskStatus({
+    dirty,
+    busy: submitting,
+    needsAttention: !!error,
+    uncertain: unconfirmedBooking && !submitting,
+  });
+  useEffect(() => {
+    onUnconfirmedBookingChange(unconfirmedBooking);
+  }, [unconfirmedBooking, onUnconfirmedBookingChange]);
+  useUnsavedWorkGuard(
+    dirty || unconfirmedBooking,
+    'This appointment has unsaved changes. Leave without saving them?',
+    submitting,
+  );
+  function requestClose() {
+    if (busyRef.current) return;
+    // Uncertain attempts stay mounted with all form values. Reopening only reviews them.
+    if (unconfirmedBooking) {
+      onClose();
+      return;
+    }
+    if (dirty && !window.confirm('Discard the unsaved appointment changes?')) return;
+    onClose();
+  }
   // Sprint 53 — trial cap modal trigger; Sprint 56 — paid-cap variant too.
   const [upgradePrompt, setUpgradePrompt] = useState<{
     variant: 'TRIAL_CAP' | 'PLAN_CAP';
@@ -193,9 +256,17 @@ function ScheduleModal({
     [clientOptions, query, clientId],
   );
   const fixedClient = closeoutMode ? clients.find((client) => client.id === initialClientId) : null;
-  useModalA11y(!creatingClient && !upgradePrompt, dialogRef, submitting ? undefined : onClose);
+  useModalA11y(
+    open && !creatingClient && !upgradePrompt,
+    dialogRef,
+    submitting ? undefined : requestClose,
+  );
 
   async function skipFollowUp() {
+    if (!canSkipFollowUp || busyRef.current || unconfirmedBooking) return;
+    if (dirty && !window.confirm('Record no follow-up and discard this unsaved appointment?'))
+      return;
+    busyRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -203,12 +274,15 @@ function ScheduleModal({
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the follow-up decision.');
     } finally {
+      busyRef.current = false;
       setSubmitting(false);
     }
   }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (busyRef.current || unconfirmedBooking) return;
+    busyRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -222,12 +296,16 @@ function ScheduleModal({
       if (new Date(scheduledAt).getTime() <= Date.now()) {
         throw new Error('Follow-up must be scheduled in the future.');
       }
+      setUnconfirmedBooking(true);
       const res = await fetch('/api/v1/sessions', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ clientId, scheduledAt, sourceSessionId }),
+        signal: AbortSignal.timeout(20_000),
       });
       if (!res.ok) {
+        if (res.status >= 400 && res.status < 500 && res.status !== 408)
+          setUnconfirmedBooking(false);
         const body = (await res.json().catch(() => ({}))) as {
           error?: string;
           code?: string;
@@ -246,10 +324,21 @@ function ScheduleModal({
         }
         throw new Error(body.error ?? `Failed (${res.status})`);
       }
-      onScheduled(readScheduleReceipt(await res.json().catch(() => null), clientId));
+      const saved = readScheduleReceipt(await res.json().catch(() => null), clientId);
+      if (!saved)
+        throw new Error(
+          'The booking receipt could not be verified. Check Today before booking again; your form is kept here.',
+        );
+      setUnconfirmedBooking(false);
+      onScheduled(saved);
     } catch (e) {
-      setError((e as Error).message);
+      setError(
+        e instanceof Error && !['TimeoutError', 'AbortError', 'TypeError'].includes(e.name)
+          ? e.message
+          : 'The appointment request could not be confirmed. Your details are still here.',
+      );
     } finally {
+      busyRef.current = false;
       setSubmitting(false);
     }
   }
@@ -257,6 +346,8 @@ function ScheduleModal({
   return (
     <div
       ref={dialogRef}
+      hidden={!open}
+      style={open ? undefined : { display: 'none' }}
       className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
@@ -269,11 +360,11 @@ function ScheduleModal({
           </h2>
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={submitting}
             className="text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
           >
-            cancel
+            Cancel
           </button>
         </header>
         {closeoutMode && (
@@ -365,21 +456,41 @@ function ScheduleModal({
               </div>
             </div>
             <FieldError message={error} />
+            {unconfirmedBooking && !submitting && (
+              <p role="alert" className="text-sm text-[var(--color-warn)]">
+                Check{' '}
+                <Link
+                  href="/app/today"
+                  className="underline"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Today in a new tab
+                </Link>{' '}
+                before booking again. The previous request may have been saved. Your note and
+                agreements are unchanged.
+              </p>
+            )}
             <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--color-line-soft)] pt-4">
-              {closeoutMode && (
+              {closeoutMode && canSkipFollowUp && (
                 <Button
                   type="button"
                   variant="secondary"
                   onClick={() => void skipFollowUp()}
-                  disabled={submitting}
+                  disabled={submitting || unconfirmedBooking}
                 >
                   Skip follow-up
                 </Button>
               )}
-              <Button type="button" variant="secondary" onClick={onClose} disabled={submitting}>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={requestClose}
+                disabled={submitting}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting || !clientId}>
+              <Button type="submit" disabled={submitting || unconfirmedBooking || !clientId}>
                 {submitting ? 'Scheduling…' : 'Schedule'}
               </Button>
             </div>

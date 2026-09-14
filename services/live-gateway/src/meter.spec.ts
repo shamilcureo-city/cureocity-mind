@@ -76,6 +76,38 @@ describe('ConsultMeter', () => {
     expect([...m.transcribeInputTokens]).toEqual([160, 160, 160]);
   });
 
+  it('breaks down recorded AI estimates by work instead of implying a transcription-only rate', () => {
+    const m = new ConsultMeter();
+    m.recordTranscribe(pass1Log({ costInr: 0.21 }), 100);
+    m.recordNote(pass2Log({ costInr: 0.85 }), 1000);
+    m.recordReasoning(pass1Log({ pass: 'PASS_12_THERAPY_REASONING', costInr: 0.15 }));
+    // Paid provider responses still count when their output was rejected.
+    m.recordTranscribe(pass1Log({ status: 'ERROR', costInr: 0.03 }), 100);
+    const result = m.summary('s', 'vertex', 60000);
+    expect(result.costInr).toBe(1.24);
+    expect(result.reasoningCalls).toBe(1);
+    expect(result.costBreakdown).toEqual({
+      transcriptionInr: 0.24,
+      notesInr: 0.85,
+      reasoningInr: 0.15,
+    });
+  });
+
+  it('keeps connection scopes separate and mock estimates at zero', () => {
+    const first = new ConsultMeter();
+    first.recordNote(pass2Log(), 10);
+    const reconnected = new ConsultMeter().summary('s', 'vertex', 0);
+    expect(reconnected.costInr).toBe(0);
+    expect(reconnected.reasoningCalls).toBe(0);
+    const mock = new ConsultMeter();
+    mock.recordTranscribe(pass1Log({ costInr: 0 }), 5);
+    expect(mock.summary('s', 'mock', 100).costBreakdown).toEqual({
+      transcriptionInr: 0,
+      notesInr: 0,
+      reasoningInr: 0,
+    });
+  });
+
   it('reports all-zero latencies before any call', () => {
     const s = new ConsultMeter().summary('s', 'mock', 0);
     expect(s.windows).toBe(0);

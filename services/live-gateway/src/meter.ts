@@ -7,8 +7,9 @@ import type { GeminiCallLogData } from '@cureocity/llm';
  * latency; this accumulates them and, on demand, emits a MeterSummary the
  * gateway ships to the browser (which relays it to the live-metric route).
  *
- * This is the unit-economics instrument: it tells us whether a real consult
- * stays under ₹2 and whether transcription p95 stays under 2s. It holds no
+ * This is a per-connection AI usage estimate, NOT an invoice, subscription
+ * charge or whole-session total. It excludes web-side follow-up passes,
+ * reconnects and hosting. It holds no
  * clock of its own — the caller passes wall-clock + backend identity into
  * `summary()` — so it is pure and unit-tests without mocking time.
  */
@@ -16,6 +17,10 @@ export class ConsultMeter {
   private windows = 0;
   private pass1Calls = 0;
   private pass2Calls = 0;
+  private reasoningCalls = 0;
+  private transcriptionCostInr = 0;
+  private notesCostInr = 0;
+  private reasoningCostInr = 0;
   private inputTokens = 0;
   private outputTokens = 0;
   private costInr = 0;
@@ -27,6 +32,7 @@ export class ConsultMeter {
   /** A Pass-1 transcription of one window completed. */
   recordTranscribe(callLog: GeminiCallLogData, latencyMs: number): void {
     this.pass1Calls++;
+    this.transcriptionCostInr += callLog.costInr;
     this.accumulate(callLog);
     this.transcriptLatencies.push(nonNegInt(latencyMs));
     this.pass1InputTokenSamples.push(callLog.inputTokens);
@@ -47,6 +53,7 @@ export class ConsultMeter {
   /** A Pass-2 note build completed. */
   recordNote(callLog: GeminiCallLogData, latencyMs: number): void {
     this.pass2Calls++;
+    this.notesCostInr += callLog.costInr;
     this.accumulate(callLog);
     this.noteLatencies.push(nonNegInt(latencyMs));
   }
@@ -58,6 +65,8 @@ export class ConsultMeter {
    * summary yet (DS2 adds a reasoning latency field).
    */
   recordReasoning(callLog: GeminiCallLogData): void {
+    this.reasoningCalls++;
+    this.reasoningCostInr += callLog.costInr;
     this.accumulate(callLog);
   }
 
@@ -67,7 +76,7 @@ export class ConsultMeter {
   }
 
   /**
-   * Input tokens billed per Pass-1 window, in order. The O(n) acceptance
+   * Reported/estimated input tokens per Pass-1 window, in order. The O(n) acceptance
    * check compares the first and last of these: after windowing they should
    * be within ±20% (each window is bounded), where the old whole-buffer
    * re-run grew every cycle.
@@ -89,11 +98,17 @@ export class ConsultMeter {
       windows: this.windows,
       pass1Calls: this.pass1Calls,
       pass2Calls: this.pass2Calls,
+      reasoningCalls: this.reasoningCalls,
       // Backends may report fractional token estimates (the mock divides by
       // 4); the contract + DB column are integers, so round the totals.
       inputTokens: Math.round(this.inputTokens),
       outputTokens: Math.round(this.outputTokens),
       costInr: round4(this.costInr),
+      costBreakdown: {
+        transcriptionInr: round4(this.transcriptionCostInr),
+        notesInr: round4(this.notesCostInr),
+        reasoningInr: round4(this.reasoningCostInr),
+      },
       transcriptP50Ms: percentile(this.transcriptLatencies, 50),
       transcriptP95Ms: percentile(this.transcriptLatencies, 95),
       // DOC-9 — the lived speech→transcript latency (window-wait included).

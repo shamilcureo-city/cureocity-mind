@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { CarriedQuestionSchema, type TherapyCarriedQuestion } from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
 import { TherapistLiveSession } from '@/components/app/TherapistLiveSession';
+import { SessionPreparationPanel } from '@/components/app/SessionPreparationPanel';
+import { isMindSessionPreparationEnabled } from '@/lib/mind-session-preparation-feature';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { getEffectiveCapabilities } from '@/lib/capabilities';
 import { decryptClientField } from '@/lib/client-pii';
@@ -185,6 +187,19 @@ export default async function TherapistLivePage({
         initialGuideId={sp.guide}
         caseContext={caseContext}
       />
+      {isMindSessionPreparationEnabled() && (
+        <details className="mt-4 print:hidden">
+          <summary className="cursor-pointer py-2 text-sm text-[var(--color-ink-2)]">
+            Your preparation for this visit
+          </summary>
+          <SessionPreparationPanel
+            sessionId={session.id}
+            clientId={session.clientId}
+            clientName={clientName}
+            readOnly
+          />
+        </details>
+      )}
     </Container>
   );
 }

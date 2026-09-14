@@ -29,6 +29,7 @@ export interface LiveRecoveryDraft {
   transcript: string;
   captureMode: 'LIVE' | 'BATCH';
   durable: boolean;
+  transcriptionWarning?: boolean;
 }
 
 export function recoveryDraftKey(sessionId: string): string {
@@ -59,7 +60,8 @@ export function loadRecoveryDraft(
       !Array.isArray(value.utterances) ||
       typeof value.transcript !== 'string' ||
       (value.captureMode !== 'LIVE' && value.captureMode !== 'BATCH') ||
-      typeof value.durable !== 'boolean'
+      typeof value.durable !== 'boolean' ||
+      (value.transcriptionWarning !== undefined && typeof value.transcriptionWarning !== 'boolean')
     ) {
       return null;
     }

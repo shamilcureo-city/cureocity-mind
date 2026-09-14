@@ -14,7 +14,12 @@ import {
   THERAPY_NOTE_PROMPT_VERSION,
   THERAPY_NOTE_SYSTEM_PROMPT_V1,
 } from '../prompts';
-import { computeCostInr, PRO_PRICING, type ModelPricing } from '../pricing';
+import {
+  estimateVertexUsageCostInr,
+  PRO_PRICING,
+  type ModelPricing,
+  type VertexUsageForCost,
+} from '../pricing';
 
 export interface VertexGeminiProGlobalOptions {
   projectId: string;
@@ -23,9 +28,8 @@ export interface VertexGeminiProGlobalOptions {
   model?: string;
   saKeyPath?: string;
   /**
-   * Sprint 74 — cost table used for the call log. Defaults to Pro pricing;
-   * pass FLASH_PRICING when this backend is constructed with a Flash model
-   * (e.g. the live gateway's interim-note pass) so the meter stays honest.
+   * Fallback estimate for an unrecognised model override. Recognised Gemini
+   * models use their own verified rates, even if this legacy option differs.
    */
   pricing?: ModelPricing;
   /**
@@ -95,6 +99,17 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
         ? INTAKE_NOTE_PROMPT_VERSION
         : THERAPY_NOTE_PROMPT_VERSION;
 
+    let usage: VertexUsageForCost | undefined;
+    let responseText = '';
+    const costEstimate = (requestError?: unknown) =>
+      estimateVertexUsageCostInr({
+        model: this.modelName,
+        usage,
+        fallbackInputTokens: Math.ceil((systemPrompt.length + userMessage.length) / 4),
+        fallbackOutputTokens: Math.ceil(responseText.length / 4),
+        fallbackPricing: this.pricing,
+        requestError,
+      });
     try {
       const res = await this.callWithRetry({
         model: this.modelName,
@@ -122,7 +137,9 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
         },
       });
 
+      usage = res.usageMetadata;
       const text = res.text ?? '{}';
+      responseText = text;
       const finishReason = res.candidates?.[0]?.finishReason;
       const blockReason = res.promptFeedback?.blockReason;
       if (!text || text === '{}' || text === '') {
@@ -146,9 +163,7 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
               therapyNote: normaliseTherapyNoteOutput(parsed),
             });
 
-      const usage = res.usageMetadata;
-      const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
-      const outputTokens = usage?.candidatesTokenCount ?? Math.ceil(text.length / 4);
+      const { inputTokens, outputTokens, costInr } = costEstimate();
 
       return {
         output,
@@ -160,22 +175,22 @@ export class VertexGeminiProGlobalBackend implements IPass2Backend {
           promptVersion,
           inputTokens,
           outputTokens,
-          costInr: computeCostInr(inputTokens, outputTokens, this.pricing),
+          costInr,
           latencyMs: Date.now() - start,
           status: 'SUCCESS',
         },
       };
     } catch (e) {
-      const fallbackTokens = Math.ceil(userMessage.length / 4);
+      const { inputTokens, outputTokens, costInr } = costEstimate(e);
       throw new Pass2BackendError((e as Error).message, {
         sessionId: input.sessionId,
         pass: 'PASS_2_NOTE_GENERATION',
         model: this.modelName,
         region: this.region,
         promptVersion,
-        inputTokens: fallbackTokens,
-        outputTokens: 0,
-        costInr: computeCostInr(fallbackTokens, 0, this.pricing),
+        inputTokens,
+        outputTokens,
+        costInr,
         latencyMs: Date.now() - start,
         status: 'ERROR',
         errorMessage: (e as Error).message,

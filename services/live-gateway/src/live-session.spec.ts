@@ -437,6 +437,9 @@ describe('LiveSession — incremental windowing + metering (DS0)', () => {
     session.start();
     session.pushAudio(BLOCK);
     await session.pump(); // cycle 1 — q1 opens
+    // Answering requires new speech; the leftover silence must not fabricate
+    // a second transcription/reasoning cycle during End.
+    session.pushAudio(pcm(500, SPEECH));
     await session.finalize(); // cycle 2 — q1 answered
 
     const reasoningEvents = events.filter((e) => e.type === 'reasoning');

@@ -1,5 +1,6 @@
 import { prisma } from './prisma';
-import { resolveNoteTranscript } from './note-transcript';
+import { containsTranscriptionArtifact } from '@cureocity/contracts';
+import { resolveNoteTranscriptData } from './note-transcript';
 import { decryptClientField } from './client-pii';
 
 /**
@@ -70,16 +71,35 @@ export async function buildConceptualMapContext(
   const orderedSessions = [...sessions].reverse();
 
   for (const s of orderedSessions) {
-    const transcript = s.noteDraft
-      ? await resolveNoteTranscript(psychologistId, s.noteDraft)
+    const savedTranscript = s.noteDraft
+      ? await resolveNoteTranscriptData(psychologistId, s.noteDraft)
       : null;
+    const transcript = savedTranscript?.transcript ?? null;
+    const note = s.therapyNote?.content;
+    // Check the full source before truncation or SOAP summarisation. Silently
+    // omitting a contaminated visit would misrepresent the client's history.
+    if (s.noteDraft?.transcriptEncrypted && !savedTranscript) {
+      throw new Error(
+        'A session source needs review: its saved transcript could not be read. Restore access before generating a case map.',
+      );
+    }
+    if (
+      containsTranscriptionArtifact(transcript ?? '') ||
+      savedTranscript?.speakerSegments?.some((segment) =>
+        containsTranscriptionArtifact(segment.text),
+      ) ||
+      containsTranscriptionArtifact(JSON.stringify(note) ?? '')
+    ) {
+      throw new Error(
+        'A session source needs review: its transcript or note contains invalid generated text. Review and correct the source before generating a case map.',
+      );
+    }
     if (!transcript || typeof transcript !== 'string') continue;
     sessionIds.push(s.id);
     lines.push(
       `=== Session ${s.id} (${s.kind}, ended ${s.endedAt?.toISOString() ?? 'unknown'}) ===`,
     );
     lines.push(truncate(transcript, 6000));
-    const note = s.therapyNote?.content;
     if (note && typeof note === 'object') {
       const noteSummary = summariseNote(note as Record<string, unknown>);
       if (noteSummary) {

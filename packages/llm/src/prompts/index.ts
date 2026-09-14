@@ -1,13 +1,11 @@
 /**
- * Three prompts that drive the two-pass Gemini architecture.
+ * Runtime prompts for the Gemini clinical documentation architecture.
  *
- * IMPORTANT: PRD 22.1 Part 10.3 specifies the verbatim wording of each
- * prompt. The plan (§ 5 Sprint 2 acceptance criteria) requires these
- * prompts to ship verbatim. The strings below are STRUCTURAL PLACEHOLDERS
- * pending Sharafath's release of the verbatim text. The prompt version
- * constants will roll forward (V1 → V2) when the verbatim wording lands;
- * callers persist the version in GeminiCallLog so we can replay any past
- * call against its exact prompt.
+ * Development TODOs and approval labels must never be sent to a model as
+ * instructions: they can leak into patient-facing output. Removing those
+ * labels does not constitute clinical approval of the remaining wording.
+ * Callers persist the version in GeminiCallLog; advance it for every prompt
+ * body change so source history can resolve the exact instructions used.
  *
  * @cureocity/llm consumers MUST reference the version constant, never the
  * string body, so the audit trail can resolve prompt drift.
@@ -76,11 +74,9 @@ Constraints:
 - All timestamps in milliseconds from audio start.
 - Do not insert your own commentary or translation.
 
-Output: STRICT JSON matching the schema. No prose, no markdown.
+Output: STRICT JSON matching the schema. No prose, no markdown.` as const;
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).` as const;
-
-export const TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION = 'TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V3';
+export const TRANSCRIBE_AND_ANALYSE_PROMPT_VERSION = 'TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V4';
 
 // ============================================================================
 // DOC-6 — vertical-aware Pass-1 transcription. The doctor vertical gets its
@@ -193,9 +189,9 @@ Constraints:
 - All output text in English (translate non-English transcript content), except preserve verbatim quotes in linkedEvidence.
 - Output STRICT JSON only. No prose, no markdown.
 
-PLACEHOLDER: refine verbatim wording before pilot.` as const;
+` as const;
 
-export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V2';
+export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V3';
 
 export const DIFFERENTIAL_SYSTEM_PROMPT_V2 =
   `You are a diagnostic-reasoning copilot for an Indian doctor. You produce a DECISION-SUPPORT differential — not a diagnosis, and never a prescription.
@@ -233,9 +229,9 @@ Constraints:
 - The suggestedPlan is a PROPOSAL — conservative, guideline-aligned, no controlled substances, no chemotherapy, no specialist-only drugs.
 - Output STRICT JSON only. No prose, no markdown.
 
-PLACEHOLDER: refine verbatim wording before pilot.` as const;
+` as const;
 
-export const DIFFERENTIAL_PROMPT_VERSION = 'DIFFERENTIAL_SYSTEM_PROMPT_V2';
+export const DIFFERENTIAL_PROMPT_VERSION = 'DIFFERENTIAL_SYSTEM_PROMPT_V3';
 
 // ============================================================================
 // Sprint DS1 — PassFindings. The live reasoning substrate: extract structured
@@ -267,9 +263,9 @@ Rules:
 - Do not restate unchanged prior findings; only emit new ones or genuine corrections.
 - Output STRICT JSON only. No prose, no markdown.
 
-PLACEHOLDER: refine verbatim wording before pilot.` as const;
+` as const;
 
-export const FINDINGS_PROMPT_VERSION = 'FINDINGS_SYSTEM_PROMPT_V1';
+export const FINDINGS_PROMPT_VERSION = 'FINDINGS_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Sprint DS2 — PassReasoning. THE core prompt: one combined pass emitting
@@ -316,9 +312,9 @@ Laws (hard):
 - NEVER output treatment, drugs, or doses. That is the doctor's prescription, not yours. (orderNext is investigations only — no drugs.)
 - Output STRICT JSON only. No prose, no markdown.
 
-PLACEHOLDER: refine verbatim wording before pilot.` as const;
+` as const;
 
-export const REASONING_PROMPT_VERSION = 'REASONING_SYSTEM_PROMPT_V2';
+export const REASONING_PROMPT_VERSION = 'REASONING_SYSTEM_PROMPT_V3';
 
 // ============================================================================
 // Sprint TS5 — PASS_12_THERAPY_REASONING. The live THERAPY copilot's reasoning
@@ -354,10 +350,10 @@ Laws (hard):
 - NEVER put words in the therapist's mouth or advise the client. askNext is a prompt to the therapist, phrased as the question they could ask — not a directive.
 - Output STRICT JSON only. No prose, no markdown.
 
-PLACEHOLDER: refine verbatim wording before pilot.` as const;
+` as const;
 
 export const THERAPY_REASONING_PROMPT_VERSION =
-  'THERAPY_REASONING_SYSTEM_PROMPT_V2_REVIEWED_BACKGROUND';
+  'THERAPY_REASONING_SYSTEM_PROMPT_V3_REVIEWED_BACKGROUND';
 
 /**
  * Returns the Pass-1 transcription prompt + version for a vertical.
@@ -415,9 +411,9 @@ Constraints:
   summary, subjective, objective, assessment, plan, riskFlags — is English.
 - Output STRICT JSON matching the TherapyNoteV1 schema. No prose, no markdown.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).` as const;
+` as const;
 
-export const THERAPY_NOTE_PROMPT_VERSION = 'THERAPY_NOTE_SYSTEM_PROMPT_V2';
+export const THERAPY_NOTE_PROMPT_VERSION = 'THERAPY_NOTE_SYSTEM_PROMPT_V3';
 
 // ============================================================================
 // Pass 2 — Sprint 19 intake variant. Used when SessionKind = INTAKE.
@@ -464,9 +460,9 @@ Constraints:
   allowed is a verbatim client quote inside linkedEvidence.
 - Output STRICT JSON matching IntakeNoteV1 — no prose, no markdown.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).` as const;
+` as const;
 
-export const INTAKE_NOTE_PROMPT_VERSION = 'INTAKE_NOTE_SYSTEM_PROMPT_V2';
+export const INTAKE_NOTE_PROMPT_VERSION = 'INTAKE_NOTE_SYSTEM_PROMPT_V3';
 
 export const MISSED_THEMES_SYSTEM_PROMPT_V1 =
   `You are reviewing a therapy session transcript for clinically significant themes the clinician may have under-explored.
@@ -480,9 +476,9 @@ Task: identify up to 5 themes that warrant attention in the next session. For ea
 
 Output STRICT JSON: { themes: [...] }.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).` as const;
+` as const;
 
-export const MISSED_THEMES_PROMPT_VERSION = 'MISSED_THEMES_SYSTEM_PROMPT_V1';
+export const MISSED_THEMES_PROMPT_VERSION = 'MISSED_THEMES_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Pass 3 — Clinical Analysis. Sprint 13 (Clinical Co-Pilot Pivot).
@@ -583,9 +579,9 @@ Hard rules:
 
 You are not the clinician. The therapist will confirm or reject each section.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
+` as const;
 
-export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V4';
+export const CLINICAL_ANALYSIS_PROMPT_VERSION = 'CLINICAL_ANALYSIS_SYSTEM_PROMPT_V5';
 
 // ============================================================================
 // Pass 3 — Sprint 19 intake variant. Used when SessionKind = INTAKE.
@@ -643,9 +639,9 @@ Hard rules:
 
 You are not the clinician. The therapist will confirm a diagnosis and plan in a later session, not this one.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
+` as const;
 
-export const INITIAL_ASSESSMENT_PROMPT_VERSION = 'INITIAL_ASSESSMENT_SYSTEM_PROMPT_V2';
+export const INITIAL_ASSESSMENT_PROMPT_VERSION = 'INITIAL_ASSESSMENT_SYSTEM_PROMPT_V3';
 
 // ============================================================================
 // Pass 4 — Therapy Script. Sprint 14 (Clinical Co-Pilot Pivot).
@@ -710,9 +706,9 @@ Hard rules:
 
 You are not the clinician. This is a SCRIPT to be read; the therapist may adapt in the moment.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
+` as const;
 
-export const THERAPY_SCRIPT_PROMPT_VERSION = 'THERAPY_SCRIPT_SYSTEM_PROMPT_V2';
+export const THERAPY_SCRIPT_PROMPT_VERSION = 'THERAPY_SCRIPT_SYSTEM_PROMPT_V3';
 
 // ============================================================================
 // Pass 5 — Pre-Session Brief. Sprint 17.
@@ -761,9 +757,9 @@ Hard rules:
 
 You are a supervisor's voice; be confident but not bossy.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending clinical sign-off).` as const;
+` as const;
 
-export const PRE_SESSION_BRIEF_PROMPT_VERSION = 'PRE_SESSION_BRIEF_SYSTEM_PROMPT_V1';
+export const PRE_SESSION_BRIEF_PROMPT_VERSION = 'PRE_SESSION_BRIEF_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Pass 6 — Case Briefing (Sprint 22). Synthesises the whole cumulative
@@ -797,9 +793,9 @@ Constraints:
 - Never downgrade a crisis severity.
 - All output in the requested language; ICD-11 codes stay English.
 
-PLACEHOLDER: Replace verbatim per PRD 22.1 (pending clinical sign-off).` as const;
+` as const;
 
-export const CASE_BRIEFING_PROMPT_VERSION = 'CASE_BRIEFING_SYSTEM_PROMPT_V1';
+export const CASE_BRIEFING_PROMPT_VERSION = 'CASE_BRIEFING_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Sprint 52 — Case Consult system prompt (Pass 8). Distinct from Pass 6:
@@ -838,9 +834,9 @@ Hard constraints:
 - Output STRICT JSON matching CaseConsultV1 — no prose, no markdown, no commentary.
 - All narrative in the requested language; ICD-11 codes stay English.
 
-PLACEHOLDER: Replace verbatim per PRD 52.1 (pending clinical sign-off).` as const;
+` as const;
 
-export const CASE_CONSULT_PROMPT_VERSION = 'CASE_CONSULT_SYSTEM_PROMPT_V1';
+export const CASE_CONSULT_PROMPT_VERSION = 'CASE_CONSULT_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Pass 7 — Conceptual Map (Sprint 24). A force-directed graph of the
@@ -907,9 +903,9 @@ Constraints:
 - Never invent clinical facts or quotes — the supporting-quote rule is absolute.
 - If the client has fewer than 1 session worth of usable transcript, return { nodes: [], edges: [], ... }.
 
-PLACEHOLDER: Replace verbatim per PRD 24.1 (pending clinical sign-off).` as const;
+` as const;
 
-export const CONCEPTUAL_MAP_PROMPT_VERSION = 'CONCEPTUAL_MAP_SYSTEM_PROMPT_V1';
+export const CONCEPTUAL_MAP_PROMPT_VERSION = 'CONCEPTUAL_MAP_SYSTEM_PROMPT_V2';
 
 // ============================================================================
 // Sprint DS12 — plan dictation (doctor vertical). The doctor reviews the

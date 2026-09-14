@@ -1,4 +1,5 @@
 import { decryptForTenant } from './tenant-crypto';
+import { decodeSavedTranscript } from './saved-transcript';
 
 /**
  * The single read path for a session transcript (S-hardening, 2026-08).
@@ -14,6 +15,13 @@ export async function resolveNoteTranscript(
   psychologistId: string,
   row: { transcriptEncrypted: string | null },
 ): Promise<string | null> {
+  return (await resolveNoteTranscriptData(psychologistId, row))?.transcript ?? null;
+}
+
+export async function resolveNoteTranscriptData(
+  psychologistId: string,
+  row: { transcriptEncrypted: string | null },
+): Promise<ReturnType<typeof decodeSavedTranscript> | null> {
   if (!row.transcriptEncrypted) return null;
   const plaintext = await decryptForTenant(psychologistId, row.transcriptEncrypted);
   if (plaintext === null) {
@@ -21,7 +29,13 @@ export async function resolveNoteTranscript(
       `[note-transcript] UNDECRYPTABLE transcript for psy=${psychologistId} — check KMS health/key`,
     );
   }
-  return plaintext;
+  if (plaintext === null) return null;
+  try {
+    return decodeSavedTranscript(plaintext);
+  } catch {
+    console.error('[note-transcript] Invalid encrypted transcript format');
+    return null;
+  }
 }
 
 /** Presence check — ciphertext is the only copy. */

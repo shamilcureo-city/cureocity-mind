@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { loadClientAgreementExport } from '@/lib/session-agreement-export';
 import { ClientPhiWriteForbiddenError } from '@/lib/phi-write-lock';
 import { loadMindCareDataExport } from '@/lib/mind-care-data-export';
+import { loadSessionUsageDataExport } from '@/lib/session-usage-data-export';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -90,6 +91,7 @@ export async function GET(
 
   let sessionAgreements;
   let mindData;
+  let sessionUsageConnections;
   try {
     const exported = await prisma.$transaction(async (tx) => ({
       sessionAgreements: await loadClientAgreementExport(tx, clientId, auth.value.psychologistId),
@@ -99,9 +101,15 @@ export async function GET(
         auth.value.psychologistId,
         new Set(auth.value.user.capabilities ?? []),
       ),
+      sessionUsageConnections: await loadSessionUsageDataExport(
+        tx,
+        clientId,
+        auth.value.psychologistId,
+      ),
     }));
     sessionAgreements = exported.sessionAgreements;
     mindData = exported.mindData;
+    sessionUsageConnections = exported.sessionUsageConnections;
   } catch (error) {
     if (error instanceof ClientPhiWriteForbiddenError)
       return NextResponse.json({ error: 'Client not found' }, { status: 404 });
@@ -149,6 +157,7 @@ export async function GET(
       withdrawnAt: c.withdrawnAt?.toISOString() ?? null,
     })),
     sessionCount,
+    sessionUsageConnections,
     sessionAgreements,
     ...mindData,
     moodLogCount,

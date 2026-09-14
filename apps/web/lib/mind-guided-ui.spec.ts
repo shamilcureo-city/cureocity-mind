@@ -189,7 +189,9 @@ describe('Mind Quiet mode clinical boundary', () => {
     const collapsed = [...html.matchAll(/<details\b[^>]*>[\s\S]*?<\/details>/g)].map(
       ([details]) => details,
     );
-    expect(collapsed).toHaveLength(3);
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]).toContain('More session support (8)');
+    expect(collapsed[0]).toContain('These are options, not a checklist');
     expect(html).not.toMatch(/<details\b[^>]*\bopen(?:[\s=>])/);
     for (const risk of reasoning.riskWatch) {
       expect(html).toContain(risk.label);
@@ -199,14 +201,21 @@ describe('Mind Quiet mode clinical boundary', () => {
     for (const thread of reasoning.threads) expect(html).toContain(thread.topic);
     expect(collapsed[0]).toContain('SYNTHETIC CARRIED ordinary question 2');
     expect(collapsed[0]).toContain('SYNTHETIC CARRIED ordinary question 1');
-    expect(collapsed[1]).toContain('SYNTHETIC LIVE ordinary question 2');
-    expect(collapsed[1]).not.toContain('SYNTHETIC LIVE ordinary question 1');
-    expect(collapsed[2]).toContain('SYNTHETIC ordinary topic 2');
-    expect(collapsed[2]).toContain('SYNTHETIC ordinary topic 1');
+    expect(collapsed[0]).toContain('SYNTHETIC LIVE ordinary question 2');
+    expect(collapsed[0]).not.toContain('SYNTHETIC LIVE ordinary question 1');
+    expect(collapsed[0]).toContain('SYNTHETIC ordinary topic 2');
+    expect(collapsed[0]).toContain('SYNTHETIC ordinary topic 1');
     const outsideDisclosures = html.replace(/<details\b[^>]*>[\s\S]*?<\/details>/g, '');
     expect(outsideDisclosures).toContain('SYNTHETIC LIVE ordinary question 1');
     for (const item of reasoning.askNext.filter((item) => item.id !== 'LIVE-1')) {
       expect(outsideDisclosures).not.toContain(item.question);
+    }
+    for (const title of [
+      'Prepared questions',
+      'Questions from this conversation',
+      'Topics to return to',
+    ]) {
+      expect(outsideDisclosures).not.toContain(title);
     }
   });
 
@@ -219,8 +228,33 @@ describe('Mind Quiet mode clinical boundary', () => {
     for (const item of reasoning.askNext) expect(outsideDisclosures).not.toContain(item.question);
     for (const item of reasoning.threads) expect(outsideDisclosures).not.toContain(item.topic);
     expect(outsideDisclosures).toContain('Your selected guide is in focus');
+    expect(html).toContain('More session support (9)');
     expect(html).toContain('min-h-11');
   });
+
+  it.each(['prepared', 'live', 'topic'] as const)(
+    'shows one %s item without an empty more-support disclosure',
+    (source) => {
+      const data = TherapyReasoningV1Schema.parse({
+        askNext:
+          source === 'topic'
+            ? []
+            : [
+                reasoning.askNext.find(
+                  (item) => item.source === (source === 'prepared' ? 'CARRIED' : 'LIVE'),
+                ),
+              ],
+        threads: source === 'topic' ? [reasoning.threads[0]] : [],
+      });
+      const html = renderToStaticMarkup(
+        React.createElement(TherapyCopilotRail, { reasoning: data, onResolve: vi.fn() }),
+      );
+      expect(html).not.toContain('<details');
+      expect(html).not.toContain('More session support');
+      expect(html).toContain(source === 'topic' ? 'Mark explored' : 'Mark asked');
+      expect(html).toContain('focus-visible:outline');
+    },
+  );
 });
 
 describe('Mind guide starts with a clinician review gate', () => {

@@ -30,6 +30,42 @@ describe('Pass1OutputSchema', () => {
       }),
     ).toThrow();
   });
+
+  const artifact =
+    'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
+  it.each([
+    { transcript: artifact, speakerSegments: [], affectFeatures: [] },
+    {
+      transcript: 'Hello',
+      speakerSegments: [{ speaker: 'unknown', startMs: 0, endMs: 1000, text: artifact }],
+      affectFeatures: [],
+    },
+    {
+      transcript: 'Hello',
+      speakerSegments: [],
+      affectFeatures: [{ startMs: 0, endMs: 1000, valence: 0, arousal: 0, notes: artifact }],
+    },
+  ])('rejects artifacts in every text-bearing output field', (value) => {
+    const result = Pass1OutputSchema.safeParse(value);
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.message === 'TRANSCRIPTION_ARTIFACT')).toBe(
+        true,
+      );
+      expect(result.error.message).not.toContain(artifact);
+    }
+  });
+
+  it.each([
+    '',
+    '[inaudible]',
+    'Sharafath said the word placeholder.',
+    'എനിക്ക് ഉത്കണ്ഠ തോന്നുന്നു.',
+    'എനിക്ക് anxiety undu. I used a placeholder in my notes.',
+  ])('preserves legitimate words without rewriting them: %s', (transcript) => {
+    const value = { transcript, speakerSegments: [], affectFeatures: [] };
+    expect(Pass1OutputSchema.parse(value).transcript).toBe(transcript);
+  });
 });
 
 describe('TherapyNoteV1Schema', () => {

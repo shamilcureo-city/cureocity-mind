@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { PreparePanel } from './PreparePanel';
+import { SessionPreparationPanel } from './SessionPreparationPanel';
 import { RescheduleModal } from './RescheduleModal';
 import { mindSessionDestination, mindStartEntryHref } from '@/lib/mind-session-start';
 import styles from './MindTodayStudio.module.css';
@@ -41,6 +42,7 @@ export interface TodaySessionCardProps {
   dueMeasure?: string | null;
   /** Optional supplied brief; the normal page uses the real preparation panel. */
   preparation?: ReactNode;
+  sessionPreparationEnabled?: boolean;
 }
 
 /**
@@ -57,10 +59,13 @@ export function TodaySessionCard({
   variant = 'row',
   dueMeasure = null,
   preparation,
+  sessionPreparationEnabled = false,
 }: TodaySessionCardProps) {
   const router = useRouter();
   const [busy, setBusy] = useState<'no-show' | 'undo' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [preparationPending, setPreparationPending] = useState(false);
+  const [preparationDirty, setPreparationDirty] = useState(false);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [startMenuOpen, setStartMenuOpen] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState(false);
@@ -107,7 +112,7 @@ export function TodaySessionCard({
   const resumeHref = mindSessionDestination(session, defaultCapture);
 
   async function markNoShow() {
-    if (busy) return;
+    if (busy || preparationPending || preparationDirty) return;
     setBusy('no-show');
     setError(null);
     try {
@@ -232,7 +237,7 @@ export function TodaySessionCard({
               <span aria-hidden="true">2</span>Session
             </li>
             <li>
-              <span aria-hidden="true">3</span>Review &amp; Close
+              <span aria-hidden="true">3</span>Review &amp; finish
             </li>
           </ol>
 
@@ -295,7 +300,7 @@ export function TodaySessionCard({
                   <button
                     type="button"
                     onClick={() => setRescheduleOpen(true)}
-                    disabled={busy !== null}
+                    disabled={busy !== null || preparationPending || preparationDirty}
                     className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
                   >
                     Reschedule
@@ -303,7 +308,7 @@ export function TodaySessionCard({
                   <button
                     type="button"
                     onClick={() => void markNoShow()}
-                    disabled={busy !== null}
+                    disabled={busy !== null || preparationPending || preparationDirty}
                     className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
                   >
                     {busy === 'no-show' ? 'Marking…' : 'No-show'}
@@ -320,7 +325,31 @@ export function TodaySessionCard({
 
           {/* Safety and a short brief stay visible; full preparation is optional. */}
           <div className="mt-4">
-            {preparation ?? <PreparePanel clientId={session.clientId} summaryVisible />}
+            {preparation ?? (
+              <PreparePanel
+                clientId={session.clientId}
+                summaryVisible
+                hideDeviceScratch={sessionPreparationEnabled}
+              />
+            )}
+            {sessionPreparationEnabled && (
+              <SessionPreparationPanel
+                key={session.id}
+                sessionId={session.id}
+                clientId={session.clientId}
+                clientName={session.clientName}
+                readOnly={
+                  session.status !== 'SCHEDULED' || rescheduleOpen || busy !== null || undoOffer
+                }
+                onPendingChange={setPreparationPending}
+                onDirtyChange={setPreparationDirty}
+              />
+            )}
+            {sessionPreparationEnabled && preparationDirty && (
+              <p className="mt-2 text-xs text-[var(--color-ink-3)]" role="status">
+                Save or discard your preparation edits before rescheduling or marking a no-show.
+              </p>
+            )}
           </div>
         </Card>
         <RescheduleModal
@@ -443,7 +472,7 @@ export function TodaySessionCard({
                 href={`/app/sessions/${session.id}?tab=note`}
                 className="rounded-full border border-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
               >
-                Review &amp; Close
+                Review &amp; finish
               </Link>
             ) : session.draftStatus === 'IN_PROGRESS' || session.draftStatus === 'PENDING' ? (
               <Link

@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import type { ModalityStateWithHistory } from '@cureocity/contracts';
+import { EMDR_INITIAL_PHASE } from '@cureocity/clinical';
 import { Label, Select, Textarea } from '../ui/Field';
 import { Button } from '../ui/Button';
 
@@ -19,16 +20,7 @@ const CBT_PHASE_OPTIONS = [
   { value: 'consolidation_relapse_prevention', label: 'Consolidation & relapse prevention' },
 ];
 
-const EMDR_PHASE_OPTIONS = [
-  { value: 'history_taking', label: 'History taking' },
-  { value: 'preparation', label: 'Preparation' },
-  { value: 'assessment', label: 'Assessment' },
-  { value: 'desensitization', label: 'Desensitization' },
-  { value: 'installation', label: 'Installation' },
-  { value: 'body_scan', label: 'Body scan' },
-  { value: 'closure', label: 'Closure' },
-  { value: 'reevaluation', label: 'Re-evaluation' },
-];
+const EMDR_PHASE_OPTIONS = [{ value: EMDR_INITIAL_PHASE, label: 'History taking' }];
 
 /**
  * Starts a new ModalityState for a client. The form collects the
@@ -48,7 +40,7 @@ export function CreateWorkflowForm({ clientId, scribeBase = '/api/v1', onCreated
 
   function onModalityChange(next: 'CBT' | 'EMDR') {
     setModality(next);
-    setInitialPhase(next === 'CBT' ? 'engagement_assessment' : 'history_taking');
+    setInitialPhase(next === 'CBT' ? 'engagement_assessment' : EMDR_INITIAL_PHASE);
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>) {
@@ -102,13 +94,22 @@ export function CreateWorkflowForm({ clientId, scribeBase = '/api/v1', onCreated
           </Select>
         </div>
         <div>
-          <Label htmlFor="wf-phase" hint="Defaults to canonical start">
+          <Label
+            htmlFor="wf-phase"
+            hint={
+              modality === 'EMDR'
+                ? 'New workflows begin at history taking'
+                : 'Defaults to canonical start'
+            }
+          >
             Starting phase
           </Label>
           <Select
             id="wf-phase"
             value={initialPhase}
             onChange={(e) => setInitialPhase(e.target.value)}
+            disabled={modality === 'EMDR'}
+            aria-describedby={modality === 'EMDR' ? 'wf-emdr-entry-help' : undefined}
           >
             {phaseOptions.map((p) => (
               <option key={p.value} value={p.value}>
@@ -116,6 +117,12 @@ export function CreateWorkflowForm({ clientId, scribeBase = '/api/v1', onCreated
               </option>
             ))}
           </Select>
+          {modality === 'EMDR' && (
+            <p id="wf-emdr-entry-help" className="mt-2 text-xs text-[var(--color-ink-2)]">
+              Later phases use the recorded preparation and target checks. Starting from prior care
+              is not available yet. Existing workflows and session records remain available.
+            </p>
+          )}
         </div>
       </div>
       <div>

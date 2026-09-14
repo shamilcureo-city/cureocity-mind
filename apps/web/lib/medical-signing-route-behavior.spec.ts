@@ -25,11 +25,15 @@ const mocks = vi.hoisted(() => ({
   rxSafeParse: vi.fn(),
   recoveryFindUnique: vi.fn(),
   manualDraftFindUnique: vi.fn(),
+  resolveNoteTranscript: vi.fn(),
 }));
 
-vi.mock('@cureocity/contracts', () => {
+vi.mock('@cureocity/contracts', async (importOriginal) => {
+  const { containsTranscriptionArtifact } =
+    await importOriginal<typeof import('@cureocity/contracts')>();
   const passthrough = { safeParse: mocks.noteSafeParse };
   return {
+    containsTranscriptionArtifact,
     IntakeNoteV1Schema: passthrough,
     MedicalEncounterNoteV1Schema: passthrough,
     TherapyNoteV1Schema: passthrough,
@@ -51,6 +55,7 @@ vi.mock('./note-edit-fields', () => ({
   signableKindFor: () => mocks.signableKind,
 }));
 vi.mock('./validate', () => ({ parseJson: mocks.parseJson }));
+vi.mock('./note-transcript', () => ({ resolveNoteTranscript: mocks.resolveNoteTranscript }));
 vi.mock('./webauthn-verify', () => ({
   resolveAllowedOrigins: () => ['https://example.test'],
   verifyNoteSigningAssertion: vi.fn(),
@@ -117,6 +122,7 @@ beforeEach(() => {
   vi.setSystemTime(new Date('2026-08-18T12:00:00.000Z'));
   vi.clearAllMocks();
   mocks.signableKind = 'MEDICAL';
+  mocks.resolveNoteTranscript.mockResolvedValue('Fictional reliable transcript.');
   mocks.requirePsychologistId.mockResolvedValue(auth);
   mocks.requireCapability.mockResolvedValue(auth);
   mocks.noteSafeParse.mockImplementation((value) => ({ success: true, data: value }));
@@ -229,6 +235,64 @@ beforeEach(() => {
 afterAll(() => vi.useRealTimers());
 
 describe('medical signing route transaction behavior', () => {
+  it.each([
+    {
+      ciphertext: 'encrypted-source',
+      source: 'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).',
+    },
+    { ciphertext: 'encrypted-source', source: null },
+    { ciphertext: '', source: null },
+  ])(
+    'refuses Mind signing when the locked source is invalid or unreadable (%j)',
+    async ({ ciphertext, source }) => {
+      mocks.signableKind = 'THERAPY';
+      const baseQuery = mocks.queryRaw.getMockImplementation()!;
+      mocks.queryRaw.mockImplementation(
+        async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          const rows = await baseQuery(strings, ...values);
+          if (sqlText(strings).includes('FROM "sessions"'))
+            return rows.map((row: object) => ({ ...row, vertical: 'THERAPIST' }));
+          if (sqlText(strings).includes('FROM "note_drafts"'))
+            return rows.map((row: object) => ({ ...row, transcriptEncrypted: ciphertext }));
+          return rows;
+        },
+      );
+      mocks.resolveNoteTranscript.mockResolvedValue(source);
+      const response = await POST(request() as never, {
+        params: Promise.resolve({ id: 'session-1' }),
+      });
+      expect(response.status).toBe(409);
+      expect(mocks.resolveNoteTranscript).toHaveBeenCalledWith(
+        'psy-1',
+        expect.objectContaining({ transcriptEncrypted: ciphertext }),
+      );
+      expect(mocks.noteCreate).not.toHaveBeenCalled();
+      expect(mocks.noteUpdate).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects generated transcription placeholders in submitted note content before signing', async () => {
+    const parsed = await mocks.parseJson();
+    mocks.parseJson.mockResolvedValue({
+      ...parsed,
+      value: {
+        ...parsed.value,
+        note: {
+          version: 'V1',
+          subjective:
+            'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).',
+        },
+      },
+    });
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining('invalid generated text'),
+    });
+    expect(mocks.noteCreate).not.toHaveBeenCalled();
+    expect(mocks.noteUpdate).not.toHaveBeenCalled();
+  });
   it.each([true, false])(
     'clinician-written signing respects pending encrypted draft state (%s)',
     async (pending) => {

@@ -1,18 +1,16 @@
 import type { SessionStatus } from '@prisma/client';
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import type {
-  NoteDraft,
-  SessionKind,
-  SpeakerSegment,
-  TherapyNote,
-  TherapyNoteV1,
-} from '@cureocity/contracts';
+import type { NoteDraft, SessionKind, TherapyNote, TherapyNoteV1 } from '@cureocity/contracts';
 import { Container } from '@/components/ui/Container';
 import { AICopilotTab } from '@/components/app/AICopilotTab';
 import { MindmapTab } from '@/components/app/MindmapTab';
 import { NotesTab } from '@/components/app/NotesTab';
 import { MindManualSession } from '@/components/app/MindManualSession';
+import { SessionPreparationPanel } from '@/components/app/SessionPreparationPanel';
+import { isMindSessionPreparationEnabled } from '@/lib/mind-session-preparation-feature';
+import { SessionUsagePanel } from '@/components/app/SessionUsagePanel';
+import { isSessionUsageEnabled } from '@/lib/session-usage-feature';
 import { MindSessionCloseout } from '@/components/app/MindSessionCloseout';
 import { MindSessionReviewHeader } from '@/components/app/MindSessionReviewHeader';
 import { selectedQuestionsForSession } from '@/components/app/MindSessionCloseoutEvidence';
@@ -31,7 +29,8 @@ import { formatIstDateTime } from '@/lib/ist';
 import { languageNames } from '@/lib/language-names';
 import { prisma } from '@/lib/prisma';
 import { toNoteDraft } from '@/lib/mappers';
-import { resolveNoteTranscript } from '@/lib/note-transcript';
+import { resolveNoteTranscriptData } from '@/lib/note-transcript';
+import { noteTranscriptView } from '@/lib/note-transcript-view';
 import { deriveMindSessionCloseout } from '@/lib/mind-session-closeout';
 import { getEffectiveCapabilities } from '@/lib/capabilities';
 import { canOpenMindPage, loadOptionalCapabilityData } from '@/lib/mind-page-capabilities';
@@ -126,9 +125,18 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
     });
     return (
       <Container>
+        {isMindSessionPreparationEnabled() && (
+          <SessionPreparationPanel
+            sessionId={id}
+            clientId={session.clientId}
+            clientName={pii.fullName}
+            readOnly
+          />
+        )}
         <MindManualSession
           key={id}
           sessionId={id}
+          sessionScheduledAt={session.scheduledAt.toISOString()}
           clientId={session.clientId}
           clientName={pii.fullName}
           canShare={canShare}
@@ -141,6 +149,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
               : null
           }
         />
+        {isSessionUsageEnabled() && <SessionUsagePanel key={`usage-${id}`} sessionId={id} />}
       </Container>
     );
   }
@@ -181,6 +190,14 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       />
 
       <div className="print:hidden">
+        {isMindSessionPreparationEnabled() && (
+          <SessionPreparationPanel
+            sessionId={id}
+            clientId={session.clientId}
+            clientName={pii.fullName}
+            readOnly
+          />
+        )}
         <SessionWorkspaceTabs
           sessionId={id}
           active={tab}
@@ -218,7 +235,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         {tab === 'transcript' && (
           <TranscriptTabPanel sessionId={id} psychologistId={therapist.id} />
         )}
-        {tab === 'details' && <SessionInfoTabPanel sessionId={id} />}
+        {tab === 'details' && (
+          <div className="space-y-6">
+            {isSessionUsageEnabled() && <SessionUsagePanel key={id} sessionId={id} />}
+            <SessionInfoTabPanel sessionId={id} />
+          </div>
+        )}
       </div>
     </Container>
   );
@@ -312,8 +334,12 @@ async function NotesTabPanel({
       ),
     ]);
 
+  const source = draftRow ? await resolveNoteTranscriptData(psychologistId, draftRow) : null;
   const draft: NoteDraft | null = draftRow
-    ? toNoteDraft(draftRow, await resolveNoteTranscript(psychologistId, draftRow))
+    ? {
+        ...toNoteDraft(draftRow, source?.transcript ?? null),
+        ...noteTranscriptView(draftRow, source),
+      }
     : null;
   const signedNote: TherapyNote | null = signedRow
     ? {
@@ -374,6 +400,7 @@ async function NotesTabPanel({
       sessionCompleted={sessionStatus === 'COMPLETED'}
       canShare={canShare}
       canReviewClinical={canReviewClinical}
+      canRecordWork={canUseWorkflows}
       initialReviewOpen={initialReviewOpen}
       hasSignedNote={signedRow != null}
       clinicalReview={
@@ -489,9 +516,9 @@ async function TranscriptTabPanel({
     );
   }
 
-  const segments = (draftRow.speakerSegments as SpeakerSegment[] | null) ?? null;
-  // Mindmap moved here (R1) — it's a view OF the note, so it belongs beside
-  // the transcript, not in the copilot decision flow.
+  const savedTranscript = await resolveNoteTranscriptData(psychologistId, draftRow);
+  const transcriptView = noteTranscriptView(draftRow, savedTranscript);
+  // A derived view of the note is optional and distinct from the source words.
   const sourceSigned = signedRow?.locked === true;
   const noteJson = (
     sourceSigned ? signedRow.content : (draftRow.content ?? signedRow?.content ?? null)
@@ -503,20 +530,27 @@ async function TranscriptTabPanel({
         sessionId={sessionId}
         data={{
           status: draftRow.status,
-          segments,
-          transcript: await resolveNoteTranscript(psychologistId, draftRow),
+          segments: transcriptView.speakerSegments,
+          transcript: transcriptView.transcript,
           totalCostInr: draftRow.totalCostInr.toString(),
           backend: lastCall ? `${lastCall.model} (${lastCall.region})` : null,
-          errorMessage: draftRow.errorMessage,
+          errorMessage: transcriptView.errorMessage,
+          transcriptionWarning: transcriptView.transcriptionWarning,
         }}
       />
       {noteJson && (
-        <section>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--color-ink-3)]">
-            Session mindmap
-          </h3>
-          <MindmapTab note={noteJson} sourceState={sourceSigned ? 'signed' : 'draft'} />
-        </section>
+        <details className="rounded-xl border border-[var(--color-line-soft)] p-5">
+          <summary className="cursor-pointer font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4">
+            Explore the note as a mindmap
+          </summary>
+          <p className="mt-3 text-sm text-[var(--color-ink-2)]">
+            This is a visual summary of the {sourceSigned ? 'signed note' : 'draft note'}, not a
+            transcript or independent clinical evidence.
+          </p>
+          <div className="mt-4">
+            <MindmapTab note={noteJson} sourceState={sourceSigned ? 'signed' : 'draft'} />
+          </div>
+        </details>
       )}
     </div>
   );

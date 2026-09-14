@@ -7,6 +7,7 @@ import {
   CaseConsultV1Schema,
   type CaseState,
   ClinicalFindingSchema,
+  containsTranscriptionArtifact,
   type ClinicalLocale,
   ClinicalReportV1Schema,
   AskNextItemSchema,
@@ -76,10 +77,18 @@ export type {
 // DPDP residency. See execution plan § 6.1.
 // ============================================================================
 
+// Validate every text-bearing Pass-1 output before it can become transcript,
+// reasoning or note evidence. Never silently strip words from an accepted result.
+const TranscriptionTextSchema = z.string().refine((text) => !containsTranscriptionArtifact(text), {
+  message: 'TRANSCRIPTION_ARTIFACT',
+});
+
 export const Pass1OutputSchema = z.object({
-  transcript: z.string(),
-  speakerSegments: z.array(SpeakerSegmentSchema),
-  affectFeatures: z.array(AffectFeatureSchema),
+  transcript: TranscriptionTextSchema,
+  speakerSegments: z.array(SpeakerSegmentSchema.extend({ text: TranscriptionTextSchema })),
+  affectFeatures: z.array(
+    AffectFeatureSchema.extend({ notes: TranscriptionTextSchema.optional() }),
+  ),
   /**
    * Sprint 16 — language detection. ISO 639-1 codes (or "mixed") of
    * the languages Pass 1 detected in the audio, sorted by prevalence.

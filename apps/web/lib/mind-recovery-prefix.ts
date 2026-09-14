@@ -4,6 +4,7 @@ export interface RecoveryPrefix {
   version: 1;
   transcript: string;
   speakerSegments: SpeakerSegment[];
+  transcriptionWarning?: boolean;
 }
 
 export function buildRecoveryPrefix(utterances: MindRecoveryInput['utterances']): RecoveryPrefix {

@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import type { ClinicalLocale } from '@cureocity/contracts';
+import { containsTranscriptionArtifact, type ClinicalLocale } from '@cureocity/contracts';
 import { requireCapability } from '@/lib/auth-server';
 import { runClinicalAnalysis } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
 import { readInitialAssessmentBrief, toClinicalReport } from '@/lib/clinical-mappers';
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
-import { hasTranscript, resolveNoteTranscript } from '@/lib/note-transcript';
+import { hasTranscript, resolveNoteTranscriptData } from '@/lib/note-transcript';
 
 type SpeakerSegmentRow = {
   speaker: 'therapist' | 'client' | 'unknown';
@@ -92,7 +92,22 @@ export async function POST(
     );
   }
 
-  const transcript = (await resolveNoteTranscript(session.psychologistId, draft)) ?? '';
+  const savedTranscript = await resolveNoteTranscriptData(session.psychologistId, draft);
+  const transcript = savedTranscript?.transcript ?? '';
+
+  if (
+    containsTranscriptionArtifact(transcript) ||
+    containsTranscriptionArtifact(JSON.stringify(draft.content))
+  ) {
+    return NextResponse.json(
+      {
+        error:
+          'This transcript or note contains invalid generated text. Review and correct the source before running clinical suggestions.',
+        code: 'TRANSCRIPT_NEEDS_REVIEW',
+      },
+      { status: 409 },
+    );
+  }
 
   // A draft can hold a full transcript and an EMPTY speaker timeline when Pass 1
   // transcribed a window but didn't diarize it. That used to hard-409 here, which
@@ -101,7 +116,17 @@ export async function POST(
   // guarantees coverage for new sessions; this heals the ones already stored,
   // labelling the text `unknown` rather than guessing who spoke.
   const stored = draft.speakerSegments as SpeakerSegmentRow[] | null;
-  let segments = stored ?? [];
+  let segments = savedTranscript?.speakerSegments ?? stored ?? [];
+  if (segments.some((segment) => containsTranscriptionArtifact(segment.text))) {
+    return NextResponse.json(
+      {
+        error:
+          'This transcript or note contains invalid generated text. Review and correct the source before running clinical suggestions.',
+        code: 'TRANSCRIPT_NEEDS_REVIEW',
+      },
+      { status: 409 },
+    );
+  }
   if (segments.length === 0) {
     const chunks = await prisma.audioChunk.aggregate({
       where: { sessionId },

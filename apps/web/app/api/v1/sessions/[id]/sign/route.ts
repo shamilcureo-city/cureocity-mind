@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
+  containsTranscriptionArtifact,
   IntakeNoteV1Schema,
   MedicalEncounterNoteV1Schema,
   SignNoteInputSchema,
@@ -31,6 +32,7 @@ import {
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
+import { resolveNoteTranscript } from '@/lib/note-transcript';
 import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauthn-verify';
 
 export const runtime = 'nodejs';
@@ -115,6 +117,7 @@ type LockedDraft = {
   status: string;
   content: Prisma.JsonValue | null;
   rxPad: Prisma.JsonValue | null;
+  transcriptEncrypted: string | null;
 };
 type LockedNote = {
   id: string;
@@ -193,7 +196,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       }
 
       const drafts = await tx.$queryRaw<LockedDraft[]>`
-        SELECT "id", "status", "content", "rxPad"
+        SELECT "id", "status", "content", "rxPad", "transcriptEncrypted"
         FROM "note_drafts"
         WHERE "sessionId" = ${sessionId}
         FOR UPDATE
@@ -205,6 +208,23 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           409,
           `Note draft is in ${draft.status} state — cannot sign until COMPLETED`,
         );
+      }
+      if (session.vertical === 'THERAPIST' && typeof draft.transcriptEncrypted === 'string') {
+        // Bind the check to the same locked source as the note. A clean-looking
+        // AI note is not evidence that a pre-fix contaminated source is safe.
+        const source = await resolveNoteTranscript(session.psychologistId, draft);
+        if (source === null) {
+          throw new SigningHttpError(
+            409,
+            'The saved transcript could not be verified. Retry when secure storage is available.',
+          );
+        }
+        if (containsTranscriptionArtifact(source)) {
+          throw new SigningHttpError(
+            409,
+            'The saved transcript contains invalid generated text. Recover it from the original recording, or create a new clinician-written session note before signing. This original record has not been changed.',
+          );
+        }
       }
 
       const existingRows = await tx.$queryRaw<LockedNote[]>`
@@ -276,6 +296,12 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       }
       const draftContent = parsedDraft.data as SignedNoteContent;
       const finalNote = parsedFinal.data as SignedNoteContent;
+      if (containsTranscriptionArtifact(JSON.stringify(finalNote))) {
+        throw new SigningHttpError(
+          409,
+          'The note contains invalid generated text. Review and correct the note before signing.',
+        );
+      }
       const edits = input.value.edits ?? [];
       validateEdits(draftContent, finalNote, edits, signableFields);
 

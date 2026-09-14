@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { TherapyScriptV1 } from '@cureocity/contracts';
 import { Button } from '@/components/ui/Button';
 import { mindGuideSteps, reviewedGuideCount } from '@/lib/mind-guidance';
@@ -36,17 +36,61 @@ export function MindTherapyGuide({
     retry,
   } = useMindGuideReview(steps, reviewTarget);
   const statusId = useId();
+  const headingId = useId();
+  const jumpMenu = useRef<HTMLDetailsElement>(null);
+  const guideHeading = useRef<HTMLHeadingElement>(null);
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  const focusNextSection = useRef(false);
   const active = steps[activeIndex] ?? steps[0]!;
   const count = reviewedGuideCount(steps, reviewed);
+  const hasPlace = activeIndex > 0 || count > 0;
+  const needsRecovery = ['load-error', 'save-error', 'conflict', 'stale'].includes(saveStatus);
+  const saveMessage = {
+    local: 'Your place and review markers stay in this open guide only.',
+    loading: 'Loading saved review progress. You can keep reading.',
+    ready: 'No saved review progress for this draft yet.',
+    saving: 'Saving your place. Review markers update after the save is confirmed.',
+    saved: 'Your place and review markers are saved for this draft version.',
+    stale: 'This draft has changed. Close and reopen the guide to review its current content.',
+    conflict: 'Saved progress changed in another view. Reload before marking more sections.',
+    'load-error':
+      'Saved progress could not be loaded. Your place is not being saved. Reload to try again.',
+    'save-error':
+      'The last save could not be confirmed. Retry save, or reload to discard the unconfirmed change.',
+  }[saveStatus];
+
+  useEffect(() => {
+    if (focusNextSection.current && mode === 'guided' && reviewedForUse) {
+      stepHeading.current?.focus();
+      focusNextSection.current = false;
+    }
+  }, [activeIndex, mode, reviewedForUse]);
+
+  function openGuided() {
+    focusNextSection.current = true;
+    setMode('guided');
+  }
+
+  function goToSection(index: number) {
+    if (jumpMenu.current) jumpMenu.current.open = false;
+    if (index === activeIndex) {
+      stepHeading.current?.focus();
+      return;
+    }
+    focusNextSection.current = true;
+    setActiveIndex(index);
+  }
 
   return (
     <section className={styles.guide} aria-label="Psychologist session guide">
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>Your session companion</p>
-          <h2 className={styles.title}>{script.therapyName}</h2>
+          <h2 className={styles.title} ref={guideHeading} tabIndex={-1}>
+            {script.therapyName}
+          </h2>
           <p className={styles.meta}>
-            AI-drafted guidance · {steps.length} guide sections · Adapt to the client
+            AI-drafted guidance. Not a reviewed protocol. Adapt to the client.
           </p>
         </div>
         <div className={styles.modes} role="group" aria-label="Guide view">
@@ -61,13 +105,42 @@ export function MindTherapyGuide({
             type="button"
             disabled={!reviewedForUse}
             aria-pressed={mode === 'guided' && reviewedForUse}
-            onClick={() => setMode('guided')}
+            onClick={openGuided}
             aria-describedby={statusId}
           >
             Step by step
           </button>
         </div>
       </header>
+
+      <div className={styles.orientation} data-recovery={needsRecovery}>
+        <div className={styles.place}>
+          <div>
+            <p className={styles.label}>
+              {reviewTarget && saveStatus === 'saved' ? 'Saved place' : 'Current place'}
+            </p>
+            <p className={styles.placeTitle}>
+              Section {activeIndex + 1} of {steps.length}: {active.title}
+            </p>
+          </div>
+          <p className={styles.reviewCount}>
+            {count} of {steps.length} guide sections reviewed
+          </p>
+        </div>
+        <div className={styles.saveState}>
+          <p role="status">{saveMessage}</p>
+          {saveStatus === 'save-error' && (
+            <Button variant="secondary" size="sm" onClick={retry}>
+              Retry save
+            </Button>
+          )}
+          {['load-error', 'save-error', 'conflict'].includes(saveStatus) && (
+            <Button variant="secondary" size="sm" onClick={reload}>
+              Reload saved progress
+            </Button>
+          )}
+        </div>
+      </div>
 
       <div className={styles.reviewGate} data-reviewed={reviewedForUse}>
         {!reviewedForUse && (
@@ -92,6 +165,11 @@ export function MindTherapyGuide({
               : 'I have reviewed this draft for suitability. Enable guide navigation.'}
           </span>
         </label>
+        {reviewedForUse && mode === 'overview' && (
+          <Button className={styles.openGuide} onClick={openGuided}>
+            {hasPlace ? `Continue at section ${activeIndex + 1}` : 'Open step-by-step guide'}
+          </Button>
+        )}
       </div>
 
       {script.riskWatchpoints.length > 0 && (
@@ -133,41 +211,48 @@ export function MindTherapyGuide({
               )}
             </section>
           ))}
-          {reviewedForUse && (
-            <Button onClick={() => setMode('guided')}>Open step-by-step guide</Button>
-          )}
         </div>
       ) : (
         <div className={styles.journey}>
-          <nav className={styles.path} aria-label="Guide sections">
-            <ol>
-              {steps.map((step, index) => (
-                <li key={step.id}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveIndex(index)}
-                    aria-current={index === activeIndex ? 'step' : undefined}
-                  >
-                    <span
-                      className={`${styles.node} ${reviewed.has(step.id) ? styles.nodeDone : ''}`}
-                      aria-hidden="true"
+          <details className={styles.path} ref={jumpMenu}>
+            <summary>Jump to a section</summary>
+            <nav aria-label="Guide sections">
+              <ol>
+                {steps.map((step, index) => (
+                  <li key={step.id}>
+                    <button
+                      type="button"
+                      onClick={() => goToSection(index)}
+                      aria-current={index === activeIndex ? 'step' : undefined}
                     >
-                      {reviewed.has(step.id) ? '✓' : index + 1}
-                    </span>
-                    <span>
-                      {step.title}
-                      {reviewed.has(step.id) && <span className="sr-only"> — reviewed</span>}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </nav>
-          <div className={styles.stepBody}>
-            <p className={styles.label} role="status">
+                      <span
+                        className={`${styles.node} ${reviewed.has(step.id) ? styles.nodeDone : ''}`}
+                        aria-hidden="true"
+                      >
+                        {reviewed.has(step.id) ? '✓' : index + 1}
+                      </span>
+                      <span>
+                        {step.title}
+                        {reviewed.has(step.id) && (
+                          <span className={styles.reviewedLabel}>Reviewed</span>
+                        )}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </nav>
+          </details>
+          <section className={styles.stepBody} aria-labelledby={headingId}>
+            <p className={styles.label}>
               Section {activeIndex + 1} of {steps.length}
             </p>
-            <h3>{active.title}</h3>
+            <h3 id={headingId} ref={stepHeading} tabIndex={-1}>
+              {active.title}
+            </h3>
+            <p className={styles.sectionHint}>
+              Suggested wording — adapt it, pause or skip as needed.
+            </p>
             <p className={styles.prompt}>{active.text}</p>
             {active.listenFor && (
               <div className={styles.listen}>
@@ -202,27 +287,42 @@ export function MindTherapyGuide({
                 aria-pressed={reviewed.has(active.id)}
                 aria-describedby={statusId}
               >
-                {reviewed.has(active.id) ? '✓ Reviewed · undo' : 'Mark section reviewed'}
+                {reviewed.has(active.id) ? 'Undo reviewed marker' : 'Mark section reviewed'}
               </Button>
               <div>
                 <Button
                   variant="ghost"
                   size="sm"
                   disabled={activeIndex === 0}
-                  onClick={() => setActiveIndex((i) => Math.max(0, i - 1))}
+                  onClick={() => goToSection(Math.max(0, activeIndex - 1))}
                 >
-                  Previous
+                  Previous section
                 </Button>
-                <Button
-                  size="sm"
-                  disabled={activeIndex === steps.length - 1}
-                  onClick={() => setActiveIndex((i) => Math.min(steps.length - 1, i + 1))}
-                >
-                  Next section
-                </Button>
+                {activeIndex < steps.length - 1 ? (
+                  <Button
+                    size="sm"
+                    aria-label={`Next section: ${steps[activeIndex + 1]!.title}`}
+                    onClick={() => goToSection(activeIndex + 1)}
+                  >
+                    Next section
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setMode('overview');
+                      guideHeading.current?.focus();
+                    }}
+                  >
+                    Return to overview
+                  </Button>
+                )}
               </div>
             </div>
-          </div>
+            <p className={styles.navigationNote}>
+              Moving between sections does not mark them reviewed or record therapy delivery.
+            </p>
+          </section>
         </div>
       )}
 
@@ -236,14 +336,6 @@ export function MindTherapyGuide({
           </ul>
         </details>
       )}
-      <div className={styles.progress}>
-        <span role="status">
-          {count} of {steps.length} guide sections reviewed
-        </span>
-        <div className={styles.progressTrack} aria-hidden="true">
-          <span style={{ width: `${(count / steps.length) * 100}%` }} />
-        </div>
-      </div>
       {count === steps.length && (
         <p className={styles.completion} role="status">
           Your guide review is complete. Record only the work actually delivered in the session
@@ -257,35 +349,6 @@ export function MindTherapyGuide({
         They do not save a clinical event, advance therapy, assign homework or share anything with
         the client.
       </p>
-      {reviewTarget && (
-        <div className={styles.footnote} role="status">
-          {saveStatus === 'loading'
-            ? 'Loading saved review progress. You can keep reading.'
-            : saveStatus === 'ready'
-              ? 'No saved review progress for this draft yet.'
-              : saveStatus === 'saving'
-                ? 'Saving your place and review progress. You can keep reading; review markers update after saving.'
-                : saveStatus === 'stale'
-                  ? 'This draft has changed. Close and reopen the guide to review its current content.'
-                  : saveStatus === 'conflict'
-                    ? 'Saved progress changed in another view. You can keep reading. Reload saved progress before marking more sections.'
-                    : saveStatus === 'load-error'
-                      ? 'Saved progress could not be loaded. You can keep reading; your place is not being saved. Reload before marking sections.'
-                      : saveStatus === 'save-error'
-                        ? 'The last save could not be confirmed. You can keep reading; your latest place and review change are not confirmed saved. Retry save, or reload to discard the unconfirmed change.'
-                        : 'Guide review progress saved. No therapy delivery has been recorded.'}
-          {saveStatus === 'save-error' && (
-            <Button variant="secondary" size="sm" onClick={retry}>
-              Retry save
-            </Button>
-          )}
-          {['load-error', 'save-error', 'conflict'].includes(saveStatus) && (
-            <Button variant="secondary" size="sm" onClick={reload}>
-              Reload saved progress
-            </Button>
-          )}
-        </div>
-      )}
     </section>
   );
 }

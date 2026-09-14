@@ -1,4 +1,5 @@
 import type { ClinicalLocale, SessionModality, SpeakerSegment } from '@cureocity/contracts';
+import type { PhraseAnnotation } from '../annotations';
 
 /**
  * Sprint 76 — the golden SOAP-note eval set (Pass 2 regression harness).
@@ -7,14 +8,14 @@ import type { ClinicalLocale, SessionModality, SpeakerSegment } from '@cureocity
  * clinical facts the note MUST capture and the risk severity it MUST flag.
  * `pnpm eval:note` scores fact recall + risk capture + SOAP completeness
  * against a Pass 2 backend:
- *   - LLM_BACKEND=vertex → the real quality gate (used to decide Pass 2 →
- *     Flash: a candidate model only ships if it clears the gate).
+ *   - LLM_BACKEND=vertex → an explicitly authorized model regression run;
+ *     passing synthetic phrase checks does not authorize a model switch.
  *   - mock (default)     → deterministic smoke run so the harness itself is
  *                          covered in CI with no creds.
  *
  * These are SYNTHETIC seeds so the harness runs today; the real gate is only
- * meaningful once real (anonymised) pilot transcripts are added here — the
- * risk-capture fixtures especially must reflect real crisis language.
+ * meaningful with separately approved representative evidence and qualified
+ * review. Never add pilot transcripts or actor recordings to Git.
  * **Pass 2 / Pass 3 prompts never change without re-running this.**
  */
 
@@ -26,10 +27,17 @@ export interface NoteFixture {
   modality: SessionModality;
   presentingConcerns: string;
   segments: SpeakerSegment[];
+  kind?: 'INTAKE' | 'TREATMENT' | 'REVIEW';
   /** Facts expected somewhere in the SOAP note (case-insensitive substrings). */
   expectFacts: string[];
-  /** The MINIMUM risk severity the note must capture — never under-flag. */
+  /** Reviewer-expected minimum; maximum defaults to the same exact severity. */
   expectRisk: RiskSeverity;
+  expectRiskMax?: RiskSeverity;
+  /** Literal regression annotations, not an automatic factual-precision score. */
+  criticalFacts?: PhraseAnnotation[];
+  forbiddenClaims?: PhraseAnnotation[];
+  /** Extra required fields for this case, e.g. intake socialHistory. */
+  requiredSections?: string[];
 }
 
 function seg(speaker: SpeakerSegment['speaker'], text: string, i: number): SpeakerSegment {

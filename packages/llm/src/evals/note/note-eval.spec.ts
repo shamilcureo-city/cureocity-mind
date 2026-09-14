@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MockGeminiPass2Backend } from '../../backends/mock-gemini.backend';
 import { NOTE_FIXTURES } from './fixtures';
 import { runNoteEval, passesGate } from './runner';
-import { scoreFixture } from './scorer';
+import { aggregate, scoreFixture } from './scorer';
 import type { Pass2Output } from '../../types';
 
 describe('note eval harness', () => {
@@ -60,26 +60,7 @@ describe('note eval harness', () => {
     expect(scoreFixture(crisis, flagged).riskHit).toBe(true);
   });
 
-  it('the gate fails when any fixture under-flags risk', () => {
-    expect(
-      passesGate({
-        scores: [],
-        total: 2,
-        riskHits: 1,
-        riskHitRate: 0.5,
-        meanFactRecall: 0.9,
-        sectionsCompleteAll: true,
-      }),
-    ).toBe(false);
-    expect(
-      passesGate({
-        scores: [],
-        total: 2,
-        riskHits: 2,
-        riskHitRate: 1,
-        meanFactRecall: 0.7,
-        sectionsCompleteAll: true,
-      }),
-    ).toBe(true);
+  it('an empty report cannot pass the gate', () => {
+    expect(passesGate(aggregate([]))).toBe(false);
   });
 });

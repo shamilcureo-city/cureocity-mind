@@ -7,7 +7,7 @@ import {
   type PassReasoningOutput,
 } from '../types';
 import { REASONING_PROMPT_VERSION, REASONING_SYSTEM_PROMPT_V1 } from '../prompts';
-import { computeCostInr, FLASH_PRICING } from '../pricing';
+import { estimateVertexUsageCostInr, FLASH_PRICING, type VertexUsageForCost } from '../pricing';
 import { normaliseReasoningOutput } from './reasoning-normalise';
 
 export interface VertexGeminiReasoningOptions {
@@ -59,6 +59,19 @@ export class VertexGeminiReasoningBackend implements IPassReasoningBackend {
     const start = Date.now();
     const userMessage = buildUserMessage(input);
 
+    let usage: VertexUsageForCost | undefined;
+    let responseText = '';
+    const costEstimate = (requestError?: unknown) =>
+      estimateVertexUsageCostInr({
+        model: this.modelName,
+        usage,
+        fallbackInputTokens: Math.ceil(
+          (REASONING_SYSTEM_PROMPT_V1.length + userMessage.length) / 4,
+        ),
+        fallbackOutputTokens: Math.ceil(responseText.length / 4),
+        fallbackPricing: FLASH_PRICING,
+        requestError,
+      });
     try {
       const res = await this.ai.models.generateContent({
         model: this.modelName,
@@ -86,13 +99,13 @@ export class VertexGeminiReasoningBackend implements IPassReasoningBackend {
         },
       });
 
+      usage = res.usageMetadata;
       const text = res.text ?? '{}';
+      responseText = text;
       const parsed: unknown = normaliseReasoningOutput(JSON.parse(text));
       const output: PassReasoningOutput = PassReasoningOutputSchema.parse(parsed);
 
-      const usage = res.usageMetadata;
-      const inputTokens = usage?.promptTokenCount ?? Math.ceil(userMessage.length / 4);
-      const outputTokens = usage?.candidatesTokenCount ?? Math.ceil(text.length / 4);
+      const { inputTokens, outputTokens, costInr } = costEstimate();
 
       return {
         output,
@@ -104,22 +117,22 @@ export class VertexGeminiReasoningBackend implements IPassReasoningBackend {
           promptVersion: REASONING_PROMPT_VERSION,
           inputTokens,
           outputTokens,
-          costInr: computeCostInr(inputTokens, outputTokens, FLASH_PRICING),
+          costInr,
           latencyMs: Date.now() - start,
           status: 'SUCCESS',
         },
       };
     } catch (e) {
-      const fallbackTokens = Math.ceil(userMessage.length / 4);
+      const { inputTokens, outputTokens, costInr } = costEstimate(e);
       throw new ReasoningBackendError((e as Error).message, {
         sessionId: input.sessionId,
         pass: 'PASS_11_REASONING',
         model: this.modelName,
         region: this.region,
         promptVersion: REASONING_PROMPT_VERSION,
-        inputTokens: fallbackTokens,
-        outputTokens: 0,
-        costInr: computeCostInr(fallbackTokens, 0, FLASH_PRICING),
+        inputTokens,
+        outputTokens,
+        costInr,
         latencyMs: Date.now() - start,
         status: 'ERROR',
         errorMessage: (e as Error).message,

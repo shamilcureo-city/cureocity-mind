@@ -1,9 +1,10 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from './prisma';
+import { loadRecordedUsage, totalRecordedUsage } from './session-usage';
 
 /**
  * Cost-guard port from scribe-service/src/cost/cost-guard.service.ts.
- * Stateless — every call sums GeminiCallLog rows + compares against
+ * Stateless — every call reads positive web/legacy usage and acknowledged
+ * connection receipts with non-additive overlap precedence, then compares against
  * env-configurable caps. Defaults match the original (₹500/session,
  * ₹15 000/therapist/month).
  */
@@ -37,11 +38,7 @@ function monthlyCap(): number {
 }
 
 export async function getSessionTotalInr(sessionId: string): Promise<Prisma.Decimal> {
-  const agg = await prisma.geminiCallLog.aggregate({
-    where: { sessionId, status: 'SUCCESS' },
-    _sum: { costInr: true },
-  });
-  return agg._sum.costInr ?? new Prisma.Decimal(0);
+  return totalRecordedUsage((await loadRecordedUsage({ sessionId })).entries);
 }
 
 export async function getTherapistMonthlyTotalInr(
@@ -50,17 +47,17 @@ export async function getTherapistMonthlyTotalInr(
 ): Promise<Prisma.Decimal> {
   const startOfMonth = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), 1));
   const startOfNextMonth = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth() + 1, 1));
-  const agg = await prisma.geminiCallLog.aggregate({
-    where: {
-      createdAt: { gte: startOfMonth, lt: startOfNextMonth },
-      status: 'SUCCESS',
-      // AUD1 — session-attributed calls AND session-less tenant calls (the
-      // practice-assistant chat logs psychologistId directly).
-      OR: [{ session: { psychologistId } }, { psychologistId }],
-    },
-    _sum: { costInr: true },
-  });
-  return agg._sum.costInr ?? new Prisma.Decimal(0);
+  // Receipts are attributed to connection-start month, not reconstructed provider
+  // attempt timestamps. Shared reader retains session-less tenant-attributed calls.
+  return totalRecordedUsage(
+    (
+      await loadRecordedUsage({
+        psychologistId,
+        from: startOfMonth,
+        to: startOfNextMonth,
+      })
+    ).entries,
+  );
 }
 
 /**

@@ -38,6 +38,8 @@ import { MockBackendBanner } from './MockBackendBanner';
 import { RevisionPanel } from './RevisionPanel';
 import { ShareModal } from './ShareModal';
 import { MindSessionNoteTools } from './MindSessionNoteTools';
+import { MindNoteRewrite } from './MindNoteRewrite';
+import type { EditableMindNote } from '@/lib/mind-note-proposal';
 import { HelpNote, InlineExplainer } from './EduHeading';
 import { glossary } from '../../lib/clinical-glossary';
 import { NoteReadiness } from './NoteReadiness';
@@ -45,6 +47,7 @@ import { checkIntakeNoteReadiness, checkTreatmentNoteReadiness } from '../../lib
 import { NoteReviewPanel } from './NoteReviewPanel';
 import { NoteRecoveryNotice, type NoteRecoveryStatus } from './NoteRecoveryNotice';
 import { NoteEditingLayout } from './NoteEditingLayout';
+import { SavedNoteProcessingDetails as NoteFooter } from './SavedNoteProcessingDetails';
 import { mindSessionDestination } from '../../lib/mind-session-start';
 
 type SessionStatus =
@@ -157,6 +160,13 @@ export function NotesTab({
   const [signError, setSignError] = useState<string | null>(null);
   const [recoveryStatus, setRecoveryStatus] = useState<NoteRecoveryStatus>('loading');
   const [modifying, setModifying] = useState(false);
+  // Claim the rewrite boundary immediately, before React publishes disabled
+  // controls. A callback retained from the previous render must also stop.
+  const modifyingRef = useRef(false);
+  const onModifyBusyChange = useCallback((busy: boolean) => {
+    modifyingRef.current = busy;
+    setModifying(busy);
+  }, []);
   // View density for the note ("Detailed" dropdown in the toolbar). Per-device.
   const [verbosity, setVerbosity] = useState<NoteVerbosity>('DETAILED');
   useEffect(() => {
@@ -196,6 +206,11 @@ export function NotesTab({
   const [editError, setEditError] = useState<string | null>(null);
   // Sprint 71 — re-opening a signed note for editing.
   const [unlocking, setUnlocking] = useState(false);
+  const startEditing = useCallback(() => {
+    if (modifyingRef.current || modifying || generating || translating || savingEdit || signing)
+      return;
+    setEditing(true);
+  }, [modifying, generating, translating, savingEdit, signing]);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Stall detection for the generating phase. `slow` latches true once
   // a run has sat past its threshold, flipping the spinner into a
@@ -284,6 +299,8 @@ export function NotesTab({
   }, [phase.kind]);
 
   const triggerGeneration = useCallback(async (): Promise<void> => {
+    if (modifyingRef.current || modifying || translating || savingEdit || signing || generating)
+      return;
     if (phase.kind === 'completed' && (editing || recoveryStatus !== 'none')) {
       setEditing(true);
       return;
@@ -329,7 +346,19 @@ export function NotesTab({
     } finally {
       setGenerating(false);
     }
-  }, [sessionId, pollOnce, phase.kind, noteLanguage, editing, recoveryStatus]);
+  }, [
+    sessionId,
+    pollOnce,
+    phase.kind,
+    noteLanguage,
+    editing,
+    recoveryStatus,
+    modifying,
+    translating,
+    savingEdit,
+    signing,
+    generating,
+  ]);
 
   // Manual recovery from a stalled run. Re-runs the orchestrator, which
   // is idempotent: it resets the draft to IN_PROGRESS and re-drafts from
@@ -341,7 +370,15 @@ export function NotesTab({
   }, [triggerGeneration]);
 
   const triggerSignOff = useCallback(async (): Promise<void> => {
-    if (phase.kind !== 'completed' || translating || modifying || savingEdit || generating) return;
+    if (
+      phase.kind !== 'completed' ||
+      modifyingRef.current ||
+      translating ||
+      modifying ||
+      savingEdit ||
+      generating
+    )
+      return;
     if (editing || recoveryStatus !== 'none') {
       setPendingShare(false);
       setSignError('Review and apply or discard saved draft edits before signing.');
@@ -392,6 +429,8 @@ export function NotesTab({
       setShareOpen(true);
       return;
     }
+    if (modifyingRef.current || modifying || translating || savingEdit || generating || signing)
+      return;
     if (editing || recoveryStatus !== 'none') {
       setPendingShare(false);
       setEditing(true);
@@ -399,7 +438,17 @@ export function NotesTab({
     }
     setPendingShare(true);
     void triggerSignOff();
-  }, [phase.kind, triggerSignOff, editing, recoveryStatus]);
+  }, [
+    phase.kind,
+    triggerSignOff,
+    editing,
+    recoveryStatus,
+    modifying,
+    translating,
+    savingEdit,
+    generating,
+    signing,
+  ]);
 
   useEffect(() => {
     if (phase.kind === 'signed' && pendingShare) {
@@ -417,7 +466,16 @@ export function NotesTab({
       // pill reflects Session.language, which can DISAGREE with the note body's
       // actual language, so clicking the "current" language must still run a
       // translate (otherwise clicking it does nothing — the reported symptom).
-      if (phase.kind !== 'completed' || translating) return;
+      if (
+        phase.kind !== 'completed' ||
+        modifyingRef.current ||
+        modifying ||
+        translating ||
+        generating ||
+        signing ||
+        savingEdit
+      )
+        return;
       if (editing || recoveryStatus !== 'none') {
         setEditing(true);
         return;
@@ -465,7 +523,17 @@ export function NotesTab({
         setTranslating(false);
       }
     },
-    [phase, sessionId, translating, editing, recoveryStatus],
+    [
+      phase,
+      sessionId,
+      translating,
+      editing,
+      recoveryStatus,
+      modifying,
+      generating,
+      signing,
+      savingEdit,
+    ],
   );
 
   // Save a manual edit of the draft note (PUT note-draft). Kind-agnostic —
@@ -476,7 +544,15 @@ export function NotesTab({
       next: TherapyNoteV1 | IntakeNoteV1,
       expectedRecoveryRevision?: number,
     ): Promise<boolean> => {
-      if (phase.kind !== 'completed') return false;
+      if (
+        phase.kind !== 'completed' ||
+        modifyingRef.current ||
+        modifying ||
+        generating ||
+        translating ||
+        signing
+      )
+        return false;
       const draft = phase.draft;
       const reopened = phase.reopened;
       setSavingEdit(true);
@@ -511,7 +587,7 @@ export function NotesTab({
         setSavingEdit(false);
       }
     },
-    [phase, sessionId],
+    [phase, sessionId, modifying, generating, translating, signing],
   );
 
   // Re-open a signed note for editing: unlock server-side, then drop into the
@@ -880,14 +956,30 @@ export function NotesTab({
                       sessionId={sessionId}
                       currentTemplateId={noteTemplateId}
                       kind="INTAKE"
-                      disabled={generating || translating || editing || recoveryStatus !== 'none'}
+                      disabled={
+                        generating ||
+                        translating ||
+                        modifying ||
+                        signing ||
+                        savingEdit ||
+                        editing ||
+                        recoveryStatus !== 'none'
+                      }
                       onApply={triggerGeneration}
                     />
                   )}
                   <LanguagePicker
                     value={noteLang}
                     onChange={translateTo}
-                    disabled={translating || generating || editing || recoveryStatus !== 'none'}
+                    disabled={
+                      translating ||
+                      generating ||
+                      modifying ||
+                      signing ||
+                      savingEdit ||
+                      editing ||
+                      recoveryStatus !== 'none'
+                    }
                   />
                   <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
                 </>
@@ -922,10 +1014,15 @@ export function NotesTab({
                 <NoteRecoveryNotice
                   sessionId={sessionId}
                   draftUpdatedAt={phase.draft.updatedAt}
-                  onResume={() => setEditing(true)}
+                  onResume={startEditing}
                   onStatusChange={setRecoveryStatus}
                 />
-                <IntakeNotePreview note={intakeNote} verbosity={verbosity} />
+                <NoteEditingLayout
+                  mode="review"
+                  reference={<NoteTranscriptReference draft={phase.draft} />}
+                >
+                  <IntakeNotePreview note={intakeNote} verbosity={verbosity} />
+                </NoteEditingLayout>
                 <NoteFooter
                   costInr={phase.draft.totalCostInr}
                   chunkCount={phase.draft.speakerSegments?.length ?? 0}
@@ -939,10 +1036,11 @@ export function NotesTab({
                   signing={signing}
                   generating={generating}
                   translating={translating}
+                  modifying={modifying}
                   reopened={reopened}
                   signError={signError}
                   onSign={triggerSignOff}
-                  onEdit={() => setEditing(true)}
+                  onEdit={startEditing}
                   onRegenerate={triggerGeneration}
                 />
               </>
@@ -950,9 +1048,14 @@ export function NotesTab({
           </Card>
           <MindSessionNoteTools focused={focusedReview} signed={false}>
             <ModifyPanel
-              onBusyChange={setModifying}
+              reviewDraft={
+                focusedReview
+                  ? { content: intakeNote, updatedAt: phase.draft.updatedAt }
+                  : undefined
+              }
+              onBusyChange={onModifyBusyChange}
               disabled={false}
-              busy={translating || editing || signing}
+              busy={translating || editing || signing || generating || savingEdit}
               recoveryBlocked={recoveryStatus !== 'none'}
               sessionId={sessionId}
               clientName={clientName}
@@ -972,7 +1075,7 @@ export function NotesTab({
             focusedReview={focusedReview}
             blocked={translating || modifying || generating}
             recoveryStatus={recoveryStatus}
-            onReviewEdits={() => setEditing(true)}
+            onReviewEdits={startEditing}
             signing={signing}
             reopened={reopened}
             riskSeverity={intakeNote.riskFlags?.severity ?? null}
@@ -1007,14 +1110,30 @@ export function NotesTab({
                   <TemplatePicker
                     sessionId={sessionId}
                     currentTemplateId={noteTemplateId}
-                    disabled={generating || translating || editing || recoveryStatus !== 'none'}
+                    disabled={
+                      generating ||
+                      translating ||
+                      modifying ||
+                      signing ||
+                      savingEdit ||
+                      editing ||
+                      recoveryStatus !== 'none'
+                    }
                     onApply={triggerGeneration}
                   />
                 )}
                 <LanguagePicker
                   value={noteLang}
                   onChange={translateTo}
-                  disabled={translating || generating || editing || recoveryStatus !== 'none'}
+                  disabled={
+                    translating ||
+                    generating ||
+                    modifying ||
+                    signing ||
+                    savingEdit ||
+                    editing ||
+                    recoveryStatus !== 'none'
+                  }
                 />
                 <VerbosityDropdown value={verbosity} onChange={pickVerbosity} />
               </>
@@ -1049,10 +1168,15 @@ export function NotesTab({
               <NoteRecoveryNotice
                 sessionId={sessionId}
                 draftUpdatedAt={phase.draft.updatedAt}
-                onResume={() => setEditing(true)}
+                onResume={startEditing}
                 onStatusChange={setRecoveryStatus}
               />
-              <NotePreview note={note} verbosity={verbosity} />
+              <NoteEditingLayout
+                mode="review"
+                reference={<NoteTranscriptReference draft={phase.draft} />}
+              >
+                <NotePreview note={note} verbosity={verbosity} />
+              </NoteEditingLayout>
               <NoteFooter
                 costInr={phase.draft.totalCostInr}
                 chunkCount={phase.draft.speakerSegments?.length ?? 0}
@@ -1066,10 +1190,11 @@ export function NotesTab({
                 signing={signing}
                 generating={generating}
                 translating={translating}
+                modifying={modifying}
                 reopened={reopened}
                 signError={signError}
                 onSign={triggerSignOff}
-                onEdit={() => setEditing(true)}
+                onEdit={startEditing}
                 onRegenerate={triggerGeneration}
               />
             </>
@@ -1077,9 +1202,12 @@ export function NotesTab({
         </Card>
         <MindSessionNoteTools focused={focusedReview} signed={false}>
           <ModifyPanel
-            onBusyChange={setModifying}
+            reviewDraft={
+              focusedReview ? { content: note, updatedAt: phase.draft.updatedAt } : undefined
+            }
+            onBusyChange={onModifyBusyChange}
             disabled={false}
-            busy={translating || editing || signing}
+            busy={translating || editing || signing || generating || savingEdit}
             recoveryBlocked={recoveryStatus !== 'none'}
             sessionId={sessionId}
             clientName={clientName}
@@ -1099,7 +1227,7 @@ export function NotesTab({
           focusedReview={focusedReview}
           blocked={translating || modifying || generating}
           recoveryStatus={recoveryStatus}
-          onReviewEdits={() => setEditing(true)}
+          onReviewEdits={startEditing}
           signing={signing}
           reopened={reopened}
           riskSeverity={note.riskFlags?.severity ?? null}
@@ -1357,6 +1485,7 @@ function NoteActions({
   signing,
   generating,
   translating,
+  modifying,
   reopened,
   signError,
   onSign,
@@ -1368,6 +1497,7 @@ function NoteActions({
   signing: boolean;
   generating: boolean;
   translating: boolean;
+  modifying: boolean;
   reopened: boolean;
   signError: string | null;
   onSign: () => void;
@@ -1378,18 +1508,25 @@ function NoteActions({
     <>
       <div className="mt-6 flex flex-wrap items-center gap-2 border-t border-[var(--color-line-soft)] pt-5">
         {showSign && (
-          <Button onClick={onSign} disabled={signing || recoveryBlocked}>
+          <Button
+            onClick={onSign}
+            disabled={signing || modifying || translating || generating || recoveryBlocked}
+          >
             {signing ? 'Signing…' : reopened ? 'Sign & re-lock' : 'Sign off'}
           </Button>
         )}
-        <Button variant="secondary" onClick={onEdit} disabled={translating}>
+        <Button
+          variant="secondary"
+          onClick={onEdit}
+          disabled={translating || modifying || signing || generating}
+        >
           Edit note
         </Button>
         {!reopened && (
           <Button
             variant="secondary"
             onClick={onRegenerate}
-            disabled={generating || recoveryBlocked}
+            disabled={generating || modifying || translating || signing || recoveryBlocked}
           >
             Re-generate
           </Button>
@@ -1444,41 +1581,6 @@ function VerbosityDropdown({
   );
 }
 
-function NoteFooter({
-  costInr,
-  chunkCount,
-  transcriptChars,
-  region,
-}: {
-  costInr: string;
-  chunkCount: number;
-  transcriptChars: number;
-  region: string;
-}) {
-  return (
-    <details className="mt-6 border-t border-[var(--color-line-soft)] pt-4 text-xs text-[var(--color-ink-3)]">
-      <summary className="cursor-pointer select-none font-medium text-[var(--color-ink-3)] hover:text-[var(--color-ink-2)]">
-        Session details
-      </summary>
-      <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Cost" value={costInr === '—' ? '—' : `₹${costInr}`} />
-        <Stat label="Audio segments" value={String(chunkCount)} />
-        <Stat label="Characters" value={`${transcriptChars} characters`} />
-        <Stat label="Mode" value={region} />
-      </dl>
-    </details>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="font-medium uppercase tracking-wider">{label}</dt>
-      <dd className="mt-1 font-mono text-[13px] text-[var(--color-ink)]">{value}</dd>
-    </div>
-  );
-}
-
 type SuggestKind = 'paragraph' | 'eye-off' | 'concise' | 'expand';
 
 const QUICK_INSTRUCTIONS: { label: string; icon: SuggestKind }[] = [
@@ -1495,7 +1597,27 @@ const QUICK_INSTRUCTIONS: { label: string; icon: SuggestKind }[] = [
  * Submitting (a chip or typed instruction) calls the note/modify endpoint;
  * the model only rewrites existing SOAP content, it doesn't invent any.
  */
-function ModifyPanel({
+function ModifyPanel(
+  props: Parameters<typeof LegacyModifyPanel>[0] & {
+    reviewDraft?: { content: EditableMindNote; updatedAt: string };
+  },
+) {
+  if (props.reviewDraft && props.onModified) {
+    return (
+      <MindNoteRewrite
+        key={props.sessionId}
+        sessionId={props.sessionId}
+        currentDraft={props.reviewDraft}
+        blocked={props.disabled || props.busy || props.recoveryBlocked}
+        onBusyChange={props.onBusyChange}
+        onModified={props.onModified}
+      />
+    );
+  }
+  return <LegacyModifyPanel {...props} />;
+}
+
+function LegacyModifyPanel({
   disabled,
   recoveryBlocked = false,
   onBusyChange,

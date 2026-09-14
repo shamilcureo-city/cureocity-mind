@@ -80,6 +80,9 @@ export const DPDP_ERASURE_MANIFEST = {
   MindManualNoteDraft: clinicalDelete(
     'delete encrypted clinician-written draft fields, versions and mutation receipts',
   ),
+  MindSessionPreparation: clinicalDelete(
+    'delete every encrypted visit preparation revision, including clears and retry identifiers, regardless of editing flag',
+  ),
   MindInstrumentDraft: clinicalDelete(
     'delete encrypted unfinished questionnaire answers and submission/discard receipts',
   ),
@@ -133,6 +136,9 @@ export const DPDP_ERASURE_MANIFEST = {
   SessionProblemLink: clinicalDelete('delete session/problem linkage before either parent'),
   NoteReview: clinicalDelete('delete reviewer list and review timestamps'),
   LiveConsultMetric: clinicalDelete('delete per-consult latency and quality measurements'),
+  SessionUsageConnection: clinicalDelete(
+    'delete all registered connections and cumulative usage receipts, including incomplete reports and provenance, regardless of reporting flag',
+  ),
   Letter: clinicalDelete('delete clinical letter recipient, subject and body'),
   ProblemListItem: clinicalDelete('delete problem title, detail and status history'),
   AppointmentReminderDelivery: clinicalDelete(

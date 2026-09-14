@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as React from 'react';
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
-import { MindManualNoteFieldsSchema } from '@cureocity/contracts';
+import { MindManualNoteFieldsSchema, canonicalMindManualNote } from '@cureocity/contracts';
 
 const harness = vi.hoisted(() => ({
   states: [] as unknown[],
@@ -65,7 +65,16 @@ vi.mock('../components/app/MindSessionAgreements', () => ({ MindSessionAgreement
 vi.mock('../components/app/ScheduleSessionPanel', () => ({ ScheduleSessionPanel: 'aside' }));
 import { MindManualSession } from '../components/app/MindManualSession';
 
-type Props = { children?: ReactNode; onClick?: () => Promise<void> | void; disabled?: boolean };
+type Props = {
+  children?: ReactNode;
+  onClick?: () => Promise<void> | void;
+  onChange?: (event: { target: { value: string } }) => void;
+  disabled?: boolean;
+  readOnly?: boolean;
+  id?: string;
+  value?: string;
+  role?: string;
+};
 function elements(node: ReactNode): ReactElement<Props>[] {
   return Children.toArray(node).flatMap((child) =>
     isValidElement<Props>(child) ? [child, ...elements(child.props.children)] : [],
@@ -90,6 +99,24 @@ function render() {
 function button(label: string) {
   return elements(render()).find((el) => el.type === 'button' && text(el.props.children) === label);
 }
+function clinicalField(name: string) {
+  return elements(render()).find(
+    (el) => el.type === 'textarea' && el.props.id === `manual-${name}`,
+  );
+}
+function saveStatus() {
+  return text(
+    elements(render()).find((el) => el.type === 'span' && el.props.role === 'status')?.props
+      .children,
+  );
+}
+function expectEditableCorrection() {
+  expect(button('Save now')?.props.disabled).toBe(false);
+  expect(clinicalField('subjective')?.props.readOnly).toBe(false);
+  expect(clinicalField('risk-details')?.props.readOnly).toBe(false);
+  expect(button('Finish session & review note')?.props.disabled).toBe(false);
+  expect(button('Sign this note')).toBeUndefined();
+}
 async function click(label: string) {
   const action = button(label);
   expect(action, `Missing action: ${label}`).toBeDefined();
@@ -109,8 +136,8 @@ const state = (signed = false) => ({
   signed,
   signedAt: signed ? '2026-09-10T11:00:00.000Z' : null,
 });
-async function load(signed = false) {
-  harness.request.mockResolvedValueOnce(Response.json(state(signed)));
+async function load(signed = false, snapshot: ReturnType<typeof state> = state(signed)) {
+  harness.request.mockResolvedValueOnce(Response.json(snapshot));
   render();
   await vi.waitFor(() =>
     expect(button(signed ? 'Reopen to make a correction' : 'Sign this note')).toBeDefined(),
@@ -130,6 +157,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   harness.effects.forEach((effect) => effect.cleanup?.());
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -174,7 +202,9 @@ describe('manual-note signing and reopening refresh boundary', () => {
     await click('Reopen to make a correction');
     expect(text(render())).not.toContain('Download signed PDF');
     expect(button('Reopen to make a correction')).toBeUndefined();
-    expect(button('Save draft')).toBeUndefined();
+    expect(button('Save now')).toBeUndefined();
+    expect(clinicalField('subjective')).toBeUndefined();
+    expect(button('Finish session & review note')).toBeUndefined();
     expect(button('Reload saved version')).toBeDefined();
   });
   it('opens correction fields only after verifying the note is unlocked', async () => {
@@ -183,8 +213,96 @@ describe('manual-note signing and reopening refresh boundary', () => {
       .mockResolvedValueOnce(Response.json({ ok: true }))
       .mockResolvedValueOnce(Response.json(state(false)));
     await click('Reopen to make a correction');
-    expect(button('Save draft')).toBeDefined();
+    expectEditableCorrection();
     expect(text(render())).not.toContain('Download signed PDF');
+  });
+  it('autosaves typing after verified reopening, then requires explicit finish and sign for the corrected note', async () => {
+    const fields = MindManualNoteFieldsSchema.parse({
+      subjective: 'Fictional prior account',
+      objective: 'Fictional observation',
+      assessment: 'Further information remains uncertain',
+      plan: 'Review together next visit',
+      riskSeverity: 'none',
+      riskDetails: 'Fictional clinician-authored assessment and uncertainty',
+    });
+    const unsigned = {
+      ...state(false),
+      fields,
+      note: canonicalMindManualNote('TREATMENT', null, fields),
+    };
+    await load(true, { ...unsigned, signed: true, signedAt: '2026-09-10T11:00:00.000Z' });
+    harness.request
+      .mockResolvedValueOnce(Response.json({ ok: true }))
+      .mockResolvedValueOnce(Response.json(unsigned));
+    await click('Reopen to make a correction');
+    expectEditableCorrection();
+    vi.useFakeTimers();
+
+    let acknowledge!: (response: Response) => void;
+    harness.request.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const corrected = { ...fields, subjective: 'Fictional corrected account' };
+    clinicalField('subjective')!.props.onChange!({ target: { value: corrected.subjective } });
+    expect(saveStatus()).toBe('Changes waiting to save');
+    await vi.advanceTimersByTimeAsync(999);
+    expect(harness.request).toHaveBeenCalledTimes(3); // load, unlock, authoritative unlocked read
+    await vi.advanceTimersByTimeAsync(1);
+    expect(saveStatus()).toBe('Saving…');
+    expect(clinicalField('subjective')?.props.readOnly).toBe(false);
+    expect(harness.sign).not.toHaveBeenCalled();
+    const checkpoint = JSON.parse(harness.request.mock.calls[3][1].body);
+    expect(checkpoint).toMatchObject({
+      operation: 'save',
+      expectedRevision: 1,
+      expectedNoteUpdatedAt: unsigned.noteUpdatedAt,
+      fields: corrected,
+    });
+    expect(checkpoint.mutationId).toEqual(expect.any(String));
+
+    acknowledge(
+      Response.json({ ...unsigned, revision: 2, fields: corrected, hasUnappliedDraft: true }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(saveStatus()).toBe('Saved securely · not signed');
+    expect(clinicalField('subjective')?.props.value).toBe(corrected.subjective);
+    expectEditableCorrection();
+    expect(harness.sign).not.toHaveBeenCalled();
+
+    const completed = {
+      ...unsigned,
+      revision: 3,
+      fields: corrected,
+      noteUpdatedAt: '2026-09-10T12:00:00.000Z',
+      note: canonicalMindManualNote('TREATMENT', null, corrected),
+    };
+    harness.request.mockResolvedValueOnce(Response.json(completed));
+    await click('Finish session & review note');
+    const completion = JSON.parse(harness.request.mock.calls[4][1].body);
+    expect(completion).toMatchObject({
+      operation: 'complete',
+      expectedRevision: 2,
+      fields: corrected,
+    });
+    expect(button('Save now')).toBeUndefined();
+    expect(clinicalField('subjective')).toBeUndefined();
+    expect(button('Sign this note')?.props.disabled).toBe(false);
+    expect(harness.sign).not.toHaveBeenCalled();
+
+    harness.request.mockResolvedValueOnce(
+      Response.json({ ...completed, signed: true, signedAt: '2026-09-10T12:01:00.000Z' }),
+    );
+    await click('Sign this note');
+    expect(harness.sign).toHaveBeenCalledExactlyOnceWith(
+      'fictional-session',
+      expect.objectContaining({ note: completed.note, draftContent: completed.note }),
+      { requestTimeoutMs: 20_000 },
+    );
+    expect(text(render())).toContain('Your clinical note is signed. Nothing has been shared.');
+    expect(button('Save now')).toBeUndefined();
   });
   it('recovers an aborted signing request through a verified reload without signing twice', async () => {
     await load();
@@ -235,14 +353,16 @@ describe('manual-note signing and reopening refresh boundary', () => {
     await pending;
     expect(button('Reload saved version')?.props.disabled).toBe(false);
     expect(button('Reopen to make a correction')).toBeUndefined();
-    expect(button('Save draft')).toBeUndefined();
+    expect(button('Save now')).toBeUndefined();
+    expect(clinicalField('subjective')).toBeUndefined();
+    expect(button('Finish session & review note')).toBeUndefined();
     expect(text(render())).not.toContain('Download signed PDF');
 
     harness.request.mockResolvedValueOnce(Response.json(state(false)));
     await click('Reload saved version');
     await vi.waitFor(() => expect(button('Edit note')).toBeDefined());
     await click('Edit note');
-    expect(button('Save draft')).toBeDefined();
+    expectEditableCorrection();
     expect(text(render())).not.toContain('Download signed PDF');
     expect(
       harness.request.mock.calls.filter(([url]) => String(url).endsWith('/unlock')),

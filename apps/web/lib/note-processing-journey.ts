@@ -26,7 +26,7 @@ export function noteProcessingJourney(status: NoteDraftJourneyStatus): NoteProce
       state: 'READY_TO_REVIEW',
       queueKind: 'NOTE_REVIEW',
       label: 'Ready to review',
-      message: 'Your note is ready for Review & Close.',
+      message: 'Your note is ready for Review & finish.',
     };
   }
   if (status === 'FAILED') {
@@ -34,7 +34,7 @@ export function noteProcessingJourney(status: NoteDraftJourneyStatus): NoteProce
       state: 'NEEDS_ATTENTION',
       queueKind: 'NOTE_NEEDS_ATTENTION',
       label: 'Needs attention',
-      message: 'Note generation needs your attention before Review & Close.',
+      message: 'Note generation needs your attention before Review & finish.',
     };
   }
   return {

@@ -11,7 +11,8 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { toNoteDraft } from '@/lib/mappers';
-import { resolveNoteTranscript } from '@/lib/note-transcript';
+import { resolveNoteTranscriptData } from '@/lib/note-transcript';
+import { noteTranscriptView } from '@/lib/note-transcript-view';
 import { parseJson } from '@/lib/validate';
 import { canonicalIntakeEdit, canonicalTreatmentEdit } from '@/lib/canonical-note-edit';
 
@@ -61,8 +62,12 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
   });
   // Sprint DS5-fu — expose whether a live-assembled Rx pad exists so the
   // encounter workspace can offer the prescription PDF + patient share.
-  const transcript = await resolveNoteTranscript(auth.value.psychologistId, draft);
-  return NextResponse.json({ ...toNoteDraft(draft, transcript), hasRxPad: draft.rxPad != null });
+  const transcript = await resolveNoteTranscriptData(auth.value.psychologistId, draft);
+  return NextResponse.json({
+    ...toNoteDraft(draft, transcript?.transcript ?? null),
+    ...noteTranscriptView(draft, transcript),
+    hasRxPad: draft.rxPad != null,
+  });
 }
 
 /**

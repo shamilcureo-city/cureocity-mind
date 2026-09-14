@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import {
   LiveGatewayCommandSchema,
@@ -22,6 +23,7 @@ import { initSentry } from './sentry';
 import { makeStreamTranscriber } from './stream-transcript';
 import { ledgerFromEnv } from './tenant-spend';
 import { windowOptionsFromEnv } from './vad';
+import { LiveUsageReporter } from './usage-reporter';
 
 // Error reporting first — init before any pipeline construction so a
 // boot-time failure (e.g. the mock-refusal guard) is captured too.
@@ -74,6 +76,9 @@ const DRAIN_TIMEOUT_MS = Number(process.env['LIVE_GATEWAY_DRAIN_TIMEOUT_MS'] ?? 
 // them all. Registered on start, removed on dispose/close.
 const liveSessions = new Set<LiveSession>();
 const liveAuthorities = new Set<LiveAuthority>();
+const liveUsageReporters = new Set<LiveUsageReporter>();
+// First rollout is Mind only. Scribe and all defaults remain unchanged.
+const LIVE_USAGE_RECEIPTS_ENABLED = process.env['LIVE_USAGE_RECEIPTS_ENABLED'] === 'true';
 
 const backends = buildBackends();
 // Sprint DS8 — concurrent-session cap (graceful shed above it).
@@ -162,6 +167,8 @@ wss.on('connection', (ws, req) => {
   send(ws, { type: 'status', state: 'connected' });
   let session: LiveSession | null = null;
   let authority: LiveAuthority | null = null;
+  const connectionId = randomUUID(); // Actual socket identity, never a start-token identity.
+  let usageReporter: LiveUsageReporter | null = null;
   let started = false;
   let finalizationRequested = false;
   let renewalInFlight = false;
@@ -339,6 +346,12 @@ wss.on('connection', (ws, req) => {
           ? new Set(claims.capabilities)
           : DEV_OPEN_CAPABILITIES;
         const vertical = claims?.vertical ?? cmd.vertical ?? 'DOCTOR';
+        const reportUsage = LIVE_USAGE_RECEIPTS_ENABLED && vertical === 'THERAPIST';
+        if (reportUsage && !claims) {
+          send(ws, { type: 'usageUnavailable' });
+          ws.close();
+          return;
+        }
         if (tenantId && tenantSpend.isOverCap(tenantId)) {
           console.warn(`[gateway] tenant ${tenantId} over daily cost cap — shedding start`);
           send(ws, { type: 'status', state: 'busy' });
@@ -434,7 +447,7 @@ wss.on('connection', (ws, req) => {
           session = new LiveSession(
             cmd.sessionId ?? `live-${Date.now()}`,
             cmd.specialty ?? null,
-            backends,
+            usageReporter ? usageReporter.wrapBackends(backends) : backends,
             forward,
             windowOptionsFromEnv(process.env, vertical), // Mind-only defaults; explicit env wins.
             scopePatientContext(cmd.context, capabilities),
@@ -444,6 +457,7 @@ wss.on('connection', (ws, req) => {
             cmd.modality ?? null,
             cmd.therapyContext ?? null, // Sprint TS5 — carried questions + prior risk
             capabilities,
+            usageReporter ?? undefined,
           );
           // Batch A — a reconnect after a dropped socket replays the transcript the
           // browser still holds, so the consult continues instead of starting blank.
@@ -504,11 +518,71 @@ wss.on('connection', (ws, req) => {
           authority = pendingAuthority;
           liveAuthorities.add(pendingAuthority);
           if (finalizationRequested) pendingAuthority.preventRenewal();
-          void pendingAuthority.revalidate().then((authorized) => {
-            if (!authorized || authority !== pendingAuthority) return;
-            pendingAuthority.start();
-            beginSession();
-          });
+          void pendingAuthority
+            .revalidate()
+            .then(async (authorized) => {
+              if (!authorized || authority !== pendingAuthority) return;
+              if (reportUsage) {
+                try {
+                  const reporter = new LiveUsageReporter({
+                    registration: {
+                      version: 1,
+                      domain: 'CUREOCITY_LIVE_USAGE_V1',
+                      type: 'REGISTER',
+                      connectionId,
+                      sessionId: claims.sessionId,
+                      psychologistId: claims.psychologistId,
+                      vertical: claims.vertical,
+                      startedAt: new Date().toISOString(),
+                      backend: backends.backend,
+                    },
+                    authorityUrl: LIVE_AUTHZ_REVALIDATE_URL,
+                    serviceSecret,
+                    onIdle: () => {
+                      if (reporter.settled) liveUsageReporters.delete(reporter);
+                    },
+                  });
+                  usageReporter = reporter;
+                  liveUsageReporters.add(reporter);
+                  if (!(await reporter.register())) {
+                    liveUsageReporters.delete(reporter);
+                    send(ws, { type: 'usageUnavailable' });
+                    ws.close();
+                    return;
+                  }
+                  // Registration cannot revive a closed, stopped, or expired
+                  // authority while its network response was in flight.
+                  if (
+                    authority !== pendingAuthority ||
+                    connectionDisposed ||
+                    draining ||
+                    finalizationRequested ||
+                    ws.readyState !== ws.OPEN ||
+                    !(await pendingAuthority.revalidate()) ||
+                    connectionDisposed ||
+                    draining ||
+                    finalizationRequested ||
+                    authority !== pendingAuthority ||
+                    ws.readyState !== ws.OPEN
+                  ) {
+                    reporter.terminate('INCOMPLETE', 'INTERRUPTED');
+                    ws.close();
+                    return;
+                  }
+                } catch {
+                  send(ws, { type: 'usageUnavailable' });
+                  ws.close();
+                  return;
+                }
+              }
+              pendingAuthority.start();
+              beginSession();
+            })
+            .catch(() => {
+              if (reportUsage) send(ws, { type: 'usageUnavailable' });
+              else send(ws, { type: 'status', state: 'unauthorized' });
+              ws.close();
+            });
         } else {
           beginSession();
         }
@@ -543,6 +617,7 @@ wss.on('connection', (ws, req) => {
     if (authority) liveAuthorities.delete(authority);
     authority?.dispose();
     authority = null;
+    usageReporter?.terminate('INCOMPLETE', 'INTERRUPTED');
     if (session) {
       liveSessions.delete(session);
       session.dispose();
@@ -583,7 +658,13 @@ function drain(signal: string): void {
     console.error('[live-gateway] drain timed out — exiting');
     process.exit(0);
   }, DRAIN_TIMEOUT_MS);
-  void Promise.all(finals).then(() => {
+  void Promise.all(finals).then(async () => {
+    // Registered sockets can outlive their browsers while incurred calls and
+    // immutable receipt retries settle. Do not let the browser relay own this.
+    for (const reporter of liveUsageReporters) {
+      if (!reporter.settled) reporter.terminate('INCOMPLETE', 'PROCESS_SHUTDOWN');
+    }
+    await Promise.all([...liveUsageReporters].map((reporter) => reporter.flush()));
     clearTimeout(hardStop);
     // Give the socket writes a beat to flush the `final` + `done` frames.
     setTimeout(() => process.exit(0), 1_000);

@@ -2,6 +2,7 @@ import { NextResponse, after, type NextRequest } from 'next/server';
 import {
   LiveNoteInputSchema,
   TherapyLiveNoteInputSchema,
+  containsTranscriptionArtifact,
   type ClinicalLocale,
   type ClinicalOrderV1,
   type IntakeNoteV1,
@@ -22,6 +23,11 @@ import {
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
 
 import { encryptForTenant } from '@/lib/tenant-crypto';
+import {
+  encodeSavedTranscript,
+  matchingTranscriptSegments,
+  TRANSCRIPTION_REVIEW_WARNING,
+} from '@/lib/saved-transcript';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import {
@@ -124,6 +130,16 @@ export async function POST(
   if (session.psychologist.vertical === 'THERAPIST') {
     const parsedT = await parseJson(req, TherapyLiveNoteInputSchema);
     if (!parsedT.ok) return parsedT.response;
+    if (containsTranscriptionArtifact(JSON.stringify(parsedT.value))) {
+      return NextResponse.json(
+        {
+          error:
+            'The transcript or note contains invalid transcription text. Keep this session unsigned and review the captured words before saving.',
+          code: 'TRANSCRIPTION_ARTIFACT',
+        },
+        { status: 422 },
+      );
+    }
     // TS-fix — guarantee the clinician's note is in English (best-effort; the
     // live gateway's Pass 2 can echo a Malayalam-dominant transcript's language).
     // The cast bridges Zod's input/output typing of the union — the parsed
@@ -132,14 +148,29 @@ export async function POST(
       parsedT.value.note as TherapyNoteV1 | IntakeNoteV1,
       parsedT.value.kind,
     );
+    if (containsTranscriptionArtifact(JSON.stringify(tnote))) {
+      return NextResponse.json(
+        {
+          error:
+            'The note translation contains invalid generated text. Keep the session unsigned and retry after reviewing the captured words.',
+          code: 'TRANSCRIPTION_ARTIFACT',
+        },
+        { status: 422 },
+      );
+    }
     const tTranscript = parsedT.value.transcript?.trim() ?? '';
     const tTranscriptText = tTranscript.length > 0 ? tTranscript : '(captured via live scribe)';
+    const speakerSegments = matchingTranscriptSegments(tTranscript, parsedT.value.utterances ?? []);
+    const transcriptionWarning = parsedT.value.transcriptionWarning === true;
     // S-hardening: same fail-closed rule as the doctor branch — the plaintext
     // column is gone, the payload is still in the browser, so a KMS outage
     // 503s retryably instead of dropping the transcript.
     let tTranscriptEncrypted: string;
     try {
-      tTranscriptEncrypted = await encryptForTenant(auth.value.psychologistId, tTranscriptText);
+      tTranscriptEncrypted = await encryptForTenant(
+        auth.value.psychologistId,
+        encodeSavedTranscript(tTranscriptText, speakerSegments, transcriptionWarning),
+      );
     } catch (e) {
       console.error(
         `[live-note] therapist transcript encryption failed for session=${sessionId}: ${(e as Error).message}`,
@@ -168,7 +199,7 @@ export async function POST(
                 status: 'COMPLETED',
                 content: tnote as unknown as Prisma.InputJsonValue,
                 riskSeverity,
-                errorMessage: null,
+                errorMessage: transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
                 ...tWrite,
               },
               create: {
@@ -177,6 +208,7 @@ export async function POST(
                 content: tnote as unknown as Prisma.InputJsonValue,
                 riskSeverity,
                 transcriptEncrypted: tTranscriptEncrypted,
+                errorMessage: transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
               },
             });
             await writeAudit(
@@ -232,10 +264,8 @@ export async function POST(
     // The batch path schedules Pass 3 (the copilot reading) in generate-note's
     // after(); this branch never did, so every live session landed on a board
     // whose "generated automatically" promise was false — the therapist had to
-    // discover the Generate button. Schedule it the same way: fire-and-forget,
-    // the board polls it in. The live transcript has no diarized timeline, so
-    // it is covered with a single `unknown` segment (same as the batch heal;
-    // the Pass 3 prompt is told not to guess speakers).
+    // discover the Generate button. Preserve actual finalized speaker segments;
+    // only older clients without a matching timeline use unknown coverage.
     const p3Transcript = tTranscriptText;
     const p3Kind = session.kind;
     if (auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
@@ -252,7 +282,7 @@ export async function POST(
             transcript: p3Transcript,
             speakerSegments: coverTranscriptWithSegments({
               transcript: p3Transcript,
-              segments: [],
+              segments: speakerSegments,
               startMs: 0,
               endMs: 0,
             }),
@@ -271,6 +301,16 @@ export async function POST(
   // Doctor path — parse the medical live-note body + narrow. Behavior unchanged.
   const parsed = await parseJson(req, LiveNoteInputSchema);
   if (!parsed.ok) return parsed.response;
+  if (containsTranscriptionArtifact(JSON.stringify(parsed.value))) {
+    return NextResponse.json(
+      {
+        error:
+          'The transcript or note contains invalid transcription text. Review the captured words before saving.',
+        code: 'TRANSCRIPTION_ARTIFACT',
+      },
+      { status: 422 },
+    );
+  }
   // The schema's `.default([])`s mean the validated value is fully
   // populated at runtime; narrow to the output types the helpers expect.
   const note = parsed.value.note as MedicalEncounterNoteV1;

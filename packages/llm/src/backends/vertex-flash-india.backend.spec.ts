@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Pass1Input } from '../types';
 import { VertexGeminiFlashIndiaBackend } from './vertex-flash-india.backend';
+import { estimateVertexUsageCostInr, FLASH_AUDIO_PRICING } from '../pricing';
 
 const fictionalOutput = {
   transcript: 'The green cup is beside the notebook.',
@@ -101,5 +102,128 @@ describe('Mind live transcription thinking policy', () => {
     expect(result.callLog.status).toBe('ERROR');
     expect(result.output.transcript).toBe('');
     expect(result.output.speakerSegments).toEqual([]);
+  });
+});
+
+describe('Pass 1 rejects generated transcription artifacts', () => {
+  const artifact =
+    'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
+  const boilerplate =
+    'PLACEHOLDER: This is a placeholder for the audio transcription. The actual transcription will be generated based on the provided audio input.';
+
+  it.each(['THERAPIST', 'DOCTOR'] as const)(
+    'rejects leaked prompt text for %s and does not log its contents',
+    async (vertical) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const { backend, generateContent } = setup(
+          'gemini-2.5-flash',
+          JSON.stringify({ ...fictionalOutput, transcript: artifact }),
+        );
+        const result = await backend.run({ ...input, vertical });
+        expect(generateContent).toHaveBeenCalledTimes(1);
+        expect(generateContent.mock.calls[0]![0].config.systemInstruction).not.toContain(
+          'PLACEHOLDER',
+        );
+        expect(result.output).toEqual({
+          transcript: '',
+          speakerSegments: [],
+          affectFeatures: [],
+          detectedLanguages: [],
+        });
+        expect(result.callLog).toMatchObject({
+          status: 'ERROR',
+          errorMessage: 'TRANSCRIPTION_ARTIFACT',
+          inputTokens: 10,
+          outputTokens: 20,
+        });
+        expect(result.callLog.costInr).toBeGreaterThan(0);
+        expect(JSON.stringify(result.callLog)).not.toContain(artifact);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  it('rejects generated boilerplate in a segment even when the transcript is clean', async () => {
+    const { backend } = setup(
+      'gemini-2.5-flash',
+      JSON.stringify({
+        ...fictionalOutput,
+        speakerSegments: [{ ...fictionalOutput.speakerSegments[0], text: boilerplate }],
+      }),
+    );
+    const result = await backend.run(input);
+    expect(result.callLog.errorMessage).toBe('TRANSCRIPTION_ARTIFACT');
+    expect(result.output.transcript).toBe('');
+    expect(result.output.speakerSegments).toEqual([]);
+  });
+
+  it('retains actual input, candidate and thought-token usage when output is rejected', async () => {
+    const { backend, generateContent } = setup();
+    const usage = {
+      promptTokenCount: 1000,
+      candidatesTokenCount: 80,
+      thoughtsTokenCount: 25,
+      promptTokensDetails: [
+        { modality: 'TEXT', tokenCount: 500 },
+        { modality: 'AUDIO', tokenCount: 500 },
+      ],
+    };
+    generateContent.mockResolvedValue({
+      text: JSON.stringify({ ...fictionalOutput, transcript: artifact }),
+      usageMetadata: usage,
+    });
+    const result = await backend.run(input);
+    const expected = estimateVertexUsageCostInr({
+      model: 'gemini-2.5-flash',
+      usage,
+      fallbackInputTokens: 0,
+      fallbackPricing: FLASH_AUDIO_PRICING,
+    });
+    expect(result.callLog).toMatchObject({
+      status: 'ERROR',
+      errorMessage: 'TRANSCRIPTION_ARTIFACT',
+      inputTokens: 1000,
+      outputTokens: 105,
+      costInr: expected.costInr,
+    });
+  });
+
+  it('does not put malformed provider output into an error message', async () => {
+    const secretFixture = 'FICTIONAL_PRIVATE_SENTENCE';
+    const { backend } = setup('gemini-2.5-flash', `{"transcript":${secretFixture}}`);
+    const result = await backend.run(input);
+    expect(result.callLog.errorMessage).toBe('INVALID_TRANSCRIPTION_OUTPUT');
+    expect(JSON.stringify(result)).not.toContain(secretFixture);
+  });
+
+  it('does not report a known rejected HTTP request as billed model usage', async () => {
+    const { backend, generateContent } = setup();
+    generateContent.mockRejectedValue({ status: 403, message: 'Permission denied' });
+    const result = await backend.run(input);
+    expect(result.callLog).toMatchObject({
+      status: 'ERROR',
+      inputTokens: 0,
+      outputTokens: 0,
+      costInr: 0,
+    });
+  });
+
+  it.each([
+    'I used a placeholder in my presentation. Sharafath helped me.',
+    'എനിക്ക് ഉത്കണ്ഠ തോന്നുന്നു.',
+    'എനിക്ക് anxiety undu, but breathing exercises help cheythu.',
+  ])('keeps genuine transcript and segment text unchanged: %s', async (text) => {
+    const output = {
+      ...fictionalOutput,
+      transcript: text,
+      speakerSegments: [{ ...fictionalOutput.speakerSegments[0], text }],
+    };
+    const { backend } = setup('gemini-2.5-flash', JSON.stringify(output));
+    const result = await backend.run(input);
+    expect(result.callLog.status).toBe('SUCCESS');
+    expect(result.output).toEqual(output);
   });
 });

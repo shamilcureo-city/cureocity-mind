@@ -10,6 +10,7 @@ import {
   type Pass1Output,
 } from '@cureocity/llm';
 import {
+  containsTranscriptionArtifact,
   PENDING_SECTION_CONFIRMATIONS,
   type ClinicalLocale,
   type ClinicalOrderV1,
@@ -42,6 +43,7 @@ import {
 } from './transcribe-segment';
 import { compactPassError } from './pass-error';
 import { hasTranscript } from './note-transcript';
+import { encodeSavedTranscript, TRANSCRIPTION_REVIEW_WARNING } from './saved-transcript';
 import { assertAuditedSessionCapabilities, getEffectiveCapabilities } from './capabilities';
 import { requiredMedicalCapabilities } from './regulated-actions';
 import { assertCurrentScribeAuthority } from './scribe-authority';
@@ -171,6 +173,17 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       );
     }
 
+    // Cached chunks and pre-fix recovery prefixes bypass a fresh Pass-1 parse.
+    // Fail before saving or using known generated boilerplate as clinical input.
+    if (
+      containsTranscriptionArtifact(pass1.transcript) ||
+      pass1.speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text))
+    ) {
+      throw new Error(
+        'The transcript contains invalid generated text. Review the recording and recover the transcript before generating a note.',
+      );
+    }
+
     await assertCurrentScribeAuthority(sessionId, {
       psychologistId: session.psychologistId,
       source: 'pass1BeforePersistence',
@@ -184,7 +197,16 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     // beats minting a transcript nobody can ever read.
     let transcriptEncrypted: string;
     try {
-      transcriptEncrypted = await encryptForTenant(session.psychologistId, pass1.transcript);
+      transcriptEncrypted = await encryptForTenant(
+        session.psychologistId,
+        prefix
+          ? encodeSavedTranscript(
+              pass1.transcript,
+              pass1.speakerSegments,
+              prefix.transcriptionWarning,
+            )
+          : pass1.transcript,
+      );
     } catch (e) {
       throw new Error(
         `Could not encrypt the transcript (KMS unavailable: ${(e as Error).message}). ` +
@@ -203,7 +225,9 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
           where: { id: draft.id },
           data: {
             transcriptEncrypted,
-            speakerSegments: pass1.speakerSegments as unknown as Prisma.InputJsonValue,
+            speakerSegments: prefix
+              ? Prisma.DbNull
+              : (pass1.speakerSegments as unknown as Prisma.InputJsonValue),
             affectFeatures: pass1.affectFeatures as unknown as Prisma.InputJsonValue,
             totalCostInr: pass1Cost,
           },
@@ -307,6 +331,12 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
         }),
       },
     });
+
+    if (containsTranscriptionArtifact(JSON.stringify(pass2.output))) {
+      throw new Error(
+        'The generated note contains invalid generated text. Review the transcript and retry note generation.',
+      );
+    }
 
     // Sprint DV3 — doctors get a medical encounter note. Store it, audit
     // ENCOUNTER_NOTE_DRAFTED, persist the drafted orders + vital readings,
@@ -437,6 +467,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
             content: pass2Body as unknown as Prisma.InputJsonValue,
             riskSeverity,
             status: 'COMPLETED',
+            errorMessage: prefix?.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
             totalCostInr: pass1Cost.plus(pass2Cost),
           },
         });
@@ -954,6 +985,15 @@ export async function runClinicalAnalysis(args: ClinicalAnalysisArgs): Promise<v
   );
 
   try {
+    if (
+      containsTranscriptionArtifact(args.transcript) ||
+      args.speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text)) ||
+      containsTranscriptionArtifact(JSON.stringify(args.note) ?? '')
+    ) {
+      throw new Error(
+        'The transcript or note contains invalid generated text. Review and correct the source before running clinical suggestions.',
+      );
+    }
     // Cost-guard pre-check. Estimate ~ Pass 2 input + report output;
     // Pass 3 reads the same transcript + a small JSON note + history.
     const pass3Estimate = computeCostInr(

@@ -14,6 +14,7 @@ import { PageCrisisBanner } from '@/components/app/PageCrisisBanner';
 import { ClientWorkspaceNav } from '@/components/app/ClientWorkspaceNav';
 import { PreparePanel } from '@/components/app/PreparePanel';
 import { MindCareRecordPanel } from '@/components/app/MindCareRecordPanel';
+import { MindWorkHistory } from '@/components/app/MindWorkHistory';
 import { ScheduleSessionPanel } from '@/components/app/ScheduleSessionPanel';
 import { requireOnboardedPsychologist } from '@/lib/auth-page';
 import { buildDeterministicCaseBriefing } from '@/lib/case-briefing';
@@ -351,6 +352,9 @@ export default async function ClientDetailPage({ params }: PageProps) {
       </Card>
 
       <MindCareRecordPanel key={client.id} clientId={client.id} />
+      <div id="work-history" className="mt-5 scroll-mt-6">
+        <MindWorkHistory key={`work-history-${client.id}`} clientId={client.id} />
+      </div>
 
       <div className="mt-6">
         <Card className="p-5">

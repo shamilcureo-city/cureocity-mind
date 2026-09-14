@@ -16,6 +16,7 @@ import { requirePageAdmin } from '@/lib/auth-page';
 import { getEntitlement } from '@/lib/billing';
 import { formatIstDate, formatIstDateTime } from '@/lib/ist';
 import { prisma } from '@/lib/prisma';
+import { loadRecordedUsage, totalRecordedUsage } from '@/lib/session-usage';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,14 +66,11 @@ export default async function AdminAccountDetailPage({
     prisma.client.count({ where: { psychologistId: id, deletedAt: null } }),
     prisma.session.count({ where: { psychologistId: id } }),
     prisma.therapyNote.count({ where: { session: { psychologistId: id } } }),
-    prisma.geminiCallLog.aggregate({
-      where: { psychologistId: id },
-      _sum: { costInr: true },
-    }),
+    loadRecordedUsage({ psychologistId: id }),
     getEntitlement(id),
   ]);
 
-  const lifetimeCostInr = Number(aiCost._sum.costInr ?? 0);
+  const lifetimeCostInr = totalRecordedUsage(aiCost.entries).toNumber();
   const isSelf = id === admin.id;
 
   return (
@@ -107,7 +105,11 @@ export default async function AdminAccountDetailPage({
           }
           tone={isPaidPlan(entitlement.plan) ? 'good' : 'default'}
         />
-        <StatTile label="AI cost · lifetime" value={inr(lifetimeCostInr)} />
+        <StatTile
+          label="Recorded AI estimate · lifetime"
+          value={inr(lifetimeCostInr)}
+          sub="Partial retained records, not an invoice"
+        />
       </StatGrid>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">

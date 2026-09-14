@@ -7,10 +7,9 @@ import { formatReport, passesGate, runNoteEval } from './runner';
 /**
  * Sprint 76 — `pnpm eval:note`. Runs the golden SOAP-note set through a Pass 2
  * backend and prints the report.
- *   LLM_BACKEND=vertex → the REAL quality gate; exits non-zero if any fixture
- *     under-flags its risk or mean fact recall < 0.6. This is the gate that
- *     decides Pass 2 → Flash: set LLM_PASS2_EVAL_MODEL=gemini-2.5-flash and
- *     only flip the production default if it passes.
+ *   LLM_BACKEND=vertex + NOTE_EVAL_ALLOW_PROVIDER_CALLS=true → an authorized
+ *     model regression run. Nonzero on failed/unavailable checks; never
+ *     clinical validation or authorization to switch the production model.
  *   mock (default)     → deterministic smoke run; always exits 0.
  */
 async function main(): Promise<void> {
@@ -18,6 +17,11 @@ async function main(): Promise<void> {
   let backend: IPass2Backend;
 
   if (backendName === 'vertex') {
+    if (process.env['NOTE_EVAL_ALLOW_PROVIDER_CALLS'] !== 'true') {
+      console.error('NOT_EVALUATED: PROVIDER_CALLS_NOT_AUTHORIZED');
+      process.exitCode = 2;
+      return;
+    }
     const project = process.env['VERTEX_PROJECT_ID'];
     if (!project) {
       console.error('LLM_BACKEND=vertex requires VERTEX_PROJECT_ID');
@@ -44,14 +48,19 @@ async function main(): Promise<void> {
 
   if (backendName === 'vertex') {
     if (passesGate(report)) {
-      console.log('\nGATE: PASS');
+      console.log('\nREGRESSION GATE: PASS (synthetic fixtures; clinical quality NOT_EVALUATED)');
     } else {
-      console.error('\nGATE: FAIL (a fixture under-flagged risk, or mean fact recall < 0.6)');
+      console.error(
+        '\nREGRESSION GATE: FAIL (risk, sections, source, kind, annotated claims or keyword recall)',
+      );
       process.exit(1);
     }
   } else {
-    console.log('\n(mock backend — smoke run only; run with LLM_BACKEND=vertex for the real gate)');
+    console.log('\n(mock backend — smoke run only; clinical quality NOT_EVALUATED)');
   }
 }
 
-void main();
+void main().catch(() => {
+  console.error('NOT_EVALUATED: NOTE_EVALUATION_FAILED');
+  process.exitCode = 2;
+});

@@ -78,6 +78,13 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   // Clinical documentation artifacts and disclosures.
   policy('api/v1/sessions', ['POST'], ['VERTICAL_DOCUMENTATION'], 'write'),
   policy('api/v1/sessions/[id]', ['GET'], ['VERTICAL_DOCUMENTATION'], 'disclosure'),
+  policy('api/v1/sessions/[id]/usage', ['GET'], ['VERTICAL_DOCUMENTATION'], 'read'),
+  policy(
+    'api/v1/sessions/[id]/preparation',
+    ['GET', 'POST'],
+    ['BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'write',
+  ),
   policy(
     'api/v1/sessions/[id]/manual-note',
     ['GET', 'POST'],
@@ -247,6 +254,12 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     ['GET', 'POST'],
     ['THERAPY_WORKFLOWS', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
     'write',
+  ),
+  policy(
+    'api/v1/clients/[id]/session-work-history',
+    ['GET'],
+    ['THERAPY_WORKFLOWS', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'read',
   ),
   policy('api/v1/assignments', ['POST'], ['THERAPY_WORKFLOWS'], 'write'),
   policy('api/v1/assignments/[id]', ['PATCH'], ['THERAPY_WORKFLOWS'], 'write'),

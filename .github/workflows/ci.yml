@@ -170,12 +170,15 @@ jobs:
         env:
           RUN_MIND_POSTGRES_TESTS: '1'
           MIND_TEST_DATABASE_URL: postgresql://cureocity:cureocity@127.0.0.1:55439/cureocity_mind_test
+          RUN_SESSION_USAGE_POSTGRES_TESTS: '1'
+          SESSION_USAGE_TEST_DATABASE_URL: postgresql://cureocity:cureocity@127.0.0.1:55439/cureocity_mind_test
           DATABASE_URL: postgresql://cureocity:cureocity@127.0.0.1:55439/cureocity_mind_test
         run: |
           pnpm --filter @cureocity/web exec vitest run \
             lib/appointment-reminder-uniqueness-postgres.spec.ts \
             lib/mind-consent-recovery-postgres.spec.ts \
             lib/mind-counselling-postgres.spec.ts \
+            lib/session-usage-postgres.spec.ts \
             --maxWorkers=1
 
       - name: Stop isolated Mind PostgreSQL

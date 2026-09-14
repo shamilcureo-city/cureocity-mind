@@ -12,24 +12,33 @@ const mocks = vi.hoisted(() => ({
   update: vi.fn(),
   audit: vi.fn(),
   transaction: vi.fn(),
+  sessionLock: vi.fn(),
 }));
 vi.mock('./prisma', () => ({ prisma: { $transaction: mocks.transaction } }));
-vi.mock('./phi-write-lock', () => ({ lockActiveClientForSession: mocks.lock }));
+vi.mock('./phi-write-lock', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./phi-write-lock')>()),
+  lockActiveClientForSession: mocks.lock,
+}));
 vi.mock('./audit', () => ({ writeAudit: mocks.audit }));
 import { selectMindSessionPurpose } from './mind-session-purpose';
 const now = new Date('2026-09-10T10:00:00Z');
 const row = {
   id: 's1',
+  clientId: 'c1',
   psychologistId: 'p1',
   status: 'SCHEDULED',
   kind: 'TREATMENT',
   mindPurpose: null,
   updatedAt: now,
 } as Session;
-const tx = { session: { findUnique: mocks.find, update: mocks.update } };
+const tx = {
+  session: { findUnique: mocks.find, update: mocks.update },
+  $queryRaw: mocks.sessionLock,
+};
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.find.mockResolvedValue(row);
+  mocks.lock.mockResolvedValue({ id: 'c1', psychologistId: 'p1' });
   mocks.transaction.mockImplementation((run) => run(tx));
   mocks.update.mockImplementation(({ data }) => ({ ...row, ...data }));
 });
@@ -55,30 +64,43 @@ describe('clinician-selected purpose and documentation routing', () => {
     });
     expect(mindSessionPurposeLabel('COUNSELLING', 'TREATMENT')).toBe('Supportive counselling');
   });
-  it.each(['IN_PROGRESS', 'COMPLETED', 'CANCELLED'])(
-    'does not reinterpret an already %s visit',
-    async (status) => {
-      mocks.find.mockResolvedValue({ ...row, status });
-      await expect(selectMindSessionPurpose(row, 'p1', 'ASSESSMENT')).rejects.toThrow(
-        'already started or changed',
-      );
-      expect(mocks.update).not.toHaveBeenCalled();
-    },
-  );
+  it.each(['IN_PROGRESS'])('does not reinterpret an already %s visit', async (status) => {
+    mocks.find.mockResolvedValue({ ...row, status });
+    await expect(selectMindSessionPurpose(row, 'p1', 'ASSESSMENT')).rejects.toThrow(
+      'already started or changed',
+    );
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
   it('rejects stale booking versions and foreign owners', async () => {
     mocks.find.mockResolvedValueOnce({ ...row, updatedAt: new Date(now.getTime() + 1) });
     await expect(selectMindSessionPurpose(row, 'p1', 'ASSESSMENT')).rejects.toThrow();
     mocks.find.mockResolvedValueOnce({ ...row, psychologistId: 'another' });
     await expect(selectMindSessionPurpose(row, 'p1', 'ASSESSMENT')).rejects.toThrow(
-      'Session not found',
+      'Client not found',
     );
     expect(mocks.update).not.toHaveBeenCalled();
   });
   it('keeps legacy defaults unchanged when no clinician choice is submitted', async () => {
     expect(await selectMindSessionPurpose(row, 'p1')).toBe(row);
-    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.lock).toHaveBeenCalledWith(tx, 's1', 'p1');
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
     expect(mindSessionPurposeLabel(null, 'INTAKE')).toBe('Assessment session');
     expect(sessionKindForMindPurpose('REVIEW')).toBe('REVIEW');
+  });
+  it.each(['COMPLETED', 'CANCELLED', 'NO_SHOW', 'RESCHEDULED'])(
+    'rejects a booking that becomes %s before reuse even without a new purpose',
+    async (status) => {
+      mocks.find.mockResolvedValue({ ...row, status });
+      await expect(selectMindSessionPurpose(row, 'p1')).rejects.toThrow('no longer available');
+      expect(mocks.update).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects relinked sessions even when the new client has the same owner', async () => {
+    mocks.lock.mockResolvedValue({ id: 'c2', psychologistId: 'p1' });
+    mocks.find.mockResolvedValue({ ...row, clientId: 'c2' });
+    await expect(selectMindSessionPurpose(row, 'p1')).rejects.toThrow('Client not found');
+    expect(mocks.update).not.toHaveBeenCalled();
   });
   it('resumes a manual visit at its clinician workspace, never the recorder', () => {
     expect(
