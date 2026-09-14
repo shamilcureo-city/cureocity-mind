@@ -400,6 +400,7 @@ async function NotesTabPanel({
       sessionCompleted={sessionStatus === 'COMPLETED'}
       canShare={canShare}
       canReviewClinical={canReviewClinical}
+      canRecordWork={canUseWorkflows}
       initialReviewOpen={initialReviewOpen}
       hasSignedNote={signedRow != null}
       clinicalReview={

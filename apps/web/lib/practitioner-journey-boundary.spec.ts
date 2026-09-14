@@ -156,7 +156,7 @@ describe('Mind and Scribe practitioner journey boundary', () => {
       work: 'Sessions',
       home: 'Today',
       start: 'Start session',
-      completion: 'Review & Close',
+      completion: 'Review & finish',
     });
     expect(practitionerVocabulary('DOCTOR')).toEqual({
       people: 'Patients',

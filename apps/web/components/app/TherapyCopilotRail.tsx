@@ -63,8 +63,8 @@ export function TherapyCopilotRail({
   ) => void;
 }) {
   const { riskWatch, askNext, threads, arc } = reasoning;
-  // The plan (carried in) and the live cues (heard in the room) are different
-  // altitudes — separate sections, not chips on a mixed list.
+  // Prepared questions and live suggestions retain their source, but only one
+  // ordinary item leads the session. The rest is available on request.
   const planned = askNext.filter((a) => a.source === 'CARRIED');
   const live = askNext.filter((a) => a.source !== 'CARRIED');
   const nothing = riskWatch.length === 0 && askNext.length === 0 && threads.length === 0;
@@ -75,8 +75,11 @@ export function TherapyCopilotRail({
     threads.length,
     guideActive,
   );
-  const liveDetailsRef = useRef<HTMLDetailsElement>(null);
-  const threadDetailsRef = useRef<HTMLDetailsElement>(null);
+  const remainingPlanned = planned.slice(visible.planned);
+  const remainingLive = live.slice(visible.live);
+  const remainingThreads = threads.slice(visible.threads);
+  const remainingCount = remainingPlanned.length + remainingLive.length + remainingThreads.length;
+  const supportDetailsRef = useRef<HTMLDetailsElement>(null);
   const reportShown = useCallback(() => {
     if (!onShown) return;
     // Read native disclosure state, so updates while open and removed/remounted
@@ -85,8 +88,8 @@ export function TherapyCopilotRail({
       reasoning,
       mode,
       {
-        live: liveDetailsRef.current?.open ?? false,
-        threads: threadDetailsRef.current?.open ?? false,
+        live: supportDetailsRef.current?.open ?? false,
+        threads: supportDetailsRef.current?.open ?? false,
       },
       guideActive,
     );
@@ -95,13 +98,13 @@ export function TherapyCopilotRail({
   useEffect(reportShown, [reportShown]);
 
   return (
-    <Card className="overflow-hidden border-t-[3px] border-t-[#d9c9a3] p-0">
-      <div className="flex items-center gap-2 px-4 pb-2 pt-3.5">
+    <Card className="overflow-hidden p-0">
+      <div className="flex flex-wrap items-center gap-2 px-4 pb-2 pt-3.5">
         <h2 className="text-base font-semibold text-[var(--color-ink)]">Session support</h2>
         <span className="rounded-full border border-[#e7d9b0] bg-[#f6efdc] px-2 py-px text-[10px] font-bold tracking-[0.08em] text-[#8a7434]">
           AI
         </span>
-        <span className="ml-auto text-xs text-[var(--color-ink-2)]">suggestions — you decide</span>
+        <span className="text-xs text-[var(--color-ink-2)]">You decide what to use.</span>
       </div>
 
       {mode === 'guided' && guideActive && (
@@ -118,99 +121,92 @@ export function TherapyCopilotRail({
           <p>{reviewError}</p>
           <div className="mt-2 flex flex-wrap gap-2">
             <MiniAct onClick={() => onRetry?.()} disabled={pendingId !== null}>
-              Retry cue save / history
+              Retry last action
             </MiniAct>
             <MiniAct quiet onClick={() => onReload?.()} disabled={pendingId !== null}>
-              Reload cue history
+              Reload review history
             </MiniAct>
           </div>
         </div>
       )}
       {pendingId && (
         <p role="status" className="px-4 pb-3 text-sm">
-          Saving cue review…
+          Saving your review…
         </p>
       )}
       {reviewBlocked && !reviewError && !pendingId && (
         <p role="status" className="px-4 pb-3 text-sm">
-          Loading cue review history… Safety cues stay visible.
+          Loading review history… Safety cues stay visible.
         </p>
       )}
 
       <fieldset disabled={reviewBlocked || pendingId !== null} className="min-w-0">
         {riskWatch.length > 0 && (
-          <RailSection title="Risk watch" risk>
+          <RailSection title="Safety concerns to review" risk>
             {riskWatch.map((r) => (
               <RiskCard key={r.id} item={r} onResolve={onResolve} />
             ))}
           </RailSection>
         )}
 
-        {mode === 'guided' && planned.length > 0 && (
-          <RailSection title={visible.planned ? 'A question you prepared' : 'Prepared questions'}>
+        {mode === 'guided' && visible.planned > 0 && (
+          <RailSection title="A question you prepared">
             {planned.slice(0, visible.planned).map((a) => (
               <AskCard key={a.id} item={a} onResolve={onResolve} />
             ))}
-            {planned.length > visible.planned && (
-              <details className="pt-2 text-sm">
-                <summary className="cursor-pointer text-[var(--color-accent)]">
-                  {visible.planned ? 'More prepared questions' : 'Open prepared questions'} (
-                  {planned.length - visible.planned})
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {planned.slice(visible.planned).map((a) => (
-                    <AskCard key={a.id} item={a} onResolve={onResolve} />
-                  ))}
-                </div>
-              </details>
-            )}
           </RailSection>
         )}
 
-        {mode === 'guided' && live.length > 0 && (
-          <RailSection
-            title={visible.live ? 'A question to consider now' : 'Questions from this conversation'}
-          >
+        {mode === 'guided' && visible.live > 0 && (
+          <RailSection title="A question to consider now">
             {live.slice(0, visible.live).map((a) => (
               <AskCard key={a.id} item={a} onResolve={onResolve} />
             ))}
-            {live.length > visible.live && (
-              <details ref={liveDetailsRef} onToggle={reportShown} className="pt-2 text-sm">
-                <summary className="cursor-pointer text-[var(--color-accent)]">
-                  {visible.live
-                    ? 'More questions from this conversation'
-                    : 'Open questions from this conversation'}{' '}
-                  ({live.length - visible.live})
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {live.slice(visible.live).map((a) => (
-                    <AskCard key={a.id} item={a} onResolve={onResolve} />
-                  ))}
-                </div>
-              </details>
-            )}
           </RailSection>
         )}
 
-        {mode === 'guided' && threads.length > 0 && (
-          <RailSection title="Topics to return to">
+        {mode === 'guided' && visible.threads > 0 && (
+          <RailSection title="A topic to return to">
             {threads.slice(0, visible.threads).map((t) => (
               <ThreadCard key={t.id} item={t} onResolve={onResolve} />
             ))}
-            {threads.length > visible.threads && (
-              <details ref={threadDetailsRef} onToggle={reportShown} className="pt-2 text-sm">
-                <summary className="cursor-pointer text-[var(--color-accent)]">
-                  {visible.threads ? 'More topics' : 'Open topics'} (
-                  {threads.length - visible.threads})
-                </summary>
-                <div className="mt-3 space-y-2">
-                  {threads.slice(visible.threads).map((t) => (
-                    <ThreadCard key={t.id} item={t} onResolve={onResolve} />
-                  ))}
-                </div>
-              </details>
-            )}
           </RailSection>
+        )}
+
+        {mode === 'guided' && remainingCount > 0 && (
+          <details
+            ref={supportDetailsRef}
+            onToggle={reportShown}
+            className="border-t border-[var(--color-line-soft)]"
+          >
+            <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-medium text-[var(--color-accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent)]">
+              More session support ({remainingCount})
+            </summary>
+            <p className="px-4 pb-3 text-sm text-[var(--color-ink-2)]">
+              Choose only what helps this conversation. These are options, not a checklist.
+            </p>
+            {remainingPlanned.length > 0 && (
+              <RailSection title="Prepared questions">
+                {remainingPlanned.map((a) => (
+                  <AskCard key={a.id} item={a} onResolve={onResolve} />
+                ))}
+              </RailSection>
+            )}
+            {remainingLive.length > 0 && (
+              <RailSection title="Questions from this conversation">
+                {remainingLive.map((a) => (
+                  <AskCard key={a.id} item={a} onResolve={onResolve} />
+                ))}
+              </RailSection>
+            )}
+            {remainingThreads.length > 0 && (
+              <RailSection title="Topics to return to">
+                {remainingThreads.map((t) => (
+                  <ThreadCard key={t.id} item={t} onResolve={onResolve} />
+                ))}
+              </RailSection>
+            )}
+          </details>
         )}
       </fieldset>
 
@@ -231,8 +227,8 @@ export function TherapyCopilotRail({
       )}
       {reviewedCues.length > 0 && (
         <details className="border-t border-[var(--color-line-soft)] px-4 py-3">
-          <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">
-            Reviewed cue history ({reviewedCues.length})
+          <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
+            Review history ({reviewedCues.length})
           </summary>
           <p className="mb-3 text-sm text-[var(--color-ink-2)]">
             These are interface choices, not documented assessments. Undo asks you to review the cue
@@ -296,7 +292,7 @@ export function TherapyCopilotRail({
 
       {arc && mode === 'guided' && (
         <details className="border-t border-[var(--color-line-soft)] px-4 py-3">
-          <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink-2)]">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium text-[var(--color-ink-2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
             Session pacing · {arc.elapsedMin} of {arc.plannedMin} min
           </summary>
           <p className="mt-1 text-[12.5px] capitalize text-[var(--color-ink-2)]">
@@ -330,7 +326,7 @@ function RailSection({
     <div className="border-t border-[var(--color-line-soft)] px-4 py-3">
       <h3
         className={`mb-2 text-sm font-semibold ${
-          risk ? 'text-[var(--color-risk,#a03b34)]' : 'text-[var(--color-ink-3)]'
+          risk ? 'text-[var(--color-warn)]' : 'text-[var(--color-ink-2)]'
         }`}
       >
         {title}
@@ -370,7 +366,7 @@ function RiskCard({
         </span>
       </div>
       <p className="mt-0.5 text-[var(--color-ink-2)]">{item.why}</p>
-      <div className="mt-1.5 flex gap-1.5">
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
         <MiniAct onClick={() => onResolve(item.id, 'RED_FLAG', 'acted', item.label)}>
           Mark cue reviewed
         </MiniAct>
@@ -398,15 +394,15 @@ function AskCard({
   ) => void;
 }) {
   return (
-    <div className="rounded-xl border border-[var(--color-line-soft)] p-3 text-sm">
-      <b className="text-[var(--color-ink)]">{item.question}</b>
+    <div className="rounded-xl border border-[var(--color-line-soft)] p-3 text-sm leading-relaxed">
+      <p className="max-w-prose font-semibold text-[var(--color-ink)]">{item.question}</p>
       <p className="mt-0.5 text-[var(--color-ink-3)]">{item.why}</p>
-      <div className="mt-1.5 flex gap-1.5">
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
         <MiniAct onClick={() => onResolve(item.id, 'ASK_NEXT', 'acted', item.question)}>
-          Asked ✓
+          Mark asked
         </MiniAct>
         <MiniAct quiet onClick={() => onResolve(item.id, 'ASK_NEXT', 'dismissed', item.question)}>
-          Skip
+          Skip question
         </MiniAct>
       </div>
     </div>
@@ -436,10 +432,12 @@ function ThreadCard({
         )}
       </div>
       <p className="mt-0.5 text-[var(--color-ink-3)]">{item.note}</p>
-      <div className="mt-1.5 flex gap-1.5">
-        <MiniAct onClick={() => onResolve(item.id, 'GAP', 'acted', item.topic)}>Explore</MiniAct>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        <MiniAct onClick={() => onResolve(item.id, 'GAP', 'acted', item.topic)}>
+          Mark explored
+        </MiniAct>
         <MiniAct quiet onClick={() => onResolve(item.id, 'GAP', 'dismissed', item.topic)}>
-          Dismiss
+          Skip topic
         </MiniAct>
       </div>
     </div>
@@ -463,7 +461,7 @@ function MiniAct({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`min-h-11 rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
+      className={`min-h-11 rounded-full px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
         quiet
           ? 'text-[var(--color-ink-3)] hover:text-[var(--color-ink)]'
           : 'border border-[var(--color-line)] bg-white text-[var(--color-accent)] hover:border-[var(--color-accent)]'

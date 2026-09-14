@@ -4,6 +4,7 @@ import { ScheduleSessionPanel } from './ScheduleSessionPanel';
 import { MindCloseoutDecisionActions } from './MindCloseoutDecisionActions';
 import { MindSessionAgreements } from './MindSessionAgreements';
 import { MindCareRecordPanel } from './MindCareRecordPanel';
+import { MindWorkHistory } from './MindWorkHistory';
 import { ShareReceiptList, type ShareReceiptView } from './ShareReceiptList';
 import { suggestFollowUp } from '../../lib/follow-up-suggestion';
 import styles from './MindSessionReview.module.css';
@@ -26,6 +27,7 @@ interface Props {
   children: React.ReactNode;
   clinicalReview?: React.ReactNode;
   canReviewClinical?: boolean;
+  canRecordWork?: boolean;
   initialReviewOpen?: boolean;
   hasSignedNote?: boolean;
 }
@@ -44,6 +46,7 @@ export function MindSessionCloseout({
   children,
   clinicalReview,
   canReviewClinical = true,
+  canRecordWork = false,
   initialReviewOpen = false,
   hasSignedNote,
 }: Props) {
@@ -68,15 +71,6 @@ export function MindSessionCloseout({
         )}
       </div>
       {children}
-      <MindCloseoutDecisionActions
-        key={sessionId}
-        sessionId={sessionId}
-        steps={closeout.steps}
-        canShare={canShare}
-        clinicalReview={clinicalReview}
-        canReviewClinical={canReviewClinical}
-        initialReviewOpen={initialReviewOpen}
-      />
       <div className={styles.finish} id="session-next-steps">
         <h2 className={styles.finishTitle}>Next steps, if useful</h2>
         <p className={styles.finishIntro}>
@@ -96,30 +90,42 @@ export function MindSessionCloseout({
             </span>
           )}
         </div>
-        <div className="mt-5 space-y-3">
-          {canReviewClinical && (
-            <MindCareRecordPanel
-              key={`session-work-${sessionId}`}
-              clientId={client.id}
-              sessionContext={{ sessionId, scheduledAt: sessionAt.toISOString() }}
+        <MindCloseoutDecisionActions
+          key={sessionId}
+          sessionId={sessionId}
+          steps={closeout.steps}
+          canShare={canShare}
+          clinicalReview={clinicalReview}
+          canReviewClinical={canReviewClinical}
+          canRecordWork={canRecordWork}
+          initialReviewOpen={initialReviewOpen}
+          agreementCount={agreementCount}
+          appointmentScheduled={!!followUpSession}
+          work={
+            canRecordWork && (
+              <>
+                <MindCareRecordPanel
+                  key={`session-work-${sessionId}`}
+                  clientId={client.id}
+                  sessionContext={{ sessionId, scheduledAt: sessionAt.toISOString() }}
+                  embedded
+                />
+                <div className="mt-5">
+                  <MindWorkHistory key={`work-history-${client.id}`} clientId={client.id} />
+                </div>
+              </>
+            )
+          }
+          agreements={
+            <MindSessionAgreements
+              key={sessionId}
+              sessionId={sessionId}
+              signed={signed}
+              hasSignedNote={hasSignedNote}
             />
-          )}
-          <details className={styles.disclosure}>
-            <summary>
-              Agreements or homework{agreementCount > 0 ? ` (${agreementCount} saved)` : ''}
-            </summary>
-            <div className={styles.disclosureBody}>
-              <MindSessionAgreements
-                key={sessionId}
-                sessionId={sessionId}
-                signed={signed}
-                hasSignedNote={hasSignedNote}
-              />
-            </div>
-          </details>
-          <details className={styles.disclosure}>
-            <summary>The next appointment{followUpSession ? ' · scheduled' : ''}</summary>
-            <div className={styles.disclosureBody}>
+          }
+          appointment={
+            <>
               <p className="mb-4">
                 If another appointment is useful, choose a time to suit your care plan. The form
                 starts one week later; nothing is booked until you save it.
@@ -133,10 +139,11 @@ export function MindSessionCloseout({
                 sourceSessionId={sessionId}
                 followUpState={closeout.steps.followUp}
                 followUpSession={followUpSession}
+                canSkipFollowUp={canReviewClinical}
               />
-            </div>
-          </details>
-        </div>
+            </>
+          }
+        />
         {canShare && (
           <p className={`${styles.finishIntro} mt-5`}>
             {closeout.steps.shared === 'SKIPPED'

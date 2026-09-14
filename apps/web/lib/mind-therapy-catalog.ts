@@ -42,6 +42,39 @@ export const MIND_THERAPY_GUIDE_KIND_LABELS: Record<MindTherapyGuideKind, string
   protocol_stage: 'Protocol stage',
 };
 
+/** Explains the scope of a choice, never its clinical suitability or evidence. */
+export const MIND_THERAPY_GUIDE_GROUPS = [
+  {
+    kind: 'approach',
+    title: 'Approaches',
+    description: 'A starting point for a session draft, not a complete treatment programme.',
+  },
+  {
+    kind: 'technique',
+    title: 'Techniques',
+    description: 'A focused part of a session, not a whole course of therapy.',
+  },
+  {
+    kind: 'protocol_stage',
+    title: 'Protocol stages',
+    description: 'Individual stages only. Selecting one does not advance a treatment protocol.',
+  },
+  {
+    kind: 'unclassified',
+    title: 'Other suggested guides',
+    description: 'AI-suggested names that have not been classified in this library.',
+  },
+] as const;
+
+export function groupMindTherapyGuideChoices<T extends { name: string }>(choices: readonly T[]) {
+  return MIND_THERAPY_GUIDE_GROUPS.map((group) => ({
+    ...group,
+    choices: choices.filter(
+      (choice) => (mindTherapyGuideChoice(choice.name)?.kind ?? 'unclassified') === group.kind,
+    ),
+  })).filter((group) => group.choices.length > 0);
+}
+
 export const EMDR_GUIDE_TRAINING_NOTICE =
   'For clinicians trained in EMDR. This AI draft does not replace specialist training or supervision.';
 

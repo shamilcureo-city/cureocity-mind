@@ -2,6 +2,24 @@
 
 13 September 2026. This tracks implementation against [the product sprint plan](MIND_PRODUCT_EXCELLENCE_SPRINT_PLAN.md). The owner has now requested deployment; [release preflight](MIND_2026_09_13_RELEASE_CHECKLIST.md) tracks the exact publication, migration and runtime gates. The earlier sections below describe their implementation-time boundaries, not a claim that deployment has occurred. **The programme is not complete.**
 
+14 September continuation: [the locally checked UX batch](MIND_UX_FINISH_2026_09_14.md)
+adds calmer Guided support, grouped single-step therapy guides, independent
+closeout tasks with persistent save/error status, and reviewed proposed narrative
+edits. It is uncommitted on `codex/mind-product-release-20260913` over `501754f`;
+the existing PR/preview checks do not include it. Its final web/contracts suites
+pass 2,808 tests with 37 database-backed tests explicitly skipped. No new release
+or account activation is implied. Historical implementation gaps below should be
+read together with this continuation and its narrower verified scope.
+
+The subsequent **recorded-work history** continuation is tracked in
+[its implementation report](MIND_WORK_HISTORY_2026_09_14.md). It reuses immutable
+encrypted care versions for bounded history reads and earlier-wording review;
+it does not add a delivery-event ledger, guide-version linkage or AI context.
+Final combined-candidate local verification for that continuation: **2,917 web/
+contracts tests passed; 37 database-backed tests skipped**, plus typecheck, scoped
+lint, formatting and fictional browser checks. This does not replace the separate
+authenticated, database, clinical and release gates.
+
 ## Baseline and boundaries
 
 - Working branch: `codex/mind-counselling-workflow`, committed HEAD `561888581257c61f6a22f0e584a9d87efd7a45ad`.
@@ -222,18 +240,18 @@ The first integrated web run exposed two old manual-note button-label assertions
 
 ## Remaining programme work
 
-| Package | Remaining work and release gate                                                                                                                                                                                                                                                           |
-| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MP00    | Final integrated candidate review, current web/gateway/flags, compatible reader/writer rollout and rollback evidence.                                                                                                                                                                     |
-| MP01    | Authorized 40-case actor corpus, held-out discipline, language/clinical annotations, semantic claim adjudication, paired real ASR-to-note study and actual effort/latency baseline.                                                                                                       |
-| MP02    | Full live/batch/manual interruption matrix, long-session renewal/recovery and authorized device/microphone checks.                                                                                                                                                                        |
-| MP03    | Session-bound preparation is local and feature-gated; isolated database/authenticated rollout checks remain. Optional explicit legacy scratch adoption, remaining navigation/quiet-guided refinements and observed usability/accessibility work remain.                                   |
-| MP04    | Source/history/clinician-addition attribution, reviewed proposed edits, unified optional agreement/homework/booking closeout with partial-failure proof.                                                                                                                                  |
-| MP05    | Grounded evidence/uncertainty, versioned permitted terminology checks, explainable next-action fidelity and governed instrument metadata.                                                                                                                                                 |
-| MP06    | Immutable reviewed content versions, permissions/rights, qualified reviewer, one scoped complete pathway and separately labelled adaptations.                                                                                                                                             |
-| MP07    | Verified session-bound actual-work/response continuity; guide-version linkage, reviewed insertion into notes and the multi-visit scenario matrix.                                                                                                                                         |
-| MP08    | Connection receipts and reported-subtotal UI are local/default-off; isolated DB/runtime release checks remain. Physical-attempt provenance, originating-session attribution, provider reconciliation, large-window query validation and quality-gated optimization are still outstanding. |
-| MP09    | Observed fictional journeys, real device/access/encryption checks, clinical pilot approval, stop criteria and release decision.                                                                                                                                                           |
+| Package | Remaining work and release gate                                                                                                                                                                                                                                                              |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MP00    | Final integrated candidate review, current web/gateway/flags, compatible reader/writer rollout and rollback evidence.                                                                                                                                                                        |
+| MP01    | Authorized 40-case actor corpus, held-out discipline, language/clinical annotations, semantic claim adjudication, paired real ASR-to-note study and actual effort/latency baseline.                                                                                                          |
+| MP02    | Full live/batch/manual interruption matrix, long-session renewal/recovery and authorized device/microphone checks.                                                                                                                                                                           |
+| MP03    | Session-bound preparation is local and feature-gated; isolated database/authenticated rollout checks remain. Optional explicit legacy scratch adoption, remaining navigation/quiet-guided refinements and observed usability/accessibility work remain.                                      |
+| MP04    | Full source/history/clinician-addition attribution and authenticated partial-failure validation remain. The 14 September local batch adds reviewed narrative proposals and one optional agreement/homework/booking workspace; translation and complete revision attribution are not covered. |
+| MP05    | Grounded evidence/uncertainty, versioned permitted terminology checks, explainable next-action fidelity and governed instrument metadata.                                                                                                                                                    |
+| MP06    | Immutable reviewed content versions, permissions/rights, qualified reviewer, one scoped complete pathway and separately labelled adaptations.                                                                                                                                                |
+| MP07    | Verified session-bound actual-work/response continuity; guide-version linkage, reviewed insertion into notes and the multi-visit scenario matrix.                                                                                                                                            |
+| MP08    | Connection receipts and reported-subtotal UI are local/default-off; isolated DB/runtime release checks remain. Physical-attempt provenance, originating-session attribution, provider reconciliation, large-window query validation and quality-gated optimization are still outstanding.    |
+| MP09    | Observed fictional journeys, real device/access/encryption checks, clinical pilot approval, stop criteria and release decision.                                                                                                                                                              |
 
 These are real outstanding tickets, not all blocked on clinical review: further engineering remains. Clinical content publication, real-audio validation and release require the separate decisions/evidence below.
 

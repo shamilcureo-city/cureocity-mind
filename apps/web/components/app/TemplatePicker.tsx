@@ -36,6 +36,8 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, kind, o
   const [applying, setApplying] = useState(false);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
 
   const activeId = currentTemplateId ?? '';
   // The no-template default: the standard intake for INTAKE, plain SOAP else.
@@ -82,7 +84,7 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, kind, o
   }
 
   async function apply(templateId: string | null): Promise<void> {
-    if (applying) return;
+    if (applying || disabledRef.current) return;
     setOpen(false);
     setApplying(true);
     try {
@@ -113,7 +115,7 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, kind, o
         </span>
       </button>
 
-      {open && (
+      {open && !disabled && (
         <div className="absolute left-0 z-30 mt-1.5 max-h-[420px] w-80 overflow-y-auto rounded-xl border border-[var(--color-line)] bg-white p-1.5 shadow-[0_12px_30px_rgba(15,27,42,0.13)]">
           <Row label={standardLabel} active={activeId === ''} onClick={() => void apply(null)} />
 

@@ -6,6 +6,25 @@ preparation and usage work, not only the latest cost panel. See the
 
 ## Verified baseline
 
+### 14 September combined candidate
+
+The owner requested merge and deployment of the additional UX and recorded-work
+history batches. They are being added to the existing release branch, not treated
+as covered by the old head's CI or preview. See
+[UX verification](MIND_UX_FINISH_2026_09_14.md) and
+[work-history verification](MIND_WORK_HISTORY_2026_09_14.md). The combined local
+checks passed: web 2,430 tests (37 opt-in database cases skipped), contracts 487,
+web typecheck, contracts build, scoped lint/formatting and whitespace checks.
+These are suite totals, not clinical validation. The additional batches introduce
+no schema migration or gateway change beyond the original cumulative candidate.
+
+Before publication, GitHub main and Vercel production were refreshed and still
+matched the baseline below. New hosted CI and preview checks must refer to the
+new exact commit. Authenticated preview testing remains blocked by the pending
+test-practitioner account; the previously rejected activation/capability grant
+must not be retried without exact preview-only approval. No production merge,
+migration, feature activation or gateway traffic change is implied by publication.
+
 - GitHub `main`: `8af631f8c7ae3b368f967660fddd4ebac9f6be64`.
 - Original local HEAD: `561888581257c61f6a22f0e584a9d87efd7a45ad`.
   Its source tree was identical to main; ancestry divergence alone was not an

@@ -527,7 +527,7 @@ export function MindWorkspacePreview() {
                   title: 'Example client C',
                   detail: 'The draft is ready for your review and next steps.',
                   href: '/app/sessions/preview-session-c?tab=note',
-                  ctaLabel: 'Review & Close',
+                  ctaLabel: 'Review & finish',
                 },
                 {
                   id: 'preview-response',

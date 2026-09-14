@@ -255,6 +255,12 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     ['THERAPY_WORKFLOWS', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
     'write',
   ),
+  policy(
+    'api/v1/clients/[id]/session-work-history',
+    ['GET'],
+    ['THERAPY_WORKFLOWS', 'BEHAVIORAL_HEALTH_DOCUMENTATION'],
+    'read',
+  ),
   policy('api/v1/assignments', ['POST'], ['THERAPY_WORKFLOWS'], 'write'),
   policy('api/v1/assignments/[id]', ['PATCH'], ['THERAPY_WORKFLOWS'], 'write'),
   policy('api/v1/treatment-plans/[id]/goals/[index]', ['PATCH'], ['THERAPY_WORKFLOWS'], 'write'),

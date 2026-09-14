@@ -237,7 +237,7 @@ export function TodaySessionCard({
               <span aria-hidden="true">2</span>Session
             </li>
             <li>
-              <span aria-hidden="true">3</span>Review &amp; Close
+              <span aria-hidden="true">3</span>Review &amp; finish
             </li>
           </ol>
 
@@ -472,7 +472,7 @@ export function TodaySessionCard({
                 href={`/app/sessions/${session.id}?tab=note`}
                 className="rounded-full border border-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
               >
-                Review &amp; Close
+                Review &amp; finish
               </Link>
             ) : session.draftStatus === 'IN_PROGRESS' || session.draftStatus === 'PENDING' ? (
               <Link

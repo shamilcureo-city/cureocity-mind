@@ -82,6 +82,14 @@ export function MindCareContinuitySummary({ clientId }: { clientId: string }) {
         <Link href={work.sourceHref} className="text-[var(--color-accent)] underline">
           Open source visit
         </Link>
+        <p>
+          <Link
+            href={`/app/clients/${encodeURIComponent(clientId)}#work-history`}
+            className="inline-flex min-h-11 items-center text-[var(--color-accent)] underline"
+          >
+            See work recorded across visits
+          </Link>
+        </p>
       </div>
     </details>
   );

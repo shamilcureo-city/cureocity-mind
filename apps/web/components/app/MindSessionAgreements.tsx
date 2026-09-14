@@ -7,6 +7,7 @@ import { Button } from '../ui/Button';
 import { AgreementHomework } from './AgreementHomework';
 import { RetireAgreement } from './RetireAgreement';
 import { useUnsavedWorkGuard } from '../../lib/use-unsaved-work-guard';
+import { useMindCloseoutTaskStatus } from '../../lib/mind-closeout-task-status';
 import {
   agreementSaveFingerprint,
   confirmedAgreementReceipt,
@@ -41,6 +42,7 @@ export function MindSessionAgreements({
   const dirty = editing
     ? text.trim() !== editing.text || speaker !== editing.speaker
     : !!text.trim();
+  useMindCloseoutTaskStatus({ dirty, busy, needsAttention: !!error });
   useUnsavedWorkGuard(
     dirty,
     'This agreement has unsaved changes. Leave without saving them?',

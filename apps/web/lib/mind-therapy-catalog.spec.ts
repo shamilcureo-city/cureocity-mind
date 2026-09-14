@@ -4,6 +4,7 @@ import {
   MIND_THERAPY_GUIDE_CATALOG,
   MIND_THERAPY_GUIDE_KIND_LABELS,
   mindTherapyGuideChoice,
+  groupMindTherapyGuideChoices,
 } from './mind-therapy-catalog';
 
 const legacyNames = [
@@ -20,6 +21,24 @@ const legacyNames = [
 ];
 
 describe('Mind guide display catalog', () => {
+  it('groups the ten starting points without changing names, losing rationale, or classifying unknown names', () => {
+    const unknown = { name: 'Fictional new recommendation', rationale: 'Keep this case context' };
+    const groups = groupMindTherapyGuideChoices([...MIND_THERAPY_GUIDE_CATALOG, unknown]);
+    expect(groups.map((group) => [group.kind, group.choices.length])).toEqual([
+      ['approach', 4],
+      ['technique', 4],
+      ['protocol_stage', 2],
+      ['unclassified', 1],
+    ]);
+    expect(groups.at(-1)!.choices).toEqual([unknown]);
+    expect(
+      groups
+        .flatMap((group) => group.choices)
+        .map((choice) => choice.name)
+        .sort(),
+    ).toEqual([...legacyNames, unknown.name].sort());
+    expect(groupMindTherapyGuideChoices([])).toEqual([]);
+  });
   it('keeps all ten exact legacy names and their order for request/cache compatibility', () => {
     expect(MIND_THERAPY_GUIDE_CATALOG.map((choice) => choice.name)).toEqual(legacyNames);
     expect(new Set(MIND_THERAPY_GUIDE_CATALOG.map((choice) => choice.id)).size).toBe(10);

@@ -34,6 +34,7 @@ vi.mock('react', async (original) => ({
   },
 }));
 vi.mock('@/lib/use-unsaved-work-guard', () => ({ useUnsavedWorkGuard: h.guard }));
+vi.mock('./mind-closeout-task-status', () => ({ useMindCloseoutTaskStatus: vi.fn() }));
 vi.mock('../components/ui/Button', () => ({ Button: 'button' }));
 vi.mock('next/link', () => ({ default: 'a' }));
 import { MindCareRecordPanel, EMPTY_MIND_CARE_RECORD } from '../components/app/MindCareRecordPanel';

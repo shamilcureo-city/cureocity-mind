@@ -129,6 +129,16 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('guide catalog display', () => {
+  it('presents library categories as optional disclosures rather than ten complete therapies', () => {
+    const html = renderToStaticMarkup(render());
+    expect(html).toContain('10 library starting points — not 10');
+    expect(html).toContain('complete therapies.');
+    for (const title of ['Approaches (4)', 'Techniques (4)', 'Protocol stages (2)'])
+      expect(html).toContain(title);
+    expect(html).not.toMatch(/<details\b[^>]*\bopen(?:[\s=>])/);
+    expect(html).toContain('Selecting one does not advance a treatment protocol.');
+    expect(harness.request).not.toHaveBeenCalled();
+  });
   it('shows categories and honest draft status without an approval claim', () => {
     const html = renderToStaticMarkup(
       React.createElement(TherapyList, {
@@ -186,6 +196,20 @@ describe('guide catalog display', () => {
 });
 
 describe('existing guide selection compatibility', () => {
+  it('keeps an explicit retry after guide preparation fails', async () => {
+    harness.request.mockRejectedValueOnce(new Error('Fictional request failure'));
+    lists()[1]!.onPick('Cognitive Restructuring');
+    await vi.waitFor(() => expect(renderToStaticMarkup(render())).toContain('Try again'));
+    expect(harness.request).toHaveBeenCalledOnce();
+    const retry = elements(render()).find(
+      (element) => element.type === 'button' && element.props.children === 'Try again',
+    )!;
+    retry.props.onClick!();
+    await vi.waitFor(() =>
+      expect(elements(render()).some((element) => element.type === 'mind-guide')).toBe(true),
+    );
+    expect(harness.request).toHaveBeenCalledTimes(2);
+  });
   it.each(MIND_THERAPY_GUIDE_CATALOG)(
     'preserves the exact generation request for $name',
     async ({ name }) => {

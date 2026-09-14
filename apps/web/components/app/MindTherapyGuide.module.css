@@ -1,8 +1,64 @@
 .guide {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--color-line);
   border-radius: 22px;
   background: var(--color-surface);
+}
+.guide :is(button, input, summary):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+.orientation {
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--color-line-soft);
+  background: var(--color-surface-soft);
+}
+.orientation[data-recovery='true'] {
+  background: var(--color-warn-bg);
+  border-bottom-color: var(--color-warn-border);
+}
+.place {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.place > div {
+  min-width: 0;
+  flex: 1 1 240px;
+}
+.placeTitle {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.reviewCount {
+  font-size: 13px;
+  color: var(--color-ink-2);
+}
+.saveState {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--color-ink-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.saveState p {
+  flex: 1 1 280px;
+  max-width: 70ch;
+}
+.saveState button,
+.controls button {
+  min-height: 44px;
+}
+.openGuide {
+  margin-top: 14px;
 }
 .header {
   display: flex;
@@ -23,6 +79,7 @@
   font-size: clamp(23px, 3vw, 30px);
   letter-spacing: -0.8px;
   margin-top: 5px;
+  overflow-wrap: anywhere;
 }
 .meta {
   margin-top: 8px;
@@ -75,7 +132,9 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  font-size: 13px;
+  min-height: 44px;
+  padding-block: 8px;
+  font-size: 14px;
   line-height: 1.6;
 }
 .reviewGate input {
@@ -101,17 +160,25 @@
   line-height: 1.7;
 }
 .journey {
-  display: grid;
-  grid-template-columns: 205px minmax(0, 1fr);
+  display: block;
 }
 .path {
-  padding: 24px 14px;
-  background: #faf9fe;
-  border-right: 1px solid var(--color-line-soft);
+  margin: 20px 24px 0;
+  border-bottom: 1px solid var(--color-line-soft);
+}
+.path > summary {
+  min-height: 44px;
+  padding: 12px 4px;
+  cursor: pointer;
+  color: var(--color-accent-hover);
+  font-size: 14px;
+  font-weight: 600;
 }
 .path ol {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
+  padding-block: 8px 16px;
 }
 .path button {
   min-height: 44px;
@@ -147,9 +214,15 @@
   font-size: 11px;
 }
 .nodeDone {
-  background: var(--color-good-soft);
-  border-color: #afd7be;
-  color: var(--color-good);
+  background: var(--color-surface-soft);
+  border-color: var(--color-line);
+  color: var(--color-ink-2);
+}
+.reviewedLabel {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: 400;
 }
 .path button[aria-current='step'] .node {
   background: var(--color-accent);
@@ -159,12 +232,26 @@
 .stepBody {
   min-width: 0;
   padding: 28px;
+  max-width: 78ch;
+  margin-inline: auto;
 }
 .stepBody h3 {
   font-family: var(--font-serif);
   font-size: 25px;
   letter-spacing: -0.5px;
   margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+.stepBody h3:focus,
+.title:focus {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 5px;
+  border-radius: 3px;
+}
+.sectionHint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--color-ink-2);
 }
 .prompt {
   margin-top: 24px;
@@ -175,6 +262,7 @@
   font-size: 16px;
   line-height: 1.8;
   white-space: pre-line;
+  overflow-wrap: anywhere;
 }
 .label {
   font-size: 12px;
@@ -196,6 +284,8 @@
   font-size: 13px;
 }
 .details summary {
+  min-height: 44px;
+  padding-block: 10px;
   cursor: pointer;
   color: var(--color-accent);
   font-weight: 600;
@@ -221,30 +311,14 @@
 }
 .controls div {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
-.progress {
-  padding: 18px 24px;
-  border-top: 1px solid var(--color-line-soft);
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  font-size: 12px;
+.navigationNote {
+  margin-top: 14px;
+  font-size: 13px;
   color: var(--color-ink-2);
-}
-.progressTrack {
-  height: 5px;
-  flex: 1;
-  max-width: 140px;
-  border-radius: 5px;
-  background: var(--color-line-soft);
-  overflow: hidden;
-}
-.progressTrack span {
-  display: block;
-  height: 100%;
-  background: var(--color-accent);
-  transition: width 0.25s ease;
+  line-height: 1.6;
 }
 .completion {
   margin: 0 24px 20px;
@@ -257,7 +331,7 @@
 .footnote {
   padding: 0 24px 22px;
   color: var(--color-ink-2);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.7;
 }
 .overview {
@@ -279,12 +353,16 @@
   font-size: 14px;
   color: var(--color-ink-2);
   line-height: 1.8;
+  max-width: 72ch;
+  overflow-wrap: anywhere;
 }
 .adaptation {
   padding: 0 24px 20px;
   font-size: 13px;
 }
 .adaptation summary {
+  min-height: 44px;
+  padding-block: 10px;
   cursor: pointer;
   color: var(--color-accent);
 }
@@ -296,21 +374,15 @@
   color: var(--color-ink-2);
 }
 @media (max-width: 700px) {
-  .journey {
-    grid-template-columns: 1fr;
-  }
   .path {
-    padding: 14px;
-    border-right: 0;
-    border-bottom: 1px solid var(--color-line-soft);
+    margin-inline: 20px;
   }
   .path ol {
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    grid-template-columns: 1fr;
     gap: 3px;
   }
   .path button {
-    font-size: 11px;
-    padding: 7px;
+    font-size: 14px;
   }
   .stepBody {
     padding: 21px;
@@ -319,12 +391,19 @@
     padding: 16px;
     font-size: 15px;
   }
-  .header {
-    padding: 21px;
+  .header,
+  .orientation,
+  .reviewGate,
+  .overview {
+    padding: 20px;
   }
-}
-@media (prefers-reduced-motion: reduce) {
-  .progressTrack span {
-    transition: none;
+  .controls {
+    align-items: stretch;
+  }
+  .controls > div {
+    width: 100%;
+  }
+  .controls > div > button {
+    flex: 1 1 120px;
   }
 }

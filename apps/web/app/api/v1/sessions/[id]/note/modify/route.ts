@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { z } from 'zod';
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
 import {
   IntakeNoteV1Schema,
+  ModifyNoteInputSchema,
   TherapyNoteV1Schema,
   type IntakeNoteV1,
   type TherapyNoteV1,
@@ -13,6 +13,7 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
+import { canonicalIntakeEdit, canonicalTreatmentEdit } from '@/lib/canonical-note-edit';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,10 +21,6 @@ export const dynamic = 'force-dynamic';
 // Flash with no thinking budget (see below), which finishes in a few seconds.
 // 60s is the ceiling headroom for a very long note, not the expected latency.
 export const maxDuration = 60;
-
-const ModifyInputSchema = z.object({
-  instruction: z.string().min(3).max(1000),
-});
 
 const THERAPY_SYSTEM_PROMPT = `You edit therapy notes in the TherapyNoteV1 schema.
 
@@ -81,7 +78,7 @@ export async function POST(
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
   const { id: sessionId } = await params;
-  const body = await parseJson(req, ModifyInputSchema);
+  const body = await parseJson(req, ModifyNoteInputSchema);
   if (!body.ok) return body.response;
 
   const session = await prisma.session.findUnique({
@@ -118,6 +115,15 @@ export async function POST(
       { status: 409 },
     );
   }
+  if (
+    body.value.expectedUpdatedAt &&
+    body.value.expectedUpdatedAt !== session.noteDraft.updatedAt.toISOString()
+  ) {
+    return NextResponse.json(
+      { error: 'The draft changed. Reload it before requesting suggested edits.' },
+      { status: 409 },
+    );
+  }
 
   const isIntake = session.kind === 'INTAKE';
   let currentTherapy: TherapyNoteV1 | null = null;
@@ -132,7 +138,13 @@ export async function POST(
     }
     currentIntake = parsed.data;
   } else {
-    currentTherapy = TherapyNoteV1Schema.parse(session.noteDraft.content);
+    const parsed = TherapyNoteV1Schema.safeParse(session.noteDraft.content);
+    if (!parsed.success)
+      return NextResponse.json(
+        { error: 'Stored note failed validation; cannot suggest edits.' },
+        { status: 422 },
+      );
+    currentTherapy = parsed.data;
   }
 
   const llmBackend = process.env['LLM_BACKEND'] ?? 'mock';
@@ -206,7 +218,13 @@ export async function POST(
     parsed = JSON.parse(text);
   } catch {
     return NextResponse.json(
-      { error: 'Model returned non-JSON', preview: text.slice(0, 200) },
+      { error: 'The suggested edit could not be read. Your note has not changed.' },
+      { status: 502 },
+    );
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return NextResponse.json(
+      { error: 'The suggested edit is incomplete. Your note has not changed.' },
       { status: 502 },
     );
   }
@@ -226,7 +244,13 @@ export async function POST(
         severity: currentIntake.riskFlags.severity,
       },
     };
-    validated = IntakeNoteV1Schema.parse(merged);
+    const checked = IntakeNoteV1Schema.safeParse(merged);
+    if (!checked.success)
+      return NextResponse.json(
+        { error: 'The suggested edit is incomplete. Your note has not changed.' },
+        { status: 502 },
+      );
+    validated = checked.data;
     changedFields = diffKeys(currentIntake, validated);
   } else {
     const candidate = parsed as Partial<TherapyNoteV1>;
@@ -240,8 +264,24 @@ export async function POST(
         severity: currentTherapy!.riskFlags.severity,
       },
     };
-    validated = TherapyNoteV1Schema.parse(merged);
+    const checked = TherapyNoteV1Schema.safeParse(merged);
+    if (!checked.success)
+      return NextResponse.json(
+        { error: 'The suggested edit is incomplete. Your note has not changed.' },
+        { status: 502 },
+      );
+    validated = checked.data;
     changedFields = diffKeys(currentTherapy!, validated);
+  }
+
+  if (body.value.mode === 'PREVIEW') {
+    // Only narrative changes can be applied through the canonical editor.
+    // Safety/modality fields remain original; outdated derived projections are
+    // removed on explicit apply. Preview has the same lifecycle/version locks.
+    validated = isIntake
+      ? canonicalIntakeEdit(currentIntake!, validated as IntakeNoteV1)
+      : canonicalTreatmentEdit(currentTherapy!, validated as TherapyNoteV1);
+    changedFields = diffKeys(currentNote, validated);
   }
 
   // changedFields was computed above per-kind via diffKeys.
@@ -258,6 +298,7 @@ export async function POST(
       current.updatedAt.getTime() !== session.noteDraft!.updatedAt.getTime()
     )
       return null;
+    if (body.value.mode === 'PREVIEW') return current;
     const updated = await tx.noteDraft.update({
       where: { id: session.noteDraft!.id },
       data: { content: validated as unknown as object },
@@ -290,6 +331,9 @@ export async function POST(
     );
   return NextResponse.json({
     note: validated,
+    ...(body.value.mode === 'PREVIEW'
+      ? { baseUpdatedAt: saved.updatedAt.toISOString(), applied: false }
+      : { applied: true }),
     updatedAt: saved.updatedAt.toISOString(),
     changedFields,
     model: modifyModel,

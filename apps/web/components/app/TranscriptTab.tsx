@@ -121,7 +121,7 @@ export function TranscriptTab({
     return (
       <EmptyState
         title="Transcript needs attention"
-        body="No transcript was saved. Return to Review & Close to check the generation error and recovery options."
+        body="No transcript was saved. Return to Review & finish to check the generation error and recovery options."
         tone="warn"
       />
     );
@@ -135,7 +135,7 @@ export function TranscriptTab({
           body={
             data.transcript
               ? 'Speaker labels were not saved for this session. The words are shown as readable paragraphs; we have not guessed who said what.'
-              : 'No transcript was produced for this session. Return to Review & Close for recovery options.'
+              : 'No transcript was produced for this session. Return to Review & finish for recovery options.'
           }
           rawTranscript={data.transcript ?? undefined}
         />

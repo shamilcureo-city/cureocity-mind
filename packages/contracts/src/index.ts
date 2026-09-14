@@ -73,6 +73,7 @@ export * from './note-review';
 // The Session Loop (SL1) — living formulation + agreements + feedback.
 export * from './formulation';
 export * from './mind-care-record';
+export * from './mind-work-history';
 export * from './mind-session-preparation';
 export * from './session-usage';
 export * from './session-usage-summary';
@@ -82,3 +83,4 @@ export * from './orbit-capability';
 export * from './mind-recovery';
 export * from './note-edit-recovery';
 export * from './mind-manual-note';
+export * from './note-modify';

@@ -2,6 +2,12 @@
 
 This implements a bounded part of MP07, not the complete therapy-delivery system. No release or production migration is performed by this change.
 
+14 September continuation: [recorded-work history](MIND_WORK_HISTORY_2026_09_14.md)
+is now implemented locally as a read-only projection over these existing versions. It groups
+work changes by source visit and keeps earlier wording separate, without adding
+an intervention-event store or changing the current work pointer. The original
+storage scope below remains relevant; the continuation records its own checks.
+
 ## What is reused
 
 The existing encrypted, versioned care-record API stores an optional `sessionWork` section. Recorded and manual-session closeout reuse the same collapsed care-record UI. The psychologist explicitly chooses used/adapted/paused/not-used and writes what happened. Client response may remain blank. Existing agreements/homework remain the one place for agreed next steps.

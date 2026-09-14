@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   MindCareRecordResponseSchema,
   MindCareRecordBodySchema,
@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { Button } from '../ui/Button';
 import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
 import { MIND_WORK_LABELS, formatMindWorkDate } from '@/lib/mind-session-work';
+import { useMindCloseoutTaskStatus } from '@/lib/mind-closeout-task-status';
 
 export const EMPTY_MIND_CARE_RECORD: MindCareRecordBody = {
   version: 'V1',
@@ -60,9 +61,12 @@ const workDraftFor = (work: MindSessionWork | undefined, sessionId?: string): Wo
 export function MindCareRecordPanel({
   clientId: requestedClientId,
   sessionContext: requestedSessionContext,
+  embedded = false,
 }: {
   clientId: string;
   sessionContext?: { sessionId: string; scheduledAt: string };
+  /** The closeout task supplies the disclosure, while this editor stays mounted. */
+  embedded?: boolean;
 }) {
   // Bind every draft, receipt and request to the context in which it was opened. A parent
   // prop change must neither display its text under another client nor silently discard it.
@@ -102,11 +106,24 @@ export function MindCareRecordPanel({
         JSON.stringify(workDraftFor(record?.body.sessionWork, sessionContext.sessionId))
       : JSON.stringify(body) !== JSON.stringify(record?.body ?? EMPTY_MIND_CARE_RECORD));
   const historical = (record?.version ?? 0) !== latestVersion;
+  useMindCloseoutTaskStatus({
+    dirty,
+    busy: busy && editing,
+    needsAttention: !!error || conflict || !contextMatches,
+    uncertain: uncertainSave && !busy,
+  });
   useUnsavedWorkGuard(
     dirty,
     'This care record has unsaved changes. Leave without saving them?',
     busy,
   );
+
+  useEffect(() => {
+    // Embedded closeout owns visibility; this initial read never resets an editor
+    // when the user opens another optional task or a server refresh arrives.
+    if (embedded) void load();
+    // The panel is keyed to its session by its parent; load only on initial embedding.
+  }, [embedded]);
 
   async function load(version?: number) {
     if (!contextMatches || busyRef.current || dirty) return;
@@ -340,32 +357,42 @@ export function MindCareRecordPanel({
 
   return (
     <section
-      className="mt-5 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-5"
+      className={
+        embedded
+          ? ''
+          : 'mt-5 rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface)] p-5'
+      }
       aria-labelledby={`${id}-title`}
     >
-      <button
-        type="button"
-        id={`${id}-title`}
-        aria-expanded={open}
-        aria-controls={`${id}-content`}
-        disabled={dirty || busy}
-        onClick={() => {
-          setOpen(!open);
-          if (!open && !loaded) void load();
-        }}
-        className="flex w-full items-center justify-between gap-4 text-left"
-      >
-        <span className="font-serif text-xl">
-          {sessionContext ? 'Work done & client response' : 'Care agreement & reviews'}
-        </span>
-        <span className="text-sm text-[var(--color-accent)]">{open ? 'Close' : 'Open'}</span>
-      </button>
+      {embedded ? (
+        <h4 id={`${id}-title`} className="text-sm font-semibold">
+          Record this session’s work
+        </h4>
+      ) : (
+        <button
+          type="button"
+          id={`${id}-title`}
+          aria-expanded={open}
+          aria-controls={`${id}-content`}
+          disabled={dirty || busy}
+          onClick={() => {
+            setOpen(!open);
+            if (!open && !loaded) void load();
+          }}
+          className="flex w-full items-center justify-between gap-4 text-left"
+        >
+          <span className="font-serif text-xl">
+            {sessionContext ? 'Work done & client response' : 'Care agreement & reviews'}
+          </span>
+          <span className="text-sm text-[var(--color-accent)]">{open ? 'Close' : 'Open'}</span>
+        </button>
+      )}
       <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--color-ink-2)]">
         {sessionContext
           ? 'Record only what actually happened. Reading or selecting a guide does not record delivered work. Saving here does not change your clinical note or create homework.'
           : 'What you and the client discussed, how the work is helping, and what happens next. A living clinical record, separate from recording permissions.'}
       </p>
-      {open && (
+      {(embedded || open) && (
         <div id={`${id}-content`} className="mt-5 space-y-6">
           {busy && (
             <p role="status">{editing ? 'Saving your care record…' : 'Loading the care record…'}</p>

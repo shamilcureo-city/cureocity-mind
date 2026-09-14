@@ -352,7 +352,7 @@ export default async function TodayPage() {
               journey.state === 'NEEDS_ATTENTION'
                 ? 'Resume generation'
                 : journey.state === 'READY_TO_REVIEW'
-                  ? 'Review & Close'
+                  ? 'Review & finish'
                   : 'View progress',
           };
         }),

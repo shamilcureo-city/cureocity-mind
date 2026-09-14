@@ -6,6 +6,7 @@ import { ExerciseAssignmentSchema } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { ShareModal } from './ShareModal';
 import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
+import { useMindCloseoutTaskStatus } from '@/lib/mind-closeout-task-status';
 
 /** An explicit, reviewed conversion. Creating homework never sends it or changes the agreement. */
 export function AgreementHomework({
@@ -41,6 +42,7 @@ export function AgreementHomework({
     (a) => a.sourceAgreementRevision !== (agreement.revision ?? 0),
   );
   const changed = sourceRevision !== (agreement.revision ?? 0);
+  useMindCloseoutTaskStatus({ dirty: open, busy, needsAttention: !!error || (open && changed) });
 
   async function create() {
     if (!agreement.clientId || busyRef.current || changed) return;

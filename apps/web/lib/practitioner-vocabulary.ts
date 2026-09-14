@@ -5,7 +5,7 @@ export interface PractitionerVocabulary {
   work: 'Sessions' | 'Encounters';
   home: 'Today' | 'Clinic';
   start: 'Start session' | 'Start encounter';
-  completion: 'Review & Close' | 'Review & Sign';
+  completion: 'Review & finish' | 'Review & Sign';
 }
 
 const MIND_VOCABULARY: PractitionerVocabulary = {
@@ -13,7 +13,7 @@ const MIND_VOCABULARY: PractitionerVocabulary = {
   work: 'Sessions',
   home: 'Today',
   start: 'Start session',
-  completion: 'Review & Close',
+  completion: 'Review & finish',
 };
 
 const SCRIBE_VOCABULARY: PractitionerVocabulary = {

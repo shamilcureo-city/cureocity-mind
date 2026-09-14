@@ -45,7 +45,7 @@ describe('Mind Review & Close architecture', () => {
     expect(notes).not.toContain('Session closed');
     expect(today).toContain('noteProcessingJourney(session.noteDraft!.status)');
     expect(today).toContain("'Resume generation'");
-    expect(today).toContain("'Review & Close'");
+    expect(today).toContain("'Review & finish'");
   });
 
   it('refreshes the authoritative server checklist after signing', () => {
