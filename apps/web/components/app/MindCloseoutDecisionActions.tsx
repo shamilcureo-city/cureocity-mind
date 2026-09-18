@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import type { MindSessionCloseout } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
@@ -19,6 +19,7 @@ import {
 } from '../../lib/mind-closeout-task-status';
 
 type Task = 'work' | 'agreements' | 'appointment' | 'support' | 'decisions';
+type TaskGroup = 'clinical' | 'next' | 'records';
 interface Props {
   sessionId: string;
   steps: MindSessionCloseout['steps'];
@@ -39,6 +40,12 @@ const labels: Record<DecisionStep, string> = {
   agreements: 'Agreements or homework',
   nextSessionQuestions: 'Next-session questions',
   shared: 'Client sharing',
+};
+
+const groupLabels: Record<TaskGroup, string> = {
+  clinical: 'Clinical support',
+  next: 'Next session',
+  records: 'Decision history',
 };
 
 /** One optional task at a time. Hiding a task never unmounts its loaded editor. */
@@ -125,14 +132,21 @@ export function MindCloseoutDecisionActions({
     }
   }
 
-  const tasks: { key: Task; title: string; description: string; content: ReactNode }[] = [
-    ...(canRecordWork && work
+  const tasks: {
+    key: Task;
+    group: TaskGroup;
+    title: string;
+    description: string;
+    content: ReactNode;
+  }[] = [
+    ...(canReviewClinical && clinicalReview
       ? [
           {
-            key: 'work' as const,
-            title: 'Work done & client response',
-            description: 'Record what happened, in your own words.',
-            content: work,
+            key: 'support' as const,
+            group: 'clinical' as const,
+            title: 'Session support',
+            description: 'Diagnostic evidence and next-session questions.',
+            content: null,
           },
         ]
       : []),
@@ -140,6 +154,7 @@ export function MindCloseoutDecisionActions({
       ? [
           {
             key: 'agreements' as const,
+            group: 'next' as const,
             title: 'Agreements or homework',
             description: agreementCount
               ? `${agreementCount} ${agreementCount === 1 ? 'agreement saved' : 'agreements saved'}. Review or add an agreed step.`
@@ -152,6 +167,7 @@ export function MindCloseoutDecisionActions({
       ? [
           {
             key: 'appointment' as const,
+            group: 'next' as const,
             title: 'The next appointment',
             description: appointmentScheduled
               ? 'A follow-up appointment is scheduled.'
@@ -160,13 +176,14 @@ export function MindCloseoutDecisionActions({
           },
         ]
       : []),
-    ...(canReviewClinical && clinicalReview
+    ...(canRecordWork && work
       ? [
           {
-            key: 'support' as const,
-            title: 'Session support',
-            description: 'Evidence, diagnostic suggestions and next-session questions.',
-            content: null,
+            key: 'work' as const,
+            group: 'next' as const,
+            title: 'Work done & client response',
+            description: 'Record what happened, in your own words.',
+            content: work,
           },
         ]
       : []),
@@ -174,6 +191,7 @@ export function MindCloseoutDecisionActions({
       ? [
           {
             key: 'decisions' as const,
+            group: 'records' as const,
             title: 'Optional decision records',
             description: 'Record a review or an explicit “not needed” decision, if useful.',
             content: null,
@@ -185,137 +203,144 @@ export function MindCloseoutDecisionActions({
   return (
     <div className="print:hidden">
       <p className={styles.intro}>
-        Open one task at a time. Switching tasks keeps entries in this open page; save each task
-        before leaving. Saving one does not save the others or send anything to the client.
+        Choose only what is useful for this session. Open one group at a time and save it before
+        leaving; saving one group does not save the others or send anything to the client.
       </p>
       <div className={styles.tasks}>
-        {tasks.map((task) => {
+        {tasks.map((task, index) => {
           const status = summarizeMindCloseoutTaskStatus(taskStates[task.key]);
           return (
-            <section
-              key={task.key}
-              className={styles.task}
-              id={task.key === 'support' ? 'session-support' : undefined}
-            >
-              <h3>
-                <button
-                  type="button"
-                  id={`${id}-${task.key}-trigger`}
-                  className={styles.trigger}
-                  aria-expanded={activeTask === task.key}
-                  aria-controls={`${id}-${task.key}`}
-                  onClick={() => toggle(task.key)}
-                >
-                  <span>
-                    <strong>{task.title}</strong>
-                    <small>{task.description}</small>
-                    {(status.busy || status.uncertain || status.needsAttention || status.dirty) && (
-                      <small className={styles.taskStatus}>
-                        {status.busy
-                          ? 'Saving…'
-                          : status.uncertain
-                            ? 'Save not confirmed'
-                            : status.needsAttention
-                              ? 'Needs attention'
-                              : 'Unsaved changes'}
-                      </small>
+            <Fragment key={task.key}>
+              {(index === 0 || tasks[index - 1]?.group !== task.group) && (
+                <p className={styles.groupLabel}>{groupLabels[task.group]}</p>
+              )}
+              <section
+                className={styles.task}
+                id={task.key === 'support' ? 'session-support' : undefined}
+              >
+                <h3>
+                  <button
+                    type="button"
+                    id={`${id}-${task.key}-trigger`}
+                    className={styles.trigger}
+                    aria-expanded={activeTask === task.key}
+                    aria-controls={`${id}-${task.key}`}
+                    onClick={() => toggle(task.key)}
+                  >
+                    <span>
+                      <strong>{task.title}</strong>
+                      <small>{task.description}</small>
+                      {(status.busy ||
+                        status.uncertain ||
+                        status.needsAttention ||
+                        status.dirty) && (
+                        <small className={styles.taskStatus}>
+                          {status.busy
+                            ? 'Saving…'
+                            : status.uncertain
+                              ? 'Save not confirmed'
+                              : status.needsAttention
+                                ? 'Needs attention'
+                                : 'Unsaved changes'}
+                        </small>
+                      )}
+                    </span>
+                    <span className={styles.indicator} aria-hidden="true">
+                      {activeTask === task.key ? '−' : '+'}
+                    </span>
+                  </button>
+                </h3>
+                {task.key === 'support' ? (
+                  <section
+                    id={`${id}-${task.key}`}
+                    hidden={!reviewOpen}
+                    className={styles.body}
+                    aria-labelledby={`${id}-${task.key}-trigger`}
+                  >
+                    {reviewLoaded && (
+                      <>
+                        <p className={styles.intro}>
+                          Review only what is useful; opening this panel does not mark it reviewed.
+                          A diagnosis, questionnaire or new plan is not required to finish a
+                          counselling session.
+                        </p>
+                        {clinicalReview}
+                      </>
                     )}
-                  </span>
-                  <span className={styles.indicator} aria-hidden="true">
-                    {activeTask === task.key ? '−' : '+'}
-                  </span>
-                </button>
-              </h3>
-              {task.key === 'support' ? (
-                <section
-                  id={`${id}-${task.key}`}
-                  hidden={!reviewOpen}
-                  className={styles.body}
-                  aria-labelledby={`${id}-${task.key}-trigger`}
-                >
-                  {reviewLoaded && (
-                    <>
-                      <p className={styles.intro}>
-                        Review only what is useful; opening this panel does not mark it reviewed. A
-                        diagnosis, questionnaire or new plan is not required to finish a counselling
-                        session.
-                      </p>
-                      {clinicalReview}
-                    </>
-                  )}
-                </section>
-              ) : (
-                <section
-                  id={`${id}-${task.key}`}
-                  hidden={activeTask !== task.key}
-                  className={styles.body}
-                  aria-labelledby={`${id}-${task.key}-trigger`}
-                >
-                  {task.key === 'decisions' ? (
-                    <>
-                      <p className={styles.intro}>
-                        Untouched options remain undecided. You do not need to record “not needed”
-                        to finish your note. Skipping sharing does not revoke a link.
-                      </p>
-                      {(Object.keys(labels) as DecisionStep[])
-                        .filter((step) => canShare || step !== 'shared')
-                        .map((step) => {
-                          // Saved agreements, selected questions and actual sharing are evidence,
-                          // not toggle decisions. A later server receipt outranks a prior local skip.
-                          const outcome =
-                            step !== 'clinicalSuggestions' && steps[step] === 'COMPLETE'
-                              ? 'COMPLETE'
-                              : (confirmed[step] ?? steps[step]);
-                          return (
-                            <div
-                              key={step}
-                              className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-line-soft)] py-3 text-sm"
-                            >
-                              <p>
-                                {labels[step]} ·{' '}
-                                {outcome === 'PENDING'
-                                  ? 'No decision recorded'
-                                  : outcome === 'SKIPPED'
-                                    ? 'Not needed this session'
-                                    : 'Recorded'}
-                              </p>
-                              <div className="flex flex-wrap gap-2">
-                                {step === 'clinicalSuggestions' && outcome !== 'COMPLETE' && (
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    disabled={savingStep !== null}
-                                    onClick={() => void decide(step, 'COMPLETE')}
-                                  >
-                                    Record as reviewed
-                                  </Button>
-                                )}
-                                {outcome !== 'SKIPPED' &&
-                                  (outcome !== 'COMPLETE' || step === 'clinicalSuggestions') && (
+                  </section>
+                ) : (
+                  <section
+                    id={`${id}-${task.key}`}
+                    hidden={activeTask !== task.key}
+                    className={styles.body}
+                    aria-labelledby={`${id}-${task.key}-trigger`}
+                  >
+                    {task.key === 'decisions' ? (
+                      <>
+                        <p className={styles.intro}>
+                          Untouched options remain undecided. You do not need to record “not needed”
+                          to finish your note. Skipping sharing does not revoke a link.
+                        </p>
+                        {(Object.keys(labels) as DecisionStep[])
+                          .filter((step) => canShare || step !== 'shared')
+                          .map((step) => {
+                            // Saved agreements, selected questions and actual sharing are evidence,
+                            // not toggle decisions. A later server receipt outranks a prior local skip.
+                            const outcome =
+                              step !== 'clinicalSuggestions' && steps[step] === 'COMPLETE'
+                                ? 'COMPLETE'
+                                : (confirmed[step] ?? steps[step]);
+                            return (
+                              <div
+                                key={step}
+                                className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-line-soft)] py-3 text-sm"
+                              >
+                                <p>
+                                  {labels[step]} ·{' '}
+                                  {outcome === 'PENDING'
+                                    ? 'No decision recorded'
+                                    : outcome === 'SKIPPED'
+                                      ? 'Not needed this session'
+                                      : 'Recorded'}
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {step === 'clinicalSuggestions' && outcome !== 'COMPLETE' && (
                                     <Button
                                       variant="secondary"
                                       size="sm"
                                       disabled={savingStep !== null}
-                                      onClick={() => void decide(step, 'SKIPPED')}
+                                      onClick={() => void decide(step, 'COMPLETE')}
                                     >
-                                      {step === 'shared'
-                                        ? 'Record no sharing'
-                                        : 'Record not needed'}
+                                      Record as reviewed
                                     </Button>
                                   )}
+                                  {outcome !== 'SKIPPED' &&
+                                    (outcome !== 'COMPLETE' || step === 'clinicalSuggestions') && (
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={savingStep !== null}
+                                        onClick={() => void decide(step, 'SKIPPED')}
+                                      >
+                                        {step === 'shared'
+                                          ? 'Record no sharing'
+                                          : 'Record not needed'}
+                                      </Button>
+                                    )}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
-                    </>
-                  ) : (
-                    <MindCloseoutTaskBoundary task={task.key} onStatusChange={reportTaskStatus}>
-                      {task.content}
-                    </MindCloseoutTaskBoundary>
-                  )}
-                </section>
-              )}
-            </section>
+                            );
+                          })}
+                      </>
+                    ) : (
+                      <MindCloseoutTaskBoundary task={task.key} onStatusChange={reportTaskStatus}>
+                        {task.content}
+                      </MindCloseoutTaskBoundary>
+                    )}
+                  </section>
+                )}
+              </section>
+            </Fragment>
           );
         })}
       </div>

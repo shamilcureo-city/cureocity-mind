@@ -3,6 +3,17 @@
   border-top: 1px solid var(--color-line-soft);
 }
 
+.groupLabel {
+  margin: 1.15rem 0 0;
+  color: var(--color-ink-3);
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.groupLabel:first-child {
+  margin-top: 0.85rem;
+}
+
 .task {
   border-bottom: 1px solid var(--color-line-soft);
 }

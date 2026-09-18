@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { mindSessionPhaseForStatus } from '../components/app/MindSessionPhaseRail';
 
 const root = join(import.meta.dirname, '..');
 const read = (path: string) => readFileSync(join(root, path), 'utf8');
@@ -16,6 +17,9 @@ describe('Mind session workspace v2', () => {
     expect(tabs).not.toContain("label: 'Client'");
     expect(tabs).not.toContain("label: 'Clinical context'");
     expect(tabs.match(/key: '/g)).toHaveLength(3);
+    expect(tabs).toContain('Sources & details');
+    expect(tabs).toContain('Conversation evidence and session mindmap');
+    expect(tabs).toContain('aria-label={`${tab.label}. ${description}`}');
   });
 
   it('keeps Review & Close as the sole note signing ceremony', () => {
@@ -26,8 +30,35 @@ describe('Mind session workspace v2', () => {
     expect(page).toContain("tab === 'note'");
     expect(page).toContain('showSubTabs={false}');
     expect(page).toContain('<MindSessionCloseout');
-    expect(closeout).toContain('Review &amp; finish');
+    expect(closeout).toContain('Review the clinical note');
+    expect(closeout).toContain('Before you finish');
     expect(copilot).not.toContain('<NoteSignPanel');
+  });
+
+  it('uses one passive phase rail and keeps preparation out of the primary review surface', () => {
+    const page = read('app/app/sessions/[id]/page.tsx');
+    const rail = read('components/app/MindSessionPhaseRail.tsx');
+    const toolbar = read('components/app/NoteToolbar.tsx');
+    const notes = read('components/app/NotesTab.tsx');
+
+    expect(page).toContain('<MindSessionPhaseRail');
+    expect(rail).toContain('aria-current={current');
+    expect(rail).toContain('Session state continues to come from the server');
+    expect(page.indexOf("tab === 'details'")).toBeLessThan(
+      page.lastIndexOf('<SessionPreparationPanel'),
+    );
+    expect(page).toContain("session.status !== 'COMPLETED'");
+    expect(page).toContain("session.status === 'COMPLETED'");
+    expect(toolbar).toContain('showClinicalReview');
+    expect(notes.match(/showClinicalReview={!focusedReview}/g)).toHaveLength(4);
+    expect(mindSessionPhaseForStatus('SCHEDULED')).toBe('prepare');
+    expect(mindSessionPhaseForStatus('IN_PROGRESS')).toBe('session');
+    expect(mindSessionPhaseForStatus('COMPLETED')).toBe('review');
+    expect(mindSessionPhaseForStatus('CANCELLED')).toBeNull();
+    expect(rail).toContain('Completed:');
+    expect(read('components/app/MindSessionReview.module.css')).toMatch(
+      /@media print {[\s\S]*\.optionalSteps/,
+    );
   });
 
   it('redirects old longitudinal bookmarks to client-owned routes', () => {

@@ -24,11 +24,17 @@ vi.mock('../components/app/ShareReceiptList', () => ({
 beforeAll(() => vi.stubGlobal('React', React));
 afterAll(() => vi.unstubAllGlobals());
 
-const renderCloseout = (signed: boolean, initialReviewOpen = false, canReviewClinical = true) =>
+const renderCloseout = (
+  signed: boolean,
+  initialReviewOpen = false,
+  canReviewClinical = true,
+  draftStatus: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | null = 'COMPLETED',
+  hasSignedNote = signed,
+) =>
   renderToStaticMarkup(
     React.createElement(MindSessionCloseout, {
       sessionId: 'fictional-session',
-      closeout: deriveMindSessionCloseout({ draftStatus: 'COMPLETED', noteSigned: signed }),
+      closeout: deriveMindSessionCloseout({ draftStatus, noteSigned: signed }),
       client: { id: 'fictional-client', fullName: 'Fictional client', preferredModality: null },
       sessionAt: new Date('2026-09-09T09:00:00Z'),
       sessionCompleted: true,
@@ -36,6 +42,7 @@ const renderCloseout = (signed: boolean, initialReviewOpen = false, canReviewCli
       receipts: [],
       canReviewClinical,
       initialReviewOpen,
+      hasSignedNote,
       clinicalReview: React.createElement('div', null, 'ONE CLINICAL SUPPORT SURFACE'),
       children: React.createElement('article', null, 'PRIMARY NOTE'),
     }),
@@ -62,10 +69,15 @@ describe('Mind note-first review and honest trust messages', () => {
   it('shows the note first, does not mount optional clinical support by default, and keeps one agreement editor', () => {
     const html = renderCloseout(false);
     expect(html.indexOf('PRIMARY NOTE')).toBeLessThan(html.indexOf('id="session-support"'));
+    expect(html.indexOf('PRIMARY NOTE')).toBeLessThan(html.indexOf('Before you finish'));
     expect(html).not.toContain('ONE CLINICAL SUPPORT SURFACE');
     expect(html.match(/CANONICAL AGREEMENTS/g)).toHaveLength(1);
-    expect(html).toContain('There is no checklist to complete here');
-    expect(html).toContain('Leaving an option untouched does not record a clinical decision');
+    expect(html).toContain('The note is the only required review');
+    expect(html).toContain('Review any safety alert shown with the note before signing');
+    expect(html).toContain('Diagnostic evidence and questions');
+    expect(html).not.toContain('Safety, diagnosis and questions');
+    expect(html).toContain('Leaving an option untouched records no clinical decision');
+    expect(html).not.toContain('type="checkbox"');
   });
   it('opens the legacy deep-link support once without implicitly reviewing anything', () => {
     const html = renderCloseout(false, true);
@@ -81,11 +93,32 @@ describe('Mind note-first review and honest trust messages', () => {
   });
   it('lets signed-note users return to Today while all optional decisions remain undecided', () => {
     const html = renderCloseout(true);
-    expect(html).toContain('Note signed');
+    expect(html).toContain('Signed clinical record');
     expect(html).toContain('No decision recorded');
     expect(html).toContain('Return to Today');
     expect(html).not.toContain('Ready for the next chapter');
     expect(html).not.toContain('your next-step decisions are saved');
+  });
+  it('reports generating, failed, and reopened notes without claiming a new draft is ready', () => {
+    const generating = renderCloseout(false, false, true, 'IN_PROGRESS');
+    expect(generating).toContain('The note is still being prepared');
+    expect(generating).toContain('Preparing');
+    expect(generating).not.toContain('This draft was prepared');
+
+    const failed = renderCloseout(false, false, true, 'FAILED');
+    expect(failed).toContain('The note could not be prepared');
+    expect(failed).toContain('Needs attention');
+    expect(failed).not.toContain('This draft was prepared');
+
+    const reopened = renderCloseout(false, false, true, 'COMPLETED', true);
+    expect(reopened).toContain('previously signed note is open for correction');
+    expect(reopened).toContain('Re-lock');
+  });
+  it('uses the canonical deep link so clinical support opens when selected from the rail', () => {
+    const html = renderCloseout(false);
+    expect(html).toContain(
+      '/app/sessions/fictional-session?tab=note&amp;support=clinical#session-support',
+    );
   });
   it('keeps saved-draft exits behind actual write/recovery state and preserves the agreement unsaved guard', () => {
     const notes = readFileSync(join(import.meta.dirname, '../components/app/NotesTab.tsx'), 'utf8');
