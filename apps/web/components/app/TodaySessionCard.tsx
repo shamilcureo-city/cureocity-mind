@@ -91,7 +91,7 @@ export function TodaySessionCard({
         sessionId: session.id,
         captureMode: 'LIVE',
       }),
-      primaryLabel: 'Start session',
+      primaryLabel: 'Prepare & start',
       menuLabel: 'Live scribe',
       menuDesc: 'Transcript, note and copilot build as you talk.',
     },
@@ -102,7 +102,7 @@ export function TodaySessionCard({
         sessionId: session.id,
         captureMode: 'BATCH',
       }),
-      primaryLabel: 'Start recording',
+      primaryLabel: 'Prepare & start',
       menuLabel: 'Record only',
       menuDesc: 'Just records — the note generates when you finish.',
     },
@@ -110,6 +110,20 @@ export function TodaySessionCard({
   const primaryStart = startOptions[defaultCapture];
   const secondaryStart = startOptions[defaultCapture === 'LIVE' ? 'BATCH' : 'LIVE'];
   const resumeHref = mindSessionDestination(session, defaultCapture);
+  const startBlocked =
+    session.status === 'SCHEDULED' &&
+    sessionPreparationEnabled &&
+    (preparationPending || preparationDirty);
+  const startStatusId = `session-${session.id}-prepare-start-status`;
+  const startBlockedMessage = !startBlocked
+    ? null
+    : preparationPending
+      ? 'Saving preparation… You can continue when it finishes.'
+      : 'Save or discard your preparation edits before you continue.';
+
+  useEffect(() => {
+    if (startBlocked) setStartMenuOpen(false);
+  }, [startBlocked]);
 
   async function markNoShow() {
     if (busy || preparationPending || preparationDirty) return;
@@ -256,23 +270,45 @@ export function TodaySessionCard({
           ) : (
             <div className="relative mt-4">
               <div className="flex items-stretch">
-                <Link
-                  href={primaryStart.href}
-                  className="flex-1 rounded-l-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-                >
-                  {primaryStart.primaryLabel}
-                </Link>
+                {startBlocked ? (
+                  <button
+                    type="button"
+                    disabled
+                    aria-describedby={startStatusId}
+                    className="flex-1 cursor-not-allowed rounded-l-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white opacity-45"
+                  >
+                    {primaryStart.primaryLabel}
+                  </button>
+                ) : (
+                  <Link
+                    href={primaryStart.href}
+                    className="flex-1 rounded-l-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+                  >
+                    {primaryStart.primaryLabel}
+                  </Link>
+                )}
                 <button
                   type="button"
                   aria-label="More ways to start"
-                  aria-expanded={startMenuOpen}
+                  aria-expanded={!startBlocked && startMenuOpen}
+                  aria-describedby={startBlocked ? startStatusId : undefined}
+                  disabled={startBlocked}
                   onClick={() => setStartMenuOpen((o) => !o)}
-                  className="rounded-r-full border-l border-white/25 bg-[var(--color-accent)] px-4 text-base font-medium text-white hover:bg-[var(--color-accent-hover)]"
+                  className="rounded-r-full border-l border-white/25 bg-[var(--color-accent)] px-4 text-base font-medium text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   ▾
                 </button>
               </div>
-              {startMenuOpen && (
+              {startBlockedMessage && (
+                <p
+                  id={startStatusId}
+                  className="mt-2 text-center text-xs leading-relaxed text-[var(--color-ink-3)]"
+                  role="status"
+                >
+                  {startBlockedMessage}
+                </p>
+              )}
+              {startMenuOpen && !startBlocked && (
                 <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-xl border border-[var(--color-line)] bg-white shadow-lg">
                   <Link
                     href={secondaryStart.href}
@@ -345,11 +381,6 @@ export function TodaySessionCard({
                 onDirtyChange={setPreparationDirty}
               />
             )}
-            {sessionPreparationEnabled && preparationDirty && (
-              <p className="mt-2 text-xs text-[var(--color-ink-3)]" role="status">
-                Save or discard your preparation edits before rescheduling or marking a no-show.
-              </p>
-            )}
           </div>
         </Card>
         <RescheduleModal
@@ -403,7 +434,7 @@ export function TodaySessionCard({
                 href={primaryStart.href}
                 className="rounded-full bg-[var(--color-accent)] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[var(--color-accent-hover)]"
               >
-                Start
+                Prepare &amp; start
               </Link>
               <button
                 type="button"

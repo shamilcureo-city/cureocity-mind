@@ -25,7 +25,7 @@ export function MindSessionReviewHeader({
   return (
     <header className={styles.header}>
       <div>
-        <h1>{clientName}</h1>
+        <h1>{ended ? `Review session with ${clientName}` : `Session with ${clientName}`}</h1>
         <div className={styles.metadata}>
           <span>{sessionDate}</span>
           <span>{mindSessionPurposeLabel(mindPurpose, sessionKind)}</span>

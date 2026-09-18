@@ -13,6 +13,10 @@ import { SessionUsagePanel } from '@/components/app/SessionUsagePanel';
 import { isSessionUsageEnabled } from '@/lib/session-usage-feature';
 import { MindSessionCloseout } from '@/components/app/MindSessionCloseout';
 import { MindSessionReviewHeader } from '@/components/app/MindSessionReviewHeader';
+import {
+  MindSessionPhaseRail,
+  mindSessionPhaseForStatus,
+} from '@/components/app/MindSessionPhaseRail';
 import { selectedQuestionsForSession } from '@/components/app/MindSessionCloseoutEvidence';
 import styles from '@/components/app/MindSessionReview.module.css';
 import { SessionInfoTab } from '@/components/app/SessionInfoTab';
@@ -155,6 +159,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
   }
 
   const sessionKind: SessionKind = session.kind;
+  const sessionPhase = mindSessionPhaseForStatus(session.status);
 
   // Sprint 73 — case thread: where this document sits in the client's
   // arc + what carried over. Defensive: a compose failure must never
@@ -179,6 +184,12 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         {caseThread && <CaseThreadNav position={caseThread.position} />}
       </div>
 
+      {sessionPhase && (
+        <div className="mt-5 print:hidden">
+          <MindSessionPhaseRail active={sessionPhase} />
+        </div>
+      )}
+
       <MindSessionReviewHeader
         clientName={pii.fullName}
         sessionDate={formatIstDateTime(session.scheduledAt)}
@@ -190,7 +201,7 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
       />
 
       <div className="print:hidden">
-        {isMindSessionPreparationEnabled() && (
+        {isMindSessionPreparationEnabled() && session.status !== 'COMPLETED' && (
           <SessionPreparationPanel
             sessionId={id}
             clientId={session.clientId}
@@ -237,6 +248,19 @@ export default async function SessionPage({ params, searchParams }: PageProps) {
         )}
         {tab === 'details' && (
           <div className="space-y-6">
+            {isMindSessionPreparationEnabled() && session.status === 'COMPLETED' && (
+              <details className={styles.disclosure}>
+                <summary>Session preparation</summary>
+                <div className={styles.disclosureBody}>
+                  <SessionPreparationPanel
+                    sessionId={id}
+                    clientId={session.clientId}
+                    clientName={pii.fullName}
+                    readOnly
+                  />
+                </div>
+              </details>
+            )}
             {isSessionUsageEnabled() && <SessionUsagePanel key={id} sessionId={id} />}
             <SessionInfoTabPanel sessionId={id} />
           </div>

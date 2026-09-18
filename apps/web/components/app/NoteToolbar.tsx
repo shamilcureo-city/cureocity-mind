@@ -19,6 +19,10 @@ interface Props {
   /** Opens the Share flow. When present on an unsigned note the handler
    *  signs first, then shares (so the report is finalised before it goes out). */
   onShare?: () => void;
+  /** Focused review exposes clinical support in the finish rail instead. */
+  showClinicalReview?: boolean;
+  /** Override the signed-note PDF destination. Pass null in closed previews. */
+  pdfHref?: string | null;
   /** The BASE (template) + language + Detailed controls, rendered on the left.
    *  The note language now lives in that language control, not a flag here. */
   leftControls?: ReactNode;
@@ -27,12 +31,12 @@ interface Props {
 const FOCUS_RING =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2';
 
-const ICON_BTN = `grid h-9 w-9 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)] transition-colors hover:border-[var(--color-ink-3)] hover:text-[var(--color-ink)] ${FOCUS_RING}`;
+const ICON_BTN = `grid h-11 w-11 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)] transition-colors hover:border-[var(--color-ink-3)] hover:text-[var(--color-ink)] ${FOCUS_RING}`;
 
 // A non-interactive status chip (lock/unlock). Same footprint as ICON_BTN but
 // without hover/focus affordances — it reports state, it isn't a control.
 const STATUS_CHIP =
-  'grid h-9 w-9 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)]';
+  'grid h-11 w-11 place-items-center rounded-full border border-[var(--color-line)] bg-white text-[var(--color-ink-2)]';
 
 export function NoteToolbar({
   sessionId,
@@ -41,8 +45,12 @@ export function NoteToolbar({
   signed,
   onShare,
   leftControls,
+  showClinicalReview = true,
+  pdfHref,
 }: Props) {
   const [copied, setCopied] = useState(false);
+  const resolvedPdfHref =
+    pdfHref === undefined ? `/api/v1/sessions/${sessionId}/note/pdf` : pdfHref;
 
   async function copy(): Promise<void> {
     const ok = await copyText(noteText);
@@ -56,15 +64,17 @@ export function NoteToolbar({
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-2">{leftControls}</div>
 
-      <div className="flex items-center gap-1.5">
-        <Link
-          href={`/app/sessions/${sessionId}?tab=review`}
-          className={ICON_BTN}
-          title="Review diagnosis"
-          aria-label="Review diagnosis"
-        >
-          <Icon kind="review" />
-        </Link>
+      <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
+        {showClinicalReview && (
+          <Link
+            href={`/app/sessions/${sessionId}?tab=review`}
+            className={ICON_BTN}
+            title="Review clinical support"
+            aria-label="Review clinical support"
+          >
+            <Icon kind="review" />
+          </Link>
+        )}
 
         <button
           type="button"
@@ -76,9 +86,9 @@ export function NoteToolbar({
           <Icon kind={copied ? 'check' : 'copy'} />
         </button>
 
-        {signed && (
+        {signed && resolvedPdfHref && (
           <a
-            href={`/api/v1/sessions/${sessionId}/note/pdf`}
+            href={resolvedPdfHref}
             download
             className={ICON_BTN}
             title="Download PDF"
@@ -101,7 +111,7 @@ export function NoteToolbar({
           <button
             type="button"
             onClick={onShare}
-            className={`grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)] ${FOCUS_RING}`}
+            className={`grid h-11 w-11 place-items-center rounded-full bg-[var(--color-accent)] text-white transition-colors hover:bg-[var(--color-accent-hover)] ${FOCUS_RING}`}
             title={signed ? 'Share with patient' : 'Sign & share with patient'}
             aria-label={signed ? 'Share with patient' : 'Sign and share with patient'}
           >
@@ -112,7 +122,7 @@ export function NoteToolbar({
         <span
           aria-hidden
           title={clientName}
-          className="ml-1 grid h-9 w-9 place-items-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)]"
+          className="ml-1 hidden h-11 w-11 place-items-center rounded-full bg-[var(--color-accent-soft)] text-xs font-semibold text-[var(--color-accent)] sm:grid"
         >
           {initials(clientName)}
         </span>

@@ -14,6 +14,7 @@ interface Props {
   active?: TabKey;
   sessionKind?: SessionKind;
   canReviewClinical?: boolean;
+  hrefBase?: string;
 }
 
 const TABS: TabSpec[] = [
@@ -27,23 +28,53 @@ export function SessionWorkspaceTabs({
   sessionId,
   active = 'note',
   canReviewClinical = true,
+  hrefBase,
 }: Props) {
+  const sessionHref = hrefBase ?? `/app/sessions/${sessionId}`;
+  const sourceTabs = TABS.filter((tab) => tab.key !== 'note');
+  const sourceActive = active === 'transcript' || active === 'details';
+  const sourceLabel = sourceTabs.find((tab) => tab.key === active)?.label ?? 'Sources & details';
+
   return (
     <nav className={styles.tabs} aria-label="Session sections">
-      {TABS.filter((tab) => canReviewClinical || tab.key !== 'review').map((tab) => {
-        const activeTab = tab.key === active;
-        const href = `/app/sessions/${sessionId}?tab=${tab.key}`;
-        return (
-          <Link
-            key={tab.key}
-            href={href}
-            className={styles.tab}
-            aria-current={activeTab ? 'page' : undefined}
-          >
-            {tab.label}
-          </Link>
-        );
-      })}
+      <Link
+        href={`${sessionHref}?tab=note`}
+        className={styles.tab}
+        aria-current={active === 'note' ? 'page' : undefined}
+      >
+        Review &amp; finish
+      </Link>
+      <details className={styles.sourceMenu}>
+        <summary
+          className={styles.tab}
+          aria-label={sourceActive ? `${sourceLabel}, current section` : 'Open sources and details'}
+        >
+          <span>{sourceLabel}</span>
+          <span aria-hidden="true">⌄</span>
+        </summary>
+        <div className={styles.sourceMenuPanel}>
+          {sourceTabs
+            .filter((tab) => canReviewClinical || tab.key !== 'review')
+            .map((tab) => {
+              const description =
+                tab.key === 'transcript'
+                  ? 'Conversation evidence and session mindmap'
+                  : 'Preparation, processing and session information';
+              return (
+                <Link
+                  key={tab.key}
+                  href={`${sessionHref}?tab=${tab.key}`}
+                  className={styles.sourceMenuLink}
+                  aria-label={`${tab.label}. ${description}`}
+                  aria-current={tab.key === active ? 'page' : undefined}
+                >
+                  <span>{tab.label}</span>
+                  <small>{description}</small>
+                </Link>
+              );
+            })}
+        </div>
+      </details>
     </nav>
   );
 }

@@ -38,16 +38,23 @@ describe('fictional review preview boundary', () => {
     expect(PreviewPage().type).toBe(Fixture);
     expect(metadata.robots).toEqual({ index: false, follow: false });
   });
-  it('uses a closed transport and never mounts clinical or sharing actions', () => {
+  it('uses the production review shell with a closed fictional transport', () => {
     const source = readFileSync(
       new URL('../app/dev/mind-review/MindReviewPreview.tsx', import.meta.url),
       'utf8',
     );
     expect(source).toContain('transport={transport}');
+    expect(source).toContain('<MindSessionPhaseRail active="review" />');
+    expect(source).toContain('<MindSessionReviewHeader');
+    expect(source).toContain('<SessionWorkspaceTabs');
+    expect(source).toContain('<MindSessionCloseout');
+    expect(source).toContain('decisionActions={');
     expect(source).not.toMatch(/\bfetch\s*\(/);
     expect(source).toContain('canShare={false}');
     expect(source).toContain('canReviewClinical={false}');
     expect(source).toContain('canRecordWork={false}');
+    expect(source).toContain('pdfHref={null}');
+    expect(source).toContain('dirty: text !== savedAgreement');
     expect(source).not.toMatch(/getUserMedia|localStorage|sessionStorage/);
   });
 });

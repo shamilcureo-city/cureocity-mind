@@ -27,7 +27,8 @@ import { UpgradeModal } from './UpgradeModal';
 import { isDisplayCaptureSupported, type CaptureSource } from '@/lib/audio/use-session-recorder';
 import { MindSessionPreflight } from './MindSessionPreflight';
 import { PreparePanel } from './PreparePanel';
-import { formatIstDate } from '@/lib/ist';
+import { MindSessionPhaseRail } from './MindSessionPhaseRail';
+import { formatIstDate, formatIstDateTime } from '@/lib/ist';
 import { mindCaptureRetentionCopy } from '@/lib/mind-capture-copy';
 import {
   MindVisitResolutionError,
@@ -298,13 +299,11 @@ export function RecordConfirmStrip({
   }, [clientId, expectedSessionId, visitSelection]);
 
   async function start(prepareOnly = false): Promise<void> {
-    if (!defaults || startingRef.current || preparationPending) return;
     if (
-      !prepareOnly &&
-      preparationDirty &&
-      !window.confirm(
-        'Your preparation edits are not saved. Start this visit without saving those edits?',
-      )
+      !defaults ||
+      startingRef.current ||
+      preparationPending ||
+      (!prepareOnly && preparationDirty)
     )
       return;
     const controller = new AbortController();
@@ -513,9 +512,29 @@ export function RecordConfirmStrip({
     if (!isIntake && modality) chipParts.push(MODALITY_LABEL[modality]);
     chipParts.push(language ? (LANGUAGE_LABEL[language] ?? language) : 'Saved visit language');
   }
+  const missingConsentCount = Object.values(missingRequired).filter((value) => !value).length;
+  const startBlocker = preparationPending
+    ? 'Wait for the visit focus to finish saving.'
+    : preparationDirty
+      ? 'Save or discard the visit focus before starting.'
+      : visitSelection.needsVisitLookup
+        ? 'Return to Today and choose the exact visit before starting.'
+        : !manual && !confirmedToday
+          ? 'Confirm today’s recording and AI note permission.'
+          : !manual && missingConsentCount > 0
+            ? `Confirm ${missingConsentCount} required consent ${missingConsentCount === 1 ? 'item' : 'items'}.`
+            : needsDevicePreflight && !preflightReady
+              ? 'Complete the microphone and live-service check.'
+              : null;
+  const visitIdentity = selectedVisitSettings
+    ? formatIstDateTime(selectedVisitSettings.scheduledAt)
+    : expectedSessionId
+      ? 'Checking the selected visit…'
+      : 'New visit · exact time is set when the visit is selected';
 
   return (
-    <Card className="p-7">
+    <Card className="p-5 sm:p-7">
+      <MindSessionPhaseRail active="prepare" />
       <button
         type="button"
         onClick={() => {
@@ -526,401 +545,524 @@ export function RecordConfirmStrip({
             onCancel();
         }}
         disabled={submitting || preparationPending}
-        className="mb-5 text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+        className="mb-4 mt-5 min-h-11 text-sm text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
         ← Back
       </button>
 
-      <h2 className="font-serif text-2xl">{clientName}</h2>
+      <header className="border-b border-[var(--color-line-soft)] pb-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-accent)]">
+          Before the session
+        </p>
+        <h1 className="mt-2 font-serif text-3xl leading-tight sm:text-4xl">
+          Prepare for {clientName}
+        </h1>
+        <p className="mt-2 text-sm text-[var(--color-ink-2)]">{visitIdentity}</p>
+      </header>
       {loading && <p className="mt-2 text-sm text-[var(--color-ink-3)]">Loading their context…</p>}
       {loadError && <FieldError message={loadError} />}
 
       {defaults && !loading && !loadError && (
         <>
-          <p className="mt-1 text-sm text-[var(--color-ink-2)]">{chipParts.join(' · ')}</p>
-          <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-ink-2)]">
+            {chipParts.map((part) => (
+              <span key={part}>{part}</span>
+            ))}
+          </div>
+          <p className="mt-2 text-xs leading-relaxed text-[var(--color-ink-3)]">
             {purpose
-              ? 'Today’s purpose is your choice. The note format follows it; no diagnosis is created by selecting a purpose.'
+              ? 'Today’s purpose is your choice. It shapes the note structure; it does not create a diagnosis.'
               : KIND_SUBLINE[defaults.kind](defaults)}
           </p>
 
-          {mode === 'live-capture' && (
-            <PreparePanel
-              clientId={clientId}
-              summaryVisible
-              hideDeviceScratch={sessionPreparationEnabled}
-            />
-          )}
-
-          {sessionPreparationEnabled && mode === 'live-capture' && (
-            <div className="mt-5 space-y-2">
-              {preparationSessionId ? (
-                <SessionPreparationPanel
-                  key={preparationSessionId}
-                  sessionId={preparationSessionId}
-                  clientId={clientId}
-                  clientName={clientName}
-                  readOnly={submitting}
-                  onPendingChange={setPreparationPending}
-                  onDirtyChange={setPreparationDirty}
-                />
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    className="py-2 text-sm text-[var(--color-accent)] underline"
-                    disabled={submitting || visitSelection.needsVisitLookup}
-                    onClick={() => void start(true)}
-                  >
-                    Select a visit to prepare (optional)
-                  </button>
-                  <p className="text-xs text-[var(--color-ink-3)]">
-                    Uses an open visit for today, or creates one if none exists. You will see the
-                    selected visit before saving a focus. Nothing records or starts here.
-                  </p>
-                </>
-              )}
-              <Link
-                href="/app/today"
-                className="inline-block py-2 text-xs text-[var(--color-accent)] underline"
-              >
-                Choose a different visit in Today
-              </Link>
-            </div>
-          )}
-
-          <details className="mt-5 rounded-2xl border border-[var(--color-line)] p-4">
-            <summary className="cursor-pointer text-sm font-medium">
-              Today’s purpose ·{' '}
-              {purpose ? MIND_SESSION_PURPOSE_LABELS[purpose] : 'Choose what fits this visit'}
-            </summary>
-            <Label htmlFor="rcs-purpose">What are you and the client working on today?</Label>
-            <Select
-              id="rcs-purpose"
-              value={purpose}
-              onChange={(event) => setPurpose(event.target.value as MindSessionPurpose | '')}
-            >
-              <option value="">Use the suggested session purpose</option>
-              {Object.entries(MIND_SESSION_PURPOSE_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-            <p className="mt-2 text-xs text-[var(--color-ink-3)]">
-              Assessment can continue over several visits. Counselling does not require a diagnosis.
-            </p>
-          </details>
-
-          {mode === 'live-capture' && (
-            <div
-              className="mt-5 grid gap-3 sm:grid-cols-2"
-              role="group"
-              aria-label="How to document this session"
-            >
-              <MethodOption
-                groupName="documentation"
-                checked={!manual}
-                onSelect={() => setManual(false)}
-                disabled={savedManualMode}
-                title="Use the scribe"
-                description="Record with the client’s permission and review AI-assisted notes."
-              />
-              <MethodOption
-                groupName="documentation"
-                checked={manual}
-                onSelect={() => setManual(true)}
-                title="Write my own note"
-                description="No recording. No AI processing. Save securely and sign when ready."
-              />
-            </div>
-          )}
-
-          {savedManualMode && (
-            <p className="mt-2 text-xs text-[var(--color-ink-3)]">
-              This selected visit uses a clinician-written note. No recording or AI processing
-              starts here.
-            </p>
-          )}
-
-          {!manual && mode === 'live-capture' && (
-            <details className="mt-5 rounded-2xl border border-[var(--color-line)] p-4">
-              <summary className="cursor-pointer text-sm font-medium text-[var(--color-ink)]">
-                {method === 'mic'
-                  ? 'In person'
-                  : method === 'room'
-                    ? 'Virtual room'
-                    : 'Own Meet/Zoom'}
-                {' · '}
-                {method === 'mic' && capture === 'live' ? 'Live scribe' : 'Record only'}
-                {guideId && method === 'mic' && capture === 'live' ? ' · Guide selected' : ''}
-                <span className="ml-3 text-[var(--color-accent)] underline">
-                  Change recording settings
-                </span>
-              </summary>
+          <div className="mt-7 grid gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] lg:items-start">
+            <div className="min-w-0 space-y-6">
               {mode === 'live-capture' && (
-                <div className="mt-6">
-                  <Label>Recording method</Label>
-                  <div
-                    role="radiogroup"
-                    aria-label="Recording method"
-                    className="mt-2 grid gap-2 sm:grid-cols-3"
+                <section
+                  aria-labelledby="prepare-continuity-title"
+                  className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4 sm:p-5"
+                >
+                  <h2
+                    id="prepare-continuity-title"
+                    className="font-serif text-xl text-[var(--color-ink)]"
                   >
-                    <MethodOption
-                      groupName="rcs-recording-method"
-                      checked={method === 'mic'}
-                      onSelect={() => setMethod('mic')}
-                      title="In person"
-                      description="Client in the room — this device's microphone."
-                    />
-                    <MethodOption
-                      groupName="rcs-recording-method"
-                      checked={method === 'room'}
-                      onSelect={() => setMethod('room')}
-                      title="Virtual"
-                      description={
-                        videoEnabled
-                          ? 'Video room in Cureocity — the client joins by a link you share.'
-                          : 'In-app video is not configured on this deployment.'
-                      }
-                      disabled={!videoEnabled}
-                    />
-                    <MethodOption
-                      groupName="rcs-recording-method"
-                      checked={method === 'display'}
-                      onSelect={() => setMethod('display')}
-                      title="Own Meet/Zoom"
-                      description="Your own video app — captures the tab's audio."
-                      disabled={!displaySupported}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* TS6 — the capture choice, doctor-style: live scribe or record-
-              only. Mic-only (the live stream doesn't take tab audio yet). */}
-              {mode === 'live-capture' && method === 'mic' && (
-                <div className="mt-5">
-                  <Label>During the session</Label>
-                  <div
-                    role="radiogroup"
-                    aria-label="During the session"
-                    className="mt-2 grid gap-2 sm:grid-cols-2"
-                  >
-                    <MethodOption
-                      groupName="rcs-capture-mode"
-                      checked={capture === 'live'}
-                      onSelect={() => setCapture('live')}
-                      title="Live scribe"
-                      description="Transcript, note and copilot build on screen as you talk."
-                    />
-                    <MethodOption
-                      groupName="rcs-capture-mode"
-                      checked={capture === 'batch'}
-                      onSelect={() => setCapture('batch')}
-                      title="Record only"
-                      description="Just records — the note generates when you finish."
-                    />
-                  </div>
-                </div>
-              )}
-
-              {mode === 'live-capture' && method === 'mic' && capture === 'live' && (
-                <section className="mt-5 space-y-2" aria-label="Optional session support">
-                  <Label htmlFor="rcs-guide">Session support (optional)</Label>
-                  <Select
-                    id="rcs-guide"
-                    value={guideId}
-                    onChange={(event) => setGuideId(event.target.value)}
-                    disabled={guideLoading || guideError}
-                  >
-                    <option value="">Quiet focus — no guide selected</option>
-                    {guideLoading && guideId && (
-                      <option value={guideId}>
-                        Selected prepared guide — checking availability
-                      </option>
-                    )}
-                    {preparedGuides.map((guide) => (
-                      <option key={guide.id} value={guide.id}>
-                        {guide.name} ·{' '}
-                        {new Date(guide.updatedAt).toLocaleDateString('en-IN', {
-                          timeZone: 'Asia/Kolkata',
-                          day: 'numeric',
-                          month: 'short',
-                        })}
-                      </option>
-                    ))}
-                  </Select>
-                  <p className="text-xs text-[var(--color-ink-3)]" role="status">
-                    {guideLoading
-                      ? 'Checking previously prepared guides…'
-                      : guideError
-                        ? 'Prepared guides could not be loaded. You can continue in quiet focus.'
-                        : guideId
-                          ? 'The draft guide opens with your session. Review its fit before using it; this does not confirm treatment.'
-                          : 'Stay with the client, or choose a previously prepared guide. This does not generate new advice.'}
+                    Where we left off
+                  </h2>
+                  <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-3)]">
+                    Safety context stays visible. The recap and deeper clinical history are
+                    reference material, not new session evidence.
                   </p>
-                  <Link
-                    href={`/app/clients/${clientId}/plan#session-guides`}
-                    className="inline-block py-1 text-xs text-[var(--color-accent)] underline"
-                  >
-                    Prepare a guide before recording
-                  </Link>
+                  <PreparePanel
+                    clientId={clientId}
+                    summaryVisible
+                    hideDeviceScratch={sessionPreparationEnabled}
+                  />
                 </section>
               )}
-            </details>
-          )}
 
-          {!manual && (
-            <div className="mt-6 rounded-xl border border-[var(--color-line-soft)] p-3">
-              <CheckboxRow
-                id="rcs-today-confirmation"
-                checked={confirmedToday}
-                onChange={setConfirmedToday}
-                label="The client confirmed recording and AI note processing for today’s session"
-                description="Required for this session. This is separate from their standing processing preference."
-              />
-            </div>
-          )}
+              <section aria-labelledby="prepare-focus-title" className="min-w-0">
+                <h2 id="prepare-focus-title" className="font-serif text-xl text-[var(--color-ink)]">
+                  Today’s focus
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-3)]">
+                  Confirm what this visit is for and save only the private focus you want to carry
+                  into it.
+                </p>
 
-          <MindSessionPreflight
-            enabled={
-              confirmedToday &&
-              needsDevicePreflight &&
-              Object.values(missingRequired).every(Boolean)
-            }
-            liveServiceRequired={method === 'mic' && capture === 'live'}
-            onReadyChange={setPreflightReady}
-            onSelectedDeviceIdChange={setSelectedDeviceId}
-          />
-
-          {/* Required-but-not-yet-granted consents (rare — new client
-              flow handles the common case). */}
-          {!manual && Object.keys(missingRequired).length > 0 && (
-            <div className="mt-6">
-              <Label>Consent (new for this client)</Label>
-              <div className="mt-2 space-y-2">
-                {Object.keys(missingRequired).map((scope) => (
-                  <CheckboxRow
-                    key={scope}
-                    id={`rcs-${scope}`}
-                    checked={missingRequired[scope] ?? false}
-                    onChange={(v) => setMissingRequired((p) => ({ ...p, [scope]: v }))}
-                    label={
-                      scope === 'AUDIO_RECORDING'
-                        ? 'Audio recording — they’ve agreed today'
-                        : scope === 'AI_NOTE_GENERATION'
-                          ? 'AI note generation — they’ve agreed today'
-                          : 'AI analysis outside India (the transcript, not the audio) — they’ve agreed today'
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {!manual && (
-            <p className="mt-5 text-xs leading-relaxed text-[var(--color-ink-3)]">
-              {mindCaptureRetentionCopy({ mode, method, capture })} AI note processing may use the
-              transcript outside India only under the required consent. Confirm today’s permissions
-              before starting.
-            </p>
-          )}
-          {manual && (
-            <p className="mt-5 text-sm text-[var(--color-ink-2)]">
-              Stay with the client and write only what you assessed or agreed. Your counselling
-              agreement still applies; no recording or AI permissions are granted by this choice.
-            </p>
-          )}
-
-          <FieldError message={submitError} />
-
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setShowDetails((v) => !v)}
-              aria-expanded={showDetails}
-              className="text-sm text-[var(--color-accent)] underline"
-            >
-              {showDetails ? 'Hide details' : 'Change details'}
-            </button>
-            <Button
-              onClick={() => void start()}
-              disabled={
-                !ready || submitting || preparationPending || visitSelection.needsVisitLookup
-              }
-            >
-              {submitting
-                ? 'Starting…'
-                : manual
-                  ? 'Start without recording'
-                  : mode === 'upload'
-                    ? 'Choose file'
-                    : mode === 'dictation'
-                      ? 'Start dictation'
-                      : KIND_BUTTON_LABEL[selectedKind ?? defaults.kind]}
-            </Button>
-          </div>
-
-          {showDetails && (
-            <div className="mt-5 grid gap-4 border-t border-[var(--color-line-soft)] pt-5 sm:grid-cols-2">
-              {!isIntake && (
-                <div>
-                  <div className="flex items-center justify-between gap-2">
-                    <Label htmlFor="rcs-modality">Therapy style</Label>
-                    <InlineExplainer entry={glossary('modality')} label="What's this?" />
-                  </div>
-                  <Select
-                    id="rcs-modality"
-                    value={modality ?? ''}
-                    disabled={!!selectedVisitSettings}
-                    onChange={(e) =>
-                      setModality((e.target.value || null) as SessionModality | null)
-                    }
-                  >
-                    {selectedVisitSettings && (modality === null || modality === 'INTAKE') && (
-                      <option value={modality ?? ''}>
-                        {modality === 'INTAKE' ? 'Assessment' : 'Not selected'}
-                      </option>
+                {sessionPreparationEnabled && mode === 'live-capture' && (
+                  <div className="mt-4 space-y-2">
+                    {preparationSessionId ? (
+                      <SessionPreparationPanel
+                        key={preparationSessionId}
+                        sessionId={preparationSessionId}
+                        clientId={clientId}
+                        clientName={clientName}
+                        readOnly={submitting}
+                        onPendingChange={setPreparationPending}
+                        onDirtyChange={setPreparationDirty}
+                      />
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="inline-flex min-h-11 items-center text-sm text-[var(--color-accent)] underline"
+                          disabled={submitting || visitSelection.needsVisitLookup}
+                          onClick={() => void start(true)}
+                        >
+                          Select a visit to prepare (optional)
+                        </button>
+                        <p className="text-xs text-[var(--color-ink-3)]">
+                          Uses an open visit for today, or creates one if none exists. You will see
+                          the selected visit before saving a focus. Nothing records or starts here.
+                        </p>
+                      </>
                     )}
-                    {MODALITY_OPTIONS.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
+                    <Link
+                      href="/app/today"
+                      className="inline-flex min-h-11 items-center text-xs text-[var(--color-accent)] underline"
+                    >
+                      Choose a different visit in Today
+                    </Link>
+                  </div>
+                )}
+
+                <details className="mt-4 rounded-2xl border border-[var(--color-line)] p-4">
+                  <summary className="flex min-h-11 cursor-pointer items-center text-sm font-medium">
+                    Today’s purpose ·{' '}
+                    {purpose
+                      ? MIND_SESSION_PURPOSE_LABELS[purpose]
+                      : `${mindSessionPurposeLabel('', selectedKind ?? defaults.kind)} (suggested)`}
+                  </summary>
+                  <Label htmlFor="rcs-purpose">What are you and the client working on today?</Label>
+                  <Select
+                    id="rcs-purpose"
+                    value={purpose}
+                    onChange={(event) => setPurpose(event.target.value as MindSessionPurpose | '')}
+                  >
+                    <option value="">
+                      Use suggested: {mindSessionPurposeLabel('', selectedKind ?? defaults.kind)}
+                    </option>
+                    {Object.entries(MIND_SESSION_PURPOSE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
                       </option>
                     ))}
                   </Select>
-                  <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                    {selectedVisitSettings
-                      ? 'Saved for this visit. Changing today’s purpose may determine its therapy style.'
-                      : SOURCE_PHRASE[defaults.modalitySource]}
+                  <p className="mt-2 text-xs leading-relaxed text-[var(--color-ink-3)]">
+                    The suggested purpose is used unless you choose another. Assessment can continue
+                    over several visits, and counselling does not require a diagnosis.
                   </p>
+                </details>
+              </section>
+            </div>
+
+            <aside
+              aria-labelledby="ready-to-start-title"
+              className="rounded-2xl border border-[var(--color-line)] bg-white p-4 shadow-[var(--sh-raise)] sm:p-5 lg:sticky lg:top-5"
+            >
+              <h2 id="ready-to-start-title" className="font-serif text-xl text-[var(--color-ink)]">
+                Ready to start
+              </h2>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-3)]">
+                Choose how to document, then complete only the checks required for that choice.
+              </p>
+
+              <ul
+                className="mt-5 divide-y divide-[var(--color-line-soft)] rounded-xl border border-[var(--color-line-soft)] px-3"
+                aria-label="Start readiness"
+              >
+                <li className="flex min-h-14 items-center justify-between gap-3 py-2 text-xs">
+                  <span>
+                    <strong className="block text-[var(--color-ink)]">Documentation</strong>
+                    <span className="text-[var(--color-ink-3)]">
+                      {manual ? 'Clinician-written note' : 'AI-assisted scribe'}
+                    </span>
+                  </span>
+                  <span className="font-semibold text-[var(--color-good)]">Chosen</span>
+                </li>
+                <li className="flex min-h-14 items-center justify-between gap-3 py-2 text-xs">
+                  <span>
+                    <strong className="block text-[var(--color-ink)]">Today’s permission</strong>
+                    <span className="text-[var(--color-ink-3)]">
+                      {manual
+                        ? 'No recording or AI processing'
+                        : 'Recording and AI note processing'}
+                    </span>
+                  </span>
+                  <span
+                    className={`font-semibold ${manual || confirmedToday ? 'text-[var(--color-good)]' : 'text-[var(--color-warn)]'}`}
+                  >
+                    {manual ? 'Not needed' : confirmedToday ? 'Confirmed' : 'Required'}
+                  </span>
+                </li>
+                <li className="flex min-h-14 items-center justify-between gap-3 py-2 text-xs">
+                  <span>
+                    <strong className="block text-[var(--color-ink)]">
+                      Microphone &amp; service
+                    </strong>
+                    <span className="text-[var(--color-ink-3)]">
+                      {needsDevicePreflight ? 'Checked before recording' : 'Not used by this path'}
+                    </span>
+                  </span>
+                  <span
+                    className={`font-semibold ${!needsDevicePreflight || preflightReady ? 'text-[var(--color-good)]' : 'text-[var(--color-warn)]'}`}
+                  >
+                    {!needsDevicePreflight
+                      ? 'Not needed'
+                      : preflightReady
+                        ? 'Ready'
+                        : 'Check below'}
+                  </span>
+                </li>
+              </ul>
+
+              {mode === 'live-capture' && (
+                <div
+                  className="mt-5 grid gap-3"
+                  role="group"
+                  aria-label="How to document this session"
+                >
+                  <MethodOption
+                    groupName="documentation"
+                    checked={!manual}
+                    onSelect={() => setManual(false)}
+                    disabled={savedManualMode}
+                    title="Use the scribe"
+                    description="Record with the client’s permission and review AI-assisted notes."
+                  />
+                  <MethodOption
+                    groupName="documentation"
+                    checked={manual}
+                    onSelect={() => setManual(true)}
+                    title="Write my own note"
+                    description="No recording. No AI processing. Save securely and sign when ready."
+                  />
                 </div>
               )}
-              <div>
-                <Label htmlFor="rcs-language">Note language</Label>
-                <Select
-                  id="rcs-language"
-                  value={language}
-                  disabled={!!selectedVisitSettings}
-                  onChange={(e) => setLanguage(e.target.value)}
-                >
-                  {selectedVisitSettings && !language && (
-                    <option value="">Saved visit language</option>
-                  )}
-                  {LANGUAGE_OPTIONS.map((l) => (
-                    <option key={l.value} value={l.value}>
-                      {l.label}
-                    </option>
-                  ))}
-                </Select>
-                <p className="mt-1 text-xs text-[var(--color-ink-3)]">
-                  {selectedVisitSettings
-                    ? 'Uses the saved note language for this visit. It cannot be changed from this start screen.'
-                    : 'Choose before selecting or preparing this visit.'}
+
+              {savedManualMode && (
+                <p className="mt-2 text-xs text-[var(--color-ink-3)]">
+                  This selected visit uses a clinician-written note. No recording or AI processing
+                  starts here.
                 </p>
+              )}
+
+              {!manual && mode === 'live-capture' && (
+                <details className="mt-5 rounded-2xl border border-[var(--color-line)] p-4">
+                  <summary className="flex min-h-11 cursor-pointer flex-wrap items-center text-sm font-medium text-[var(--color-ink)]">
+                    {method === 'mic'
+                      ? 'In person'
+                      : method === 'room'
+                        ? 'Virtual room'
+                        : 'Own Meet/Zoom'}
+                    {' · '}
+                    {method === 'mic' && capture === 'live' ? 'Live scribe' : 'Record only'}
+                    {guideId && method === 'mic' && capture === 'live' ? ' · Guide selected' : ''}
+                    <span className="ml-3 text-[var(--color-accent)] underline">
+                      Change recording settings
+                    </span>
+                  </summary>
+                  {mode === 'live-capture' && (
+                    <div className="mt-6">
+                      <Label>Recording method</Label>
+                      <div
+                        role="radiogroup"
+                        aria-label="Recording method"
+                        className="mt-2 grid gap-2"
+                      >
+                        <MethodOption
+                          groupName="rcs-recording-method"
+                          checked={method === 'mic'}
+                          onSelect={() => setMethod('mic')}
+                          title="In person"
+                          description="Client in the room — this device's microphone."
+                        />
+                        <MethodOption
+                          groupName="rcs-recording-method"
+                          checked={method === 'room'}
+                          onSelect={() => setMethod('room')}
+                          title="Virtual"
+                          description={
+                            videoEnabled
+                              ? 'Video room in Cureocity — the client joins by a link you share.'
+                              : 'In-app video is not configured on this deployment.'
+                          }
+                          disabled={!videoEnabled}
+                        />
+                        <MethodOption
+                          groupName="rcs-recording-method"
+                          checked={method === 'display'}
+                          onSelect={() => setMethod('display')}
+                          title="Own Meet/Zoom"
+                          description="Your own video app — captures the tab's audio."
+                          disabled={!displaySupported}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TS6 — the capture choice, doctor-style: live scribe or record-
+              only. Mic-only (the live stream doesn't take tab audio yet). */}
+                  {mode === 'live-capture' && method === 'mic' && (
+                    <div className="mt-5">
+                      <Label>During the session</Label>
+                      <div
+                        role="radiogroup"
+                        aria-label="During the session"
+                        className="mt-2 grid gap-2"
+                      >
+                        <MethodOption
+                          groupName="rcs-capture-mode"
+                          checked={capture === 'live'}
+                          onSelect={() => setCapture('live')}
+                          title="Live scribe"
+                          description="Transcript, note and copilot build on screen as you talk."
+                        />
+                        <MethodOption
+                          groupName="rcs-capture-mode"
+                          checked={capture === 'batch'}
+                          onSelect={() => setCapture('batch')}
+                          title="Record only"
+                          description="Just records — the note generates when you finish."
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {mode === 'live-capture' && method === 'mic' && capture === 'live' && (
+                    <section className="mt-5 space-y-2" aria-label="Optional session support">
+                      <Label htmlFor="rcs-guide">Session support (optional)</Label>
+                      <Select
+                        id="rcs-guide"
+                        value={guideId}
+                        onChange={(event) => setGuideId(event.target.value)}
+                        disabled={guideLoading || guideError}
+                      >
+                        <option value="">Quiet focus — no guide selected</option>
+                        {guideLoading && guideId && (
+                          <option value={guideId}>
+                            Selected prepared guide — checking availability
+                          </option>
+                        )}
+                        {preparedGuides.map((guide) => (
+                          <option key={guide.id} value={guide.id}>
+                            {guide.name} ·{' '}
+                            {new Date(guide.updatedAt).toLocaleDateString('en-IN', {
+                              timeZone: 'Asia/Kolkata',
+                              day: 'numeric',
+                              month: 'short',
+                            })}
+                          </option>
+                        ))}
+                      </Select>
+                      <p className="text-xs text-[var(--color-ink-3)]" role="status">
+                        {guideLoading
+                          ? 'Checking previously prepared guides…'
+                          : guideError
+                            ? 'Prepared guides could not be loaded. You can continue in quiet focus.'
+                            : guideId
+                              ? 'The draft guide opens with your session. Review its fit before using it; this does not confirm treatment.'
+                              : 'Stay with the client, or choose a previously prepared guide. This does not generate new advice.'}
+                      </p>
+                      <Link
+                        href={`/app/clients/${clientId}/plan#session-guides`}
+                        className="inline-flex min-h-11 items-center text-xs text-[var(--color-accent)] underline"
+                      >
+                        Prepare a guide before recording
+                      </Link>
+                    </section>
+                  )}
+                </details>
+              )}
+
+              {!manual && (
+                <div className="mt-6 rounded-xl border border-[var(--color-line-soft)] p-3">
+                  <CheckboxRow
+                    id="rcs-today-confirmation"
+                    checked={confirmedToday}
+                    onChange={setConfirmedToday}
+                    label="The client confirmed recording and AI note processing for today’s session"
+                    description="Required for this session. This is separate from their standing processing preference."
+                  />
+                </div>
+              )}
+
+              <MindSessionPreflight
+                enabled={
+                  confirmedToday &&
+                  needsDevicePreflight &&
+                  Object.values(missingRequired).every(Boolean)
+                }
+                liveServiceRequired={method === 'mic' && capture === 'live'}
+                onReadyChange={setPreflightReady}
+                onSelectedDeviceIdChange={setSelectedDeviceId}
+              />
+
+              {/* Required-but-not-yet-granted consents (rare — new client
+              flow handles the common case). */}
+              {!manual && Object.keys(missingRequired).length > 0 && (
+                <div className="mt-6">
+                  <Label>Consent (new for this client)</Label>
+                  <div className="mt-2 space-y-2">
+                    {Object.keys(missingRequired).map((scope) => (
+                      <CheckboxRow
+                        key={scope}
+                        id={`rcs-${scope}`}
+                        checked={missingRequired[scope] ?? false}
+                        onChange={(v) => setMissingRequired((p) => ({ ...p, [scope]: v }))}
+                        label={
+                          scope === 'AUDIO_RECORDING'
+                            ? 'Audio recording — they’ve agreed today'
+                            : scope === 'AI_NOTE_GENERATION'
+                              ? 'AI note generation — they’ve agreed today'
+                              : 'AI analysis outside India (the transcript, not the audio) — they’ve agreed today'
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!manual && (
+                <p className="mt-5 text-xs leading-relaxed text-[var(--color-ink-3)]">
+                  {mindCaptureRetentionCopy({ mode, method, capture })} AI note processing may use
+                  the transcript outside India only under the required consent. Confirm today’s
+                  permissions before starting.
+                </p>
+              )}
+              {manual && (
+                <p className="mt-5 text-sm text-[var(--color-ink-2)]">
+                  Stay with the client and write only what you assessed or agreed. Your counselling
+                  agreement still applies; no recording or AI permissions are granted by this
+                  choice.
+                </p>
+              )}
+
+              <FieldError message={submitError} />
+
+              <div className="mt-6 space-y-3 border-t border-[var(--color-line-soft)] pt-5">
+                <button
+                  type="button"
+                  onClick={() => setShowDetails((v) => !v)}
+                  aria-expanded={showDetails}
+                  className="inline-flex min-h-11 items-center text-sm text-[var(--color-accent)] underline"
+                >
+                  {showDetails ? 'Hide details' : 'Change details'}
+                </button>
+                {startBlocker && (
+                  <p
+                    id="record-start-blocker"
+                    role="status"
+                    className="text-xs leading-relaxed text-[var(--color-warn)]"
+                  >
+                    {startBlocker}
+                  </p>
+                )}
+                <Button
+                  onClick={() => void start()}
+                  className="w-full"
+                  aria-describedby={startBlocker ? 'record-start-blocker' : undefined}
+                  disabled={
+                    !ready ||
+                    submitting ||
+                    preparationPending ||
+                    preparationDirty ||
+                    visitSelection.needsVisitLookup
+                  }
+                >
+                  {submitting
+                    ? 'Starting…'
+                    : manual
+                      ? 'Start without recording'
+                      : mode === 'upload'
+                        ? 'Choose file'
+                        : mode === 'dictation'
+                          ? 'Start dictation'
+                          : KIND_BUTTON_LABEL[selectedKind ?? defaults.kind]}
+                </Button>
               </div>
-            </div>
-          )}
+
+              {showDetails && (
+                <div className="mt-5 grid gap-4 border-t border-[var(--color-line-soft)] pt-5">
+                  {!isIntake && (
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="rcs-modality">Therapy style</Label>
+                        <InlineExplainer entry={glossary('modality')} label="What's this?" />
+                      </div>
+                      <Select
+                        id="rcs-modality"
+                        value={modality ?? ''}
+                        disabled={!!selectedVisitSettings}
+                        onChange={(e) =>
+                          setModality((e.target.value || null) as SessionModality | null)
+                        }
+                      >
+                        {selectedVisitSettings && (modality === null || modality === 'INTAKE') && (
+                          <option value={modality ?? ''}>
+                            {modality === 'INTAKE' ? 'Assessment' : 'Not selected'}
+                          </option>
+                        )}
+                        {MODALITY_OPTIONS.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </Select>
+                      <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                        {selectedVisitSettings
+                          ? 'Saved for this visit. Changing today’s purpose may determine its therapy style.'
+                          : SOURCE_PHRASE[defaults.modalitySource]}
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    <Label htmlFor="rcs-language">Note language</Label>
+                    <Select
+                      id="rcs-language"
+                      value={language}
+                      disabled={!!selectedVisitSettings}
+                      onChange={(e) => setLanguage(e.target.value)}
+                    >
+                      {selectedVisitSettings && !language && (
+                        <option value="">Saved visit language</option>
+                      )}
+                      {LANGUAGE_OPTIONS.map((l) => (
+                        <option key={l.value} value={l.value}>
+                          {l.label}
+                        </option>
+                      ))}
+                    </Select>
+                    <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                      {selectedVisitSettings
+                        ? 'Uses the saved note language for this visit. It cannot be changed from this start screen.'
+                        : 'Choose before selecting or preparing this visit.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </aside>
+          </div>
         </>
       )}
       {upgradePrompt && (

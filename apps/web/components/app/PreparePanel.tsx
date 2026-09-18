@@ -79,7 +79,7 @@ function PreparePanelForClient({
     try {
       const res = await fetch(`/api/v1/clients/${clientId}/prepare`, {
         cache: 'no-store',
-        signal: controller.signal,
+        signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
       });
       const body = (await res.json().catch(() => ({}))) as PrepareSummaryV1 & { error?: string };
       if (controller.signal.aborted) return;
@@ -154,7 +154,7 @@ function PreparePanelForClient({
           setOpen((v) => !v);
         }}
         aria-expanded={open}
-        className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+        className="flex min-h-11 items-center gap-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
       >
         <span aria-hidden>{open ? '▾' : '▸'}</span>
         {open ? 'Hide full preparation' : 'Full preparation (optional)'}
@@ -182,7 +182,9 @@ function PreparePanelForClient({
               </button>
             </p>
           )}
-          {data && <MindCareContinuitySummary key={clientId} clientId={clientId} />}
+          {data && (!summaryVisible || open) && (
+            <MindCareContinuitySummary key={clientId} clientId={clientId} />
+          )}
           {data && open && (
             <PrepareBody
               data={data}

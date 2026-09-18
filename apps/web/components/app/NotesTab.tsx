@@ -789,6 +789,7 @@ export function NotesTab({
                 clientName={clientName}
                 noteText={intakeNoteToText(signedIntake)}
                 signed
+                showClinicalReview={!focusedReview}
                 {...(canShare && !focusedReview ? { onShare: () => setShareOpen(true) } : {})}
                 leftControls={
                   <>
@@ -866,6 +867,7 @@ export function NotesTab({
               clientName={clientName}
               noteText={therapyNoteToText(treatmentContent)}
               signed
+              showClinicalReview={!focusedReview}
               {...(canShare && !focusedReview ? { onShare: () => setShareOpen(true) } : {})}
               leftControls={
                 <>
@@ -944,6 +946,7 @@ export function NotesTab({
               clientName={clientName}
               noteText={intakeNoteToText(intakeNote)}
               signed={false}
+              showClinicalReview={!focusedReview}
               {...(canShare && !editing && !focusedReview ? { onShare: signAndShare } : {})}
               leftControls={
                 <>
@@ -1101,6 +1104,7 @@ export function NotesTab({
             clientName={clientName}
             noteText={therapyNoteToText(note)}
             signed={false}
+            showClinicalReview={!focusedReview}
             {...(canShare && !editing && !focusedReview ? { onShare: signAndShare } : {})}
             leftControls={
               <>
