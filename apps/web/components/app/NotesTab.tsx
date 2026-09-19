@@ -49,6 +49,7 @@ import { NoteRecoveryNotice, type NoteRecoveryStatus } from './NoteRecoveryNotic
 import { NoteEditingLayout } from './NoteEditingLayout';
 import { SavedNoteProcessingDetails as NoteFooter } from './SavedNoteProcessingDetails';
 import { mindSessionDestination } from '../../lib/mind-session-start';
+import { NOTE_ARTIFACT_HIDDEN_MESSAGE, noteContainsArtifact } from '../../lib/note-artifact';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -383,6 +384,11 @@ export function NotesTab({
       setPendingShare(false);
       setSignError('Review and apply or discard saved draft edits before signing.');
       setEditing(true);
+      return;
+    }
+    if (noteContainsArtifact(phase.draft.content)) {
+      setPendingShare(false);
+      setSignError(NOTE_ARTIFACT_HIDDEN_MESSAGE);
       return;
     }
     setSigning(true);
@@ -778,6 +784,7 @@ export function NotesTab({
       const signedIntake = parsedIntake.success
         ? parsedIntake.data
         : (note.content as unknown as IntakeNoteV1);
+      const signedArtifact = noteContainsArtifact(signedIntake);
       return (
         <>
           <MockBackendBanner llmBackend={llmBackend} />
@@ -790,7 +797,9 @@ export function NotesTab({
                 noteText={intakeNoteToText(signedIntake)}
                 signed
                 showClinicalReview={!focusedReview}
-                {...(canShare && !focusedReview ? { onShare: () => setShareOpen(true) } : {})}
+                {...(canShare && !focusedReview && !signedArtifact
+                  ? { onShare: () => setShareOpen(true) }
+                  : {})}
                 leftControls={
                   <>
                     <TemplatePicker
@@ -816,10 +825,10 @@ export function NotesTab({
                 signedBy={signerName}
                 verbosity={verbosity}
               />
-              {canShare && focusedReview && (
+              {canShare && focusedReview && !signedArtifact && (
                 <FocusedShareAction onShare={() => setShareOpen(true)} />
               )}
-              {canShare && (
+              {canShare && !signedArtifact && (
                 <ShareModal
                   open={shareOpen}
                   onClose={() => setShareOpen(false)}
@@ -856,6 +865,7 @@ export function NotesTab({
     // Treatment branch — narrow the now-union content to TherapyNoteV1
     // (NotePreview, ModifyPanel, RevisionPanel all read SOAP fields).
     const treatmentContent = note.content as TherapyNoteV1;
+    const signedArtifact = noteContainsArtifact(treatmentContent);
     return (
       <>
         <MockBackendBanner llmBackend={llmBackend} />
@@ -868,7 +878,9 @@ export function NotesTab({
               noteText={therapyNoteToText(treatmentContent)}
               signed
               showClinicalReview={!focusedReview}
-              {...(canShare && !focusedReview ? { onShare: () => setShareOpen(true) } : {})}
+              {...(canShare && !focusedReview && !signedArtifact
+                ? { onShare: () => setShareOpen(true) }
+                : {})}
               leftControls={
                 <>
                   <TemplatePicker
@@ -895,8 +907,10 @@ export function NotesTab({
               signedBy={signerName}
               verbosity={verbosity}
             />
-            {canShare && focusedReview && <FocusedShareAction onShare={() => setShareOpen(true)} />}
-            {canShare && (
+            {canShare && focusedReview && !signedArtifact && (
+              <FocusedShareAction onShare={() => setShareOpen(true)} />
+            )}
+            {canShare && !signedArtifact && (
               <ShareModal
                 open={shareOpen}
                 onClose={() => setShareOpen(false)}
@@ -1076,7 +1090,7 @@ export function NotesTab({
         {(focusedReview || canShare) && !editing && (
           <SignAndSendBar
             focusedReview={focusedReview}
-            blocked={translating || modifying || generating}
+            blocked={translating || modifying || generating || noteContainsArtifact(intakeNote)}
             recoveryStatus={recoveryStatus}
             onReviewEdits={startEditing}
             signing={signing}
@@ -1229,7 +1243,7 @@ export function NotesTab({
       {(focusedReview || canShare) && !editing && (
         <SignAndSendBar
           focusedReview={focusedReview}
-          blocked={translating || modifying || generating}
+          blocked={translating || modifying || generating || noteContainsArtifact(note)}
           recoveryStatus={recoveryStatus}
           onReviewEdits={startEditing}
           signing={signing}

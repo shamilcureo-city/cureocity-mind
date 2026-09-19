@@ -168,18 +168,35 @@ export function TherapyLibrary({
       {activeTherapy === null ? (
         <div className="space-y-5">
           <TherapyList
-            title="Suggested guides to consider"
+            title="Suggested for this case"
+            description="AI-linked to the available case context. These are options to review, not ranked evidence of suitability."
             empty="No suggestions yet. You can explore a guide below; a disorder diagnosis is not required to prepare a draft."
             therapies={recommendedTherapies}
             onPick={(t) => void loadScript(t)}
+            source="suggested"
           />
-          <TherapyList
-            title="Explore the library"
-            empty="No additional guide choices."
-            therapies={visibleLibrary}
-            onPick={(t) => void loadScript(t)}
-            groupByKind
-          />
+          {visibleLibrary.length > 0 ? (
+            <details className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-4">
+              <summary className="min-h-11 cursor-pointer rounded-lg py-2 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
+                Browse all other guides ({visibleLibrary.length})
+              </summary>
+              <p className="mb-4 max-w-prose text-sm leading-relaxed text-[var(--color-ink-2)]">
+                Browse by approach, technique or protocol stage. Being listed here does not mean a
+                guide fits this client or has been clinically approved.
+              </p>
+              <TherapyList
+                title="Guide library"
+                empty="No additional guide choices."
+                therapies={visibleLibrary}
+                onPick={(t) => void loadScript(t)}
+                groupByKind
+                groupPresentation="sections"
+                source="browse"
+              />
+            </details>
+          ) : (
+            <p className="text-sm text-[var(--color-ink-2)]">No additional guide choices.</p>
+          )}
         </div>
       ) : (
         <div>
@@ -309,12 +326,16 @@ export function TherapyLibrary({
 
 export function TherapyList({
   title,
+  description,
   empty,
   therapies,
   onPick,
   groupByKind = false,
+  groupPresentation = 'disclosures',
+  source = 'browse',
 }: {
   title: string;
+  description?: string;
   empty: string;
   therapies: readonly {
     name: string;
@@ -324,6 +345,8 @@ export function TherapyList({
   }[];
   onPick: (t: string) => void;
   groupByKind?: boolean;
+  groupPresentation?: 'disclosures' | 'sections';
+  source?: 'suggested' | 'browse';
 }) {
   const choices = (items: typeof therapies) => (
     <ul className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -334,21 +357,43 @@ export function TherapyList({
         >
           <h4 className="font-semibold">{t.name}</h4>
           <TherapyGuideClassification name={t.name} />
-          {t.rationale && (
-            <p className="leading-relaxed text-[var(--color-ink-2)]">{t.rationale}</p>
+          {source === 'suggested' && (
+            <p className="text-xs leading-relaxed text-[var(--color-ink-2)]">
+              Suggested from available case context. Preparing this draft does not select or record
+              an approach.
+            </p>
           )}
-          {t.whenInPlan && (
-            <p className="text-[var(--color-ink-2)]">Suggested timing: {t.whenInPlan}</p>
-          )}
-          {t.evidenceSummary && (
-            <details className="text-[var(--color-ink-2)]">
+          {(t.rationale || t.whenInPlan || t.evidenceSummary) && (
+            <details className="rounded-xl border border-[var(--color-line-soft)] px-3 text-[var(--color-ink-2)]">
               <summary className="min-h-11 cursor-pointer py-3 font-medium">
-                AI evidence summary
+                Review AI rationale and fit
               </summary>
-              <p className="mt-2 leading-relaxed">{t.evidenceSummary}</p>
-              <p className="mt-2">
-                Check the supporting sources before using this as a clinical rationale.
-              </p>
+              <div className="space-y-3 pb-3">
+                {t.rationale && (
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--color-ink)]">Why suggested</p>
+                    <p className="mt-1 leading-relaxed">{t.rationale}</p>
+                  </div>
+                )}
+                {t.whenInPlan && (
+                  <p>
+                    <span className="font-medium text-[var(--color-ink)]">Suggested timing:</span>{' '}
+                    {t.whenInPlan}
+                  </p>
+                )}
+                {t.evidenceSummary && (
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--color-ink)]">
+                      AI evidence summary
+                    </p>
+                    <p className="mt-1 leading-relaxed">{t.evidenceSummary}</p>
+                  </div>
+                )}
+                <p className="border-t border-[var(--color-line-soft)] pt-3 text-xs leading-relaxed">
+                  This explanation can be incomplete. Check it against the case, the client&rsquo;s
+                  preferences, your competence and the supporting sources before deciding.
+                </p>
+              </div>
             </details>
           )}
           <Button
@@ -366,24 +411,44 @@ export function TherapyList({
   return (
     <section>
       <h3 className="text-sm font-medium text-[var(--color-ink-2)]">{title}</h3>
+      {description && (
+        <p className="mt-1 max-w-prose text-sm leading-relaxed text-[var(--color-ink-2)]">
+          {description}
+        </p>
+      )}
       {therapies.length === 0 ? (
         <p className="mt-2 text-sm text-[var(--color-ink-2)]">{empty}</p>
       ) : groupByKind ? (
         <div className="mt-3 space-y-3">
-          {groupMindTherapyGuideChoices(therapies).map((group) => (
-            <details
-              key={group.kind}
-              className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-4"
-            >
-              <summary className="min-h-11 cursor-pointer rounded-lg py-2 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
-                {group.title} ({group.choices.length})
-              </summary>
-              <p className="mb-3 max-w-prose text-sm leading-relaxed text-[var(--color-ink-2)]">
-                {group.description}
-              </p>
-              {choices(group.choices)}
-            </details>
-          ))}
+          {groupMindTherapyGuideChoices(therapies).map((group) =>
+            groupPresentation === 'sections' ? (
+              <section
+                key={group.kind}
+                className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-4"
+              >
+                <h4 className="text-base font-semibold">
+                  {group.title} ({group.choices.length})
+                </h4>
+                <p className="mb-3 mt-1 max-w-prose text-sm leading-relaxed text-[var(--color-ink-2)]">
+                  {group.description}
+                </p>
+                {choices(group.choices)}
+              </section>
+            ) : (
+              <details
+                key={group.kind}
+                className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-soft)] p-4"
+              >
+                <summary className="min-h-11 cursor-pointer rounded-lg py-2 text-base font-semibold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-accent)]">
+                  {group.title} ({group.choices.length})
+                </summary>
+                <p className="mb-3 max-w-prose text-sm leading-relaxed text-[var(--color-ink-2)]">
+                  {group.description}
+                </p>
+                {choices(group.choices)}
+              </details>
+            ),
+          )}
         </div>
       ) : (
         choices(therapies)

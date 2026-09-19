@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 import type { IntakeNoteV1 } from '@cureocity/contracts';
 import type { NoteVerbosity } from '../../lib/note-format';
 import { formatIstDateTime } from '../../lib/ist';
+import { noteContainsArtifact } from '../../lib/note-artifact';
+import { NoteArtifactWarning } from './NoteArtifactWarning';
 
 interface Props {
   note: IntakeNoteV1;
@@ -20,6 +22,7 @@ interface Props {
  * Renders the standard intake sections under therapist-friendly headings.
  */
 export function IntakeNotePreview({ note, signedAt, signedBy, verbosity = 'DETAILED' }: Props) {
+  if (noteContainsArtifact(note)) return <NoteArtifactWarning signed={Boolean(signedAt)} />;
   // BRIEF shows just the core of the intake; DETAILED/VERY_DETAILED add the
   // optional history sections (skipping any that are empty).
   const brief = verbosity === 'BRIEF';

@@ -205,6 +205,26 @@
 .mind-workspace-shell .mind-live-header h1 {
   font-size: clamp(25px, 3vw, 36px);
 }
+.mind-workspace-shell .mind-live-session-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  padding: 8px 4px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--color-line);
+  border-radius: 0;
+  background: transparent;
+}
+.mind-workspace-shell .mind-live-session-details {
+  min-width: 152px;
+  text-align: right;
+}
+.mind-workspace-shell .mind-live-session-details > summary {
+  color: var(--color-accent-hover);
+}
+.mind-workspace-shell .mind-live-session-details > div {
+  justify-content: flex-end;
+}
 .mind-workspace-shell .mind-live-modes {
   display: flex;
   flex-wrap: wrap;
@@ -237,6 +257,9 @@
 .mind-workspace-shell .mind-capture-note {
   font-size: 12px;
   color: var(--color-ink-2);
+}
+.mind-workspace-shell .mind-live-drawer {
+  box-shadow: none;
 }
 .mind-workspace-shell .mind-live-safety {
   margin-bottom: 16px;
@@ -273,6 +296,19 @@
   .mind-workspace-shell .mind-live-header {
     padding: 16px;
     border-radius: 18px;
+  }
+  .mind-workspace-shell .mind-live-session-header {
+    grid-template-columns: 1fr;
+    padding: 4px 0 14px;
+    border-radius: 0;
+  }
+  .mind-workspace-shell .mind-live-session-details {
+    min-width: 0;
+    width: 100%;
+    text-align: left;
+  }
+  .mind-workspace-shell .mind-live-session-details > div {
+    justify-content: flex-start;
   }
   .mind-workspace-shell .mind-live-modes {
     align-items: stretch;

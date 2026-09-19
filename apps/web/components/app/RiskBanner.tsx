@@ -1,6 +1,7 @@
 'use client';
 
 import type { TherapyNoteV1 } from '@cureocity/contracts';
+import { noteContainsArtifact } from '../../lib/note-artifact';
 
 type Severity = TherapyNoteV1['riskFlags']['severity'];
 
@@ -31,6 +32,7 @@ interface Props {
 export function RiskBanner({ riskFlags }: Props) {
   if (!HIGH_SET.has(riskFlags.severity)) return null;
   const palette = PALETTE[riskFlags.severity];
+  const detailsHidden = noteContainsArtifact(riskFlags);
   return (
     <aside
       role="alert"
@@ -72,7 +74,7 @@ export function RiskBanner({ riskFlags }: Props) {
         </span>
       </div>
 
-      {riskFlags.indicators.length > 0 && (
+      {!detailsHidden && riskFlags.indicators.length > 0 && (
         <div className="mt-4">
           <p className="text-xs font-semibold uppercase tracking-wider">Indicators</p>
           <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -85,8 +87,14 @@ export function RiskBanner({ riskFlags }: Props) {
         </div>
       )}
 
-      {riskFlags.details && (
+      {!detailsHidden && riskFlags.details && (
         <p className="mt-3 whitespace-pre-line text-sm leading-relaxed">{riskFlags.details}</p>
+      )}
+      {detailsHidden && (
+        <p className="mt-3 text-sm leading-relaxed">
+          Safety details contain invalid generated or system text and are hidden. Treat this safety
+          assessment as unverified and review the source before signing.
+        </p>
       )}
 
       <div className="mt-4 flex flex-wrap gap-2 text-xs">

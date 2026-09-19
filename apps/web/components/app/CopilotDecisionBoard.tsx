@@ -28,6 +28,10 @@ import { describePassError } from '@/lib/pass-error';
 import { isSuggestionApplied } from '@/lib/formulation-applied';
 import { Card } from '../ui/Card';
 import { PlanEditor } from './PlanEditor';
+import {
+  DiagnosisSuggestionEvidence,
+  diagnosisSuggestionEvidenceCounts,
+} from './DiagnosisSuggestionEvidence';
 
 // ============================================================================
 // Sprint TSC — the copilot decision board.
@@ -996,7 +1000,11 @@ function ImpressionStep({
     keepCodes: string[],
   ) => Promise<void>;
 }) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // Put the leading suggestion's evidence and uncertainty in view immediately.
+  // Only one ledger stays open at a time so alternatives remain scannable.
+  const [expanded, setExpanded] = useState<Set<number>>(
+    () => new Set(candidates.length > 0 ? [0] : []),
+  );
   // Both kinds start empty — the therapist owns exactly what enters the
   // record; nothing is accepted by a habitual click. (R0 · finding C·19)
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
@@ -1078,10 +1086,8 @@ function ImpressionStep({
 
   const toggleExpand = (i: number) =>
     setExpanded((s) => {
-      const next = new Set(s);
-      if (next.has(i)) next.delete(i);
-      else next.add(i);
-      return next;
+      if (s.has(i)) return new Set();
+      return new Set([i]);
     });
 
   const toggleSelect = (i: number) => {
@@ -1177,6 +1183,8 @@ function ImpressionStep({
             const c = candidates[i]!;
             const isOpen = expanded.has(i);
             const isSelected = selected.has(i);
+            const evidenceCounts = diagnosisSuggestionEvidenceCounts(c);
+            const evidencePanelId = `diagnosis-suggestion-${sessionId}-${i}`;
             // UI truth pass — a candidate that IS the active record diagnosis
             // used to render as a brand-new suggestion, silently asking the
             // therapist to re-accept what they already confirmed. Badge it.
@@ -1205,6 +1213,8 @@ function ImpressionStep({
                   <button
                     type="button"
                     onClick={() => toggleExpand(i)}
+                    aria-expanded={isOpen}
+                    aria-controls={isOpen ? evidencePanelId : undefined}
                     className="min-w-0 flex-1 text-left text-sm font-semibold"
                   >
                     {c.icd11Label}
@@ -1222,34 +1232,19 @@ function ImpressionStep({
                     )}
                   </button>
                   <span className="max-w-40 flex-none text-right text-xs text-[var(--color-ink-3)]">
-                    Provisional · review supporting and missing evidence
+                    Provisional · {evidenceCounts.evidenceLabel} ·{' '}
+                    {evidenceCounts.openQuestionLabel}
                   </span>
                   <span aria-hidden className="flex-none text-xs text-[var(--color-ink-3)]">
                     {isOpen ? '▴' : '▾'}
                   </span>
                 </div>
                 {isOpen && (
-                  <div className="mt-1.5 rounded-xl bg-[var(--color-surface-soft)] p-3.5 text-[12.5px]">
-                    {c.supportingEvidence.map((q, j) => (
-                      <p key={j} className="mb-1 italic text-[var(--color-ink-2)]">
-                        “{q.quote}”{' '}
-                        <span className="not-italic text-[var(--color-ink-3)] tabular-nums">
-                          — {q.speaker} @ {formatTimestamp(q.startMs)}
-                        </span>
-                      </p>
-                    ))}
-                    {c.gapsToFill.length > 0 && (
-                      <>
-                        <b className="text-[11px] tracking-[0.08em] text-[var(--color-ink-3)]">
-                          TO CONFIRM, ESTABLISH
-                        </b>
-                        <ul className="mt-1 list-disc pl-4 text-[var(--color-ink-2)]">
-                          {c.gapsToFill.map((g, j) => (
-                            <li key={j}>{g}</li>
-                          ))}
-                        </ul>
-                      </>
-                    )}
+                  <div
+                    id={evidencePanelId}
+                    className="mt-1.5 rounded-xl bg-[var(--color-surface-soft)] p-3.5 text-[12.5px]"
+                  >
+                    <DiagnosisSuggestionEvidence candidate={c} sessionId={sessionId} />
                     {!done && (
                       <div className="mt-2.5 flex flex-wrap gap-2">
                         <Act

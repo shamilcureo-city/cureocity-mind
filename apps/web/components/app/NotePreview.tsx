@@ -4,6 +4,8 @@ import type { ReactNode } from 'react';
 import type { TherapyNoteV1 } from '@cureocity/contracts';
 import type { NoteVerbosity } from '../../lib/note-format';
 import { formatIstDateTime } from '../../lib/ist';
+import { noteContainsArtifact } from '../../lib/note-artifact';
+import { NoteArtifactWarning } from './NoteArtifactWarning';
 
 interface Props {
   note: TherapyNoteV1;
@@ -22,6 +24,7 @@ interface Props {
  * Center carries the teaching. This component is just the note.
  */
 export function NotePreview({ note, signedAt, signedBy, verbosity = 'DETAILED' }: Props) {
+  if (noteContainsArtifact(note)) return <NoteArtifactWarning signed={Boolean(signedAt)} />;
   const hasSummary = Boolean(note.summary && note.summary.trim());
   const hasNamedTopics = Boolean(note.topics && note.topics.length > 0);
   const hasTemplateSections = Boolean(note.templateSections && note.templateSections.length > 0);

@@ -1,8 +1,15 @@
 import { z } from 'zod';
-import { SpeakerSegmentSchema, type SpeakerSegment, type Utterance } from '@cureocity/contracts';
+import {
+  containsTranscriptionArtifact,
+  SpeakerSegmentSchema,
+  type SpeakerSegment,
+  type Utterance,
+} from '@cureocity/contracts';
 
 export const TRANSCRIPTION_REVIEW_WARNING =
   'Some speech could not be transcribed reliably. Review the transcript and add missing details before signing.';
+export const TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE =
+  'This transcript contains invalid generated or system text, so its words are hidden from clinical views. The encrypted source record is unchanged. Recover it from the original recording, or use a clinician-written note, before signing or sharing.';
 
 const SavedTranscriptSchema = z.object({
   format: z.literal('cureocity-transcript-v1'),
@@ -18,6 +25,12 @@ export function encodeSavedTranscript(
   speakerSegments: SpeakerSegment[],
   transcriptionWarning = false,
 ): string {
+  if (
+    containsTranscriptionArtifact(transcript) ||
+    speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text))
+  ) {
+    throw new Error('Refusing to save a transcript containing generated control text');
+  }
   return JSON.stringify(
     SavedTranscriptSchema.parse({
       format: 'cureocity-transcript-v1',
@@ -25,6 +38,20 @@ export function encodeSavedTranscript(
       speakerSegments,
       transcriptionWarning,
     }),
+  );
+}
+
+/** True when any part of the authoritative transcript contains recognizable
+ * generated control text. Callers quarantine the complete record rather than
+ * trying to edit individual words out of clinical source material. */
+export function savedTranscriptContainsArtifact(source: {
+  transcript: string;
+  speakerSegments: SpeakerSegment[] | null;
+}): boolean {
+  return (
+    containsTranscriptionArtifact(source.transcript) ||
+    (source.speakerSegments?.some((segment) => containsTranscriptionArtifact(segment.text)) ??
+      false)
   );
 }
 
@@ -89,4 +116,24 @@ export function transcriptParagraphs(transcript: string): string[] {
     for (let i = 0; i < words.length; i += 65) paragraphs.push(words.slice(i, i + 65).join(' '));
     return paragraphs;
   });
+}
+
+/** Merge consecutive ASR chunks from the same identified speaker into visual
+ * turns. The saved segments are not modified, reordered or relabelled; joining
+ * whitespace is presentation-only and every source word remains present. */
+export function transcriptConversationTurns(segments: SpeakerSegment[]): SpeakerSegment[] {
+  const turns: SpeakerSegment[] = [];
+  for (const segment of segments) {
+    const previous = turns.at(-1);
+    if (previous && previous.speaker !== 'unknown' && previous.speaker === segment.speaker) {
+      const pauseMs = Math.max(0, segment.startMs - previous.endMs);
+      const separator = pauseMs >= 3_000 ? '\n\n' : ' ';
+      previous.text = `${previous.text.trimEnd()}${separator}${segment.text.trimStart()}`;
+      previous.endMs = Math.max(previous.endMs, segment.endMs);
+      if (previous.language !== segment.language) delete previous.language;
+      continue;
+    }
+    turns.push({ ...segment });
+  }
+  return turns;
 }

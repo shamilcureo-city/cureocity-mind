@@ -159,31 +159,32 @@ export async function POST(
       );
     }
     const tTranscript = parsedT.value.transcript?.trim() ?? '';
-    const tTranscriptText = tTranscript.length > 0 ? tTranscript : '(captured via live scribe)';
     const speakerSegments = matchingTranscriptSegments(tTranscript, parsedT.value.utterances ?? []);
     const transcriptionWarning = parsedT.value.transcriptionWarning === true;
-    // S-hardening: same fail-closed rule as the doctor branch — the plaintext
-    // column is gone, the payload is still in the browser, so a KMS outage
-    // 503s retryably instead of dropping the transcript.
-    let tTranscriptEncrypted: string;
-    try {
-      tTranscriptEncrypted = await encryptForTenant(
-        auth.value.psychologistId,
-        encodeSavedTranscript(tTranscriptText, speakerSegments, transcriptionWarning),
-      );
-    } catch (e) {
-      console.error(
-        `[live-note] therapist transcript encryption failed for session=${sessionId}: ${(e as Error).message}`,
-      );
-      return NextResponse.json(
-        {
-          error:
-            'Could not encrypt the transcript (encryption service unavailable). Nothing was saved — retry in a moment.',
-        },
-        { status: 503 },
-      );
+    // No transcript is different from a transcript that says so. Do not mint a
+    // transport/status marker and persist it as clinical speech. When actual
+    // words exist, encryption remains fail-closed before any note write.
+    let tTranscriptEncrypted: string | null = null;
+    if (tTranscript.length > 0) {
+      try {
+        tTranscriptEncrypted = await encryptForTenant(
+          auth.value.psychologistId,
+          encodeSavedTranscript(tTranscript, speakerSegments, transcriptionWarning),
+        );
+      } catch (e) {
+        console.error(
+          `[live-note] therapist transcript encryption failed for session=${sessionId}: ${(e as Error).message}`,
+        );
+        return NextResponse.json(
+          {
+            error:
+              'Could not encrypt the transcript (encryption service unavailable). Nothing was saved — retry in a moment.',
+          },
+          { status: 503 },
+        );
+      }
     }
-    const tWrite = tTranscript.length > 0 ? { transcriptEncrypted: tTranscriptEncrypted } : {};
+    const tWrite = tTranscriptEncrypted ? { transcriptEncrypted: tTranscriptEncrypted } : {};
     const riskSeverity = mapRiskSeverity(tnote.riskFlags.severity);
     let tDraft;
     try {
@@ -207,7 +208,7 @@ export async function POST(
                 status: 'COMPLETED',
                 content: tnote as unknown as Prisma.InputJsonValue,
                 riskSeverity,
-                transcriptEncrypted: tTranscriptEncrypted,
+                ...tWrite,
                 errorMessage: transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
               },
             });
@@ -266,9 +267,9 @@ export async function POST(
     // whose "generated automatically" promise was false — the therapist had to
     // discover the Generate button. Preserve actual finalized speaker segments;
     // only older clients without a matching timeline use unknown coverage.
-    const p3Transcript = tTranscriptText;
     const p3Kind = session.kind;
-    if (auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
+    if (tTranscript.length > 0 && auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
+      const p3Transcript = tTranscript;
       after(async () => {
         try {
           await runClinicalAnalysis({
@@ -321,9 +322,8 @@ export async function POST(
   const orders = capabilities?.includes('CLINICAL_ORDERS')
     ? ((parsed.value.orders ?? []) as ClinicalOrderV1[])
     : [];
-  // DOC-7 — the verbatim consult transcript the gateway streamed. Trim and
-  // fall back to the presence marker when empty so a transcript-less consult
-  // still satisfies the NoteDraft presence check.
+  // DOC-7 — the verbatim consult transcript the gateway streamed. Empty input
+  // remains absent; a transport presence marker is not clinical speech.
   const transcript = parsed.value.transcript?.trim() ?? '';
   // Sprint DS5 — the finalized Rx pad, stored alongside the note.
   const rxPad =
@@ -331,38 +331,32 @@ export async function POST(
       ? (parsed.value.rxPad as unknown as Prisma.InputJsonValue)
       : undefined;
 
-  // DOC-7 — the streamed transcript is the medico-legal source record behind
-  // the note; persist it verbatim (with the presence marker as the fallback
-  // when the client sent none). Dual-write the envelope-encrypted copy on the
-  // same per-tenant DEK path as the batch note-orchestrator; a KMS hiccup must
-  // never fail an otherwise-complete note, so we log + store plaintext only.
-  const transcriptText = transcript.length > 0 ? transcript : '(captured via live copilot)';
-  // S-hardening: the plaintext column is GONE, so encryption is REQUIRED. A
-  // KMS outage 503s BEFORE anything persists — the note + transcript are
-  // still in the browser (this route is a relay), so the doctor retries once
-  // the encryption service recovers. The live path has no audio to fall back
-  // on, which is exactly why an unencryptable transcript must not be dropped
-  // silently.
-  let transcriptEncrypted: string;
-  try {
-    transcriptEncrypted = await encryptForTenant(auth.value.psychologistId, transcriptText);
-  } catch (e) {
-    console.error(
-      `[live-note] transcript encryption failed for session=${sessionId}: ${(e as Error).message}`,
-    );
-    return NextResponse.json(
-      {
-        error:
-          'Could not encrypt the transcript (encryption service unavailable). Nothing was saved — retry in a moment.',
-      },
-      { status: 503 },
-    );
+  // DOC-7 — when present, the streamed transcript is the medico-legal source
+  // record behind the note and is encrypted on the same per-tenant DEK path as
+  // batch. S-hardening: the plaintext column is gone, so encryption is required.
+  // KMS outage 503s BEFORE anything persists when actual words exist. An
+  // absent transcript remains absent instead of becoming a fake source marker.
+  let transcriptEncrypted: string | null = null;
+  if (transcript.length > 0) {
+    try {
+      transcriptEncrypted = await encryptForTenant(auth.value.psychologistId, transcript);
+    } catch (e) {
+      console.error(
+        `[live-note] transcript encryption failed for session=${sessionId}: ${(e as Error).message}`,
+      );
+      return NextResponse.json(
+        {
+          error:
+            'Could not encrypt the transcript (encryption service unavailable). Nothing was saved — retry in a moment.',
+        },
+        { status: 503 },
+      );
+    }
   }
 
   // Only overwrite a stored transcript when this request actually carried one,
-  // so a re-POST without a transcript can't clobber a good record with the
-  // marker.
-  const transcriptWrite = transcript.length > 0 ? { transcriptEncrypted } : {};
+  // so a re-POST without a transcript cannot clobber a good record.
+  const transcriptWrite = transcriptEncrypted ? { transcriptEncrypted } : {};
 
   let draft;
   try {
@@ -387,7 +381,7 @@ export async function POST(
               status: 'COMPLETED',
               content: note as unknown as Prisma.InputJsonValue,
               riskSeverity: 'NONE',
-              transcriptEncrypted,
+              ...transcriptWrite,
               ...(rxPad !== undefined && { rxPad }),
             },
           });
@@ -494,7 +488,7 @@ export async function POST(
       // lock. Its terminal state is authoritative; do not recreate a marker.
     }
   }
-  if (shouldPrewarmDifferential) {
+  if (shouldPrewarmDifferential && transcript.length > 0) {
     after(async () => {
       // runDifferential owns its own error handling (marks the row FAILED,
       // never throws) — this guard is belt-and-braces for the after() context.
@@ -504,7 +498,7 @@ export async function POST(
           psychologistId: auth.value.psychologistId,
           language: (session.language as ClinicalLocale | undefined) ?? 'en',
           specialty: session.psychologist.specialty,
-          transcript: transcriptText,
+          transcript,
           // Live notes don't persist diarized segments; the /differential route
           // already runs with [] for live consults, so match that.
           speakerSegments: [],

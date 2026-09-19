@@ -25,6 +25,7 @@ export function MindTherapyGuide({
   const steps = useMemo(() => mindGuideSteps(script), [script]);
   const [mode, setMode] = useState<'guided' | 'overview'>('overview');
   const [reviewedForUse, setReviewedForUse] = useState(false);
+  const [guidePaused, setGuidePaused] = useState(false);
   const {
     activeIndex,
     reviewed,
@@ -68,7 +69,15 @@ export function MindTherapyGuide({
 
   function openGuided() {
     focusNextSection.current = true;
+    setGuidePaused(false);
     setMode('guided');
+  }
+
+  function stopGuided() {
+    setMode('overview');
+    setReviewedForUse(false);
+    setGuidePaused(true);
+    guideHeading.current?.focus();
   }
 
   function goToSection(index: number) {
@@ -143,6 +152,16 @@ export function MindTherapyGuide({
       </div>
 
       <div className={styles.reviewGate} data-reviewed={reviewedForUse}>
+        {guidePaused && (
+          <div
+            role="status"
+            className="mb-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-sm leading-relaxed text-[var(--color-ink-2)]"
+          >
+            <strong className="text-[var(--color-ink)]">Guide stopped.</strong> Continue in your own
+            direction, choose another guide, or review fit again before reopening. No therapy
+            delivery was recorded.
+          </div>
+        )}
         {!reviewedForUse && (
           <>
             <h3>Make this guide your own.</h3>
@@ -253,6 +272,14 @@ export function MindTherapyGuide({
             <p className={styles.sectionHint}>
               Suggested wording — adapt it, pause or skip as needed.
             </p>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2.5">
+              <p className="min-w-0 flex-1 text-xs leading-relaxed text-[var(--color-ink-2)]">
+                If the fit changes, stop here. This returns to review without marking delivery.
+              </p>
+              <Button variant="secondary" size="sm" onClick={stopGuided}>
+                Stop guide / change direction
+              </Button>
+            </div>
             <p className={styles.prompt}>{active.text}</p>
             {active.listenFor && (
               <div className={styles.listen}>

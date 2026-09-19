@@ -5,7 +5,12 @@ import type { NoteDraft } from '@cureocity/contracts';
 import { containsTranscriptionArtifact, type SpeakerSegment } from '@cureocity/contracts';
 import { Badge } from '../ui/Badge';
 import { transcriptIsProcessing } from '../../lib/transcript-state';
-import { TRANSCRIPTION_REVIEW_WARNING, transcriptParagraphs } from '../../lib/saved-transcript';
+import {
+  TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE,
+  TRANSCRIPTION_REVIEW_WARNING,
+  transcriptConversationTurns,
+  transcriptParagraphs,
+} from '../../lib/saved-transcript';
 import { TRANSCRIPT_UNAVAILABLE_MESSAGE } from '../../lib/note-transcript-view';
 
 interface TranscriptPanelData {
@@ -52,7 +57,8 @@ export function TranscriptTab({
     containsTranscriptionArtifact(data.transcript ?? '') ||
     (data.segments?.some((s) => containsTranscriptionArtifact(s.text)) ?? false);
   const needsReview =
-    hasArtifact || data.transcriptionWarning || data.errorMessage === TRANSCRIPTION_REVIEW_WARNING;
+    data.transcriptionWarning || data.errorMessage === TRANSCRIPTION_REVIEW_WARNING;
+  const conversationTurns = data.segments ? transcriptConversationTurns(data.segments) : [];
   useEffect(() => {
     if (!sessionId || !processing) return;
     const controller = new AbortController();
@@ -104,6 +110,15 @@ export function TranscriptTab({
       />
     );
   }
+  if (hasArtifact || data.errorMessage === TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE) {
+    return (
+      <EmptyState
+        title="Transcript hidden"
+        body={TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE}
+        tone="warn"
+      />
+    );
+  }
   if (processing && !data.transcript && !data.segments?.length) {
     return (
       <EmptyState
@@ -129,7 +144,7 @@ export function TranscriptTab({
   if (!data.segments || data.segments.length === 0) {
     return (
       <div className="space-y-4">
-        {needsReview && <TranscriptWarning hasArtifact={hasArtifact} />}
+        {needsReview && <TranscriptWarning />}
         <EmptyState
           title={data.transcript ? 'Saved transcript' : 'No transcript available'}
           body={
@@ -145,7 +160,7 @@ export function TranscriptTab({
 
   return (
     <div className="space-y-4">
-      {needsReview && <TranscriptWarning hasArtifact={hasArtifact} />}
+      {needsReview && <TranscriptWarning />}
       {processing && (
         <p role="status" className="text-sm text-[var(--color-ink-2)]">
           The saved transcript is available; the note is still processing.
@@ -162,11 +177,11 @@ export function TranscriptTab({
         </p>
       )}
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs uppercase tracking-wide text-[var(--color-ink-3)]">
-        <span>{data.segments.length} conversation turns · review speaker labels</span>
+        <span>{conversationTurns.length} conversation turns · review speaker labels</span>
       </div>
 
       <ol aria-label="Saved conversation" className="space-y-3">
-        {data.segments.map((seg, i) => (
+        {conversationTurns.map((seg, i) => (
           <li
             key={i}
             className={`max-w-[92%] rounded-2xl border border-[var(--color-line-soft)] p-4 ${seg.speaker === 'therapist' ? 'ml-auto bg-[var(--color-accent-soft)]' : 'mr-auto bg-[var(--color-surface)]'}`}
@@ -187,18 +202,14 @@ export function TranscriptTab({
   );
 }
 
-function TranscriptWarning({ hasArtifact }: { hasArtifact: boolean }) {
+function TranscriptWarning() {
   return (
     <div
       role="alert"
       className="rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-4 text-sm text-[var(--color-warn)]"
     >
       <strong>Transcript needs review</strong>
-      <p className="mt-1">
-        {hasArtifact
-          ? 'This saved transcript contains invalid AI placeholder text. The original record is unchanged. Do not sign or share the note until the transcript and note have been reviewed and corrected.'
-          : TRANSCRIPTION_REVIEW_WARNING}
-      </p>
+      <p className="mt-1">{TRANSCRIPTION_REVIEW_WARNING}</p>
     </div>
   );
 }
@@ -216,6 +227,7 @@ function EmptyState({
 }) {
   return (
     <div
+      {...(tone === 'warn' ? { role: 'alert' as const } : {})}
       className={`rounded-2xl border p-6 ${
         tone === 'warn'
           ? 'border-[var(--color-warn-border)] bg-[var(--color-warn-bg)]'

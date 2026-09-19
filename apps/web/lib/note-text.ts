@@ -1,4 +1,5 @@
 import type { IntakeNoteV1, TherapyNoteV1 } from '@cureocity/contracts';
+import { NOTE_ARTIFACT_COPY_TEXT, noteContainsArtifact } from './note-artifact';
 
 /**
  * Plain-text renderings of a note for the toolbar "Copy" action — what a
@@ -16,6 +17,7 @@ function templateSectionsToText(
 }
 
 export function therapyNoteToText(note: TherapyNoteV1): string {
+  if (noteContainsArtifact(note)) return NOTE_ARTIFACT_COPY_TEXT;
   const templated = templateSectionsToText(note.templateSections);
   if (templated) return templated;
   const parts: string[] = [];
@@ -44,6 +46,7 @@ export function therapyNoteToText(note: TherapyNoteV1): string {
 }
 
 export function intakeNoteToText(note: IntakeNoteV1): string {
+  if (noteContainsArtifact(note)) return NOTE_ARTIFACT_COPY_TEXT;
   const templated = templateSectionsToText(note.templateSections);
   if (templated) return templated;
   const rows: [string, string][] = [

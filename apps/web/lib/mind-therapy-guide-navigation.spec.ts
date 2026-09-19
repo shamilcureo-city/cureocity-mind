@@ -220,6 +220,29 @@ describe('one-section therapy draft navigation', () => {
     expect(html).not.toContain('aria-label="Guide sections"');
     expect(html).not.toContain('Next section');
   });
+
+  it('stops the guide and clears per-view suitability without recording work', () => {
+    enterGuide();
+    const guided = renderToStaticMarkup(render());
+    expect(guided).toContain('Stop guide / change direction');
+    expect(guided).toContain('returns to review without marking delivery');
+
+    button('Stop guide / change direction').props.onClick!();
+
+    const stopped = renderToStaticMarkup(render());
+    expect(stopped).toContain('Guide stopped.');
+    expect(stopped).toContain('No therapy delivery was recorded.');
+    for (const step of mindGuideSteps(script)) expect(stopped).toContain(step.text);
+    expect(stopped).not.toContain('aria-label="Guide sections"');
+    expect(stopped).not.toContain('Next section');
+    expect(button('Step by step').props.disabled).toBe(true);
+    expect(harness.navigate).not.toHaveBeenCalled();
+    expect(harness.mark).not.toHaveBeenCalled();
+
+    reviewSuitability();
+    button('Step by step').props.onClick!();
+    expect(renderToStaticMarkup(render())).not.toContain('Guide stopped.');
+  });
 });
 
 describe('truthful guide save status and recovery', () => {

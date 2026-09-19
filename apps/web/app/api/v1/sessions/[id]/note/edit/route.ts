@@ -15,6 +15,7 @@ import { canonicalJson } from '@/lib/sign-note-payload';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
+import { noteContainsArtifact } from '@/lib/note-artifact';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -136,6 +137,12 @@ export async function POST(
       const parsedNext = noteSchema.safeParse({ ...parsedCurrent.data, ...patch });
       if (!parsedNext.success)
         throw new EditHttpError(400, 'Revised draft has an invalid clinical shape.');
+      if (noteContainsArtifact(parsedNext.data)) {
+        throw new EditHttpError(
+          422,
+          'The revision contains invalid generated or system text. Remove it before saving.',
+        );
+      }
 
       const updated = await tx.noteDraft.updateMany({
         where: { id: draft.id, status: 'COMPLETED' },

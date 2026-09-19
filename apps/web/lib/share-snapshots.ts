@@ -25,6 +25,7 @@ import {
   homeworkShareSessionMatches,
   validateOptionalShareSession,
 } from './sprint5-final-behavior';
+import { noteContainsArtifact } from './note-artifact';
 
 /**
  * Sprint 15 — Snapshot builders.
@@ -420,6 +421,11 @@ async function buildSignedNote(
     throw new SnapshotBuildError('Signed note failed schema validation; cannot share.');
   }
   const note: TherapyNoteV1 = parsed.data;
+  if (noteContainsArtifact(note)) {
+    throw new SnapshotBuildError(
+      'Signed note contains invalid generated or system text. Re-open it and record a reviewed correction before sharing.',
+    );
+  }
   const subject = `Your session note · ${session.scheduledAt.toLocaleDateString('en-IN', {
     month: 'short',
     day: 'numeric',
@@ -517,6 +523,11 @@ async function buildSignedIntakeNote(
     throw new SnapshotBuildError('Signed intake note failed schema validation; cannot share.');
   }
   const note: IntakeNoteV1 = parsed.data;
+  if (noteContainsArtifact(note)) {
+    throw new SnapshotBuildError(
+      'Signed intake note contains invalid generated or system text. Re-open it and record a reviewed correction before sharing.',
+    );
+  }
   const sections: SignedIntakeNoteSnapshotSection[] = [
     {
       title: 'What you shared',
