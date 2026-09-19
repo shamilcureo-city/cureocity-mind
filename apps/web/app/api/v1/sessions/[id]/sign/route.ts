@@ -32,7 +32,8 @@ import {
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
-import { resolveNoteTranscript } from '@/lib/note-transcript';
+import { resolveNoteTranscriptData } from '@/lib/note-transcript';
+import { savedTranscriptContainsArtifact } from '@/lib/saved-transcript';
 import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauthn-verify';
 
 export const runtime = 'nodejs';
@@ -118,6 +119,7 @@ type LockedDraft = {
   content: Prisma.JsonValue | null;
   rxPad: Prisma.JsonValue | null;
   transcriptEncrypted: string | null;
+  speakerSegments: Prisma.JsonValue | null;
 };
 type LockedNote = {
   id: string;
@@ -196,7 +198,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       }
 
       const drafts = await tx.$queryRaw<LockedDraft[]>`
-        SELECT "id", "status", "content", "rxPad", "transcriptEncrypted"
+        SELECT "id", "status", "content", "rxPad", "transcriptEncrypted", "speakerSegments"
         FROM "note_drafts"
         WHERE "sessionId" = ${sessionId}
         FOR UPDATE
@@ -212,14 +214,17 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       if (session.vertical === 'THERAPIST' && typeof draft.transcriptEncrypted === 'string') {
         // Bind the check to the same locked source as the note. A clean-looking
         // AI note is not evidence that a pre-fix contaminated source is safe.
-        const source = await resolveNoteTranscript(session.psychologistId, draft);
+        const source = await resolveNoteTranscriptData(session.psychologistId, draft);
         if (source === null) {
           throw new SigningHttpError(
             409,
             'The saved transcript could not be verified. Retry when secure storage is available.',
           );
         }
-        if (containsTranscriptionArtifact(source)) {
+        const speakerSegments =
+          source.speakerSegments ??
+          (draft.speakerSegments as unknown as typeof source.speakerSegments);
+        if (savedTranscriptContainsArtifact({ transcript: source.transcript, speakerSegments })) {
           throw new SigningHttpError(
             409,
             'The saved transcript contains invalid generated text. Recover it from the original recording, or create a new clinician-written session note before signing. This original record has not been changed.',

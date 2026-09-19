@@ -14,7 +14,8 @@ const mocks = vi.hoisted(() => ({
   noteSafeParse: vi.fn(),
 }));
 
-vi.mock('@cureocity/contracts', () => ({
+vi.mock('@cureocity/contracts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@cureocity/contracts')>()),
   IntakeNoteV1Schema: { safeParse: mocks.noteSafeParse, parse: (value: unknown) => value },
   MedicalEncounterNoteV1Schema: {
     safeParse: mocks.noteSafeParse,

@@ -8,7 +8,7 @@
  *   - a speaker-true CONVERSATION (one bubble per diarized segment — B1 made
  *     the gateway emit per-segment utterances) with timestamps, auto-scroll
  *     and a live talk-balance bar;
- *   - an optional LIVE NOTE that assembles behind Show draft,
+ *   - an optional LIVE NOTE that assembles behind Open draft,
  *     unfilled ones as placeholders, "Updated Xs ago" + an Update-now button
  *     (the `refreshNote` gateway command) instead of a silent 90s wait;
  *   - a RISK WATCH that is always present (calm state → escalates in place);
@@ -72,6 +72,11 @@ import { MindConsentRecovery } from './MindConsentRecovery';
 import { isSessionConsentFailure, liveNoteStatus } from '@/lib/mind-consent-recovery-client';
 import { MindLiveCaseContext } from './MindLiveCaseContext';
 import { TRANSCRIPTION_REVIEW_WARNING } from '@/lib/saved-transcript';
+import {
+  focusedLiveSessionReasoning,
+  liveSessionCapturePresentation,
+  type LiveSessionPhase,
+} from '@/lib/mind-live-session-surface';
 
 const GATEWAY_URL = process.env['NEXT_PUBLIC_LIVE_GATEWAY_URL'] ?? 'ws://localhost:8787';
 
@@ -89,16 +94,7 @@ function withoutContextDerivedReasoning(
   };
 }
 
-type Phase =
-  | 'idle'
-  | 'connecting'
-  | 'listening'
-  | 'pausing'
-  | 'paused'
-  | 'pause-unconfirmed'
-  | 'finalizing'
-  | 'done'
-  | 'error';
+type Phase = LiveSessionPhase;
 
 interface Props {
   sessionId: string;
@@ -283,6 +279,7 @@ export function TherapistLiveSession({
   const [showDraft, setShowDraft] = useState(false);
   const [guideId, setGuideId] = useState(initialGuide?.id ?? '');
   const [phase, setPhase] = useState<Phase>('idle');
+  const [connectionIntent, setConnectionIntent] = useState<'start' | 'reconnect'>('start');
   const [caseStatus, setCaseStatus] = useState<'off' | 'pending' | 'using' | 'unconfirmed'>('off');
   const [acknowledgedCaseKey, setAcknowledgedCaseKey] = useState<string | null>(null);
   const caseReply = useRef<{
@@ -870,6 +867,11 @@ export function TherapistLiveSession({
     // screen and replay it to the gateway (`resume`) so the consult continues
     // from the whole session, not just what it hears after the drop.
     const resume = shouldResumeRecovery(utterancesRef.current.length, opts.resume === true);
+    setConnectionIntent(
+      resume && (utterancesRef.current.length > 0 || lifecycleStartedRef.current)
+        ? 'reconnect'
+        : 'start',
+    );
     setError(null);
     setNoteFailed(false);
     setConnectionLost(false);
@@ -1618,24 +1620,55 @@ export function TherapistLiveSession({
     }
   }
   const hasGuide = workspaceMode === 'guided' && selectedGuide !== undefined;
-  const showConversation = showTranscript && (phase !== 'idle' || consentChecked);
+  const showConversation = showTranscript;
+  const capturePresentation = liveSessionCapturePresentation({
+    phase,
+    consentBlocked: Boolean(consentBlocked),
+    reconnecting: connectionIntent === 'reconnect',
+    connectionLost,
+  });
+  const focusedCopilot = focusedLiveSessionReasoning(effectiveCopilot, workspaceMode, hasGuide);
+  const visibleCueReviews =
+    workspaceMode === 'guided'
+      ? cueReview.records
+      : cueReview.records.filter(
+          (record) => record.kind === 'RED_FLAG' && record.state === 'reopened',
+        );
+  const showCopilot =
+    workspaceMode === 'guided'
+      ? Boolean(
+          focusedCopilot || cueReview.error || cueDisclosureError || cueReview.records.length > 0,
+        )
+      : Boolean(focusedCopilot?.riskWatch.length || visibleCueReviews.length > 0);
+  const transcriptRegionId = `mind-live-transcript-${sessionId}`;
+  const draftRegionId = `mind-live-draft-${sessionId}`;
 
   return (
     <div className="space-y-4">
       <GatewayMockBanner />
-      <header className="mind-live-header flex flex-wrap items-start justify-between gap-3">
-        <div>
+      <header className="mind-live-header mind-live-session-header flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="font-serif text-2xl">{clientName || 'Live session'}</h1>
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
+          <p className="mt-1 text-sm text-[var(--color-ink-2)]">
+            Stay with the conversation. Safety remains visible; other support follows your mode.
+          </p>
+        </div>
+        <details className="mind-live-session-details text-sm text-[var(--color-ink-2)]">
+          <summary className="min-h-11 cursor-pointer py-2 font-medium">Session details</summary>
+          <div className="mt-2 flex max-w-xl flex-wrap items-center gap-1.5">
+            <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs">
               {mindSessionPurposeLabel(mindPurpose, kind)}
             </span>
-            {modality && (
+            {modality ? (
               <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
                 {modality}
               </span>
+            ) : (
+              <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs">
+                Modality not set
+              </span>
             )}
-            <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs text-[var(--color-ink-2)]">
+            <span className="rounded-full border border-[var(--color-line)] bg-white px-2.5 py-0.5 text-xs">
               Note: {LANGUAGE_LABEL[language] ?? language}
             </span>
             {hearing.length > 0 && (
@@ -1644,40 +1677,12 @@ export function TherapistLiveSession({
               </span>
             )}
           </div>
-        </div>
+        </details>
       </header>
       <CaptureStatusBar
-        status={
-          consentBlocked
-            ? 'Microphone off · consent required'
-            : phase === 'listening'
-              ? 'Recording'
-              : phase === 'paused'
-                ? 'Paused · microphone off'
-                : phase === 'pausing'
-                  ? 'Microphone off · confirming pause'
-                  : phase === 'pause-unconfirmed'
-                    ? 'Microphone off · pause not confirmed'
-                    : phase === 'connecting'
-                      ? 'Connecting capture'
-                      : phase === 'idle'
-                        ? 'Ready when you are'
-                        : phase === 'done'
-                          ? 'Capture stopped'
-                          : phase === 'error'
-                            ? 'Capture interrupted'
-                            : 'Finishing session'
-        }
+        status={capturePresentation.status}
         elapsedMs={elapsedMs}
-        detail={
-          consentBlocked
-            ? 'Confirm consent below. No new audio is being captured.'
-            : phase === 'listening'
-              ? 'Live transcription is running. Keep this page open until saving is confirmed.'
-              : phase === 'paused'
-                ? 'No new audio is captured. The session has not ended.'
-                : 'The clock describes this open view, not the length of saved audio.'
-        }
+        detail={capturePresentation.detail}
       >
         {phase === 'idle' && (
           <Button
@@ -1693,7 +1698,7 @@ export function TherapistLiveSession({
         )}
         {phase === 'connecting' && (
           <span role="status" className="text-sm">
-            Connecting capture…
+            {connectionIntent === 'reconnect' ? 'Reconnecting…' : 'Preparing…'}
           </span>
         )}
         {phase === 'listening' && (
@@ -1732,7 +1737,7 @@ export function TherapistLiveSession({
         </p>
       )}
 
-      {['pausing', 'paused', 'pause-unconfirmed'].includes(phase) && (
+      {(phase === 'pausing' || phase === 'pause-unconfirmed' || pauseWarning) && (
         <Card
           className="border-[var(--color-line)] bg-[var(--color-surface-soft)] p-4 text-sm"
           role="status"
@@ -1770,38 +1775,40 @@ export function TherapistLiveSession({
               aria-pressed={workspaceMode === 'quiet'}
               onClick={() => setWorkspaceMode('quiet')}
             >
-              Quiet focus
+              Quiet
             </button>
             <button
               type="button"
               aria-pressed={workspaceMode === 'guided'}
               onClick={() => setWorkspaceMode('guided')}
             >
-              Guided session
+              Guided
             </button>
           </div>
           <p className="mind-capture-note mt-2">
             {workspaceMode === 'quiet'
-              ? 'Stay with the client. Open the draft or transcript only when useful.'
-              : 'Your questions, your chosen guide. Change direction whenever you need.'}
+              ? 'Ordinary suggestions are hidden. Safety stays visible.'
+              : 'One question, thread or guide step at a time. You decide what to use.'}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="mind-live-disclosures flex flex-wrap gap-2">
           <Button
             variant="secondary"
             size="sm"
             aria-expanded={showDraft}
+            aria-controls={showDraft ? draftRegionId : undefined}
             onClick={() => setShowDraft((value) => !value)}
           >
-            {showDraft ? 'Hide draft' : 'Show draft'}
+            {showDraft ? 'Close draft' : 'Open draft'}
           </Button>
           <Button
             variant="secondary"
             size="sm"
             aria-expanded={showTranscript}
+            aria-controls={transcriptRegionId}
             onClick={() => setShowTranscript((value) => !value)}
           >
-            {showTranscript ? 'Hide transcript' : 'Show transcript'}
+            {showTranscript ? 'Close transcript' : 'Open transcript'}
           </Button>
         </div>
       </div>
@@ -2160,16 +2167,16 @@ export function TherapistLiveSession({
       )}
 
       {/* Safety stays ahead of the guide in both modes, at every recording phase. */}
-      {(effectiveCopilot || cueReview.error || cueReview.records.length > 0) && (
+      {showCopilot && (
         <TherapyCopilotRail
           reasoning={
-            effectiveCopilot ?? { riskWatch: [], askNext: [], threads: [], arc: null, version: 0 }
+            focusedCopilot ?? { riskWatch: [], askNext: [], threads: [], arc: null, version: 0 }
           }
           onResolve={resolveCopilot}
           onShown={reportShownCopilot}
           mode={workspaceMode}
           guideActive={hasGuide}
-          reviewedCues={cueReview.records}
+          reviewedCues={visibleCueReviews}
           cueLabels={{ ...cueReview.labels, ...cueLabelsRef.current }}
           pendingId={cueReview.pendingId ?? cueDisclosurePending}
           reviewBlocked={cueReview.blocked}
@@ -2207,12 +2214,17 @@ export function TherapistLiveSession({
               />
             </div>
           )}
-          <Card className={`p-4 ${showConversation ? '' : 'hidden'}`}>
+          <Card
+            id={transcriptRegionId}
+            role="region"
+            aria-label="Live transcript"
+            className={`mind-live-drawer p-4 ${showConversation ? '' : 'hidden'}`}
+          >
             <div className="flex items-baseline justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                Conversation
-              </h2>
-              <span className="text-xs text-[var(--color-ink-3)]">auto-scrolls</span>
+              <h2 className="text-sm font-semibold text-[var(--color-ink)]">Live transcript</h2>
+              <span className="text-xs text-[var(--color-ink-3)]">
+                Auto-scrolls · review before use
+              </span>
             </div>
 
             {balance && (
@@ -2289,7 +2301,7 @@ export function TherapistLiveSession({
         <div
           className={`space-y-4 ${!showConversation && !hasGuide ? 'lg:col-span-12' : 'lg:col-span-5'}`}
         >
-          {phase === 'idle' && !consentChecked ? (
+          {phase === 'idle' && !consentChecked && !showDraft ? (
             <Card className="p-8 text-center">
               <p className="mb-4 text-sm text-[var(--color-ink-2)]">
                 The conversation and note build in real time as you talk. Recording starts only when
@@ -2301,7 +2313,7 @@ export function TherapistLiveSession({
             </Card>
           ) : (
             <>
-              {!effectiveCopilot && workspaceMode === 'guided' && (
+              {!effectiveCopilot && workspaceMode === 'guided' && !hasGuide && (
                 <Card className="flex items-start gap-2.5 p-4">
                   <span className="mt-1.5 h-2 w-2 flex-none rounded-full bg-[var(--color-accent)]" />
                   <div>
@@ -2318,10 +2330,8 @@ export function TherapistLiveSession({
 
               {/* What to explore — intake coverage (B5) */}
               {kind === 'INTAKE' && showDraft && (
-                <Card className="p-4">
-                  <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                    What to explore
-                  </h2>
+                <Card className="mind-live-drawer p-4">
+                  <h2 className="text-sm font-semibold text-[var(--color-ink)]">What to explore</h2>
                   <div className="mt-2.5 flex flex-wrap gap-1.5">
                     {coverage.map((c) => (
                       <span
@@ -2345,11 +2355,14 @@ export function TherapistLiveSession({
 
               {/* Live note */}
               {showDraft && (
-                <Card className="p-4">
+                <Card
+                  id={draftRegionId}
+                  role="region"
+                  aria-label="Live draft"
+                  className="mind-live-drawer p-4"
+                >
                   <div className="flex items-center gap-2">
-                    <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                      Live note
-                    </h2>
+                    <h2 className="text-sm font-semibold text-[var(--color-ink)]">Live draft</h2>
                     <span className="flex-1" />
                     <span className="text-xs text-[var(--color-ink-3)]">
                       {liveNoteStatus({

@@ -101,7 +101,14 @@ class Socket {
     this.onmessage?.({ data: JSON.stringify({ type: 'status', state }) });
   }
 }
-type ElementProps = { children?: ReactNode; onClick?: () => void; disabled?: boolean };
+type ElementProps = {
+  children?: ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  id?: string;
+  'aria-controls'?: string;
+  'aria-expanded'?: boolean;
+};
 function elements(node: ReactNode): Array<ReactElement<ElementProps>> {
   return Children.toArray(node).flatMap((child) =>
     isValidElement<ElementProps>(child) ? [child, ...elements(child.props.children)] : [],
@@ -147,6 +154,12 @@ function click(label: string) {
   expect(button, `Missing action: ${label}`).toBeDefined();
   expect(button!.props.disabled).not.toBe(true);
   button!.props.onClick!();
+}
+
+function action(label: string) {
+  return elements(render()).find(
+    (element) => element.type === 'button' && text(element.props.children) === label,
+  );
 }
 
 beforeEach(() => {
@@ -456,8 +469,8 @@ describe('same-session consent recovery wiring', () => {
         note: { subjective: 'Fictional draft already received.' },
       }),
     });
-    click('Show draft');
-    click('Show transcript');
+    click('Open draft');
+    click('Open transcript');
 
     // Read rendered conditional content and exclude explicitly hidden ancestors;
     // this is hook/event wiring, not a claim of browser layout verification.
@@ -477,8 +490,8 @@ describe('same-session consent recovery wiring', () => {
       expect(visible).toContain('Fictional words already transcribed.');
       expect(visible).toContain('Fictional draft already received.');
       expect(visible).not.toMatch(/Listening…|Writing…/);
-      expect(visible).toContain('Hide draft');
-      expect(visible).toContain('Hide transcript');
+      expect(visible).toContain('Close draft');
+      expect(visible).toContain('Close transcript');
     };
 
     socket.status('unauthorized');
@@ -515,6 +528,23 @@ describe('same-session consent recovery wiring', () => {
 });
 
 describe('real TherapistLiveSession attempt lifecycle wiring', () => {
+  it('links the draft disclosure only after its controlled region is mounted', () => {
+    mount();
+    expect(action('Open draft')?.props['aria-expanded']).toBe(false);
+    expect(action('Open draft')?.props['aria-controls']).toBeUndefined();
+    expect(elements(render()).some((element) => element.props.id === 'mind-live-draft-s-1')).toBe(
+      false,
+    );
+
+    click('Open draft');
+
+    expect(action('Close draft')?.props['aria-expanded']).toBe(true);
+    expect(action('Close draft')?.props['aria-controls']).toBe('mind-live-draft-s-1');
+    expect(elements(render()).some((element) => element.props.id === 'mind-live-draft-s-1')).toBe(
+      true,
+    );
+  });
+
   it('a failed visibility receipt keeps the safety cue open and retries the actual review action, without audio', async () => {
     priorRisk = true;
     mount();
@@ -709,6 +739,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
   it('clears displayed context-derived reasoning on revocation without removing deterministic safety or transcript', async () => {
     priorRisk = true;
     const socket = await listening();
+    click('Guided');
     socket.onmessage?.({
       data: JSON.stringify({
         type: 'utterance',
@@ -784,10 +815,11 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
           riskWatch: { id: string }[];
           askNext: { id: string }[];
           threads: unknown[];
-          arc: { phase: string };
+          arc: { phase: string } | null;
         };
       };
-    expect(rail().reasoning.threads).toHaveLength(1);
+    expect(rail().reasoning.askNext.map((item) => item.id)).toEqual(['derived-ask']);
+    expect(rail().reasoning.threads).toEqual([]);
     const stopsBeforeRevocation = harness.stream.stop.mock.calls.length;
     socket.onmessage?.({
       data: JSON.stringify({ type: 'therapyContextCleared', reason: 'CAPABILITY_CHANGED' }),
@@ -795,8 +827,8 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
     expect(rail().reasoning.riskWatch.map((item) => item.id)).toEqual(['risk-recheck']);
     expect(rail().reasoning.askNext.map((item) => item.id)).toEqual(['carried-0']);
     expect(rail().reasoning.threads).toEqual([]);
-    expect(rail().reasoning.arc.phase).toBe('opening');
-    click('Show transcript');
+    expect(rail().reasoning.arc).toBeNull();
+    click('Open transcript');
     expect(text(render())).toContain('Fictional spoken words');
     expect(harness.stream.stop).toHaveBeenCalledTimes(stopsBeforeRevocation);
   });
@@ -808,7 +840,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
     expect(controlsIndex).toBeGreaterThan(-1);
     expect(text(rendered[controlsIndex])).toContain('Start session');
     expect(controlsIndex).toBeLessThan(
-      rendered.findIndex((el) => text(el.props.children).startsWith('Quiet focus')),
+      rendered.findIndex((el) => text(el.props.children).startsWith('Quiet')),
     );
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
@@ -824,8 +856,21 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
 
   it('pause waits for matching acknowledgement, sends no stop, blocks new audio, and explicitly reauthorizes resume', async () => {
     const socket = await listening();
+    const captureStatus = () =>
+      elements(render()).find((element) => element.type === CaptureStatusBar)!.props as unknown as {
+        status: string;
+        detail: string;
+      };
+    expect(captureStatus()).toMatchObject({
+      status: 'Listening',
+      detail: expect.stringContaining('Microphone on · Connected'),
+    });
     const command = await pause(socket);
     expect(command.type).toBe('pause');
+    expect(captureStatus()).toMatchObject({
+      status: 'Processing',
+      detail: expect.stringContaining('Microphone off'),
+    });
     expect(text(render())).toContain('Microphone off');
     expect(text(render())).not.toContain('Resume recording');
     socket.onmessage?.({
@@ -836,12 +881,20 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
       data: JSON.stringify({ type: 'capturePaused', requestId: command.requestId }),
     });
     await vi.waitFor(() => expect(text(render())).toContain('Resume recording'));
+    expect(captureStatus()).toMatchObject({
+      status: 'Paused',
+      detail: expect.stringContaining('No new audio is captured'),
+    });
     harness.onFrame(new Uint8Array([3, 4]));
     expect(socket.send).toHaveBeenCalledTimes(2);
     expect(fetch).toHaveBeenCalledOnce();
     expect(harness.push).not.toHaveBeenCalled();
     click('Resume recording');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    expect(captureStatus()).toMatchObject({
+      status: 'Reconnecting',
+      detail: expect.stringContaining('Connection not yet confirmed'),
+    });
     expect(fetch).toHaveBeenCalledTimes(2);
     expect(socket.close).toHaveBeenCalledOnce();
     expect(harness.stream.start).toHaveBeenCalledOnce();

@@ -1,5 +1,10 @@
 import type { SpeakerSegment } from '@cureocity/contracts';
-import { TRANSCRIPTION_REVIEW_WARNING, type decodeSavedTranscript } from './saved-transcript';
+import {
+  savedTranscriptContainsArtifact,
+  TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE,
+  TRANSCRIPTION_REVIEW_WARNING,
+  type decodeSavedTranscript,
+} from './saved-transcript';
 
 export const TRANSCRIPT_UNAVAILABLE_MESSAGE =
   'The saved transcript could not be opened. Reload to retry. Do not rely on this note until its source can be reviewed.';
@@ -16,16 +21,26 @@ export function noteTranscriptView(
 ) {
   // Empty ciphertext is malformed, not an absent legacy transcript.
   const unavailable = typeof row.transcriptEncrypted === 'string' && !source;
+  const speakerSegments = unavailable
+    ? null
+    : (source?.speakerSegments ?? (row.speakerSegments as SpeakerSegment[] | null) ?? null);
+  // Never partially redact an authoritative clinical source. Quarantine the
+  // whole presentation while leaving its encrypted bytes untouched for
+  // recovery/audit and for the signing boundary's explicit rejection.
+  const artifactHidden = savedTranscriptContainsArtifact({
+    transcript: source?.transcript ?? '',
+    speakerSegments,
+  });
   return {
-    transcript: source?.transcript ?? null,
-    speakerSegments: unavailable
-      ? null
-      : (source?.speakerSegments ?? (row.speakerSegments as SpeakerSegment[] | null) ?? null),
+    transcript: artifactHidden ? null : (source?.transcript ?? null),
+    speakerSegments: artifactHidden ? null : speakerSegments,
     errorMessage: unavailable
       ? TRANSCRIPT_UNAVAILABLE_MESSAGE
-      : source?.transcriptionWarning
-        ? TRANSCRIPTION_REVIEW_WARNING
-        : row.errorMessage,
-    transcriptionWarning: source?.transcriptionWarning ?? false,
+      : artifactHidden
+        ? TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE
+        : source?.transcriptionWarning
+          ? TRANSCRIPTION_REVIEW_WARNING
+          : row.errorMessage,
+    transcriptionWarning: artifactHidden || (source?.transcriptionWarning ?? false),
   };
 }

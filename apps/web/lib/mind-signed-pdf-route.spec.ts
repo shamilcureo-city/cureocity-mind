@@ -103,6 +103,21 @@ describe('signed clinician-note PDF lifecycle', () => {
     expect(mocks.render).not.toHaveBeenCalled();
     expect(mocks.signer).not.toHaveBeenCalled();
   });
+  it('refuses to export generated control text from a historical signed record', async () => {
+    const current = row();
+    (current.therapyNote as { content: unknown }).content = {
+      version: 'V1',
+      subjective: 'As an AI language model, I cannot transcribe this recording.',
+    };
+    mocks.session.mockResolvedValue(current);
+    const response = await GET(request(), ctx);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining('record') });
+    expect(mocks.render).not.toHaveBeenCalled();
+    expect(mocks.soap).not.toHaveBeenCalled();
+    expect(mocks.intake).not.toHaveBeenCalled();
+    expect(mocks.audit).not.toHaveBeenCalled();
+  });
   it.each([
     null,
     { ...row(), psychologistId: 'other' },

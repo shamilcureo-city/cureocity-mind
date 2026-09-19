@@ -15,6 +15,7 @@ import { resolveNoteTranscriptData } from '@/lib/note-transcript';
 import { noteTranscriptView } from '@/lib/note-transcript-view';
 import { parseJson } from '@/lib/validate';
 import { canonicalIntakeEdit, canonicalTreatmentEdit } from '@/lib/canonical-note-edit';
+import { noteContainsArtifact } from '@/lib/note-artifact';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -158,6 +159,15 @@ export async function PUT(req: NextRequest, ctx: RouteContext): Promise<NextResp
       return NextResponse.json({ error: 'Edited note failed validation.' }, { status: 422 });
     }
     validated = TherapyNoteV1Schema.parse(canonicalTreatmentEdit(current, parsed.data));
+  }
+  if (noteContainsArtifact(validated)) {
+    return NextResponse.json(
+      {
+        error:
+          'The edited note contains invalid generated or system text. Remove it before saving the clinical draft.',
+      },
+      { status: 422 },
+    );
   }
 
   const saved = await prisma.$transaction(async (tx) => {

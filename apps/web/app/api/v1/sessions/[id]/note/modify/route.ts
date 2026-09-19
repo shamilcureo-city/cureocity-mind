@@ -14,6 +14,7 @@ import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
 import { canonicalIntakeEdit, canonicalTreatmentEdit } from '@/lib/canonical-note-edit';
+import { noteContainsArtifact } from '@/lib/note-artifact';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -282,6 +283,15 @@ export async function POST(
       ? canonicalIntakeEdit(currentIntake!, validated as IntakeNoteV1)
       : canonicalTreatmentEdit(currentTherapy!, validated as TherapyNoteV1);
     changedFields = diffKeys(currentNote, validated);
+  }
+  if (noteContainsArtifact(validated)) {
+    return NextResponse.json(
+      {
+        error:
+          'The suggested edit contains invalid generated or system text. Your note has not changed.',
+      },
+      { status: 502 },
+    );
   }
 
   // changedFields was computed above per-kind via diffKeys.

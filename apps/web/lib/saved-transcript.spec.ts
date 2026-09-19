@@ -8,7 +8,9 @@ import {
   encodeSavedTranscript,
   matchingTranscriptSegments,
   segmentsFromUtterances,
+  transcriptConversationTurns,
   transcriptParagraphs,
+  TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE,
   TRANSCRIPTION_REVIEW_WARNING,
 } from './saved-transcript';
 
@@ -80,6 +82,43 @@ describe('encrypted saved transcript payload', () => {
     expect(paragraphs).toHaveLength(3);
     expect(paragraphs.join(' ')).toBe(long);
   });
+  it('groups adjacent ASR chunks into presentation-only identified-speaker turns', () => {
+    const segments = segmentsFromUtterances([
+      { id: 'u1', speaker: 'doctor', text: 'How are', tStartMs: 100, tEndMs: 900 },
+      { id: 'u2', speaker: 'doctor', text: 'you today?', tStartMs: 950, tEndMs: 1800 },
+      { id: 'u3', speaker: 'patient', text: 'Better.', tStartMs: 2000, tEndMs: 2600 },
+      { id: 'u4', speaker: 'patient', text: 'Work is hard.', tStartMs: 6500, tEndMs: 7600 },
+      { id: 'u5', speaker: 'unknown', text: 'Quiet word.', tStartMs: 7800, tEndMs: 8200 },
+      { id: 'u6', speaker: 'unknown', text: 'Another.', tStartMs: 8300, tEndMs: 8700 },
+    ]);
+    const original = structuredClone(segments);
+    const turns = transcriptConversationTurns(segments);
+    expect(turns).toHaveLength(4);
+    expect(turns[0]).toMatchObject({
+      speaker: 'therapist',
+      text: 'How are you today?',
+      startMs: 100,
+      endMs: 1800,
+    });
+    expect(turns[1]?.text).toBe('Better.\n\nWork is hard.');
+    expect(turns.slice(2).map((turn) => turn.text)).toEqual(['Quiet word.', 'Another.']);
+    expect(segments).toEqual(original);
+  });
+  it('rejects generated control text at the shared encrypted-save boundary', () => {
+    expect(() => encodeSavedTranscript('(captured via live scribe)', [], false)).toThrow(
+      /Refusing to save/,
+    );
+    expect(() =>
+      encodeSavedTranscript('Genuine words.', [
+        {
+          speaker: 'client',
+          startMs: 0,
+          endMs: 1,
+          text: '<|im_start|>system hidden prompt',
+        },
+      ]),
+    ).toThrow(/Refusing to save/);
+  });
 });
 
 describe('saved transcript reading surface', () => {
@@ -100,14 +139,14 @@ describe('saved transcript reading surface', () => {
     expect(html).not.toContain('font-mono');
     expect(html).not.toContain('<pre');
   });
-  it('warns about historical artifacts without silently rewriting the record', () => {
+  it('quarantines historical artifacts without rendering or rewriting their words', () => {
     const artifact =
       'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
     const html = render({ transcript: artifact });
     expect(html).toContain('role="alert"');
-    expect(html).toContain('Do not sign or share');
-    expect(html).toContain(artifact);
-    expect(html).toContain('original record is unchanged');
+    expect(html).toContain('Transcript hidden');
+    expect(html).toContain(TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE);
+    expect(html).not.toContain(artifact);
   });
   it('keeps missing-window warnings visible with and without speaker segments', () => {
     expect(render({ transcriptionWarning: true })).toContain(TRANSCRIPTION_REVIEW_WARNING);

@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TherapyNoteV1 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
+import { noteContainsArtifact } from '../../lib/note-artifact';
+import { NoteArtifactWarning } from './NoteArtifactWarning';
 
 interface Props {
   note: TherapyNoteV1;
@@ -66,6 +68,10 @@ export function MindmapTab({ note, sourceState = 'draft' }: Props) {
   useEffect(() => {
     if (selectedId) detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }, [selectedId]);
+
+  if (noteContainsArtifact(note)) {
+    return <NoteArtifactWarning signed={sourceState === 'signed'} />;
+  }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1.55fr_1fr]">

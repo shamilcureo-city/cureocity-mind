@@ -98,11 +98,19 @@ type TreeProps = {
   onClick?: () => void;
   'aria-label'?: string;
   href?: string;
+  open?: boolean;
 };
 function elements(node: ReactNode): ReactElement<TreeProps>[] {
   return Children.toArray(node).flatMap((child) =>
     isValidElement<TreeProps>(child) ? [child, ...elements(child.props.children)] : [],
   );
+}
+function content(node: ReactNode): string {
+  return Children.toArray(node)
+    .map((child) =>
+      isValidElement<TreeProps>(child) ? content(child.props.children) : String(child),
+    )
+    .join('');
 }
 function render(recommended: ClinicalRecommendedTherapy[] = []) {
   harness.stateIndex = harness.refIndex = 0;
@@ -129,6 +137,57 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('guide catalog display', () => {
+  it('keeps case-linked suggestions primary and the complete catalog behind one browse choice', () => {
+    const recommendation = {
+      name: 'Behavioural Activation',
+      rationale: 'Fictional case rationale',
+      evidenceSummary: 'Fictional evidence summary',
+      whenInPlan: 'For clinician review',
+    };
+    const view = render([recommendation]);
+    const html = renderToStaticMarkup(view);
+    const browse = elements(view).find(
+      (element) =>
+        element.type === 'details' && content(element).includes('Browse all other guides (9)'),
+    );
+
+    expect(html).toContain('Suggested for this case');
+    expect(html).toContain('not ranked evidence of suitability');
+    expect(html).toContain('Browse all other guides (9)');
+    expect(html).toContain('Being listed here does not mean a guide fits this client');
+    expect(browse?.props.open).toBeUndefined();
+    expect(elements(browse!).filter((element) => element.type === 'details')).toHaveLength(1);
+    expect(lists([recommendation])[0]?.therapies).toEqual([recommendation]);
+    expect(lists([recommendation])[1]?.therapies).toHaveLength(9);
+  });
+
+  it('keeps the AI rationale optional and puts the fit caveat inside the clinician-opened review', () => {
+    const html = renderToStaticMarkup(
+      React.createElement(TherapyList, {
+        title: 'Suggested for this case',
+        empty: 'Empty',
+        source: 'suggested',
+        therapies: [
+          {
+            name: 'Behavioural Activation',
+            rationale: 'Fictional rationale',
+            evidenceSummary: 'Fictional evidence',
+            whenInPlan: 'Fictional timing',
+          },
+        ],
+        onPick: vi.fn(),
+      }),
+    );
+
+    expect(html).toContain('Suggested from available case context');
+    expect(html).toContain('Review AI rationale and fit');
+    expect(html).toContain('Why suggested');
+    expect(html).toContain('AI evidence summary');
+    expect(html).toContain('This explanation can be incomplete');
+    expect(html).toContain('Preparing this draft does not select or record an approach');
+    expect(html).not.toMatch(/<details\b[^>]*\bopen(?:[\s=>])/);
+  });
+
   it('presents library categories as optional disclosures rather than ten complete therapies', () => {
     const html = renderToStaticMarkup(render());
     expect(html).toContain('10 library starting points — not 10');

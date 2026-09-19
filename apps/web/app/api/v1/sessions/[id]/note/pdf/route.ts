@@ -7,6 +7,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
+import { noteContainsArtifact } from '@/lib/note-artifact';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,6 +51,15 @@ export async function GET(
     return NextResponse.json(
       { error: 'Session has no signed therapy note yet — sign before downloading.' },
       { status: 404 },
+    );
+  }
+  if (noteContainsArtifact(session.therapyNote.content)) {
+    return NextResponse.json(
+      {
+        error:
+          'This signed note contains invalid generated or system text. The record is unchanged; re-open it and record a reviewed correction before exporting.',
+      },
+      { status: 409 },
     );
   }
 

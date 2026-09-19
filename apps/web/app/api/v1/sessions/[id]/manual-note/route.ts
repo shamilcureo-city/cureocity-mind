@@ -13,11 +13,13 @@ import { prisma } from '@/lib/prisma';
 import { ClientPhiWriteForbiddenError, lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { encryptForTenant, decryptForTenant } from '@/lib/tenant-crypto';
 import { parseJson } from '@/lib/validate';
+import { noteContainsArtifact } from '@/lib/note-artifact';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 type Context = { params: Promise<{ id: string }> };
 class ManualConflict extends Error {}
+class ManualArtifactError extends Error {}
 
 async function lockedSession(tx: Prisma.TransactionClient, sessionId: string, owner: string) {
   await lockActiveClientForSession(tx, sessionId, owner);
@@ -76,6 +78,8 @@ function failure(error: unknown) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   if (error instanceof ManualConflict)
     return NextResponse.json({ error: error.message }, { status: 409 });
+  if (error instanceof ManualArtifactError)
+    return NextResponse.json({ error: error.message }, { status: 422 });
   // KMS/parse errors may contain clinical text; never log or expose raw exceptions.
   return NextResponse.json(
     { error: 'Your note could not be securely loaded or saved. Keep this view open and retry.' },
@@ -219,6 +223,11 @@ export async function POST(req: NextRequest, ctx: Context) {
           } catch {
             throw new ManualConflict(
               'Complete the required clinical fields and safety assessment. Document uncertainty or information not yet assessed in your own words.',
+            );
+          }
+          if (noteContainsArtifact(note)) {
+            throw new ManualArtifactError(
+              'The clinician-written note contains invalid generated or system text. Remove it before completing the clinical note.',
             );
           }
         }
