@@ -2,6 +2,10 @@ import { NextResponse, after, type NextRequest } from 'next/server';
 import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { runClinicalAnalysis, runNoteGeneration } from '@/lib/note-orchestrator';
 import { prisma } from '@/lib/prisma';
+import {
+  scribeCaptureIntegrity,
+  SCRIBE_CAPTURE_REVIEW_REQUIRED,
+} from '@/lib/scribe-capture-integrity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,6 +43,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       status: true,
       mindDocumentationMode: true,
       psychologist: { select: { vertical: true } },
+      noteDraft: { select: { errorMessage: true } },
     },
   });
   if (!session || session.psychologistId !== auth.value.psychologistId) {
@@ -62,6 +67,12 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       : 'BEHAVIORAL_HEALTH_DOCUMENTATION';
   const documentationAuth = await requireCapability(req, documentationCapability, auth);
   if (!documentationAuth.ok) return documentationAuth.response;
+  if (
+    session.psychologist.vertical === 'DOCTOR' &&
+    scribeCaptureIntegrity(session.noteDraft?.errorMessage).incomplete
+  ) {
+    return NextResponse.json({ error: SCRIBE_CAPTURE_REVIEW_REQUIRED }, { status: 409 });
+  }
 
   const result = await runNoteGeneration(sessionId);
   // Schedule Pass 3 (Clinical Analysis) to run AFTER the response is

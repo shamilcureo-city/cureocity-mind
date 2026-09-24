@@ -20,7 +20,7 @@ export default async function EncounterWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string; sessionId: string }>;
-  searchParams: Promise<{ mode?: string }>;
+  searchParams: Promise<{ mode?: string; liveConsent?: string }>;
 }) {
   const doctor = await requireOnboardedDoctor();
   const { id: clientId, sessionId } = await params;
@@ -42,6 +42,8 @@ export default async function EncounterWorkspacePage({
     session.psychologistId,
     session.client.fullNameEncrypted,
   );
+
+  const query = await searchParams;
 
   return (
     <Container className="py-10">
@@ -68,7 +70,8 @@ export default async function EncounterWorkspacePage({
         </div>
       </header>
       <DoctorEncounterPanel
-        mode={(await searchParams).mode === 'upload' ? 'upload' : 'dictate'}
+        mode={query.mode === 'upload' ? 'upload' : 'dictate'}
+        liveConsentDeclined={query.liveConsent === 'declined'}
         sessionId={session.id}
         clientId={clientId}
         clientName={clientFullName}

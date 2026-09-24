@@ -1546,6 +1546,10 @@ enum NoteEditField {
   // Sprint DV3 — medical encounter note signable string fields.
   chiefComplaint
   hpi
+  // Structured values are stored as canonical JSON in NoteEdit text columns.
+  reviewOfSystems
+  physicalExam
+  vitals
 }
 
 model NoteEdit {

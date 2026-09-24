@@ -326,6 +326,12 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     'live',
   ),
   policy('api/v1/sessions/[id]/live-suggestion', ['POST'], ['LIVE_ENCOUNTER'], 'live'),
+  policy(
+    'api/v1/sessions/[id]/capture-review',
+    ['GET', 'POST'],
+    ['MEDICAL_DOCUMENTATION'],
+    'write',
+  ),
   policy('api/v1/sessions/[id]/mind-cue-review', ['GET', 'POST'], ['LIVE_ENCOUNTER'], 'live'),
   policy(
     'api/v1/sessions/[id]/recovery-transcript',

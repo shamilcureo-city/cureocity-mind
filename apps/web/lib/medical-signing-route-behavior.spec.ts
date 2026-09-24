@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalJson, canonicalSigningPayload } from './sign-note-payload';
+import {
+  markScribeCaptureReviewed,
+  preserveScribeCaptureIntegrity,
+} from './scribe-capture-integrity';
 
 const mocks = vi.hoisted(() => ({
   signableKind: 'MEDICAL' as 'MEDICAL' | 'THERAPY',
@@ -11,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   sessionFindUnique: vi.fn(),
   webAuthnFindMany: vi.fn(),
   draftFindUnique: vi.fn(),
+  draftUpdate: vi.fn(),
   noteFindUnique: vi.fn(),
   persistedEdits: vi.fn(),
   transaction: vi.fn(),
@@ -114,6 +119,7 @@ const tx = {
   webAuthnCredential: { update: mocks.webAuthnUpdate },
   noteEditRecovery: { findUnique: mocks.recoveryFindUnique },
   mindManualNoteDraft: { findUnique: mocks.manualDraftFindUnique },
+  noteDraft: { update: mocks.draftUpdate },
 };
 
 function sqlText(strings: TemplateStringsArray): string {
@@ -242,6 +248,61 @@ beforeEach(() => {
 afterAll(() => vi.useRealTimers());
 
 describe('medical signing route transaction behavior', () => {
+  it.each(['pending', 'reviewed_different_note', 'reviewed_changed_source', 'reviewed_exact_note'])(
+    'checks capture review under signing locks: %s',
+    async (scenario) => {
+      const draft = {
+        id: 'draft-1',
+        status: 'COMPLETED',
+        content: finalNote,
+        rxPad: null,
+        transcriptEncrypted: 'encrypted-source',
+        errorMessage: preserveScribeCaptureIntegrity(null, true, 'audio_loss'),
+      };
+      if (scenario !== 'pending') {
+        draft.errorMessage = markScribeCaptureReviewed(
+          draft,
+          scenario === 'reviewed_different_note'
+            ? { ...finalNote, assessment: 'Corrected note' }
+            : finalNote,
+        );
+      }
+      if (scenario === 'reviewed_changed_source') draft.transcriptEncrypted = 'changed-source';
+      const baseQuery = mocks.queryRaw.getMockImplementation()!;
+      mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+        sqlText(strings).includes('FROM "note_drafts"')
+          ? Promise.resolve([draft])
+          : baseQuery(strings, ...values),
+      );
+      const response = await POST(request() as never, {
+        params: Promise.resolve({ id: 'session-1' }),
+      });
+      if (scenario === 'reviewed_exact_note') {
+        expect(response.status).toBe(201);
+        expect(mocks.noteCreate).toHaveBeenCalledOnce();
+        expect(mocks.draftUpdate).toHaveBeenCalledWith({
+          where: { id: draft.id },
+          data: { errorMessage: null },
+        });
+        expect(mocks.writeAudit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            metadata: expect.objectContaining({
+              captureReviewed: true,
+              reviewedNoteHashHex: expect.stringMatching(/^[a-f0-9]{64}$/),
+            }),
+          }),
+          tx,
+        );
+      } else {
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({
+          error: expect.stringContaining('capture is incomplete'),
+        });
+        expect(mocks.noteCreate).not.toHaveBeenCalled();
+        expect(mocks.draftUpdate).not.toHaveBeenCalled();
+      }
+    },
+  );
   it.each([
     {
       ciphertext: 'encrypted-source',

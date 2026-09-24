@@ -6,7 +6,7 @@
 > (`case-state.ts` + `reasoning-loop.ts` + `ask-next.ts`, contract
 > `packages/contracts/src/live-reasoning.ts`, `passReasoning` in the
 > ModelRouter), the Rx pad (`packages/contracts/src/rx-pad.ts`,
-> `NoteDraft.rxPad`), the zero-click OPD queue (`/app/clinic` +
+> `NoteDraft.rxPad`), the rapid-turnover OPD queue (`/app/clinic` +
 > `lib/clinic-queue` + `Session.tokenNumber`), and the pilot insights
 > dashboard (`/app/insights` + `lib/insights`). The DS10 Plan-Pad and
 > DS11 consult-UX follow-ups (`docs/DS11_CONSULT_UX_SPRINTS.md`) also
@@ -410,7 +410,7 @@ writes its audit row.
 
 ---
 
-## DS7 — Zero-click clinic flow (queue + context flash + turnover)
+## DS7 — Fast clinic flow (queue + context flash + consent + turnover)
 
 **Goal**: screens 01, 02, 10 — because the verified adoption evidence
 says per-consult activation is the binding constraint.
@@ -424,14 +424,16 @@ says per-consult activation is the binding constraint.
    queue-order API; statuses derive from session state.
 2. Context flash: 3-second pre-consult screen (chronic trends from
    `/chronic`, active meds, allergies, last impression, "copilot is
-   watching X") with auto-advance into listening; skippable.
+   watching X"), followed by one explicit live-capture consent choice.
+   Refusal is audited and routes to clinician dictation; the mic never
+   auto-starts.
 3. Turnover: after sign/share, auto-arm next token (countdown,
    "wait" voice command holds); target ≤10 s between consults.
 4. "Next patient" voice command (extend `voice-commands.ts` grammar).
 
 **Accept**: simulated 5-patient clinic run: queue → flash → consult →
 sign → auto-next; measured turnover ≤10 s (excluding consult time);
-activation requires ≤1 click per patient.
+activation requires one consent-confirmation click per patient.
 
 ---
 

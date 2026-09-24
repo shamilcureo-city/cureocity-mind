@@ -887,7 +887,10 @@ describe('LiveSession — finalize never duplicates the in-flight window (Batch 
     const utterances = events.flatMap((e) => (e.type === 'utterance' ? [e.utterance] : []));
     const texts = utterances.map((u) => `${u.tStartMs}:${u.text}`);
     expect(new Set(texts).size).toBe(texts.length); // no duplicated window
-    expect(events.some((e) => e.type === 'final')).toBe(true);
+    expect(events.find((e) => e.type === 'final')).toMatchObject({
+      captureIncomplete: true,
+      captureIncompleteReason: 'audio_loss',
+    });
     // The consult always reaches a terminal `done` — the client must never be
     // left on "Finishing…". (The released window's trailing meter can land
     // after it, which is why this is a contains, not a last-event, check.)
@@ -906,6 +909,10 @@ describe('LiveSession — finalize never duplicates the in-flight window (Batch 
     await session.finalize();
     const after = events.filter((e) => e.type === 'utterance').length;
     expect(after).toBeGreaterThan(before);
+    const final = events.find((e) => e.type === 'final');
+    expect(final).toBeDefined();
+    expect(final).not.toHaveProperty('captureIncomplete');
+    expect(final).not.toHaveProperty('captureIncompleteReason');
     session.dispose();
   });
 });

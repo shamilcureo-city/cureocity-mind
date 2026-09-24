@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { MedicalEncounterNoteV1, RxPadDraft } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -13,6 +13,8 @@ import { EncounterOrdersPanel } from './EncounterOrdersPanel';
 import { EncounterInteropPanel } from './EncounterInteropPanel';
 import { postSignNote } from '../../lib/sign-note';
 import { buildShareDeliveryInput } from '../../lib/share-delivery-input';
+import { TRANSCRIPT_UNAVAILABLE_MESSAGE } from '@/lib/note-transcript-view';
+import { TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE } from '@/lib/saved-transcript';
 
 /**
  * Sprint DS11.2 — the ONE review-and-sign surface.
@@ -34,6 +36,7 @@ export function ReviewAndSign({
   examined,
   notExamined,
   onSigned,
+  captureSaveState = 'saved',
 }: {
   sessionId: string;
   /** Needed for patient shares; when absent the share buttons hide. */
@@ -50,6 +53,8 @@ export function ReviewAndSign({
   examined?: string[] | undefined;
   notExamined?: string[] | undefined;
   onSigned?: () => void;
+  /** Live capture must finish saving its source and integrity marker before review. */
+  captureSaveState?: 'idle' | 'saving' | 'saved' | 'error';
 }) {
   const [signed, setSigned] = useState(false);
   const [signing, setSigning] = useState(false);
@@ -80,14 +85,142 @@ export function ReviewAndSign({
   const [working, setWorking] = useState<MedicalEncounterNoteV1>(note);
   const [edits, setEdits] = useState<NoteFieldEdit[]>([]);
   const [editing, setEditing] = useState(false);
+  const [copilotActive, setCopilotActive] = useState(false);
+  const [captureReview, setCaptureReview] = useState<{
+    incomplete: boolean;
+    reason: string | null;
+    draftId: string | null;
+    reviewToken: string | null;
+  } | null>(null);
+  const [captureReviewError, setCaptureReviewError] = useState<string | null>(null);
+  const [captureReviewLoading, setCaptureReviewLoading] = useState(true);
+  const [captureReviewing, setCaptureReviewing] = useState(false);
+  const [captureChecked, setCaptureChecked] = useState(false);
+  const [sourceTranscript, setSourceTranscript] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [reviewedNoteSnapshot, setReviewedNoteSnapshot] = useState<string | null>(null);
+  const rxReviewSnapshot = useRef<string | null>(null);
+  const captureRequestRef = useRef(0);
+  const sourceRequestRef = useRef(0);
+  const loadCaptureReview = useCallback(async () => {
+    const request = ++captureRequestRef.current;
+    ++sourceRequestRef.current;
+    setCaptureReviewLoading(true);
+    setCaptureReviewError(null);
+    setSourceTranscript(null);
+    setSourceError(null);
+    try {
+      const response = await fetch(`/api/v1/sessions/${sessionId}/capture-review`, {
+        cache: 'no-store',
+      });
+      if (!response.ok)
+        throw new Error(await errorOf(response, 'Could not verify capture completeness'));
+      const next = await response.json();
+      if (request === captureRequestRef.current) setCaptureReview(next);
+    } catch (error) {
+      if (request === captureRequestRef.current) setCaptureReviewError((error as Error).message);
+    } finally {
+      if (request === captureRequestRef.current) setCaptureReviewLoading(false);
+    }
+  }, [sessionId]);
+  useEffect(() => {
+    if (captureSaveState === 'saved') void loadCaptureReview();
+  }, [captureSaveState, loadCaptureReview]);
+  useEffect(() => {
+    if (!captureReview?.incomplete || captureSaveState !== 'saved') return;
+    let cancelled = false;
+    const request = ++sourceRequestRef.current;
+    setSourceTranscript(null);
+    setSourceError(null);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/v1/sessions/${sessionId}/note-draft`, {
+          cache: 'no-store',
+        });
+        if (!response.ok)
+          throw new Error(
+            'The captured transcript could not be loaded. Retry before completing capture review.',
+          );
+        const data = (await response.json()) as {
+          transcript?: string | null;
+          errorMessage?: string | null;
+        };
+        if (
+          data.errorMessage === TRANSCRIPT_UNAVAILABLE_MESSAGE ||
+          data.errorMessage === TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE
+        )
+          throw new Error(data.errorMessage);
+        if (!cancelled && request === sourceRequestRef.current) {
+          setSourceTranscript(data.transcript ?? '');
+          setSourceError(null);
+        }
+      } catch (error) {
+        if (!cancelled && request === sourceRequestRef.current)
+          setSourceError((error as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [captureReview, captureSaveState, sessionId]);
+  const captureResolved = reviewedNoteSnapshot === JSON.stringify(working);
+  const captureBlocked =
+    captureSaveState !== 'saved' ||
+    captureReviewLoading ||
+    Boolean(captureReviewError) ||
+    captureReview === null ||
+    (captureReview.incomplete && !captureResolved);
   const overriding = blockers.hard.length > 0;
   const blocked =
-    !signed && (blockers.soft.length > 0 || (overriding && overrideReason.trim().length < 3));
+    !signed &&
+    (captureBlocked ||
+      editing ||
+      blockers.soft.length > 0 ||
+      (overriding && overrideReason.trim().length < 3));
+
+  async function reconcileCapture(): Promise<void> {
+    if (
+      !captureChecked ||
+      !captureReview?.draftId ||
+      !captureReview.reviewToken ||
+      captureReviewLoading ||
+      captureReviewError ||
+      captureSaveState !== 'saved' ||
+      editing ||
+      sourceTranscript === null ||
+      sourceError
+    )
+      return;
+    setCaptureReviewing(true);
+    setCaptureReviewError(null);
+    const reviewedNote = working;
+    try {
+      const response = await fetch(`/api/v1/sessions/${sessionId}/capture-review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          resolution: 'reviewed_and_completed',
+          reviewedDraftId: captureReview.draftId,
+          reviewToken: captureReview.reviewToken,
+          reviewedNote,
+        }),
+      });
+      if (!response.ok)
+        throw new Error(await errorOf(response, 'Capture review could not be saved'));
+      setReviewedNoteSnapshot(JSON.stringify(reviewedNote));
+    } catch (error) {
+      setCaptureReviewError((error as Error).message);
+      setCaptureChecked(false);
+    } finally {
+      setCaptureReviewing(false);
+    }
+  }
 
   // Sign-off. A doctor with a registered WebAuthn credential is required
   // to assert (same rule as the therapist sign route). The note is signed
   // as-drafted (no field edits in this MVP).
   async function sign(): Promise<void> {
+    if (blocked || signing) return;
     setSigning(true);
     setSignError(null);
     try {
@@ -128,6 +261,9 @@ export function ReviewAndSign({
       onSigned?.();
     } catch (e) {
       setSignError((e as Error).message);
+      setReviewedNoteSnapshot(null);
+      setCaptureChecked(false);
+      void loadCaptureReview();
     } finally {
       setSigning(false);
     }
@@ -193,6 +329,101 @@ export function ReviewAndSign({
   return (
     <div className="space-y-4">
       {header}
+      {!signed && captureSaveState !== 'saved' && (
+        <Card role="status" className="p-5 text-sm">
+          {captureSaveState === 'error'
+            ? 'The draft has not been saved. Retry saving before signing.'
+            : 'Saving the consultation before checking capture completeness…'}
+        </Card>
+      )}
+      {!signed && captureSaveState === 'saved' && captureReviewLoading && (
+        <p role="status" className="text-sm text-[var(--color-ink-2)]">
+          Checking capture completeness…
+        </p>
+      )}
+      {!signed && captureReview?.incomplete && (
+        <Card
+          role="alert"
+          className="space-y-3 border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-5 text-sm"
+        >
+          <h2 className="text-lg font-semibold">Incomplete capture — review required</h2>
+          <p>
+            Some of this consultation may be missing. Compare the captured transcript with your
+            recollection, then use Edit note to add or correct missing clinical details. If you
+            cannot reconstruct them, leave this note unsigned.
+          </p>
+          <details className="rounded-lg border border-[var(--color-line)] bg-white p-3" open>
+            <summary className="min-h-11 cursor-pointer py-2 font-medium">
+              Captured transcript
+            </summary>
+            <p className="max-h-64 overflow-auto whitespace-pre-wrap leading-relaxed">
+              {sourceError ??
+                (sourceTranscript === null
+                  ? 'Loading captured words…'
+                  : sourceTranscript ||
+                    'No transcript was recovered. Complete the note from your clinical record before recording this review.')}
+            </p>
+          </details>
+          <label className="flex min-h-11 items-start gap-3 py-2">
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 shrink-0"
+              checked={captureChecked}
+              disabled={captureReviewing || captureResolved}
+              onChange={(event) => setCaptureChecked(event.target.checked)}
+            />
+            <span>
+              I have reviewed the captured conversation and completed or corrected the note to
+              account for the missing content.
+            </span>
+          </label>
+          <Button
+            variant="secondary"
+            disabled={
+              !captureChecked ||
+              captureReviewing ||
+              captureResolved ||
+              editing ||
+              captureReviewLoading ||
+              Boolean(captureReviewError) ||
+              captureSaveState !== 'saved' ||
+              sourceTranscript === null ||
+              Boolean(sourceError)
+            }
+            onClick={() => void reconcileCapture()}
+          >
+            {captureReviewing
+              ? 'Recording review…'
+              : captureResolved
+                ? 'Capture review recorded'
+                : 'Record capture review'}
+          </Button>
+          <p className="text-sm">
+            This review applies to the exact note you will sign. Further changes require another
+            review.
+          </p>
+          {sourceError && (
+            <Button variant="secondary" onClick={() => void loadCaptureReview()}>
+              Retry loading transcript
+            </Button>
+          )}
+        </Card>
+      )}
+      {!signed && captureReviewError && (
+        <Card role="alert" className="space-y-3 p-5 text-sm">
+          <p>{captureReviewError}</p>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setCaptureChecked(false);
+              setReviewedNoteSnapshot(null);
+              void loadCaptureReview();
+            }}
+          >
+            Reload capture status
+          </Button>
+        </Card>
+      )}
       <Card className="p-7">
         {editing ? (
           <MedicalNoteEditor
@@ -201,6 +432,8 @@ export function ReviewAndSign({
             onCancel={() => setEditing(false)}
             onSave={(next, changed) => {
               setWorking(next);
+              setCaptureChecked(false);
+              setReviewedNoteSnapshot(null);
               // Re-editing accumulates against the ORIGINAL draft, so the
               // trail always reads "what the AI wrote → what was signed",
               // never a chain of intermediate keystrokes.
@@ -257,13 +490,21 @@ export function ReviewAndSign({
       <PlanComposer
         sessionId={sessionId}
         signed={signed}
+        copilotActive={copilotActive}
         onPadChange={(hasContent, pad) => {
+          const snapshot = JSON.stringify(pad);
+          if (rxReviewSnapshot.current !== null && rxReviewSnapshot.current !== snapshot) {
+            setReviewedNoteSnapshot(null);
+            setCaptureChecked(false);
+            if (captureSaveState === 'saved') void loadCaptureReview();
+          }
+          rxReviewSnapshot.current = snapshot;
           setHasRx(hasContent);
           setSignedRxPad(pad);
         }}
         onSignBlockers={setBlockers}
       />
-      <EncounterDifferentialPanel sessionId={sessionId} />
+      <EncounterDifferentialPanel sessionId={sessionId} onActiveChange={setCopilotActive} />
       <EncounterOrdersPanel sessionId={sessionId} />
       <EncounterInteropPanel sessionId={sessionId} />
 

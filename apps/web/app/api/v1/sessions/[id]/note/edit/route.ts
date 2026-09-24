@@ -16,6 +16,7 @@ import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
 import { noteContainsArtifact } from '@/lib/note-artifact';
+import { noteEditValue } from '@/lib/note-edit-value';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,11 +123,15 @@ export async function POST(
       const current = parsedCurrent.data as unknown as Record<string, unknown>;
       const input = body.value as unknown as Record<string, unknown>;
       const fieldsChanged: NoteEditField[] = [];
-      const patch: Record<string, string> = {};
+      const patch: Record<string, unknown> = {};
       for (const field of fields) {
         const next = input[field];
-        const before = current[field];
-        if (typeof next === 'string' && typeof before === 'string' && next !== before) {
+        if (next === undefined) continue;
+        const candidate = { ...current, [field]: next } as unknown as Parameters<
+          typeof noteEditValue
+        >[0];
+        const currentNote = parsedCurrent.data as unknown as Parameters<typeof noteEditValue>[0];
+        if (noteEditValue(candidate, field) !== noteEditValue(currentNote, field)) {
           fieldsChanged.push(field);
           patch[field] = next;
         }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   DifferentialResponseSchema,
   RxPadResponseSchema,
+  type RxMedRow,
   type RxPadDraft,
   type RxPadPatchOp,
   type SuggestedPlan,
@@ -38,11 +39,14 @@ type DiffState =
 export function PlanComposer({
   sessionId,
   signed,
+  copilotActive,
   onPadChange,
   onSignBlockers,
 }: {
   sessionId: string;
   signed: boolean;
+  /** Differential suggestions stay dormant until the doctor asks the copilot. */
+  copilotActive: boolean;
   /** Fires with whether the pad has any prescribable content — meds,
    *  investigations, advice or a follow-up. In Indian OPD practice the
    *  prescription sheet is also where investigations + advice go, so a
@@ -58,10 +62,11 @@ export function PlanComposer({
 }) {
   const [pad, setPad] = useState<RxPadDraft | null>(null);
   const [padLoaded, setPadLoaded] = useState(false);
-  const [diff, setDiff] = useState<DiffState>({ kind: 'loading' });
+  const [diff, setDiff] = useState<DiffState>({ kind: 'none' });
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editingMed, setEditingMed] = useState<RxMedRow | null>(null);
   const onPadChangeRef = useRef(onPadChange);
   onPadChangeRef.current = onPadChange;
   const onSignBlockersRef = useRef(onSignBlockers);
@@ -101,6 +106,10 @@ export function PlanComposer({
   // triggers generation; we only read). Give up quietly after ~2 minutes —
   // the pad remains fully usable without suggestions.
   useEffect(() => {
+    if (!copilotActive) {
+      setDiff({ kind: 'none' });
+      return;
+    }
     let cancelled = false;
     let tries = 0;
     const tick = async (): Promise<void> => {
@@ -133,7 +142,7 @@ export function PlanComposer({
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, copilotActive]);
 
   // Sprint DS12 — every pad mutation bumps this; the voice editor uses it to
   // retire a stale Undo once OTHER edits have landed on top of it.
@@ -352,12 +361,22 @@ export function PlanComposer({
                         )
                       )}
                       {!signed && (
-                        <RemoveButton
-                          busy={busyKey === `rmmed:${m.drug}`}
-                          onClick={() =>
-                            void patch({ op: 'removeMed', drug: m.drug }, `rmmed:${m.drug}`)
-                          }
-                        />
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busyKey != null}
+                            onClick={() => setEditingMed(m)}
+                          >
+                            Edit
+                          </Button>
+                          <RemoveButton
+                            busy={busyKey === `rmmed:${m.drug}`}
+                            onClick={() =>
+                              void patch({ op: 'removeMed', drug: m.drug }, `rmmed:${m.drug}`)
+                            }
+                          />
+                        </>
                       )}
                     </span>
                   </div>
@@ -368,6 +387,21 @@ export function PlanComposer({
                   )}
                 </div>
               ))}
+              {editingMed && (
+                <MedicationEditor
+                  key={editingMed.drug}
+                  med={editingMed}
+                  busy={busyKey != null}
+                  onCancel={() => setEditingMed(null)}
+                  onSave={async (med) => {
+                    const ok = await patch(
+                      { op: 'updateMed', drug: editingMed.drug, med },
+                      `editmed:${editingMed.drug}`,
+                    );
+                    if (ok) setEditingMed(null);
+                  }}
+                />
+              )}
             </div>
           )}
 
@@ -463,7 +497,12 @@ export function PlanComposer({
               Reasoning over the consult…
             </p>
           )}
-          {diff.kind === 'none' && (
+          {!copilotActive && (
+            <p className="px-1 py-4 text-sm text-[var(--color-ink-3)]">
+              Ask the reasoning copilot below when you want clinical suggestions for this consult.
+            </p>
+          )}
+          {copilotActive && diff.kind === 'none' && (
             <p className="px-1 py-4 text-sm text-[var(--color-ink-3)]">
               No AI suggestions for this consult.
             </p>
@@ -679,6 +718,107 @@ function RemoveButton({ busy, onClick }: { busy: boolean; onClick: () => void })
     >
       {busy ? '…' : '✕'}
     </button>
+  );
+}
+
+function MedicationEditor({
+  med,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  med: RxMedRow;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (med: {
+    drug: string;
+    strength?: string;
+    dose?: string;
+    frequency?: string;
+    timing?: string;
+    durationDays?: number;
+    route?: string;
+  }) => Promise<void>;
+}) {
+  const [values, setValues] = useState({
+    drug: med.drug,
+    strength: med.strength ?? '',
+    dose: med.dose ?? '',
+    frequency: med.frequency ?? '',
+    timing: med.timing ?? '',
+    durationDays: med.durationDays?.toString() ?? '',
+    route: med.route ?? '',
+  });
+
+  async function submit(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    const durationDays = Number.parseInt(values.durationDays, 10);
+    await onSave({
+      drug: values.drug.trim(),
+      ...(values.strength.trim() ? { strength: values.strength.trim() } : {}),
+      ...(values.dose.trim() ? { dose: values.dose.trim() } : {}),
+      ...(values.frequency.trim() ? { frequency: values.frequency.trim() } : {}),
+      ...(values.timing.trim() ? { timing: values.timing.trim() } : {}),
+      ...(Number.isFinite(durationDays) && durationDays > 0 ? { durationDays } : {}),
+      ...(values.route.trim() ? { route: values.route.trim() } : {}),
+    });
+  }
+
+  const fields: Array<{
+    key: keyof typeof values;
+    label: string;
+    placeholder: string;
+    required?: boolean;
+  }> = [
+    { key: 'drug', label: 'Medicine', placeholder: 'Metformin', required: true },
+    { key: 'strength', label: 'Strength', placeholder: '500 mg' },
+    { key: 'dose', label: 'Dose', placeholder: '1 tablet' },
+    { key: 'frequency', label: 'Frequency', placeholder: '1-0-1' },
+    { key: 'timing', label: 'Timing', placeholder: 'after food' },
+    { key: 'durationDays', label: 'Days', placeholder: '30' },
+    { key: 'route', label: 'Route', placeholder: 'oral' },
+  ];
+
+  return (
+    <form
+      onSubmit={submit}
+      className="space-y-3 rounded-xl border border-[var(--color-accent)] bg-[var(--color-surface-soft)] p-4"
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+        Correct prescription line
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {fields.map((field) => (
+          <div key={field.key}>
+            <Label htmlFor={`edit-med-${field.key}`}>{field.label}</Label>
+            <Input
+              id={`edit-med-${field.key}`}
+              value={values[field.key]}
+              inputMode={field.key === 'durationDays' ? 'numeric' : undefined}
+              onChange={(e) =>
+                setValues((current) => ({
+                  ...current,
+                  [field.key]:
+                    field.key === 'durationDays'
+                      ? e.target.value.replace(/\D/g, '')
+                      : e.target.value,
+                }))
+              }
+              placeholder={field.placeholder}
+              required={field.required}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="ghost" type="button" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button size="sm" type="submit" disabled={busy || !values.drug.trim()}>
+          {busy ? 'Saving…' : 'Save line'}
+        </Button>
+      </div>
+    </form>
   );
 }
 

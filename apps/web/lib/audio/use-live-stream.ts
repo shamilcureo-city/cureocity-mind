@@ -4,6 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PolyphaseDecimator, float32ToInt16Le } from '@cureocity/audio';
 import { stopWorklet } from './stop-worklet';
 import { closeDetachedAudioContext } from './live-stream-cleanup';
+import { measureInputLevel } from './input-level';
+
+const INPUT_LEVEL_UPDATE_INTERVAL_MS = 100;
 
 export type LiveStreamState = 'idle' | 'preparing' | 'streaming' | 'error';
 
@@ -18,6 +21,10 @@ export interface LiveStreamOptions {
 export interface LiveStreamHandle {
   state: LiveStreamState;
   error: string | null;
+  /** Actual microphone RMS amplitude (0..1), updated at most ten times per second. */
+  inputLevel: number;
+  /** Unix milliseconds of the last observed audio frame, including silent frames. */
+  lastAudioAt: number | null;
   start: () => Promise<void>;
   stop: () => Promise<void>;
 }
@@ -38,6 +45,7 @@ export interface LiveStreamHandle {
 export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
   const [state, setState] = useState<LiveStreamState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [input, setInput] = useState({ inputLevel: 0, lastAudioAt: null as number | null });
 
   type Capture = {
     stream?: MediaStream;
@@ -47,6 +55,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     decimator?: PolyphaseDecimator;
     closing?: Promise<void>;
     stopping: boolean;
+    lastInputUpdateAt?: number;
   };
   const captureRef = useRef<Capture | null>(null);
   const onFrameRef = useRef(opts.onFrame);
@@ -59,7 +68,10 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
   const teardown = useCallback(async (capture: Capture | null): Promise<void> => {
     if (!capture) return;
     capture.stopping = true;
-    if (captureRef.current === capture) captureRef.current = null;
+    if (captureRef.current === capture) {
+      captureRef.current = null;
+      if (!disposedRef.current) setInput({ inputLevel: 0, lastAudioAt: null });
+    }
     capture.stream?.getTracks().forEach((t) => t.stop());
     // Detach only this capture. Late port/context events cannot reach a replacement.
     if (capture.worklet) capture.worklet.port.onmessage = null;
@@ -82,6 +94,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     captureRef.current = capture;
     setState('preparing');
     setError(null);
+    setInput({ inputLevel: 0, lastAudioAt: null });
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -138,6 +151,16 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
 
       worklet.port.onmessage = (e: MessageEvent<{ type: string; samples: Float32Array }>) => {
         if (e.data.type !== 'frames' || captureRef.current !== capture) return;
+        const now = performance.now();
+        if (
+          !capture.stopping &&
+          e.data.samples.length > 0 &&
+          (capture.lastInputUpdateAt === undefined ||
+            now - capture.lastInputUpdateAt >= INPUT_LEVEL_UPDATE_INTERVAL_MS)
+        ) {
+          capture.lastInputUpdateAt = now;
+          setInput({ inputLevel: measureInputLevel(e.data.samples), lastAudioAt: Date.now() });
+        }
         const decimated = decimator.process(e.data.samples);
         if (decimated.length === 0) return;
         onFrameRef.current(float32ToInt16Le(decimated));
@@ -163,6 +186,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     if (stopInFlightRef.current) return stopInFlightRef.current;
     const generation = ++generationRef.current;
     const capture = captureRef.current;
+    if (!disposedRef.current) setInput({ inputLevel: 0, lastAudioAt: null });
     if (capture) {
       capture.stopping = true;
       // Stop the physical input immediately; already-posted worklet frames
@@ -192,5 +216,5 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStreamHandle {
     };
   }, [teardown]);
 
-  return { state, error, start, stop };
+  return { state, error, ...input, start, stop };
 }

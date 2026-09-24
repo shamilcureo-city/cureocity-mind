@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  * docs/DOCTOR_VERTICAL.md §4.
  *
  * Sprint DS7 — arriving from the clinic queue with `?flash=1` plays the
- * 3-second context flash first, then auto-starts the mic (zero-click flow).
+ * 3-second context flash first, then requires the live-capture consent choice.
  */
 export default async function LiveEncounterPage({
   params,
@@ -33,6 +33,7 @@ export default async function LiveEncounterPage({
     where: { id: sessionId },
     select: {
       id: true,
+      status: true,
       psychologistId: true,
       clientId: true,
       client: {
@@ -65,6 +66,7 @@ export default async function LiveEncounterPage({
 
       <LiveEncounterFlow
         sessionId={sessionId}
+        sessionStatus={session.status}
         clientId={clientId}
         specialty={doctor.specialty}
         patient={{ name, age: ageFrom(session.client.dateOfBirth) }}

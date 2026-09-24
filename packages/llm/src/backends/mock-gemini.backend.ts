@@ -194,6 +194,8 @@ export class MockGeminiPass2Backend implements IPass2Backend {
                     startMs: firstSeg.startMs,
                     endMs: firstSeg.endMs,
                     quote: firstSeg.text.slice(0, 160),
+                    field: 'chiefComplaint',
+                    claim: 'Exertional chest pressure for two days',
                   },
                 ]
               : [],

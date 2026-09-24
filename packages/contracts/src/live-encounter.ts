@@ -387,6 +387,11 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
     // Sprint DS5 — the finalized Rx pad, assembled from the note + drafted
     // meds/orders + patient context. The browser persists it with the note.
     rxPad: RxPadV1Schema.optional(),
+    // A fallback note must retain its capture gap when saved or reopened.
+    captureIncomplete: z.boolean().optional(),
+    captureIncompleteReason: z
+      .enum(['connection_lost', 'finalization_failed', 'audio_loss', 'capture_interrupted'])
+      .optional(),
   }),
   z.object({ type: z.literal('command'), command: VoiceCommandSchema }),
   // Sprint TS1 — therapist live note (interim). Display-only, so the note
@@ -429,8 +434,21 @@ export const LiveNoteInputSchema = z.object({
   // note. Optional so an older client (or a transcript-less consult) still
   // persists the note. Bounded to keep a runaway stream from bloating the row.
   transcript: z.string().max(200_000).optional(),
+  captureIncomplete: z.boolean().optional(),
+  captureIncompleteReason: z
+    .enum(['connection_lost', 'finalization_failed', 'audio_loss', 'capture_interrupted'])
+    .optional(),
 });
 export type LiveNoteInput = z.infer<typeof LiveNoteInputSchema>;
+
+/** A clinician acknowledges only the current saved, unsigned capture draft. */
+export const CaptureReviewInputSchema = z.object({
+  resolution: z.literal('reviewed_and_completed'),
+  reviewedDraftId: z.string().min(1).max(128),
+  reviewToken: z.string().regex(/^[a-f0-9]{64}$/),
+  reviewedNote: MedicalEncounterNoteV1Schema,
+});
+export type CaptureReviewInput = z.infer<typeof CaptureReviewInputSchema>;
 
 /**
  * Sprint TS1 — POST /sessions/:id/live-note body for the THERAPIST vertical.

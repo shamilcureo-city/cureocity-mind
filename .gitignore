@@ -75,3 +75,4 @@ Desktop.ini
 .parcel-cache/
 .eslintcache
 .stylelintcache
+.vercel

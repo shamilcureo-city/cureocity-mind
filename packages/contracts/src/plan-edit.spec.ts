@@ -72,4 +72,22 @@ describe('RxPadPatchOpSchema (DS12 additions)', () => {
       true,
     );
   });
+
+  it('parses a complete clinician correction to a prescription line', () => {
+    expect(
+      RxPadPatchOpSchema.safeParse({
+        op: 'updateMed',
+        drug: 'Metformin',
+        med: {
+          drug: 'Metformin XR',
+          strength: '500 mg',
+          dose: '1 tablet',
+          frequency: '0-0-1',
+          timing: 'after food',
+          durationDays: 30,
+          route: 'oral',
+        },
+      }).success,
+    ).toBe(true);
+  });
 });

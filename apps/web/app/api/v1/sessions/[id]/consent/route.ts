@@ -130,3 +130,60 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   }
   return NextResponse.json(toSession(updated));
 }
+
+/**
+ * Record an encounter-specific refusal of live ambient capture. Standing
+ * preferences are left intact; the empty snapshot prevents live capture
+ * until a separate workflow receives its own explicit acknowledgement.
+ */
+export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextResponse> {
+  const auth = await requirePsychologistId(req);
+  if (!auth.ok) return auth.response;
+  const { id: sessionId } = await ctx.params;
+  const existing = await fetchOwnedSession(auth.value.psychologistId, sessionId);
+  if (!existing) return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+  if (existing.status !== 'SCHEDULED') {
+    return NextResponse.json(
+      { error: `Cannot record a live-capture refusal on a session in ${existing.status} state` },
+      { status: 409 },
+    );
+  }
+
+  try {
+    const updated = await prisma.$transaction((tx) =>
+      withClientConsentLock(tx, existing.clientId, async () => {
+        const row = await conditionalSessionTransition(tx, {
+          sessionId,
+          expectedStatus: 'SCHEDULED',
+          data: {
+            consentSnapshot: {
+              entries: [],
+              notes: 'Patient declined live ambient capture for this encounter.',
+            },
+          },
+        });
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'SESSION_CONSENT_RECORDED',
+            targetType: 'Session',
+            targetId: sessionId,
+            metadata: {
+              ...auditMetadataFromRequest(req),
+              decision: 'DECLINED_LIVE_CAPTURE',
+              scopes: [],
+            },
+          },
+          tx,
+        );
+        return row;
+      }),
+    );
+    return NextResponse.json(toSession(updated));
+  } catch (error) {
+    const response = sessionConcurrentModificationResponse(error);
+    if (response) return response;
+    throw error;
+  }
+}

@@ -325,10 +325,14 @@ export const NoteEditFieldSchema = z.enum([
   'mentalStatusExam',
   'workingHypothesis',
   'immediatePlan',
-  // Sprint DV3 — medical encounter note signable strings (assessment +
-  // plan are shared with the SOAP set above).
+  // Sprint DV3 — medical encounter note fields (assessment + plan are
+  // shared with SOAP). Structured sections use canonical JSON strings in
+  // NoteEdit.before/after so their correction trail remains auditable.
   'chiefComplaint',
   'hpi',
+  'reviewOfSystems',
+  'physicalExam',
+  'vitals',
 ]);
 export type NoteEditField = z.infer<typeof NoteEditFieldSchema>;
 
@@ -379,6 +383,9 @@ export const ReviseMedicalNoteInputSchema = z.object({
   kind: z.literal('MEDICAL'),
   chiefComplaint: z.string().min(1).optional(),
   hpi: z.string().min(1).optional(),
+  reviewOfSystems: z.array(z.string()).optional(),
+  physicalExam: MedicalEncounterNoteV1Schema.shape.physicalExam.optional(),
+  vitals: MedicalEncounterNoteV1Schema.shape.vitals.optional(),
   assessment: z.string().min(1).optional(),
   plan: z.string().min(1).optional(),
   reason: z.string().min(5).max(2000),
@@ -420,7 +427,16 @@ export const ReviseNoteInputSchema = z
         message: 'At least one intake field must be revised',
       });
     }
-    if (d.kind === 'MEDICAL' && !d.chiefComplaint && !d.hpi && !d.assessment && !d.plan) {
+    if (
+      d.kind === 'MEDICAL' &&
+      d.chiefComplaint === undefined &&
+      d.hpi === undefined &&
+      d.reviewOfSystems === undefined &&
+      d.physicalExam === undefined &&
+      d.vitals === undefined &&
+      d.assessment === undefined &&
+      d.plan === undefined
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'At least one medical note field must be revised',

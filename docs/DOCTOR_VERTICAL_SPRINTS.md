@@ -325,7 +325,8 @@ working voice commands.
   wiring, observability union, `differentials` table (migration
   `…_dv6_differential`). On-demand route `GET/POST
 /sessions/:id/differential` (own 120s budget); the
-  `EncounterDifferentialPanel` auto-runs it once the note is ready.
+  `EncounterDifferentialPanel` reads any existing result and starts a new
+  pass only after the doctor selects **Ask copilot**.
   `DIFFERENTIAL_GENERATED` audit.
 - **ICD-10 coding nudges** (DV6.2) — `codingNudges[]` on the
   differential (SUGGESTED_CODE / UNDERCODING / DOCUMENTATION_GAP),

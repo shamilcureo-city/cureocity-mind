@@ -89,8 +89,15 @@ export async function PATCH(
   const draftId = session.noteDraft.id;
 
   let pad: RxPadDraft = parsePad(session.noteDraft.rxPad) ?? { version: 'V1' };
-  for (const op of parsed.value.ops) {
-    pad = applyOp(pad, op);
+  try {
+    for (const op of parsed.value.ops) {
+      pad = applyOp(pad, op);
+    }
+  } catch (error) {
+    if (error instanceof RxPadPatchError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
   }
   // Server-owned warnings: recompute across the whole pad after the edits.
   pad = withSafetyWarnings(pad);
@@ -152,6 +159,15 @@ function parsePad(value: unknown): RxPadDraft | null {
 
 const eq = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+class RxPadPatchError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 /** Apply one typed op. Adds are idempotent; removes are case-insensitive. */
 function applyOp(pad: RxPadDraft, op: RxPadPatchOp): RxPadDraft {
   const meds = pad.meds ?? [];
@@ -174,6 +190,33 @@ function applyOp(pad: RxPadDraft, op: RxPadPatchOp): RxPadDraft {
     }
     case 'removeMed':
       return { ...pad, meds: meds.filter((m) => !eq(m.drug, op.drug)) };
+    case 'updateMed': {
+      const existing = meds.find((m) => eq(m.drug, op.drug));
+      if (!existing)
+        throw new RxPadPatchError(404, `Medicine “${op.drug}” is no longer on the pad.`);
+      if (!eq(op.drug, op.med.drug) && meds.some((m) => eq(m.drug, op.med.drug))) {
+        throw new RxPadPatchError(409, `Medicine “${op.med.drug}” is already on the pad.`);
+      }
+      return {
+        ...pad,
+        meds: meds.map((m) =>
+          eq(m.drug, op.drug)
+            ? {
+                ...m,
+                ...op.med,
+                // These fields are server/history owned and cannot be forged
+                // by a browser edit.
+                continued: m.continued,
+                status: m.status,
+                warnings: [],
+                source: m.source,
+                utteranceId: m.utteranceId,
+                previous: m.previous,
+              }
+            : m,
+        ),
+      };
+    }
     case 'confirmMed':
       return {
         ...pad,
@@ -259,6 +302,7 @@ function itemLabel(op: RxPadPatchOp): string {
     case 'addMed':
       return op.med.drug;
     case 'removeMed':
+    case 'updateMed':
     case 'confirmMed':
     case 'unconfirmMed':
       return op.drug;

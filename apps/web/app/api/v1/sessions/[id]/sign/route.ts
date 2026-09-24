@@ -29,11 +29,19 @@ import {
   canonicalSignedRxPad,
   canonicalSigningPayload,
 } from '@/lib/sign-note-payload';
+import { noteEditValue } from '@/lib/note-edit-value';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
 import { parseJson } from '@/lib/validate';
 import { resolveNoteTranscriptData } from '@/lib/note-transcript';
 import { savedTranscriptContainsArtifact } from '@/lib/saved-transcript';
+import {
+  scribeCaptureIntegrity,
+  clearScribeCaptureIntegrity,
+  isScribeCaptureReviewedForNote,
+  reviewedScribeNoteHash,
+  SCRIBE_CAPTURE_REVIEW_REQUIRED,
+} from '@/lib/scribe-capture-integrity';
 import { resolveAllowedOrigins, verifyNoteSigningAssertion } from '@/lib/webauthn-verify';
 
 export const runtime = 'nodejs';
@@ -53,10 +61,6 @@ class SigningHttpError extends Error {
   }
 }
 
-function readField(note: SignedNoteContent, field: NoteEditField): string {
-  return (note as unknown as Record<string, unknown>)[field] as string;
-}
-
 function validateEdits(
   draft: SignedNoteContent,
   final: SignedNoteContent,
@@ -72,18 +76,18 @@ function validateEdits(
       throw new SigningHttpError(400, `Duplicate edit entry for field ${edit.field}`);
     }
     seen.add(edit.field);
-    if (edit.before !== readField(draft, edit.field)) {
+    if (edit.before !== noteEditValue(draft, edit.field)) {
       throw new SigningHttpError(
         409,
         `edit.before for ${edit.field} does not match the current locked draft text`,
       );
     }
-    if (edit.after !== readField(final, edit.field)) {
+    if (edit.after !== noteEditValue(final, edit.field)) {
       throw new SigningHttpError(400, `edit.after for ${edit.field} does not match the note`);
     }
   }
   for (const field of signable) {
-    if (!seen.has(field) && readField(final, field) !== readField(draft, field)) {
+    if (!seen.has(field) && noteEditValue(final, field) !== noteEditValue(draft, field)) {
       throw new SigningHttpError(400, `Field ${field} changed but is missing from the edits list`);
     }
   }
@@ -96,9 +100,9 @@ function changedFields(
 ): Array<{ field: NoteEditField; before: string; after: string }> {
   const result: Array<{ field: NoteEditField; before: string; after: string }> = [];
   for (const field of fields) {
-    const before = readField(beforeNote, field);
-    const after = readField(afterNote, field);
-    if (typeof before === 'string' && typeof after === 'string' && before !== after) {
+    const before = noteEditValue(beforeNote, field);
+    const after = noteEditValue(afterNote, field);
+    if (before !== after) {
       result.push({ field, before, after });
     }
   }
@@ -120,6 +124,7 @@ type LockedDraft = {
   rxPad: Prisma.JsonValue | null;
   transcriptEncrypted: string | null;
   speakerSegments: Prisma.JsonValue | null;
+  errorMessage: string | null;
 };
 type LockedNote = {
   id: string;
@@ -198,7 +203,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       }
 
       const drafts = await tx.$queryRaw<LockedDraft[]>`
-        SELECT "id", "status", "content", "rxPad", "transcriptEncrypted", "speakerSegments"
+        SELECT "id", "status", "content", "rxPad", "transcriptEncrypted", "speakerSegments", "errorMessage"
         FROM "note_drafts"
         WHERE "sessionId" = ${sessionId}
         FOR UPDATE
@@ -301,6 +306,9 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       }
       const draftContent = parsedDraft.data as SignedNoteContent;
       const finalNote = parsedFinal.data as SignedNoteContent;
+      if (session.vertical === 'DOCTOR' && !isScribeCaptureReviewedForNote(draft, finalNote)) {
+        throw new SigningHttpError(409, SCRIBE_CAPTURE_REVIEW_REQUIRED);
+      }
       if (containsTranscriptionArtifact(JSON.stringify(finalNote))) {
         throw new SigningHttpError(
           409,
@@ -473,6 +481,15 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         ? await tx.therapyNote.update({ where: { id: existing.id }, data: noteData })
         : await tx.therapyNote.create({ data: { sessionId, draftId: draft.id, ...noteData } });
 
+      const captureReviewed =
+        session.vertical === 'DOCTOR' && scribeCaptureIntegrity(draft.errorMessage).incomplete;
+      if (captureReviewed) {
+        await tx.noteDraft.update({
+          where: { id: draft.id },
+          data: { errorMessage: clearScribeCaptureIntegrity(draft.errorMessage) },
+        });
+      }
+
       if (transactionEdits.length > 0) {
         await tx.noteEdit.createMany({
           data: transactionEdits.map((edit) => ({ therapyNoteId: note.id, ...edit })),
@@ -494,6 +511,10 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           webauthnUsed: input.value.assertion !== undefined,
           webauthnEnforced: credentialBump !== null,
           kind: signableKind,
+          ...(captureReviewed && {
+            captureReviewed: true,
+            reviewedNoteHashHex: reviewedScribeNoteHash(finalNote),
+          }),
           clientSignedAt: input.value.signedAt,
           serverReceivedAt: serverReceivedAt.toISOString(),
           ...(medicalAuthority && {

@@ -171,7 +171,7 @@ Task: produce a STRICT JSON object with exactly three top-level keys: "encounter
 - vitals: ONLY the vitals explicitly stated (bpSystolic, bpDiastolic, heartRateBpm, respRateBpm, tempCelsius, spo2Pct, weightKg). Omit any not stated.
 - assessment: clinical impression + working diagnosis, with relevant differentials
 - plan: investigations, medications, advice, follow-up
-- linkedEvidence: array of { startMs, endMs, quote } tying each key statement back to the transcript
+- linkedEvidence: array of { field, claim, startMs, endMs, quote } tying each key statement back to the transcript. field must be one of chiefComplaint | hpi | reviewOfSystems | physicalExam | vitals | assessment | plan; claim is the short clinical statement supported by the VERBATIM quote. Include medication names/doses under plan, diagnoses under assessment, and abnormal values under vitals. If a claim has no verbatim support, omit the evidence entry.
 
 "medications" is an array of MedicationOrderV1 objects, one per drug the doctor prescribed or clearly intends to prescribe, each:
 - version: "V1"
@@ -191,7 +191,7 @@ Constraints:
 
 ` as const;
 
-export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V3';
+export const MEDICAL_NOTE_PROMPT_VERSION = 'MEDICAL_NOTE_SYSTEM_PROMPT_V4';
 
 export const DIFFERENTIAL_SYSTEM_PROMPT_V2 =
   `You are a diagnostic-reasoning copilot for an Indian doctor. You produce a DECISION-SUPPORT differential — not a diagnosis, and never a prescription.
