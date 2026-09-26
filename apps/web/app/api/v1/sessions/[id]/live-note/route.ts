@@ -18,7 +18,6 @@ import {
   persistDraftedOrders,
   persistVitalReadings,
   runClinicalAnalysis,
-  runDifferential,
 } from '@/lib/note-orchestrator';
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
 
@@ -30,11 +29,13 @@ import {
 } from '@/lib/saved-transcript';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
+import { assertScribeTeleconsultDraftPersistence } from '@/lib/scribe-teleconsult';
+import { consentAuthorizationResponse } from '@/lib/consent-gate';
 import {
-  ClientPhiWriteForbiddenError,
-  lockActiveClientForSession,
-  withActiveSessionPhiWrite,
-} from '@/lib/phi-write-lock';
+  preserveScribeCaptureIntegrity,
+  scribeCaptureIntegrity,
+} from '@/lib/scribe-capture-integrity';
 import type { Prisma } from '@prisma/client';
 import {
   finalizeLiveSession,
@@ -43,9 +44,8 @@ import {
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// The response returns as soon as the note is persisted; the differential
-// pre-warm (DS-perf, below) runs in after() and needs headroom for the Pro
-// call — give the function the same 120s budget the /differential route uses.
+// Therapy clinical analysis may continue in after(); keep enough headroom for
+// that background pass. Doctor differential reasoning is clinician-triggered.
 export const maxDuration = 120;
 
 /**
@@ -359,20 +359,36 @@ export async function POST(
   const transcriptWrite = transcriptEncrypted ? { transcriptEncrypted } : {};
 
   let draft;
+  let teleconsultInterrupted = false;
   try {
     draft = await prisma.$transaction(async (tx) => {
       await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      teleconsultInterrupted = await assertScribeTeleconsultDraftPersistence(
+        tx,
+        sessionId,
+        auth.value.psychologistId,
+        parsed.value.captureIncomplete,
+      );
       return finalizeLiveSession(tx, {
         sessionId,
         endedAt: new Date(),
         persistDraft: async () => {
+          const previousDraft = await tx.noteDraft.findUnique({
+            where: { sessionId },
+            select: { errorMessage: true },
+          });
+          const errorMessage = preserveScribeCaptureIntegrity(
+            previousDraft?.errorMessage,
+            teleconsultInterrupted || parsed.value.captureIncomplete,
+            teleconsultInterrupted ? 'capture_interrupted' : parsed.value.captureIncompleteReason,
+          );
           const persisted = await tx.noteDraft.upsert({
             where: { sessionId },
             update: {
               status: 'COMPLETED',
               content: note as unknown as Prisma.InputJsonValue,
               riskSeverity: 'NONE',
-              errorMessage: null,
+              errorMessage,
               ...transcriptWrite,
               ...(rxPad !== undefined && { rxPad }),
             },
@@ -381,6 +397,7 @@ export async function POST(
               status: 'COMPLETED',
               content: note as unknown as Prisma.InputJsonValue,
               riskSeverity: 'NONE',
+              errorMessage,
               ...transcriptWrite,
               ...(rxPad !== undefined && { rxPad }),
             },
@@ -395,6 +412,10 @@ export async function POST(
               metadata: {
                 sessionId,
                 source: 'LIVE',
+                captureIncomplete: scribeCaptureIntegrity(errorMessage).incomplete,
+                ...(scribeCaptureIntegrity(errorMessage).reason && {
+                  captureIncompleteReason: scribeCaptureIntegrity(errorMessage).reason,
+                }),
                 medicationCount: medications.length,
                 orderCount: orders.length,
                 ...auditMetadataFromRequest(req),
@@ -419,7 +440,8 @@ export async function POST(
       });
     });
   } catch (error) {
-    const response = sessionConcurrentModificationResponse(error);
+    const response =
+      consentAuthorizationResponse(error) ?? sessionConcurrentModificationResponse(error);
     if (response) return response;
     throw error;
   }
@@ -427,12 +449,12 @@ export async function POST(
   // Reuse the batch helpers: draft the Rx + clinical orders (interaction-
   // checked server-side) and capture vitals into the chronic series.
   if (
-    capabilities?.includes('PRESCRIPTION_DRAFTING') ||
-    capabilities?.includes('CLINICAL_ORDERS')
+    !teleconsultInterrupted &&
+    (capabilities?.includes('PRESCRIPTION_DRAFTING') || capabilities?.includes('CLINICAL_ORDERS'))
   ) {
     await persistDraftedOrders(sessionId, auth.value.psychologistId, medications, orders);
   }
-  if (capabilities?.includes('CHRONIC_CARE')) {
+  if (!teleconsultInterrupted && capabilities?.includes('CHRONIC_CARE')) {
     await persistVitalReadings(
       sessionId,
       session.clientId,
@@ -440,76 +462,6 @@ export async function POST(
       session.scheduledAt,
       note.vitals,
     );
-  }
-
-  // DS-perf — pre-warm the differential. Previously the Review & Sign panel
-  // fired the differential (a 15-40s Vertex Pro pass) only when it MOUNTED,
-  // so the doctor watched "Thinking through the differential…" from zero — and
-  // because that panel renders in the same tick the note is set (before this
-  // route finishes persisting it), its POST could even race the note into a
-  // 409 NOTE_NOT_READY. Kicking it off HERE fixes both: the note is already
-  // COMPLETED in this request, and generation starts the instant the consult
-  // ends. We mark the row IN_PROGRESS synchronously so the panel polls the
-  // pending row instead of triggering a duplicate run, then do the heavy pass
-  // in after() so the doctor's response isn't blocked. Skipped when a
-  // COMPLETED differential already exists (a re-POST must not wipe it).
-  let shouldPrewarmDifferential = false;
-  if (auth.value.user.capabilities?.includes('CLINICAL_ANALYSIS')) {
-    try {
-      // PASS_9_LIVE_PREWARM_MARKER — the find + upsert are one short PHI
-      // transaction that locks the active Client and rereads Session ownership
-      // and COMPLETED state. Erasure therefore wins cleanly without a marker.
-      shouldPrewarmDifferential = await withActiveSessionPhiWrite(
-        prisma,
-        sessionId,
-        auth.value.psychologistId,
-        async (tx) => {
-          const existingDiff = await tx.differential.findUnique({
-            where: { sessionId },
-            select: { status: true },
-          });
-          if (existingDiff?.status === 'COMPLETED') return false;
-          await tx.differential.upsert({
-            where: { sessionId },
-            update: { status: 'IN_PROGRESS', errorMessage: null },
-            create: {
-              sessionId,
-              psychologistId: auth.value.psychologistId,
-              status: 'IN_PROGRESS',
-            },
-          });
-          return true;
-        },
-        { allowedStatuses: ['COMPLETED'] },
-      );
-    } catch (error) {
-      if (!(error instanceof ClientPhiWriteForbiddenError)) throw error;
-      // The note committed before erasure, then erasure won the next Client
-      // lock. Its terminal state is authoritative; do not recreate a marker.
-    }
-  }
-  if (shouldPrewarmDifferential && transcript.length > 0) {
-    after(async () => {
-      // runDifferential owns its own error handling (marks the row FAILED,
-      // never throws) — this guard is belt-and-braces for the after() context.
-      try {
-        await runDifferential({
-          sessionId,
-          psychologistId: auth.value.psychologistId,
-          language: (session.language as ClinicalLocale | undefined) ?? 'en',
-          specialty: session.psychologist.specialty,
-          transcript,
-          // Live notes don't persist diarized segments; the /differential route
-          // already runs with [] for live consults, so match that.
-          speakerSegments: [],
-          encounterNote: note,
-        });
-      } catch (e) {
-        console.warn(
-          `[live-note] differential pre-warm failed for session=${sessionId}: ${(e as Error).message}`,
-        );
-      }
-    });
   }
 
   return NextResponse.json({ draftId: draft.id, status: 'COMPLETED' }, { status: 201 });

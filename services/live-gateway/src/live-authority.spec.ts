@@ -147,6 +147,7 @@ describe('continuous live authority', () => {
           psychologistId: 'practitioner-opaque-id',
           tokenExpiresAt: 2_000_000_000,
           vertical: 'DOCTOR',
+          purpose: 'queued-finalization',
         }),
       }),
     );
@@ -166,6 +167,66 @@ describe('continuous live authority', () => {
     resolveResponse(response());
     await expect(Promise.all([first, second])).resolves.toEqual([noteEvent(), noteEvent()]);
     expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('permits consented queued output after pause but denies any new audio input', async () => {
+    let paused = false;
+    fetchImpl.mockImplementation(async (_url, options) => {
+      const { purpose } = JSON.parse(String(options?.body)) as { purpose: string };
+      return response(ALL, !paused || purpose === 'queued-finalization');
+    });
+    const auth = authority();
+    await expect(auth.authorizeCurrentInput()).resolves.toBe(true);
+    paused = true;
+    await expect(auth.authorizeQueuedControl()).resolves.toBe(true);
+    await expect(auth.authorizeEvent(noteEvent())).resolves.toEqual(noteEvent());
+    expect(close).not.toHaveBeenCalled();
+    await expect(auth.authorizeCurrentInput()).resolves.toBe(false);
+    expect(close).toHaveBeenCalledExactlyOnceWith('live_authority_denied');
+    expect(
+      fetchImpl.mock.calls.map(([, options]) => JSON.parse(String(options?.body)).purpose),
+    ).toEqual(['capture', 'queued-finalization', 'queued-finalization', 'capture']);
+  });
+
+  it('does not reuse an in-flight finalization approval for a new capture check', async () => {
+    let finishOutput!: (value: Response) => void;
+    let finishInput!: (value: Response) => void;
+    fetchImpl.mockImplementation((_url, options) => {
+      const { purpose } = JSON.parse(String(options?.body)) as { purpose: string };
+      return new Promise<Response>((resolve) => {
+        if (purpose === 'capture') finishInput = resolve;
+        else finishOutput = resolve;
+      });
+    });
+    const auth = authority();
+    const output = auth.authorizeEvent(noteEvent());
+    const firstInput = auth.authorizeCurrentInput();
+    const secondInput = auth.authorizeCurrentInput();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    finishOutput(response());
+    await expect(output).resolves.toEqual(noteEvent());
+    expect(close).not.toHaveBeenCalled();
+    finishInput(response([], false));
+    await expect(Promise.all([firstInput, secondInput])).resolves.toEqual([false, false]);
+    expect(close).toHaveBeenCalledExactlyOnceWith('live_authority_denied');
+  });
+
+  it('a late finalization approval cannot revive a denied capture check', async () => {
+    let finishOutput!: (value: Response) => void;
+    fetchImpl.mockImplementation((_url, options) => {
+      const { purpose } = JSON.parse(String(options?.body)) as { purpose: string };
+      return purpose === 'capture'
+        ? Promise.resolve(response([], false))
+        : new Promise<Response>((resolve) => {
+            finishOutput = resolve;
+          });
+    });
+    const auth = authority();
+    const output = auth.authorizeEvent(noteEvent());
+    await expect(auth.authorizeCurrentInput()).resolves.toBe(false);
+    finishOutput(response());
+    await expect(output).resolves.toBeNull();
+    expect(updateCapabilities).not.toHaveBeenCalled();
   });
 
   it.each([

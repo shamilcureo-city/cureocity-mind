@@ -142,6 +142,67 @@ afterAll(() => {
 });
 
 describe('actual gateway durable registration and socket lifecycle', () => {
+  it.each(['pause', 'stop'] as const)(
+    'uses queued authority only for the parsed %s control',
+    async (type) => {
+      const { socket } = connect('DOCTOR');
+      await vi.waitFor(() =>
+        expect(socket.events).toContainEqual({ type: 'status', state: 'listening' }),
+      );
+      const initial = verifier.mock.calls
+        .filter(([url]) => String(url).endsWith('/live-authority'))
+        .map(([, options]) => JSON.parse(String(options?.body)) as { purpose: string });
+      expect(initial[0]?.purpose).toBe('capture');
+      verifier.mockClear();
+      verifier.mockImplementation(async (_url, options) => {
+        const { purpose } = JSON.parse(String(options?.body)) as { purpose: string };
+        return new Response(
+          JSON.stringify({ authorized: purpose === 'queued-finalization', capabilities }),
+          {
+            status: purpose === 'queued-finalization' ? 200 : 403,
+          },
+        );
+      });
+      socket.command({
+        type,
+        ...(type === 'pause' ? { requestId: '00000000-0000-4000-8000-000000000001' } : {}),
+      });
+      await vi.waitFor(() => expect(verifier).toHaveBeenCalled());
+      const checked = verifier.mock.calls.map(
+        ([, options]) => JSON.parse(String(options?.body)) as { purpose: string },
+      );
+      expect(checked.every(({ purpose }) => purpose === 'queued-finalization')).toBe(true);
+      expect(socket.events).not.toContainEqual({ type: 'status', state: 'unauthorized' });
+    },
+  );
+
+  it.each(['binary', 'refreshNote'] as const)(
+    'requires capture permission for %s even while finalization is allowed',
+    async (input) => {
+      const { socket } = connect('DOCTOR');
+      await vi.waitFor(() =>
+        expect(socket.events).toContainEqual({ type: 'status', state: 'listening' }),
+      );
+      verifier.mockClear();
+      verifier.mockImplementation(async (_url, options) => {
+        const { purpose } = JSON.parse(String(options?.body)) as { purpose: string };
+        return new Response(
+          JSON.stringify({ authorized: purpose === 'queued-finalization', capabilities }),
+          {
+            status: purpose === 'queued-finalization' ? 200 : 403,
+          },
+        );
+      });
+      if (input === 'binary') socket.emit('message', Buffer.alloc(320), true);
+      else socket.command({ type: input });
+      await vi.waitFor(() =>
+        expect(socket.events).toContainEqual({ type: 'status', state: 'unauthorized' }),
+      );
+      expect(JSON.parse(String(verifier.mock.calls[0]?.[1]?.body)).purpose).toBe('capture');
+      expect(socket.readyState).toBe(3);
+    },
+  );
+
   it('waits for durable registration before listening or constructing billable work', async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => {

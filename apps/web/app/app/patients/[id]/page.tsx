@@ -10,6 +10,10 @@ import { AllergyEditor } from '@/components/app/AllergyEditor';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { resolveClientPii } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
+import { ScribeBriefingCard } from '@/components/app/ScribeBriefingCard';
+import { ScribePendingWorkPanel } from '@/components/app/ScribePendingWorkPanel';
+import { ScribeIntakePanel } from '@/components/app/ScribeIntakePanel';
+import { ScribeReportsPanel } from '@/components/app/ScribeReportsPanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,6 +91,11 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
       </header>
 
       <AllergyEditor clientId={patient.id} initial={patient.allergies} />
+      <div className="mt-6">
+        <ScribeBriefingCard key={patient.id} clientId={patient.id} />
+      </div>
+      <ScribeIntakePanel key={patient.id} clientId={patient.id} />
+      <ScribePendingWorkPanel key={patient.id} clientId={patient.id} />
 
       <section className="mt-8">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--color-accent)]">
@@ -118,6 +127,13 @@ export default async function PatientDetailPage({ params }: { params: Promise<{ 
       </section>
 
       <ChronicCarePanel clientId={patient.id} />
+      <details
+        id="scribe-reports"
+        className="mt-6 rounded-xl border border-[var(--color-line)] bg-white p-4"
+      >
+        <summary className="min-h-11 cursor-pointer py-2 font-semibold">Uploaded reports</summary>
+        <ScribeReportsPanel clientId={patient.id} />
+      </details>
     </Container>
   );
 }

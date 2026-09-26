@@ -14,6 +14,8 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
+import { canonicalJson } from '@/lib/sign-note-payload';
+import { scribeErrorResponse } from '@/lib/scribe-workspace-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -88,41 +90,73 @@ export async function PATCH(
   }
   const draftId = session.noteDraft.id;
 
-  let pad: RxPadDraft = parsePad(session.noteDraft.rxPad) ?? { version: 'V1' };
-  for (const op of parsed.value.ops) {
-    pad = applyOp(pad, op);
-  }
-  // Server-owned warnings: recompute across the whole pad after the edits.
-  pad = withSafetyWarnings(pad);
+  let pad: RxPadDraft;
+  try {
+    pad = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      await tx.$queryRaw`SELECT "id" FROM "sessions" WHERE "id" = ${sessionId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "note_drafts" WHERE "sessionId" = ${sessionId} FOR UPDATE`;
+      const current = await loadSession(sessionId, tx);
+      if (
+        !current ||
+        current.psychologistId !== auth.value.psychologistId ||
+        !current.noteDraft ||
+        current.noteDraft.id !== draftId
+      ) {
+        throw new RxPadPatchError(409, 'The encounter draft changed. Reload before editing.');
+      }
+      if (current.therapyNote?.signedAt != null) {
+        throw new RxPadPatchError(
+          409,
+          'This note is signed — the prescription can no longer be edited.',
+        );
+      }
+      const original = parsePad(current.noteDraft.rxPad);
+      if (
+        parsed.value.expectedPad !== undefined &&
+        canonicalJson(original) !== canonicalJson(parsed.value.expectedPad)
+      ) {
+        throw new RxPadPatchError(
+          409,
+          'The prescription changed in another window. Reload and preview your changes again.',
+        );
+      }
+      let updated: RxPadDraft = original ?? { version: 'V1' };
+      for (const op of parsed.value.ops) updated = applyOp(updated, op);
+      updated = withSafetyWarnings(updated);
+      await tx.noteDraft.update({
+        where: { id: draftId },
+        data: { rxPad: updated as unknown as Prisma.InputJsonValue },
+      });
 
-  await prisma.$transaction(async (tx) => {
-    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-    await tx.noteDraft.update({
-      where: { id: draftId },
-      data: { rxPad: pad as unknown as Prisma.InputJsonValue },
-    });
-
-    const baseMetadata = auditMetadataFromRequest(req);
-    for (const op of parsed.value.ops) {
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'RX_PAD_EDITED',
-          targetType: 'NoteDraft',
-          targetId: draftId,
-          metadata: {
-            ...baseMetadata,
-            sessionId,
-            op: op.op,
-            ...('source' in op ? { source: op.source } : {}),
-            item: itemLabel(op),
+      const baseMetadata = auditMetadataFromRequest(req);
+      for (const op of parsed.value.ops) {
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'RX_PAD_EDITED',
+            targetType: 'NoteDraft',
+            targetId: draftId,
+            metadata: {
+              ...baseMetadata,
+              sessionId,
+              op: op.op,
+              ...('source' in op ? { source: op.source } : {}),
+              item: itemLabel(op),
+            },
           },
-        },
-        tx,
-      );
+          tx,
+        );
+      }
+      return updated;
+    });
+  } catch (error) {
+    if (error instanceof RxPadPatchError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
-  });
+    return scribeErrorResponse(error);
+  }
 
   const body: RxPadResponse = { rxPad: pad, signed: false };
   return NextResponse.json(body);
@@ -130,8 +164,11 @@ export async function PATCH(
 
 // ---------------------------------------------------------------------------
 
-async function loadSession(sessionId: string) {
-  return prisma.session.findUnique({
+async function loadSession(
+  sessionId: string,
+  db: Pick<Prisma.TransactionClient, 'session'> = prisma,
+) {
+  return db.session.findUnique({
     where: { id: sessionId },
     select: {
       id: true,
@@ -151,6 +188,15 @@ function parsePad(value: unknown): RxPadDraft | null {
 }
 
 const eq = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+class RxPadPatchError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 /** Apply one typed op. Adds are idempotent; removes are case-insensitive. */
 function applyOp(pad: RxPadDraft, op: RxPadPatchOp): RxPadDraft {
@@ -174,6 +220,33 @@ function applyOp(pad: RxPadDraft, op: RxPadPatchOp): RxPadDraft {
     }
     case 'removeMed':
       return { ...pad, meds: meds.filter((m) => !eq(m.drug, op.drug)) };
+    case 'updateMed': {
+      const existing = meds.find((m) => eq(m.drug, op.drug));
+      if (!existing)
+        throw new RxPadPatchError(404, `Medicine “${op.drug}” is no longer on the pad.`);
+      if (!eq(op.drug, op.med.drug) && meds.some((m) => eq(m.drug, op.med.drug))) {
+        throw new RxPadPatchError(409, `Medicine “${op.med.drug}” is already on the pad.`);
+      }
+      return {
+        ...pad,
+        meds: meds.map((m) =>
+          eq(m.drug, op.drug)
+            ? {
+                ...m,
+                ...op.med,
+                // These fields are server/history owned and cannot be forged
+                // by a browser edit.
+                continued: m.continued,
+                status: m.status,
+                warnings: [],
+                source: m.source,
+                utteranceId: m.utteranceId,
+                previous: m.previous,
+              }
+            : m,
+        ),
+      };
+    }
     case 'confirmMed':
       return {
         ...pad,
@@ -259,6 +332,7 @@ function itemLabel(op: RxPadPatchOp): string {
     case 'addMed':
       return op.med.drug;
     case 'removeMed':
+    case 'updateMed':
     case 'confirmMed':
     case 'unconfirmMed':
       return op.drug;

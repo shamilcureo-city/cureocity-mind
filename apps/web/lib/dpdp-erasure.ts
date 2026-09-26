@@ -5,6 +5,7 @@ import { activeShareSubmissionWhere } from './sprint5-final-behavior';
 import { legacyAudioReferenceProvider } from './dpdp-object-storage-config';
 import { hasMindSessionPreparationStorage } from './mind-session-preparation-storage';
 import { hasSessionUsageConnectionStorage } from './session-usage-storage';
+import { hasScribeWorkspaceStorage } from './scribe-workspace-privacy';
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -108,6 +109,10 @@ export async function eraseClientPhi(
 
   const sessions = await tx.session.findMany({ where: { clientId }, select: { id: true } });
   const sessionIds = sessions.map(({ id }) => id);
+  // Includes encrypted report originals and intake credentials; do not gate on UI rollout.
+  if (await hasScribeWorkspaceStorage(tx)) {
+    await tx.scribeWorkspaceRecord.deleteMany({ where: { clientId } });
+  }
   // Privacy support outlives the editing flag. An absent pre-migration table
   // cannot contain PHI; all failures for a present table abort this transaction.
   if (await hasMindSessionPreparationStorage(tx)) {

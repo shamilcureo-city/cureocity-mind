@@ -133,6 +133,7 @@ describe('secure in-place authorization renewal', () => {
       psychologistId: 'fictional-owner',
       tokenExpiresAt: BASE + 600,
       vertical: 'DOCTOR',
+      purpose: 'capture',
     });
   });
 
@@ -155,7 +156,7 @@ describe('secure in-place authorization renewal', () => {
     await expect(renewal).resolves.toBe(BASE + 600);
     await expect(inputDuring).resolves.toBe(true);
     await expect(outputDuring).resolves.toEqual({ type: 'note', partial: {} });
-    expect(fetchImpl).toHaveBeenCalledTimes(3); // post-renew checks coalesce
+    expect(fetchImpl).toHaveBeenCalledTimes(4); // Input and output have distinct authority purposes.
     expect(close).not.toHaveBeenCalled();
   });
 
@@ -217,6 +218,25 @@ describe('secure in-place authorization renewal', () => {
     expect(close).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(300_000);
     expect(close).toHaveBeenCalledWith('live_authority_denied');
+  });
+
+  it('periodic checks preserve a consented paused connection without permitting capture renewal', async () => {
+    fetchImpl.mockImplementation(async (_url, options) => {
+      const { purpose } = JSON.parse(String(options?.body)) as { purpose: string };
+      return purpose === 'queued-finalization' ? grant() : new Response('{}', { status: 403 });
+    });
+    const auth = authority();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(close).not.toHaveBeenCalled();
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).purpose).toBe(
+      'queued-finalization',
+    );
+    await expect(auth.authorizeEvent({ type: 'note', partial: {} })).resolves.toEqual({
+      type: 'note',
+      partial: {},
+    });
+    await expect(auth.renewToken(token(BASE + 600))).resolves.toBeNull();
+    expect(close).toHaveBeenCalledExactlyOnceWith('live_authority_denied');
   });
 
   it('fails closed on bounded verifier timeout and cannot accept a late renewal', async () => {

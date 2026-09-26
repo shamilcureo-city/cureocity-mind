@@ -226,3 +226,106 @@ jobs:
       - name: Build image
         if: steps.changed.outputs.run == 'true'
         run: docker build -f services/live-gateway/Dockerfile -t cureocity-live-gateway:ci .
+
+  # Independent disposable database: owner-only schema setup, then real Scribe
+  # persistence tests as a restricted application role, never the migration owner.
+  scribe-postgres:
+    name: Scribe PostgreSQL runtime-role tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      AUTH_BYPASS: 'true'
+      STORAGE_BACKEND: memory
+      NOTE_QUEUE_BACKEND: sync
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        env:
+          DATABASE_URL: postgresql://scribe_test_owner:scribe_ci_owner@127.0.0.1:55440/cureocity_scribe_test
+        run: pnpm db:generate
+
+      - name: Build Scribe persistence test dependencies
+        run: pnpm nx run-many -t build --projects=contracts,orbit-core,observability
+
+      # Fixed credentials belong only to this ephemeral fixture, not an account
+      # or deployment. Host networking keeps the server's own address/port equal
+      # to the loopback target verified by the persistence suite before writes.
+      - name: Start isolated Scribe PostgreSQL
+        timeout-minutes: 1
+        run: |
+          docker run --detach --name cureocity-scribe-postgres-ci --network host \
+            --env POSTGRES_USER=scribe_test_owner --env POSTGRES_PASSWORD=scribe_ci_owner \
+            --env POSTGRES_DB=cureocity_scribe_test \
+            postgres:16-alpine postgres -p 55440 -c listen_addresses=127.0.0.1
+          for attempt in {1..30}; do
+            if docker exec cureocity-scribe-postgres-ci pg_isready -h 127.0.0.1 -p 55440 -U scribe_test_owner -d cureocity_scribe_test; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs cureocity-scribe-postgres-ci
+          exit 1
+
+      - name: Migrate isolated Scribe PostgreSQL as owner
+        timeout-minutes: 3
+        env:
+          CI: 'true'
+          RUN_INTEGRATION_TESTS: '1'
+          RUN_SCRIBE_POSTGRES_TESTS: '1'
+          DATABASE_URL: postgresql://scribe_test_owner:scribe_ci_owner@127.0.0.1:55440/cureocity_scribe_test
+        run: |
+          pnpm db:prepare-fresh-ci
+          pnpm db:migrate:deploy
+
+      - name: Provision restricted Scribe test runtime role
+        timeout-minutes: 1
+        env:
+          DATABASE_URL: postgresql://scribe_test_owner:scribe_ci_owner@127.0.0.1:55440/cureocity_scribe_test
+          DATABASE_RUNTIME_ROLE: scribe_test_runtime
+          DATABASE_RUNTIME_URL: postgresql://scribe_test_runtime:scribe_ci_runtime@127.0.0.1:55440/cureocity_scribe_test
+        run: |
+          docker exec --env PGPASSWORD=scribe_ci_owner cureocity-scribe-postgres-ci psql -X -v ON_ERROR_STOP=1 \
+            -h 127.0.0.1 -p 55440 -U scribe_test_owner -d cureocity_scribe_test \
+            -c "CREATE ROLE scribe_test_runtime LOGIN PASSWORD 'scribe_ci_runtime' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;" \
+            -c "GRANT CONNECT ON DATABASE cureocity_scribe_test TO scribe_test_runtime;"
+          node scripts/configure-runtime-db-role.mjs
+
+      - name: Run Scribe PostgreSQL persistence tests as runtime role
+        timeout-minutes: 5
+        env:
+          RUN_SCRIBE_POSTGRES_TESTS: '1'
+          SCRIBE_TEST_DATABASE_URL: postgresql://scribe_test_runtime:scribe_ci_runtime@127.0.0.1:55440/cureocity_scribe_test
+          DATABASE_URL: postgresql://scribe_test_runtime:scribe_ci_runtime@127.0.0.1:55440/cureocity_scribe_test
+          DATABASE_RUNTIME_URL: postgresql://scribe_test_runtime:scribe_ci_runtime@127.0.0.1:55440/cureocity_scribe_test
+          DATABASE_RUNTIME_ROLE: scribe_test_runtime
+        run: |
+          pnpm --filter @cureocity/web exec vitest run \
+            lib/scribe-workspace-postgres.spec.ts \
+            --maxWorkers=1
+
+      - name: Stop isolated Scribe PostgreSQL
+        if: ${{ always() }}
+        timeout-minutes: 1
+        run: |
+          if docker container inspect cureocity-scribe-postgres-ci >/dev/null 2>&1; then
+            docker rm --force --volumes cureocity-scribe-postgres-ci
+          fi

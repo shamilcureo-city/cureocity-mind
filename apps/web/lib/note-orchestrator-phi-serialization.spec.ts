@@ -111,8 +111,9 @@ describe('asynchronous note-generation PHI serialization', () => {
     );
 
     const liveNote = source('app/api/v1/sessions/[id]/live-note/route.ts');
-    expect(liveNote).toContain('PASS_9_LIVE_PREWARM_MARKER');
-    expect(liveNote).toContain('withActiveSessionPhiWrite');
+    // Doctor reasoning is now explicitly clinician-triggered from the review
+    // surface, so finalizing a live note must not create a differential row.
+    expect(liveNote).not.toContain('runDifferential');
     expect(liveNote).not.toMatch(/prisma\.differential\.(findUnique|upsert)/);
 
     for (const writer of [

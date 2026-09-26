@@ -199,6 +199,8 @@ export class LiveSession {
   private finalEmitted = false;
   /** Never turn a rejected model response into speech or hide the resulting gap. */
   private transcriptionWarning = false;
+  /** Doctor finals retain an incomplete capture even when a usable draft exists. */
+  private captureIncompleteReason: 'audio_loss' | 'finalization_failed' | null = null;
   private startedAtMs = 0;
   /** DOC-5 — runaway-consult guards (silence skip + duration/cost ceilings). */
   private readonly guards = runawayGuardsFromEnv();
@@ -588,7 +590,21 @@ export class LiveSession {
 
   private warnTranscription(startMs: number, endMs: number): void {
     this.transcriptionWarning = true;
+    this.markCaptureIncomplete('audio_loss');
     this.emit({ type: 'transcriptionWarning', startMs, endMs });
+  }
+
+  private markCaptureIncomplete(reason: 'audio_loss' | 'finalization_failed'): void {
+    if (this.vertical !== 'DOCTOR') return;
+    // Missing audio remains the most concrete cause even if note generation
+    // subsequently times out or fails as well.
+    if (this.captureIncompleteReason !== 'audio_loss') this.captureIncompleteReason = reason;
+  }
+
+  private captureIntegrityFields() {
+    return this.captureIncompleteReason
+      ? { captureIncomplete: true, captureIncompleteReason: this.captureIncompleteReason }
+      : {};
   }
 
   /**
@@ -1157,7 +1173,10 @@ export class LiveSession {
 
     if (pass2.output.kind !== 'MEDICAL') {
       // Defensive — DOCTOR always MEDICAL. Fall back to whatever we had.
-      if (isFinal) this.emitFinalFromLatest();
+      if (isFinal) {
+        this.markCaptureIncomplete('finalization_failed');
+        this.emitFinalFromLatest();
+      }
       return;
     }
     const note = pass2.output.encounterNote;
@@ -1174,6 +1193,7 @@ export class LiveSession {
         medications: this.latestMedications,
         orders: this.latestOrders,
         ...(this.has('PRESCRIPTION_DRAFTING') ? { rxPad: this.assembleRx() } : {}),
+        ...this.captureIntegrityFields(),
       });
       return;
     }
@@ -1329,6 +1349,7 @@ export class LiveSession {
     this.streamTranscriber = null;
     this.stopAudio(); // sets `stopped` → any in-flight pump loop exits after its window
     const idle = await this.waitIdle();
+    if (!idle) this.markCaptureIncomplete('audio_loss');
     if (this.pausedAtMs !== null && !idle) {
       this.dispose();
       throw new Error('Unconfirmed paused audio; recover the captured transcript');
@@ -1360,6 +1381,7 @@ export class LiveSession {
     } catch (err) {
       usageTimedOut = err instanceof Error && err.message === 'finalize budget exceeded';
       reportError('finalize failed', err);
+      this.markCaptureIncomplete('finalization_failed');
       this.emitFinalFromLatest();
     } finally {
       if (timer) clearTimeout(timer);
@@ -1380,7 +1402,7 @@ export class LiveSession {
    * That window OWNS `pending` (it slices its prefix off and advances
    * flushedBytes when its Pass-1 call returns), so transcribing the tail here
    * would re-transcribe its bytes and DUPLICATE them in the record. Skip the
-   * tail in that case — a few unheard seconds beats a doubled transcript.
+   * tail in that case and mark the doctor final incomplete for review.
    */
   private async finalizeWork(idle: boolean): Promise<void> {
     // Join already-owned analysis inside the existing finalize deadline.
@@ -1401,13 +1423,18 @@ export class LiveSession {
         continue;
       }
       const t0 = Date.now();
-      const pass1 = await this.backends.pass1.run({
-        sessionId: this.sessionId,
-        audioBytes: tail,
-        durationMs,
-        vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
-        ...(this.vertical === 'THERAPIST' ? { latencyMode: 'realtime' as const } : {}),
-      });
+      const pass1 = await this.backends.pass1
+        .run({
+          sessionId: this.sessionId,
+          audioBytes: tail,
+          durationMs,
+          vertical: this.vertical, // Sprint TS1 — DOCTOR or THERAPIST
+          ...(this.vertical === 'THERAPIST' ? { latencyMode: 'realtime' as const } : {}),
+        })
+        .catch((error: unknown) => {
+          this.markCaptureIncomplete('audio_loss');
+          throw error;
+        });
       this.meter.recordTranscribe(pass1.callLog, Date.now() - t0);
       if (this.terminal) return;
       this.meter.markWindow();
@@ -1529,6 +1556,7 @@ export class LiveSession {
       medications: this.latestMedications,
       orders: this.latestOrders,
       ...(this.has('PRESCRIPTION_DRAFTING') ? { rxPad: this.assembleRx() } : {}),
+      ...this.captureIntegrityFields(),
     });
   }
 

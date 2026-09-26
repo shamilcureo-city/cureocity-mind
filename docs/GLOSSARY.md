@@ -123,8 +123,9 @@ pass to its backend (Vertex or mock) and fires the call-log hook.
 
 ### OPD
 
-**Out-Patient Department.** The doctor's home is a zero-click OPD queue
-(`/app/clinic`), ordered by `Session.tokenNumber` per IST clinic day.
+**Out-Patient Department.** The doctor's home is a rapid-turnover OPD queue
+(`/app/clinic`), ordered by `Session.tokenNumber` per IST clinic day. Live
+capture still requires an explicit encounter-level consent choice.
 
 ### Reliable change
 

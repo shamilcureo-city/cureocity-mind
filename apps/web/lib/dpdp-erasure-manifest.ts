@@ -49,6 +49,9 @@ export const CLIENT_FIELD_ERASURE_MANIFEST = {
 } as const satisfies Record<string, DpdpErasureDisposition>;
 
 export const DPDP_ERASURE_MANIFEST = {
+  ScribeWorkspaceRecord: clinicalDelete(
+    'deleteMany by clientId, including encrypted report originals and intake credentials; independent of UI flags',
+  ),
   ClientNomination: clinicalDelete('delete nominee identity, contact details and notes'),
   ClientErasureRequest: legalProof(
     'retain status/timestamps; replace reason and resolution free text with SHA-256 hashes',

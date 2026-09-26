@@ -20,13 +20,16 @@ import {
 import { drugNameKey } from '@cureocity/clinical';
 import { useRouter } from 'next/navigation';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
+import { waitForLiveCaptureStop } from '@/lib/audio/live-stream-cleanup';
 import { LiveTokenRenewal, type LiveTokenLease } from '@/lib/audio/live-token-renewal';
+import type { ScribeTeleconsultDocumentationState } from '@/lib/scribe-teleconsult-contracts';
 import { GatewayMockBanner } from './GatewayMockBanner';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { ReviewAndSign } from './ReviewAndSign';
 // (MedicalNoteView now renders inside ReviewAndSign)
 import { TurnoverBar } from './TurnoverBar';
+import { ScribeLiveWorkspace, ScribeInputMeter, scribeLiveStyles } from './ScribeLiveWorkspace';
 
 /**
  * Sprint DV4 (full) — the live copilot. Streams real mic audio to the
@@ -47,6 +50,8 @@ type Phase =
   | 'idle'
   | 'connecting'
   | 'listening'
+  | 'pausing'
+  | 'paused'
   | 'finalizing'
   | 'done'
   | 'error'
@@ -107,12 +112,22 @@ interface GateItem {
   kind: 'RED_FLAG' | 'DIFFERENTIAL';
 }
 
+/** The call owns its media. Documentation only borrows a consent-gated audio stream. */
+export interface ScribeTeleconsultCapture {
+  stream: MediaStream | null;
+  ready: boolean;
+  unavailableReason: string | null;
+  beforeStart: () => Promise<void>;
+  onStateChange: (state: ScribeTeleconsultDocumentationState, busy: boolean) => void;
+}
+
 export function DoctorLiveEncounter({
   sessionId,
   clientId,
   specialty,
   patient,
   autoStart = false,
+  teleconsult,
 }: {
   sessionId: string;
   clientId?: string;
@@ -122,8 +137,11 @@ export function DoctorLiveEncounter({
   // flash → live), so kick off the mic without a second tap. Best-effort:
   // if the browser needs a gesture, the StartPanel button is the fallback.
   autoStart?: boolean;
+  teleconsult?: ScribeTeleconsultCapture;
 }) {
   const router = useRouter();
+  const teleconsultRef = useRef(teleconsult);
+  teleconsultRef.current = teleconsult;
   const wsRef = useRef<WebSocket | null>(null);
   // Safety-net timer so "End" can never trap the doctor on "Finishing…" if
   // the gateway's `done` never arrives (e.g. a dropped socket).
@@ -135,6 +153,19 @@ export function DoctorLiveEncounter({
   // Sprint DS3 — suggestion ids we've already audited as SHOWN, so each fires once.
   const shownSuggestionsRef = useRef<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>('idle');
+  const [lastTranscriptAt, setLastTranscriptAt] = useState<number | null>(null);
+  const [clockNow, setClockNow] = useState(Date.now);
+  const [captureIncomplete, setCaptureIncomplete] = useState<string | null>(null);
+  const captureIncompleteRef = useRef<
+    'connection_lost' | 'finalization_failed' | 'audio_loss' | 'capture_interrupted' | null
+  >(null);
+  const pauseReplyRef = useRef<{
+    requestId: string;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+  const speechAtRef = useRef<number | null>(null);
+  const captureStartedAtRef = useRef<number | null>(null);
   // Sprint DS4 — the transcript is utterance-anchored (ids from DS0) so an
   // evidence chip can scroll-highlight its source utterance.
   const [utterances, setUtterances] = useState<Utterance[]>([]);
@@ -186,6 +217,13 @@ export function DoctorLiveEncounter({
   const [justSigned, setJustSigned] = useState(false);
   const [startingNew, setStartingNew] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const lastSavePayloadRef = useRef<{
+    note: MedicalEncounterNoteV1;
+    medications: unknown[];
+    orders: unknown[];
+    rx: RxPadV1 | null;
+    transcript: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   // Batch A — socket health, surfaced on the capture bar instead of a screen
@@ -212,10 +250,22 @@ export function DoctorLiveEncounter({
 
   const live = phase === 'listening' || phase === 'finalizing';
 
+  function flagIncomplete(reason: NonNullable<typeof captureIncompleteRef.current>): void {
+    captureIncompleteRef.current ??= reason;
+    setCaptureIncomplete(captureIncompleteRef.current);
+  }
+
+  useEffect(() => {
+    const timer = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Consult timer — ticks only while the mic is streaming.
   useEffect(() => {
     if (phase !== 'listening') return;
-    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    const t = setInterval(() => {
+      if (streamRef.current.state === 'streaming') setElapsed((s) => s + 1);
+    }, 1000);
     return () => clearInterval(t);
   }, [phase]);
 
@@ -333,6 +383,7 @@ export function DoctorLiveEncounter({
     rx: RxPadV1 | null,
     transcript: string,
   ): Promise<void> {
+    lastSavePayloadRef.current = { note, medications, orders, rx, transcript };
     setSaveState('saving');
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
@@ -346,13 +397,17 @@ export function DoctorLiveEncounter({
           // DOC-7 — the verbatim diarized transcript is the source record
           // behind the note; relay it so it's stored, not discarded.
           ...(transcript ? { transcript } : {}),
+          ...(captureIncompleteRef.current
+            ? {
+                captureIncomplete: true,
+                captureIncompleteReason: captureIncompleteRef.current,
+              }
+            : {}),
         }),
       });
-      // Batch C — 409 means the encounter is already signed, so the route
-      // refused to replace the attested note. That is the correct outcome,
-      // not a failure: nothing was lost, and telling the doctor "couldn't
-      // save" would be wrong.
-      const saved = res.ok || res.status === 409;
+      // A conflict may be consent loss or a stale session, not an existing saved note.
+      // Only an acknowledged successful write may unlock closeout/navigation.
+      const saved = res.ok;
       setSaveState(saved ? 'saved' : 'error');
       // live-note is the lifecycle authority: only after it has finalized the
       // Session to COMPLETED may finalized telemetry pass the route guard.
@@ -491,8 +546,14 @@ export function DoctorLiveEncounter({
   }
 
   const stream = useLiveStream({
+    captureSource: teleconsult ? 'external' : 'microphone',
+    externalStream: teleconsult?.stream,
+    externalReady: teleconsult?.ready,
+    externalUnavailableReason: teleconsult?.unavailableReason,
     onFrame: (pcm) => {
       if (captureBlockedRef.current) return;
+      // Fail closed immediately on a consent/status render, before effect cleanup.
+      if (teleconsultRef.current && !teleconsultRef.current.ready) return;
       const ws = wsRef.current;
       const open = socketReadyRef.current && ws && ws.readyState === ws.OPEN;
       // Fast path: socket up, nothing queued, and the send buffer isn't
@@ -511,10 +572,48 @@ export function DoctorLiveEncounter({
         if (!dropped) break;
         audioQueueBytesRef.current -= dropped.byteLength;
         droppedFramesRef.current += 1;
+        flagIncomplete('audio_loss');
       }
       if (open) flushAudioQueue(ws);
     },
+    onInterrupted: (message) => {
+      flagIncomplete('capture_interrupted');
+      stopForAuthorization(
+        `${message} Capture is stopped. Review any missing words before signing.`,
+        true,
+      );
+    },
   });
+
+  const notifyTeleconsult = teleconsult?.onStateChange;
+  const teleconsultLeaseState = useRef<ScribeTeleconsultDocumentationState>('idle');
+  useEffect(() => {
+    if (!notifyTeleconsult) return;
+    const finished = finalNote !== null || phase === 'done';
+    const busy = finished ? saveState !== 'saved' : !['idle', 'error'].includes(phase);
+    // Keep the last authority while accepted PCM is being drained. A browser
+    // send-buffer of zero is not a gateway acknowledgement. capturePaused/final
+    // transitions below retire the lease only after the gateway confirms its tail.
+    const next: ScribeTeleconsultDocumentationState = finished
+      ? 'finished'
+      : phase === 'pausing' || phase === 'finalizing'
+        ? teleconsultLeaseState.current
+        : phase === 'connecting' || (phase === 'listening' && stream.state !== 'streaming')
+          ? 'preparing'
+          : phase === 'listening'
+            ? 'recording'
+            : phase === 'idle'
+              ? 'idle'
+              : 'paused';
+    teleconsultLeaseState.current = next;
+    notifyTeleconsult(next, busy);
+  }, [notifyTeleconsult, phase, stream.state, finalNote, saveState]);
+
+  useEffect(() => {
+    if (stream.state === 'streaming' && stream.inputLevel > 0.01) {
+      speechAtRef.current = stream.lastAudioAt;
+    }
+  }, [stream.state, stream.inputLevel, stream.lastAudioAt]);
 
   // Close the socket + release the mic on unmount. `stream` is a stable hook
   // handle; we intentionally run this once.
@@ -534,6 +633,7 @@ export function DoctorLiveEncounter({
       renewalRef.current = null;
       if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      pauseReplyRef.current?.reject(new Error('Capture view closed.'));
       // Batch A — an unmount is a deliberate close, not a drop: suppress the
       // reconnect path so navigating away doesn't spin up a doomed retry loop.
       intentionalCloseRef.current = true;
@@ -561,6 +661,12 @@ export function DoctorLiveEncounter({
       ['connecting', 'listening', 'finalizing'].includes(phaseRef.current)
     )
       return;
+    if (teleconsultRef.current && !teleconsultRef.current.ready) {
+      setError(
+        teleconsultRef.current.unavailableReason ?? 'The video call is not ready for capture.',
+      );
+      return;
+    }
     setError(null);
     setUtterances([]);
     setPartialText(''); // DS13 — clear the provisional streaming line
@@ -587,7 +693,13 @@ export function DoctorLiveEncounter({
     setFinalNote(null);
     setJustSigned(false);
     setSaveState('idle');
+    lastSavePayloadRef.current = null;
     setElapsed(0);
+    setLastTranscriptAt(null);
+    setCaptureIncomplete(null);
+    captureIncompleteRef.current = null;
+    speechAtRef.current = null;
+    captureStartedAtRef.current = null;
     latestMeterRef.current = null;
     meteredRef.current = false;
     shownSuggestionsRef.current = new Set();
@@ -618,6 +730,10 @@ export function DoctorLiveEncounter({
 
   /** Authorization loss never restarts a microphone or clears captured clinical context. */
   function stopForAuthorization(message: string, canResume: boolean): void {
+    if (['listening', 'pausing', 'finalizing'].includes(phaseRef.current)) {
+      flagIncomplete('capture_interrupted');
+    }
+    pauseReplyRef.current?.reject(new Error(message));
     captureBlockedRef.current = true;
     socketReadyRef.current = false;
     intentionalCloseRef.current = true;
@@ -638,7 +754,14 @@ export function DoctorLiveEncounter({
   }
 
   function resumeAuthorizedCapture(): void {
-    if (phaseRef.current !== 'authorization-paused' || unmountedRef.current) return;
+    if (!['authorization-paused', 'paused'].includes(phaseRef.current) || unmountedRef.current)
+      return;
+    if (teleconsultRef.current && !teleconsultRef.current.ready) {
+      setError(
+        teleconsultRef.current.unavailableReason ?? 'The video call is not ready for capture.',
+      );
+      return;
+    }
     intentionalCloseRef.current = false;
     phaseRef.current = 'connecting';
     setPhase('connecting');
@@ -677,6 +800,15 @@ export function DoctorLiveEncounter({
     let initialLease: LiveTokenLease;
     // Never reuse a previous token/context after a failed authorization request.
     try {
+      const callCapture = teleconsultRef.current;
+      if (callCapture) {
+        if (!callCapture.ready)
+          throw new Error(callCapture.unavailableReason ?? 'Call capture is unavailable.');
+        await callCapture.beforeStart();
+        if (!isCurrentAttempt()) return;
+        if (!teleconsultRef.current?.ready)
+          throw new Error('Call audio or consent changed. Check the consultation before resuming.');
+      }
       const requestedAtMs = Date.now();
       const r = await fetch(`/api/v1/sessions/${sessionId}/live-token`, {
         method: 'POST',
@@ -813,6 +945,14 @@ export function DoctorLiveEncounter({
       // Expected closes: we asked for it, or the consult already finished.
       if (intentionalCloseRef.current || finalHandledRef.current) return;
       const p = phaseRef.current;
+      if (p === 'pausing') {
+        pauseReplyRef.current?.reject(new Error('Connection closed before pause was confirmed.'));
+        return;
+      }
+      if (p === 'paused') {
+        setConnState('lost');
+        return;
+      }
       if (p === 'connecting') {
         stopForAuthorization(
           'The live connection closed before capture was ready. Microphone off. Retry before continuing.',
@@ -821,6 +961,11 @@ export function DoctorLiveEncounter({
         return;
       }
       if (p !== 'listening' && p !== 'finalizing') return;
+      flagIncomplete('connection_lost');
+      if (p === 'finalizing') {
+        void salvageConsult('dropped');
+        return;
+      }
       // Batch A — an UNEXPECTED drop mid-consult. Previously this line was the
       // whole handler: the UI kept saying REC, the mic kept running, and every
       // word from here on was lost without a single signal. Now we retry.
@@ -854,9 +999,18 @@ export function DoctorLiveEncounter({
             phaseRef.current = 'listening';
             setPhase('listening');
             if (!resume || restartCapture) {
+              captureStartedAtRef.current = Date.now();
               captureBlockedRef.current = false;
               void streamRef.current.start().catch((e: Error) => {
-                if (!ownsSocket()) return;
+                // End/pause can cancel a pending microphone permission/start request.
+                // Its late rejection must not replace the newer capture state.
+                if (
+                  !ownsSocket() ||
+                  phaseRef.current !== 'listening' ||
+                  intentionalCloseRef.current ||
+                  finalHandledRef.current
+                )
+                  return;
                 renewal.dispose();
                 stopForAuthorization(
                   `Microphone unavailable: ${e.message}. Resume explicitly to try again.`,
@@ -865,7 +1019,14 @@ export function DoctorLiveEncounter({
               });
             }
           } else if (event.state === 'finalizing') {
+            if (phaseRef.current === 'listening' || phaseRef.current === 'pausing') {
+              // Gateway-driven close may race speech still being captured.
+              flagIncomplete('capture_interrupted');
+              captureBlockedRef.current = true;
+              void streamRef.current.stop().catch(() => flagIncomplete('audio_loss'));
+            }
             renewal.dispose();
+            phaseRef.current = 'finalizing';
             setPhase('finalizing');
           } else if (event.state === 'done') {
             renewal.dispose();
@@ -882,6 +1043,12 @@ export function DoctorLiveEncounter({
             }
           } else if (event.state === 'unauthorized') {
             renewal.dispose();
+            if (teleconsultRef.current && phaseRef.current === 'finalizing') {
+              // An expired paused lease cannot confirm a final note. Preserve
+              // the draft immediately rather than waiting for the final timer.
+              void salvageConsult('dropped');
+              return;
+            }
             stopForAuthorization(
               'The live session could not be authorised. Microphone stopped. Check access and consent before resuming.',
               resume || listeningHandled,
@@ -909,11 +1076,25 @@ export function DoctorLiveEncounter({
           // Sprint DS4 — the utterance-anchored record (below) drives the
           // transcript display now; the delta is redundant.
           break;
+        case 'capturePaused':
+          if (pauseReplyRef.current?.requestId === event.requestId) pauseReplyRef.current.resolve();
+          break;
+        case 'capturePauseFailed':
+          if (pauseReplyRef.current?.requestId === event.requestId) {
+            pauseReplyRef.current.reject(
+              new Error('The last spoken words could not be confirmed. Capture is stopped.'),
+            );
+          }
+          break;
+        case 'transcriptionWarning':
+          flagIncomplete('audio_loss');
+          break;
         case 'partialTranscript':
           // Sprint DS13 — display-only; never enters utterances/persistence.
           setPartialText(event.text);
           break;
         case 'utterance':
+          setLastTranscriptAt(Date.now());
           setUtterances((prev) => {
             const next = prev.some((u) => u.id === event.utterance.id)
               ? prev
@@ -979,6 +1160,13 @@ export function DoctorLiveEncounter({
           if (event.command.kind === 'SHOW_DATA') void resolveShowData(event.command.measure);
           break;
         case 'final': {
+          if (phaseRef.current === 'listening' || phaseRef.current === 'pausing')
+            flagIncomplete('capture_interrupted');
+          if (event.captureIncomplete)
+            flagIncomplete(event.captureIncompleteReason ?? 'finalization_failed');
+          // Auto-finalization must stop the physical microphone too.
+          captureBlockedRef.current = true;
+          void streamRef.current.stop().catch(() => {});
           renewal.dispose();
           // Batch A — the consult is closed: a socket close from here on is
           // expected, so the reconnect loop must never arm.
@@ -1081,6 +1269,7 @@ export function DoctorLiveEncounter({
    * bad; losing all of it silently is what this whole path exists to prevent.
    */
   async function salvageConsult(reason: 'dropped' | 'empty-final'): Promise<void> {
+    flagIncomplete(reason === 'dropped' ? 'connection_lost' : 'finalization_failed');
     renewalRef.current?.dispose();
     renewalRef.current = null;
     intentionalCloseRef.current = true;
@@ -1092,7 +1281,7 @@ export function DoctorLiveEncounter({
     wsRef.current = null;
     socket?.close();
     if (reason === 'dropped') setConnState('lost');
-    void stream.stop();
+    void stream.stop().catch(() => {});
     const salvaged: MedicalEncounterNoteV1 = {
       ...NOTE_DEFAULTS,
       ...noteRef.current,
@@ -1108,7 +1297,7 @@ export function DoctorLiveEncounter({
       setPhase('done');
       setError(
         reason === 'dropped'
-          ? 'The live connection dropped and could not be restored. Everything captured up to that point is saved as the draft below — review it carefully before signing; the last part of the consult may be missing.'
+          ? 'The live connection dropped and could not be restored. Captured text remains in the draft below. Confirm that it has saved, then review any missing words before signing.'
           : 'The consult ended without a finished note. The draft below is built from what the live rails captured — review every section before signing.',
       );
       await persistLiveNote(salvaged, [], [], rxFinalRef.current, transcript);
@@ -1122,11 +1311,115 @@ export function DoctorLiveEncounter({
     }
   }
 
-  function stop(): void {
+  async function pauseCapture(): Promise<void> {
+    if (phaseRef.current !== 'listening') return;
+    const socket = wsRef.current;
+    const attempt = connectAttemptRef.current;
+    const ownsAttempt = () =>
+      !unmountedRef.current &&
+      !finalHandledRef.current &&
+      connectAttemptRef.current === attempt &&
+      phaseRef.current === 'pausing';
+    phaseRef.current = 'pausing';
+    setPhase('pausing');
+    try {
+      await waitForLiveCaptureStop(() => streamRef.current.stop());
+      if (!ownsAttempt()) return;
+      captureBlockedRef.current = true;
+      if (!socket || socket.readyState !== WebSocket.OPEN)
+        throw new Error('Connection lost before pause could be confirmed.');
+      await drainQueuedAudio(socket);
+      if (!ownsAttempt()) return;
+      const requestId = crypto.randomUUID();
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () =>
+            pauseReplyRef.current?.requestId === requestId &&
+            pauseReplyRef.current.reject(
+              new Error(
+                'Pause confirmation timed out. The microphone is off; the last words need review.',
+              ),
+            ),
+          30_000,
+        );
+        pauseReplyRef.current = {
+          requestId,
+          resolve: () => {
+            clearTimeout(timer);
+            pauseReplyRef.current = null;
+            resolve();
+          },
+          reject: (error) => {
+            clearTimeout(timer);
+            pauseReplyRef.current = null;
+            reject(error);
+          },
+        };
+        try {
+          socket.send(JSON.stringify({ type: 'pause', requestId }));
+        } catch {
+          pauseReplyRef.current.reject(
+            new Error('Could not confirm pause. The microphone is off.'),
+          );
+        }
+      });
+      if (!ownsAttempt()) return;
+      if (teleconsultRef.current) {
+        // Once the gateway acknowledges the tail, a deliberate pause has no
+        // capture lease to renew. Resume explicitly obtains a fresh lease and
+        // replays the transcript; the video call stays independent.
+        renewalRef.current?.dispose();
+        renewalRef.current = null;
+      }
+      phaseRef.current = 'paused';
+      setPhase('paused');
+    } catch (reason) {
+      if (!ownsAttempt()) return;
+      flagIncomplete('audio_loss');
+      stopForAuthorization((reason as Error).message, true);
+    }
+  }
+
+  /** Stop/pause cannot overtake locally queued or socket-buffered PCM. */
+  async function drainQueuedAudio(socket: WebSocket): Promise<void> {
+    const deadline = Date.now() + 5000;
+    while (true) {
+      if (
+        unmountedRef.current ||
+        wsRef.current !== socket ||
+        socket.readyState !== WebSocket.OPEN ||
+        !socketReadyRef.current
+      )
+        throw new Error('Connection lost while sending the last audio.');
+      flushAudioQueue(socket);
+      if (audioQueueRef.current.length === 0 && socket.bufferedAmount === 0) return;
+      if (Date.now() >= deadline)
+        throw new Error(
+          'The last audio could not be delivered. Review the missing words before signing.',
+        );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
+  async function stop(): Promise<void> {
+    if (!['listening', 'paused', 'authorization-paused'].includes(phaseRef.current)) return;
+    phaseRef.current = 'finalizing';
+    setPhase('finalizing');
+    intentionalCloseRef.current = true;
+    if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+    try {
+      await waitForLiveCaptureStop(() => streamRef.current.stop());
+    } catch {
+      flagIncomplete('audio_loss');
+      void salvageConsult('empty-final');
+      return;
+    }
+    if (unmountedRef.current || finalHandledRef.current) return;
+    captureBlockedRef.current = true;
     renewalRef.current?.dispose();
     renewalRef.current = null;
     connectAbortRef.current?.abort();
-    void stream.stop();
     // Batch A — a manual End is an intentional close: don't let the socket's
     // eventual `close` kick off the reconnect loop.
     intentionalCloseRef.current = true;
@@ -1138,7 +1431,14 @@ export function DoctorLiveEncounter({
     if (ws && ws.readyState === ws.OPEN) {
       // Flush any queued audio BEFORE `stop`, so the gateway transcribes the
       // tail it was owed rather than dropping it on the floor.
-      flushAudioQueue(ws);
+      try {
+        await drainQueuedAudio(ws);
+      } catch {
+        flagIncomplete('audio_loss');
+        void salvageConsult('empty-final');
+        return;
+      }
+      if (unmountedRef.current || finalHandledRef.current) return;
       ws.send(JSON.stringify({ type: 'stop' }));
     } else {
       ++connectAttemptRef.current;
@@ -1187,7 +1487,7 @@ export function DoctorLiveEncounter({
   // The doctor pressed "End": gate on unacted critical items, else close.
   function attemptEnd(): void {
     if (criticalUnacted.length > 0) setGateOpen(true);
-    else stop();
+    else void stop();
   }
   // "Addressed — record my reason": audit each unacted critical item with the
   // reason (stored in audit metadata) and close.
@@ -1199,23 +1499,74 @@ export function DoctorLiveEncounter({
     }
     setGateReason('');
     setGateOpen(false);
-    stop();
+    void stop();
   }
   // Every critical item is acted — close cleanly from inside the gate.
   function endFromGate(): void {
     setGateReason('');
     setGateOpen(false);
-    stop();
+    void stop();
   }
 
   const recs = rankRecommendations(gaps, commands, shownData);
   const criticalOpen = recs.some((r) => r.severity === 'critical');
+  const microphoneOn = phase === 'listening' && stream.state === 'streaming';
+  const transcriptAge =
+    lastTranscriptAt === null
+      ? null
+      : Math.max(0, Math.floor((clockNow - lastTranscriptAt) / 1000));
+  const waitingOnSpeech =
+    microphoneOn &&
+    speechAtRef.current !== null &&
+    speechAtRef.current > (lastTranscriptAt ?? 0) &&
+    clockNow - (lastTranscriptAt ?? captureStartedAtRef.current ?? clockNow) > 20_000;
+  const inputStalled =
+    microphoneOn &&
+    clockNow - (stream.lastAudioAt ?? captureStartedAtRef.current ?? clockNow) > 5_000;
+  useEffect(() => {
+    if (inputStalled) flagIncomplete('capture_interrupted');
+  }, [inputStalled]);
+  const microphoneCaptureLabel =
+    phase === 'pausing'
+      ? 'Mic off · confirming last words'
+      : phase === 'paused'
+        ? 'Paused · microphone off'
+        : phase === 'authorization-paused'
+          ? 'Capture stopped · microphone off'
+          : phase === 'finalizing'
+            ? 'Finishing · microphone off'
+            : phase === 'connecting'
+              ? 'Connecting · microphone off'
+              : connState === 'reconnecting'
+                ? 'Reconnecting · audio held locally'
+                : inputStalled
+                  ? 'Microphone input interrupted'
+                  : microphoneOn
+                    ? `Recording ${fmtTime(elapsed)}`
+                    : phase === 'listening'
+                      ? 'Starting microphone…'
+                      : finalNote
+                        ? 'Consultation ended'
+                        : 'Microphone off';
+  const captureLabel = teleconsult
+    ? phase === 'finalizing'
+      ? 'Finishing documentation · call stays open'
+      : microphoneOn
+        ? `Documenting call ${fmtTime(elapsed)}`
+        : phase === 'connecting'
+          ? 'Preparing AI documentation'
+          : phase === 'paused' || phase === 'authorization-paused' || phase === 'pausing'
+            ? 'AI documentation paused · call audio is separate'
+            : finalNote
+              ? 'Documentation ended'
+              : 'AI documentation off'
+    : microphoneCaptureLabel;
 
   return (
-    <div className="space-y-4">
+    <div className={`${scribeLiveStyles.surface} space-y-4`}>
       <GatewayMockBanner />
       {/* Capture bar */}
-      <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-[var(--color-line)] bg-white px-5 py-3.5">
+      <div className={scribeLiveStyles.captureBar}>
         <div className="flex items-center gap-3">
           <span
             aria-hidden
@@ -1231,72 +1582,113 @@ export function DoctorLiveEncounter({
               )}
             </p>
             <p className="text-xs text-[var(--color-ink-3)]">
-              {specialty ? `${specialty} · ` : ''}Live encounter
+              {specialty ? `${specialty} · ` : ''}
+              {teleconsult ? 'Video encounter' : 'Live encounter'}
             </p>
           </div>
         </div>
 
-        {live && (
-          // Batch A — the pill tells the truth about the SOCKET, not just the
-          // mic. While reconnecting it must never read "REC": the doctor has
-          // to know their words are being held, not heard.
-          <div
-            className={`ml-1 flex items-center gap-3 rounded-full px-3.5 py-1.5 ${
-              connState === 'reconnecting'
-                ? 'bg-[var(--color-warn-soft)]'
-                : phase === 'finalizing'
-                  ? 'bg-[var(--color-accent-soft)]'
-                  : 'bg-[var(--color-warn-soft)]'
-            }`}
-          >
-            <span
-              className={`h-2.5 w-2.5 rounded-full ${
-                connState === 'reconnecting'
-                  ? 'animate-pulse bg-[var(--color-ink-3)]'
-                  : phase === 'finalizing'
-                    ? 'bg-[var(--color-accent)]'
-                    : 'bg-[var(--color-warn)] animate-pulse'
-              }`}
-            />
-            <span
-              className={`text-[13px] font-semibold tracking-wide ${
-                connState === 'reconnecting'
-                  ? 'text-[var(--color-ink-2)]'
-                  : phase === 'finalizing'
-                    ? 'text-[var(--color-accent)]'
-                    : 'text-[var(--color-warn)]'
-              }`}
-            >
-              {connState === 'reconnecting'
-                ? 'Reconnecting…'
-                : phase === 'finalizing'
-                  ? 'Finishing…'
-                  : `REC ${fmtTime(elapsed)}`}
+        <div className={scribeLiveStyles.status}>
+          <div className={scribeLiveStyles.statusLine}>
+            <span role="status" className="font-semibold">
+              {captureLabel}
             </span>
-            {phase === 'listening' && connState === 'ok' && <Waveform />}
+            <ScribeInputMeter
+              level={stream.inputLevel}
+              active={microphoneOn && !inputStalled}
+              source={teleconsult ? 'call' : 'microphone'}
+            />
           </div>
-        )}
+          <small>
+            {lastTranscriptAt === null
+              ? 'Waiting for the first transcript'
+              : `Transcript updated ${transcriptAge}s ago`}
+          </small>
+        </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className={scribeLiveStyles.actions}>
+          {!finalNote && criticalUnacted.length > 0 && (
+            <Button variant="secondary" onClick={() => setGateOpen(true)}>
+              {criticalUnacted.length} urgent {criticalUnacted.length === 1 ? 'item' : 'items'}
+            </Button>
+          )}
           {finalNote || phase === 'done' ? (
-            clientId ? (
+            clientId && !teleconsult ? (
               <Button onClick={() => void newConsult()} variant="secondary" disabled={startingNew}>
                 {startingNew ? 'Starting…' : 'New consult'}
               </Button>
             ) : null
-          ) : phase === 'authorization-paused' ? (
-            <Button onClick={resumeAuthorizedCapture}>Resume live consult</Button>
-          ) : live ? (
-            <Button onClick={attemptEnd} className="bg-[var(--color-warn)] hover:bg-[#a25b30]">
-              End &amp; review note
-            </Button>
+          ) : phase === 'authorization-paused' || phase === 'paused' ? (
+            <>
+              <Button
+                variant="secondary"
+                onClick={resumeAuthorizedCapture}
+                disabled={teleconsult && !teleconsult.ready}
+              >
+                {teleconsult ? 'Resume AI documentation' : 'Resume recording'}
+              </Button>
+              <Button onClick={attemptEnd}>End &amp; review note</Button>
+            </>
+          ) : live || phase === 'pausing' ? (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => void pauseCapture()}
+                disabled={!microphoneOn || phase !== 'listening'}
+              >
+                {phase === 'pausing'
+                  ? 'Confirming pause…'
+                  : teleconsult
+                    ? 'Pause AI documentation'
+                    : 'Pause recording'}
+              </Button>
+              <Button onClick={attemptEnd} disabled={phase === 'finalizing' || phase === 'pausing'}>
+                {phase === 'finalizing' ? 'Finishing…' : 'End & review note'}
+              </Button>
+            </>
           ) : (
-            <Button onClick={() => void start()} disabled={phase === 'connecting'}>
-              {phase === 'connecting' ? 'Connecting…' : '● Start live consult'}
+            <Button
+              onClick={() => void start()}
+              disabled={phase === 'connecting' || (teleconsult && !teleconsult.ready)}
+            >
+              {phase === 'connecting'
+                ? 'Connecting…'
+                : teleconsult
+                  ? 'Start AI documentation'
+                  : '● Start live consult'}
             </Button>
           )}
         </div>
       </div>
+
+      {teleconsult && !teleconsult.ready && !finalNote && (
+        <p role="status" className="text-sm text-[var(--color-ink-2)]">
+          {teleconsult.unavailableReason ??
+            'Connect both sides of the call before starting AI documentation.'}
+        </p>
+      )}
+
+      {(waitingOnSpeech || inputStalled) && (
+        <Card
+          role="status"
+          className="border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4 text-sm"
+        >
+          {inputStalled
+            ? teleconsult
+              ? 'Call audio has stopped arriving. Reconnect both sides before resuming AI documentation.'
+              : 'Microphone frames have stopped arriving. Pause and reconnect the microphone before continuing.'
+            : 'Sound is being captured, but the transcript has not updated for over 20 seconds. Check the connection and pause if you need to stop speaking.'}
+        </Card>
+      )}
+      {captureIncomplete && !finalNote && (
+        <Card
+          role="alert"
+          className="border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4 text-sm"
+        >
+          <strong>Some words may be missing.</strong> Capture or transcription was interrupted. You
+          can continue; the missing details must be reviewed and completed before signing.
+        </Card>
+      )}
 
       {/* Batch A — the reconnect banner. The doctor keeps talking; we say
           plainly that we're holding their audio rather than hearing it. */}
@@ -1308,10 +1700,10 @@ export function DoctorLiveEncounter({
         >
           <strong className="block">Reconnecting to the live copilot…</strong>
           <p className="mt-1">
-            The connection dropped. Your microphone is still recording and the last couple of
-            minutes are being held — they&rsquo;ll be sent as soon as the link is back. The
-            transcript on screen is safe. Keep going, or press End to close the consult with what
-            has been captured.
+            The connection dropped. {teleconsult ? 'Consented call audio' : 'Your microphone'} is
+            still recording and the last couple of minutes are being held — they&rsquo;ll be sent as
+            soon as the link is back. The transcript on screen is safe. Keep going, or press End to
+            close the consult with what has been captured.
           </p>
         </Card>
       )}
@@ -1334,43 +1726,85 @@ export function DoctorLiveEncounter({
       {finalNote ? (
         <>
           {/* DS11.2 — sign on THIS surface; no detour to the encounter page. */}
-          <ReviewAndSign
-            sessionId={sessionId}
-            clientId={clientId}
-            note={finalNote}
-            examined={[...examinedDone]}
-            notExamined={[...proposedExams].filter((s) => !examinedDone.has(s))}
-            header={
-              <p className="text-sm text-[var(--color-ink-2)]">
-                Consult ended — review the note and plan, then sign.{' '}
-                <span className="text-[var(--color-ink-3)]">
-                  {saveState === 'saving' && 'Saving the draft…'}
-                  {saveState === 'saved' && '✓ Draft saved.'}
-                  {saveState === 'error' &&
-                    'The draft could not be saved automatically — signing will retry.'}
-                </span>
-              </p>
-            }
-            onSigned={() => setJustSigned(true)}
-          />
+          {saveState === 'saved' ? (
+            <ReviewAndSign
+              key={sessionId}
+              sessionId={sessionId}
+              clientId={clientId}
+              note={finalNote}
+              captureSaveState={saveState}
+              examined={[...examinedDone]}
+              notExamined={[...proposedExams].filter((s) => !examinedDone.has(s))}
+              header={
+                <p className="text-sm text-[var(--color-ink-2)]">
+                  Consult ended — review the note and plan, then sign.{' '}
+                  <span className="text-[var(--color-ink-3)]">✓ Draft saved.</span>
+                </p>
+              }
+              onSigned={() => setJustSigned(true)}
+            />
+          ) : (
+            <Card role="status" className="p-5 text-sm">
+              {saveState === 'error'
+                ? 'Draft not saved. Retry saving before review or signing.'
+                : 'Saving the note, prescription and captured transcript…'}
+            </Card>
+          )}
+          {saveState === 'error' && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const payload = lastSavePayloadRef.current;
+                if (payload)
+                  void persistLiveNote(
+                    payload.note,
+                    payload.medications,
+                    payload.orders,
+                    payload.rx,
+                    payload.transcript,
+                  );
+              }}
+            >
+              Retry saving draft
+            </Button>
+          )}
           {/* Sprint DS7 + DS11.2 — the next token arms only after the
               signature lands: sign first, then chain. */}
-          {justSigned && <TurnoverBar currentSessionId={sessionId} />}
+          {justSigned && !teleconsult && <TurnoverBar currentSessionId={sessionId} />}
         </>
       ) : phase === 'idle' || phase === 'connecting' || phase === 'error' ? (
         // DS11.4 — 'error' renders the StartPanel too: the error card above
         // explains what happened, and the capture bar's Start is the retry.
-        <StartPanel connecting={phase === 'connecting'} />
+        <StartPanel connecting={phase === 'connecting'} teleconsult={!!teleconsult} />
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,300px)_minmax(0,1fr)_minmax(0,420px)]">
-          <TranscriptPanel
-            utterances={utterances}
-            partialText={partialText}
-            highlightIds={highlightIds}
-            refs={transcriptRefs}
-            listening={phase === 'listening'}
-          />
-          <div className="space-y-4">
+        <ScribeLiveWorkspace
+          alert={
+            criticalUnacted.length > 0 ? (
+              <Card
+                role="alert"
+                className="border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4 text-sm"
+              >
+                <strong>
+                  {criticalUnacted.length} urgent{' '}
+                  {criticalUnacted.length === 1 ? 'item needs' : 'items need'} review
+                </strong>
+                <p className="mt-1">{criticalUnacted[0]?.label}</p>
+                <Button variant="secondary" className="mt-3" onClick={() => setGateOpen(true)}>
+                  Review urgent items
+                </Button>
+              </Card>
+            ) : undefined
+          }
+          transcript={
+            <TranscriptPanel
+              utterances={utterances}
+              partialText={partialText}
+              highlightIds={highlightIds}
+              refs={transcriptRefs}
+              listening={microphoneOn && connState === 'ok'}
+            />
+          }
+          prescription={
             <RxPadPanel
               rxPad={withAdoptedTestsDraft(rxPad, adoptedTests)}
               confirmedDrugs={confirmedDrugs}
@@ -1378,32 +1812,36 @@ export function DoctorLiveEncounter({
               onQuote={highlightUtterances}
               live={live}
             />
+          }
+          note={
             <NotePanel
               note={note}
               specialty={specialty}
               live={phase === 'listening'}
               assessmentAdds={assessmentAdds}
             />
-          </div>
-          <LiveRail
-            reasoning={reasoning}
-            findings={findings}
-            recs={recs}
-            criticalOpen={criticalOpen}
-            live={live}
-            onDismiss={dismissQuestion}
-            onAsked={(id, label) => void relaySuggestion('acted', id, 'ASK_NEXT', label)}
-            onEvidence={highlightEvidence}
-            onAddToAssessment={addToAssessment}
-            addedToAssessment={assessmentAdds}
-            onAct={markActed}
-            actedItems={actedItems}
-            handledSuggestions={handledSuggestions}
-            onAdoptOrder={adoptOrder}
-            onDismissOrder={dismissOrder}
-            onExam={resolveExam}
-          />
-        </div>
+          }
+          copilot={
+            <LiveRail
+              reasoning={reasoning}
+              findings={findings}
+              recs={recs}
+              criticalOpen={criticalOpen}
+              live={live}
+              onDismiss={dismissQuestion}
+              onAsked={(id, label) => void relaySuggestion('acted', id, 'ASK_NEXT', label)}
+              onEvidence={highlightEvidence}
+              onAddToAssessment={addToAssessment}
+              addedToAssessment={assessmentAdds}
+              onAct={markActed}
+              actedItems={actedItems}
+              handledSuggestions={handledSuggestions}
+              onAdoptOrder={adoptOrder}
+              onDismissOrder={dismissOrder}
+              onExam={resolveExam}
+            />
+          }
+        />
       )}
 
       {gateOpen && (
@@ -1426,7 +1864,13 @@ export function DoctorLiveEncounter({
 /* Panels                                                              */
 /* ------------------------------------------------------------------ */
 
-function StartPanel({ connecting }: { connecting: boolean }) {
+function StartPanel({
+  connecting,
+  teleconsult = false,
+}: {
+  connecting: boolean;
+  teleconsult?: boolean;
+}) {
   return (
     <Card className="flex flex-col items-center gap-4 px-6 py-16 text-center">
       <span
@@ -1438,9 +1882,12 @@ function StartPanel({ connecting }: { connecting: boolean }) {
       <div>
         <h2 className="font-serif text-2xl">The note writes itself while you consult.</h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-ink-2)]">
-          Press start and allow the mic. The transcript and structured note build in real time, and
-          the Live Copilot surfaces red flags, drug-interaction checks and coding nudges as you
-          talk. Audio is streamed for transcription, not stored.
+          {teleconsult
+            ? 'Start AI documentation to capture both voices from this call. Pausing documentation does not mute the call.'
+            : 'Press start and allow the mic.'}{' '}
+          The transcript and structured note build in real time, and the Live Copilot surfaces red
+          flags, drug-interaction checks and coding nudges as you talk. Audio is streamed for
+          transcription, not stored.
         </p>
       </div>
       {connecting && (
@@ -1450,7 +1897,7 @@ function StartPanel({ connecting }: { connecting: boolean }) {
   );
 }
 
-function TranscriptPanel({
+export function TranscriptPanel({
   utterances,
   partialText,
   highlightIds,
@@ -1483,7 +1930,7 @@ function TranscriptPanel({
                 }`}
               >
                 <p
-                  className={`mb-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                  className={`mb-1 text-xs font-semibold ${
                     u.speaker === 'patient' ? 'text-[#2f5aa8]' : 'text-[var(--color-accent)]'
                   }`}
                 >
@@ -1493,7 +1940,7 @@ function TranscriptPanel({
                       ? 'Doctor'
                       : 'Speaker'}
                 </p>
-                <p className="text-[13.5px] leading-relaxed text-[var(--color-ink-2)]">{u.text}</p>
+                <p className="text-[15px] leading-relaxed text-[var(--color-ink-2)]">{u.text}</p>
               </div>
             );
           })}
@@ -1511,9 +1958,8 @@ function TranscriptPanel({
         </p>
       )}
       {listening && (
-        <div className="mt-4 flex items-center gap-2 text-[11.5px] text-[var(--color-ink-3)]">
-          <Waveform small />
-          listening · transcribing in real time
+        <div className="mt-4 text-sm text-[var(--color-ink-3)]">
+          Capturing conversation. New words appear after transcription.
         </div>
       )}
     </PanelShell>
@@ -1523,11 +1969,6 @@ function TranscriptPanel({
 // Sprint DS4 — the live copilot rail: a persistent clinical picture in three
 // stacked zones. ASK NEXT (pinned) → DIFFERENTIAL (evidence-cited, tap a chip
 // to highlight its source in the transcript) → SAFETY & MORE (the card feed).
-const LIKELIHOOD_PCT: Record<LiveReasoning['differential'][number]['likelihood'], number> = {
-  high: 90,
-  moderate: 55,
-  low: 25,
-};
 const TREND_GLYPH: Record<LiveReasoning['differential'][number]['trend'], string> = {
   new: '•',
   up: '↑',
@@ -1773,22 +2214,22 @@ function AskNextZone({
                     </button>
                   </span>
                 ) : (
-                  <span className="flex shrink-0 gap-1 pt-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  <span className="flex shrink-0 flex-wrap gap-1">
                     <button
                       type="button"
                       onClick={() => onAsked(q.id, q.question)}
-                      className="rounded px-1 text-[11px] font-semibold text-[var(--color-accent)] hover:underline"
+                      className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
                       title="Mark as asked"
                     >
-                      asked
+                      Asked
                     </button>
                     <button
                       type="button"
                       onClick={() => setReasonFor(q.id)}
-                      className="rounded px-1 text-[11px] text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
+                      className="min-h-11 rounded-lg px-3 text-sm text-[var(--color-ink-3)] hover:text-[var(--color-warn)]"
                       title="Dismiss"
                     >
-                      ✕
+                      Dismiss
                     </button>
                   </span>
                 ))}
@@ -1805,7 +2246,7 @@ function AskNextZone({
   );
 }
 
-function DifferentialZone({
+export function DifferentialZone({
   reasoning,
   findings,
   live,
@@ -1827,13 +2268,17 @@ function DifferentialZone({
       <div className="flex items-center gap-2 border-b border-[var(--color-line-soft)] px-5 py-3.5">
         <span className="h-2 w-2 rounded-full bg-[#2f5aa8] ring-4 ring-[#dbe6f7]" />
         <h2 className="text-xs font-bold uppercase tracking-wider text-[#2f5aa8]">Differential</h2>
-        <span className="ml-auto text-[11px] text-[var(--color-ink-3)]">evidence-cited · live</span>
+        <span className="ml-auto text-xs text-[var(--color-ink-3)]">Clinician review required</span>
       </div>
+      <p className="px-5 pt-3 text-sm text-[var(--color-ink-3)]">
+        AI suggestions for your review. Labels are qualitative, not measured probabilities or
+        confirmed diagnoses.
+      </p>
 
       {differential.length === 0 ? (
         <div className="px-5 py-6 text-center text-[13px] text-[var(--color-ink-3)]">
           {live
-            ? 'Building the differential as the history unfolds — deterministic checks (right) are running now.'
+            ? 'Suggestions will appear when there is enough history. Urgent items remain visible above the workspace.'
             : 'The ranked differential appears here as the consult begins.'}
         </div>
       ) : (
@@ -1858,15 +2303,9 @@ function DifferentialZone({
                     {TREND_GLYPH[d.trend]}
                   </span>
                 </div>
-                <div className="mt-1.5 flex items-center gap-2">
-                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-line-soft)]">
-                    <span
-                      className="block h-full rounded-full bg-[#2f5aa8] transition-[width] duration-500"
-                      style={{ width: `${LIKELIHOOD_PCT[d.likelihood]}%` }}
-                    />
-                  </span>
-                  <span className="text-[10.5px] uppercase tracking-wide text-[var(--color-ink-3)]">
-                    {d.likelihood}
+                <div className="mt-1.5 text-sm text-[var(--color-ink-3)]">
+                  <span>
+                    AI suggestion: {d.likelihood} likelihood
                     {d.icd10 ? ` · ${d.icd10}` : ''}
                   </span>
                 </div>
@@ -1877,7 +2316,7 @@ function DifferentialZone({
                         key={id}
                         type="button"
                         onClick={() => onEvidence([id])}
-                        className="rounded-full border border-[var(--color-line-soft)] bg-white px-2 py-0.5 text-[10.5px] text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                        className="min-h-11 rounded-lg border border-[var(--color-line-soft)] bg-white px-3 py-2 text-sm text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                         title="Show the source in the transcript"
                       >
                         {clean(labelOf(id)) ?? id}
@@ -1894,7 +2333,7 @@ function DifferentialZone({
                   type="button"
                   disabled={added}
                   onClick={() => onAddToAssessment(d.id, d.label)}
-                  className={`mt-2 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+                  className={`mt-2 min-h-11 rounded-lg px-3 py-2 text-sm font-semibold ${
                     added
                       ? 'text-[var(--color-ink-3)]'
                       : 'text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]'
@@ -1913,7 +2352,7 @@ function DifferentialZone({
 
 // Sprint DS5 — the Rx-first artifact assembling live. Continued meds carry
 // forward; AI/voice-drafted rows land pending until the doctor confirms.
-function RxPadPanel({
+export function RxPadPanel({
   rxPad,
   confirmedDrugs,
   onConfirm,
@@ -2109,7 +2548,7 @@ function RxPadPanel({
   );
 }
 
-function NotePanel({
+export function NotePanel({
   note,
   specialty,
   live,
@@ -2636,9 +3075,7 @@ function PanelShell({
   return (
     <Card className="flex flex-col overflow-hidden p-0">
       <div className="flex items-center gap-2 border-b border-[var(--color-line-soft)] px-5 py-3.5">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-3)]">
-          {title}
-        </h2>
+        <h2 className="text-base font-semibold text-[var(--color-ink)]">{title}</h2>
         {right && <div className="ml-auto">{right}</div>}
       </div>
       <div className="p-5">{children}</div>
@@ -2654,8 +3091,8 @@ function Section({ label, value, live }: { label: string; value?: string; live: 
       <p className="mt-1 text-[14px] leading-relaxed text-[var(--color-ink)]">
         {value}
         {live && (
-          <span className="ml-2 inline-block animate-pulse rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 align-[2px] text-[9px] font-bold uppercase tracking-wide text-[var(--color-accent)]">
-            live
+          <span className="ml-2 inline-block rounded-full bg-[var(--color-accent-soft)] px-2 py-0.5 text-xs text-[var(--color-accent)]">
+            Draft
           </span>
         )}
       </p>
@@ -2664,30 +3101,11 @@ function Section({ label, value, live }: { label: string; value?: string; live: 
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
-  return (
-    <span className="text-[10.5px] font-bold uppercase tracking-wide text-[var(--color-ink-3)]">
-      {children}
-    </span>
-  );
+  return <span className="text-sm font-semibold text-[var(--color-ink-2)]">{children}</span>;
 }
 
 function Empty({ children }: { children: ReactNode }) {
   return <p className="text-sm text-[var(--color-ink-3)]">{children}</p>;
-}
-
-function Waveform({ small }: { small?: boolean }) {
-  const bars = small ? [6, 12, 9, 14] : [7, 15, 20, 11, 17, 6, 13, 19, 9];
-  return (
-    <span className="flex items-end gap-[3px]" style={{ height: small ? 14 : 20 }}>
-      {bars.map((h, i) => (
-        <span
-          key={i}
-          className="w-[3px] rounded-full bg-current opacity-60 animate-pulse"
-          style={{ height: h, animationDelay: `${i * 90}ms` }}
-        />
-      ))}
-    </span>
-  );
 }
 
 /* Icons (stroke, inherit currentColor unless white on a chip) */

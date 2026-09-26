@@ -57,6 +57,7 @@ enum PractitionerVertical {
 }
 
 model Psychologist {
+  scribeWorkspaceRecords  ScribeWorkspaceRecord[]
   sessionUsageConnections SessionUsageConnection[]
   mindSessionPreparations MindSessionPreparation[]
   mindCareRecords         ClientMindCareRecord[]
@@ -532,6 +533,7 @@ enum ClientStatus {
 }
 
 model Client {
+  scribeWorkspaceRecords  ScribeWorkspaceRecord[]
   sessionUsageConnections SessionUsageConnection[]
   id                      String                   @id @default(cuid())
   psychologistId          String
@@ -951,9 +953,10 @@ enum SessionKind {
 }
 
 model Session {
-  id             String @id @default(cuid())
-  clientId       String
-  psychologistId String
+  scribeWorkspaceRecords ScribeWorkspaceRecord[]
+  id                     String                  @id @default(cuid())
+  clientId               String
+  psychologistId         String
 
   /// Sprint 19 made this nullable. The session-defaults cascade
   /// computes a default (TreatmentPlan.body.modality →
@@ -1546,6 +1549,10 @@ enum NoteEditField {
   // Sprint DV3 — medical encounter note signable string fields.
   chiefComplaint
   hpi
+  // Structured values are stored as canonical JSON in NoteEdit text columns.
+  reviewOfSystems
+  physicalExam
+  vitals
 }
 
 model NoteEdit {
@@ -1984,6 +1991,26 @@ enum AgreementFollowUp {
 // ============================================================================
 
 /// Immutable clinician-authored counselling context. Every version is erased with the client.
+model ScribeWorkspaceRecord {
+  id             String       @id @default(cuid())
+  psychologistId String
+  clientId       String?
+  sessionId      String?
+  kind           String
+  revision       Int          @default(1)
+  bodyEncrypted  String       @db.Text
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  psychologist   Psychologist @relation(fields: [psychologistId], references: [id])
+  client         Client?      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  session        Session?     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId, kind, updatedAt])
+  @@index([clientId])
+  @@index([sessionId])
+  @@map("scribe_workspace_records")
+}
+
 model ClientMindCareRecord {
   id             String       @id @default(cuid())
   clientId       String
@@ -3085,6 +3112,7 @@ model LiveConsultMetric {
 // ============================================================================
 
 enum AuditAction {
+  SCRIBE_WORKSPACE_UPDATED
   // Psychologist
   PSYCHOLOGIST_REGISTERED
   PSYCHOLOGIST_UPDATED

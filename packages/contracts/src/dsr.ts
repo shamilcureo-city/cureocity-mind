@@ -49,6 +49,20 @@ export const DsrDataExportSchema = z.object({
   sessionCount: z.number().int().nonnegative(),
   /** Latest reported per-connection usage, including registered-but-unreported connections. */
   sessionUsageConnections: z.array(SessionUsageConnectionExportSchema).optional(),
+  scribeWorkspaceRecords: z
+    .array(
+      z.object({
+        id: z.string(),
+        kind: z.string(),
+        sessionId: z.string().nullable(),
+        revision: z.number().int().positive(),
+        createdAt: IsoDateTimeSchema,
+        updatedAt: IsoDateTimeSchema,
+        body: z.unknown(),
+      }),
+    )
+    .optional(),
+  omittedScribeWorkspace: z.boolean().optional(),
   /** Current care decisions with their preserved correction/amendment history. */
   sessionAgreements: z.array(SessionAgreementDtoSchema).optional(),
   /** Unfinished records are included too; cryptographic retry receipts are not disclosures. */

@@ -9,18 +9,14 @@ import {
 } from '@cureocity/contracts';
 import { Card } from '../ui/Card';
 import { Button } from '../ui/Button';
+import { ScribeBriefingCard } from './ScribeBriefingCard';
 
 /**
- * Sprint DS7 — the 3-second context flash before a consult starts.
+ * Doctor-controlled preparation before a consult starts.
  *
- * Surfaces what the doctor should hold in mind for THIS patient — chronic
- * trends (real, from /chronic), and what the copilot will be watching —
- * then auto-advances into listening. Skippable, and a big "Start now"
- * gives the mic gesture on the first patient (browsers require one until
- * permission sticks; patients 2..N auto-advance zero-click). See
- * docs/DOCTOR_SCRIBE_V2_SPRINTS.md DS7.
+ * Dated signed history and chronic trends stay visible until the doctor
+ * chooses to continue. Continuing opens consent, never the microphone.
  */
-const COUNTDOWN_SECONDS = 3;
 
 export function ContextFlash({
   clientId,
@@ -40,10 +36,10 @@ export function ContextFlash({
 }) {
   const router = useRouter();
   const [measures, setMeasures] = useState<ChronicMeasureTrajectory[]>([]);
-  const [left, setLeft] = useState(COUNTDOWN_SECONDS);
   // DS11.3 — the countdown waits for the chronic chips (they are the point
   // of this screen); a 4s cap keeps a slow fetch from stalling the consult.
   const [chronicReady, setChronicReady] = useState(false);
+  const [chronicError, setChronicError] = useState(false);
   const [modesOpen, setModesOpen] = useState(false);
   // DS11.4 — gateway preflight: null = checking, true = healthy.
   const [gatewayOk, setGatewayOk] = useState<boolean | null>(null);
@@ -67,17 +63,26 @@ export function ContextFlash({
   // Pull the chronic trajectory so the doctor sees control/trend at a glance.
   useEffect(() => {
     let cancelled = false;
-    const cap = setTimeout(() => setChronicReady(true), 4000);
+    setMeasures([]);
+    setChronicReady(false);
+    setChronicError(false);
+    const cap = setTimeout(() => {
+      setChronicReady(true);
+      setChronicError(true);
+    }, 4000);
     void (async () => {
       try {
         const res = await fetch(`/api/v1/clients/${clientId}/chronic`);
-        if (!res.ok) return;
+        if (!res.ok) throw new Error('Chronic trends unavailable');
         const parsed = ChronicTrajectorySchema.safeParse(await res.json());
-        if (!cancelled && parsed.success) {
+        if (!parsed.success) throw new Error('Chronic trends unavailable');
+        if (!cancelled) {
+          clearTimeout(cap);
+          setChronicError(false);
           setMeasures(parsed.data.measures.filter((m) => m.latest));
         }
       } catch {
-        /* best-effort — the flash still shows identity + what's watched */
+        if (!cancelled) setChronicError(true);
       } finally {
         if (!cancelled) setChronicReady(true);
       }
@@ -88,26 +93,14 @@ export function ContextFlash({
     };
   }, [clientId]);
 
-  // Auto-advance countdown — armed once the chronic chips render (or the
-  // 4s cap fires) and paused while the doctor is choosing a capture mode.
-  useEffect(() => {
-    if (!chronicReady || modesOpen || gatewayOk === false) return;
-    if (left <= 0) {
-      onDone();
-      return;
-    }
-    const t = setTimeout(() => setLeft((s) => s - 1), 1000);
-    return () => clearTimeout(t);
-  }, [left, onDone, chronicReady, modesOpen, gatewayOk]);
-
   return (
     <Card className="mx-auto max-w-2xl overflow-hidden p-0">
       <div className="flex items-center justify-between gap-3 bg-[var(--color-accent-soft)] px-6 py-3">
         <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--color-accent)]">
           {specialty ? `${specialty} · ` : ''}Getting ready
         </p>
-        <span className="grid h-7 w-7 place-items-center rounded-full bg-white text-sm font-bold tabular-nums text-[var(--color-accent)]">
-          {left}
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-[var(--color-accent)]">
+          Review
         </span>
       </div>
 
@@ -119,9 +112,19 @@ export function ContextFlash({
           </h2>
         </div>
 
+        <ScribeBriefingCard clientId={clientId} />
+
         <div>
           <SectionLabel>Chronic trends</SectionLabel>
-          {measures.length === 0 ? (
+          {chronicError ? (
+            <p role="alert" className="text-sm">
+              Chronic trends unavailable — verify the patient record.
+            </p>
+          ) : !chronicReady ? (
+            <p role="status" className="text-sm">
+              Loading chronic trends…
+            </p>
+          ) : measures.length === 0 ? (
             <p className="mt-1.5 text-sm text-[var(--color-ink-3)]">
               No chronic readings on file yet.
             </p>
@@ -169,7 +172,9 @@ export function ContextFlash({
 
         <div className="flex items-center gap-3 pt-1">
           <Button onClick={onDone}>
-            {gatewayOk === false ? '● Try live anyway' : '● Start recording now'}
+            {gatewayOk === false
+              ? 'Continue to live consent anyway'
+              : 'Continue to capture consent'}
           </Button>
           <button
             type="button"
@@ -241,6 +246,11 @@ function TrendChip({ m }: { m: ChronicMeasureTrajectory }) {
         {m.unit ? ` ${m.unit}` : ''}
       </span>
       <span className="font-bold">{glyph}</span>
+      {m.latest?.takenAt && (
+        <span className="text-xs opacity-80">
+          {new Date(m.latest.takenAt).toLocaleDateString('en-IN')}
+        </span>
+      )}
     </span>
   );
 }

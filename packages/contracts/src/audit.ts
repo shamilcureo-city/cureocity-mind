@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { CuidSchema, IsoDateTimeSchema, PaginationCursorSchema } from './common';
 
 export const AuditActionSchema = z.enum([
+  'SCRIBE_WORKSPACE_UPDATED',
   'CAPABILITY_ACCESS_DENIED',
   'PSYCHOLOGIST_REGISTERED',
   'PSYCHOLOGIST_UPDATED',

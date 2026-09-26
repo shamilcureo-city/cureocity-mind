@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   persistDraftedOrders: vi.fn(),
   persistVitalReadings: vi.fn(),
+  teleconsultPersistence: vi.fn(),
 }));
 
 vi.mock('next/server', async (importOriginal) => ({
@@ -34,6 +35,9 @@ vi.mock('@/lib/audit', () => ({
 }));
 vi.mock('@/lib/tenant-crypto', () => ({ encryptForTenant: mocks.encrypt }));
 vi.mock('@/lib/ensure-english-note', () => ({ ensureEnglishNote: mocks.translate }));
+vi.mock('@/lib/scribe-teleconsult', () => ({
+  assertScribeTeleconsultDraftPersistence: mocks.teleconsultPersistence,
+}));
 vi.mock('@/lib/note-orchestrator', () => ({
   persistDraftedOrders: mocks.persistDraftedOrders,
   persistVitalReadings: mocks.persistVitalReadings,
@@ -46,6 +50,7 @@ vi.mock('@cureocity/observability/metrics', () => ({ recordCrisisFlag: mocks.met
 import { POST } from '../app/api/v1/sessions/[id]/live-note/route';
 import { ClientPhiWriteForbiddenError } from './phi-write-lock';
 import { decodeSavedTranscript, TRANSCRIPTION_REVIEW_WARNING } from './saved-transcript';
+import { scribeCaptureIntegrity } from './scribe-capture-integrity';
 
 const auth = {
   ok: true,
@@ -96,7 +101,7 @@ let failCommit: boolean;
 let tx: {
   $queryRaw: ReturnType<typeof vi.fn>;
   session: { updateMany: ReturnType<typeof vi.fn>; findUniqueOrThrow: ReturnType<typeof vi.fn> };
-  noteDraft: { upsert: typeof mocks.upsert };
+  noteDraft: { upsert: typeof mocks.upsert; findUnique: ReturnType<typeof vi.fn> };
 };
 
 beforeEach(() => {
@@ -121,6 +126,7 @@ beforeEach(() => {
   failAudit = false;
   failCommit = false;
   mocks.requirePsychologistId.mockResolvedValue(auth);
+  mocks.teleconsultPersistence.mockResolvedValue(false);
   mocks.requireCapability.mockResolvedValue(auth);
   mocks.sessionFindUnique.mockImplementation(async () => ({ ...session }));
   mocks.encrypt.mockResolvedValue('encrypted-transcript');
@@ -147,7 +153,7 @@ beforeEach(() => {
       }),
       findUniqueOrThrow: vi.fn(async () => ({ ...session })),
     },
-    noteDraft: { upsert: mocks.upsert },
+    noteDraft: { upsert: mocks.upsert, findUnique: vi.fn(async () => storedDraft) },
   };
   mocks.transaction.mockImplementation(async (callback) => {
     const before = { session: { ...session }, draft: storedDraft, audits: [...storedAudits] };
@@ -461,6 +467,31 @@ describe('Mind live risk persistence boundaries', () => {
       auth,
     );
   });
+  it('retains an interrupted teleconsult draft for review without further orders or vitals automation', async () => {
+    session.psychologist = { vertical: 'DOCTOR', specialty: null };
+    mocks.teleconsultPersistence.mockResolvedValue(true);
+    mocks.requireCapability.mockResolvedValue({
+      ...auth,
+      value: {
+        ...auth.value,
+        user: { capabilities: ['PRESCRIPTION_DRAFTING', 'CLINICAL_ORDERS', 'CHRONIC_CARE'] },
+      },
+    });
+    const response = await post({
+      note: { version: 'V1', chiefComplaint: 'Previously captured synthetic concern' },
+      transcript: 'Previously captured synthetic speech',
+      captureIncomplete: true,
+    });
+    expect(response.status).toBe(201);
+    expect(storedDraft).toMatchObject({ transcriptEncrypted: 'encrypted-transcript' });
+    expect(scribeCaptureIntegrity(storedDraft?.errorMessage as string)).toEqual({
+      incomplete: true,
+      reason: 'capture_interrupted',
+    });
+    expect(mocks.persistDraftedOrders).not.toHaveBeenCalled();
+    expect(mocks.persistVitalReadings).not.toHaveBeenCalled();
+    expect(mocks.translate).not.toHaveBeenCalled();
+  });
 
   it('saves a doctor note without inventing speech when its live transcript is empty', async () => {
     session.psychologist = { vertical: 'DOCTOR', specialty: null };
@@ -473,5 +504,24 @@ describe('Mind live risk persistence boundaries', () => {
     expect(storedDraft).not.toHaveProperty('transcriptEncrypted');
     expect(mocks.encrypt).not.toHaveBeenCalled();
     expect(JSON.stringify(mocks.upsert.mock.calls)).not.toContain('captured via live');
+  });
+
+  it('preserves Scribe capture loss in durable draft state and never clears it on a normal ingestion', async () => {
+    session.psychologist = { vertical: 'DOCTOR', specialty: null };
+    const note = { version: 'V1', chiefComplaint: 'Synthetic concern' };
+    expect(
+      (await post({ note, captureIncomplete: true, captureIncompleteReason: 'connection_lost' }))
+        .status,
+    ).toBe(201);
+    expect(scribeCaptureIntegrity(storedDraft?.errorMessage as string | undefined)).toEqual({
+      incomplete: true,
+      reason: 'connection_lost',
+    });
+    // Model a pre-existing draft when another capture attempt reaches ingestion.
+    session.status = 'IN_PROGRESS';
+    expect((await post({ note, captureIncomplete: false })).status).toBe(201);
+    expect(scribeCaptureIntegrity(storedDraft?.errorMessage as string | undefined).incomplete).toBe(
+      true,
+    );
   });
 });

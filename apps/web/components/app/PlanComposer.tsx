@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import {
   DifferentialResponseSchema,
   RxPadResponseSchema,
+  type RxMedRow,
   type RxPadDraft,
   type RxPadPatchOp,
   type SuggestedPlan,
@@ -14,6 +15,9 @@ import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
 import { Input, Label } from '../ui/Field';
 import { VoicePlanEditor, type PatchOpsResult } from './VoicePlanEditor';
+import { ScribeFavorites } from './ScribeFavorites';
+import type { ScribeShortcut } from '@/lib/scribe-personalization-contracts';
+import { useScribeFetch } from './ScribeTransport';
 
 /**
  * Sprint DS10-B — the plan composer: two plans, one sign-off.
@@ -35,14 +39,29 @@ type DiffState =
   | { kind: 'ready'; plan: SuggestedPlan; workupFallback: string[] }
   | { kind: 'none' }; // failed or nothing to suggest — the pad still works
 
+function medicineFavorite(med: RxMedRow): ScribeShortcut {
+  const { drug, strength, dose, frequency, timing, durationDays, route } = med;
+  return {
+    type: 'medication',
+    title: drug.slice(0, 80),
+    med: { drug, strength, dose, frequency, timing, durationDays, route },
+  };
+}
+
 export function PlanComposer({
   sessionId,
-  signed,
+  signed: signedProp,
+  copilotActive,
+  voiceEditingEnabled = true,
   onPadChange,
   onSignBlockers,
 }: {
   sessionId: string;
   signed: boolean;
+  /** Differential suggestions stay dormant until the doctor asks the copilot. */
+  copilotActive: boolean;
+  /** Off in the fictional preview: never mount microphone/model controls. */
+  voiceEditingEnabled?: boolean;
   /** Fires with whether the pad has any prescribable content — meds,
    *  investigations, advice or a follow-up. In Indian OPD practice the
    *  prescription sheet is also where investigations + advice go, so a
@@ -56,18 +75,26 @@ export function PlanComposer({
    */
   onSignBlockers?: (blockers: { hard: string[]; soft: string[] }) => void;
 }) {
+  const request = useScribeFetch();
   const [pad, setPad] = useState<RxPadDraft | null>(null);
+  const padSnapshotRef = useRef<RxPadDraft | null>(null);
   const [padLoaded, setPadLoaded] = useState(false);
-  const [diff, setDiff] = useState<DiffState>({ kind: 'loading' });
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [serverSigned, setServerSigned] = useState(false);
+  const signed = signedProp || serverSigned;
+  const [diff, setDiff] = useState<DiffState>({ kind: 'none' });
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editingMed, setEditingMed] = useState<RxMedRow | null>(null);
+  const [favoriteSeed, setFavoriteSeed] = useState<ScribeShortcut | null>(null);
   const onPadChangeRef = useRef(onPadChange);
   onPadChangeRef.current = onPadChange;
   const onSignBlockersRef = useRef(onSignBlockers);
   onSignBlockersRef.current = onSignBlockers;
 
   const setPadAndNotify = useCallback((next: RxPadDraft | null) => {
+    padSnapshotRef.current = next;
     setPad(next);
     const hasContent =
       (next?.meds ?? []).length > 0 ||
@@ -82,31 +109,48 @@ export function PlanComposer({
   // Load the draft pad once.
   useEffect(() => {
     let cancelled = false;
+    setPadLoaded(false);
+    setError(null);
     void (async () => {
       try {
-        const res = await fetch(`/api/v1/sessions/${sessionId}/rx-pad`);
-        if (!res.ok) return;
+        const res = await request(`/api/v1/sessions/${sessionId}/rx-pad`);
+        if (!res.ok)
+          throw new Error('Could not load the current prescription. Refresh before editing.');
         const parsed = RxPadResponseSchema.safeParse(await res.json());
-        if (!cancelled && parsed.success) setPadAndNotify(parsed.data.rxPad);
-      } finally {
-        if (!cancelled) setPadLoaded(true);
+        if (!parsed.success)
+          throw new Error('Could not read the current prescription. Refresh before editing.');
+        if (!cancelled) {
+          setPadAndNotify(parsed.data.rxPad);
+          setServerSigned(parsed.data.signed);
+          setPadLoaded(true);
+        }
+      } catch (reason) {
+        if (!cancelled)
+          setError(
+            reason instanceof Error ? reason.message : 'Could not load the current prescription.',
+          );
+        // A failed read must not masquerade as an empty editable prescription.
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [sessionId, setPadAndNotify]);
+  }, [sessionId, setPadAndNotify, request, loadAttempt]);
 
   // Poll the differential until it completes (the differential panel below
   // triggers generation; we only read). Give up quietly after ~2 minutes —
   // the pad remains fully usable without suggestions.
   useEffect(() => {
+    if (!copilotActive) {
+      setDiff({ kind: 'none' });
+      return;
+    }
     let cancelled = false;
     let tries = 0;
     const tick = async (): Promise<void> => {
       tries += 1;
       try {
-        const res = await fetch(`/api/v1/sessions/${sessionId}/differential`);
+        const res = await request(`/api/v1/sessions/${sessionId}/differential`);
         if (res.ok) {
           const parsed = DifferentialResponseSchema.safeParse(await res.json());
           if (parsed.success && parsed.data.status === 'COMPLETED' && parsed.data.differential) {
@@ -133,7 +177,7 @@ export function PlanComposer({
     return () => {
       cancelled = true;
     };
-  }, [sessionId]);
+  }, [sessionId, copilotActive, request]);
 
   // Sprint DS12 — every pad mutation bumps this; the voice editor uses it to
   // retire a stale Undo once OTHER edits have landed on top of it.
@@ -148,6 +192,7 @@ export function PlanComposer({
   // unapplied — a "change" can't decay into a bare delete.
   const patchOps = useCallback(
     async (groups: RxPadPatchOp[][], key: string): Promise<PatchOpsResult> => {
+      if (!padLoaded || signed) return { ok: false, appliedGroups: 0 };
       const nonEmpty = groups.filter((g) => g.length > 0);
       if (nonEmpty.length === 0) return { ok: true, appliedGroups: 0 };
       setBusyKey(key);
@@ -166,18 +211,34 @@ export function PlanComposer({
       let appliedGroups = 0;
       try {
         for (const batch of batches) {
-          const res = await fetch(`/api/v1/sessions/${sessionId}/rx-pad`, {
+          const res = await request(`/api/v1/sessions/${sessionId}/rx-pad`, {
             method: 'PATCH',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ ops: batch.ops }),
+            body: JSON.stringify({ ops: batch.ops, expectedPad: padSnapshotRef.current }),
           });
           if (!res.ok) {
             const body = (await res.json().catch(() => ({}))) as { error?: string };
             setError(body.error ?? 'Could not update the plan.');
+            if (res.status === 409) {
+              const latest = await request(`/api/v1/sessions/${sessionId}/rx-pad`, {
+                cache: 'no-store',
+              });
+              if (latest.ok) {
+                const current = RxPadResponseSchema.safeParse(await latest.json());
+                if (current.success) {
+                  setPadAndNotify(current.data.rxPad);
+                  setServerSigned(current.data.signed);
+                  setEditSeq((value) => value + 1);
+                }
+              }
+            }
             return { ok: false, appliedGroups };
           }
           const parsed = RxPadResponseSchema.safeParse(await res.json());
-          if (parsed.success) setPadAndNotify(parsed.data.rxPad);
+          if (parsed.success) {
+            setPadAndNotify(parsed.data.rxPad);
+            setServerSigned(parsed.data.signed);
+          }
           appliedGroups += batch.groupCount;
         }
         return { ok: true, appliedGroups };
@@ -189,7 +250,7 @@ export function PlanComposer({
         setEditSeq((s) => s + 1);
       }
     },
-    [sessionId, setPadAndNotify],
+    [sessionId, setPadAndNotify, request, padLoaded, signed],
   );
 
   const patch = useCallback(
@@ -203,13 +264,13 @@ export function PlanComposer({
   // Best-effort suggestion-lifecycle audit (feeds the DS9 insights funnel).
   const relay = useCallback(
     (event: 'acted' | 'dismissed', suggestionId: string, label: string) => {
-      void fetch(`/api/v1/sessions/${sessionId}/live-suggestion`, {
+      void request(`/api/v1/sessions/${sessionId}/live-suggestion`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ event, suggestionId, kind: 'PLAN', label }),
       }).catch(() => {});
     },
-    [sessionId],
+    [sessionId, request],
   );
 
   function dismiss(id: string, label: string): void {
@@ -217,7 +278,31 @@ export function PlanComposer({
     relay('dismissed', id, label);
   }
 
-  if (!padLoaded) return null;
+  if (!padLoaded)
+    return (
+      <Card className="p-6">
+        <h2 className="font-serif text-xl">Plan &amp; prescription</h2>
+        {error ? (
+          <>
+            <p role="alert" className="mt-3 text-sm text-[var(--color-warn)]">
+              {error}
+            </p>
+            <Button
+              type="button"
+              variant="secondary"
+              className="mt-3 min-h-11"
+              onClick={() => setLoadAttempt((attempt) => attempt + 1)}
+            >
+              Retry loading prescription
+            </Button>
+          </>
+        ) : (
+          <p role="status" className="mt-3 text-sm">
+            Loading the current prescription…
+          </p>
+        )}
+      </Card>
+    );
 
   const meds = pad?.meds ?? [];
   const investigations = pad?.investigations ?? [];
@@ -281,10 +366,18 @@ export function PlanComposer({
 
       {/* Sprint DS12 — speak the change; approve it as a diff. */}
       {!signed && (
+        <ScribeFavorites
+          pad={pad}
+          seed={favoriteSeed}
+          disabled={busyKey != null || !padLoaded}
+          onApply={async (ops) => (await patchOps([ops], 'favorite')).ok}
+        />
+      )}
+      {!signed && voiceEditingEnabled && (
         <VoicePlanEditor
           sessionId={sessionId}
           pad={pad}
-          disabled={busyKey != null}
+          disabled={busyKey != null || !padLoaded}
           editSeq={editSeq}
           onApply={patchOps}
         />
@@ -352,12 +445,31 @@ export function PlanComposer({
                         )
                       )}
                       {!signed && (
-                        <RemoveButton
-                          busy={busyKey === `rmmed:${m.drug}`}
-                          onClick={() =>
-                            void patch({ op: 'removeMed', drug: m.drug }, `rmmed:${m.drug}`)
-                          }
-                        />
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="min-h-11"
+                            disabled={busyKey != null}
+                            onClick={() => setFavoriteSeed(medicineFavorite(m))}
+                          >
+                            Save favorite
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={busyKey != null}
+                            onClick={() => setEditingMed(m)}
+                          >
+                            Edit
+                          </Button>
+                          <RemoveButton
+                            busy={busyKey === `rmmed:${m.drug}`}
+                            onClick={() =>
+                              void patch({ op: 'removeMed', drug: m.drug }, `rmmed:${m.drug}`)
+                            }
+                          />
+                        </>
                       )}
                     </span>
                   </div>
@@ -368,6 +480,21 @@ export function PlanComposer({
                   )}
                 </div>
               ))}
+              {editingMed && (
+                <MedicationEditor
+                  key={editingMed.drug}
+                  med={editingMed}
+                  busy={busyKey != null}
+                  onCancel={() => setEditingMed(null)}
+                  onSave={async (med) => {
+                    const ok = await patch(
+                      { op: 'updateMed', drug: editingMed.drug, med },
+                      `editmed:${editingMed.drug}`,
+                    );
+                    if (ok) setEditingMed(null);
+                  }}
+                />
+              )}
             </div>
           )}
 
@@ -388,6 +515,22 @@ export function PlanComposer({
                   {inv.source === 'ai' && <Badge tone="accent">AI</Badge>}
                   {!signed && (
                     <span className="ml-auto">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="min-h-11"
+                        disabled={busyKey != null}
+                        onClick={() =>
+                          setFavoriteSeed({
+                            type: 'investigation',
+                            title: inv.name.slice(0, 80),
+                            name: inv.name,
+                            ...(inv.rationale ? { rationale: inv.rationale } : {}),
+                          })
+                        }
+                      >
+                        Save favorite
+                      </Button>
                       <RemoveButton
                         busy={busyKey === `rminv:${inv.name}`}
                         onClick={() =>
@@ -417,6 +560,17 @@ export function PlanComposer({
                   <span className="text-sm">{a}</span>
                   {!signed && (
                     <span className="ml-auto">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="min-h-11"
+                        disabled={busyKey != null}
+                        onClick={() =>
+                          setFavoriteSeed({ type: 'advice', title: a.slice(0, 80), text: a })
+                        }
+                      >
+                        Save favorite
+                      </Button>
                       <RemoveButton
                         busy={busyKey === `rmadv:${a}`}
                         onClick={() => void patch({ op: 'removeAdvice', text: a }, `rmadv:${a}`)}
@@ -463,7 +617,12 @@ export function PlanComposer({
               Reasoning over the consult…
             </p>
           )}
-          {diff.kind === 'none' && (
+          {!copilotActive && (
+            <p className="px-1 py-4 text-sm text-[var(--color-ink-3)]">
+              Ask the reasoning copilot below when you want clinical suggestions for this consult.
+            </p>
+          )}
+          {copilotActive && diff.kind === 'none' && (
             <p className="px-1 py-4 text-sm text-[var(--color-ink-3)]">
               No AI suggestions for this consult.
             </p>
@@ -679,6 +838,107 @@ function RemoveButton({ busy, onClick }: { busy: boolean; onClick: () => void })
     >
       {busy ? '…' : '✕'}
     </button>
+  );
+}
+
+function MedicationEditor({
+  med,
+  busy,
+  onCancel,
+  onSave,
+}: {
+  med: RxMedRow;
+  busy: boolean;
+  onCancel: () => void;
+  onSave: (med: {
+    drug: string;
+    strength?: string;
+    dose?: string;
+    frequency?: string;
+    timing?: string;
+    durationDays?: number;
+    route?: string;
+  }) => Promise<void>;
+}) {
+  const [values, setValues] = useState({
+    drug: med.drug,
+    strength: med.strength ?? '',
+    dose: med.dose ?? '',
+    frequency: med.frequency ?? '',
+    timing: med.timing ?? '',
+    durationDays: med.durationDays?.toString() ?? '',
+    route: med.route ?? '',
+  });
+
+  async function submit(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    const durationDays = Number.parseInt(values.durationDays, 10);
+    await onSave({
+      drug: values.drug.trim(),
+      ...(values.strength.trim() ? { strength: values.strength.trim() } : {}),
+      ...(values.dose.trim() ? { dose: values.dose.trim() } : {}),
+      ...(values.frequency.trim() ? { frequency: values.frequency.trim() } : {}),
+      ...(values.timing.trim() ? { timing: values.timing.trim() } : {}),
+      ...(Number.isFinite(durationDays) && durationDays > 0 ? { durationDays } : {}),
+      ...(values.route.trim() ? { route: values.route.trim() } : {}),
+    });
+  }
+
+  const fields: Array<{
+    key: keyof typeof values;
+    label: string;
+    placeholder: string;
+    required?: boolean;
+  }> = [
+    { key: 'drug', label: 'Medicine', placeholder: 'Metformin', required: true },
+    { key: 'strength', label: 'Strength', placeholder: '500 mg' },
+    { key: 'dose', label: 'Dose', placeholder: '1 tablet' },
+    { key: 'frequency', label: 'Frequency', placeholder: '1-0-1' },
+    { key: 'timing', label: 'Timing', placeholder: 'after food' },
+    { key: 'durationDays', label: 'Days', placeholder: '30' },
+    { key: 'route', label: 'Route', placeholder: 'oral' },
+  ];
+
+  return (
+    <form
+      onSubmit={submit}
+      className="space-y-3 rounded-xl border border-[var(--color-accent)] bg-[var(--color-surface-soft)] p-4"
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-3)]">
+        Correct prescription line
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {fields.map((field) => (
+          <div key={field.key}>
+            <Label htmlFor={`edit-med-${field.key}`}>{field.label}</Label>
+            <Input
+              id={`edit-med-${field.key}`}
+              value={values[field.key]}
+              inputMode={field.key === 'durationDays' ? 'numeric' : undefined}
+              onChange={(e) =>
+                setValues((current) => ({
+                  ...current,
+                  [field.key]:
+                    field.key === 'durationDays'
+                      ? e.target.value.replace(/\D/g, '')
+                      : e.target.value,
+                }))
+              }
+              placeholder={field.placeholder}
+              required={field.required}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="ghost" type="button" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+        <Button size="sm" type="submit" disabled={busy || !values.drug.trim()}>
+          {busy ? 'Saving…' : 'Save line'}
+        </Button>
+      </div>
+    </form>
   );
 }
 

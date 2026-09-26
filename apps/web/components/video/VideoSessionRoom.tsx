@@ -9,6 +9,7 @@ import {
   RoomEvent,
   Track,
   createLocalTracks,
+  type LocalTrack,
 } from 'livekit-client';
 
 /**
@@ -47,6 +48,11 @@ interface Props {
    * recorder alive and guides the therapist to End session instead).
    */
   onLeave?: () => void;
+  /** Optional secure token transport; legacy session endpoints remain unchanged. */
+  requestToken?: (signal: AbortSignal) => Promise<{ token: string; url: string }>;
+  title?: string;
+  joinLabel?: string;
+  leaveLabel?: string;
 }
 
 type Phase =
@@ -66,6 +72,10 @@ export function VideoSessionRoom({
   chrome = 'full',
   onRoom,
   onLeave,
+  requestToken,
+  title = 'Your video session',
+  joinLabel = 'Join session',
+  leaveLabel = 'Leave session',
 }: Props) {
   const heightCls =
     chrome === 'embedded' ? 'h-full min-h-[420px] overflow-hidden rounded-3xl' : 'min-h-screen';
@@ -78,6 +88,33 @@ export function VideoSessionRoom({
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
+  const tracksRef = useRef<LocalTrack[]>([]);
+  const joinRequestRef = useRef<AbortController | null>(null);
+  const joinGenerationRef = useRef(0);
+  const joiningRef = useRef(false);
+  const onRoomRef = useRef(onRoom);
+  useEffect(() => {
+    onRoomRef.current = onRoom;
+  }, [onRoom]);
+
+  const releaseRoom = useCallback(() => {
+    const room = roomRef.current;
+    roomRef.current = null;
+    if (room) {
+      room.removeAllListeners();
+      for (const participant of room.remoteParticipants.values()) {
+        for (const publication of participant.trackPublications.values())
+          publication.track?.detach();
+      }
+    }
+    for (const track of tracksRef.current) {
+      track.detach();
+      track.stop();
+    }
+    tracksRef.current = [];
+    void room?.disconnect();
+    onRoomRef.current?.(null);
+  }, []);
 
   const attachRemote = useCallback((track: RemoteTrack) => {
     if (track.kind === Track.Kind.Video && remoteVideoRef.current) {
@@ -88,29 +125,58 @@ export function VideoSessionRoom({
     }
   }, []);
 
+  // A fast connection can publish/subscribe before React mounts the media
+  // elements. Reattach existing tracks once the in-call frame has committed.
+  useEffect(() => {
+    const room = roomRef.current;
+    if (!room || (phase !== 'connecting' && phase !== 'live' && phase !== 'reconnecting')) return;
+    for (const publication of room.localParticipant.trackPublications.values()) {
+      if (publication.track?.kind === Track.Kind.Video && localVideoRef.current)
+        (publication.track as LocalVideoTrack).attach(localVideoRef.current);
+    }
+    for (const participant of room.remoteParticipants.values()) {
+      for (const publication of participant.trackPublications.values()) {
+        if (publication.track) attachRemote(publication.track);
+      }
+    }
+  }, [phase, remotePresent, attachRemote]);
+
   const join = useCallback(async () => {
+    if (joiningRef.current) return;
+    joiningRef.current = true;
+    const generation = ++joinGenerationRef.current;
+    const controller = new AbortController();
+    joinRequestRef.current?.abort();
+    joinRequestRef.current = controller;
+    releaseRoom();
+    const isCurrent = () => generation === joinGenerationRef.current && !controller.signal.aborted;
     setPhase('requesting-devices');
     setMessage(null);
     try {
-      const res = await fetch(tokenEndpoint, { method: 'POST' });
-      const body = (await res.json().catch(() => ({}))) as {
-        token?: string;
-        url?: string;
-        error?: string;
-        startAt?: string;
-      };
-      if (res.status === 409) {
-        // The session is over (or not open) — a Rejoin can only fail, so say
-        // so plainly instead of an error + retry loop.
-        setMessage(body.error ?? null);
-        setPhase('over');
-        return;
+      let credentials: { token: string; url: string };
+      if (requestToken) {
+        credentials = await requestToken(controller.signal);
+      } else {
+        const res = await fetch(tokenEndpoint, { method: 'POST', signal: controller.signal });
+        const body = (await res.json().catch(() => ({}))) as {
+          token?: string;
+          url?: string;
+          error?: string;
+        };
+        if (!isCurrent()) return;
+        if (res.status === 409) {
+          setMessage(body.error ?? null);
+          setPhase('over');
+          return;
+        }
+        if (!res.ok || !body.token || !body.url) {
+          throw new Error(body.error ?? 'Could not open the room — try again.');
+        }
+        credentials = { token: body.token, url: body.url };
       }
-      if (!res.ok || !body.token || !body.url) {
-        throw new Error(body.error ?? 'Could not open the room — try again.');
-      }
+      if (!isCurrent()) return;
 
-      let tracks;
+      let tracks: LocalTrack[];
       try {
         tracks = await createLocalTracks({ audio: true, video: true });
       } catch {
@@ -118,6 +184,12 @@ export function VideoSessionRoom({
           'Camera or microphone was blocked. Allow access in your browser (the icon near the address bar), then try again.',
         );
       }
+      // Device permission can resolve after navigation or a consent change.
+      if (!isCurrent()) {
+        tracks.forEach((track) => track.stop());
+        return;
+      }
+      tracksRef.current = tracks;
 
       setPhase('connecting');
       const room = new Room({ adaptiveStream: true, dynacast: true });
@@ -125,53 +197,70 @@ export function VideoSessionRoom({
 
       room
         .on(RoomEvent.TrackSubscribed, (track) => {
+          if (!isCurrent()) return;
           attachRemote(track);
           setRemotePresent(true);
         })
-        .on(RoomEvent.ParticipantConnected, () => setRemotePresent(true))
-        .on(RoomEvent.ParticipantDisconnected, () => setRemotePresent(false))
+        .on(RoomEvent.TrackUnsubscribed, (track) => track.detach())
+        .on(RoomEvent.ParticipantConnected, () => {
+          if (isCurrent()) setRemotePresent(true);
+        })
+        .on(RoomEvent.ParticipantDisconnected, () => {
+          if (isCurrent()) setRemotePresent(room.remoteParticipants.size > 0);
+        })
         .on(RoomEvent.ConnectionStateChanged, (s) => {
+          if (!isCurrent() || roomRef.current !== room) return;
           if (s === ConnectionState.Reconnecting) setPhase('reconnecting');
           if (s === ConnectionState.Connected) setPhase('live');
           if (s === ConnectionState.Disconnected) {
             setPhase('ended');
             // The parent's audio mix must not keep consuming a dead room —
             // on rejoin a fresh Room arrives via onRoom(room) below.
-            onRoom?.(null);
+            releaseRoom();
           }
         });
 
-      await room.connect(body.url, body.token);
+      await room.connect(credentials.url, credentials.token);
+      if (!isCurrent() || roomRef.current !== room) {
+        void room.disconnect();
+        return;
+      }
       for (const track of tracks) {
         await room.localParticipant.publishTrack(track);
+        if (!isCurrent() || roomRef.current !== room) {
+          track.stop();
+          void room.disconnect();
+          return;
+        }
         if (track.kind === Track.Kind.Video && localVideoRef.current) {
           (track as LocalVideoTrack).attach(localVideoRef.current);
         }
       }
       setRemotePresent(room.remoteParticipants.size > 0);
+      setMicOn(true);
+      setCamOn(true);
       setPhase('live');
-      onRoom?.(room);
+      onRoomRef.current?.(room);
     } catch (e) {
+      if (!isCurrent()) return;
       setMessage((e as Error).message);
       setPhase('error');
-      roomRef.current?.disconnect();
-      roomRef.current = null;
-      onRoom?.(null);
+      releaseRoom();
+    } finally {
+      if (generation === joinGenerationRef.current) joiningRef.current = false;
     }
-  }, [tokenEndpoint, attachRemote, onRoom]);
+  }, [tokenEndpoint, requestToken, attachRemote, releaseRoom]);
 
   // Unmount cleanup reads the latest onRoom through a ref, so the effect can
   // stay mount-only without a lint suppression.
-  const onRoomRef = useRef(onRoom);
-  useEffect(() => {
-    onRoomRef.current = onRoom;
-  }, [onRoom]);
   useEffect(() => {
     return () => {
-      roomRef.current?.disconnect();
-      onRoomRef.current?.(null);
+      joinGenerationRef.current += 1;
+      joinRequestRef.current?.abort();
+      joiningRef.current = false;
+      releaseRoom();
     };
-  }, []);
+  }, [releaseRoom]);
 
   const toggleMic = useCallback(async () => {
     const room = roomRef.current;
@@ -190,9 +279,10 @@ export function VideoSessionRoom({
   }, [camOn]);
 
   const leave = useCallback(() => {
-    roomRef.current?.disconnect();
-    roomRef.current = null;
-    onRoom?.(null);
+    joinGenerationRef.current += 1;
+    joinRequestRef.current?.abort();
+    joiningRef.current = false;
+    releaseRoom();
     if (onLeave) {
       // The parent owns what happens next (e.g. the therapist shell keeps
       // the recorder running and points at End session).
@@ -201,14 +291,14 @@ export function VideoSessionRoom({
       return;
     }
     window.location.href = leaveHref;
-  }, [leaveHref, onRoom, onLeave]);
+  }, [leaveHref, releaseRoom, onLeave]);
 
   // ---------------------------------------------------------- pre-join --
   if (phase === 'idle' || phase === 'error' || phase === 'requesting-devices') {
     return (
       <div className={`grid ${heightCls} place-items-center bg-[#0a101f] p-6`}>
         <div className="w-full max-w-md rounded-3xl bg-white p-8 text-center">
-          <h1 className="font-serif text-2xl">Your video session</h1>
+          <h1 className="font-serif text-2xl">{title}</h1>
           <p className="mt-2 text-sm leading-relaxed text-[var(--color-ink-2)]">
             You&rsquo;ll join {counterpartLabel} in a private room. Your browser will ask for camera
             and microphone access.
@@ -224,7 +314,7 @@ export function VideoSessionRoom({
             disabled={phase === 'requesting-devices'}
             className="mt-6 rounded-full bg-[var(--color-accent)] px-8 py-3 text-sm font-semibold text-white disabled:opacity-60"
           >
-            {phase === 'requesting-devices' ? 'Opening…' : message ? 'Try again' : 'Join session'}
+            {phase === 'requesting-devices' ? 'Opening…' : message ? 'Try again' : joinLabel}
           </button>
         </div>
       </div>
@@ -365,7 +455,7 @@ export function VideoSessionRoom({
         <button
           type="button"
           onClick={leave}
-          aria-label="Leave session"
+          aria-label={leaveLabel}
           className="grid h-14 w-14 place-items-center rounded-full bg-[#d0453b] text-white hover:bg-[#b73a31]"
         >
           <svg

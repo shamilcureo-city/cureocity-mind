@@ -373,12 +373,12 @@ frequency, durationDays, prn?, instructions, interactionWarnings[] }`.
 
 Follow `CLAUDE.md` §5. The doctor passes:
 
-| Pass           | Input → Output                                                                                          | Backend                          | Cadence               |
-| -------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------- | --------------------- |
-| `ASR-live`     | audio frames → `LiveTranscriptDelta`                                                                    | streaming engine (§4.3)          | continuous            |
-| `structure`    | rolling transcript → `PartialStructuredNote` + `EncounterGap[]`                                         | Gemini Flash                     | debounced 2–4s        |
-| `finalize`     | full transcript + last partial → `MedicalEncounterNoteV1` + `MedicationOrderV1[]` + `ClinicalOrderV1[]` | Gemini Pro                       | once, on end          |
-| `differential` | note + history → `DifferentialDiagnosisV1`                                                              | Gemini Pro (or clinical backend) | `after()` / on-demand |
+| Pass           | Input → Output                                                                                          | Backend                          | Cadence             |
+| -------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------- | ------------------- |
+| `ASR-live`     | audio frames → `LiveTranscriptDelta`                                                                    | streaming engine (§4.3)          | continuous          |
+| `structure`    | rolling transcript → `PartialStructuredNote` + `EncounterGap[]`                                         | Gemini Flash                     | debounced 2–4s      |
+| `finalize`     | full transcript + last partial → `MedicalEncounterNoteV1` + `MedicationOrderV1[]` + `ClinicalOrderV1[]` | Gemini Pro                       | once, on end        |
+| `differential` | note + history → `DifferentialDiagnosisV1`                                                              | Gemini Pro (or clinical backend) | clinician-triggered |
 
 - New prompts + version constants in `packages/llm/src/prompts/index.ts`
   (vertical-aware loader). The psychology prompts open with _"expert

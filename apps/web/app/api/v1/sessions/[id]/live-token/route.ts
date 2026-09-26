@@ -11,6 +11,7 @@ import {
   withClientConsentLock,
 } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
+import { assertScribeTeleconsultDocumentationConsent } from '@/lib/scribe-teleconsult';
 import {
   assertLiveTokenSessionStatus,
   captureActivationTransitionData,
@@ -99,6 +100,13 @@ export async function POST(
         assertLiveTokenSessionStatus(current.status);
 
         await assertValidScribeConsent(current.consentSnapshot, session.clientId, tx);
+        if (session.psychologist.vertical === 'DOCTOR') {
+          await assertScribeTeleconsultDocumentationConsent(
+            tx,
+            sessionId,
+            auth.value.psychologistId,
+          );
+        }
 
         if (current.status === 'SCHEDULED') {
           // Scribe keeps its established token-is-start contract. Mind mints a

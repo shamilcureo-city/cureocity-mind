@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   assertCapabilities: vi.fn(),
   writeAudit: vi.fn(),
   transaction: vi.fn(),
+  teleconsult: vi.fn(),
 }));
 
 vi.mock('./prisma', () => ({
@@ -19,6 +20,9 @@ vi.mock('./capabilities', () => ({
   assertAuditedSessionCapabilities: mocks.assertCapabilities,
 }));
 vi.mock('./audit', () => ({ writeAudit: mocks.writeAudit }));
+vi.mock('./scribe-teleconsult', () => ({
+  assertScribeTeleconsultRetainedAiConsent: mocks.teleconsult,
+}));
 
 import { assertCurrentScribeAuthority, ScribeAuthorityError } from './scribe-authority';
 
@@ -37,6 +41,7 @@ const allConsents = [
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.teleconsult.mockResolvedValue(undefined);
   mocks.transaction.mockImplementation(async (callback) =>
     callback({
       session: { findUnique: mocks.findSession },
@@ -49,6 +54,16 @@ beforeEach(() => {
 });
 
 describe('current scribe authority', () => {
+  it('does not use standing preferences to override an encounter-specific remote opt-out', async () => {
+    mocks.teleconsult.mockRejectedValue(new Error('remote opt-out'));
+    await expect(
+      assertCurrentScribeAuthority('session-1', {
+        psychologistId: 'psy-1',
+        source: 'pass1BeforeModel',
+      }),
+    ).rejects.toMatchObject({ reason: 'CONSENT' });
+    expect(mocks.assertCapabilities).not.toHaveBeenCalled();
+  });
   it.each([
     'pass2BeforeModel',
     'clinicalAnalysisBeforeModel',

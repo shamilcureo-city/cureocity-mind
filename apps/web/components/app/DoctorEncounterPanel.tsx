@@ -37,6 +37,7 @@ export function DoctorEncounterPanel({
   clientName,
   sessionStatus,
   mode = 'dictate',
+  liveConsentDeclined = false,
 }: {
   sessionId: string;
   clientId: string;
@@ -44,6 +45,8 @@ export function DoctorEncounterPanel({
   sessionStatus: string;
   /** DS11.7 — the batch capture pipeline: dictate (mic) or upload a file. */
   mode?: 'dictate' | 'upload';
+  /** The patient declined ambient/live capture and the doctor chose summary dictation. */
+  liveConsentDeclined?: boolean;
 }) {
   const router = useRouter();
   const [state, setState] = useState<State>(
@@ -137,6 +140,13 @@ export function DoctorEncounterPanel({
   if (state.kind === 'idle') {
     return (
       <Card className="space-y-4 p-8 text-center">
+        {liveConsentDeclined && (
+          <div className="rounded-xl border border-[var(--color-warn)] bg-[var(--color-warn-soft)] p-4 text-left text-sm text-[var(--color-warn)]">
+            <strong className="block">Live recording declined.</strong>
+            Dictate only your clinical summary after the patient conversation. Do not capture the
+            patient&rsquo;s voice. Confirm consent for AI processing before you begin.
+          </div>
+        )}
         <p className="text-sm text-[var(--color-ink-2)]">
           {mode === 'upload'
             ? 'Upload a recording of the visit — the medical note drafts itself from the audio; you confirm and sign it.'
@@ -205,7 +215,9 @@ export function DoctorEncounterPanel({
   }
 
   // done — the single shared review-and-sign surface (DS11.2).
-  return <ReviewAndSign sessionId={sessionId} clientId={clientId} note={state.note} />;
+  return (
+    <ReviewAndSign key={sessionId} sessionId={sessionId} clientId={clientId} note={state.note} />
+  );
 }
 
 async function errorOf(res: Response, fallback: string): Promise<string> {

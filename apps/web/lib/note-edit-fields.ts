@@ -26,10 +26,17 @@ export const SIGNABLE_FIELDS_BY_KIND: Record<
     'workingHypothesis',
     'immediatePlan',
   ],
-  // Sprint DV3 — doctor encounter note. The array/object fields (ROS,
-  // physical exam, vitals, linkedEvidence) are frozen at draft; only the
-  // narrative strings are field-level signable.
-  MEDICAL: ['chiefComplaint', 'hpi', 'assessment', 'plan'],
+  // Every clinician-authored clinical section is correctable. linkedEvidence
+  // remains immutable provenance and is therefore intentionally excluded.
+  MEDICAL: [
+    'chiefComplaint',
+    'hpi',
+    'reviewOfSystems',
+    'physicalExam',
+    'vitals',
+    'assessment',
+    'plan',
+  ],
 };
 
 export type SignableKind = keyof typeof SIGNABLE_FIELDS_BY_KIND;

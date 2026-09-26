@@ -22,11 +22,26 @@ export type MedicalSessionKind = z.infer<typeof MedicalSessionKindSchema>;
 
 /// One note statement traced back to the transcript segment + timestamp
 /// that produced it — the anti-hallucination "linked evidence" mechanism.
+export const MedicalEvidenceFieldSchema = z.enum([
+  'chiefComplaint',
+  'hpi',
+  'reviewOfSystems',
+  'physicalExam',
+  'vitals',
+  'assessment',
+  'plan',
+]);
+export type MedicalEvidenceField = z.infer<typeof MedicalEvidenceFieldSchema>;
+
 export const EvidenceRefSchema = z.object({
   segmentId: z.string().optional(),
   startMs: z.number().int().nonnegative().optional(),
   endMs: z.number().int().nonnegative().optional(),
   quote: z.string().optional(),
+  /** Medical notes attach the quote to the clinical section it supports. */
+  field: MedicalEvidenceFieldSchema.optional(),
+  /** Short statement supported by the verbatim quote. */
+  claim: z.string().max(300).optional(),
 });
 export type EvidenceRef = z.infer<typeof EvidenceRefSchema>;
 

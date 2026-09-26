@@ -39,6 +39,64 @@ const policy = (
  * route names so additions are reviewable and testable.
  */
 export const REGULATED_ROUTE_CAPABILITIES = [
+  policy(
+    'api/v1/scribe/encounters/[sessionId]/teleconsult',
+    ['GET', 'POST'],
+    ['MEDICAL_DOCUMENTATION', 'LIVE_ENCOUNTER'],
+    'live',
+  ),
+  // Scribe workflow extensions. Public intake is a separate single-use,
+  // write-only token boundary, never a practitioner chart-disclosure endpoint.
+  policy('api/v1/scribe/shortcuts', ['GET', 'POST'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe/shortcuts/[id]', ['PATCH', 'DELETE'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe/note-styles', ['GET', 'PUT'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe/templates', ['GET', 'POST'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe/templates/[id]', ['PATCH', 'DELETE'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy(
+    'api/v1/scribe/encounters/[sessionId]/documents',
+    ['GET', 'POST'],
+    ['MEDICAL_DOCUMENTATION'],
+    'write',
+  ),
+  policy('api/v1/scribe/documents/[id]', ['PATCH'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy(
+    'api/v1/scribe/documents/[id]/[documentId]/text',
+    ['GET'],
+    ['MEDICAL_DOCUMENTATION', 'PATIENT_SHARING'],
+    'disclosure',
+  ),
+  policy(
+    'api/v1/scribe/encounters/[sessionId]/coding',
+    ['GET', 'PUT'],
+    ['MEDICAL_DOCUMENTATION'],
+    'write',
+  ),
+  policy('api/v1/clients/[id]/scribe-briefing', ['GET'], ['MEDICAL_DOCUMENTATION'], 'disclosure'),
+  policy('api/v1/clients/[id]/scribe-intake', ['GET', 'POST'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy(
+    'api/v1/clients/[id]/scribe-intake/[recordId]',
+    ['PATCH'],
+    ['MEDICAL_DOCUMENTATION'],
+    'write',
+  ),
+  policy('api/v1/scribe-tasks', ['GET', 'POST'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe-tasks/[recordId]', ['PATCH'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe/reports', ['GET', 'POST'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe/reports/[id]', ['PATCH', 'DELETE'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/scribe/reports/[id]/original', ['GET'], ['MEDICAL_DOCUMENTATION'], 'disclosure'),
+  policy('api/v1/scribe/instructions', ['GET', 'POST'], ['MEDICAL_DOCUMENTATION'], 'write'),
+  policy(
+    'api/v1/scribe/instructions/[id]',
+    ['PATCH', 'DELETE'],
+    ['MEDICAL_DOCUMENTATION'],
+    'write',
+  ),
+  policy(
+    'api/v1/scribe/instructions/[id]/text',
+    ['GET'],
+    ['MEDICAL_DOCUMENTATION', 'PATIENT_SHARING'],
+    'disclosure',
+  ),
   // Doctor-facing Encounter compatibility paths delegate to Session handlers,
   // but authorization is always resolved against the original pathname.
   policy('api/v1/encounters', ['POST'], ['LIVE_ENCOUNTER'], 'write', 'all', 'api/v1/sessions'),
@@ -141,6 +199,7 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   ),
   policy('api/v1/sessions/[id]/problems', ['PUT'], ['VERTICAL_DOCUMENTATION'], 'write'),
   policy('api/v1/sessions/[id]/note-draft', ['GET', 'PUT'], ['VERTICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/sessions/[id]/source-review', ['GET'], ['MEDICAL_DOCUMENTATION'], 'disclosure'),
   policy(
     'api/v1/sessions/[id]/note-edit-recovery',
     ['GET', 'PUT', 'DELETE'],
@@ -326,6 +385,12 @@ export const REGULATED_ROUTE_CAPABILITIES = [
     'live',
   ),
   policy('api/v1/sessions/[id]/live-suggestion', ['POST'], ['LIVE_ENCOUNTER'], 'live'),
+  policy(
+    'api/v1/sessions/[id]/capture-review',
+    ['GET', 'POST'],
+    ['MEDICAL_DOCUMENTATION'],
+    'write',
+  ),
   policy('api/v1/sessions/[id]/mind-cue-review', ['GET', 'POST'], ['LIVE_ENCOUNTER'], 'live'),
   policy(
     'api/v1/sessions/[id]/recovery-transcript',

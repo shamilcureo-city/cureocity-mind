@@ -6,6 +6,7 @@ import { DoctorEncounterPanel } from '@/components/app/DoctorEncounterPanel';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
+import { isScribeTeleconsultEnabled } from '@/lib/scribe-teleconsult-links';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +21,7 @@ export default async function EncounterWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string; sessionId: string }>;
-  searchParams: Promise<{ mode?: string }>;
+  searchParams: Promise<{ mode?: string; liveConsent?: string }>;
 }) {
   const doctor = await requireOnboardedDoctor();
   const { id: clientId, sessionId } = await params;
@@ -43,6 +44,8 @@ export default async function EncounterWorkspacePage({
     session.client.fullNameEncrypted,
   );
 
+  const query = await searchParams;
+
   return (
     <Container className="py-10">
       <Link
@@ -54,6 +57,15 @@ export default async function EncounterWorkspacePage({
       <header className="mb-6 mt-3 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">Encounter</h1>
         <div className="flex items-center gap-3">
+          {isScribeTeleconsultEnabled() &&
+            (session.status === 'SCHEDULED' || session.status === 'IN_PROGRESS') && (
+              <Link
+                href={`/app/patients/${clientId}/encounters/${sessionId}/teleconsult`}
+                className="text-sm font-medium text-[var(--color-accent)] hover:underline"
+              >
+                Video consultation
+              </Link>
+            )}
           {session.status !== 'COMPLETED' && (
             <Link
               href={`/app/patients/${clientId}/encounters/${sessionId}/live?flash=1`}
@@ -68,7 +80,8 @@ export default async function EncounterWorkspacePage({
         </div>
       </header>
       <DoctorEncounterPanel
-        mode={(await searchParams).mode === 'upload' ? 'upload' : 'dictate'}
+        mode={query.mode === 'upload' ? 'upload' : 'dictate'}
+        liveConsentDeclined={query.liveConsent === 'declined'}
         sessionId={session.id}
         clientId={clientId}
         clientName={clientFullName}

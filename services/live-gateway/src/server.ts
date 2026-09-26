@@ -297,7 +297,13 @@ wss.on('connection', (ws, req) => {
     // the result in arrival order. Do not let a slow old authority survive
     // teardown or a pause overtake its preceding audio.
     const inputAuthority = authority;
-    const authorized = inputAuthority?.authorizeCurrentInput();
+    // Only these parsed controls drain previously captured work. Binary audio,
+    // new starts and all other inputs must retain current capture authority.
+    const queuedControl =
+      !isBinary && parsed?.success && ['pause', 'stop'].includes(parsed.data.type);
+    const authorized = queuedControl
+      ? inputAuthority?.authorizeQueuedControl()
+      : inputAuthority?.authorizeCurrentInput();
     const wasStarted = started;
     inputQueue.enqueue(async () => {
       if (inputAuthority && !inputAuthority.authorizeInput()) return;

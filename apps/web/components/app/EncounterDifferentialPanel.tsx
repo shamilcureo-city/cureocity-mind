@@ -14,20 +14,27 @@ import { Badge } from '../ui/Badge';
 /**
  * Sprint DV6 — the differential-diagnosis panel (the reasoning copilot).
  *
- * Auto-runs once the note is ready: ranked candidates with ICD-10 +
+ * Runs only when the clinician asks: ranked candidates with ICD-10 +
  * likelihood + discriminating questions + suggested workup, red flags to
  * exclude, and ICD-10 coding nudges (🧾). Decision-support only — never
  * auto-applied to the note. See docs/DOCTOR_VERTICAL.md §6, §7.
  */
 type State =
   | { kind: 'loading' }
+  | { kind: 'idle' }
   | { kind: 'generating' }
   | { kind: 'done'; differential: DifferentialDiagnosisV1 }
   | { kind: 'failed'; message: string };
 
-export function EncounterDifferentialPanel({ sessionId }: { sessionId: string }) {
+export function EncounterDifferentialPanel({
+  sessionId,
+  onActiveChange,
+}: {
+  sessionId: string;
+  onActiveChange?: (active: boolean) => void;
+}) {
   const [state, setState] = useState<State>({ kind: 'loading' });
-  const triggered = useRef(false);
+  const pollToken = useRef(0);
 
   const applyResponse = useCallback((raw: unknown): 'done' | 'failed' | 'pending' => {
     const parsed = DifferentialResponseSchema.safeParse(raw);
@@ -47,8 +54,34 @@ export function EncounterDifferentialPanel({ sessionId }: { sessionId: string })
     return 'pending';
   }, []);
 
-  // Manual (re-)generate — the Re-run / Try again buttons. Synchronous POST.
+  const poll = useCallback(
+    async (token: number) => {
+      for (let tries = 0; tries < 30; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        if (pollToken.current !== token) return;
+        try {
+          const res = await fetch(`/api/v1/sessions/${sessionId}/differential`);
+          if (pollToken.current !== token) return;
+          if (!res.ok) continue;
+          const outcome = applyResponse(await res.json());
+          if (outcome !== 'pending') return;
+        } catch {
+          // A transient read error should not cancel clinician-requested work.
+        }
+      }
+      if (pollToken.current === token) {
+        setState({
+          kind: 'failed',
+          message: 'The differential is taking longer than expected — try again.',
+        });
+      }
+    },
+    [sessionId, applyResponse],
+  );
+
+  // Manual (re-)generate — no reasoning request is sent before this action.
   const generate = useCallback(async () => {
+    const token = ++pollToken.current;
     setState({ kind: 'generating' });
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/differential`, { method: 'POST' });
@@ -57,77 +90,41 @@ export function EncounterDifferentialPanel({ sessionId }: { sessionId: string })
         setState({ kind: 'failed', message: body.error ?? `Could not run (${res.status}).` });
         return;
       }
-      applyResponse(await res.json());
+      const outcome = applyResponse(await res.json());
+      if (outcome === 'pending') void poll(token);
     } catch (e) {
       setState({ kind: 'failed', message: (e as Error).message });
     }
-  }, [sessionId, applyResponse]);
+  }, [sessionId, applyResponse, poll]);
 
-  // On mount: POLL the differential until it resolves. The live-note route
-  // pre-warms it server-side the instant the consult ends, so we usually just
-  // read a row that's already IN_PROGRESS → COMPLETED — no more staring at a
-  // fresh 15-40s Pro call. If no row appears after a short grace (the
-  // dictate/upload path has no pre-warm), we trigger one generation ourselves.
-  // A 409 (note still being persisted by live-note) is transient — keep
-  // polling rather than surfacing a "note not ready" error to the doctor.
+  // Read an existing clinician-requested result, but never start one on mount.
   useEffect(() => {
-    if (triggered.current) return;
-    triggered.current = true;
     let cancelled = false;
-    let tries = 0;
-    let notFound = 0;
-    let triggeredGen = false;
-
-    const triggerGen = async (): Promise<void> => {
-      if (triggeredGen) return;
-      triggeredGen = true;
-      try {
-        const res = await fetch(`/api/v1/sessions/${sessionId}/differential`, { method: 'POST' });
-        if (res.ok) {
-          if (!cancelled) applyResponse(await res.json());
-          return;
-        }
-        // Note not COMPLETED yet — let the poller keep trying; it'll land soon.
-        if (res.status === 409) {
-          triggeredGen = false;
-          return;
-        }
-        const body = (await res.json().catch(() => ({}))) as { error?: string };
-        if (!cancelled)
-          setState({ kind: 'failed', message: body.error ?? `Could not run (${res.status}).` });
-      } catch (e) {
-        if (!cancelled) setState({ kind: 'failed', message: (e as Error).message });
-      }
-    };
-
-    const tick = async (): Promise<void> => {
-      tries += 1;
+    const token = ++pollToken.current;
+    void (async () => {
       try {
         const res = await fetch(`/api/v1/sessions/${sessionId}/differential`);
         if (res.status === 404) {
-          notFound += 1;
-          if (!cancelled) setState({ kind: 'generating' });
-          // No row after ~12s → nothing is pre-warming it; kick one off.
-          if (notFound >= 3) void triggerGen();
+          if (!cancelled) setState({ kind: 'idle' });
         } else if (res.ok) {
           const outcome = applyResponse(await res.json());
-          if (outcome === 'done' || outcome === 'failed') return;
+          if (!cancelled && outcome === 'pending') void poll(token);
+        } else if (!cancelled) {
+          setState({ kind: 'failed', message: `Could not load (${res.status}).` });
         }
-      } catch {
-        /* transient — retry */
+      } catch (error) {
+        if (!cancelled) setState({ kind: 'failed', message: (error as Error).message });
       }
-      if (!cancelled && tries < 30) setTimeout(() => void tick(), 4000);
-      else if (!cancelled)
-        setState({
-          kind: 'failed',
-          message: 'The differential is taking longer than expected — try re-running.',
-        });
-    };
-    void tick();
+    })();
     return () => {
       cancelled = true;
+      pollToken.current += 1;
     };
-  }, [sessionId, applyResponse]);
+  }, [sessionId, applyResponse, poll]);
+
+  useEffect(() => {
+    onActiveChange?.(state.kind !== 'loading' && state.kind !== 'idle');
+  }, [state.kind, onActiveChange]);
 
   return (
     <Card className="p-6">
@@ -143,7 +140,15 @@ export function EncounterDifferentialPanel({ sessionId }: { sessionId: string })
         Decision-support only — not a diagnosis. You decide what enters the record.
       </p>
 
-      {state.kind === 'loading' || state.kind === 'generating' ? (
+      {state.kind === 'idle' ? (
+        <div className="space-y-3 rounded-xl border border-dashed border-[var(--color-line)] p-4">
+          <p className="text-sm text-[var(--color-ink-2)]">
+            Generate a ranked differential, red flags, workup ideas, and coding nudges for this
+            encounter.
+          </p>
+          <Button onClick={generate}>Ask copilot</Button>
+        </div>
+      ) : state.kind === 'loading' || state.kind === 'generating' ? (
         <p className="text-sm text-[var(--color-ink-3)]">
           {state.kind === 'generating' ? 'Thinking through the differential…' : 'Loading…'}
         </p>

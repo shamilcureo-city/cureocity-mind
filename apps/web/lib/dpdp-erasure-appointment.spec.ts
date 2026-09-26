@@ -11,6 +11,9 @@ let preparationDeletionFails = false;
 let usageTableExists = true;
 let usageDeletionFails = false;
 const usageDeletionArgs: unknown[] = [];
+const scribeDeletionArgs: unknown[] = [];
+let scribeTableExists = true;
+let scribeDeletionFails = false;
 let sessionRows: Array<{ id: string }> = [];
 
 function model(name: string) {
@@ -29,6 +32,10 @@ function model(name: string) {
           if (name === 'sessionUsageConnection' && operation === 'deleteMany') {
             usageDeletionArgs.push(args);
             if (usageDeletionFails) throw new Error('usage deletion failed');
+          }
+          if (name === 'scribeWorkspaceRecord' && operation === 'deleteMany') {
+            scribeDeletionArgs.push(args);
+            if (scribeDeletionFails) throw new Error('scribe deletion failed');
           }
           if (name === 'session' && operation === 'findMany') return sessionRows;
           if (name === 'therapyNote' && operation === 'findMany') return [];
@@ -57,6 +64,10 @@ const tx = new Proxy(
       if (property === '$queryRaw') {
         return vi.fn(async (strings: TemplateStringsArray) => {
           const sql = Array.from(strings).join('?');
+          if (sql.includes('scribe_workspace_records')) {
+            calls.push('scribe.discover');
+            return [{ exists: scribeTableExists }];
+          }
           if (sql.includes('session_usage_connections')) {
             calls.push('usage.discover');
             return [{ exists: usageTableExists }];
@@ -98,7 +109,51 @@ describe('DPDP appointment erasure invariant', () => {
     usageTableExists = true;
     usageDeletionFails = false;
     usageDeletionArgs.length = 0;
+    scribeDeletionArgs.length = 0;
+    scribeTableExists = true;
+    scribeDeletionFails = false;
     sessionRows = [];
+  });
+
+  it('erases all patient Scribe kinds, including coding and document packets, without a kind or UI-flag filter', async () => {
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now: new Date('2026-09-26T00:00:00Z'),
+    });
+    expect(scribeDeletionArgs).toEqual([{ where: { clientId: 'client-1' } }]);
+    expect(calls.indexOf('client.update')).toBeLessThan(
+      calls.indexOf('scribeWorkspaceRecord.deleteMany'),
+    );
+    expect(calls.indexOf('scribeWorkspaceRecord.deleteMany')).toBeLessThan(
+      calls.indexOf('session.updateMany'),
+    );
+  });
+
+  it('does not fulfil erasure if encrypted coding or other Scribe records cannot be deleted', async () => {
+    scribeDeletionFails = true;
+    await expect(
+      eraseClientPhi(tx as never, {
+        clientId: 'client-1',
+        erasureRequestId: 'erasure-1',
+        psychologistId: 'psy-1',
+        now: new Date('2026-09-26T00:00:00Z'),
+      }),
+    ).rejects.toThrow('scribe deletion failed');
+    expect(calls).not.toContain('session.updateMany');
+  });
+
+  it('skips only confirmed absent pre-migration Scribe storage during erasure', async () => {
+    scribeTableExists = false;
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now: new Date('2026-09-26T00:00:00Z'),
+    });
+    expect(calls).toContain('scribe.discover');
+    expect(scribeDeletionArgs).toEqual([]);
   });
 
   it('makes linked appointments non-enqueueable before deleting reminder outbox rows', async () => {

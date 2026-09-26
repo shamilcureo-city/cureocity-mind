@@ -27,11 +27,15 @@ to the doctor vertical (DV1–DV8). Pairs with `docs/DOCTOR_VERTICAL.md`
 
 1. Create a patient (reuses the `Client` model + PII encryption).
 2. **Batch path** (DV3): Start encounter → record → medical note drafts
-   → confirm Rx + orders (interaction-checked, DV5) → differential auto-
-   runs (DV6) → sign → share after-visit summary.
+   → correct every clinical field → confirm/correct Rx + orders
+   (interaction-checked, DV5) → optionally select **Ask copilot** for the
+   differential (DV6) → sign → share after-visit summary.
 3. **Live path** (DV4): open "Live copilot" → the note + gaps + 💊
-   interaction flags + voice commands surface mid-consult. Mic audio is
-   streamed (not stored); confirm the gateway is reachable.
+   interaction flags + voice commands surface mid-consult. Before the mic
+   starts, confirm consent in a language the patient understands. If they
+   decline live capture, use the visible clinician-dictation fallback after
+   the visit. Mic audio is streamed (not stored); confirm the gateway is
+   reachable.
 4. **Chronic care** (DV7): vitals auto-capture into the trajectory; log
    an HbA1c; share the progress report.
 5. **Interoperability** (DV8): Download FHIR; link ABHA + push to PHR.

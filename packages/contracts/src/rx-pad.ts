@@ -106,29 +106,37 @@ export type RxPadDraft = z.infer<typeof RxPadDraftSchema>;
 // row. Every op is audited (RX_PAD_EDITED); interaction warnings are
 // recomputed server-side after every med change.
 
+const RxPadEditableMedSchema = z.object({
+  drug: z.string().min(1).max(120),
+  strength: z.string().max(60).optional(),
+  dose: z.string().max(60).optional(),
+  frequency: z.string().max(60).optional(),
+  timing: z.string().max(60).optional(),
+  durationDays: z.number().int().positive().max(365).optional(),
+  route: z.string().max(40).optional(),
+  /**
+   * Sprint DS12 — preserve the carried-forward badge when a continued med
+   * is re-added by a voice change or an undo restore. Display provenance
+   * only; the prescribing decision is still carried by `status`.
+   */
+  continued: z.boolean().optional(),
+});
+
 /** A med being added (adopted from AI or typed manually). */
 export const RxPadAddMedSchema = z.object({
   op: z.literal('addMed'),
   source: RxRowSourceSchema,
-  med: z.object({
-    drug: z.string().min(1).max(120),
-    strength: z.string().max(60).optional(),
-    dose: z.string().max(60).optional(),
-    frequency: z.string().max(60).optional(),
-    timing: z.string().max(60).optional(),
-    durationDays: z.number().int().positive().max(365).optional(),
-    route: z.string().max(40).optional(),
-    /**
-     * Sprint DS12 — preserve the carried-forward badge when a continued med
-     * is re-added by a voice change or an undo restore. Display provenance
-     * only; the prescribing decision is still carried by `status`.
-     */
-    continued: z.boolean().optional(),
-  }),
+  med: RxPadEditableMedSchema,
 });
 
 export const RxPadPatchOpSchema = z.discriminatedUnion('op', [
   RxPadAddMedSchema,
+  z.object({
+    op: z.literal('updateMed'),
+    /** Current row identity; `med.drug` may rename it. */
+    drug: z.string().min(1).max(120),
+    med: RxPadEditableMedSchema.omit({ continued: true }),
+  }),
   z.object({ op: z.literal('removeMed'), drug: z.string().min(1).max(120) }),
   /** Flip a pending (voice/AI-drafted) med to confirmed — the prescribe tap. */
   z.object({ op: z.literal('confirmMed'), drug: z.string().min(1).max(120) }),
@@ -162,6 +170,8 @@ export const RxPadPatchOpSchema = z.discriminatedUnion('op', [
 export type RxPadPatchOp = z.infer<typeof RxPadPatchOpSchema>;
 
 export const RxPadPatchInputSchema = z.object({
+  /** New clients bind edits to the exact pad they reviewed. Legacy callers still apply to a locked fresh pad. */
+  expectedPad: RxPadDraftSchema.nullable().optional(),
   ops: z.array(RxPadPatchOpSchema).min(1).max(10),
 });
 export type RxPadPatchInput = z.infer<typeof RxPadPatchInputSchema>;

@@ -3,6 +3,7 @@ import { SCRIBE_CONSENT_SCOPES } from './consent-gate';
 import { assertAuditedSessionCapabilities } from './capabilities';
 import { writeAudit } from './audit';
 import { prisma } from './prisma';
+import { assertScribeTeleconsultRetainedAiConsent } from './scribe-teleconsult';
 
 export type ScribeAuthorityDenialReason = 'CLIENT' | 'CONSENT' | 'SESSION_STATE' | 'MANUAL_SESSION';
 
@@ -91,7 +92,21 @@ export async function assertCurrentScribeAuthority(
           psychologist: { select: { vertical: true } },
         },
       });
-      if (!session) return { session: null, consents: new Set<string>() };
+      if (!session)
+        return { session: null, consents: new Set<string>(), teleconsultAuthorized: false };
+      let teleconsultAuthorized = true;
+      if (session.psychologist.vertical === 'DOCTOR') {
+        try {
+          await assertScribeTeleconsultRetainedAiConsent(
+            tx,
+            sessionId,
+            session.psychologistId,
+            session.status === 'IN_PROGRESS',
+          );
+        } catch {
+          teleconsultAuthorized = false;
+        }
+      }
       const rows = await tx.consent.findMany({
         where: {
           clientId: session.clientId,
@@ -102,7 +117,7 @@ export async function assertCurrentScribeAuthority(
         },
         select: { scope: true },
       });
-      return { session, consents: new Set(rows.map(({ scope }) => scope)) };
+      return { session, consents: new Set(rows.map(({ scope }) => scope)), teleconsultAuthorized };
     },
     { isolationLevel: 'Serializable' },
   );
@@ -125,7 +140,10 @@ export async function assertCurrentScribeAuthority(
     await auditScribeDenial(sessionId, boundary, 'CLIENT');
     throw new ScribeAuthorityError('CLIENT');
   }
-  if (SCRIBE_CONSENT_SCOPES.some((scope) => !current.consents.has(scope))) {
+  if (
+    !current.teleconsultAuthorized ||
+    SCRIBE_CONSENT_SCOPES.some((scope) => !current.consents.has(scope))
+  ) {
     await auditScribeDenial(sessionId, boundary, 'CONSENT');
     throw new ScribeAuthorityError('CONSENT');
   }

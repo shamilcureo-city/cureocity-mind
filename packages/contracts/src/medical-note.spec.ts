@@ -34,11 +34,20 @@ describe('MedicalEncounterNoteV1Schema', () => {
       vitals: { bpSystolic: 148, bpDiastolic: 92, heartRateBpm: 88, spo2Pct: 98 },
       assessment: 'Exertional chest pain — rule out stable angina.',
       plan: 'ECG today; aspirin; review in 3 days with reports.',
-      linkedEvidence: [{ startMs: 1000, endMs: 4000, quote: 'seene mein pressure' }],
+      linkedEvidence: [
+        {
+          field: 'chiefComplaint',
+          claim: 'Exertional chest pressure',
+          startMs: 1000,
+          endMs: 4000,
+          quote: 'seene mein pressure',
+        },
+      ],
     });
     expect(note.vitals.bpSystolic).toBe(148);
     expect(note.physicalExam.examined).toBe(true);
     expect(note.linkedEvidence).toHaveLength(1);
+    expect(note.linkedEvidence[0]?.field).toBe('chiefComplaint');
   });
 
   it('rejects an out-of-range SpO2', () => {
