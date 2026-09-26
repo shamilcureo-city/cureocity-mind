@@ -14,6 +14,7 @@ import {
   scribeLiveStyles as styles,
 } from '@/components/app/ScribeLiveWorkspace';
 import { Button } from '@/components/ui/Button';
+import { ScribeWorkflowPreview } from './ScribeWorkflowPreview';
 
 const utterances: Utterance[] = [
   {
@@ -50,6 +51,7 @@ const utterances: Utterance[] = [
 export function ScribeLivePreview() {
   const refs = useRef(new Map<string, HTMLDivElement | null>());
   const [paused, setPaused] = useState(false);
+  const [workflow, setWorkflow] = useState(false);
   return (
     <main className={`${styles.surface} min-h-screen bg-[var(--color-bg)] px-4 py-6 sm:px-8`}>
       <div className="mx-auto max-w-7xl space-y-5">
@@ -59,74 +61,88 @@ export function ScribeLivePreview() {
             Fictional local preview · microphone off
           </p>
         </header>
-        <div className={styles.captureBar}>
-          <div>
-            <p className="font-semibold">
-              Ananya Rao <span className="font-normal">· 42</span>
-            </p>
-            <p className="text-sm text-[var(--color-ink-2)]">Internal medicine</p>
-          </div>
-          <div className={styles.status}>
-            <div className={styles.statusLine}>
-              <strong>{paused ? 'Paused preview' : 'Consultation preview'}</strong>
-              <ScribeInputMeter level={0} active={false} />
-            </div>
-            <small>Example transcript · no live audio</small>
-          </div>
-          <div className={styles.actions}>
-            <Button variant="secondary" onClick={() => setPaused(!paused)}>
-              {paused ? 'Resume preview' : 'Pause preview'}
-            </Button>
-            <Button disabled>End &amp; review note</Button>
-          </div>
+        <div className="flex flex-wrap gap-2" aria-label="Preview mode">
+          <Button variant={workflow ? 'secondary' : 'primary'} onClick={() => setWorkflow(false)}>
+            Live capture
+          </Button>
+          <Button variant={workflow ? 'primary' : 'secondary'} onClick={() => setWorkflow(true)}>
+            Doctor workflow tools
+          </Button>
         </div>
-        <ScribeLiveWorkspace
-          transcript={
-            <TranscriptPanel
-              utterances={utterances}
-              partialText=""
-              highlightIds={new Set()}
-              refs={refs}
-              listening={false}
+        {workflow ? (
+          <ScribeWorkflowPreview />
+        ) : (
+          <>
+            <div className={styles.captureBar}>
+              <div>
+                <p className="font-semibold">
+                  Ananya Rao <span className="font-normal">· 42</span>
+                </p>
+                <p className="text-sm text-[var(--color-ink-2)]">Internal medicine</p>
+              </div>
+              <div className={styles.status}>
+                <div className={styles.statusLine}>
+                  <strong>{paused ? 'Paused preview' : 'Consultation preview'}</strong>
+                  <ScribeInputMeter level={0} active={false} />
+                </div>
+                <small>Example transcript · no live audio</small>
+              </div>
+              <div className={styles.actions}>
+                <Button variant="secondary" onClick={() => setPaused(!paused)}>
+                  {paused ? 'Resume preview' : 'Pause preview'}
+                </Button>
+                <Button disabled>End &amp; review note</Button>
+              </div>
+            </div>
+            <ScribeLiveWorkspace
+              transcript={
+                <TranscriptPanel
+                  utterances={utterances}
+                  partialText=""
+                  highlightIds={new Set()}
+                  refs={refs}
+                  listening={false}
+                />
+              }
+              note={
+                <NotePanel
+                  note={{
+                    chiefComplaint: 'Tiredness for two weeks.',
+                    hpi: 'Reports irregular sleep and late working hours. Previous reports brought for review.',
+                    assessment: 'Clinician assessment pending.',
+                    plan: 'Complete history and examination; review previous reports with the patient.',
+                  }}
+                  specialty="Internal medicine"
+                  live={false}
+                  assessmentAdds={[]}
+                />
+              }
+              prescription={
+                <RxPadPanel
+                  rxPad={{
+                    meds: [],
+                    investigations: [],
+                    adviceLines: ['Bring previous reports to the next visit.'],
+                  }}
+                  confirmedDrugs={new Set()}
+                  onConfirm={() => {}}
+                  onQuote={() => {}}
+                  live={false}
+                />
+              }
+              copilot={
+                <DifferentialZone
+                  reasoning={null}
+                  findings={[]}
+                  live={false}
+                  onEvidence={() => {}}
+                  onAddToAssessment={() => {}}
+                  addedToAssessment={[]}
+                />
+              }
             />
-          }
-          note={
-            <NotePanel
-              note={{
-                chiefComplaint: 'Tiredness for two weeks.',
-                hpi: 'Reports irregular sleep and late working hours. Previous reports brought for review.',
-                assessment: 'Clinician assessment pending.',
-                plan: 'Complete history and examination; review previous reports with the patient.',
-              }}
-              specialty="Internal medicine"
-              live={false}
-              assessmentAdds={[]}
-            />
-          }
-          prescription={
-            <RxPadPanel
-              rxPad={{
-                meds: [],
-                investigations: [],
-                adviceLines: ['Bring previous reports to the next visit.'],
-              }}
-              confirmedDrugs={new Set()}
-              onConfirm={() => {}}
-              onQuote={() => {}}
-              live={false}
-            />
-          }
-          copilot={
-            <DifferentialZone
-              reasoning={null}
-              findings={[]}
-              live={false}
-              onEvidence={() => {}}
-              onAddToAssessment={() => {}}
-              addedToAssessment={[]}
-            />
-          }
-        />
+          </>
+        )}
       </div>
     </main>
   );

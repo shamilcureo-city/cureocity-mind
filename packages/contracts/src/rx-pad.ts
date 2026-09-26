@@ -170,6 +170,8 @@ export const RxPadPatchOpSchema = z.discriminatedUnion('op', [
 export type RxPadPatchOp = z.infer<typeof RxPadPatchOpSchema>;
 
 export const RxPadPatchInputSchema = z.object({
+  /** New clients bind edits to the exact pad they reviewed. Legacy callers still apply to a locked fresh pad. */
+  expectedPad: RxPadDraftSchema.nullable().optional(),
   ops: z.array(RxPadPatchOpSchema).min(1).max(10),
 });
 export type RxPadPatchInput = z.infer<typeof RxPadPatchInputSchema>;

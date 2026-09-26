@@ -74,6 +74,7 @@ vi.mock('../components/ui/Card', () => ({ Card: 'div' }));
 // transform uses the classic JSX runtime, so supply React before importing it.
 vi.stubGlobal('React', React);
 const { DoctorLiveEncounter } = await import('../components/app/DoctorLiveEncounter');
+let teleconsult: Parameters<typeof DoctorLiveEncounter>[0]['teleconsult'];
 
 class Socket {
   static OPEN = 1;
@@ -140,6 +141,7 @@ function render() {
     sessionId: 'session-1',
     clientId: 'client-1',
     patient: { name: 'Fictional patient', age: 30 },
+    teleconsult,
   });
   harness.registerEffects = false;
   return view;
@@ -213,6 +215,7 @@ async function startCapture() {
 }
 
 beforeEach(() => {
+  teleconsult = undefined;
   vi.clearAllMocks();
   harness.states = [];
   harness.refs = [];
@@ -247,6 +250,85 @@ afterEach(() => {
 });
 
 describe('Scribe live consultation lifecycle', () => {
+  it('does not label a consent or session conflict as a saved draft', async () => {
+    const socket = await startCapture();
+    socket.emit({ type: 'utterance', utterance });
+    socket.emit({ type: 'note', partial: { chiefComplaint: 'Cough' } });
+    vi.mocked(fetch).mockImplementation(async (url) =>
+      String(url).endsWith('/live-note')
+        ? Response.json({ error: 'Consent changed.' }, { status: 409 })
+        : Response.json({ token: 'fixture-token', expiresInSec: 300 }),
+    );
+    harness.onInterrupted('Capture interrupted.');
+    click('Review captured note');
+    await vi.waitFor(() =>
+      expect(text(render())).toContain('Draft not saved. Retry saving before review or signing.'),
+    );
+    expect(elements(render()).some((node) => node.type === 'review-and-sign')).toBe(false);
+    expect(action('Retry saving draft')).toBeDefined();
+  });
+  it('does not mint or open capture when a teleconsult lacks consent or either audio source', () => {
+    teleconsult = {
+      stream: null,
+      ready: false,
+      unavailableReason: 'Patient consent is pending.',
+      beforeStart: vi.fn(),
+      onStateChange: vi.fn(),
+    };
+    mount();
+    expect(action('Start AI documentation')?.props.disabled).toBe(true);
+    expect(text(render())).toContain('Patient consent is pending.');
+    expect(fetch).not.toHaveBeenCalled();
+    expect(harness.stream.start).not.toHaveBeenCalled();
+  });
+
+  it('requires server consent confirmation before minting a teleconsult live token', async () => {
+    const authorize = vi.fn(async () => {
+      throw new Error('Patient withdrew AI consent.');
+    });
+    teleconsult = {
+      stream: {} as MediaStream,
+      ready: true,
+      unavailableReason: null,
+      beforeStart: authorize,
+      onStateChange: vi.fn(),
+    };
+    mount();
+    click('Start AI documentation');
+    await vi.waitFor(() => expect(text(render())).toContain('Patient withdrew AI consent.'));
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(harness.stream.start).not.toHaveBeenCalled();
+  });
+
+  it('stops sending video frames as soon as consent/readiness changes and requires explicit resume', async () => {
+    teleconsult = {
+      stream: {} as MediaStream,
+      ready: true,
+      unavailableReason: null,
+      beforeStart: vi.fn(async () => {}),
+      onStateChange: vi.fn(),
+    };
+    mount();
+    click('Start AI documentation');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    socket.status('listening');
+    render();
+    const first = new Uint8Array([1, 2]);
+    harness.onFrame(first);
+    expect(socket.send).toHaveBeenLastCalledWith(first);
+    teleconsult = { ...teleconsult, ready: false, unavailableReason: 'Patient withdrew consent.' };
+    render();
+    const later = new Uint8Array([3, 4]);
+    harness.onFrame(later);
+    expect(socket.send).not.toHaveBeenCalledWith(later);
+    harness.onInterrupted('Call capture is no longer authorized.');
+    expect(action('Resume AI documentation')?.props.disabled).toBe(true);
+    expect(text(render())).toContain('Some words may be missing.');
+    expect(harness.stream.stop).toHaveBeenCalledOnce();
+  });
   it('leaves recording after microphone interruption and preserves words through explicit authorized resume', async () => {
     const socket = await startCapture();
     socket.emit({ type: 'utterance', utterance });
@@ -302,6 +384,105 @@ describe('Scribe live consultation lifecycle', () => {
     expect(text(render())).toContain('Paused · microphone off');
     expect(savedDrafts()).toEqual([]);
   });
+
+  it('does not renew capture during a deliberate teleconsult pause and resumes with a fresh authorization', async () => {
+    vi.useFakeTimers();
+    teleconsult = {
+      stream: {} as MediaStream,
+      ready: true,
+      unavailableReason: null,
+      beforeStart: vi.fn(async () => {}),
+      onStateChange: vi.fn(),
+    };
+    mount();
+    click('Start AI documentation');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    socket.status('listening');
+    socket.emit({ type: 'utterance', utterance });
+    render();
+    click('Pause AI documentation');
+    await vi.waitFor(() =>
+      expect(commands(socket).some(({ type }) => type === 'pause')).toBe(true),
+    );
+    const pause = commands(socket).find(({ type }) => type === 'pause')!;
+    socket.emit({ type: 'capturePaused', requestId: pause.requestId });
+    await vi.waitFor(() => expect(action('Resume AI documentation')).toBeDefined());
+
+    await vi.advanceTimersByTimeAsync(310_000);
+    expect(
+      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/live-token')),
+    ).toHaveLength(1);
+    expect(commands(socket).some(({ type }) => type === 'renewToken')).toBe(false);
+    expect(text(render())).not.toContain('Some words may be missing.');
+    expect(displayedUtterances()).toEqual([utterance]);
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+
+    // A paused socket may expire; that is not permission to silently resume.
+    socket.status('unauthorized');
+    socket.disconnect();
+    expect(text(render())).not.toContain('Some words may be missing.');
+    click('Resume AI documentation');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    expect(teleconsult.beforeStart).toHaveBeenCalledTimes(2);
+    const resumed = harness.sockets[1];
+    resumed.open();
+    expect(commands(resumed)[0]).toMatchObject({
+      type: 'start',
+      resume: { utterances: [utterance] },
+    });
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    resumed.status('listening');
+    expect(harness.stream.start).toHaveBeenCalledTimes(2);
+    expect(text(render())).not.toContain('Some words may be missing.');
+  });
+
+  it.each(['paused', 'finalizing'])(
+    'immediately preserves an incomplete teleconsult draft if authorization expires while %s',
+    async (phase) => {
+      teleconsult = {
+        stream: {} as MediaStream,
+        ready: true,
+        unavailableReason: null,
+        beforeStart: vi.fn(async () => {}),
+        onStateChange: vi.fn(),
+      };
+      mount();
+      click('Start AI documentation');
+      await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+      const socket = harness.sockets[0];
+      socket.open();
+      socket.status('listening');
+      socket.emit({ type: 'utterance', utterance });
+      socket.emit({ type: 'note', partial: { chiefComplaint: 'Cough' } });
+      render();
+      click('Pause AI documentation');
+      await vi.waitFor(() =>
+        expect(commands(socket).some(({ type }) => type === 'pause')).toBe(true),
+      );
+      const pause = commands(socket).find(({ type }) => type === 'pause')!;
+      socket.emit({ type: 'capturePaused', requestId: pause.requestId });
+      await vi.waitFor(() => expect(action('Resume AI documentation')).toBeDefined());
+      if (phase === 'finalizing') {
+        click('End & review note');
+        await vi.waitFor(() =>
+          expect(commands(socket).some(({ type }) => type === 'stop')).toBe(true),
+        );
+      }
+      socket.status('unauthorized');
+      if (phase === 'paused') click('End & review note');
+      await vi.waitFor(() => expect(savedDrafts()).toHaveLength(1));
+      expect(savedDrafts()[0]).toMatchObject({
+        captureIncomplete: true,
+        transcript: 'Patient: I have had a cough for two days.',
+        note: { chiefComplaint: 'Cough' },
+      });
+      expect(harness.stream.start).toHaveBeenCalledOnce();
+      expect(socket.close).toHaveBeenCalled();
+      expect(text(render())).toContain('review any missing words before signing');
+    },
+  );
 
   it('awaits microphone tail and socket delivery before sending End', async () => {
     const socket = await startCapture();

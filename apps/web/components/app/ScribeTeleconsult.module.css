@@ -1,0 +1,141 @@
+.surface {
+  --color-ink-3: #596273;
+  --color-warn: #8b4522;
+  color: var(--color-ink);
+}
+.setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr);
+  gap: 1.5rem;
+  margin: 1.5rem 0 2rem;
+  align-items: start;
+}
+.room {
+  min-width: 0;
+  height: min(64vh, 620px);
+  min-height: 440px;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  background: #0a101f;
+}
+.controls {
+  display: grid;
+  gap: 1.25rem;
+}
+.controls h2 {
+  font-size: 1rem;
+  font-weight: 650;
+  margin-bottom: 0.4rem;
+}
+.controls p {
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+  max-width: 66ch;
+}
+.controls .detail {
+  font-size: 0.8125rem;
+  margin-top: 0.6rem;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.actions button {
+  min-height: 44px;
+  font-size: 0.875rem;
+}
+.consent {
+  padding: 1rem 0;
+  border-top: 1px solid var(--color-line);
+  border-bottom: 1px solid var(--color-line);
+}
+.controls .choice {
+  color: var(--color-ink);
+  font-weight: 600;
+  margin: 0.5rem 0 0.8rem;
+}
+.checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  cursor: pointer;
+}
+.checkbox input {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+  accent-color: var(--color-ink);
+}
+.audio {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.5rem;
+  font-size: 0.875rem;
+}
+.audio li {
+  display: flex;
+  gap: 0.65rem;
+}
+.audio strong {
+  font-weight: 600;
+}
+.surface :focus-visible {
+  outline: 2px solid #304c80;
+  outline-offset: 3px;
+}
+.empty {
+  height: 100%;
+  display: grid;
+  place-content: center;
+  gap: 0.75rem;
+  padding: 2rem;
+  color: white;
+  text-align: center;
+}
+.empty h2 {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+}
+.empty p {
+  color: #d4d9e5;
+  max-width: 42ch;
+  line-height: 1.6;
+  font-size: 0.9375rem;
+}
+.notice {
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  background: white;
+  padding: 1rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.warning {
+  border-color: #e5c39c;
+  color: #713a1e;
+  background: #fff6ef;
+}
+@media (max-width: 900px) {
+  .setup {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+  .room {
+    height: 52vh;
+    min-height: 440px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .surface *,
+  .surface *::before,
+  .surface *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

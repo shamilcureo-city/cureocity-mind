@@ -3,6 +3,8 @@ import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { loadClinicQueue } from '@/lib/clinic-queue';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
+import { ScribePendingWorkPanel } from '@/components/app/ScribePendingWorkPanel';
+import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,5 +34,18 @@ export default async function ClinicPage() {
     })),
   );
 
-  return <ClinicBoard queue={queue} patients={patients} />;
+  return (
+    <>
+      <ClinicBoard queue={queue} patients={patients} />
+      <div className="mx-auto max-w-6xl px-6">
+        <Link
+          href="/app/clinic/templates"
+          className="my-3 inline-flex min-h-11 items-center rounded-lg border border-[var(--color-line)] bg-white px-4 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4"
+        >
+          My note and document templates
+        </Link>
+        <ScribePendingWorkPanel patients={patients} />
+      </div>
+    </>
+  );
 }

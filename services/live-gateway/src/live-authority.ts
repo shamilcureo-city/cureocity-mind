@@ -6,6 +6,7 @@ import {
 import { extractVerifiedClaims } from './auth';
 
 export type LiveAuthorityCloseReason = 'live_authority_denied' | 'live_authority_unavailable';
+type AuthorityPurpose = 'capture' | 'queued-finalization';
 
 interface LiveAuthorityOptions {
   sessionId: string;
@@ -63,7 +64,9 @@ export class LiveAuthority {
   private capabilities = new Set<PractitionerCapability>();
   private interval: NodeJS.Timeout | null = null;
   private expiryTimer: NodeJS.Timeout | null = null;
-  private inFlight: Promise<boolean> | null = null;
+  // Output may remain authorized after capture is paused. Never let its more
+  // permissive snapshot authorize a concurrently arriving audio frame.
+  private inFlight = new Map<AuthorityPurpose, Promise<boolean>>();
   private renewal: Promise<number | null> | null = null;
   private tokenExpiresAt: number;
   private renewalAllowed = true;
@@ -81,7 +84,7 @@ export class LiveAuthority {
   start(): void {
     if (!this.authorizeInput() || this.started) return;
     this.started = true;
-    this.interval = setInterval(() => void this.revalidate(), this.intervalMs);
+    this.interval = setInterval(() => void this.revalidate('queued-finalization'), this.intervalMs);
     this.armExpiry();
   }
 
@@ -128,11 +131,12 @@ export class LiveAuthority {
     // Let the old request finish before starting a new verifier snapshot. New
     // input/output checks wait behind this renewal, so an older denial or grant
     // can never arrive after the replacement lease has committed.
-    const previousCheck = this.inFlight;
+    const previousChecks = [...this.inFlight.values()];
     const renewal = (async (): Promise<number | null> => {
-      if (previousCheck && !(await previousCheck)) return null;
+      if (previousChecks.length && (await Promise.all(previousChecks)).some((allowed) => !allowed))
+        return null;
       if (!this.authorizeInput() || !this.renewalAllowed) return null;
-      const capabilities = await this.fetchCapabilities(claims.exp);
+      const capabilities = await this.fetchCapabilities(claims.exp, 'capture');
       // The OLD expiry timer remains live throughout the fetch. Stop, disposal,
       // expiry, or another mandatory denial cannot be undone by a late reply.
       if (!capabilities || !this.authorizeInput() || !this.renewalAllowed) return null;
@@ -162,13 +166,18 @@ export class LiveAuthority {
 
   /** Current server authority gate immediately before consuming socket input. */
   authorizeCurrentInput(): Promise<boolean> {
-    return this.revalidate();
+    return this.revalidate('capture');
+  }
+
+  /** Only the server's parsed pause/stop controls may use this drain authority. */
+  authorizeQueuedControl(): Promise<boolean> {
+    return this.revalidate('queued-finalization');
   }
 
   /** Recheck immediately before every regulated gateway output. */
   async authorizeEvent(event: LiveGatewayEvent): Promise<LiveGatewayEvent | null> {
     if (this.closed) return null;
-    if (!(await this.revalidate())) return null;
+    if (!(await this.revalidate('queued-finalization'))) return null;
 
     const required = optionalEventCapability(event);
     if (required && !this.capabilities.has(required)) return null;
@@ -183,7 +192,7 @@ export class LiveAuthority {
     return event;
   }
 
-  async revalidate(): Promise<boolean> {
+  async revalidate(purpose: AuthorityPurpose = 'capture'): Promise<boolean> {
     if (!this.authorizeInput()) return false;
     while (this.renewal) {
       const pending = this.renewal;
@@ -191,18 +200,19 @@ export class LiveAuthority {
       if (!this.authorizeInput()) return false;
       if (this.renewal === pending) this.renewal = null;
     }
-    if (this.inFlight) return this.inFlight;
-    const check = this.performRevalidation();
-    this.inFlight = check;
+    const existing = this.inFlight.get(purpose);
+    if (existing) return existing;
+    const check = this.performRevalidation(purpose);
+    this.inFlight.set(purpose, check);
     try {
       return await check;
     } finally {
-      if (this.inFlight === check) this.inFlight = null;
+      if (this.inFlight.get(purpose) === check) this.inFlight.delete(purpose);
     }
   }
 
-  private async performRevalidation(): Promise<boolean> {
-    const capabilities = await this.fetchCapabilities(this.tokenExpiresAt);
+  private async performRevalidation(purpose: AuthorityPurpose): Promise<boolean> {
+    const capabilities = await this.fetchCapabilities(this.tokenExpiresAt, purpose);
     if (!capabilities || !this.authorizeInput()) return false;
     this.capabilities = capabilities;
     this.options.updateCapabilities(capabilities);
@@ -211,6 +221,7 @@ export class LiveAuthority {
 
   private async fetchCapabilities(
     tokenExpiresAt: number,
+    purpose: AuthorityPurpose,
   ): Promise<Set<PractitionerCapability> | null> {
     try {
       const response = await this.fetchImpl(this.options.verifierUrl, {
@@ -225,6 +236,7 @@ export class LiveAuthority {
           psychologistId: this.options.psychologistId,
           tokenExpiresAt,
           vertical: this.options.vertical,
+          purpose,
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });

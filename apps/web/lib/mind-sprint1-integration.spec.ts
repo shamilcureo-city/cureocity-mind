@@ -15,7 +15,10 @@ describe('Sprint 1 Mind reliable session journey integration', () => {
     const confirm = webSource('components/app/RecordConfirmStrip.tsx');
     expect(confirm).toContain('onSelectedDeviceIdChange={setSelectedDeviceId}');
     expect(confirm).toContain('selectedDeviceId');
-    expect(webSource('lib/audio/use-live-stream.ts')).toContain('opts.selectedDeviceId');
+    const liveInput = webSource('lib/audio/use-live-stream.ts');
+    expect(liveInput).toContain('optionsRef.current = opts');
+    expect(liveInput).toContain('const input = optionsRef.current');
+    expect(liveInput).toContain('deviceId: { exact: input.selectedDeviceId }');
     expect(webSource('lib/audio/use-session-recorder.ts')).toContain('opts.selectedDeviceId');
 
     for (const path of [

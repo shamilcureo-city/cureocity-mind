@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   queryRaw: vi.fn(),
   getEffectiveCapabilities: vi.fn(),
   writeAudit: vi.fn(),
+  teleconsult: vi.fn(),
 }));
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -27,13 +28,16 @@ vi.mock('@/lib/capabilities', () => ({
     [...effective.capabilities].sort(),
 }));
 vi.mock('@/lib/audit', () => ({ writeAudit: mocks.writeAudit }));
+vi.mock('@/lib/scribe-teleconsult', () => ({
+  assertScribeTeleconsultDocumentationConsent: mocks.teleconsult,
+}));
 
 import { POST } from '../app/api/v1/internal/live-authority/route';
 
 const SESSION_ID = 'c123456789012345678901234';
 const PSYCHOLOGIST_ID = 'cabcdefghijklmnopqrstuvwx';
 
-const request = (secret = 'service-secret') =>
+const request = (secret = 'service-secret', purpose?: 'capture' | 'queued-finalization') =>
   new Request('https://web.internal/api/v1/internal/live-authority', {
     method: 'POST',
     headers: {
@@ -45,6 +49,7 @@ const request = (secret = 'service-secret') =>
       psychologistId: PSYCHOLOGIST_ID,
       tokenExpiresAt: 2_000_000_000,
       vertical: 'DOCTOR',
+      ...(purpose ? { purpose } : {}),
     }),
   }) as never;
 
@@ -52,6 +57,7 @@ describe('internal live authority verifier', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env['LIVE_GATEWAY_SECRET'] = 'service-secret';
+    mocks.teleconsult.mockResolvedValue(undefined);
     mocks.sessionFindUnique.mockResolvedValue({
       psychologistId: PSYCHOLOGIST_ID,
       status: 'IN_PROGRESS',
@@ -83,6 +89,21 @@ describe('internal live authority verifier', () => {
       capabilities: ['CLINICAL_ANALYSIS', 'LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'],
     });
     expect(mocks.getEffectiveCapabilities).toHaveBeenCalledWith(PSYCHOLOGIST_ID);
+    expect(mocks.teleconsult).toHaveBeenCalledWith(
+      expect.anything(),
+      SESSION_ID,
+      PSYCHOLOGIST_ID,
+      'capture',
+    );
+  });
+
+  it('defaults old gateway requests to capture and separately authorizes consented queued output', async () => {
+    mocks.teleconsult.mockImplementation(async (_tx, _sessionId, _ownerId, purpose) => {
+      if (purpose !== 'queued-finalization') throw new Error('paused capture');
+    });
+    expect((await POST(request())).status).toBe(403);
+    expect((await POST(request('service-secret', 'capture'))).status).toBe(403);
+    expect((await POST(request('service-secret', 'queued-finalization'))).status).toBe(200);
   });
 
   it('fails closed and safely audits owner mismatch, inactivity, deletion, or lookup failure', async () => {

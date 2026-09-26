@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   after: vi.fn(),
   persistDraftedOrders: vi.fn(),
   persistVitalReadings: vi.fn(),
+  teleconsultPersistence: vi.fn(),
 }));
 
 vi.mock('next/server', async (importOriginal) => ({
@@ -34,6 +35,9 @@ vi.mock('@/lib/audit', () => ({
 }));
 vi.mock('@/lib/tenant-crypto', () => ({ encryptForTenant: mocks.encrypt }));
 vi.mock('@/lib/ensure-english-note', () => ({ ensureEnglishNote: mocks.translate }));
+vi.mock('@/lib/scribe-teleconsult', () => ({
+  assertScribeTeleconsultDraftPersistence: mocks.teleconsultPersistence,
+}));
 vi.mock('@/lib/note-orchestrator', () => ({
   persistDraftedOrders: mocks.persistDraftedOrders,
   persistVitalReadings: mocks.persistVitalReadings,
@@ -122,6 +126,7 @@ beforeEach(() => {
   failAudit = false;
   failCommit = false;
   mocks.requirePsychologistId.mockResolvedValue(auth);
+  mocks.teleconsultPersistence.mockResolvedValue(false);
   mocks.requireCapability.mockResolvedValue(auth);
   mocks.sessionFindUnique.mockImplementation(async () => ({ ...session }));
   mocks.encrypt.mockResolvedValue('encrypted-transcript');
@@ -461,6 +466,31 @@ describe('Mind live risk persistence boundaries', () => {
       'MEDICAL_DOCUMENTATION',
       auth,
     );
+  });
+  it('retains an interrupted teleconsult draft for review without further orders or vitals automation', async () => {
+    session.psychologist = { vertical: 'DOCTOR', specialty: null };
+    mocks.teleconsultPersistence.mockResolvedValue(true);
+    mocks.requireCapability.mockResolvedValue({
+      ...auth,
+      value: {
+        ...auth.value,
+        user: { capabilities: ['PRESCRIPTION_DRAFTING', 'CLINICAL_ORDERS', 'CHRONIC_CARE'] },
+      },
+    });
+    const response = await post({
+      note: { version: 'V1', chiefComplaint: 'Previously captured synthetic concern' },
+      transcript: 'Previously captured synthetic speech',
+      captureIncomplete: true,
+    });
+    expect(response.status).toBe(201);
+    expect(storedDraft).toMatchObject({ transcriptEncrypted: 'encrypted-transcript' });
+    expect(scribeCaptureIntegrity(storedDraft?.errorMessage as string)).toEqual({
+      incomplete: true,
+      reason: 'capture_interrupted',
+    });
+    expect(mocks.persistDraftedOrders).not.toHaveBeenCalled();
+    expect(mocks.persistVitalReadings).not.toHaveBeenCalled();
+    expect(mocks.translate).not.toHaveBeenCalled();
   });
 
   it('saves a doctor note without inventing speech when its live transcript is empty', async () => {

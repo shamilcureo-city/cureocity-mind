@@ -6,6 +6,7 @@ import { writeAudit } from '@/lib/audit';
 import { SCRIBE_CONSENT_SCOPES } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
+import { assertScribeTeleconsultDocumentationConsent } from '@/lib/scribe-teleconsult';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
 
-  const { session, currentConsentScopes } = await prisma.$transaction(
+  const { session, currentConsentScopes, teleconsultAuthorized } = await prisma.$transaction(
     async (tx) => {
       const currentSession = await tx.session.findUnique({
         where: { id: body.sessionId },
@@ -37,7 +38,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           psychologist: { select: { vertical: true } },
         },
       });
-      if (!currentSession) return { session: null, currentConsentScopes: new Set<string>() };
+      if (!currentSession)
+        return {
+          session: null,
+          currentConsentScopes: new Set<string>(),
+          teleconsultAuthorized: false,
+        };
+      let teleconsultAuthorized = true;
+      if (currentSession.psychologist?.vertical === 'DOCTOR') {
+        try {
+          await assertScribeTeleconsultDocumentationConsent(
+            tx,
+            body.sessionId,
+            currentSession.psychologistId,
+            body.purpose ?? 'capture',
+          );
+        } catch {
+          teleconsultAuthorized = false;
+        }
+      }
 
       // Read lifecycle + all standing consent grants from one serializable,
       // current server-side snapshot. Expired, withdrawn, and absent grants
@@ -55,6 +74,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       });
       return {
         session: currentSession,
+        teleconsultAuthorized,
         currentConsentScopes: new Set(consents.map((consent) => consent.scope)),
       };
     },
@@ -64,6 +84,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     if (
       !session ||
+      !teleconsultAuthorized ||
       session.psychologistId !== body.psychologistId ||
       session.psychologist.vertical !== body.vertical ||
       body.tokenExpiresAt <= Math.floor(Date.now() / 1_000) ||

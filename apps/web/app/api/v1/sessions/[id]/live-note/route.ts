@@ -30,6 +30,8 @@ import {
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
+import { assertScribeTeleconsultDraftPersistence } from '@/lib/scribe-teleconsult';
+import { consentAuthorizationResponse } from '@/lib/consent-gate';
 import {
   preserveScribeCaptureIntegrity,
   scribeCaptureIntegrity,
@@ -357,9 +359,16 @@ export async function POST(
   const transcriptWrite = transcriptEncrypted ? { transcriptEncrypted } : {};
 
   let draft;
+  let teleconsultInterrupted = false;
   try {
     draft = await prisma.$transaction(async (tx) => {
       await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      teleconsultInterrupted = await assertScribeTeleconsultDraftPersistence(
+        tx,
+        sessionId,
+        auth.value.psychologistId,
+        parsed.value.captureIncomplete,
+      );
       return finalizeLiveSession(tx, {
         sessionId,
         endedAt: new Date(),
@@ -370,8 +379,8 @@ export async function POST(
           });
           const errorMessage = preserveScribeCaptureIntegrity(
             previousDraft?.errorMessage,
-            parsed.value.captureIncomplete,
-            parsed.value.captureIncompleteReason,
+            teleconsultInterrupted || parsed.value.captureIncomplete,
+            teleconsultInterrupted ? 'capture_interrupted' : parsed.value.captureIncompleteReason,
           );
           const persisted = await tx.noteDraft.upsert({
             where: { sessionId },
@@ -431,7 +440,8 @@ export async function POST(
       });
     });
   } catch (error) {
-    const response = sessionConcurrentModificationResponse(error);
+    const response =
+      consentAuthorizationResponse(error) ?? sessionConcurrentModificationResponse(error);
     if (response) return response;
     throw error;
   }
@@ -439,12 +449,12 @@ export async function POST(
   // Reuse the batch helpers: draft the Rx + clinical orders (interaction-
   // checked server-side) and capture vitals into the chronic series.
   if (
-    capabilities?.includes('PRESCRIPTION_DRAFTING') ||
-    capabilities?.includes('CLINICAL_ORDERS')
+    !teleconsultInterrupted &&
+    (capabilities?.includes('PRESCRIPTION_DRAFTING') || capabilities?.includes('CLINICAL_ORDERS'))
   ) {
     await persistDraftedOrders(sessionId, auth.value.psychologistId, medications, orders);
   }
-  if (capabilities?.includes('CHRONIC_CARE')) {
+  if (!teleconsultInterrupted && capabilities?.includes('CHRONIC_CARE')) {
     await persistVitalReadings(
       sessionId,
       session.clientId,

@@ -121,9 +121,9 @@ describe('regulated boundary coverage', () => {
 
   it('classifies every Encounter compatibility pathname before its Session delegate runs', () => {
     expect(
-      REGULATED_ROUTE_CAPABILITIES.filter((entry) => entry.route.includes('/encounters')).map(
-        (entry) => `${entry.route}:${entry.methods.join(',')}`,
-      ),
+      REGULATED_ROUTE_CAPABILITIES.filter((entry) =>
+        entry.route.startsWith('api/v1/encounters'),
+      ).map((entry) => `${entry.route}:${entry.methods.join(',')}`),
     ).toEqual([
       'api/v1/encounters:POST',
       'api/v1/encounters/[id]:GET',

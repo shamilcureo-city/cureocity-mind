@@ -1,13 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { MedicalEncounterNoteV1, RxPadDraft } from '@cureocity/contracts';
+import type {
+  MedicalEncounterNoteV1,
+  MedicalEvidenceField,
+  RxPadDraft,
+} from '@cureocity/contracts';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { MedicalNoteView } from './MedicalNoteView';
 import { MedicalNoteEditor, type NoteFieldEdit } from './MedicalNoteEditor';
+import { ScribeSourceComparison } from './ScribeSourceComparison';
+import { ScribeCodingWorkspace } from './ScribeCodingWorkspace';
+import { useScribeSourceReview } from '@/lib/use-scribe-source-review';
 import { VitalsEntryCard } from './VitalsEntryCard';
 import { PlanComposer } from './PlanComposer';
+import { ScribeEncounterTools } from './ScribeEncounterTools';
 import { EncounterDifferentialPanel } from './EncounterDifferentialPanel';
 import { EncounterOrdersPanel } from './EncounterOrdersPanel';
 import { EncounterInteropPanel } from './EncounterInteropPanel';
@@ -85,6 +93,16 @@ export function ReviewAndSign({
   const [working, setWorking] = useState<MedicalEncounterNoteV1>(note);
   const [edits, setEdits] = useState<NoteFieldEdit[]>([]);
   const [editing, setEditing] = useState(false);
+  const [codingWorkPending, setCodingWorkPending] = useState(false);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
+  const [comparisonField, setComparisonField] = useState<MedicalEvidenceField>('chiefComplaint');
+  const [sourceFocusRequest, setSourceFocusRequest] = useState(0);
+  const comparison = useScribeSourceReview(sessionId, comparisonOpen, captureSaveState === 'saved');
+  function openSource(field: MedicalEvidenceField): void {
+    setComparisonField(field);
+    setComparisonOpen(true);
+    setSourceFocusRequest((value) => value + 1);
+  }
   const [copilotActive, setCopilotActive] = useState(false);
   const [captureReview, setCaptureReview] = useState<{
     incomplete: boolean;
@@ -175,6 +193,7 @@ export function ReviewAndSign({
     !signed &&
     (captureBlocked ||
       editing ||
+      codingWorkPending ||
       blockers.soft.length > 0 ||
       (overriding && overrideReason.trim().length < 3));
 
@@ -216,9 +235,8 @@ export function ReviewAndSign({
     }
   }
 
-  // Sign-off. A doctor with a registered WebAuthn credential is required
-  // to assert (same rule as the therapist sign route). The note is signed
-  // as-drafted (no field edits in this MVP).
+  // Sign-off. A doctor with a registered WebAuthn credential must assert.
+  // Source comparison is a reading aid, not capture reconciliation or a signature.
   async function sign(): Promise<void> {
     if (blocked || signing) return;
     setSigning(true);
@@ -425,40 +443,82 @@ export function ReviewAndSign({
         </Card>
       )}
       <Card className="p-7">
-        {editing ? (
-          <MedicalNoteEditor
-            note={working}
-            baseline={note}
-            onCancel={() => setEditing(false)}
-            onSave={(next, changed) => {
-              setWorking(next);
-              setCaptureChecked(false);
-              setReviewedNoteSnapshot(null);
-              // Re-editing accumulates against the ORIGINAL draft, so the
-              // trail always reads "what the AI wrote → what was signed",
-              // never a chain of intermediate keystrokes.
-              setEdits(changed);
-              setEditing(false);
-            }}
-          />
-        ) : (
-          <>
-            <MedicalNoteView note={working} />
-            {!signed && (
-              <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] pt-4">
-                <p className="text-xs text-[var(--color-ink-3)]">
-                  {edits.length === 0
-                    ? 'This note was drafted by AI from the consult. Correct anything that is wrong before you sign it.'
-                    : `You corrected ${edits.length === 1 ? '1 section' : `${edits.length} sections`}. The change is recorded with your signature.`}
-                </p>
-                <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
-                  Edit note
-                </Button>
-              </div>
-            )}
-          </>
+        {!comparisonOpen && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] pb-4">
+            <p className="max-w-xl text-sm text-[var(--color-ink-2)]">
+              Check the draft against the saved conversation. A located quote is not clinical
+              verification.
+            </p>
+            <Button
+              variant="secondary"
+              disabled={captureSaveState !== 'saved'}
+              onClick={() => openSource(comparisonField)}
+            >
+              Compare with source
+            </Button>
+          </div>
         )}
+        <ScribeSourceComparison
+          open={comparisonOpen}
+          editing={editing}
+          note={working}
+          baseline={note}
+          source={comparison.source}
+          loading={comparison.loading}
+          error={comparison.error}
+          onRetry={() => void comparison.reload()}
+          onClose={() => setComparisonOpen(false)}
+          activeField={comparisonField}
+          focusRequest={sourceFocusRequest}
+          onSelectField={setComparisonField}
+        >
+          {editing ? (
+            <MedicalNoteEditor
+              note={working}
+              baseline={note}
+              onFieldFocus={setComparisonField}
+              onCancel={() => setEditing(false)}
+              onSave={(next, changed) => {
+                setWorking(next);
+                setCaptureChecked(false);
+                setReviewedNoteSnapshot(null);
+                // Re-editing accumulates against the ORIGINAL draft, so the
+                // trail always reads "what the AI wrote → what was signed",
+                // never a chain of intermediate keystrokes.
+                setEdits(changed);
+                setEditing(false);
+              }}
+            />
+          ) : (
+            <>
+              <MedicalNoteView note={working} baseline={note} onReviewSource={openSource} />
+              {!signed && (
+                <div className="mt-5 flex items-center justify-between gap-3 border-t border-[var(--color-line-soft)] pt-4">
+                  <p className="text-xs text-[var(--color-ink-3)]">
+                    {edits.length === 0
+                      ? 'This note was drafted by AI from the consult. Correct anything that is wrong before you sign it.'
+                      : `You corrected ${edits.length === 1 ? '1 section' : `${edits.length} sections`}. The change is recorded with your signature.`}
+                  </p>
+                  <Button variant="secondary" size="sm" onClick={() => setEditing(true)}>
+                    Edit note
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </ScribeSourceComparison>
       </Card>
+      <ScribeCodingWorkspace
+        key={sessionId}
+        sessionId={sessionId}
+        note={working}
+        baseline={note}
+        ready={captureSaveState === 'saved'}
+        signed={signed}
+        disabled={editing || signing}
+        onReviewSource={() => openSource('assessment')}
+        onWorkChange={setCodingWorkPending}
+      />
       {/* DS11.6-fu — the honest exam ledger. A copilot exam suggestion the
           doctor never marked done is disclosed here, not silently dropped.
           Wording is deliberately factual (no judgement) — pending clinician
@@ -505,6 +565,14 @@ export function ReviewAndSign({
         onSignBlockers={setBlockers}
       />
       <EncounterDifferentialPanel sessionId={sessionId} onActiveChange={setCopilotActive} />
+      {clientId && (
+        <ScribeEncounterTools
+          key={sessionId}
+          clientId={clientId}
+          sessionId={sessionId}
+          signed={signed}
+        />
+      )}
       <EncounterOrdersPanel sessionId={sessionId} />
       <EncounterInteropPanel sessionId={sessionId} />
 
@@ -570,6 +638,12 @@ export function ReviewAndSign({
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-3">
+        {!signed && codingWorkPending && (
+          <p role="status" className="max-w-xl text-sm text-[var(--color-ink-2)]">
+            Save or discard your coding worksheet edits before signing. The worksheet remains
+            separate from the clinical signature.
+          </p>
+        )}
         {signed ? (
           <>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-soft)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent)]">

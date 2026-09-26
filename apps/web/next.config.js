@@ -90,6 +90,32 @@ const nextConfig = {
         ],
       },
       {
+        source: '/app/patients/:id/encounters/:sessionId/teleconsult',
+        headers: [
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
+          },
+        ],
+      },
+      {
+        source: '/p/scribe/teleconsult/:id',
+        headers: [
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(self), microphone=(self), geolocation=(), payment=(), usb=()',
+          },
+        ],
+      },
+      {
+        source: '/api/v1/public/scribe/teleconsult/:id',
+        headers: [
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },
+          { key: 'Cache-Control', value: 'private, no-store' },
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+        ],
+      },
+      {
         source: '/p/:path*',
         headers: [
           { key: 'X-Robots-Tag', value: 'noindex, nofollow, noarchive' },

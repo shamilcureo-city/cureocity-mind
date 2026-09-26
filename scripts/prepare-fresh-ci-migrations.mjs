@@ -22,6 +22,25 @@ export function assertSafeFreshCiDatabase(env) {
   }
 
   const database = decodeURIComponent(url.pathname.replace(/^\//, '').split('?')[0]);
+  // The Scribe fixture is a separate, explicitly opted-in CI database. Do not
+  // widen the legacy Mind target or allow connection parameters to override
+  // this fixture's host, port, database, or schema.
+  if (env.RUN_SCRIBE_POSTGRES_TESTS === '1' || database === 'cureocity_scribe_test') {
+    if (
+      env.RUN_SCRIBE_POSTGRES_TESTS !== '1' ||
+      !['postgres:', 'postgresql:'].includes(url.protocol) ||
+      url.hostname !== '127.0.0.1' ||
+      url.port !== '55440' ||
+      url.pathname !== '/cureocity_scribe_test' ||
+      url.search ||
+      url.hash
+    ) {
+      throw new Error(
+        'Scribe reconciliation requires its explicit CI opt-in and exact local disposable target 127.0.0.1:55440/cureocity_scribe_test without connection overrides',
+      );
+    }
+    return;
+  }
   if (database !== 'cureocity_mind_test') {
     throw new Error('Historical migration reconciliation requires cureocity_mind_test');
   }

@@ -18,6 +18,7 @@ vi.mock('./auth-server', () => ({
   requireCapability: mocks.requireCapability,
 }));
 vi.mock('./live-token', () => ({ signLiveToken: mocks.signLiveToken }));
+vi.mock('./scribe-teleconsult', () => ({ assertScribeTeleconsultDocumentationConsent: vi.fn() }));
 vi.mock('./patient-context', () => ({
   fetchActiveMedications: mocks.fetchActiveMedications,
   fetchAllergies: mocks.fetchAllergies,

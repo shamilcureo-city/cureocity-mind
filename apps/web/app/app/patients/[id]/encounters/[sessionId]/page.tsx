@@ -6,6 +6,7 @@ import { DoctorEncounterPanel } from '@/components/app/DoctorEncounterPanel';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
 import { prisma } from '@/lib/prisma';
+import { isScribeTeleconsultEnabled } from '@/lib/scribe-teleconsult-links';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +57,15 @@ export default async function EncounterWorkspacePage({
       <header className="mb-6 mt-3 flex flex-wrap items-center justify-between gap-3">
         <h1 className="font-serif text-3xl">Encounter</h1>
         <div className="flex items-center gap-3">
+          {isScribeTeleconsultEnabled() &&
+            (session.status === 'SCHEDULED' || session.status === 'IN_PROGRESS') && (
+              <Link
+                href={`/app/patients/${clientId}/encounters/${sessionId}/teleconsult`}
+                className="text-sm font-medium text-[var(--color-accent)] hover:underline"
+              >
+                Video consultation
+              </Link>
+            )}
           {session.status !== 'COMPLETED' && (
             <Link
               href={`/app/patients/${clientId}/encounters/${sessionId}/live?flash=1`}

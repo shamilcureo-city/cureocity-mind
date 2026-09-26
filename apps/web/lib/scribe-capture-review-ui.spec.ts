@@ -3,10 +3,12 @@ import { Children, isValidElement, type ReactElement, type ReactNode } from 'rea
 import {
   MedicalEncounterNoteV1Schema,
   type MedicalEncounterNoteV1,
+  type MedicalEvidenceField,
   type RxPadDraft,
 } from '@cureocity/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TRANSCRIPT_UNAVAILABLE_MESSAGE } from './note-transcript-view';
+import type { ScribeSourceSnapshot } from './scribe-source-review';
 
 const h = vi.hoisted(() => ({
   states: [] as unknown[],
@@ -67,6 +69,12 @@ vi.mock('../components/app/MedicalNoteView', () => ({ MedicalNoteView: 'medical-
 vi.mock('../components/app/MedicalNoteEditor', () => ({
   MedicalNoteEditor: 'medical-note-editor',
 }));
+vi.mock('../components/app/ScribeSourceComparison', () => ({
+  ScribeSourceComparison: 'source-comparison',
+}));
+vi.mock('../components/app/ScribeCodingWorkspace', () => ({
+  ScribeCodingWorkspace: 'coding-workspace',
+}));
 vi.mock('../components/app/VitalsEntryCard', () => ({ VitalsEntryCard: 'vitals' }));
 vi.mock('../components/app/PlanComposer', () => ({ PlanComposer: 'plan-composer' }));
 vi.mock('../components/app/EncounterDifferentialPanel', () => ({
@@ -86,6 +94,18 @@ type Props = {
   onChange?: (event: { target: { checked: boolean } }) => void;
   onSave?: (note: MedicalEncounterNoteV1, edits: unknown[]) => void;
   onPadChange?: (hasContent: boolean, pad: RxPadDraft | null) => void;
+  open?: boolean;
+  source?: ScribeSourceSnapshot | null;
+  error?: string | null;
+  loading?: boolean;
+  note?: MedicalEncounterNoteV1;
+  activeField?: MedicalEvidenceField;
+  onReviewSource?: (field: MedicalEvidenceField) => void;
+  onFieldFocus?: (field: MedicalEvidenceField) => void;
+  onSelectField?: (field: MedicalEvidenceField) => void;
+  onRetry?: () => void;
+  onClose?: () => void;
+  onWorkChange?: (blocked: boolean) => void;
 };
 const elements = (node: ReactNode): ReactElement<Props>[] =>
   Children.toArray(node).flatMap((child) =>
@@ -108,6 +128,17 @@ const status = () => ({
   reviewToken: 'a'.repeat(64),
 });
 const transcript = 'Fictional captured conversation for review.';
+const comparisonSnapshot = (
+  overrides: Partial<ScribeSourceSnapshot> = {},
+): ScribeSourceSnapshot => ({
+  draftId: 'draft-1',
+  version: 'a'.repeat(64),
+  draftContent: note,
+  transcript,
+  sourceState: 'available',
+  sourceMessage: null,
+  ...overrides,
+});
 function render() {
   h.stateIndex = h.refIndex = h.effectIndex = h.callbackIndex = 0;
   const view = ReviewAndSign(props);
@@ -176,6 +207,7 @@ beforeEach(() => {
     if (url.endsWith('/capture-review'))
       return Response.json(init?.method === 'POST' ? { ...status(), reviewed: true } : status());
     if (url.endsWith('/note-draft')) return Response.json({ transcript });
+    if (url.endsWith('/source-review')) return Response.json(comparisonSnapshot());
     throw new Error(`Unexpected request: ${url}`);
   });
   h.sign.mockResolvedValue(Response.json({ id: 'note-1' }, { status: 201 }));
@@ -186,6 +218,136 @@ afterEach(() => {
 });
 
 describe('Scribe capture review actual control handlers', () => {
+  it('blocks signing over unsaved coding edits without treating coding as capture review', async () => {
+    await loadedIncomplete();
+    const coding = element('coding-workspace');
+    expect(coding).toBeDefined();
+    coding!.props.onWorkChange!(true);
+    expect(button('Confirm & sign')?.props.disabled).toBe(true);
+    coding!.props.onWorkChange!(false);
+    expect(button('Confirm & sign')?.props.disabled).toBe(true);
+    expect(reviewPosts()).toHaveLength(0);
+    await reviewed();
+    element('coding-workspace')!.props.onWorkChange!(true);
+    expect(button('Confirm & sign')?.props.disabled).toBe(true);
+    expect(text(render())).toContain('Save or discard your coding worksheet edits before signing');
+    element('coding-workspace')!.props.onWorkChange!(false);
+    expect(button('Confirm & sign')?.props.disabled).toBe(false);
+  });
+
+  it('loads saved source only on explicit comparison and keeps section focus in sync', async () => {
+    incomplete = false;
+    render();
+    await vi.waitFor(() => expect(button('Confirm & sign')?.props.disabled).toBe(false));
+    expect(h.request.mock.calls.some(([url]) => String(url).endsWith('/source-review'))).toBe(
+      false,
+    );
+    click('Compare with source');
+    await vi.waitFor(() =>
+      expect(element('source-comparison')?.props.source?.transcript).toBe(transcript),
+    );
+    expect(element('source-comparison')?.props.open).toBe(true);
+    expect(reviewPosts()).toHaveLength(0);
+    element('medical-note')!.props.onReviewSource!('plan');
+    expect(element('source-comparison')?.props.activeField).toBe('plan');
+    click('Edit note');
+    element('medical-note-editor')!.props.onFieldFocus!('vitals');
+    expect(element('source-comparison')?.props.activeField).toBe('vitals');
+    expect(button('Confirm & sign')?.props.disabled).toBe(true);
+  });
+
+  it('does not turn source comparison into incomplete-capture approval', async () => {
+    await loadedIncomplete();
+    click('Compare with source');
+    await vi.waitFor(() => expect(element('source-comparison')?.props.source).not.toBeNull());
+    expect(button('Confirm & sign')?.props.disabled).toBe(true);
+    button('Confirm & sign')!.props.onClick!();
+    expect(h.sign).not.toHaveBeenCalled();
+    expect(reviewPosts()).toHaveLength(0);
+    expect(button('Record capture review')?.props.disabled).toBe(true);
+  });
+
+  it('aborts a closed comparison and ignores its late source response after reopening', async () => {
+    incomplete = false;
+    const old = deferred<Response>();
+    const latest = deferred<Response>();
+    let sourceCalls = 0;
+    h.request.mockImplementation(async (url: string) =>
+      url.endsWith('/source-review')
+        ? sourceCalls++ === 0
+          ? old.promise
+          : latest.promise
+        : Response.json(status()),
+    );
+    render();
+    click('Compare with source');
+    render();
+    const pending = h.request.mock.calls.find(([url]) => String(url).endsWith('/source-review'))!;
+    element('source-comparison')!.props.onClose!();
+    render();
+    expect((pending[1].signal as AbortSignal).aborted).toBe(true);
+    expect(element('source-comparison')?.props.source).toBeNull();
+    click('Compare with source');
+    render();
+    latest.resolve(
+      Response.json(
+        comparisonSnapshot({ version: 'b'.repeat(64), transcript: 'New saved source.' }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(element('source-comparison')?.props.source?.transcript).toBe('New saved source.'),
+    );
+    const json = vi.fn(async () => comparisonSnapshot({ transcript: 'Old private source.' }));
+    old.resolve({ ok: true, json } as unknown as Response);
+    await vi.waitFor(() => expect(json).toHaveBeenCalled());
+    expect(element('source-comparison')?.props.source?.transcript).toBe('New saved source.');
+  });
+
+  it('retains applied clinician corrections through failed and successful source refreshes', async () => {
+    incomplete = false;
+    render();
+    click('Edit note');
+    const corrected = { ...note, assessment: 'Clinician correction, not yet signed.' };
+    element('medical-note-editor')!.props.onSave!(corrected, [
+      { field: 'assessment', before: '', after: corrected.assessment },
+    ]);
+    click('Compare with source');
+    await vi.waitFor(() => expect(element('source-comparison')?.props.source).not.toBeNull());
+    h.request.mockResolvedValueOnce(Response.json({ invalid: true }));
+    element('source-comparison')!.props.onRetry!();
+    await vi.waitFor(() =>
+      expect(element('source-comparison')?.props.error).toContain('could not be verified'),
+    );
+    expect(element('source-comparison')?.props.source).toBeNull();
+    expect(element('medical-note')?.props.note).toEqual(corrected);
+    element('source-comparison')!.props.onRetry!();
+    await vi.waitFor(() => expect(element('source-comparison')?.props.source).not.toBeNull());
+    expect(element('medical-note')?.props.note).toEqual(corrected);
+    expect(reviewPosts()).toHaveLength(0);
+    expect(h.sign).not.toHaveBeenCalled();
+  });
+
+  it('hides a previous session source immediately and cancels its pending fetch on unmount', async () => {
+    incomplete = false;
+    render();
+    click('Compare with source');
+    await vi.waitFor(() => expect(element('source-comparison')?.props.source).not.toBeNull());
+    const pending = deferred<Response>();
+    h.request.mockImplementation(async (url: string) =>
+      url.endsWith('/source-review') ? pending.promise : Response.json(status()),
+    );
+    props = { ...props, sessionId: 'session-2' };
+    const changed = render();
+    expect(
+      elements(changed).find((node) => node.type === 'source-comparison')?.props.source,
+    ).toBeNull();
+    const request = h.request.mock.calls.find(
+      ([url]) => String(url) === '/api/v1/sessions/session-2/source-review',
+    )!;
+    h.effects.forEach((effect) => effect.cleanup?.());
+    expect((request[1].signal as AbortSignal).aborted).toBe(true);
+  });
+
   it('blocks signing while capture status is loading, including direct invocation of its handler', async () => {
     const pending = deferred<Response>();
     h.request.mockReturnValueOnce(pending.promise);

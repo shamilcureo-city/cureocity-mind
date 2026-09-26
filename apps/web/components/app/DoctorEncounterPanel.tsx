@@ -215,7 +215,9 @@ export function DoctorEncounterPanel({
   }
 
   // done — the single shared review-and-sign surface (DS11.2).
-  return <ReviewAndSign sessionId={sessionId} clientId={clientId} note={state.note} />;
+  return (
+    <ReviewAndSign key={sessionId} sessionId={sessionId} clientId={clientId} note={state.note} />
+  );
 }
 
 async function errorOf(res: Response, fallback: string): Promise<string> {

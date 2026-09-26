@@ -89,6 +89,7 @@ describe('Mind and Scribe practitioner journey boundary', () => {
       'app/app/patients/page.tsx',
       'app/app/patients/[id]/encounters/[sessionId]/page.tsx',
       'app/app/patients/[id]/encounters/[sessionId]/live/page.tsx',
+      'app/app/patients/[id]/encounters/[sessionId]/teleconsult/page.tsx',
     ];
 
     for (const path of doctorPages)

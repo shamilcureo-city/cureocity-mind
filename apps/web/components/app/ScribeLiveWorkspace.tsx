@@ -85,7 +85,15 @@ export function ScribeLiveWorkspace({
 }
 
 /** This meter uses measured RMS microphone input, never a looping animation. */
-export function ScribeInputMeter({ level, active }: { level: number; active: boolean }) {
+export function ScribeInputMeter({
+  level,
+  active,
+  source = 'microphone',
+}: {
+  level: number;
+  active: boolean;
+  source?: 'microphone' | 'call';
+}) {
   const normalized = active && Number.isFinite(level) ? Math.min(1, Math.max(0, level)) : 0;
   // A display gain makes ordinary speech legible; it is not a clinical score.
   const displayLevel = Math.min(1, Math.sqrt(normalized));
@@ -93,18 +101,32 @@ export function ScribeInputMeter({ level, active }: { level: number; active: boo
     <span className={styles.inputMeter}>
       <span
         role="meter"
-        aria-label="Microphone input level"
+        aria-label={source === 'call' ? 'Call capture input level' : 'Microphone input level'}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(normalized * 100)}
         aria-valuetext={
-          !active ? 'Microphone off' : normalized > 0.005 ? 'Sound detected' : 'Quiet input'
+          !active
+            ? source === 'call'
+              ? 'Documentation capture off'
+              : 'Microphone off'
+            : normalized > 0.005
+              ? 'Sound detected'
+              : 'Quiet input'
         }
         className={styles.meterTrack}
       >
         <span style={{ width: `${displayLevel * 100}%` }} />
       </span>
-      <span>{!active ? 'Mic off' : normalized > 0.005 ? 'Sound detected' : 'Quiet input'}</span>
+      <span>
+        {!active
+          ? source === 'call'
+            ? 'Capture off'
+            : 'Mic off'
+          : normalized > 0.005
+            ? 'Sound detected'
+            : 'Quiet input'}
+      </span>
     </span>
   );
 }

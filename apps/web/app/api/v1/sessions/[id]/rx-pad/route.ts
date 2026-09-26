@@ -14,6 +14,8 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
+import { canonicalJson } from '@/lib/sign-note-payload';
+import { scribeErrorResponse } from '@/lib/scribe-workspace-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -88,48 +90,73 @@ export async function PATCH(
   }
   const draftId = session.noteDraft.id;
 
-  let pad: RxPadDraft = parsePad(session.noteDraft.rxPad) ?? { version: 'V1' };
+  let pad: RxPadDraft;
   try {
-    for (const op of parsed.value.ops) {
-      pad = applyOp(pad, op);
-    }
+    pad = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      await tx.$queryRaw`SELECT "id" FROM "sessions" WHERE "id" = ${sessionId} FOR UPDATE`;
+      await tx.$queryRaw`SELECT "id" FROM "note_drafts" WHERE "sessionId" = ${sessionId} FOR UPDATE`;
+      const current = await loadSession(sessionId, tx);
+      if (
+        !current ||
+        current.psychologistId !== auth.value.psychologistId ||
+        !current.noteDraft ||
+        current.noteDraft.id !== draftId
+      ) {
+        throw new RxPadPatchError(409, 'The encounter draft changed. Reload before editing.');
+      }
+      if (current.therapyNote?.signedAt != null) {
+        throw new RxPadPatchError(
+          409,
+          'This note is signed — the prescription can no longer be edited.',
+        );
+      }
+      const original = parsePad(current.noteDraft.rxPad);
+      if (
+        parsed.value.expectedPad !== undefined &&
+        canonicalJson(original) !== canonicalJson(parsed.value.expectedPad)
+      ) {
+        throw new RxPadPatchError(
+          409,
+          'The prescription changed in another window. Reload and preview your changes again.',
+        );
+      }
+      let updated: RxPadDraft = original ?? { version: 'V1' };
+      for (const op of parsed.value.ops) updated = applyOp(updated, op);
+      updated = withSafetyWarnings(updated);
+      await tx.noteDraft.update({
+        where: { id: draftId },
+        data: { rxPad: updated as unknown as Prisma.InputJsonValue },
+      });
+
+      const baseMetadata = auditMetadataFromRequest(req);
+      for (const op of parsed.value.ops) {
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'RX_PAD_EDITED',
+            targetType: 'NoteDraft',
+            targetId: draftId,
+            metadata: {
+              ...baseMetadata,
+              sessionId,
+              op: op.op,
+              ...('source' in op ? { source: op.source } : {}),
+              item: itemLabel(op),
+            },
+          },
+          tx,
+        );
+      }
+      return updated;
+    });
   } catch (error) {
     if (error instanceof RxPadPatchError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
-    throw error;
+    return scribeErrorResponse(error);
   }
-  // Server-owned warnings: recompute across the whole pad after the edits.
-  pad = withSafetyWarnings(pad);
-
-  await prisma.$transaction(async (tx) => {
-    await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
-    await tx.noteDraft.update({
-      where: { id: draftId },
-      data: { rxPad: pad as unknown as Prisma.InputJsonValue },
-    });
-
-    const baseMetadata = auditMetadataFromRequest(req);
-    for (const op of parsed.value.ops) {
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'RX_PAD_EDITED',
-          targetType: 'NoteDraft',
-          targetId: draftId,
-          metadata: {
-            ...baseMetadata,
-            sessionId,
-            op: op.op,
-            ...('source' in op ? { source: op.source } : {}),
-            item: itemLabel(op),
-          },
-        },
-        tx,
-      );
-    }
-  });
 
   const body: RxPadResponse = { rxPad: pad, signed: false };
   return NextResponse.json(body);
@@ -137,8 +164,11 @@ export async function PATCH(
 
 // ---------------------------------------------------------------------------
 
-async function loadSession(sessionId: string) {
-  return prisma.session.findUnique({
+async function loadSession(
+  sessionId: string,
+  db: Pick<Prisma.TransactionClient, 'session'> = prisma,
+) {
+  return db.session.findUnique({
     where: { id: sessionId },
     select: {
       id: true,

@@ -28,6 +28,8 @@ export const LiveAuthorityRequestSchema = z
     psychologistId: CuidSchema,
     tokenExpiresAt: z.number().int().positive(),
     vertical: PractitionerVerticalSchema,
+    // Older gateways must never inherit queued-processing authority for new audio.
+    purpose: z.enum(['capture', 'queued-finalization']).optional(),
   })
   .strict();
 export type LiveAuthorityRequest = z.infer<typeof LiveAuthorityRequestSchema>;
