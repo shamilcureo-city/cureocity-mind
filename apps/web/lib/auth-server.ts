@@ -290,7 +290,10 @@ export async function resolvePsychologist(req: NextRequest): Promise<Resolved<Au
   if (psy && (psy.deletedAt !== null || psy.status !== 'ACTIVE')) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'Practitioner account is not active' }, { status: 403 }),
+      response: NextResponse.json(
+        { error: 'Practitioner account is not active', code: 'PRACTITIONER_INACTIVE' },
+        { status: 403 },
+      ),
     };
   }
   if (psy) {

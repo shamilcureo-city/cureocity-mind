@@ -84,16 +84,26 @@ export async function requirePagePsychologist(): Promise<Psychologist> {
   return psy;
 }
 
+/** Clinical pages must apply the same lifecycle gate as their API requests.
+ * Keep the identity-only helper above for the account-status page so an
+ * inactive practitioner can understand the restriction without a login loop.
+ */
+export async function requireActivePagePsychologist(): Promise<Psychologist> {
+  const psy = await requirePagePsychologist();
+  if (psy.status !== 'ACTIVE') redirect('/account-status');
+  return psy;
+}
+
 /**
  * Sprint 31 — primary page guard for `/app/*`. Bounces signed-in but
  * not-yet-onboarded therapists to the onboarding form so the rest of
  * the app never sees placeholder identity fields.
  *
- * The onboarding page itself must use `requirePagePsychologist` (not
+ * The onboarding page itself must use `requireActivePagePsychologist` (not
  * this helper) to avoid an infinite redirect.
  */
 export async function requireOnboardedPsychologist(): Promise<Psychologist> {
-  const psy = await requirePagePsychologist();
+  const psy = await requireActivePagePsychologist();
   if (psy.onboardingCompletedAt === null) redirect('/onboarding');
   return psy;
 }

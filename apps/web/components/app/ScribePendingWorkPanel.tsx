@@ -1,12 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import type {
   ScribePendingWork,
   ScribeTaskBody,
   ScribeTaskRecord,
 } from '@/lib/scribe-preparation-contracts';
+import {
+  readScribeRequestError,
+  safeScribeRequestError,
+  type ScribeRequestError,
+  type ScribeRequestOperation,
+} from '@/lib/scribe-request-error';
 import { Button } from '../ui/Button';
 import { Input, Label, Select, Textarea } from '../ui/Field';
 import { useScribeFetch } from './ScribeTransport';
@@ -23,8 +29,10 @@ export function ScribePendingWorkPanel({
     clientId: string | undefined;
     data: ScribePendingWork;
   } | null>(null);
-  const data = loaded?.clientId === clientId ? (loaded?.data ?? null) : null;
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ScribeRequestError | null>(null);
+  const accessDenied = useRef(false);
+  const blocked = error?.blocksAccess ?? false;
+  const data = !blocked && loaded?.clientId === clientId ? (loaded?.data ?? null) : null;
   const [busy, setBusy] = useState(false);
   const [closed, setClosed] = useState(false);
   const [patient, setPatient] = useState(clientId ?? '');
@@ -33,30 +41,49 @@ export function ScribePendingWorkPanel({
   const [category, setCategory] = useState<ScribeTaskBody['category']>('results');
   const [dueDate, setDueDate] = useState('');
   const [assignee, setAssignee] = useState('Doctor (you)');
+  const reportFailure = useCallback((reason: unknown, operation: ScribeRequestOperation) => {
+    const failure = safeScribeRequestError(reason, operation);
+    if (failure.blocksAccess) {
+      accessDenied.current = true;
+      setLoaded(null);
+      setPatient('');
+      setTitle('');
+      setDetails('');
+      setDueDate('');
+      setAssignee('Doctor (you)');
+    }
+    // A late network error must not replace an already established access denial.
+    if (failure.blocksAccess || !accessDenied.current) setError(failure);
+    return failure;
+  }, []);
   const load = useCallback(
     async (signal?: AbortSignal) => {
+      if (accessDenied.current) return;
       const response = await request(
         `/api/v1/scribe-tasks${clientId ? `?clientId=${encodeURIComponent(clientId)}` : ''}`,
         { signal, cache: 'no-store' },
       );
-      if (!response.ok) throw new Error('Could not load pending work. Please retry.');
+      if (!response.ok) throw await readScribeRequestError(response, 'load');
       const body = (await response.json()) as ScribePendingWork;
-      if (!signal?.aborted) setLoaded({ clientId, data: body });
+      // An older successful refresh must never restore data after another request loses access.
+      if (!signal?.aborted && !accessDenied.current) setLoaded({ clientId, data: body });
     },
     [clientId, request],
   );
   useEffect(() => {
     const controller = new AbortController();
+    accessDenied.current = false;
     setLoaded(null);
     setError(null);
     setPatient(clientId ?? '');
-    void load(controller.signal).catch((reason: Error) => {
-      if (!controller.signal.aborted) setError(reason.message);
+    void load(controller.signal).catch((reason: unknown) => {
+      if (!controller.signal.aborted) reportFailure(reason, 'load');
     });
     return () => controller.abort();
-  }, [load]);
+  }, [load, reportFailure]);
   async function create(event: FormEvent) {
     event.preventDefault();
+    if (accessDenied.current) return;
     setBusy(true);
     setError(null);
     try {
@@ -68,17 +95,18 @@ export function ScribePendingWorkPanel({
           task: { title, details, category, dueDate, assignee },
         }),
       });
-      if (!response.ok) throw new Error('Could not create task. Check the fields and retry.');
+      if (!response.ok) throw await readScribeRequestError(response, 'create');
       setTitle('');
       setDetails('');
       await load();
     } catch (reason) {
-      setError((reason as Error).message);
+      reportFailure(reason, 'create');
     } finally {
       setBusy(false);
     }
   }
   async function change(record: ScribeTaskRecord, changes: Partial<ScribeTaskBody>) {
+    if (accessDenied.current) return;
     setBusy(true);
     setError(null);
     try {
@@ -90,16 +118,13 @@ export function ScribePendingWorkPanel({
           task: { ...record.body, ...changes },
         }),
       });
-      if (!response.ok)
-        throw new Error(
-          response.status === 409
-            ? 'This task changed elsewhere. Refreshed; check it before trying again.'
-            : 'Could not update task.',
-        );
+      if (!response.ok) throw await readScribeRequestError(response, 'update');
       await load();
     } catch (reason) {
-      setError((reason as Error).message);
-      await load().catch(() => {});
+      const failure = reportFailure(reason, 'update');
+      if (failure.kind === 'conflict' && !accessDenied.current) {
+        await load().catch((loadReason: unknown) => reportFailure(loadReason, 'load'));
+      }
     } finally {
       setBusy(false);
     }
@@ -111,26 +136,33 @@ export function ScribePendingWorkPanel({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-serif text-xl">Pending work</h2>
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={busy}
-          onClick={() => {
-            setError(null);
-            void load().catch((reason: Error) => setError(reason.message));
-          }}
-        >
-          Refresh
-        </Button>
+        {!blocked && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              setError(null);
+              void load().catch((reason: unknown) => reportFailure(reason, 'load'));
+            }}
+          >
+            Refresh
+          </Button>
+        )}
       </div>
       <p className="mt-1 text-sm text-[var(--color-ink-3)]">
         Unsigned notes and doctor-created work items. Assignee is a label only; no staff access,
         reminders or messages are sent.
       </p>
       {error && (
-        <p role="alert" className="mt-3 text-sm text-[var(--color-warn)]">
-          {error}
-        </p>
+        <div role="alert" className="mt-3 text-sm text-[var(--color-warn)]">
+          <p>{error.message}</p>
+          {error.action && (
+            <Link className="mt-2 inline-block underline" href={error.action.href}>
+              {error.action.label}
+            </Link>
+          )}
+        </div>
       )}
       {!data ? (
         <p role="status" className="mt-3">
@@ -255,76 +287,82 @@ export function ScribePendingWorkPanel({
           </div>
         </div>
       )}
-      <details className="mt-5 border-t border-[var(--color-line-soft)] pt-3">
-        <summary className="cursor-pointer font-medium">
-          Add pending result, referral or follow-up
-        </summary>
-        <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={(event) => void create(event)}>
-          {!clientId && (
+      {data && (
+        <details className="mt-5 border-t border-[var(--color-line-soft)] pt-3">
+          <summary className="cursor-pointer font-medium">
+            Add pending result, referral or follow-up
+          </summary>
+          <form className="mt-4 grid gap-3 sm:grid-cols-2" onSubmit={(event) => void create(event)}>
+            {!clientId && (
+              <label className="text-sm">
+                Patient
+                <Select
+                  value={patient}
+                  onChange={(event) => setPatient(event.target.value)}
+                  required
+                >
+                  <option value="">Select patient</option>
+                  {patients.map((entry) => (
+                    <option key={entry.id} value={entry.id}>
+                      {entry.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            )}
             <label className="text-sm">
-              Patient
-              <Select value={patient} onChange={(event) => setPatient(event.target.value)} required>
-                <option value="">Select patient</option>
-                {patients.map((entry) => (
-                  <option key={entry.id} value={entry.id}>
-                    {entry.name}
-                  </option>
-                ))}
+              Type
+              <Select
+                value={category}
+                onChange={(event) => setCategory(event.target.value as ScribeTaskBody['category'])}
+              >
+                <option value="results">Result review</option>
+                <option value="referral">Referral</option>
+                <option value="follow_up">Follow-up</option>
               </Select>
             </label>
-          )}
-          <label className="text-sm">
-            Type
-            <Select
-              value={category}
-              onChange={(event) => setCategory(event.target.value as ScribeTaskBody['category'])}
-            >
-              <option value="results">Result review</option>
-              <option value="referral">Referral</option>
-              <option value="follow_up">Follow-up</option>
-            </Select>
-          </label>
-          <label className="text-sm">
-            Task
-            <Input
-              value={title}
-              maxLength={300}
-              onChange={(event) => setTitle(event.target.value)}
-              required
-            />
-          </label>
-          <label className="text-sm">
-            Due date
-            <Input
-              type="date"
-              value={dueDate}
-              onChange={(event) => setDueDate(event.target.value)}
-              required
-            />
-          </label>
-          <label className="text-sm">
-            Responsible person (label only)
-            <Input
-              value={assignee}
-              maxLength={100}
-              onChange={(event) => setAssignee(event.target.value)}
-              required
-            />
-          </label>
-          <div className="sm:col-span-2">
-            <Label htmlFor={`task-details-${clientId ?? 'clinic'}`}>Details</Label>
-            <Textarea
-              id={`task-details-${clientId ?? 'clinic'}`}
-              value={details}
-              maxLength={2000}
-              onChange={(event) => setDetails(event.target.value)}
-            />
-          </div>
-          <Button type="submit" disabled={busy || !patient}>
-            {busy ? 'Saving…' : 'Create task'}
-          </Button>
-        </form>
-      </details>
+            <label className="text-sm">
+              Task
+              <Input
+                value={title}
+                maxLength={300}
+                onChange={(event) => setTitle(event.target.value)}
+                required
+              />
+            </label>
+            <label className="text-sm">
+              Due date
+              <Input
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+                required
+              />
+            </label>
+            <label className="text-sm">
+              Responsible person (label only)
+              <Input
+                value={assignee}
+                maxLength={100}
+                onChange={(event) => setAssignee(event.target.value)}
+                required
+              />
+            </label>
+            <div className="sm:col-span-2">
+              <Label htmlFor={`task-details-${clientId ?? 'clinic'}`}>Details</Label>
+              <Textarea
+                id={`task-details-${clientId ?? 'clinic'}`}
+                value={details}
+                maxLength={2000}
+                onChange={(event) => setDetails(event.target.value)}
+              />
+            </div>
+            <Button type="submit" disabled={busy || !patient}>
+              {busy ? 'Saving…' : 'Create task'}
+            </Button>
+          </form>
+        </details>
+      )}
     </section>
   );
 }

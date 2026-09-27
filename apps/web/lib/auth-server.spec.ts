@@ -137,7 +137,13 @@ describe('practitioner state boundary', () => {
       );
 
       expect(resolved.ok).toBe(false);
-      if (!resolved.ok) expect(resolved.response.status).toBe(403);
+      if (!resolved.ok) {
+        expect(resolved.response.status).toBe(403);
+        expect(await resolved.response.json()).toEqual({
+          error: 'Practitioner account is not active',
+          code: 'PRACTITIONER_INACTIVE',
+        });
+      }
       expect(mocks.getEffectiveCapabilities).not.toHaveBeenCalled();
     },
   );
