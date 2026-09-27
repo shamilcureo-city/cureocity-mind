@@ -9,7 +9,8 @@ describe('Scribe evidence-first closeout safety', () => {
     const flow = source('components/app/LiveEncounterFlow.tsx');
     const consentRoute = source('app/api/v1/sessions/[id]/consent/route.ts');
 
-    expect(flow).toContain('Patient agreed — open live consult');
+    expect(flow).toContain('Save consent and open live consult');
+    expect(flow).toContain("method: 'POST'");
     expect(flow).toContain('Patient declined — use dictation');
     expect(flow).toContain('liveConsent=declined');
     expect(flow).toContain("method: 'DELETE'");
