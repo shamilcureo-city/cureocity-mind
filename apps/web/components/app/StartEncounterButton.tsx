@@ -4,15 +4,14 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { CaptureMode } from '@cureocity/contracts';
 import { Button } from '../ui/Button';
-import { primeMicPermission } from '@/lib/audio/prime-mic';
 
 /**
  * Sprint DV2 → DS11.3 → DS11.7-fu — "Start consult" for the doctor patient
  * page.
  *
- * Live is the product default: the primary action creates the session, primes
- * the mic permission on this same gesture, and lands on the live copilot
- * (?flash=1 → Ready screen → auto-start). The caret reveals the deliberate
+ * Live is the product default: the primary action creates the session and
+ * opens the context flash, then consent. Microphone access happens only on
+ * the later, explicit live Start action. The caret reveals the deliberate
  * deviations (dictate/upload — the classic batch pipeline).
  *
  * DS11.7-fu — a doctor can set a preferred capture mode in Preferences; when
@@ -88,8 +87,6 @@ export function StartEncounterButton({
     if (!id) return;
     const base = `/app/patients/${clientId}/encounters/${id}`;
     if (mode === 'LIVE') {
-      // Prime the mic on THIS gesture so the live page auto-starts.
-      await primeMicPermission();
       router.push(`${base}/live?flash=1`);
     } else if (mode === 'UPLOAD') {
       router.push(`${base}?mode=upload`);

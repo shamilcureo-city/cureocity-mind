@@ -65,6 +65,7 @@ export default async function LiveEncounterPage({
       </div>
 
       <LiveEncounterFlow
+        key={sessionId}
         sessionId={sessionId}
         sessionStatus={session.status}
         clientId={clientId}
