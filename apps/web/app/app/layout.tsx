@@ -37,6 +37,9 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   const psy = await currentPsychologist();
+  // Page guards also enforce this before loading clinical data. The shell
+  // must not fetch billing or mount clinical navigation for blocked accounts.
+  if (psy && psy.status !== 'ACTIVE') redirect('/account-status');
   const host = (await headers()).get('host');
   if (psy) {
     const canonicalUrl = practitionerHostRedirect(host, psy.vertical, sessionCookieDomain());

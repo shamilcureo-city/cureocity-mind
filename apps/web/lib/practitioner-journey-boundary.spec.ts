@@ -126,7 +126,7 @@ describe('Mind and Scribe practitioner journey boundary', () => {
     const sidebar = readWeb('components/app/Sidebar.tsx');
 
     expect(sidebar).toContain("vertical === 'DOCTOR' ? '/app/clinic' : '/app/today'");
-    expect(sidebar).toContain('<OrbitLogo href={homeHref} />');
+    expect(sidebar).toContain('<ScribeLogo href={homeHref} />');
   });
 
   it('keeps the documented route inventory exactly synchronized with page files', () => {

@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
 import { Container } from '@/components/ui/Container';
 import { OnboardingForm } from '@/components/app/OnboardingForm';
-import { requirePagePsychologist } from '@/lib/auth-page';
+import { requireActivePagePsychologist } from '@/lib/auth-page';
 import { practitionerProductCopy, productFromHost } from '@/lib/product';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
 /**
  * Sprint 31 — onboarding gate.
  *
- * Uses `requirePagePsychologist` (NOT `requireOnboardedPsychologist`)
+ * Uses `requireActivePagePsychologist` (NOT `requireOnboardedPsychologist`)
  * to avoid an infinite redirect: if the user is already onboarded we
  * bounce to /app explicitly.
  *
@@ -29,7 +29,9 @@ export async function generateMetadata(): Promise<Metadata> {
  * must-pick behaviour.
  */
 export default async function OnboardingPage() {
-  const me = await requirePagePsychologist();
+  // Match the onboarding API's existing lifecycle restriction. Do not offer
+  // a form which will inevitably fail with an inactive-account error.
+  const me = await requireActivePagePsychologist();
   if (me.onboardingCompletedAt !== null) redirect('/app');
 
   const host = (await headers()).get('host');

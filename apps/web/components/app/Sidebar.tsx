@@ -8,7 +8,7 @@ import {
   type BillingPlan,
   type PractitionerVertical,
 } from '@cureocity/contracts';
-import { OrbitLogo } from '@/components/ui/OrbitLogo';
+import { ScribeLogo } from '@/components/ui/ScribeLogo';
 import { practitionerNavigation } from '@/lib/practitioner-navigation';
 
 export interface PlanUsage {
@@ -59,7 +59,7 @@ export function Sidebar({ usage = null, vertical = 'THERAPIST' }: SidebarProps) 
             </span>
           </Link>
         ) : (
-          <OrbitLogo href={homeHref} />
+          <ScribeLogo href={homeHref} />
         )}
       </div>
 
