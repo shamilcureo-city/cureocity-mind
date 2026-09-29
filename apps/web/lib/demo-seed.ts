@@ -19,8 +19,9 @@ import {
  * - 89 clearly synthetic Indian psychologists with pending TEST-RCI ids.
  * - 500–800 UAE doctor encounters per day and exactly 250 psychologist
  *   encounters per day from 1–30 September 2026.
- * - Every client is isDemo=true; no names, contact details, audio, transcript,
- *   notes, diagnosis, consent, billing, or signed records are created.
+ * - Each practitioner has one reusable isDemo=true client; no names, contact
+ *   details, audio, transcript, notes, diagnosis, consent, billing, or signed
+ *   records are created.
  *
  * The CLI is intentionally explicit (`--apply`). Applying a plan replaces the
  * reserved legacy `seed-*` and current `demo-load-*` namespaces so reruns
@@ -123,6 +124,28 @@ function practitionerRows(plan: DemoLoadPlan): Prisma.PsychologistCreateManyInpu
   }));
 }
 
+function assertPlanOwnership(plan: DemoLoadPlan): void {
+  if (plan.clients.length !== plan.practitioners.length) {
+    throw new Error(
+      `Synthetic plan must have one demo client per practitioner: ${plan.clients.length}/${plan.practitioners.length}`,
+    );
+  }
+
+  const clientById = new Map(plan.clients.map((client) => [client.id, client]));
+  const clientOwners = new Set(plan.clients.map((client) => client.practitionerUid));
+  if (clientById.size !== plan.clients.length || clientOwners.size !== plan.practitioners.length) {
+    throw new Error('Synthetic plan contains duplicate client ids or practitioner ownership');
+  }
+
+  const ownershipMismatch = plan.sessions.find(
+    (session) =>
+      clientById.get(session.clientId)?.practitionerUid !== session.practitionerUid,
+  );
+  if (ownershipMismatch) {
+    throw new Error(`Synthetic session ${ownershipMismatch.id} has an invalid client owner`);
+  }
+}
+
 function summaryFor(plan: DemoLoadPlan, purged: number): DemoSeedSummary {
   const daily: DemoSeedDaySummary[] = plan.days.map((day) => ({
     date: day.dateKey,
@@ -184,10 +207,14 @@ export async function seedDemo(
   prisma: PrismaClient,
   opts: { purge?: boolean } = {},
 ): Promise<DemoSeedSummary> {
-  const purged = await purgeDemo(prisma);
-  if (opts.purge) return emptySummary(purged);
+  if (opts.purge) return emptySummary(await purgeDemo(prisma));
 
   const plan = buildDemoLoadPlan();
+  // Validate the complete in-memory plan before deleting the previous cohort.
+  // This guards the product's one-demo-client-per-practitioner invariant and
+  // prevents an invalid generated plan from turning replacement into a purge.
+  assertPlanOwnership(plan);
+  const purged = await purgeDemo(prisma);
   await prisma.psychologist.createMany({ data: practitionerRows(plan) });
 
   const persistedPractitioners = await prisma.psychologist.findMany({

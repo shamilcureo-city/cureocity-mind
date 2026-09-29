@@ -334,12 +334,29 @@ function sessionStem(
   return `${cohort}-${pad(practitioner.ordinal, 4)}-${dateKey.replaceAll('-', '')}-${pad(sequence, 3)}`;
 }
 
+function buildDemoLoadClient(practitioner: DemoLoadPractitioner): DemoLoadClient {
+  const cohort = practitioner.cohort === 'UAE_DOCTOR' ? 'uae-doc' : 'in-psy';
+  const stem = `${cohort}-${pad(practitioner.ordinal, 4)}`;
+  const spokenLanguages = practitioner.vertical === 'DOCTOR' ? ['en', 'ar'] : ['en', 'hi'];
+
+  return {
+    id: `demo-load-client-${stem}`,
+    clientFirebaseUid: `demo-load-firebase-${stem}`,
+    practitionerUid: practitioner.uid,
+    preferredLanguage: 'en',
+    spokenLanguages,
+    status: 'ACTIVE',
+    isDemo: true,
+  };
+}
+
 function buildEncounter(
   practitioner: DemoLoadPractitioner,
+  clientId: string,
   dateKey: string,
   status: DemoLoadSessionStatus,
   sequence: number,
-): { client: DemoLoadClient; session: DemoLoadSession } {
+): DemoLoadSession {
   const isDoctor = practitioner.vertical === 'DOCTOR';
   const localStartMinutes = isDoctor ? 8 * 60 : 9 * 60;
   const spacingMinutes = isDoctor ? 40 : 90;
@@ -352,36 +369,24 @@ function buildEncounter(
     practitioner.timezoneOffsetMinutes,
   );
   const stem = sessionStem(practitioner, dateKey, sequence);
-  const clientId = `demo-load-client-${stem}`;
   const spokenLanguages = isDoctor ? ['en', 'ar'] : ['en', 'hi'];
   const completed = status === 'COMPLETED';
 
   return {
-    client: {
-      id: clientId,
-      clientFirebaseUid: `demo-load-firebase-${stem}`,
-      practitionerUid: practitioner.uid,
-      preferredLanguage: 'en',
-      spokenLanguages: [...spokenLanguages],
-      status: 'ACTIVE',
-      isDemo: true,
-    },
-    session: {
-      id: `demo-load-session-${stem}`,
-      clientId,
-      practitionerUid: practitioner.uid,
-      status,
-      kind: 'TREATMENT',
-      scheduledAt,
-      startedAt: completed ? new Date(scheduledAt) : null,
-      endedAt: completed ? new Date(scheduledAt.getTime() + durationMinutes * MINUTE_MS) : null,
-      createdAt: new Date(scheduledAt.getTime() - DAY_MS),
-      language: 'en',
-      spokenLanguages: [...spokenLanguages],
-      captureMode: isDoctor ? captureModeForSequence(sequence) : null,
-      tokenNumber: isDoctor ? sequence : null,
-      modality: isDoctor ? null : 'SUPPORTIVE',
-    },
+    id: `demo-load-session-${stem}`,
+    clientId,
+    practitionerUid: practitioner.uid,
+    status,
+    kind: 'TREATMENT',
+    scheduledAt,
+    startedAt: completed ? new Date(scheduledAt) : null,
+    endedAt: completed ? new Date(scheduledAt.getTime() + durationMinutes * MINUTE_MS) : null,
+    createdAt: new Date(scheduledAt.getTime() - DAY_MS),
+    language: 'en',
+    spokenLanguages: [...spokenLanguages],
+    captureMode: isDoctor ? captureModeForSequence(sequence) : null,
+    tokenNumber: isDoctor ? sequence : null,
+    modality: isDoctor ? null : 'SUPPORTIVE',
   };
 }
 
@@ -396,7 +401,13 @@ export function buildDemoLoadPlan(): DemoLoadPlan {
     practitioners.map((practitioner) => [practitioner.uid, practitioner]),
   );
 
-  const clients: DemoLoadClient[] = [];
+  // The product intentionally permits at most one isDemo client per
+  // practitioner. Reuse that opaque client for the practitioner's synthetic
+  // encounter history rather than weakening the database safety index.
+  const clients = practitioners.map(buildDemoLoadClient);
+  const clientIdByPractitionerUid = new Map(
+    clients.map((client) => [client.practitionerUid, client.id]),
+  );
   const sessions: DemoLoadSession[] = [];
   const days: DemoLoadDaySummary[] = [];
 
@@ -431,11 +442,11 @@ export function buildDemoLoadPlan(): DemoLoadPlan {
     for (const allocation of [...doctorAllocations, ...psychologistAllocations]) {
       const practitioner = practitionerByUid.get(allocation.practitionerUid);
       if (!practitioner) throw new Error(`Unknown practitioner: ${allocation.practitionerUid}`);
+      const clientId = clientIdByPractitionerUid.get(practitioner.uid);
+      if (!clientId) throw new Error(`Missing synthetic client for ${practitioner.uid}`);
 
       for (let sequence = 1; sequence <= allocation.encounterCount; sequence += 1) {
-        const encounter = buildEncounter(practitioner, dateKey, status, sequence);
-        clients.push(encounter.client);
-        sessions.push(encounter.session);
+        sessions.push(buildEncounter(practitioner, clientId, dateKey, status, sequence));
       }
     }
   }

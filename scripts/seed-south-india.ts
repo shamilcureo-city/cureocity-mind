@@ -35,7 +35,7 @@ function printPreview(): void {
   console.log('  Psychologists:  89 synthetic Indian accounts');
   console.log(`  Mind visits:    ${psychologistTotal.toLocaleString('en-IN')} (250 per day)`);
   console.log(
-    `  Demo clients:   ${plan.clients.length.toLocaleString('en-IN')} (one per encounter)`,
+    `  Demo clients:   ${plan.clients.length.toLocaleString('en-IN')} (one per synthetic practitioner)`,
   );
   console.log(`  Sessions:       ${plan.sessions.length.toLocaleString('en-IN')}`);
   console.log('\nRun again with --apply against the intended test database to replace the cohort.');

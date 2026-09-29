@@ -98,10 +98,21 @@ describe('demo load plan', () => {
       (sum, day) => sum + day.doctorEncounterTotal + day.psychologistEncounterTotal,
       0,
     );
+    expect(sessionTotal).toBe(26_714);
     expect(plan.sessions).toHaveLength(sessionTotal);
-    expect(plan.clients).toHaveLength(sessionTotal);
+    expect(plan.clients).toHaveLength(plan.practitioners.length);
     expect(new Set(plan.sessions.map((session) => session.id)).size).toBe(sessionTotal);
-    expect(new Set(plan.clients.map((client) => client.id)).size).toBe(sessionTotal);
+    expect(new Set(plan.clients.map((client) => client.id)).size).toBe(plan.practitioners.length);
+    expect(new Set(plan.clients.map((client) => client.practitionerUid)).size).toBe(
+      plan.practitioners.length,
+    );
+    const clientById = new Map(plan.clients.map((client) => [client.id, client]));
+    expect(
+      plan.sessions.every(
+        (session) =>
+          clientById.get(session.clientId)?.practitionerUid === session.practitionerUid,
+      ),
+    ).toBe(true);
   });
 
   it('is reproducible without relying on the current clock', () => {
