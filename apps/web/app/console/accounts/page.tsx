@@ -28,7 +28,7 @@ interface PageProps {
   }>;
 }
 
-type DatasetFilter = 'real' | 'synthetic' | 'all';
+type DatasetFilter = 'real' | 'synthetic';
 
 const PAGE_SIZE = 50;
 
@@ -49,13 +49,12 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
   await requirePageAdmin();
   const { q, vertical, status, dataset: rawDataset, page: rawPage } = await searchParams;
   const query = (q ?? '').trim();
-  const dataset: DatasetFilter =
-    rawDataset === 'synthetic' || rawDataset === 'all' ? rawDataset : 'real';
+  const dataset: DatasetFilter = rawDataset === 'synthetic' ? rawDataset : 'real';
   const parsedPage = Number.parseInt(rawPage ?? '1', 10);
   const requestedPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
   const where: Prisma.PsychologistWhereInput = { deletedAt: null };
-  if (dataset !== 'all') where.isSynthetic = dataset === 'synthetic';
+  where.isSynthetic = dataset === 'synthetic';
   if (vertical === 'THERAPIST' || vertical === 'DOCTOR') where.vertical = vertical;
   if (status && ['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'OFFBOARDED'].includes(status)) {
     where.status = status as Prisma.PsychologistWhereInput['status'];
@@ -85,7 +84,8 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
       vertical: true,
       status: true,
       role: true,
-      isSynthetic: true,
+      rciNumber: true,
+      medicalRegNumber: true,
       createdAt: true,
       onboardingCompletedAt: true,
     },
@@ -154,13 +154,24 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
         )}
       </form>
 
+      {dataset === 'synthetic' && (
+        <section
+          className="mb-4 rounded-xl border border-[var(--color-line)] bg-white/70 px-4 py-3 text-sm text-[var(--color-ink-2)]"
+          aria-label="Demo data notice"
+        >
+          <span className="font-medium text-[var(--color-ink)]">Demo data.</span> Fictional
+          practitioner profiles and generated sessions for product demonstration — not real
+          clinicians, credentials, customers, or clinical activity.
+        </section>
+      )}
+
       <AdminCard
-        hint={`${totalAccounts} account${totalAccounts === 1 ? '' : 's'} · page ${currentPage} of ${totalPages}`}
+        hint={`${totalAccounts} ${dataset === 'synthetic' ? 'fictional demo ' : ''}account${totalAccounts === 1 ? '' : 's'} · page ${currentPage} of ${totalPages}`}
       >
         <Table>
           <Thead
             cols={[
-              { label: 'Practitioner' },
+              { label: dataset === 'synthetic' ? 'Demo practitioner' : 'Practitioner' },
               { label: 'Vertical' },
               { label: 'Status' },
               { label: 'Role' },
@@ -184,12 +195,13 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
                       >
                         {a.fullName || '(no name)'}
                       </Link>
-                      {a.isSynthetic && (
-                        <span className="ml-2">
-                          <Pill tone="muted">synthetic</Pill>
-                        </span>
-                      )}
                       <div className="text-xs text-[var(--color-ink-3)]">{a.email}</div>
+                      {(a.medicalRegNumber || a.rciNumber) && (
+                        <div className="mt-0.5 text-[11px] text-[var(--color-ink-3)]">
+                          {a.vertical === 'DOCTOR' ? 'Medical reg.' : 'RCI'} ·{' '}
+                          {a.vertical === 'DOCTOR' ? a.medicalRegNumber : a.rciNumber}
+                        </div>
+                      )}
                       {a.onboardingCompletedAt === null && (
                         <div className="mt-0.5 text-[11px] text-[var(--color-warn)]">
                           not onboarded
@@ -245,9 +257,8 @@ function DatasetSelect({ value }: { value: DatasetFilter }) {
         defaultValue={value}
         className="h-[38px] rounded-full border border-[var(--color-line)] bg-white px-3 text-sm outline-none focus:border-[var(--color-accent)]"
       >
-        <option value="real">Real only</option>
-        <option value="synthetic">Synthetic only</option>
-        <option value="all">All accounts</option>
+        <option value="real">Real accounts</option>
+        <option value="synthetic">Demo accounts</option>
       </select>
     </div>
   );

@@ -111,6 +111,65 @@ const DOCTOR_SPECIALTIES = [
   'Endocrinology',
 ] as const;
 
+// These names are fictional combinations for a clearly separated demo
+// dataset. Contact addresses remain under the reserved `.test` domain and
+// registration identifiers say DEMO-NOT-ISSUED so they cannot be mistaken
+// for issued professional credentials.
+const UAE_DOCTOR_FIRST_NAMES = [
+  'Amina',
+  'Omar',
+  'Mariam',
+  'Zayd',
+  'Noor',
+  'Kareem',
+  'Sara',
+  'Yusuf',
+  'Layla',
+  'Hamza',
+  'Huda',
+  'Rami',
+  'Farah',
+  'Imran',
+  'Salma',
+  'Tariq',
+] as const;
+
+const UAE_DOCTOR_LAST_NAMES = [
+  'Al Mansoori',
+  'Al Nuaimi',
+  'Rahman',
+  'Siddiqui',
+  'Farooq',
+  'Nair',
+  'Menon',
+] as const;
+
+const INDIA_PSYCHOLOGIST_FIRST_NAMES = [
+  'Ananya',
+  'Meera',
+  'Kavya',
+  'Nisha',
+  'Riya',
+  'Isha',
+  'Diya',
+  'Arjun',
+  'Kiran',
+  'Neha',
+  'Vivek',
+  'Sana',
+  'Aditya',
+] as const;
+
+const INDIA_PSYCHOLOGIST_LAST_NAMES = [
+  'Menon',
+  'Iyer',
+  'Nair',
+  'Sharma',
+  'Rao',
+  'Reddy',
+  'Kulkarni',
+] as const;
+
 const INDIA_LOCATIONS = [
   { city: 'Bengaluru', province: 'Karnataka' },
   { city: 'Chennai', province: 'Tamil Nadu' },
@@ -125,6 +184,17 @@ const MINUTE_MS = 60 * 1000;
 
 function pad(value: number, width: number): string {
   return String(value).padStart(width, '0');
+}
+
+function fictionalName(
+  index: number,
+  firstNames: readonly string[],
+  lastNames: readonly string[],
+): string {
+  const firstName = firstNames[index % firstNames.length];
+  const lastName = lastNames[Math.floor(index / firstNames.length) % lastNames.length];
+  if (!firstName || !lastName) throw new RangeError('Fictional name pools must not be empty');
+  return `${firstName} ${lastName}`;
 }
 
 function assertDayIndex(dayIndex: number): void {
@@ -261,21 +331,22 @@ export function buildDemoLoadPractitioners(): DemoLoadPractitioner[] {
   const doctors = Array.from({ length: DEMO_LOAD_UAE_DOCTOR_COUNT }, (_, index) => {
     const ordinal = index + 1;
     const code = pad(ordinal, 4);
+    const name = fictionalName(index, UAE_DOCTOR_FIRST_NAMES, UAE_DOCTOR_LAST_NAMES);
     return {
       uid: `demo-load-uae-doctor-${code}`,
       email: `uae-doctor-${code}@demo.cureocity.test`,
       phone: `+9710000${pad(ordinal, 5)}`,
-      fullName: `Synthetic UAE Doctor ${code}`,
+      fullName: `Dr ${name}`,
       vertical: 'DOCTOR' as const,
       languages: ['English', 'Arabic'],
       city: 'Dubai',
       province: 'Dubai',
       years: 3 + ((ordinal * 7) % 23),
       specialty: DOCTOR_SPECIALTIES[index % DOCTOR_SPECIALTIES.length] ?? 'Family Medicine',
-      focus: 'Synthetic OPD documentation workload',
+      focus: 'OPD documentation demonstration',
       modalities: [],
-      rciNumber: `NOT-APPLICABLE-TEST-DHA-2026-${code}`,
-      medicalRegNumber: `TEST-DHA-2026-${code}`,
+      rciNumber: `NOT-APPLICABLE-DHA-DEMO-NOT-ISSUED-${code}`,
+      medicalRegNumber: `DHA-DEMO-NOT-ISSUED-${code}`,
       createdAt: localDateTimeToUtc(DEMO_LOAD_START_DATE, 0, 0, DEMO_LOAD_UAE_UTC_OFFSET_MINUTES),
       cohort: 'UAE_DOCTOR' as const,
       ordinal,
@@ -288,20 +359,25 @@ export function buildDemoLoadPractitioners(): DemoLoadPractitioner[] {
     const ordinal = index + 1;
     const code = pad(ordinal, 4);
     const location = INDIA_LOCATIONS[index % INDIA_LOCATIONS.length] ?? INDIA_LOCATIONS[0];
+    const name = fictionalName(
+      index,
+      INDIA_PSYCHOLOGIST_FIRST_NAMES,
+      INDIA_PSYCHOLOGIST_LAST_NAMES,
+    );
     return {
       uid: `demo-load-india-psychologist-${code}`,
       email: `india-psychologist-${code}@demo.cureocity.test`,
       phone: `+910000${pad(ordinal, 6)}`,
-      fullName: `Synthetic India Psychologist ${code}`,
+      fullName: name,
       vertical: 'THERAPIST' as const,
       languages: ['English', 'Hindi'],
       city: location.city,
       province: location.province,
       years: 2 + ((ordinal * 5) % 19),
       specialty: null,
-      focus: 'Synthetic counselling documentation workload',
+      focus: 'Counselling documentation demonstration',
       modalities: ['SUPPORTIVE'],
-      rciNumber: `PENDING-TEST-RCI-2026-${code}`,
+      rciNumber: `RCI-DEMO-NOT-ISSUED-${code}`,
       medicalRegNumber: null,
       createdAt: localDateTimeToUtc(DEMO_LOAD_START_DATE, 0, 0, DEMO_LOAD_INDIA_UTC_OFFSET_MINUTES),
       cohort: 'INDIA_PSYCHOLOGIST' as const,

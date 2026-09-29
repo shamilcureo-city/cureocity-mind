@@ -19,7 +19,7 @@ import {
 } from './demo-load-plan';
 
 describe('demo load plan', () => {
-  it('builds the requested clearly synthetic practitioner cohorts', () => {
+  it('builds isolated demo cohorts with unique fictional names and non-issued credentials', () => {
     const plan = buildDemoLoadPlan();
     const doctors = plan.practitioners.filter((practitioner) => practitioner.vertical === 'DOCTOR');
     const psychologists = plan.practitioners.filter(
@@ -35,20 +35,35 @@ describe('demo load plan', () => {
       plan.practitioners.length,
     );
 
-    expect(doctors[0]?.medicalRegNumber).toBe('TEST-DHA-2026-0001');
-    expect(doctors.at(-1)?.medicalRegNumber).toBe('TEST-DHA-2026-0112');
+    expect(doctors[0]).toMatchObject({
+      fullName: 'Dr Amina Al Mansoori',
+      medicalRegNumber: 'DHA-DEMO-NOT-ISSUED-0001',
+    });
+    expect(doctors.at(-1)).toMatchObject({
+      fullName: 'Dr Tariq Menon',
+      medicalRegNumber: 'DHA-DEMO-NOT-ISSUED-0112',
+    });
     expect(
-      doctors.every((doctor) => /^TEST-DHA-2026-\d{4}$/.test(doctor.medicalRegNumber ?? '')),
+      doctors.every((doctor) => /^DHA-DEMO-NOT-ISSUED-\d{4}$/.test(doctor.medicalRegNumber ?? '')),
     ).toBe(true);
-    expect(psychologists[0]?.rciNumber).toBe('PENDING-TEST-RCI-2026-0001');
-    expect(psychologists.at(-1)?.rciNumber).toBe('PENDING-TEST-RCI-2026-0089');
+    expect(psychologists[0]).toMatchObject({
+      fullName: 'Ananya Menon',
+      rciNumber: 'RCI-DEMO-NOT-ISSUED-0001',
+    });
+    expect(psychologists.at(-1)).toMatchObject({
+      fullName: 'Vivek Kulkarni',
+      rciNumber: 'RCI-DEMO-NOT-ISSUED-0089',
+    });
     expect(
       psychologists.every((psychologist) =>
-        /^PENDING-TEST-RCI-2026-\d{4}$/.test(psychologist.rciNumber),
+        /^RCI-DEMO-NOT-ISSUED-\d{4}$/.test(psychologist.rciNumber),
       ),
     ).toBe(true);
+    expect(new Set(plan.practitioners.map((practitioner) => practitioner.fullName)).size).toBe(
+      plan.practitioners.length,
+    );
     expect(
-      plan.practitioners.every((practitioner) => practitioner.fullName.startsWith('Synthetic ')),
+      plan.practitioners.every((practitioner) => !/synthetic/i.test(practitioner.fullName)),
     ).toBe(true);
     expect(plan.practitioners.every((practitioner) => practitioner.email.endsWith('.test'))).toBe(
       true,
@@ -109,8 +124,7 @@ describe('demo load plan', () => {
     const clientById = new Map(plan.clients.map((client) => [client.id, client]));
     expect(
       plan.sessions.every(
-        (session) =>
-          clientById.get(session.clientId)?.practitionerUid === session.practitionerUid,
+        (session) => clientById.get(session.clientId)?.practitionerUid === session.practitionerUid,
       ),
     ).toBe(true);
   });

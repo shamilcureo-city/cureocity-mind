@@ -123,8 +123,8 @@ describe('synthetic activity month navigation', () => {
   });
 });
 
-describe('synthetic activity console boundary', () => {
-  it('stays admin-gated, synthetic-only and visibly labelled without client PII reads', () => {
+describe('demo activity console boundary', () => {
+  it('stays admin-gated, isolated and visibly labelled without client PII reads', () => {
     const source = readFileSync(
       resolve(import.meta.dirname, '../app/console/activity/page.tsx'),
       'utf8',
@@ -135,8 +135,8 @@ describe('synthetic activity console boundary', () => {
     expect(guard).toBeGreaterThan(-1);
     expect(firstRead).toBeGreaterThan(guard);
     expect(source.match(/isSynthetic: true/g)).toHaveLength(2);
-    expect(source).toContain('Synthetic test data only');
-    expect(source).toContain('Do not use this page as evidence');
+    expect(source).toContain('Demo data');
+    expect(source).toMatch(/not\s+real clinicians, credentials, customers, patients/);
     expect(source).not.toContain('decryptClient');
     expect(source).not.toContain('fullNameEncrypted');
   });

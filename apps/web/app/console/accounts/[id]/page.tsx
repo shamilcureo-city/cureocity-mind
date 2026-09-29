@@ -51,6 +51,7 @@ export default async function AdminAccountDetailPage({
       vertical: true,
       status: true,
       role: true,
+      isSynthetic: true,
       rciNumber: true,
       rciVerifiedAt: true,
       medicalRegNumber: true,
@@ -72,14 +73,18 @@ export default async function AdminAccountDetailPage({
 
   const lifetimeCostInr = totalRecordedUsage(aiCost.entries).toNumber();
   const isSelf = id === admin.id;
+  const accountType = account.vertical === 'DOCTOR' ? 'doctor' : 'therapist';
 
   return (
     <>
-      <Link href="/console/accounts" className="text-sm text-[var(--color-accent)] hover:underline">
+      <Link
+        href={account.isSynthetic ? '/console/accounts?dataset=synthetic' : '/console/accounts'}
+        className="text-sm text-[var(--color-accent)] hover:underline"
+      >
         ← All accounts
       </Link>
       <AdminPageHeader
-        eyebrow={account.vertical === 'DOCTOR' ? 'Doctor account' : 'Therapist account'}
+        eyebrow={`${account.isSynthetic ? 'Demo ' : ''}${accountType} account`}
         title={account.fullName || '(no name)'}
         description={account.email}
         right={
@@ -91,6 +96,17 @@ export default async function AdminAccountDetailPage({
           </div>
         }
       />
+
+      {account.isSynthetic && (
+        <section
+          className="mb-4 rounded-xl border border-[var(--color-line)] bg-white/70 px-4 py-3 text-sm text-[var(--color-ink-2)]"
+          aria-label="Demo data notice"
+        >
+          <span className="font-medium text-[var(--color-ink)]">Demo data.</span> This fictional
+          practitioner profile and its generated activity are for product demonstration, not a real
+          clinician or issued credential.
+        </section>
+      )}
 
       <StatGrid>
         <StatTile label="Clients" value={String(clientCount)} />
