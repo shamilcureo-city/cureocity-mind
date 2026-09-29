@@ -26,6 +26,7 @@
     "db:prepare-fresh-ci": "node scripts/prepare-fresh-ci-migrations.mjs",
     "db:reset": "prisma migrate reset --force",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed:synthetic": "tsx scripts/seed-south-india.ts",
     "db:studio": "prisma studio",
     "db:validate": "prisma validate && prisma format --check",
     "db:check-migrations": "node --test scripts/check-migration-idempotency.test.mjs scripts/prepare-fresh-ci-migrations.test.mjs && node scripts/check-migration-idempotency.mjs",

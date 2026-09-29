@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic';
 export default async function CompetencyPage() {
   await requirePageAdmin();
   const psychologists = await prisma.psychologist.findMany({
-    where: { deletedAt: null },
+    where: { deletedAt: null, isSynthetic: false },
     select: {
       id: true,
       fullName: true,

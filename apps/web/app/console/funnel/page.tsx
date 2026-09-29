@@ -40,7 +40,7 @@ export default async function FunnelPage() {
   const [therapists, activatedRows, signedRows, accounts, trialCapHits, planCapHits, capActorRows] =
     await Promise.all([
       prisma.psychologist.findMany({
-        where: { deletedAt: null, role: 'THERAPIST' },
+        where: { deletedAt: null, role: 'THERAPIST', isSynthetic: false },
         select: {
           id: true,
           createdAt: true,
@@ -50,25 +50,36 @@ export default async function FunnelPage() {
       }),
       // distinct therapists with >=1 real-client session
       prisma.session.findMany({
-        where: { client: { isDemo: false } },
+        where: { psychologist: { isSynthetic: false }, client: { isDemo: false } },
         select: { psychologistId: true },
         distinct: ['psychologistId'],
       }),
       // distinct therapists with >=1 signed note (TherapyNote joins via Session)
       prisma.session.findMany({
-        where: { therapyNote: { isNot: null } },
+        where: { psychologist: { isSynthetic: false }, therapyNote: { isNot: null } },
         select: { psychologistId: true },
         distinct: ['psychologistId'],
       }),
       prisma.billingAccount.findMany({
         select: { psychologistId: true, plan: true, paidThroughAt: true },
       }),
-      prisma.auditLog.count({ where: { action: 'TRIAL_CAP_REACHED' } }),
-      prisma.auditLog.count({ where: { action: 'PLAN_CAP_REACHED' } }),
+      prisma.auditLog.count({
+        where: {
+          action: 'TRIAL_CAP_REACHED',
+          actorPsychologist: { is: { isSynthetic: false } },
+        },
+      }),
+      prisma.auditLog.count({
+        where: {
+          action: 'PLAN_CAP_REACHED',
+          actorPsychologist: { is: { isSynthetic: false } },
+        },
+      }),
       prisma.auditLog.findMany({
         where: {
           action: { in: ['TRIAL_CAP_REACHED', 'PLAN_CAP_REACHED'] },
           actorPsychologistId: { not: null },
+          actorPsychologist: { is: { isSynthetic: false } },
         },
         select: { actorPsychologistId: true },
         distinct: ['actorPsychologistId'],

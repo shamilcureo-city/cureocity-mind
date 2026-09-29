@@ -183,6 +183,8 @@ export function summarizeSessionUsage(
 export interface UsageScope {
   sessionId?: string;
   psychologistId?: string;
+  /** Cross-tenant operator roll-ups can pass the already-authorised real-account set. */
+  psychologistIds?: string[];
   from?: Date;
   to?: Date;
 }
@@ -209,7 +211,14 @@ export async function loadRecordedUsage(
               { psychologistId: scope.psychologistId },
             ],
           }
-        : {}),
+        : scope.psychologistIds
+          ? {
+              OR: [
+                { session: { psychologistId: { in: scope.psychologistIds } } },
+                { psychologistId: { in: scope.psychologistIds } },
+              ],
+            }
+          : {}),
       ...(hasWindow ? { createdAt: window } : {}),
       status: { in: METERED_USAGE_STATUSES },
       costInr: { gt: 0 },
@@ -230,7 +239,11 @@ export async function loadRecordedUsage(
     ? await db.sessionUsageConnection.findMany({
         where: {
           ...(scope.sessionId ? { sessionId: scope.sessionId } : {}),
-          ...(scope.psychologistId ? { psychologistId: scope.psychologistId } : {}),
+          ...(scope.psychologistId
+            ? { psychologistId: scope.psychologistId }
+            : scope.psychologistIds
+              ? { psychologistId: { in: scope.psychologistIds } }
+              : {}),
           ...(hasWindow ? { startedAt: window } : {}),
         },
         select: {

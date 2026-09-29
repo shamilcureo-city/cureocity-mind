@@ -70,6 +70,9 @@ model Psychologist {
   rciVerifiedAt           DateTime?
   status                  PsychologistStatus       @default(PENDING_VERIFICATION)
   role                    PsychologistRole         @default(THERAPIST)
+  /// Synthetic practitioners exist only for deterministic demos, load tests,
+  /// and operator QA. Real business/clinical metrics must exclude them.
+  isSynthetic             Boolean                  @default(false)
 
   /// First-run welcome dismissed — durable, per-therapist replacement for
   /// the per-device localStorage flag. Set via POST /psychologists/me/welcome.
@@ -190,6 +193,7 @@ model Psychologist {
 
   @@index([status])
   @@index([role])
+  @@index([isSynthetic])
   @@index([isAcceptingNewClients])
   @@index([onboardingCompletedAt])
   @@map("psychologists")
