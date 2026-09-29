@@ -39,11 +39,21 @@ export default async function AdminOverviewPage() {
   const monthAgo = new Date(now.getTime() - 30 * DAY_MS);
   const graceFloor = new Date(now.getTime() - PAID_GRACE_MS);
 
+  // Synthetic demo/load-test accounts are visible in the account directory,
+  // but must never inflate the operator's real business or clinical pulse.
+  const realPractitioners = await prisma.psychologist.findMany({
+    where: { deletedAt: null, isSynthetic: false },
+    select: { id: true, vertical: true, status: true },
+  });
+  const realPractitionerIds = realPractitioners.map((p) => p.id);
+  const therapistCount = realPractitioners.filter((p) => p.vertical === 'THERAPIST').length;
+  const doctorCount = realPractitioners.filter((p) => p.vertical === 'DOCTOR').length;
+  const pendingVerification = realPractitioners.filter(
+    (p) => p.status === 'PENDING_VERIFICATION',
+  ).length;
+  const suspended = realPractitioners.filter((p) => p.status === 'SUSPENDED').length;
+
   const [
-    therapistCount,
-    doctorCount,
-    pendingVerification,
-    suspended,
     sessionsWeek,
     costToday,
     costMonth,
@@ -53,20 +63,31 @@ export default async function AdminOverviewPage() {
     waitlistWaiting,
     recentAdminActions,
   ] = await Promise.all([
-    prisma.psychologist.count({ where: { deletedAt: null, vertical: 'THERAPIST' } }),
-    prisma.psychologist.count({ where: { deletedAt: null, vertical: 'DOCTOR' } }),
-    prisma.psychologist.count({ where: { deletedAt: null, status: 'PENDING_VERIFICATION' } }),
-    prisma.psychologist.count({ where: { deletedAt: null, status: 'SUSPENDED' } }),
     prisma.session.count({
-      where: { createdAt: { gte: weekAgo }, client: { isDemo: false } },
+      where: {
+        psychologistId: { in: realPractitionerIds },
+        createdAt: { gte: weekAgo },
+        client: { isDemo: false },
+      },
     }),
-    loadRecordedUsage({ from: dayStart }),
-    loadRecordedUsage({ from: monthAgo }),
+    loadRecordedUsage({ from: dayStart, psychologistIds: realPractitionerIds }),
+    loadRecordedUsage({ from: monthAgo, psychologistIds: realPractitionerIds }),
     prisma.billingAccount.findMany({
+      where: { psychologistId: { in: realPractitionerIds } },
       select: { psychologistId: true, plan: true, paidThroughAt: true },
     }),
-    prisma.clientErasureRequest.count({ where: { status: 'PENDING' } }),
-    prisma.clientGrievance.count({ where: { status: 'OPEN' } }),
+    prisma.clientErasureRequest.count({
+      where: {
+        status: 'PENDING',
+        client: { psychologistId: { in: realPractitionerIds } },
+      },
+    }),
+    prisma.clientGrievance.count({
+      where: {
+        status: 'OPEN',
+        client: { psychologistId: { in: realPractitionerIds } },
+      },
+    }),
     prisma.careWaitlistEntry.count({ where: { invitedAt: null } }),
     prisma.auditLog.findMany({
       where: {

@@ -239,6 +239,18 @@ describe('canonical reader scope and fail-closed storage', () => {
       startedAt: { gte: from, lt: to },
     });
   });
+  it('scopes operator roll-ups to the supplied real-account ids', async () => {
+    await loadRecordedUsage({ psychologistIds: ['real-1', 'real-2'] });
+    expect(m.calls.mock.calls[0][0].where).toMatchObject({
+      OR: [
+        { session: { psychologistId: { in: ['real-1', 'real-2'] } } },
+        { psychologistId: { in: ['real-1', 'real-2'] } },
+      ],
+    });
+    expect(m.connections.mock.calls[0][0].where).toEqual({
+      psychologistId: { in: ['real-1', 'real-2'] },
+    });
+  });
   it('allows only catalog-confirmed missing table fallback', async () => {
     m.storage.mockResolvedValue(false);
     m.calls.mockResolvedValue([call()]);

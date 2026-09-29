@@ -19,8 +19,18 @@ import { requirePageAdmin } from '@/lib/auth-page';
 export const dynamic = 'force-dynamic';
 
 interface PageProps {
-  searchParams: Promise<{ q?: string; vertical?: string; status?: string }>;
+  searchParams: Promise<{
+    q?: string;
+    vertical?: string;
+    status?: string;
+    dataset?: string;
+    page?: string;
+  }>;
 }
+
+type DatasetFilter = 'real' | 'synthetic' | 'all';
+
+const PAGE_SIZE = 50;
 
 const STATUS_TONE: Record<string, PillTone> = {
   ACTIVE: 'good',
@@ -37,10 +47,15 @@ const STATUS_TONE: Record<string, PillTone> = {
  */
 export default async function AdminAccountsPage({ searchParams }: PageProps) {
   await requirePageAdmin();
-  const { q, vertical, status } = await searchParams;
+  const { q, vertical, status, dataset: rawDataset, page: rawPage } = await searchParams;
   const query = (q ?? '').trim();
+  const dataset: DatasetFilter =
+    rawDataset === 'synthetic' || rawDataset === 'all' ? rawDataset : 'real';
+  const parsedPage = Number.parseInt(rawPage ?? '1', 10);
+  const requestedPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
   const where: Prisma.PsychologistWhereInput = { deletedAt: null };
+  if (dataset !== 'all') where.isSynthetic = dataset === 'synthetic';
   if (vertical === 'THERAPIST' || vertical === 'DOCTOR') where.vertical = vertical;
   if (status && ['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'OFFBOARDED'].includes(status)) {
     where.status = status as Prisma.PsychologistWhereInput['status'];
@@ -51,27 +66,41 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
       { email: { contains: query, mode: 'insensitive' } },
       { phone: { contains: query } },
       { rciNumber: { contains: query, mode: 'insensitive' } },
+      { medicalRegNumber: { contains: query, mode: 'insensitive' } },
     ];
   }
 
-  const [accounts, billing, sessionCounts] = await Promise.all([
-    prisma.psychologist.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 100,
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        vertical: true,
-        status: true,
-        role: true,
-        createdAt: true,
-        onboardingCompletedAt: true,
-      },
+  const totalAccounts = await prisma.psychologist.count({ where });
+  const totalPages = Math.max(1, Math.ceil(totalAccounts / PAGE_SIZE));
+  const currentPage = Math.min(requestedPage, totalPages);
+  const accounts = await prisma.psychologist.findMany({
+    where,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    skip: (currentPage - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
+    select: {
+      id: true,
+      fullName: true,
+      email: true,
+      vertical: true,
+      status: true,
+      role: true,
+      isSynthetic: true,
+      createdAt: true,
+      onboardingCompletedAt: true,
+    },
+  });
+  const accountIds = accounts.map((account) => account.id);
+  const [billing, sessionCounts] = await Promise.all([
+    prisma.billingAccount.findMany({
+      where: { psychologistId: { in: accountIds } },
+      select: { psychologistId: true, plan: true },
     }),
-    prisma.billingAccount.findMany({ select: { psychologistId: true, plan: true } }),
-    prisma.session.groupBy({ by: ['psychologistId'], _count: { _all: true } }),
+    prisma.session.groupBy({
+      by: ['psychologistId'],
+      where: { psychologistId: { in: accountIds } },
+      _count: { _all: true },
+    }),
   ]);
 
   const planByPsy = new Map<string, BillingPlan>(billing.map((b) => [b.psychologistId, b.plan]));
@@ -92,7 +121,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
             type="text"
             name="q"
             defaultValue={query}
-            placeholder="Name, email, phone, RCI…"
+            placeholder="Name, email, phone, RCI or medical registration…"
             className="w-full rounded-full border border-[var(--color-line)] bg-white px-4 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
           />
         </div>
@@ -108,13 +137,14 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
           value={status}
           options={['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'OFFBOARDED']}
         />
+        <DatasetSelect value={dataset} />
         <button
           type="submit"
           className="h-[38px] rounded-full bg-[var(--color-accent)] px-5 text-sm font-medium text-white hover:opacity-90"
         >
           Filter
         </button>
-        {(query || vertical || status) && (
+        {(query || vertical || status || dataset !== 'real' || currentPage > 1) && (
           <Link
             href="/console/accounts"
             className="h-[38px] rounded-full border border-[var(--color-line)] px-4 py-2 text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
@@ -125,7 +155,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
       </form>
 
       <AdminCard
-        hint={`${accounts.length} account${accounts.length === 1 ? '' : 's'}${accounts.length === 100 ? ' (showing first 100)' : ''}`}
+        hint={`${totalAccounts} account${totalAccounts === 1 ? '' : 's'} · page ${currentPage} of ${totalPages}`}
       >
         <Table>
           <Thead
@@ -154,6 +184,11 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
                       >
                         {a.fullName || '(no name)'}
                       </Link>
+                      {a.isSynthetic && (
+                        <span className="ml-2">
+                          <Pill tone="muted">synthetic</Pill>
+                        </span>
+                      )}
                       <div className="text-xs text-[var(--color-ink-3)]">{a.email}</div>
                       {a.onboardingCompletedAt === null && (
                         <div className="mt-0.5 text-[11px] text-[var(--color-warn)]">
@@ -187,8 +222,96 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
             )}
           </tbody>
         </Table>
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalAccounts={totalAccounts}
+          query={query}
+          vertical={vertical}
+          status={status}
+          dataset={dataset}
+        />
       </AdminCard>
     </>
+  );
+}
+
+function DatasetSelect({ value }: { value: DatasetFilter }) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs text-[var(--color-ink-3)]">Dataset</label>
+      <select
+        name="dataset"
+        defaultValue={value}
+        className="h-[38px] rounded-full border border-[var(--color-line)] bg-white px-3 text-sm outline-none focus:border-[var(--color-accent)]"
+      >
+        <option value="real">Real only</option>
+        <option value="synthetic">Synthetic only</option>
+        <option value="all">All accounts</option>
+      </select>
+    </div>
+  );
+}
+
+function Pagination({
+  currentPage,
+  totalPages,
+  totalAccounts,
+  query,
+  vertical,
+  status,
+  dataset,
+}: {
+  currentPage: number;
+  totalPages: number;
+  totalAccounts: number;
+  query: string;
+  vertical: string | undefined;
+  status: string | undefined;
+  dataset: DatasetFilter;
+}) {
+  if (totalAccounts === 0) return null;
+  const first = (currentPage - 1) * PAGE_SIZE + 1;
+  const last = Math.min(currentPage * PAGE_SIZE, totalAccounts);
+  const href = (page: number) => {
+    const params = new URLSearchParams();
+    if (query) params.set('q', query);
+    if (vertical) params.set('vertical', vertical);
+    if (status) params.set('status', status);
+    params.set('dataset', dataset);
+    if (page > 1) params.set('page', String(page));
+    return `/console/accounts?${params.toString()}`;
+  };
+  const buttonClass =
+    'rounded-full border border-[var(--color-line)] bg-white px-3.5 py-1.5 text-sm text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]';
+  const disabledClass =
+    'rounded-full border border-[var(--color-line-soft)] px-3.5 py-1.5 text-sm text-[var(--color-ink-3)] opacity-50';
+
+  return (
+    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-line-soft)] pt-4">
+      <p className="text-xs text-[var(--color-ink-3)]">
+        Showing {first}–{last} of {totalAccounts}
+      </p>
+      <div className="flex items-center gap-2">
+        {currentPage > 1 ? (
+          <Link href={href(currentPage - 1)} className={buttonClass}>
+            Previous
+          </Link>
+        ) : (
+          <span className={disabledClass}>Previous</span>
+        )}
+        <span className="px-1 text-xs tabular-nums text-[var(--color-ink-3)]">
+          {currentPage} / {totalPages}
+        </span>
+        {currentPage < totalPages ? (
+          <Link href={href(currentPage + 1)} className={buttonClass}>
+            Next
+          </Link>
+        ) : (
+          <span className={disabledClass}>Next</span>
+        )}
+      </div>
+    </div>
   );
 }
 

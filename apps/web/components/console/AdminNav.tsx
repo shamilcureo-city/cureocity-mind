@@ -13,6 +13,7 @@ import { usePathname } from 'next/navigation';
 export const ADMIN_NAV: { href: string; label: string }[] = [
   { href: '/console', label: 'Overview' },
   { href: '/console/accounts', label: 'Accounts' },
+  { href: '/console/activity', label: 'Activity' },
   { href: '/console/billing', label: 'Billing' },
   { href: '/console/costs', label: 'AI costs' },
   { href: '/console/funnel', label: 'Growth' },
