@@ -23,12 +23,9 @@ interface PageProps {
     q?: string;
     vertical?: string;
     status?: string;
-    dataset?: string;
     page?: string;
   }>;
 }
-
-type DatasetFilter = 'real' | 'synthetic';
 
 const PAGE_SIZE = 50;
 
@@ -47,14 +44,12 @@ const STATUS_TONE: Record<string, PillTone> = {
  */
 export default async function AdminAccountsPage({ searchParams }: PageProps) {
   await requirePageAdmin();
-  const { q, vertical, status, dataset: rawDataset, page: rawPage } = await searchParams;
+  const { q, vertical, status, page: rawPage } = await searchParams;
   const query = (q ?? '').trim();
-  const dataset: DatasetFilter = rawDataset === 'synthetic' ? rawDataset : 'real';
   const parsedPage = Number.parseInt(rawPage ?? '1', 10);
   const requestedPage = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
 
   const where: Prisma.PsychologistWhereInput = { deletedAt: null };
-  where.isSynthetic = dataset === 'synthetic';
   if (vertical === 'THERAPIST' || vertical === 'DOCTOR') where.vertical = vertical;
   if (status && ['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'OFFBOARDED'].includes(status)) {
     where.status = status as Prisma.PsychologistWhereInput['status'];
@@ -74,7 +69,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
   const currentPage = Math.min(requestedPage, totalPages);
   const accounts = await prisma.psychologist.findMany({
     where,
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    orderBy: [{ isSynthetic: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
     skip: (currentPage - 1) * PAGE_SIZE,
     take: PAGE_SIZE,
     select: {
@@ -84,6 +79,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
       vertical: true,
       status: true,
       role: true,
+      isSynthetic: true,
       rciNumber: true,
       medicalRegNumber: true,
       createdAt: true,
@@ -111,7 +107,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
       <AdminPageHeader
         eyebrow="Admin console"
         title="Accounts"
-        description="Every practitioner on the platform. Open a row to verify, change role or status, or adjust the trial runway."
+        description="All platform accounts. Fictional profiles are marked Demo and use non-issued registration numbers."
       />
 
       <form className="mb-4 flex flex-wrap items-end gap-2" method="GET">
@@ -137,14 +133,13 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
           value={status}
           options={['ACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED', 'OFFBOARDED']}
         />
-        <DatasetSelect value={dataset} />
         <button
           type="submit"
           className="h-[38px] rounded-full bg-[var(--color-accent)] px-5 text-sm font-medium text-white hover:opacity-90"
         >
           Filter
         </button>
-        {(query || vertical || status || dataset !== 'real' || currentPage > 1) && (
+        {(query || vertical || status || currentPage > 1) && (
           <Link
             href="/console/accounts"
             className="h-[38px] rounded-full border border-[var(--color-line)] px-4 py-2 text-sm text-[var(--color-ink-2)] hover:text-[var(--color-ink)]"
@@ -154,24 +149,13 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
         )}
       </form>
 
-      {dataset === 'synthetic' && (
-        <section
-          className="mb-4 rounded-xl border border-[var(--color-line)] bg-white/70 px-4 py-3 text-sm text-[var(--color-ink-2)]"
-          aria-label="Demo data notice"
-        >
-          <span className="font-medium text-[var(--color-ink)]">Demo data.</span> Fictional
-          practitioner profiles and generated sessions for product demonstration — not real
-          clinicians, credentials, customers, or clinical activity.
-        </section>
-      )}
-
       <AdminCard
-        hint={`${totalAccounts} ${dataset === 'synthetic' ? 'fictional demo ' : ''}account${totalAccounts === 1 ? '' : 's'} · page ${currentPage} of ${totalPages}`}
+        hint={`${totalAccounts} account${totalAccounts === 1 ? '' : 's'} · page ${currentPage} of ${totalPages}`}
       >
         <Table>
           <Thead
             cols={[
-              { label: dataset === 'synthetic' ? 'Demo practitioner' : 'Practitioner' },
+              { label: 'Practitioner' },
               { label: 'Vertical' },
               { label: 'Status' },
               { label: 'Role' },
@@ -189,12 +173,15 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
                 return (
                   <Tr key={a.id}>
                     <Td>
-                      <Link
-                        href={`/console/accounts/${a.id}`}
-                        className="font-medium text-[var(--color-ink)] hover:text-[var(--color-accent)]"
-                      >
-                        {a.fullName || '(no name)'}
-                      </Link>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                          href={`/console/accounts/${a.id}`}
+                          className="font-medium text-[var(--color-ink)] hover:text-[var(--color-accent)]"
+                        >
+                          {a.fullName || '(no name)'}
+                        </Link>
+                        {a.isSynthetic && <Pill tone="muted">Demo</Pill>}
+                      </div>
                       <div className="text-xs text-[var(--color-ink-3)]">{a.email}</div>
                       {(a.medicalRegNumber || a.rciNumber) && (
                         <div className="mt-0.5 text-[11px] text-[var(--color-ink-3)]">
@@ -241,26 +228,9 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
           query={query}
           vertical={vertical}
           status={status}
-          dataset={dataset}
         />
       </AdminCard>
     </>
-  );
-}
-
-function DatasetSelect({ value }: { value: DatasetFilter }) {
-  return (
-    <div>
-      <label className="mb-1 block text-xs text-[var(--color-ink-3)]">Dataset</label>
-      <select
-        name="dataset"
-        defaultValue={value}
-        className="h-[38px] rounded-full border border-[var(--color-line)] bg-white px-3 text-sm outline-none focus:border-[var(--color-accent)]"
-      >
-        <option value="real">Real accounts</option>
-        <option value="synthetic">Demo accounts</option>
-      </select>
-    </div>
   );
 }
 
@@ -271,7 +241,6 @@ function Pagination({
   query,
   vertical,
   status,
-  dataset,
 }: {
   currentPage: number;
   totalPages: number;
@@ -279,7 +248,6 @@ function Pagination({
   query: string;
   vertical: string | undefined;
   status: string | undefined;
-  dataset: DatasetFilter;
 }) {
   if (totalAccounts === 0) return null;
   const first = (currentPage - 1) * PAGE_SIZE + 1;
@@ -289,7 +257,6 @@ function Pagination({
     if (query) params.set('q', query);
     if (vertical) params.set('vertical', vertical);
     if (status) params.set('status', status);
-    params.set('dataset', dataset);
     if (page > 1) params.set('page', String(page));
     return `/console/accounts?${params.toString()}`;
   };
