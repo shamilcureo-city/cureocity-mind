@@ -1,527 +1,439 @@
-import Link from 'next/link';
 import type { Metadata } from 'next';
-import type { ReactNode } from 'react';
-import { ButtonLink } from '@/components/ui/Button';
-import { Container } from '@/components/ui/Container';
-import { Reveal } from '@/components/landing/Reveal';
+import Link from 'next/link';
+import { ScribeWorkflowPreview } from './ScribeWorkflowPreview';
+import { DirhamSymbol } from './DirhamSymbol';
+import { SCRIBE_UAE_PLANS, scribeEnquiryHref } from './pricing';
+import styles from './scribe-landing.module.css';
 
-/**
- * Sprint DV2 — the doctor-vertical marketing landing (`/for-doctors`).
- *
- * One system, two faces (see docs/DOCTOR_VERTICAL.md): this reuses the
- * therapist landing's animation layer (`lp-*` in globals.css) +
- * Container/ButtonLink/Reveal primitives, with doctor-specific copy. The
- * hero story is the LIVE copilot (3 rails) — the differentiator for the
- * high-volume super-specialty OPD. Honest copy only: no invented stats,
- * no testimonials; the product is in active development.
- */
 export const metadata: Metadata = {
-  title: 'Cureocity Scribe — the live AI copilot for Indian doctors',
+  title: 'Cureocity Scribe | AI consultation notes for UAE doctors',
   description:
-    'A live ambient scribe for the OPD: the note builds as you speak, missing questions and red flags surface in the room, and the prescription drafts itself — in the code-mix your patients actually speak. You confirm every clinical call.',
+    'Give your patients your attention. Draft, review and organise consultation notes, prescriptions and patient documents with Cureocity Scribe. UAE monthly plans: AED 500 for 200 consultations or AED 750 for 500 consultations.',
+  alternates: { canonical: 'https://scribe.cureocity.in/' },
+  openGraph: {
+    title: 'Cureocity Scribe | More attention for your patients',
+    description:
+      'A doctor-led consultation workflow for UAE practices. Notes, prescription drafts and patient documents, with clear monthly pricing in dirhams.',
+    url: 'https://scribe.cureocity.in/',
+    siteName: 'Cureocity Scribe',
+    locale: 'en_AE',
+    type: 'website',
+  },
 };
 
-export default function ForDoctorsLanding() {
+function Brand() {
   return (
-    // Three-products split — Scribe wears its own identity: the page-scoped
-    // token override recolors every accent use (buttons, chips, flourishes)
-    // to clinical indigo without touching the shared design system.
-    <main
-      className="overflow-x-clip"
-      style={
-        {
-          '--color-accent': '#3a5fa8',
-          '--color-accent-hover': '#2f4e8d',
-          '--color-accent-soft': '#e9effa',
-        } as React.CSSProperties
-      }
-    >
-      <noscript>
-        <style>{`[data-lp-reveal]{opacity:1 !important;transform:none !important}`}</style>
-      </noscript>
-      <Nav />
-      <Hero />
-      <LiveCopilot />
-      <HowItWorks />
-      <Trust />
-      <FinalCta />
-      <Footer />
-    </main>
-  );
-}
-
-/* ============================== Nav ============================== */
-
-function Wordmark() {
-  return (
-    <Link href="/for-doctors" className="inline-flex items-center gap-2.5">
-      <span className="grid h-8 w-8 place-items-center rounded-xl bg-[var(--color-accent)]">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden>
+    <a href="#top" className={styles.brand} aria-label="Cureocity Scribe home">
+      <span className={styles.brandMark} aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none">
           <path
-            d="M3 12h3l2.5-6 3 12 3-9 2 3H21"
-            stroke="white"
+            d="M5 17h6l3-8 4 15 3-10 2 3h4"
+            stroke="currentColor"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
         </svg>
       </span>
-      <span className="font-serif text-lg font-semibold tracking-tight">Cureocity Scribe</span>
-    </Link>
+      <span>
+        Cureocity <strong>Scribe</strong>
+      </span>
+    </a>
+  );
+}
+function Check() {
+  return (
+    <svg className={styles.check} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path
+        d="m5 10 3 3 7-7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
-function Nav() {
-  const links = [
-    { href: '#live', label: 'The live copilot' },
-    { href: '#how', label: 'How it works' },
-    { href: '#trust', label: 'Trust & DPDP' },
-  ];
+const WORKFLOW = [
+  {
+    title: 'Be present in the conversation.',
+    body: 'Confirm patient consent, check your microphone and start the consultation. Scribe builds a transcript and structured note while you speak.',
+    label: 'Consult',
+  },
+  {
+    title: 'Make the note your own.',
+    body: 'Compare the draft with the transcript. Edit the details, confirm the prescription and apply your clinical judgement before signing.',
+    label: 'Review',
+  },
+  {
+    title: 'Finish with clear next steps.',
+    body: 'Prepare patient instructions and supporting documents from the approved encounter. Review each output before sharing or downloading.',
+    label: 'Complete',
+  },
+];
+const FEATURES = [
+  {
+    title: 'A note you can actually review',
+    body: 'Structured clinical sections, editable drafts and transcript comparison keep the important details within reach.',
+    icon: 'note',
+  },
+  {
+    title: 'Your consultation, more useful outputs',
+    body: 'Prepare prescription drafts, referral letters and patient summaries without starting from a blank page.',
+    icon: 'documents',
+  },
+  {
+    title: 'Continuity between visits',
+    body: 'Bring previous signed encounters and intake information into your preparation for the next patient.',
+    icon: 'continuity',
+  },
+  {
+    title: 'A workflow that feels like yours',
+    body: 'Use personal note layouts and document templates, with support for in-person and teleconsultation workflows.',
+    icon: 'practice',
+  },
+] as const;
+function FeatureIcon({ kind }: { kind: (typeof FEATURES)[number]['icon'] }) {
+  const paths = {
+    note: 'M7 4h10l3 3v15H7V4Zm4 6h5m-5 4h5m-5 4h3',
+    documents: 'M9 8h12v16H9V8ZM5 19H3V3h12v2m-2 8h4m-4 4h4',
+    continuity: 'M5 9a9 9 0 1 1-1 8M5 3v6h6m3-2v7l4 2',
+    practice: 'M4 6h20M4 14h20M4 22h20M9 3v6m10 2v6M11 19v6',
+  };
   return (
-    <header className="sticky top-0 z-40 border-b border-[var(--color-line-soft)] bg-[var(--color-bg)]/80 backdrop-blur-md">
-      <Container as="nav" className="flex h-16 items-center justify-between">
-        <Wordmark />
-        <div className="hidden items-center gap-7 md:flex">
-          {links.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              className="text-sm text-[var(--color-ink-2)] transition-colors hover:text-[var(--color-ink)]"
-            >
-              {l.label}
+    <svg viewBox="0 0 28 28" fill="none" aria-hidden="true">
+      <path
+        d={paths[kind]}
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+const FAQS = [
+  {
+    question: 'What does one credit include?',
+    answer:
+      'One credit is one consultation. Essential includes 200 credits for one month; Plus includes 500 credits for one month. Ask our team about usage terms, unused credits and any applicable taxes before activating your plan.',
+  },
+  {
+    question: 'Can I use Scribe for online consultations?',
+    answer:
+      'Scribe includes a teleconsultation workflow as well as in-person capture. Your microphone, call setup and patient consent need to be checked before each recording.',
+  },
+  {
+    question: 'Does Scribe make clinical decisions or sign prescriptions?',
+    answer:
+      'No. AI-generated notes, prescriptions and documents are drafts for your review. You remain responsible for diagnosis, treatment decisions, corrections and clinical approval.',
+  },
+  {
+    question: 'Will it work with the languages used in my clinic?',
+    answer:
+      'Tell us which languages and language combinations you use. We will help you evaluate your workflow before patient use. Language availability does not guarantee transcription accuracy, and clinical details always need review.',
+  },
+  {
+    question: 'What should my UAE clinic check before using it?',
+    answer:
+      'Before using real patient data, review the consent process, data-processing locations, retention arrangements and your clinic’s applicable requirements with our team. This page does not claim UAE data residency or regulatory approval.',
+  },
+  {
+    question: 'How do I activate a monthly plan?',
+    answer:
+      'Choose “Request Essential” or “Request Plus” to email our team. We will confirm the plan, usage terms and any applicable taxes before activation. This page does not take payment or change an existing subscription.',
+  },
+];
+
+export default function ForDoctorsLanding() {
+  return (
+    <div className={styles.page} id="top">
+      <a className={styles.skipLink} href="#main">
+        Skip to content
+      </a>
+      <header className={styles.header}>
+        <div className={`${styles.container} ${styles.nav}`}>
+          <Brand />
+          <nav className={styles.desktopLinks} aria-label="Main navigation">
+            <a href="#workflow">How it works</a>
+            <a href="#pricing">Pricing</a>
+            <a href="#questions">Questions</a>
+          </nav>
+          <div className={styles.navActions}>
+            <Link href="https://scribe.cureocity.in/login" className={styles.signIn}>
+              Sign in
+            </Link>
+            <a href="#pricing" className={styles.smallButton}>
+              View plans
             </a>
-          ))}
-          <Link
-            href="/"
-            className="text-sm text-[var(--color-ink-2)] transition-colors hover:text-[var(--color-ink)]"
-          >
-            For therapists
-          </Link>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <ButtonLink href="/login" variant="ghost" size="sm" className="hidden sm:inline-flex">
-            Sign in
-          </ButtonLink>
-          <ButtonLink href="/login" size="sm">
-            Get early access
-          </ButtonLink>
-        </div>
-      </Container>
-    </header>
-  );
-}
-
-/* ============================== Hero ============================== */
-
-function Hero() {
-  return (
-    <section className="relative">
-      <div className="absolute inset-0 -z-10 overflow-hidden" aria-hidden>
-        <div className="lp-blob lp-blob-a left-[-10%] top-[-18%] h-[480px] w-[480px] bg-[#ccd8ee] opacity-70" />
-        <div className="lp-blob lp-blob-b right-[-12%] top-[-6%] h-[420px] w-[420px] bg-[#e8e0cf] opacity-60" />
-        <div className="lp-blob lp-blob-c left-[28%] top-[30%] h-[360px] w-[360px] bg-[#dde5f2] opacity-60" />
-      </div>
-
-      <Container className="grid items-center gap-14 pb-20 pt-16 lg:grid-cols-[1.05fr_0.95fr] lg:gap-10 lg:pb-28 lg:pt-24">
-        <div>
-          <Reveal>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-accent)]">
-              For Indian doctors · super-specialty OPD
-            </p>
-          </Reveal>
-          <Reveal delay={90}>
-            <h1 className="mt-4 font-serif text-5xl leading-[1.04] tracking-tight sm:text-6xl lg:text-[4.2rem]">
-              See the patient. The note — and the Rx —{' '}
-              <span className="italic text-[var(--color-accent)]">write themselves.</span>
-            </h1>
-          </Reveal>
-          <Reveal delay={180}>
-            <p className="mt-6 max-w-xl text-lg leading-relaxed text-[var(--color-ink-2)]">
-              Two minutes a patient leaves no time to type. Cureocity Scribe listens, builds the
-              note live, and quietly flags the question you haven&rsquo;t asked and the red flag you
-              shouldn&rsquo;t miss — in the Hinglish, Manglish, or Tanglish your patients actually
-              speak. The prescription drafts itself. You sign.
-            </p>
-          </Reveal>
-          <Reveal delay={260}>
-            <div className="mt-8 flex flex-wrap items-center gap-3">
-              <ButtonLink href="/login" size="lg">
-                Get early access
-              </ButtonLink>
-              <ButtonLink href="#live" variant="secondary" size="lg">
-                See the live copilot
-              </ButtonLink>
+        <nav className={styles.mobileLinks} aria-label="Page sections">
+          <a href="#workflow">How it works</a>
+          <a href="#pricing">Pricing</a>
+          <a href="#questions">Questions</a>
+        </nav>
+      </header>
+      <main id="main">
+        <section className={styles.hero} aria-labelledby="hero-title">
+          <div className={`${styles.container} ${styles.heroGrid}`}>
+            <div className={styles.heroCopy}>
+              <p className={styles.location}>
+                <span aria-hidden="true" />
+                For doctors and clinics in the UAE
+              </p>
+              <h1 id="hero-title">Your attention belongs with your patient.</h1>
+              <p className={styles.heroDescription}>
+                Let Scribe help with the documentation. Turn your consultation into a structured
+                note, prescription draft and clear next steps—all ready for your review.
+              </p>
+              <div className={styles.actions}>
+                <a href="#pricing" className={styles.primaryButton}>
+                  Find your monthly plan
+                </a>
+                <a href="#workflow" className={styles.textLink}>
+                  Explore the workflow <span aria-hidden="true">↗</span>
+                </a>
+              </div>
+              <p className={styles.heroNote}>
+                <Check />
+                AI-assisted documentation. Doctor-led care.
+              </p>
             </div>
-          </Reveal>
-          <Reveal delay={340}>
-            <ul className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-[var(--color-ink-3)]">
-              {[
-                'Audio processed in India',
-                'Built for 2-minute consults',
-                'You confirm every clinical call',
-              ].map((t) => (
-                <li key={t} className="flex items-center gap-2">
-                  <span aria-hidden className="h-1 w-1 rounded-full bg-[var(--color-accent)]" />
-                  {t}
+            <ScribeWorkflowPreview />
+          </div>
+          <div className={`${styles.container} ${styles.contextStrip}`}>
+            <span>Built around the consultation</span>
+            <span>In-person visits</span>
+            <span>Teleconsultations</span>
+            <span>Your review comes first</span>
+          </div>
+        </section>
+        <section id="workflow" className={styles.section} aria-labelledby="workflow-title">
+          <div className={styles.container}>
+            <div className={styles.sectionHeading}>
+              <h2 id="workflow-title">From the first word to the final review.</h2>
+              <p>
+                A connected workspace for the work around your consultation. You bring the clinical
+                judgement. Scribe helps organise the details.
+              </p>
+            </div>
+            <ol className={styles.steps}>
+              {WORKFLOW.map((step, index) => (
+                <li key={step.label}>
+                  <div className={styles.stepLabel}>
+                    <span>{index + 1}</span>
+                    {step.label}
+                  </div>
+                  <h3>{step.title}</h3>
+                  <p>{step.body}</p>
                 </li>
               ))}
-            </ul>
-          </Reveal>
-        </div>
-
-        <Reveal delay={200}>
-          <LiveRailsMock />
-        </Reveal>
-      </Container>
-    </section>
-  );
-}
-
-/** A static mock of the three live rails — the product's signature view. */
-function LiveRailsMock() {
-  return (
-    <div className="rounded-3xl border border-[var(--color-line)] bg-white p-5 shadow-[0_32px_80px_-36px_rgba(15,27,42,0.25)]">
-      <div className="flex items-center justify-between border-b border-[var(--color-line-soft)] pb-3">
-        <p className="text-sm font-semibold">Live consult</p>
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-accent)]">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--color-accent)]" />
-          listening
-        </span>
-      </div>
-      <div className="mt-4 space-y-3">
-        <RailCard tag="Transcript" tone="muted">
-          “…seene mein pressure ho raha tha, do din se. Walking pe zyada.”
-        </RailCard>
-        <RailCard tag="Note · building" tone="ink">
-          <strong>CC:</strong> Exertional chest pressure ×2 days · <strong>HPI:</strong>{' '}
-          retrosternal, worse on exertion
-        </RailCard>
-        <RailCard tag="Ask / flag" tone="accent">
-          🔴 Exertional chest pain — consider ECG (ACS red flag) · ❓ not yet asked: radiation,
-          sweating, prior cardiac history
-        </RailCard>
-      </div>
-    </div>
-  );
-}
-
-function RailCard({
-  tag,
-  tone,
-  children,
-}: {
-  tag: string;
-  tone: 'muted' | 'ink' | 'accent';
-  children: ReactNode;
-}) {
-  const toneClass =
-    tone === 'accent'
-      ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-      : tone === 'ink'
-        ? 'border-[var(--color-line)] bg-[var(--color-surface-soft)]'
-        : 'border-[var(--color-line-soft)] bg-white';
-  return (
-    <div className={`rounded-2xl border p-3.5 ${toneClass}`}>
-      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-        {tag}
-      </p>
-      <p className="text-[13px] leading-relaxed text-[var(--color-ink)]">{children}</p>
-    </div>
-  );
-}
-
-/* ============================== Live copilot ============================== */
-
-const RAILS = [
-  {
-    tag: 'Rail 1 · Transcript',
-    title: 'Word-by-word, in the language spoken',
-    body: 'Streaming transcription tuned for Indian code-mix — Hinglish, Manglish, Tanglish. Drug names and dosages preserved exactly, not flattened to English.',
-  },
-  {
-    tag: 'Rail 2 · Note',
-    title: 'The note builds as you talk',
-    body: 'Chief complaint, HPI, exam, assessment, plan — filled in live, not started after the patient leaves. By “end consult” it is ~90% done.',
-  },
-  {
-    tag: 'Rail 3 · Ask & flag',
-    title: 'The question you forgot. The flag you can’t miss.',
-    body: 'A quiet sidebar surfaces unasked screening questions, red flags, drug-interaction warnings, and coding nudges — passive and dismissible, never blocking.',
-  },
-];
-
-function LiveCopilot() {
-  return (
-    <section
-      id="live"
-      className="scroll-mt-24 border-y border-[var(--color-line-soft)] bg-white/60 py-20 lg:py-28"
-    >
-      <Container>
-        <SectionHeading
-          eyebrow="The live copilot"
-          title={
-            <>
-              Not a scribe that catches up.{' '}
-              <span className="italic text-[var(--color-accent)]">A copilot in the room.</span>
-            </>
-          }
-          sub="Most tools record now and write a note in 30 seconds — after the patient is gone. In a two-minute OPD that is too late. Cureocity Scribe runs three live rails the whole consult."
-        />
-        <div className="mt-12 grid gap-5 md:grid-cols-3">
-          {RAILS.map((r, i) => (
-            <Reveal key={r.tag} delay={i * 110}>
-              <div className="lp-lift h-full rounded-3xl border border-[var(--color-line)] bg-white p-7">
-                <span className="inline-flex items-center rounded-full bg-[var(--color-accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-accent)]">
-                  {r.tag}
-                </span>
-                <h3 className="mt-4 font-serif text-[22px] leading-snug">{r.title}</h3>
-                <p className="mt-3 text-[15px] leading-relaxed text-[var(--color-ink-2)]">
-                  {r.body}
-                </p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </Container>
-    </section>
-  );
-}
-
-/* ============================== How it works ============================== */
-
-const STEPS = [
-  {
-    n: '01',
-    title: 'Consult',
-    body: 'Tap record — or just dictate. The transcript and the structured note build live as you speak or examine.',
-  },
-  {
-    n: '02',
-    title: 'Glance',
-    body: 'A passing look at the sidebar: the unasked question, the red flag, the interaction. Act on it while the patient is still in front of you.',
-  },
-  {
-    n: '03',
-    title: 'Sign & share',
-    body: 'End the consult — the note + prescription are already drafted. Confirm, sign, and send the patient a plain-language after-visit summary on WhatsApp.',
-  },
-];
-
-function HowItWorks() {
-  return (
-    <section id="how" className="scroll-mt-24 py-20 lg:py-28">
-      <Container>
-        <SectionHeading
-          eyebrow="How it works"
-          title={
-            <>
-              Three moves. <span className="italic text-[var(--color-accent)]">No typing.</span>
-            </>
-          }
-        />
-        <div className="mt-12 grid gap-5 md:grid-cols-3">
-          {STEPS.map((s, i) => (
-            <Reveal key={s.n} delay={i * 120}>
-              <div className="lp-lift h-full rounded-3xl border border-[var(--color-line)] bg-white p-7">
-                <span className="font-serif text-5xl font-light text-[var(--color-accent)]/35">
-                  {s.n}
-                </span>
-                <h3 className="mt-4 font-serif text-2xl">{s.title}</h3>
-                <p className="mt-3 text-[15px] leading-relaxed text-[var(--color-ink-2)]">
-                  {s.body}
-                </p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </Container>
-    </section>
-  );
-}
-
-/* ============================== Trust ============================== */
-
-const TRUST = [
-  {
-    title: 'Straight answer on your data',
-    body: 'Consult audio is transcribed on Indian infrastructure (asia-south1) and never stored. Note structuring runs on Google’s secure global AI service under the patient’s recorded consent — we say exactly where every byte goes.',
-  },
-  {
-    title: 'Every line traceable',
-    body: 'Each note line links back to the exact moment in the transcript that produced it. No invented exams, no phantom medications.',
-  },
-  {
-    title: 'You stay in charge',
-    body: 'Every diagnosis, prescription, and order is a draft until you sign it. Nothing reaches the record — or the patient — without your confirmation.',
-  },
-  {
-    title: 'ABDM-ready',
-    body: 'Built to export FHIR and link prescriptions to the patient’s ABHA, so your notes fit the national digital-health rails.',
-  },
-];
-
-function Trust() {
-  return (
-    <section
-      id="trust"
-      className="scroll-mt-24 border-y border-[var(--color-line-soft)] bg-white/60 py-20 lg:py-28"
-    >
-      <Container>
-        <SectionHeading
-          eyebrow="Trust & DPDP"
-          title={
-            <>
-              Built like it&rsquo;s health data.{' '}
-              <span className="italic text-[var(--color-accent)]">Because it is.</span>
-            </>
-          }
-        />
-        <div className="mt-12 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {TRUST.map((c, i) => (
-            <Reveal key={c.title} delay={(i % 4) * 90}>
-              <div className="lp-lift h-full rounded-3xl border border-[var(--color-line)] bg-white p-7">
-                <h3 className="text-base font-semibold">{c.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-[var(--color-ink-2)]">{c.body}</p>
-              </div>
-            </Reveal>
-          ))}
-        </div>
-      </Container>
-    </section>
-  );
-}
-
-/* ============================== CTA + footer ============================== */
-
-function FinalCta() {
-  return (
-    <section className="pb-24 pt-4 lg:pb-32">
-      <Container>
-        <Reveal>
-          <div className="relative overflow-hidden rounded-[2.5rem] bg-[var(--color-accent)] px-8 py-16 text-center text-white sm:px-16 lg:py-20">
-            <div className="absolute inset-0 overflow-hidden" aria-hidden>
-              <div className="lp-blob lp-blob-a left-[-8%] top-[-40%] h-[380px] w-[380px] bg-white opacity-10" />
-              <div className="lp-blob lp-blob-b bottom-[-50%] right-[-10%] h-[420px] w-[420px] bg-[#9ec5b2] opacity-20" />
-            </div>
-            <div className="relative">
-              <h2 className="mx-auto max-w-2xl font-serif text-4xl leading-[1.08] tracking-tight sm:text-5xl">
-                Give the patient your eyes.{' '}
-                <span className="italic">We&rsquo;ll take the notes.</span>
-              </h2>
-              <p className="mx-auto mt-5 max-w-xl text-base leading-relaxed text-white/80">
-                Cureocity Scribe for doctors is in active development. Sign in to set up your
-                practice and be among the first super-specialty OPDs to try the live copilot.
+            </ol>
+          </div>
+        </section>
+        <section
+          className={`${styles.section} ${styles.features}`}
+          aria-labelledby="features-title"
+        >
+          <div className={`${styles.container} ${styles.featureLayout}`}>
+            <div className={styles.featureIntro}>
+              <span className={styles.sectionTag}>The Scribe workspace</span>
+              <h2 id="features-title">Less starting over. More moving forward.</h2>
+              <p>
+                Keep the note, the prescription draft and the patient handover connected to the same
+                encounter.
               </p>
-              <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-                <ButtonLink
-                  href="/login"
-                  size="lg"
-                  className="!bg-white !text-[var(--color-accent)] hover:!bg-[var(--color-surface-soft)]"
-                >
-                  Get early access
-                </ButtonLink>
-              </div>
+              <a href={scribeEnquiryHref()} className={styles.textLink}>
+                Discuss your clinic’s workflow <span aria-hidden="true">↗</span>
+              </a>
+            </div>
+            <div className={styles.featureGrid}>
+              {FEATURES.map((feature) => (
+                <article key={feature.title} className={styles.feature}>
+                  <FeatureIcon kind={feature.icon} />
+                  <h3>{feature.title}</h3>
+                  <p>{feature.body}</p>
+                </article>
+              ))}
             </div>
           </div>
-        </Reveal>
-      </Container>
-    </section>
-  );
-}
-
-function Footer() {
-  return (
-    <footer className="border-t border-[var(--color-line-soft)] bg-white/60 py-12">
-      <Container>
-        <div className="flex flex-col items-start justify-between gap-8 sm:flex-row">
-          <div className="max-w-xs">
-            <Wordmark />
-            <p className="mt-3 text-sm leading-relaxed text-[var(--color-ink-3)]">
-              The live AI copilot for Indian doctors — built for the two-minute OPD.
+        </section>
+        <section
+          id="pricing"
+          className={`${styles.section} ${styles.pricing}`}
+          aria-labelledby="pricing-title"
+        >
+          <div className={styles.container}>
+            <div className={`${styles.sectionHeading} ${styles.pricingHeading}`}>
+              <div>
+                <span className={styles.sectionTag}>Monthly plans · UAE dirhams</span>
+                <h2 id="pricing-title">Simple pricing for your practice.</h2>
+              </div>
+              <p>
+                Two monthly options. One clear measure.
+                <br />
+                <strong>1 credit = 1 consultation.</strong>
+              </p>
+            </div>
+            <div className={styles.planGrid}>
+              {SCRIBE_UAE_PLANS.map((plan) => (
+                <article
+                  className={`${styles.plan} ${plan.id === 'plus' ? styles.plusPlan : ''}`}
+                  key={plan.id}
+                  aria-labelledby={`plan-${plan.id}`}
+                >
+                  <div className={styles.planTop}>
+                    <h3 id={`plan-${plan.id}`}>{plan.name}</h3>
+                    <span>{plan.label}</span>
+                  </div>
+                  <p className={styles.planDescription}>{plan.description}</p>
+                  <div className={styles.price}>
+                    <span className={styles.priceAmount}>
+                      <span className={styles.srOnly}>AED </span>
+                      <DirhamSymbol className={styles.dirham} />
+                      <span>{plan.priceAed}</span>
+                    </span>
+                    <span className={styles.pricePeriod}>/ month</span>
+                  </div>
+                  <p className={styles.credits}>
+                    <strong>{plan.credits} credits</strong>
+                    <span>{plan.credits} consultations for 1 month</span>
+                  </p>
+                  <ul className={styles.planFeatures}>
+                    <li>
+                      <Check />
+                      Consultation transcript and note drafts
+                    </li>
+                    <li>
+                      <Check />
+                      Prescription and patient-document drafts
+                    </li>
+                    <li>
+                      <Check />
+                      Doctor review and personal templates
+                    </li>
+                  </ul>
+                  <a
+                    className={plan.id === 'plus' ? styles.primaryButton : styles.secondaryButton}
+                    href={scribeEnquiryHref(plan)}
+                  >
+                    Request {plan.name}
+                  </a>
+                </article>
+              ))}
+            </div>
+            <p className={styles.pricingNote}>
+              Plan requests open an email to our team. Usage terms and any applicable taxes are
+              confirmed before activation. No payment is taken on this page.
             </p>
           </div>
-          <div className="flex gap-14">
+        </section>
+        <section
+          className={`${styles.section} ${styles.reviewSection}`}
+          aria-labelledby="review-title"
+        >
+          <div className={`${styles.container} ${styles.reviewLayout}`}>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                Product
-              </p>
-              <ul className="mt-3 space-y-2 text-sm text-[var(--color-ink-2)]">
-                {[
-                  ['#live', 'The live copilot'],
-                  ['#how', 'How it works'],
-                  ['#trust', 'Trust & DPDP'],
-                ].map(([href, label]) => (
-                  <li key={href}>
-                    <a href={href} className="transition-colors hover:text-[var(--color-ink)]">
-                      {label}
-                    </a>
-                  </li>
-                ))}
-              </ul>
+              <span className={styles.sectionTag}>Clinical responsibility stays with you</span>
+              <h2 id="review-title">
+                Helpful drafts.
+                <br />
+                Your final word.
+              </h2>
             </div>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-[var(--color-ink-3)]">
-                More
-              </p>
-              <ul className="mt-3 space-y-2 text-sm text-[var(--color-ink-2)]">
-                <li>
-                  <Link href="/" className="transition-colors hover:text-[var(--color-ink)]">
-                    For therapists
-                  </Link>
-                </li>
-                <li>
-                  <Link href="/login" className="transition-colors hover:text-[var(--color-ink)]">
-                    Sign in
-                  </Link>
-                </li>
-              </ul>
+            <div className={styles.reviewPoints}>
+              <article>
+                <Check />
+                <div>
+                  <h3>Consent before capture</h3>
+                  <p>Confirm the patient’s consent before recording or AI processing.</p>
+                </div>
+              </article>
+              <article>
+                <Check />
+                <div>
+                  <h3>Review before approval</h3>
+                  <p>
+                    Check the transcript, correct the clinical details and approve the final note
+                    and prescription.
+                  </p>
+                </div>
+              </article>
+              <article>
+                <Check />
+                <div>
+                  <h3>Assess the fit for your clinic</h3>
+                  <p>
+                    Discuss your language needs and data-handling requirements before using real
+                    patient information.
+                  </p>
+                </div>
+              </article>
             </div>
           </div>
+        </section>
+        <section
+          id="questions"
+          className={`${styles.section} ${styles.faqSection}`}
+          aria-labelledby="faq-title"
+        >
+          <div className={`${styles.container} ${styles.faqLayout}`}>
+            <div>
+              <h2 id="faq-title">A few things worth knowing.</h2>
+              <p>
+                Have a question about your practice?
+                <br />
+                <a href={scribeEnquiryHref()} className={styles.textLink}>
+                  Talk to our team
+                </a>
+              </p>
+            </div>
+            <div className={styles.faqs}>
+              {FAQS.map((faq) => (
+                <details key={faq.question}>
+                  <summary>
+                    {faq.question}
+                    <span aria-hidden="true">+</span>
+                  </summary>
+                  <p>{faq.answer}</p>
+                </details>
+              ))}
+            </div>
+          </div>
+        </section>
+        <section className={styles.finalCta} aria-labelledby="cta-title">
+          <div className={`${styles.container} ${styles.finalCtaInner}`}>
+            <div>
+              <h2 id="cta-title">
+                Make room for the patient.
+                <br />
+                Start with Scribe.
+              </h2>
+              <p>Let’s find the right workflow for your UAE practice.</p>
+            </div>
+            <a href={scribeEnquiryHref()} className={styles.primaryButton}>
+              Talk to our team
+            </a>
+          </div>
+        </section>
+      </main>
+      <footer className={styles.footer}>
+        <div className={`${styles.container} ${styles.footerTop}`}>
+          <Brand />
+          <nav aria-label="Footer navigation">
+            <a href="#pricing">Pricing</a>
+            <Link href="https://scribe.cureocity.in/privacy">Privacy</Link>
+            <Link href="https://scribe.cureocity.in/terms">Terms</Link>
+            <a href={scribeEnquiryHref()}>Contact</a>
+          </nav>
         </div>
-        <div className="mt-10 flex flex-col gap-2 border-t border-[var(--color-line-soft)] pt-6 text-xs text-[var(--color-ink-3)] sm:flex-row sm:items-center sm:justify-between">
-          <p>
-            © 2026 Cureocity · Made for Indian practice ·{' '}
-            <Link
-              href="/privacy"
-              className="underline underline-offset-2 hover:text-[var(--color-ink)]"
-            >
-              Privacy
-            </Link>{' '}
-            ·{' '}
-            <Link
-              href="/terms"
-              className="underline underline-offset-2 hover:text-[var(--color-ink)]"
-            >
-              Terms
-            </Link>
-          </p>
-          <p>Not a medical device. Clinical decisions remain with the treating professional.</p>
+        <div className={`${styles.container} ${styles.footerBottom}`}>
+          <p>© 2026 Cureocity. Scribe for doctors.</p>
+          <p>AI assists. Your clinical judgement leads.</p>
         </div>
-      </Container>
-    </footer>
-  );
-}
-
-/* ============================== shared ============================== */
-
-function SectionHeading({
-  eyebrow,
-  title,
-  sub,
-}: {
-  eyebrow: string;
-  title: ReactNode;
-  sub?: string;
-}) {
-  return (
-    <Reveal className="max-w-2xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--color-accent)]">
-        {eyebrow}
-      </p>
-      <h2 className="mt-3 font-serif text-4xl leading-[1.08] tracking-tight sm:text-5xl">
-        {title}
-      </h2>
-      {sub && <p className="mt-4 text-lg leading-relaxed text-[var(--color-ink-2)]">{sub}</p>}
-    </Reveal>
+      </footer>
+    </div>
   );
 }
