@@ -2,7 +2,7 @@ import type { PrismaClient } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
 
 import { buildDemoLoadPlan } from './demo-load-plan';
-import { refreshDemoProfiles } from './demo-seed';
+import { DEMO_PROFILE_REFRESH_RELEASE, refreshDemoProfiles } from './demo-seed';
 
 interface FakePractitioner {
   id: string;
@@ -21,6 +21,7 @@ function fakeDatabase(
   options: {
     missing?: number;
     collisions?: number;
+    markerFailure?: boolean;
     zeroUpdateAt?: number;
     swappedVerticals?: boolean;
   } = {},
@@ -61,9 +62,28 @@ function fakeDatabase(
     bio: 'Must remain unchanged',
   };
   const rows = [...targets, realLookalike];
+  const releaseMarkers: Array<{
+    id: string;
+    actorType: string;
+    action: string;
+    targetType: string;
+    targetId: string;
+  }> = [];
   let updateCalls = 0;
 
   const tx = {
+    auditLog: {
+      createMany: async ({ data }: { data: (typeof releaseMarkers)[number][] }) => {
+        if (options.markerFailure) throw new Error('marker write failed');
+        const fresh = data.filter(
+          (candidate) => !releaseMarkers.some((marker) => marker.id === candidate.id),
+        );
+        releaseMarkers.push(...structuredClone(fresh));
+        return { count: fresh.length };
+      },
+      findUnique: async ({ where }: { where: { id: string } }) =>
+        releaseMarkers.find((marker) => marker.id === where.id) ?? null,
+    },
     psychologist: {
       findMany: async ({ where }: { where: { firebaseUid: { in: string[] } } }) => {
         const exactUids = new Set(where.firebaseUid.in);
@@ -93,32 +113,45 @@ function fakeDatabase(
   const prisma = {
     $transaction: async <T>(operation: (client: typeof tx) => Promise<T>) => {
       const snapshot = structuredClone(rows);
+      const markerSnapshot = structuredClone(releaseMarkers);
       try {
         return await operation(tx);
       } catch (error) {
         rows.splice(0, rows.length, ...snapshot);
+        releaseMarkers.splice(0, releaseMarkers.length, ...markerSnapshot);
         throw error;
       }
     },
   } as unknown as PrismaClient;
 
-  return { prisma, rows, getUpdateCalls: () => updateCalls };
+  return {
+    prisma,
+    rows,
+    getUpdateCalls: () => updateCalls,
+    getMarkerCount: () => releaseMarkers.length,
+  };
 }
 
 describe('demo practitioner profile refresh', () => {
-  it('updates exactly 201 isolated profiles in place and is idempotent', async () => {
+  it('updates exactly 201 isolated profiles in place and durably skips a release replay', async () => {
     const fixture = fakeDatabase();
     const beforeIds = fixture.rows.filter((row) => row.isSynthetic).map((row) => row.id);
 
-    await expect(refreshDemoProfiles(fixture.prisma)).resolves.toEqual({
+    await expect(
+      refreshDemoProfiles(fixture.prisma, DEMO_PROFILE_REFRESH_RELEASE),
+    ).resolves.toEqual({
       practitioners: 201,
       doctor: 112,
       therapist: 89,
+      alreadyApplied: false,
     });
-    await expect(refreshDemoProfiles(fixture.prisma)).resolves.toEqual({
+    await expect(
+      refreshDemoProfiles(fixture.prisma, DEMO_PROFILE_REFRESH_RELEASE),
+    ).resolves.toEqual({
       practitioners: 201,
       doctor: 112,
       therapist: 89,
+      alreadyApplied: true,
     });
 
     const targets = fixture.rows.filter((row) => row.isSynthetic);
@@ -136,30 +169,62 @@ describe('demo practitioner profile refresh', () => {
       headline: 'Real profile',
       bio: 'Must remain unchanged',
     });
-    expect(fixture.getUpdateCalls()).toBe(402);
+    expect(fixture.getUpdateCalls()).toBe(201);
+    expect(fixture.getMarkerCount()).toBe(1);
+  });
+
+  it('rejects an invalid release id before opening a transaction', async () => {
+    const fixture = fakeDatabase();
+    await expect(refreshDemoProfiles(fixture.prisma, ' ')).rejects.toThrow(
+      DEMO_PROFILE_REFRESH_RELEASE,
+    );
+    expect(fixture.getUpdateCalls()).toBe(0);
+    expect(fixture.getMarkerCount()).toBe(0);
+  });
+
+  it('does not touch profiles when the durable release marker cannot be written', async () => {
+    const fixture = fakeDatabase({ markerFailure: true });
+    const before = structuredClone(fixture.rows);
+
+    await expect(refreshDemoProfiles(fixture.prisma, DEMO_PROFILE_REFRESH_RELEASE)).rejects.toThrow(
+      'marker write failed',
+    );
+    expect(fixture.rows).toEqual(before);
+    expect(fixture.getUpdateCalls()).toBe(0);
+    expect(fixture.getMarkerCount()).toBe(0);
   });
 
   it('fails before writing when the isolated cohort is incomplete or credentials collide', async () => {
     const incomplete = fakeDatabase({ missing: 1 });
-    await expect(refreshDemoProfiles(incomplete.prisma)).rejects.toThrow(
-      'expected 201 isolated practitioners',
-    );
+    await expect(
+      refreshDemoProfiles(incomplete.prisma, DEMO_PROFILE_REFRESH_RELEASE),
+    ).rejects.toThrow('expected 201 isolated practitioners');
     expect(incomplete.getUpdateCalls()).toBe(0);
+    expect(incomplete.getMarkerCount()).toBe(0);
 
     const collision = fakeDatabase({ collisions: 1 });
-    await expect(refreshDemoProfiles(collision.prisma)).rejects.toThrow('credential collision');
+    await expect(
+      refreshDemoProfiles(collision.prisma, DEMO_PROFILE_REFRESH_RELEASE),
+    ).rejects.toThrow('credential collision');
     expect(collision.getUpdateCalls()).toBe(0);
+    expect(collision.getMarkerCount()).toBe(0);
 
     const swapped = fakeDatabase({ swappedVerticals: true });
-    await expect(refreshDemoProfiles(swapped.prisma)).rejects.toThrow('vertical mismatch');
+    await expect(refreshDemoProfiles(swapped.prisma, DEMO_PROFILE_REFRESH_RELEASE)).rejects.toThrow(
+      'vertical mismatch',
+    );
     expect(swapped.getUpdateCalls()).toBe(0);
+    expect(swapped.getMarkerCount()).toBe(0);
   });
 
   it('rolls back the profile transaction unless every target updates', async () => {
     const fixture = fakeDatabase({ zeroUpdateAt: 80 });
     const before = structuredClone(fixture.rows);
 
-    await expect(refreshDemoProfiles(fixture.prisma)).rejects.toThrow('updated 200/201');
+    await expect(refreshDemoProfiles(fixture.prisma, DEMO_PROFILE_REFRESH_RELEASE)).rejects.toThrow(
+      'updated 200/201',
+    );
     expect(fixture.rows).toEqual(before);
+    expect(fixture.getMarkerCount()).toBe(0);
   });
 });

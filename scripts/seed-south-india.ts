@@ -12,7 +12,7 @@
  *   DATABASE_URL=postgresql://... pnpm exec tsx scripts/seed-south-india.ts --purge
  *
  * Refresh only the 201 reserved practitioner display profiles in place:
- *   DATABASE_URL=postgresql://... pnpm exec tsx scripts/seed-south-india.ts --refresh-profiles
+ *   DEMO_PROFILE_REFRESH_RELEASE=release-id DATABASE_URL=postgresql://... pnpm exec tsx scripts/seed-south-india.ts --refresh-profiles
  *
  * Apply prisma/migrations/20260929000000_synthetic_practitioner_isolation
  * before `--apply`. There is deliberately no deployed HTTP mutation route.
@@ -22,6 +22,7 @@ import { PrismaClient } from '@prisma/client';
 
 import { buildDemoLoadPlan } from '../apps/web/lib/demo-load-plan';
 import { refreshDemoProfiles, seedDemo } from '../apps/web/lib/demo-seed';
+import { resolveConnectionString } from '../apps/web/lib/prisma';
 
 function printPreview(): void {
   const plan = buildDemoLoadPlan();
@@ -59,14 +60,24 @@ async function main(): Promise<void> {
     return;
   }
 
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient({
+    datasources: { db: { url: resolveConnectionString() } },
+  });
   try {
     if (refreshProfiles) {
-      const summary = await refreshDemoProfiles(prisma);
-      console.log('\nDemo profile refresh complete.');
-      console.log(
-        `  Updated:        ${summary.practitioners} practitioners (${summary.doctor} UAE doctor · ${summary.therapist} Indian psychologist)`,
-      );
+      const releaseId = process.env.DEMO_PROFILE_REFRESH_RELEASE?.trim();
+      if (!releaseId) {
+        throw new Error('DEMO_PROFILE_REFRESH_RELEASE is required with --refresh-profiles.');
+      }
+      const summary = await refreshDemoProfiles(prisma, releaseId);
+      if (summary.alreadyApplied) {
+        console.log('\nDemo profile refresh was already applied; no profile writes were made.');
+      } else {
+        console.log('\nDemo profile refresh complete.');
+        console.log(
+          `  Updated:        ${summary.practitioners} practitioners (${summary.doctor} UAE doctor · ${summary.therapist} Indian psychologist)`,
+        );
+      }
       console.log(
         '  Preserved:      practitioner ids, clients, sessions, activity, and isolation flags',
       );
