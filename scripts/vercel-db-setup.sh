@@ -85,4 +85,18 @@ fi
 if [ "${VERCEL_ENV:-production}" = "production" ]; then
   node scripts/configure-runtime-db-role.mjs
   node scripts/verify-runtime-db-role.mjs
+
+  # One-time, versioned maintenance gate for the isolated September 2026 demo
+  # cohort. The flag is scoped to Production and removed after a verified run.
+  # Use the least-privilege runtime role; the profile refresher itself fails
+  # closed unless the exact 201-row isolated cohort is present.
+  EXPECTED_DEMO_PROFILE_REFRESH_RELEASE="2026-09-30-natural-names-v1"
+  if [ -n "${DEMO_PROFILE_REFRESH_RELEASE:-}" ]; then
+    if [ "$DEMO_PROFILE_REFRESH_RELEASE" != "$EXPECTED_DEMO_PROFILE_REFRESH_RELEASE" ]; then
+      echo "[vercel-db-setup] refusing unknown DEMO_PROFILE_REFRESH_RELEASE value"
+      exit 1
+    fi
+    echo "[vercel-db-setup] running guarded demo profile refresh: $DEMO_PROFILE_REFRESH_RELEASE"
+    DATABASE_URL="$DATABASE_RUNTIME_URL" pnpm exec tsx scripts/seed-south-india.ts --refresh-profiles
+  fi
 fi

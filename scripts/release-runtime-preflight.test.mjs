@@ -69,6 +69,29 @@ test('web build fails fast on runtime and dependency smoke before any migration 
   ]);
 });
 
+test('production demo profile maintenance is version-gated and profile-only', () => {
+  const deploy = readFileSync(join(root, 'scripts/vercel-db-setup.sh'), 'utf8');
+  assert.match(deploy, /EXPECTED_DEMO_PROFILE_REFRESH_RELEASE="2026-09-30-natural-names-v1"/);
+  assert.match(deploy, /if \[ -n "\$\{DEMO_PROFILE_REFRESH_RELEASE:-\}" \]; then/);
+  assert.match(
+    deploy,
+    /DATABASE_URL="\$DATABASE_RUNTIME_URL" pnpm exec tsx scripts\/seed-south-india\.ts --refresh-profiles/,
+  );
+  assert.doesNotMatch(deploy, /seed-south-india\.ts --(?:apply|purge)/);
+
+  const seed = readFileSync(join(root, 'scripts/seed-south-india.ts'), 'utf8');
+  assert.match(seed, /DEMO_PROFILE_REFRESH_RELEASE is required with --refresh-profiles/);
+  assert.match(seed, /resolveConnectionString\(\)/);
+  assert.doesNotMatch(seed, /new PrismaClient\(\)/);
+
+  const refresher = readFileSync(join(root, 'apps/web/lib/demo-seed.ts'), 'utf8');
+  assert.match(refresher, /DEMO_PROFILE_REFRESH_RELEASE = '2026-09-30-natural-names-v1'/);
+  assert.match(refresher, /DEMO_PROFILE_REFRESH_AUDIT_ID = 'cdemoprofilerefreshv1a001'/);
+  assert.match(refresher, /createMany/);
+  assert.match(refresher, /skipDuplicates: true/);
+  assert.match(refresher, /alreadyApplied: true/);
+});
+
 test('gateway checks the actual inherited runtime and installed dependencies before building', () => {
   const docker = readFileSync(join(root, 'services/live-gateway/Dockerfile'), 'utf8');
   const instructions = docker

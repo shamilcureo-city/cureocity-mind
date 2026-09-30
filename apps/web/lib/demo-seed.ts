@@ -67,11 +67,15 @@ export interface DemoProfileRefreshSummary {
   practitioners: number;
   doctor: number;
   therapist: number;
+  alreadyApplied: boolean;
 }
 
 const DEMO_PROFILE_HEADLINE = 'Demo practitioner profile — fictional';
 const DEMO_PROFILE_BIO =
   'Generated for product demonstration; not a real clinician or issued credential.';
+export const DEMO_PROFILE_REFRESH_RELEASE = '2026-09-30-natural-names-v1';
+const DEMO_PROFILE_REFRESH_AUDIT_ID = 'cdemoprofilerefreshv1a001';
+const DEMO_PROFILE_REFRESH_TARGET = 'DemoProfileRefreshRelease';
 
 function batches<T>(rows: readonly T[], size = INSERT_BATCH_SIZE): T[][] {
   const result: T[][] = [];
@@ -124,12 +128,68 @@ export async function purgeDemo(prisma: PrismaClient): Promise<number> {
  */
 export async function refreshDemoProfiles(
   prisma: PrismaClient,
+  releaseId: string,
 ): Promise<DemoProfileRefreshSummary> {
+  const normalizedReleaseId = releaseId.trim();
+  if (normalizedReleaseId !== DEMO_PROFILE_REFRESH_RELEASE) {
+    throw new Error(`Demo profile refresh requires release ${DEMO_PROFILE_REFRESH_RELEASE}`);
+  }
+
   const practitioners = buildDemoLoadPractitioners();
   const expectedUids = practitioners.map((practitioner) => practitioner.uid);
 
   return prisma.$transaction(
     async (tx) => {
+      // The fixed primary key is both a concurrency lock and the durable
+      // completion receipt. PostgreSQL serializes competing inserts on it;
+      // the marker rolls back with the profile updates if any check fails.
+      const marker = await tx.auditLog.createMany({
+        data: [
+          {
+            id: DEMO_PROFILE_REFRESH_AUDIT_ID,
+            actorType: 'SYSTEM',
+            action: 'PSYCHOLOGIST_UPDATED',
+            targetType: DEMO_PROFILE_REFRESH_TARGET,
+            targetId: DEMO_PROFILE_REFRESH_AUDIT_ID,
+            metadata: {
+              op: 'demo-profile-refresh',
+              source: 'release-maintenance',
+              version: normalizedReleaseId,
+            },
+          },
+        ],
+        skipDuplicates: true,
+      });
+      if (marker.count === 0) {
+        const completed = await tx.auditLog.findUnique({
+          where: { id: DEMO_PROFILE_REFRESH_AUDIT_ID },
+          select: {
+            actorType: true,
+            action: true,
+            targetType: true,
+            targetId: true,
+          },
+        });
+        if (
+          !completed ||
+          completed.actorType !== 'SYSTEM' ||
+          completed.action !== 'PSYCHOLOGIST_UPDATED' ||
+          completed.targetType !== DEMO_PROFILE_REFRESH_TARGET ||
+          completed.targetId !== DEMO_PROFILE_REFRESH_AUDIT_ID
+        ) {
+          throw new Error('Demo profile refresh audit marker collision');
+        }
+        return {
+          practitioners: practitioners.length,
+          doctor: DEMO_LOAD_UAE_DOCTOR_COUNT,
+          therapist: DEMO_LOAD_INDIA_PSYCHOLOGIST_COUNT,
+          alreadyApplied: true,
+        };
+      }
+      if (marker.count !== 1) {
+        throw new Error(`Demo profile refresh created ${marker.count} release markers`);
+      }
+
       const existing = await tx.psychologist.findMany({
         where: {
           firebaseUid: { in: expectedUids },
@@ -202,7 +262,12 @@ export async function refreshDemoProfiles(
         );
       }
 
-      return { practitioners: updated, doctor: doctors, therapist: therapists };
+      return {
+        practitioners: updated,
+        doctor: doctors,
+        therapist: therapists,
+        alreadyApplied: false,
+      };
     },
     { maxWait: 10_000, timeout: 60_000 },
   );
