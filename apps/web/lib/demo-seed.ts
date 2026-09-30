@@ -2,12 +2,14 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 
 import {
   buildDemoLoadPlan,
+  buildDemoLoadPractitioners,
   DEMO_LOAD_DOCTOR_DAILY_MAX,
   DEMO_LOAD_DOCTOR_DAILY_MIN,
   DEMO_LOAD_INDIA_PSYCHOLOGIST_COUNT,
   DEMO_LOAD_PRACTITIONER_UID_PREFIX,
   DEMO_LOAD_PSYCHOLOGIST_DAILY_TOTAL,
   DEMO_LOAD_UAE_DOCTOR_COUNT,
+  type DemoLoadPractitioner,
   type DemoLoadPlan,
 } from './demo-load-plan';
 
@@ -19,8 +21,9 @@ import {
  * - 89 clearly synthetic Indian psychologists with pending TEST-RCI ids.
  * - 500–800 UAE doctor encounters per day and exactly 250 psychologist
  *   encounters per day from 1–30 September 2026.
- * - Every client is isDemo=true; no names, contact details, audio, transcript,
- *   notes, diagnosis, consent, billing, or signed records are created.
+ * - Each practitioner has one reusable isDemo=true client; no names, contact
+ *   details, audio, transcript, notes, diagnosis, consent, billing, or signed
+ *   records are created.
  *
  * The CLI is intentionally explicit (`--apply`). Applying a plan replaces the
  * reserved legacy `seed-*` and current `demo-load-*` namespaces so reruns
@@ -60,12 +63,32 @@ export interface DemoSeedSummary {
   };
 }
 
+export interface DemoProfileRefreshSummary {
+  practitioners: number;
+  doctor: number;
+  therapist: number;
+}
+
+const DEMO_PROFILE_HEADLINE = 'Demo practitioner profile — fictional';
+const DEMO_PROFILE_BIO =
+  'Generated for product demonstration; not a real clinician or issued credential.';
+
 function batches<T>(rows: readonly T[], size = INSERT_BATCH_SIZE): T[][] {
   const result: T[][] = [];
   for (let offset = 0; offset < rows.length; offset += size) {
     result.push(rows.slice(offset, offset + size));
   }
   return result;
+}
+
+function refreshableProfileFields(practitioner: DemoLoadPractitioner) {
+  return {
+    fullName: practitioner.fullName,
+    rciNumber: practitioner.rciNumber,
+    medicalRegNumber: practitioner.medicalRegNumber,
+    headline: DEMO_PROFILE_HEADLINE,
+    bio: DEMO_PROFILE_BIO,
+  };
 }
 
 async function findReservedPractitioners(prisma: PrismaClient): Promise<string[]> {
@@ -94,21 +117,108 @@ export async function purgeDemo(prisma: PrismaClient): Promise<number> {
   return practitionerIds.length;
 }
 
+/**
+ * Refresh display-only fields for the exact generated cohort without replacing
+ * practitioner ids or touching clients and sessions. The transaction fails
+ * closed unless all 201 expected rows are present and still synthetic.
+ */
+export async function refreshDemoProfiles(
+  prisma: PrismaClient,
+): Promise<DemoProfileRefreshSummary> {
+  const practitioners = buildDemoLoadPractitioners();
+  const expectedUids = practitioners.map((practitioner) => practitioner.uid);
+
+  return prisma.$transaction(
+    async (tx) => {
+      const existing = await tx.psychologist.findMany({
+        where: {
+          firebaseUid: { in: expectedUids },
+          isSynthetic: true,
+          deletedAt: null,
+        },
+        select: { id: true, firebaseUid: true, vertical: true },
+      });
+      const doctors = existing.filter((row) => row.vertical === 'DOCTOR').length;
+      const therapists = existing.filter((row) => row.vertical === 'THERAPIST').length;
+      if (
+        existing.length !== practitioners.length ||
+        doctors !== DEMO_LOAD_UAE_DOCTOR_COUNT ||
+        therapists !== DEMO_LOAD_INDIA_PSYCHOLOGIST_COUNT
+      ) {
+        throw new Error(
+          `Demo profile refresh expected ${practitioners.length} isolated practitioners (${DEMO_LOAD_UAE_DOCTOR_COUNT} doctors, ${DEMO_LOAD_INDIA_PSYCHOLOGIST_COUNT} therapists); found ${existing.length} (${doctors} doctors, ${therapists} therapists)`,
+        );
+      }
+
+      const desiredByUid = new Map(practitioners.map((row) => [row.uid, row]));
+      const verticalMismatch = existing.find(
+        (row) => desiredByUid.get(row.firebaseUid)?.vertical !== row.vertical,
+      );
+      if (verticalMismatch) {
+        throw new Error(
+          `Demo profile refresh found a vertical mismatch for ${verticalMismatch.firebaseUid}`,
+        );
+      }
+
+      const ids = existing.map((row) => row.id);
+      const desiredRciNumbers = practitioners.map((row) => row.rciNumber);
+      const desiredMedicalNumbers = practitioners
+        .map((row) => row.medicalRegNumber)
+        .filter((value): value is string => value !== null);
+      const collisions = await tx.psychologist.count({
+        where: {
+          id: { notIn: ids },
+          OR: [
+            { rciNumber: { in: desiredRciNumbers } },
+            { medicalRegNumber: { in: desiredMedicalNumbers } },
+          ],
+        },
+      });
+      if (collisions > 0) {
+        throw new Error(`Demo profile refresh found ${collisions} credential collision(s)`);
+      }
+
+      const byUid = new Map(existing.map((row) => [row.firebaseUid, row]));
+      const results = await Promise.all(
+        practitioners.map((practitioner) => {
+          const row = byUid.get(practitioner.uid);
+          if (!row) throw new Error(`Missing isolated demo practitioner ${practitioner.uid}`);
+          return tx.psychologist.updateMany({
+            where: {
+              id: row.id,
+              firebaseUid: practitioner.uid,
+              isSynthetic: true,
+              vertical: practitioner.vertical,
+              deletedAt: null,
+            },
+            data: refreshableProfileFields(practitioner),
+          });
+        }),
+      );
+      const updated = results.reduce((sum, result) => sum + result.count, 0);
+      if (updated !== practitioners.length) {
+        throw new Error(
+          `Demo profile refresh updated ${updated}/${practitioners.length} practitioners`,
+        );
+      }
+
+      return { practitioners: updated, doctor: doctors, therapist: therapists };
+    },
+    { maxWait: 10_000, timeout: 60_000 },
+  );
+}
+
 function practitionerRows(plan: DemoLoadPlan): Prisma.PsychologistCreateManyInput[] {
   return plan.practitioners.map((practitioner) => ({
     firebaseUid: practitioner.uid,
     email: practitioner.email,
     phone: practitioner.phone,
-    fullName: practitioner.fullName,
-    rciNumber: practitioner.rciNumber,
+    ...refreshableProfileFields(practitioner),
     rciVerifiedAt: null,
     status: 'ACTIVE',
     vertical: practitioner.vertical,
     profession: practitioner.vertical === 'DOCTOR' ? 'PHYSICIAN' : 'PSYCHOLOGIST',
-    medicalRegNumber: practitioner.medicalRegNumber,
     specialty: practitioner.specialty,
-    headline: 'Synthetic test account — not a real practitioner',
-    bio: 'Generated only for the September 2026 synthetic activity calendar.',
     specialties: practitioner.specialty ? [practitioner.specialty] : [],
     languages: practitioner.languages,
     modalities: practitioner.modalities,
@@ -121,6 +231,27 @@ function practitionerRows(plan: DemoLoadPlan): Prisma.PsychologistCreateManyInpu
     isSynthetic: true,
     createdAt: practitioner.createdAt,
   }));
+}
+
+function assertPlanOwnership(plan: DemoLoadPlan): void {
+  if (plan.clients.length !== plan.practitioners.length) {
+    throw new Error(
+      `Synthetic plan must have one demo client per practitioner: ${plan.clients.length}/${plan.practitioners.length}`,
+    );
+  }
+
+  const clientById = new Map(plan.clients.map((client) => [client.id, client]));
+  const clientOwners = new Set(plan.clients.map((client) => client.practitionerUid));
+  if (clientById.size !== plan.clients.length || clientOwners.size !== plan.practitioners.length) {
+    throw new Error('Synthetic plan contains duplicate client ids or practitioner ownership');
+  }
+
+  const ownershipMismatch = plan.sessions.find(
+    (session) => clientById.get(session.clientId)?.practitionerUid !== session.practitionerUid,
+  );
+  if (ownershipMismatch) {
+    throw new Error(`Synthetic session ${ownershipMismatch.id} has an invalid client owner`);
+  }
 }
 
 function summaryFor(plan: DemoLoadPlan, purged: number): DemoSeedSummary {
@@ -184,10 +315,14 @@ export async function seedDemo(
   prisma: PrismaClient,
   opts: { purge?: boolean } = {},
 ): Promise<DemoSeedSummary> {
-  const purged = await purgeDemo(prisma);
-  if (opts.purge) return emptySummary(purged);
+  if (opts.purge) return emptySummary(await purgeDemo(prisma));
 
   const plan = buildDemoLoadPlan();
+  // Validate the complete in-memory plan before deleting the previous cohort.
+  // This guards the product's one-demo-client-per-practitioner invariant and
+  // prevents an invalid generated plan from turning replacement into a purge.
+  assertPlanOwnership(plan);
+  const purged = await purgeDemo(prisma);
   await prisma.psychologist.createMany({ data: practitionerRows(plan) });
 
   const persistedPractitioners = await prisma.psychologist.findMany({

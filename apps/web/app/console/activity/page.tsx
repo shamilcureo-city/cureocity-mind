@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-export default async function SyntheticActivityPage({
+export default async function DemoActivityPage({
   searchParams,
 }: {
   searchParams: Promise<{ day?: string }>;
@@ -63,24 +63,20 @@ export default async function SyntheticActivityPage({
     <>
       <AdminPageHeader
         eyebrow="Admin console"
-        title="Synthetic activity"
+        title="Demo activity"
         description="A fixed September 2026 view of generated Scribe and Mind sessions, grouped by each cohort’s local calendar day."
       />
 
       <section
-        className="mb-6 rounded-xl border-2 border-[#c48100] bg-[#fff8e6] px-5 py-4 text-[#5f4300]"
-        aria-label="Synthetic data warning"
+        className="mb-6 rounded-xl border border-[var(--color-line)] bg-white/70 px-5 py-4 text-[var(--color-ink-2)]"
+        aria-label="Demo data notice"
       >
         <div className="flex items-start gap-3">
-          <span aria-hidden className="mt-0.5 text-lg">
-            ⚠
-          </span>
           <div>
-            <p className="font-semibold">Synthetic test data only</p>
+            <p className="font-semibold text-[var(--color-ink)]">Demo data</p>
             <p className="mt-1 max-w-4xl text-sm leading-6">
-              These are generated practitioners and sessions. Do not use this page as evidence of
-              real clinicians, patients, adoption, revenue, clinical activity, or product
-              performance.
+              Fictional practitioner profiles and generated sessions for product demonstration — not
+              real clinicians, credentials, customers, patients, or clinical activity.
             </p>
           </div>
         </div>
@@ -88,23 +84,23 @@ export default async function SyntheticActivityPage({
 
       <StatGrid>
         <StatTile
-          label="Scribe sessions"
+          label="Demo Scribe sessions"
           value={formatNumber(calendar.doctor.totalSessions)}
-          sub={`${calendar.doctor.activePractitioners}/${calendar.doctor.practitionerCount} active synthetic UAE doctors`}
+          sub={`${calendar.doctor.activePractitioners}/${calendar.doctor.practitionerCount} active UAE doctors`}
         />
         <StatTile
-          label="Mind sessions"
+          label="Demo Mind sessions"
           value={formatNumber(calendar.psychologist.totalSessions)}
-          sub={`${calendar.psychologist.activePractitioners}/${calendar.psychologist.practitionerCount} active synthetic Indian psychologists`}
+          sub={`${calendar.psychologist.activePractitioners}/${calendar.psychologist.practitionerCount} active Indian psychologists`}
         />
         <StatTile
-          label="Combined sessions"
+          label="Demo combined sessions"
           value={formatNumber(calendar.totalSessions)}
           sub="1–30 September 2026"
           tone="accent"
         />
         <StatTile
-          label="Synthetic practitioners"
+          label="Demo practitioners"
           value={formatNumber(
             calendar.doctor.practitionerCount + calendar.psychologist.practitionerCount,
           )}
@@ -189,7 +185,7 @@ export default async function SyntheticActivityPage({
               {longDate(selectedDate)}
             </h2>
             <p className="mt-1 text-sm text-[var(--color-ink-3)]">
-              Per-practitioner distribution includes zero-session synthetic accounts.
+              Per-practitioner distribution includes zero-session demo accounts.
             </p>
           </div>
           <p className="text-sm tabular-nums text-[var(--color-ink-2)]">
@@ -198,13 +194,13 @@ export default async function SyntheticActivityPage({
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <CohortDetail
-            title="Scribe · UAE doctors"
+            title="Demo Scribe · UAE doctors"
             timezone="Gulf Standard Time"
             stats={selected.doctor}
             tone="doctor"
           />
           <CohortDetail
-            title="Mind · Indian psychologists"
+            title="Demo Mind · Indian psychologists"
             timezone="India Standard Time"
             stats={selected.psychologist}
             tone="psychologist"
@@ -266,7 +262,7 @@ function CohortDetail({
       <div className="mt-4">
         <Table>
           <Thead
-            cols={[{ label: 'Highest synthetic activity' }, { label: 'Sessions', align: 'right' }]}
+            cols={[{ label: 'Highest demo activity' }, { label: 'Sessions', align: 'right' }]}
           />
           <tbody>
             {stats.top.map((row) => (

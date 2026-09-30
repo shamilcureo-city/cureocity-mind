@@ -11,6 +11,9 @@
  * clients/sessions:
  *   DATABASE_URL=postgresql://... pnpm exec tsx scripts/seed-south-india.ts --purge
  *
+ * Refresh only the 201 reserved practitioner display profiles in place:
+ *   DATABASE_URL=postgresql://... pnpm exec tsx scripts/seed-south-india.ts --refresh-profiles
+ *
  * Apply prisma/migrations/20260929000000_synthetic_practitioner_isolation
  * before `--apply`. There is deliberately no deployed HTTP mutation route.
  */
@@ -18,7 +21,7 @@
 import { PrismaClient } from '@prisma/client';
 
 import { buildDemoLoadPlan } from '../apps/web/lib/demo-load-plan';
-import { seedDemo } from '../apps/web/lib/demo-seed';
+import { refreshDemoProfiles, seedDemo } from '../apps/web/lib/demo-seed';
 
 function printPreview(): void {
   const plan = buildDemoLoadPlan();
@@ -26,40 +29,58 @@ function printPreview(): void {
   const psychologistTotal = plan.days.reduce((sum, day) => sum + day.psychologistEncounterTotal, 0);
   const doctorDaily = plan.days.map((day) => day.doctorEncounterTotal);
 
-  console.log('\nSynthetic load preview — no database writes were made.');
+  console.log('\nDemo load preview — no database writes were made.');
   console.log(`  Period:         ${plan.startDate} through ${plan.endDate}`);
-  console.log('  UAE doctors:    112 with TEST-DHA-2026-* identifiers');
+  console.log('  UAE doctors:    112 fictional profiles with DHA-DEMO-NOT-ISSUED-* ids');
   console.log(
     `  Doctor visits:  ${doctorTotal.toLocaleString('en-IN')} (${Math.min(...doctorDaily)}–${Math.max(...doctorDaily)} per day)`,
   );
-  console.log('  Psychologists:  89 synthetic Indian accounts');
+  console.log('  Psychologists:  89 fictional Indian profiles');
   console.log(`  Mind visits:    ${psychologistTotal.toLocaleString('en-IN')} (250 per day)`);
   console.log(
-    `  Demo clients:   ${plan.clients.length.toLocaleString('en-IN')} (one per encounter)`,
+    `  Demo clients:   ${plan.clients.length.toLocaleString('en-IN')} (one per demo practitioner)`,
   );
   console.log(`  Sessions:       ${plan.sessions.length.toLocaleString('en-IN')}`);
   console.log('\nRun again with --apply against the intended test database to replace the cohort.');
+  console.log(
+    'Use --refresh-profiles to update names and demo credentials without replacing activity.',
+  );
 }
 
 async function main(): Promise<void> {
   const apply = process.argv.includes('--apply');
   const purge = process.argv.includes('--purge');
-  if (apply && purge) throw new Error('Choose either --apply or --purge, not both.');
-  if (!apply && !purge) {
+  const refreshProfiles = process.argv.includes('--refresh-profiles');
+  if ([apply, purge, refreshProfiles].filter(Boolean).length > 1) {
+    throw new Error('Choose one of --apply, --purge, or --refresh-profiles.');
+  }
+  if (!apply && !purge && !refreshProfiles) {
     printPreview();
     return;
   }
 
   const prisma = new PrismaClient();
   try {
-    const summary = await seedDemo(prisma, { purge });
-    if (purge) {
-      console.log(`Purged ${summary.purged} reserved synthetic practitioners and owned data.`);
+    if (refreshProfiles) {
+      const summary = await refreshDemoProfiles(prisma);
+      console.log('\nDemo profile refresh complete.');
+      console.log(
+        `  Updated:        ${summary.practitioners} practitioners (${summary.doctor} UAE doctor · ${summary.therapist} Indian psychologist)`,
+      );
+      console.log(
+        '  Preserved:      practitioner ids, clients, sessions, activity, and isolation flags',
+      );
       return;
     }
 
-    console.log('\nSynthetic seed complete.');
-    console.log(`  Replaced:       ${summary.purged} prior synthetic practitioners`);
+    const summary = await seedDemo(prisma, { purge });
+    if (purge) {
+      console.log(`Purged ${summary.purged} reserved demo practitioners and owned data.`);
+      return;
+    }
+
+    console.log('\nDemo seed complete.');
+    console.log(`  Replaced:       ${summary.purged} prior demo practitioners`);
     console.log(
       `  Practitioners:  ${summary.practitioners} (${summary.doctor} UAE doctor · ${summary.therapist} Indian psychologist)`,
     );
