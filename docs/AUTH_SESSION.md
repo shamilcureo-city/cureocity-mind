@@ -83,27 +83,45 @@ the cookie is cryptographically valid** — see § 5.
 
 ---
 
-## 3. The Bearer self-heal for client API calls
+## 3. Page-bound identity for browser API calls
 
-`apps/web/components/app/AuthedFetchProvider.tsx` is mounted once in the
-`/app` layout. It wraps `window.fetch` so every same-origin `/api/v1`
-request carries the signed-in therapist's Firebase id token as
-`Authorization: Bearer …`. The API guards accept either credential, so
-in-app API calls work **even if the cookie isn't sent on a fetch**.
+`AuthedFetchProvider` wraps the practitioner app, operator console and
+onboarding form with the Firebase UID verified by their server page guard.
+It installs a scoped fetch wrapper and waits for Firebase initialisation
+**before mounting children**, so child mount-time requests cannot race the
+identity check. The wrapper is removed when that authenticated layout unmounts.
 
-- Installed at **render time** (not in `useEffect`) so the wrapper is in
-  place before any descendant component's mount-time fetch (a parent's
-  effect runs _after_ its children's).
-- Purely additive: cookie still rides along, an existing `Authorization`
-  header is never overwritten, non-`/api/v1` and signed-out requests pass
-  through untouched, any failure falls back to the original fetch.
-- `OnboardingForm` has its own **inline** Bearer self-heal because
-  `/onboarding` is outside the `/app` layout where the provider mounts.
+- The browser Firebase user must match the page UID before a token is attached.
+  A mismatched user is not silently preferred, and failed authentication never
+  falls back to an unmodified request. A missing browser user may still use the
+  existing cookie.
+- Same-origin practitioner API requests carry `x-cureocity-session-uid`. This
+  is only a consistency assertion, not authentication or authority. The server
+  compares it with its independently verified identity, detecting an old page
+  paired with a newly changed cookie.
+- If both Bearer and cookie credentials are supplied, **both must verify and
+  their UIDs must agree**. Invalid credentials return a reauthentication 401;
+  conflicting identities return 401 with `SESSION_IDENTITY_MISMATCH`, without
+  patient lookup, capability changes, or identifying data in the response.
+- True Bearer-only and cookie-only clients remain supported. Existing role,
+  lifecycle, consent, ownership, capability and origin checks remain in force.
+- Tokens/assertions are never added to cross-origin URLs, API-prefix lookalikes,
+  Care/public/paired-patient endpoints, or session exchange/sign-out requests.
+  Guarded API redirects are refused rather than forwarding identity headers.
+- The paired patient home uses its own Firebase Bearer identity and explicitly
+  omits ambient practitioner cookies on its GET and refresh-request POST.
+- Onboarding no longer silently remints a cookie from persisted Firebase state.
+  Only an explicit login exchanges credentials for a new session.
 
-> This was added (PR #20) as a robust workaround while the cookie was
-> mysteriously absent on in-app requests. The actual cause of that
-> absence turned out to be § 6 (sign-out prefetch). The provider is kept
-> as defence-in-depth: API calls survive any future cookie hiccup.
+A mismatch pauses subsequent API actions and shows a sign-in recovery notice.
+Already-mounted draft state stays on the page, but is **not claimed saved**.
+The user can copy unsaved work before choosing recovery. That explicit action
+signs out Firebase, deletes the server cookie and performs full navigation to
+login. It never selects a replacement account or retries failed writes.
+
+This protects against the historical Bearer self-heal (PR #20) using a different
+persisted account than the cookie that rendered the roster. It does not resolve
+missing/erased/transferred patient records or grant missing clinical authority.
 
 ---
 

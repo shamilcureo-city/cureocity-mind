@@ -2,7 +2,6 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { getFirebaseAuth, isFirebaseConfigured } from '@/lib/firebase-therapist';
 import { Button } from '../ui/Button';
 import { FieldError, Input, Label } from '../ui/Field';
 
@@ -93,35 +92,11 @@ export function OnboardingForm({
         body['phone'] = `+${countryCode}${phoneDigits}`;
       }
 
-      // Self-heal the session cookie before the authed call. A Google
-      // redirect sign-in (popup blocked) can leave a live Firebase user
-      // with NO __session cookie — without this the call below 401s with
-      // "Missing Bearer token or session". Re-mint the cookie from the
-      // live id token so the rest of /app works too, and send the token
-      // as a Bearer fallback so this call succeeds either way.
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (isFirebaseConfigured()) {
-        try {
-          const auth = getFirebaseAuth();
-          if (typeof auth.authStateReady === 'function') await auth.authStateReady();
-          const user = auth.currentUser;
-          if (user) {
-            const idToken = await user.getIdToken();
-            headers['Authorization'] = `Bearer ${idToken}`;
-            await fetch('/api/v1/auth/session', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ idToken }),
-            }).catch(() => undefined);
-          }
-        } catch {
-          // Fall through — an existing valid cookie may still carry the call.
-        }
-      }
-
+      // The page-bound transport verifies this request belongs to the same
+      // account that opened the form. Never switch identities by reminting a cookie here.
       const res = await fetch('/api/v1/onboarding/complete', {
         method: 'POST',
-        headers,
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
       if (!res.ok) {
