@@ -6,6 +6,7 @@ import { legacyAudioReferenceProvider } from './dpdp-object-storage-config';
 import { hasMindSessionPreparationStorage } from './mind-session-preparation-storage';
 import { hasSessionUsageConnectionStorage } from './session-usage-storage';
 import { hasScribeWorkspaceStorage } from './scribe-workspace-privacy';
+import { hasReceptionStorage } from './reception-server';
 
 const sha256 = (value: string): string => createHash('sha256').update(value).digest('hex');
 
@@ -203,6 +204,13 @@ export async function eraseClientPhi(
   await tx.clientGrievance.deleteMany({ where: { clientId } });
   await tx.clientPushSubscription.deleteMany({ where: { clientId } });
   await tx.clientClaimToken.deleteMany({ where: { clientId } });
+  // Requests may contain identity and administrative narrative. Discover storage
+  // independently of the rollout flag; request-linked events cascade with them.
+  if (await hasReceptionStorage(tx)) {
+    await tx.receptionRequest.deleteMany({
+      where: { OR: [{ clientId }, { sessionId: { in: sessionIds } }] },
+    });
+  }
 
   const linkedAppointmentWhere: Prisma.AppointmentWhereInput = {
     OR: [{ clientId }, { sessionId: { in: sessionIds } }],

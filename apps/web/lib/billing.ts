@@ -6,6 +6,7 @@ import {
 } from '@cureocity/billing';
 import { PLAN_CATALOG } from '@cureocity/contracts';
 import type { BillingEntitlement, BillingPlan } from '@cureocity/contracts';
+import type { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 
 /**
@@ -148,11 +149,14 @@ const CONSUMED_STATUSES = ['IN_PROGRESS', 'COMPLETED'] as const;
  * sessions must never burn trial allowance — and counts only sessions
  * that actually ran (see CONSUMED_STATUSES).
  */
-export async function getEntitlement(psychologistId: string): Promise<BillingEntitlement> {
+export async function getEntitlement(
+  psychologistId: string,
+  db: Pick<Prisma.TransactionClient, 'billingAccount' | 'session'> = prisma,
+): Promise<BillingEntitlement> {
   const since = new Date(Date.now() - THIRTY_DAYS_MS);
   const [account, trialUsed, monthlyUsed] = await Promise.all([
-    prisma.billingAccount.findUnique({ where: { psychologistId } }),
-    prisma.session.count({
+    db.billingAccount.findUnique({ where: { psychologistId } }),
+    db.session.count({
       where: {
         psychologistId,
         client: { isDemo: false },
@@ -160,7 +164,7 @@ export async function getEntitlement(psychologistId: string): Promise<BillingEnt
       },
     }),
     // Sprint 56 — rolling-30-day count drives the paid-tier monthly cap.
-    prisma.session.count({
+    db.session.count({
       where: {
         psychologistId,
         client: { isDemo: false },

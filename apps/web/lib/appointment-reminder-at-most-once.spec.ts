@@ -82,6 +82,25 @@ describe('recipient reminder enqueue', () => {
 });
 
 describe('at-most-once submission state machine', () => {
+  it('refuses both claim and submission for a reception booking even if an outbox row exists', async () => {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([appointment({ suppressAutomaticMessages: true })]),
+      appointmentReminderDelivery: {
+        findUnique: vi.fn().mockResolvedValue(row({ status: 'PENDING', leaseExpiresAt: null })),
+        updateMany: vi.fn(),
+      },
+    };
+    await expect(
+      claimAppointmentReminderDelivery(tx as never, {
+        deliveryId: 'delivery-patient',
+        now: NOW,
+        leaseMs: 300_000,
+      }),
+    ).resolves.toBeNull();
+    await expect(beginAppointmentReminderSubmission(tx as never, row(), NOW)).resolves.toBeNull();
+    expect(tx.appointmentReminderDelivery.updateMany).not.toHaveBeenCalled();
+  });
+
   it('claims one recipient independently and derives its availability from the locked appointment', async () => {
     const tx = {
       $queryRaw: vi.fn().mockResolvedValue([appointment()]),

@@ -7,7 +7,9 @@ import {
   isClinicAdminRole,
   transferAllCustody,
   transferClientCustody,
+  ReceptionCustodyTransferConflictError,
 } from '@/lib/clinic';
+import { ClientPhiWriteForbiddenError } from '@/lib/phi-write-lock';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 
@@ -78,29 +80,36 @@ export async function POST(
       );
     }
     const fromPsychologistId = client.psychologistId;
-    await prisma.$transaction(async (tx) => {
-      await transferClientCustody(tx, {
-        clientId: client.id,
-        toPsychologistId: input.value.toPsychologistId,
-      });
-      await writeAudit(
-        {
-          actorType: 'PSYCHOLOGIST',
-          actorPsychologistId: auth.value.psychologistId,
-          action: 'CLIENT_REASSIGNED',
-          targetType: 'Client',
-          targetId: client.id,
-          metadata: {
-            ...auditMetadataFromRequest(req),
-            clinicId,
-            mode: 'one',
-            fromPsychologistId,
-            toPsychologistId: input.value.toPsychologistId,
+    try {
+      await prisma.$transaction(async (tx) => {
+        await transferClientCustody(tx, {
+          clientId: client.id,
+          fromPsychologistId,
+          toPsychologistId: input.value.toPsychologistId,
+        });
+        await writeAudit(
+          {
+            actorType: 'PSYCHOLOGIST',
+            actorPsychologistId: auth.value.psychologistId,
+            action: 'CLIENT_REASSIGNED',
+            targetType: 'Client',
+            targetId: client.id,
+            metadata: {
+              ...auditMetadataFromRequest(req),
+              clinicId,
+              mode: 'one',
+              fromPsychologistId,
+              toPsychologistId: input.value.toPsychologistId,
+            },
           },
-        },
-        tx,
-      );
-    });
+          tx,
+        );
+      });
+    } catch (error) {
+      const response = custodyTransferConflictResponse(error);
+      if (response) return response;
+      throw error;
+    }
     return NextResponse.json({
       ok: true,
       moved: 1,
@@ -119,31 +128,48 @@ export async function POST(
       { status: 400 },
     );
   }
-  const moved = await prisma.$transaction(async (tx) => {
-    const count = await transferAllCustody(tx, {
-      fromPsychologistId: fromId,
-      toPsychologistId: input.value.toPsychologistId,
-    });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'CLIENT_REASSIGNED',
-        targetType: 'Psychologist',
-        targetId: fromId,
-        metadata: {
-          ...auditMetadataFromRequest(req),
-          clinicId,
-          mode: 'all',
-          fromPsychologistId: fromId,
-          toPsychologistId: input.value.toPsychologistId,
-          clientsMoved: count,
+  let moved: number;
+  try {
+    moved = await prisma.$transaction(async (tx) => {
+      const count = await transferAllCustody(tx, {
+        fromPsychologistId: fromId,
+        toPsychologistId: input.value.toPsychologistId,
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'CLIENT_REASSIGNED',
+          targetType: 'Psychologist',
+          targetId: fromId,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            clinicId,
+            mode: 'all',
+            fromPsychologistId: fromId,
+            toPsychologistId: input.value.toPsychologistId,
+            clientsMoved: count,
+          },
         },
-      },
-      tx,
-    );
-    return count;
-  });
+        tx,
+      );
+      return count;
+    });
+  } catch (error) {
+    const response = custodyTransferConflictResponse(error);
+    if (response) return response;
+    throw error;
+  }
 
   return NextResponse.json({ ok: true, moved, toPsychologistId: input.value.toPsychologistId });
+}
+
+function custodyTransferConflictResponse(error: unknown): NextResponse | null {
+  if (error instanceof ReceptionCustodyTransferConflictError) {
+    return NextResponse.json({ error: error.message, code: error.code }, { status: 409 });
+  }
+  if (error instanceof ClientPhiWriteForbiddenError) {
+    return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+  }
+  return null;
 }

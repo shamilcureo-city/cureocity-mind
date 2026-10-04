@@ -55,6 +55,7 @@ export async function enqueueDueAppointmentReminderDeliveries(
     SELECT a."id", a."startAt", (a."patientEmailEncrypted" IS NOT NULL) AS "hasPatientEmail"
     FROM "Appointment" a
     WHERE a."status" = 'CONFIRMED'::"AppointmentStatus"
+      AND COALESCE((to_jsonb(a)->>'suppressAutomaticMessages')::boolean, false) = false
       AND a."startAt" > ${input.startAt.gt}
       AND a."startAt" <= ${input.startAt.lte}
       AND (
@@ -192,6 +193,7 @@ export async function claimAppointmentReminderDelivery(
   const expectedKind = reminderKindForStart(input.now, appointment.startAt);
   if (
     appointment.status !== 'CONFIRMED' ||
+    appointment.suppressAutomaticMessages === true ||
     appointment.startAt.getTime() !== delivery.scheduledStartAt.getTime() ||
     expectedKind === null ||
     prismaReminderKind(expectedKind) !== delivery.kind ||
@@ -241,9 +243,9 @@ export async function beginAppointmentReminderSubmission(
   startedAt: Date,
 ): Promise<AppointmentReminderDelivery | null> {
   const appointments = await tx.$queryRaw<
-    Array<Pick<Appointment, 'id' | 'status' | 'startAt'>>
+    Array<Pick<Appointment, 'id' | 'status' | 'startAt' | 'suppressAutomaticMessages'>>
   >(Prisma.sql`
-    SELECT a."id", a."status", a."startAt"
+    SELECT a."id", a."status", a."startAt", COALESCE((to_jsonb(a)->>'suppressAutomaticMessages')::boolean, false) AS "suppressAutomaticMessages"
     FROM "Appointment" a
     WHERE a."id" = ${delivery.appointmentId}
     FOR UPDATE
@@ -252,6 +254,7 @@ export async function beginAppointmentReminderSubmission(
   const expectedKind = appointment ? reminderKindForStart(startedAt, appointment.startAt) : null;
   if (
     !appointment ||
+    appointment.suppressAutomaticMessages === true ||
     appointment.status !== 'CONFIRMED' ||
     appointment.startAt.getTime() !== delivery.scheduledStartAt.getTime() ||
     expectedKind === null ||

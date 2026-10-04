@@ -57,6 +57,9 @@ enum PractitionerVertical {
 }
 
 model Psychologist {
+  receptionSettings       ReceptionSettings?
+  receptionRequests       ReceptionRequest[]
+  receptionEvents         ReceptionEvent[]
   scribeWorkspaceRecords  ScribeWorkspaceRecord[]
   sessionUsageConnections SessionUsageConnection[]
   mindSessionPreparations MindSessionPreparation[]
@@ -537,6 +540,7 @@ enum ClientStatus {
 }
 
 model Client {
+  receptionRequests       ReceptionRequest[]
   scribeWorkspaceRecords  ScribeWorkspaceRecord[]
   sessionUsageConnections SessionUsageConnection[]
   id                      String                   @id @default(cuid())
@@ -957,6 +961,7 @@ enum SessionKind {
 }
 
 model Session {
+  receptionRequest       ReceptionRequest?
   scribeWorkspaceRecords ScribeWorkspaceRecord[]
   id                     String                  @id @default(cuid())
   clientId               String
@@ -3538,9 +3543,12 @@ enum AppointmentReminderRecipient {
 /// Patient PII is tenant-envelope-encrypted at capture, same posture as
 /// Client — there is no plaintext column.
 model Appointment {
-  id             String            @id @default(cuid())
-  psychologistId String
-  status         AppointmentStatus @default(REQUESTED)
+  id                        String            @id @default(cuid())
+  psychologistId            String
+  status                    AppointmentStatus @default(REQUESTED)
+  /// Reception pilot bookings require staff-managed communication only.
+  suppressAutomaticMessages Boolean           @default(false)
+  receptionRequest          ReceptionRequest?
 
   /// Slot instant (UTC). endAt = startAt + the rule's slotMinutes.
   startAt DateTime
@@ -3572,6 +3580,75 @@ model Appointment {
 
   @@index([psychologistId, status, startAt])
   @@index([psychologistId, startAt])
+}
+
+/// Owner-only administrative reception desk. Public fields are validated before storage.
+model ReceptionSettings {
+  psychologistId String       @id
+  slug           String       @unique
+  enabled        Boolean      @default(false)
+  revision       Int          @default(1)
+  config         Json
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  psychologist   Psychologist @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+
+  @@map("reception_settings")
+}
+
+/// Identity, contact information and free text exist only in the tenant-encrypted envelope.
+model ReceptionRequest {
+  id               String           @id @default(cuid())
+  psychologistId   String
+  submissionId     String
+  submissionHash   String
+  kind             String
+  status           String           @default("NEW")
+  revision         Int              @default(1)
+  payloadEncrypted String           @db.Text
+  startAt          DateTime?
+  endAt            DateTime?
+  mode             String?
+  clientId         String?
+  sessionId        String?          @unique
+  appointmentId    String?          @unique
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  psychologist     Psychologist     @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+  client           Client?          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  session          Session?         @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  appointment      Appointment?     @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  events           ReceptionEvent[]
+
+  @@unique([psychologistId, submissionId])
+  @@index([psychologistId, status, createdAt])
+  @@index([clientId])
+  @@map("reception_requests")
+}
+
+/// Minimal transition proof; never includes a name, contact, narrative or raw network address.
+model ReceptionEvent {
+  id             String            @id @default(cuid())
+  psychologistId String
+  requestId      String?
+  kind           String
+  createdAt      DateTime          @default(now())
+  psychologist   Psychologist      @relation(fields: [psychologistId], references: [id], onDelete: Cascade)
+  request        ReceptionRequest? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  @@index([psychologistId, createdAt])
+  @@index([requestId])
+  @@map("reception_events")
+}
+
+/// Durable public-abuse counters; key is a keyed hash, never a raw IP or contact.
+model ReceptionRateLimit {
+  key     String   @id
+  hits    Int
+  resetAt DateTime
+
+  @@index([resetAt])
+  @@map("reception_rate_limits")
 }
 
 /// Per-recipient at-most-once appointment reminder outbox. The schedule snapshot

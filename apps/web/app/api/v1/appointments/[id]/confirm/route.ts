@@ -12,6 +12,12 @@ import {
   appointmentConcurrentModificationResponse,
   conditionalAppointmentTransition,
 } from '@/lib/appointment-transition';
+import {
+  assertReceptionCalendarAvailable,
+  lockReceptionCalendarIfEnabled,
+  receptionCalendarConflictResponse,
+} from '@/lib/reception-calendar';
+import { transactionConflictResponse } from '@/lib/transaction-conflict';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -105,6 +111,16 @@ export async function POST(
   let result: ConfirmAppointmentResponse;
   try {
     result = await prisma.$transaction(async (tx) => {
+      const reception = await lockReceptionCalendarIfEnabled(tx, psyId);
+      if (reception) {
+        await assertReceptionCalendarAvailable(tx, psyId, {
+          from: appt.startAt,
+          to: appt.endAt,
+          slotMinutes: reception.slotMinutes,
+          excludeAppointmentId: appt.id,
+          excludeSessionId: appt.sessionId ?? undefined,
+        });
+      }
       await conditionalAppointmentTransition(tx, {
         appointmentId: appt.id,
         expectedStatus: 'REQUESTED',
@@ -214,7 +230,10 @@ export async function POST(
       return { clientId, sessionId: session.id };
     });
   } catch (error) {
-    const response = appointmentConcurrentModificationResponse(error);
+    const response =
+      receptionCalendarConflictResponse(error) ??
+      appointmentConcurrentModificationResponse(error) ??
+      transactionConflictResponse(error);
     if (response) return response;
     throw error;
   }

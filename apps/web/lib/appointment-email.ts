@@ -107,6 +107,16 @@ export async function sendAppointmentConfirmedEmail(
   startAt: Date,
 ): Promise<void> {
   try {
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: { psychologistId: true, suppressAutomaticMessages: true },
+    });
+    if (
+      !appointment ||
+      appointment.psychologistId !== psychologistId ||
+      appointment.suppressAutomaticMessages
+    )
+      return;
     const sig = signAppointmentId(appointmentId);
     const base = publicBaseUrl();
     const when = IST_FORMAT.format(startAt);
@@ -148,10 +158,10 @@ export async function sendAppointmentRescheduledEmail(
       }),
       prisma.appointment.findUnique({
         where: { id: appointmentId },
-        select: { patientEmailEncrypted: true },
+        select: { patientEmailEncrypted: true, suppressAutomaticMessages: true },
       }),
     ]);
-    if (!psy || !appt?.patientEmailEncrypted) return;
+    if (!psy || !appt?.patientEmailEncrypted || appt.suppressAutomaticMessages) return;
     const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
     if (!patientEmail) return;
     const sig = signAppointmentId(appointmentId);
@@ -196,10 +206,10 @@ export async function sendAppointmentClosedEmail(
       }),
       prisma.appointment.findUnique({
         where: { id: appointmentId },
-        select: { patientEmailEncrypted: true },
+        select: { patientEmailEncrypted: true, suppressAutomaticMessages: true },
       }),
     ]);
-    if (!psy || !appt?.patientEmailEncrypted) return;
+    if (!psy || !appt?.patientEmailEncrypted || appt.suppressAutomaticMessages) return;
     const patientEmail = await decryptForTenant(psychologistId, appt.patientEmailEncrypted);
     if (!patientEmail) return;
     const when = IST_FORMAT.format(startAt);
@@ -267,10 +277,14 @@ export async function prepareAppointmentReminderEmail(input: {
     startAt: Date;
     mode: string;
     patientEmailEncrypted: string | null;
+    suppressAutomaticMessages?: boolean;
   };
   recipient: 'PRACTITIONER_EMAIL' | 'PATIENT_EMAIL';
   windowHours: number;
 }): Promise<PreparedAppointmentReminder> {
+  if (input.appointment.suppressAutomaticMessages === true) {
+    return { outcome: 'pre_dispatch_failure', errorCode: 'AUTOMATIC_MESSAGES_SUPPRESSED' };
+  }
   const port = reminderClient();
   if (!port) {
     return { outcome: 'pre_dispatch_failure', errorCode: 'SENDGRID_NOT_CONFIGURED' };

@@ -23,6 +23,7 @@ describe('practitioner navigation', () => {
         expect.objectContaining({ href: '/app/templates' }),
         expect.objectContaining({ href: '/app/learn' }),
         expect.objectContaining({ href: '/app/practice-assistant', label: 'Mind assistant' }),
+        expect.objectContaining({ href: '/app/reception', label: 'Reception' }),
       ]),
     );
     expect(mobile.secondary).toContainEqual(expect.objectContaining({ href: '/app/marketing' }));
@@ -40,12 +41,14 @@ describe('practitioner navigation', () => {
 
     expect(desktop.primary.map(({ href, label }) => ({ href, label }))).toEqual([
       { href: '/app/clinic', label: 'Clinic' },
+      { href: '/app/reception', label: 'Reception' },
       { href: '/app/patients', label: 'Patients' },
       { href: '/app/insights', label: 'Insights' },
       { href: '/app/learn', label: 'Learn' },
     ]);
     expect(mobile.primary.map(({ href, label }) => ({ href, label }))).toEqual([
       { href: '/app/clinic', label: 'Clinic' },
+      { href: '/app/reception', label: 'Reception' },
       { href: '/app/patients', label: 'Patients' },
       { href: '/app/insights', label: 'Insights' },
       { href: '/app/settings', label: 'Settings' },

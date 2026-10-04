@@ -9,6 +9,12 @@ import { offeredSlot } from '@/lib/marketing';
 import { loadBusyIntervals, loadPublishedTherapist, loadWeeklyRules } from '@/lib/public-profile';
 import { sendAppointmentRequestEmail } from '@/lib/appointment-email';
 import { signAppointmentId } from '@/lib/appointment-links';
+import {
+  loadReceptionBusyIntervals,
+  lockReceptionCalendarIfEnabled,
+  receptionCalendarConflictResponse,
+} from '@/lib/reception-calendar';
+import { transactionConflictResponse } from '@/lib/transaction-conflict';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -79,11 +85,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let appointmentId: string;
   try {
     appointmentId = await prisma.$transaction(async (tx) => {
+      const reception = await lockReceptionCalendarIfEnabled(tx, therapist.id);
       // Re-derive the offer against CURRENT holds; a racing request that
       // landed first makes this slot un-offered and we bail.
       const now = new Date();
       const to = new Date(now.getTime() + 15 * 24 * 60 * 60_000);
-      const busy = await loadBusyIntervals(therapist.id, now, to);
+      const busy = reception
+        ? await loadReceptionBusyIntervals(tx, therapist.id, {
+            from: now,
+            to,
+            slotMinutes: reception.slotMinutes,
+          })
+        : await loadBusyIntervals(therapist.id, now, to);
       const slot = offeredSlot(rules, busy, now, startAt);
       if (slot === null) throw new SlotTakenError();
 
@@ -112,6 +125,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return row.id;
     });
   } catch (e) {
+    const response = receptionCalendarConflictResponse(e) ?? transactionConflictResponse(e);
+    if (response) return response;
     // SlotTakenError: the re-derived offer says the slot is gone. P2002:
     // the partial unique index on (psychologistId, startAt) caught a race
     // the re-check couldn't see (both requests read before either wrote).

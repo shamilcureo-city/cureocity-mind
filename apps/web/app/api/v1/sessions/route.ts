@@ -21,6 +21,13 @@ import { DEFAULT_BUILTIN_TEMPLATE_ID } from '@/lib/builtin-templates';
 import { istDayRange, nextClinicToken } from '@/lib/clinic-queue';
 import { MindPurposeConflict, selectMindSessionPurpose } from '@/lib/mind-session-purpose';
 import { ClientPhiWriteForbiddenError, lockActiveClient } from '@/lib/phi-write-lock';
+import {
+  assertReceptionCalendarAvailable,
+  lockReceptionCalendarIfEnabled,
+  receptionCalendarConflictResponse,
+  receptionSessionDurationMinutes,
+} from '@/lib/reception-calendar';
+import { transactionConflictResponse } from '@/lib/transaction-conflict';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -318,8 +325,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let created;
   try {
     created = await prisma.$transaction(async (tx) => {
+      const reception = await lockReceptionCalendarIfEnabled(tx, auth.value.psychologistId);
       // Serialize all dependent writes against erasure and ownership changes.
-      // Client must precede source-session locks, token allocation and FK writes.
+      // After the optional calendar lock, Client precedes source-session locks,
+      // token allocation and FK writes.
       await lockActiveClient(tx, dto.value.clientId, auth.value.psychologistId);
       if (sourceSession) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${sourceSession.id}))`;
@@ -330,6 +339,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
           auth.value.psychologistId,
         );
         if (linked) return linked;
+      }
+      if (reception) {
+        await assertReceptionCalendarAvailable(tx, auth.value.psychologistId, {
+          from: scheduledAt,
+          to: new Date(
+            scheduledAt.getTime() + receptionSessionDurationMinutes(reception.slotMinutes) * 60_000,
+          ),
+          slotMinutes: reception.slotMinutes,
+          // Doctor walk-in callers send scheduledAt=now without startNow.
+          // Queue entries may overlap each other, but never an appointment hold.
+          appointmentsOnly: isDoctor && Math.abs(scheduledAt.getTime() - Date.now()) <= 5 * 60_000,
+        });
       }
       // Sprint DS7 — doctor encounters join the clinic queue with a
       // today-scoped OPD token; therapist sessions carry none.
@@ -450,6 +471,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   } catch (error) {
     if (error instanceof ClientPhiWriteForbiddenError)
       return NextResponse.json({ error: 'Client not found' }, { status: 404 });
+    const response = receptionCalendarConflictResponse(error) ?? transactionConflictResponse(error);
+    if (response) return response;
     throw error;
   }
   return NextResponse.json(toSession(created), { status: 201 });

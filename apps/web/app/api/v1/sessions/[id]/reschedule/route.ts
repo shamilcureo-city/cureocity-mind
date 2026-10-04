@@ -17,6 +17,12 @@ import {
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
 import { transactionConflictResponse } from '@/lib/transaction-conflict';
+import {
+  assertReceptionCalendarAvailable,
+  lockReceptionCalendarIfEnabled,
+  receptionCalendarConflictResponse,
+  receptionSessionDurationMinutes,
+} from '@/lib/reception-calendar';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -62,10 +68,23 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   let result;
   try {
     result = await prisma.$transaction(async (tx) => {
+      const reception = await lockReceptionCalendarIfEnabled(tx, auth.value.psychologistId);
       const linkedAppt = await lockLinkedAppointmentForSession(tx, {
         sessionId,
         psychologistId: auth.value.psychologistId,
       });
+      if (reception) {
+        const durationMs = linkedAppt
+          ? linkedAppt.endAt.getTime() - linkedAppt.startAt.getTime()
+          : receptionSessionDurationMinutes(reception.slotMinutes) * 60_000;
+        await assertReceptionCalendarAvailable(tx, auth.value.psychologistId, {
+          from: newScheduledAt,
+          to: new Date(newScheduledAt.getTime() + durationMs),
+          slotMinutes: reception.slotMinutes,
+          excludeAppointmentId: linkedAppt?.id,
+          excludeSessionId: sessionId,
+        });
+      }
       await conditionalSessionTransition(tx, {
         sessionId,
         expectedStatus: 'SCHEDULED',
@@ -151,7 +170,9 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       );
     }
     const response =
-      sessionConcurrentModificationResponse(error) ?? transactionConflictResponse(error);
+      receptionCalendarConflictResponse(error) ??
+      sessionConcurrentModificationResponse(error) ??
+      transactionConflictResponse(error);
     if (response) return response;
     throw error;
   }

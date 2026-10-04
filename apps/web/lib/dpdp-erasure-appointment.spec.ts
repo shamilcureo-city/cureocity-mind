@@ -14,6 +14,9 @@ const usageDeletionArgs: unknown[] = [];
 const scribeDeletionArgs: unknown[] = [];
 let scribeTableExists = true;
 let scribeDeletionFails = false;
+let receptionTableExists = true;
+let receptionDeletionFails = false;
+const receptionDeletionArgs: unknown[] = [];
 let sessionRows: Array<{ id: string }> = [];
 
 function model(name: string) {
@@ -36,6 +39,10 @@ function model(name: string) {
           if (name === 'scribeWorkspaceRecord' && operation === 'deleteMany') {
             scribeDeletionArgs.push(args);
             if (scribeDeletionFails) throw new Error('scribe deletion failed');
+          }
+          if (name === 'receptionRequest' && operation === 'deleteMany') {
+            receptionDeletionArgs.push(args);
+            if (receptionDeletionFails) throw new Error('reception deletion failed');
           }
           if (name === 'session' && operation === 'findMany') return sessionRows;
           if (name === 'therapyNote' && operation === 'findMany') return [];
@@ -64,6 +71,10 @@ const tx = new Proxy(
       if (property === '$queryRaw') {
         return vi.fn(async (strings: TemplateStringsArray) => {
           const sql = Array.from(strings).join('?');
+          if (sql.includes('reception_requests')) {
+            calls.push('reception.discover');
+            return [{ exists: receptionTableExists }];
+          }
           if (sql.includes('scribe_workspace_records')) {
             calls.push('scribe.discover');
             return [{ exists: scribeTableExists }];
@@ -112,7 +123,51 @@ describe('DPDP appointment erasure invariant', () => {
     scribeDeletionArgs.length = 0;
     scribeTableExists = true;
     scribeDeletionFails = false;
+    receptionTableExists = true;
+    receptionDeletionFails = false;
+    receptionDeletionArgs.length = 0;
     sessionRows = [];
+  });
+
+  it('erases linked reception identities and events independently of the pilot flag', async () => {
+    sessionRows = [{ id: 'session-1' }];
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now: new Date('2026-10-01T00:00:00Z'),
+    });
+    expect(receptionDeletionArgs).toEqual([
+      { where: { OR: [{ clientId: 'client-1' }, { sessionId: { in: ['session-1'] } }] } },
+    ]);
+    expect(calls.indexOf('client.update')).toBeLessThan(
+      calls.indexOf('receptionRequest.deleteMany'),
+    );
+  });
+
+  it('fails erasure rather than claiming success when reception deletion fails', async () => {
+    receptionDeletionFails = true;
+    await expect(
+      eraseClientPhi(tx as never, {
+        clientId: 'client-1',
+        erasureRequestId: 'erasure-1',
+        psychologistId: 'psy-1',
+        now: new Date('2026-10-01T00:00:00Z'),
+      }),
+    ).rejects.toThrow('reception deletion failed');
+    expect(calls).not.toContain('session.updateMany');
+  });
+
+  it('only skips reception deletion when pre-migration absence is confirmed', async () => {
+    receptionTableExists = false;
+    await eraseClientPhi(tx as never, {
+      clientId: 'client-1',
+      erasureRequestId: 'erasure-1',
+      psychologistId: 'psy-1',
+      now: new Date('2026-10-01T00:00:00Z'),
+    });
+    expect(calls).toContain('reception.discover');
+    expect(receptionDeletionArgs).toHaveLength(0);
   });
 
   it('erases all patient Scribe kinds, including coding and document packets, without a kind or UI-flag filter', async () => {
