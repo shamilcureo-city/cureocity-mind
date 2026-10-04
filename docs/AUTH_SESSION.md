@@ -100,14 +100,16 @@ identity check. The wrapper is removed when that authenticated layout unmounts.
   compares it with its independently verified identity, detecting an old page
   paired with a newly changed cookie.
 - If both Bearer and cookie credentials are supplied, **both must verify and
-  their UIDs must agree**. Invalid credentials return a reauthentication401;
-  conflicting identities return401 with `SESSION_IDENTITY_MISMATCH`, without
+  their UIDs must agree**. Invalid credentials return a reauthentication 401;
+  conflicting identities return 401 with `SESSION_IDENTITY_MISMATCH`, without
   patient lookup, capability changes, or identifying data in the response.
 - True Bearer-only and cookie-only clients remain supported. Existing role,
   lifecycle, consent, ownership, capability and origin checks remain in force.
 - Tokens/assertions are never added to cross-origin URLs, API-prefix lookalikes,
   Care/public/paired-patient endpoints, or session exchange/sign-out requests.
   Guarded API redirects are refused rather than forwarding identity headers.
+- The paired patient home uses its own Firebase Bearer identity and explicitly
+  omits ambient practitioner cookies on its GET and refresh-request POST.
 - Onboarding no longer silently remints a cookie from persisted Firebase state.
   Only an explicit login exchanges credentials for a new session.
 

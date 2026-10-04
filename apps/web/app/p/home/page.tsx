@@ -36,6 +36,8 @@ export default function ClientCareHomePage() {
         if (refreshShareId) {
           const requested = await fetch('/api/v1/p/home', {
             method: 'POST',
+            // Paired patients use their own Firebase identity, not a practitioner cookie.
+            credentials: 'omit',
             headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
             body: JSON.stringify({ shareId: refreshShareId }),
             signal,
@@ -46,6 +48,7 @@ export default function ClientCareHomePage() {
           window.history.replaceState(null, '', '/p/home');
         }
         const response = await fetch('/api/v1/p/home', {
+          credentials: 'omit',
           headers: { Authorization: 'Bearer ' + token },
           cache: 'no-store',
           signal,
