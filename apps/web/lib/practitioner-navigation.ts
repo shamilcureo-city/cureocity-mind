@@ -36,6 +36,7 @@ const THERAPIST_DESKTOP: PractitionerNavigation = {
     { href: '/app/search', label: 'Search', icon: 'search' },
   ],
   secondary: [
+    { href: '/app/reception', label: 'Reception', icon: 'assistant' },
     { href: '/app/templates', label: 'Note templates', icon: 'templates' },
     { href: '/app/learn', label: 'Learning library', icon: 'learn' },
     { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
@@ -53,6 +54,7 @@ const THERAPIST_MOBILE: PractitionerNavigation = {
     { href: '/app/search', label: 'Search', icon: 'search' },
   ],
   secondary: [
+    { href: '/app/reception', label: 'Reception', icon: 'assistant' },
     { href: '/app/templates', label: 'Templates', icon: 'templates' },
     { href: '/app/dashboard', label: 'Analytics', icon: 'dashboard' },
     { href: '/app/practice-assistant', label: 'Mind assistant', icon: 'assistant' },
@@ -66,6 +68,7 @@ const THERAPIST_MOBILE: PractitionerNavigation = {
 const DOCTOR_DESKTOP: PractitionerNavigation = {
   primary: [
     { href: '/app/clinic', label: 'Clinic', icon: 'clinic' },
+    { href: '/app/reception', label: 'Reception', icon: 'assistant' },
     { href: '/app/patients', label: 'Patients', icon: 'clients' },
     { href: '/app/insights', label: 'Insights', icon: 'insights' },
     { href: '/app/learn', label: 'Learn', icon: 'learn' },
@@ -76,6 +79,7 @@ const DOCTOR_DESKTOP: PractitionerNavigation = {
 const DOCTOR_MOBILE: PractitionerNavigation = {
   primary: [
     { href: '/app/clinic', label: 'Clinic', icon: 'clinic' },
+    { href: '/app/reception', label: 'Reception', icon: 'assistant' },
     { href: '/app/patients', label: 'Patients', icon: 'clients' },
     { href: '/app/insights', label: 'Insights', icon: 'insights' },
     { href: '/app/settings', label: 'Settings', icon: 'cog' },

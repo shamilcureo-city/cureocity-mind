@@ -49,6 +49,12 @@ export const CLIENT_FIELD_ERASURE_MANIFEST = {
 } as const satisfies Record<string, DpdpErasureDisposition>;
 
 export const DPDP_ERASURE_MANIFEST = {
+  ReceptionRequest: clinicalDelete(
+    'delete encrypted reception contact, narrative, submission fingerprints and links by clientId/sessionId independently of pilot flags',
+  ),
+  ReceptionEvent: clinicalDelete(
+    'delete request-linked transition events by cascading ReceptionRequest deletion',
+  ),
   ScribeWorkspaceRecord: clinicalDelete(
     'deleteMany by clientId, including encrypted report originals and intake credentials; independent of UI flags',
   ),

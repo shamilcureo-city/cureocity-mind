@@ -1,4 +1,4 @@
-import type { ConsentScope } from '@prisma/client';
+import type { ConsentScope, Prisma } from '@prisma/client';
 import {
   type ClinicalLocale,
   ClinicalLocaleSchema,
@@ -54,6 +54,10 @@ const REQUIRED_CONSENTS: ConsentScope[] = [
 export async function computeSessionDefaults(
   clientId: string,
   psychologistId: string,
+  db: Pick<
+    Prisma.TransactionClient,
+    'client' | 'psychologist' | 'treatmentPlan' | 'session' | 'consent' | 'instrumentResponse'
+  > = prisma,
 ): Promise<SessionDefaults> {
   const [
     client,
@@ -65,7 +69,7 @@ export async function computeSessionDefaults(
     gad7Latest,
     lastCompleted,
   ] = await Promise.all([
-    prisma.client.findUnique({
+    db.client.findUnique({
       where: { id: clientId },
       select: {
         psychologistId: true,
@@ -75,7 +79,7 @@ export async function computeSessionDefaults(
         deletedAt: true,
       },
     }),
-    prisma.psychologist.findUnique({
+    db.psychologist.findUnique({
       where: { id: psychologistId },
       select: {
         defaultModality: true,
@@ -83,30 +87,30 @@ export async function computeSessionDefaults(
         vertical: true,
       },
     }),
-    prisma.treatmentPlan.findFirst({
+    db.treatmentPlan.findFirst({
       where: { clientId, supersededAt: null },
       orderBy: { version: 'desc' },
       select: { id: true, body: true, confirmedAt: true },
     }),
-    prisma.session.count({
+    db.session.count({
       where: { clientId, status: 'COMPLETED' },
     }),
-    prisma.consent.findMany({
+    db.consent.findMany({
       where: { clientId, status: 'GRANTED' },
       select: { scope: true },
       distinct: ['scope'],
     }),
-    prisma.instrumentResponse.findFirst({
+    db.instrumentResponse.findFirst({
       where: { clientId, instrumentKey: 'PHQ9' },
       orderBy: { administeredAt: 'desc' },
       select: { administeredAt: true },
     }),
-    prisma.instrumentResponse.findFirst({
+    db.instrumentResponse.findFirst({
       where: { clientId, instrumentKey: 'GAD7' },
       orderBy: { administeredAt: 'desc' },
       select: { administeredAt: true },
     }),
-    prisma.session.findFirst({
+    db.session.findFirst({
       where: { clientId, status: 'COMPLETED' },
       orderBy: { endedAt: 'desc' },
       select: { endedAt: true },
@@ -129,7 +133,7 @@ export async function computeSessionDefaults(
     // REVIEW if the plan has aged past the threshold.
     const ageSessions =
       completedCount -
-      (await prisma.session.count({
+      (await db.session.count({
         where: {
           clientId,
           status: 'COMPLETED',

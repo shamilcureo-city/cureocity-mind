@@ -36,46 +36,47 @@ The September 2026 Mind workspace keeps these route owners. The default session 
 
 This table classifies every current `apps/web/app/app/**/page.tsx` route. “Shared-neutral” means the task has the same meaning for both practitioner verticals; vertical-specific content inside it must still branch explicitly.
 
-| Route                                                   | Owner          | Notes                                                                                                    |
-| ------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------- |
-| `/app`                                                  | Mind-only      | Redirects therapists to canonical Today and doctors to Clinic; preserves legacy capture query deep links |
-| `/app/clients`                                          | Mind-only      | Therapist client roster                                                                                  |
-| `/app/clients/[id]`                                     | Mind-only      | Client Overview: current stage, changes, homework, next action, preparation and session actions          |
-| `/app/clients/[id]/journey`                             | Mind-only      | Client-owned care journey, outcomes, measures, open questions, and care direction                        |
-| `/app/clients/[id]/plan`                                | Mind-only      | Client-owned formulation, treatment plan, goals, and plan tools                                          |
-| `/app/clients/[id]/sessions`                            | Mind-only      | Chronological client session history                                                                     |
-| `/app/clients/[id]/shared`                              | Mind-only      | Durable record of artefacts shared with the client                                                       |
-| `/app/clinic`                                           | Scribe-only    | Doctor OPD queue                                                                                         |
-| `/app/clinic/templates`                                 | Scribe-only    | Private doctor note layouts and blank document prompts; explicit application only                        |
-| `/app/dashboard`                                        | Mind-only      | Therapist analytics/attention surface                                                                    |
-| `/app/data-rights/erasure-queue`                        | Shared-neutral | Practitioner data-rights operations                                                                      |
-| `/app/encounters/new`                                   | Mind-only      | Compatibility alias for the Mind capture entry; visible copy says session                                |
-| `/app/insights`                                         | Scribe-only    | Doctor end-of-clinic evidence view                                                                       |
-| `/app/learn`                                            | Shared-neutral | Shared education shell; content may be vertical-aware                                                    |
-| `/app/learn/[topic]`                                    | Shared-neutral | Shared topic reader                                                                                      |
-| `/app/learn/words`                                      | Shared-neutral | Shared glossary                                                                                          |
-| `/app/marketing`                                        | Mind-only      | Therapist public profile and appointment inbox                                                           |
-| `/app/me`                                               | Mind-only      | Therapist practice outcomes                                                                              |
-| `/app/notes-due`                                        | Mind-only      | Therapy notes awaiting completion                                                                        |
-| `/app/patients`                                         | Scribe-only    | Doctor patient roster                                                                                    |
-| `/app/patients/[id]`                                    | Scribe-only    | Doctor patient record                                                                                    |
-| `/app/patients/[id]/encounters/[sessionId]`             | Scribe-only    | Doctor dictate/upload encounter and Review & Sign                                                        |
-| `/app/patients/[id]/encounters/[sessionId]/live`        | Scribe-only    | Doctor live consult                                                                                      |
-| `/app/patients/[id]/encounters/[sessionId]/teleconsult` | Scribe-only    | Feature-gated doctor video consultation, separate patient AI consent and medical Review & Sign           |
-| `/app/practice-assistant`                               | Mind-only      | Therapist practice assistant                                                                             |
-| `/app/search`                                           | Mind-only      | Therapy-note search                                                                                      |
-| `/app/sessions/[id]`                                    | Mind-only      | Therapy session workspace                                                                                |
-| `/app/sessions/[id]/live`                               | Mind-only      | Therapist live session                                                                                   |
-| `/app/settings`                                         | Shared-neutral | Redirects to shared account settings                                                                     |
-| `/app/settings/account`                                 | Shared-neutral | Practitioner account identity                                                                            |
-| `/app/settings/clinic`                                  | Shared-neutral | Practice/clinic membership administration                                                                |
-| `/app/settings/plan`                                    | Shared-neutral | Practitioner billing and entitlement                                                                     |
-| `/app/settings/preferences`                             | Shared-neutral | Shared preferences with doctor-only letterhead branch                                                    |
-| `/app/settings/security`                                | Shared-neutral | Practitioner account security                                                                            |
-| `/app/templates`                                        | Mind-only      | Therapy-note templates                                                                                   |
-| `/app/today`                                            | Mind-only      | Therapist daily agenda                                                                                   |
-| `/app/video/[appointmentId]`                            | Mind-only      | Therapist appointment video room                                                                         |
-| `/app/video/session/[sessionId]`                        | Mind-only      | Therapist virtual-session room and scribe                                                                |
+| Route                                                   | Owner          | Notes                                                                                                                                          |
+| ------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/app`                                                  | Mind-only      | Redirects therapists to canonical Today and doctors to Clinic; preserves legacy capture query deep links                                       |
+| `/app/clients`                                          | Mind-only      | Therapist client roster                                                                                                                        |
+| `/app/clients/[id]`                                     | Mind-only      | Client Overview: current stage, changes, homework, next action, preparation and session actions                                                |
+| `/app/clients/[id]/journey`                             | Mind-only      | Client-owned care journey, outcomes, measures, open questions, and care direction                                                              |
+| `/app/clients/[id]/plan`                                | Mind-only      | Client-owned formulation, treatment plan, goals, and plan tools                                                                                |
+| `/app/clients/[id]/sessions`                            | Mind-only      | Chronological client session history                                                                                                           |
+| `/app/clients/[id]/shared`                              | Mind-only      | Durable record of artefacts shared with the client                                                                                             |
+| `/app/clinic`                                           | Scribe-only    | Doctor OPD queue                                                                                                                               |
+| `/app/clinic/templates`                                 | Scribe-only    | Private doctor note layouts and blank document prompts; explicit application only                                                              |
+| `/app/dashboard`                                        | Mind-only      | Therapist analytics/attention surface                                                                                                          |
+| `/app/data-rights/erasure-queue`                        | Shared-neutral | Practitioner data-rights operations                                                                                                            |
+| `/app/encounters/new`                                   | Mind-only      | Compatibility alias for the Mind capture entry; visible copy says session                                                                      |
+| `/app/insights`                                         | Scribe-only    | Doctor end-of-clinic evidence view                                                                                                             |
+| `/app/learn`                                            | Shared-neutral | Shared education shell; content may be vertical-aware                                                                                          |
+| `/app/learn/[topic]`                                    | Shared-neutral | Shared topic reader                                                                                                                            |
+| `/app/learn/words`                                      | Shared-neutral | Shared glossary                                                                                                                                |
+| `/app/marketing`                                        | Mind-only      | Therapist public profile and appointment inbox                                                                                                 |
+| `/app/me`                                               | Mind-only      | Therapist practice outcomes                                                                                                                    |
+| `/app/notes-due`                                        | Mind-only      | Therapy notes awaiting completion                                                                                                              |
+| `/app/patients`                                         | Scribe-only    | Doctor patient roster                                                                                                                          |
+| `/app/patients/[id]`                                    | Scribe-only    | Doctor patient record                                                                                                                          |
+| `/app/patients/[id]/encounters/[sessionId]`             | Scribe-only    | Doctor dictate/upload encounter and Review & Sign                                                                                              |
+| `/app/patients/[id]/encounters/[sessionId]/live`        | Scribe-only    | Doctor live consult                                                                                                                            |
+| `/app/patients/[id]/encounters/[sessionId]/teleconsult` | Scribe-only    | Feature-gated doctor video consultation, separate patient AI consent and medical Review & Sign                                                 |
+| `/app/practice-assistant`                               | Mind-only      | Therapist practice assistant                                                                                                                   |
+| `/app/reception`                                        | Shared-neutral | Requires `RECEPTION_PILOT_ENABLED=true` and `requireOnboardedPsychologist`; owner inbox/settings use stored vertical branding and roster links |
+| `/app/search`                                           | Mind-only      | Therapy-note search                                                                                                                            |
+| `/app/sessions/[id]`                                    | Mind-only      | Therapy session workspace                                                                                                                      |
+| `/app/sessions/[id]/live`                               | Mind-only      | Therapist live session                                                                                                                         |
+| `/app/settings`                                         | Shared-neutral | Redirects to shared account settings                                                                                                           |
+| `/app/settings/account`                                 | Shared-neutral | Practitioner account identity                                                                                                                  |
+| `/app/settings/clinic`                                  | Shared-neutral | Practice/clinic membership administration                                                                                                      |
+| `/app/settings/plan`                                    | Shared-neutral | Practitioner billing and entitlement                                                                                                           |
+| `/app/settings/preferences`                             | Shared-neutral | Shared preferences with doctor-only letterhead branch                                                                                          |
+| `/app/settings/security`                                | Shared-neutral | Practitioner account security                                                                                                                  |
+| `/app/templates`                                        | Mind-only      | Therapy-note templates                                                                                                                         |
+| `/app/today`                                            | Mind-only      | Therapist daily agenda                                                                                                                         |
+| `/app/video/[appointmentId]`                            | Mind-only      | Therapist appointment video room                                                                                                               |
+| `/app/video/session/[sessionId]`                        | Mind-only      | Therapist virtual-session room and scribe                                                                                                      |
 
 Route ownership and runtime enforcement are separate checks. Mind-only pages touched by this roadmap must use the therapist vertical guard or an equivalent explicit redirect; Scribe-only pages must retain `requireOnboardedDoctor`.
 

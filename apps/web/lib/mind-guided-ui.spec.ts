@@ -286,7 +286,13 @@ describe('Mind guide starts with a clinician review gate', () => {
 describe('Shared navigation keeps the Doctor boundary', () => {
   it('keeps the doctor desktop destinations and POST-only sign-out without Mind branding', () => {
     const html = renderToStaticMarkup(React.createElement(Sidebar, { vertical: 'DOCTOR' }));
-    for (const href of ['/app/clinic', '/app/patients', '/app/insights', '/app/learn']) {
+    for (const href of [
+      '/app/clinic',
+      '/app/reception',
+      '/app/patients',
+      '/app/insights',
+      '/app/learn',
+    ]) {
       expect(html).toContain(`href="${href}"`);
     }
     for (const marker of [
@@ -318,7 +324,13 @@ describe('Shared navigation keeps the Doctor boundary', () => {
 
   it('keeps doctor mobile navigation free of Mind styling and therapist-only destinations', () => {
     const html = renderToStaticMarkup(React.createElement(MobileNav, { vertical: 'DOCTOR' }));
-    for (const href of ['/app/clinic', '/app/patients', '/app/insights', '/app/settings']) {
+    for (const href of [
+      '/app/clinic',
+      '/app/reception',
+      '/app/patients',
+      '/app/insights',
+      '/app/settings',
+    ]) {
       expect(html).toContain(`href="${href}"`);
     }
     expect(html).not.toContain('mind-mobile-nav');

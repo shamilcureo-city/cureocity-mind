@@ -2,6 +2,8 @@ import { Prisma } from '@prisma/client';
 import type { Clinic, ClinicRole } from '@cureocity/contracts';
 import { writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
+import { acquireReceptionCalendarLock } from '@/lib/reception-calendar';
+import { lockActiveClient } from '@/lib/phi-write-lock';
 
 /**
  * Sprint 39 — clinic helpers (Phase 1).
@@ -124,6 +126,85 @@ const CLIENT_SCOPED_OWNED_MODELS = [
   'treatmentPlan',
 ] as const;
 
+export class ReceptionCustodyTransferConflictError extends Error {
+  readonly code = 'RECEPTION_CUSTODY_TRANSFER_CONFLICT' as const;
+
+  constructor(
+    message = 'Pause reception for both practitioners before transferring client custody.',
+  ) {
+    super(message);
+    this.name = 'ReceptionCustodyTransferConflictError';
+  }
+}
+
+/** Calendar locks come first; sorted keys also serialize opposite-direction transfers. */
+async function guardReceptionCustodyTransfer(
+  tx: Prisma.TransactionClient,
+  fromPsychologistId: string,
+  toPsychologistId: string,
+): Promise<void> {
+  // Existing records outlive rollout flags. Always serialize custody changes
+  // with reception writers, including while the public pilot is disabled.
+  const practitionerIds = [...new Set([fromPsychologistId, toPsychologistId])].sort();
+  for (const practitionerId of practitionerIds) {
+    await acquireReceptionCalendarLock(tx, practitionerId);
+  }
+  const enabledDesk = await tx.receptionSettings.findFirst({
+    where: { psychologistId: { in: practitionerIds }, enabled: true },
+    select: { psychologistId: true },
+  });
+  if (enabledDesk) throw new ReceptionCustodyTransferConflictError();
+}
+
+/** Call after the calendar and affected Client locks, before any ownership write. */
+async function guardReceptionCustodyHistory(
+  tx: Prisma.TransactionClient,
+  scope: { clientId: string } | { fromPsychologistId: string },
+): Promise<void> {
+  const linkedClient =
+    'clientId' in scope
+      ? { OR: [{ clientId: scope.clientId }, { session: { clientId: scope.clientId } }] }
+      : {
+          OR: [
+            { client: { psychologistId: scope.fromPsychologistId } },
+            { session: { psychologistId: scope.fromPsychologistId } },
+            { session: { client: { psychologistId: scope.fromPsychologistId } } },
+          ],
+        };
+  const request = await tx.receptionRequest.findFirst({
+    where: linkedClient,
+    select: { id: true },
+  });
+  // Enquiry erasure deliberately preserves its appointment. That durable marker
+  // must also prevent a transfer that would split appointment/session ownership.
+  const appointment = request
+    ? null
+    : ('clientId' in scope
+        ? await tx.$queryRaw<Array<{ id: string }>>`
+              SELECT a."id" FROM "Appointment" a
+              LEFT JOIN "sessions" s ON s."id" = a."sessionId"
+              WHERE a."suppressAutomaticMessages" = true
+                AND (a."clientId" = ${scope.clientId} OR s."clientId" = ${scope.clientId})
+              LIMIT 1
+            `
+        : await tx.$queryRaw<Array<{ id: string }>>`
+              SELECT a."id" FROM "Appointment" a
+              LEFT JOIN "sessions" s ON s."id" = a."sessionId"
+              LEFT JOIN "clients" c ON c."id" = a."clientId"
+              LEFT JOIN "clients" sc ON sc."id" = s."clientId"
+              WHERE a."suppressAutomaticMessages" = true
+                AND (c."psychologistId" = ${scope.fromPsychologistId}
+                  OR s."psychologistId" = ${scope.fromPsychologistId}
+                  OR sc."psychologistId" = ${scope.fromPsychologistId})
+              LIMIT 1
+            `)[0];
+  if (request || appointment) {
+    throw new ReceptionCustodyTransferConflictError(
+      'Custody transfer is not supported for patients with reception booking history. A dedicated ownership-transfer workflow is required.',
+    );
+  }
+}
+
 /**
  * Transfer a client's custody from one therapist to another, atomically.
  * Moves Client.psychologistId + the psychologistId on every client-scoped
@@ -133,8 +214,16 @@ const CLIENT_SCOPED_OWNED_MODELS = [
  */
 export async function transferClientCustody(
   tx: Prisma.TransactionClient,
-  args: { clientId: string; toPsychologistId: string },
+  args: { clientId: string; fromPsychologistId: string; toPsychologistId: string },
 ): Promise<void> {
+  await guardReceptionCustodyTransfer(tx, args.fromPsychologistId, args.toPsychologistId);
+  const current = await lockActiveClient(tx, args.clientId);
+  if (current.psychologistId !== args.fromPsychologistId) {
+    throw new ReceptionCustodyTransferConflictError(
+      'Client ownership changed. Refresh before transferring custody.',
+    );
+  }
+  await guardReceptionCustodyHistory(tx, { clientId: args.clientId });
   const where = { clientId: args.clientId };
   const data = { psychologistId: args.toPsychologistId };
   for (const model of CLIENT_SCOPED_OWNED_MODELS) {
@@ -161,6 +250,14 @@ export async function transferAllCustody(
   tx: Prisma.TransactionClient,
   args: { fromPsychologistId: string; toPsychologistId: string },
 ): Promise<number> {
+  await guardReceptionCustodyTransfer(tx, args.fromPsychologistId, args.toPsychologistId);
+  // Follow the clinical writer lock order after both practitioner calendars.
+  await tx.$queryRaw`
+    SELECT "id" FROM "clients"
+    WHERE "psychologistId" = ${args.fromPsychologistId}
+    ORDER BY "id" FOR UPDATE
+  `;
+  await guardReceptionCustodyHistory(tx, { fromPsychologistId: args.fromPsychologistId });
   const where = { psychologistId: args.fromPsychologistId };
   const data = { psychologistId: args.toPsychologistId };
   for (const model of CLIENT_SCOPED_OWNED_MODELS) {

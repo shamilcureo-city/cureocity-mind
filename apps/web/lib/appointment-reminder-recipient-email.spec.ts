@@ -44,6 +44,26 @@ afterEach(() => {
 });
 
 describe('prepareAppointmentReminderEmail', () => {
+  it('never prepares automatic messages for reception bookings', async () => {
+    const sendEmail = vi.fn();
+    globalThis.__cureocityAppointmentEmail = { sendEmail } as unknown as IEmailPort;
+    for (const recipient of ['PRACTITIONER_EMAIL', 'PATIENT_EMAIL'] as const) {
+      await expect(
+        prepareAppointmentReminderEmail({
+          appointment: { ...appointment, suppressAutomaticMessages: true },
+          recipient,
+          windowHours: 2,
+        }),
+      ).resolves.toEqual({
+        outcome: 'pre_dispatch_failure',
+        errorCode: 'AUTOMATIC_MESSAGES_SUPPRESSED',
+      });
+    }
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(mocks.psychologistFindUnique).not.toHaveBeenCalled();
+    expect(mocks.decryptForTenant).not.toHaveBeenCalled();
+  });
+
   it('returns a retryable pre-dispatch config failure before any provider call', async () => {
     await expect(
       prepareAppointmentReminderEmail({
