@@ -421,6 +421,16 @@ function LoginPageInner() {
                     : 'New here? Continue with Google or create an email account — we’ll set you up.'}
                 </p>
 
+                {search.get('reason') === 'session-changed' && (
+                  <p
+                    role="status"
+                    className="mt-4 rounded-xl bg-[var(--color-surface-soft)] p-3 text-sm"
+                  >
+                    Your previous sign-in was cleared. Choose the account you want to use for this
+                    practice. Previous actions will not be retried automatically.
+                  </p>
+                )}
+
                 {/* Google primary */}
                 <button
                   type="button"

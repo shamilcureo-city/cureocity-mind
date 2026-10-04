@@ -26,7 +26,8 @@ import {
  * right HTTP status. The route handler then either uses the resolved
  * value or returns the early response.
  *
- * Identity is accepted from EITHER:
+ * Identity is accepted from either credential below. When both are supplied,
+ * both must verify and resolve to the same Firebase UID:
  *   - an `Authorization: Bearer <Firebase id token>` header, or
  *   - the `__session` cookie (Firebase session cookie, minted by
  *     POST /api/v1/auth/session after OTP verify). Server pages and
@@ -236,44 +237,80 @@ async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>
   }
 
   const header = req.headers.get('authorization');
-  if (header?.startsWith('Bearer ')) {
+  const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+  let verifiedUid: string | undefined;
+  if (header !== null) {
+    // A supplied credential must not be silently ignored in favor of another.
+    if (!header.startsWith('Bearer ') || !header.substring('Bearer '.length).trim()) {
+      return identityReauthRequired('Invalid token');
+    }
     try {
       const decoded = await verifyWithRetry(() =>
         auth.verifyIdToken(header.substring('Bearer '.length)),
       );
-      return { ok: true, value: decoded.uid };
+      verifiedUid = decoded.uid;
     } catch (error) {
       const code = (error as { code?: string } | null)?.code ?? 'unknown';
       console.warn(`[auth-server] verifyIdToken failed code=${code}`);
-      return {
-        ok: false,
-        response: NextResponse.json({ error: 'Invalid token' }, { status: 401 }),
-      };
+      return identityReauthRequired('Invalid token');
     }
   }
 
-  const cookie = req.cookies.get(SESSION_COOKIE_NAME)?.value;
-  if (cookie) {
+  if (cookie !== undefined) {
     try {
       // checkRevoked is intentionally NOT passed (no per-request
       // revocation network call). verifyWithRetry absorbs transient
       // public-key-fetch failures under concurrent requests so a brief
       // blip doesn't 401 a valid session.
       const decoded = await verifyWithRetry(() => auth.verifySessionCookie(cookie));
-      return { ok: true, value: decoded.uid };
+      if (verifiedUid !== undefined && decoded.uid !== verifiedUid) {
+        return identityMismatch();
+      }
+      verifiedUid = decoded.uid;
     } catch (error) {
       const code = (error as { code?: string } | null)?.code ?? 'unknown';
       console.warn(`[auth-server] verifySessionCookie failed code=${code}`);
-      return {
-        ok: false,
-        response: NextResponse.json({ error: 'Session expired — sign in again' }, { status: 401 }),
-      };
+      return identityReauthRequired('Session expired — sign in again');
     }
+  }
+
+  if (verifiedUid !== undefined) {
+    // This optional page assertion can only reject a verified identity. It must
+    // never select an account or grant authority on behalf of the caller.
+    const expectedUid = req.headers.get('x-cureocity-session-uid');
+    if (expectedUid !== null && expectedUid !== verifiedUid) return identityMismatch();
+    return { ok: true, value: verifiedUid };
   }
 
   return {
     ok: false,
-    response: NextResponse.json({ error: 'Missing Bearer token or session' }, { status: 401 }),
+    response: NextResponse.json(
+      { error: 'Missing Bearer token or session' },
+      { status: 401, headers: { 'Cache-Control': 'private, no-store' } },
+    ),
+  };
+}
+
+function identityMismatch(): Resolved<never> {
+  return {
+    ok: false,
+    response: NextResponse.json(
+      {
+        error: 'Your sign-in changed. Sign in again to continue with one account.',
+        code: 'SESSION_IDENTITY_MISMATCH',
+      },
+      { status: 401, headers: { 'Cache-Control': 'private, no-store' } },
+    ),
+  };
+}
+
+function identityReauthRequired(error: string): Resolved<never> {
+  return {
+    ok: false,
+    response: NextResponse.json(
+      { error, code: 'SESSION_REAUTH_REQUIRED' },
+      { status: 401, headers: { 'Cache-Control': 'private, no-store' } },
+    ),
   };
 }
 

@@ -85,30 +85,31 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
           Skip to workspace
         </a>
       )}
-      <AuthedFetchProvider />
-      {showBypassBanner && (
-        <div className="bg-[var(--color-warn-soft)] px-4 py-2 text-center text-xs text-[var(--color-warn)]">
-          <strong>Demo mode</strong> — every sign-in resolves to the shared demo therapist. Set the
-          server-side <code className="font-mono">FIREBASE_*</code> env vars and remove{' '}
-          <code className="font-mono">AUTH_BYPASS</code> for real per-user accounts.{' '}
-          <a href="/api/v1/health/auth" className="font-medium underline">
-            Check auth status
-          </a>
-          .
+      <AuthedFetchProvider expectedUid={isAuthBypassed() ? null : (psy?.firebaseUid ?? '')}>
+        {showBypassBanner && (
+          <div className="bg-[var(--color-warn-soft)] px-4 py-2 text-center text-xs text-[var(--color-warn)]">
+            <strong>Demo mode</strong> — every sign-in resolves to the shared demo therapist. Set
+            the server-side <code className="font-mono">FIREBASE_*</code> env vars and remove{' '}
+            <code className="font-mono">AUTH_BYPASS</code> for real per-user accounts.{' '}
+            <a href="/api/v1/health/auth" className="font-medium underline">
+              Check auth status
+            </a>
+            .
+          </div>
+        )}
+        <div className="flex flex-1">
+          <Sidebar usage={usage} vertical={psy?.vertical ?? 'THERAPIST'} />
+          <div
+            id="mind-main-content"
+            className="mind-content flex min-w-0 flex-1 flex-col pb-16 md:pb-0"
+          >
+            {children}
+          </div>
+          <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
         </div>
-      )}
-      <div className="flex flex-1">
-        <Sidebar usage={usage} vertical={psy?.vertical ?? 'THERAPIST'} />
-        <div
-          id="mind-main-content"
-          className="mind-content flex min-w-0 flex-1 flex-col pb-16 md:pb-0"
-        >
-          {children}
-        </div>
-        <MobileNav vertical={psy?.vertical ?? 'THERAPIST'} />
-      </div>
-      <HelpButton topics={helpTopics} words={helpWords} />
-      {psy?.vertical === 'DOCTOR' && <WelcomeOverlay serverSeen={psy.hasSeenWelcome} />}
+        <HelpButton topics={helpTopics} words={helpWords} />
+        {psy?.vertical === 'DOCTOR' && <WelcomeOverlay serverSeen={psy.hasSeenWelcome} />}
+      </AuthedFetchProvider>
     </div>
   );
 }

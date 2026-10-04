@@ -4,7 +4,9 @@ import { redirect } from 'next/navigation';
 import { Card } from '@/components/ui/Card';
 import { Container } from '@/components/ui/Container';
 import { OnboardingForm } from '@/components/app/OnboardingForm';
+import { AuthedFetchProvider } from '@/components/app/AuthedFetchProvider';
 import { requireActivePagePsychologist } from '@/lib/auth-page';
+import { isAuthBypassed } from '@/lib/auth-server';
 import { practitionerProductCopy, productFromHost } from '@/lib/product';
 
 export const dynamic = 'force-dynamic';
@@ -50,12 +52,14 @@ export default async function OnboardingPage() {
           <p className="mt-3 text-sm text-[var(--color-ink-2)]">{copy.onboardingDescription}</p>
 
           <Card className="mt-8 p-7">
-            <OnboardingForm
-              phone={me.phone}
-              presetVertical={presetVertical}
-              initialFullName={me.fullName}
-              initialEmail={me.email}
-            />
+            <AuthedFetchProvider expectedUid={isAuthBypassed() ? null : me.firebaseUid}>
+              <OnboardingForm
+                phone={me.phone}
+                presetVertical={presetVertical}
+                initialFullName={me.fullName}
+                initialEmail={me.email}
+              />
+            </AuthedFetchProvider>
           </Card>
         </div>
       </Container>
