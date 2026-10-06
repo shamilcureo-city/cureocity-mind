@@ -27,9 +27,13 @@ vi.mock('react', () => ({
 import { useLiveStream } from './use-live-stream';
 
 class Track extends EventTarget {
+  readyState = 'live';
+  enabled = true;
+  muted = false;
   stopped = false;
   stop() {
     this.stopped = true;
+    this.readyState = 'ended';
   }
 }
 
@@ -77,6 +81,16 @@ const frame = (level: number) =>
     data: { type: 'frames', samples: new Float32Array(480).fill(level) },
   });
 
+async function startWithFrame(hook: ReturnType<typeof useLiveStream>, level: number) {
+  const nextWorklet = browser.worklets.length;
+  const started = hook.start();
+  for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+  const port = browser.worklets[nextWorklet].port;
+  port.onmessage?.(frame(level));
+  await started;
+  return port;
+}
+
 beforeEach(() => {
   browser.states = [];
   browser.tracks = [];
@@ -108,9 +122,7 @@ describe('live microphone telemetry', () => {
     const hook = useLiveStream({ onFrame });
     expect(hook.inputLevel).toBe(0);
     expect(hook.lastAudioAt).toBeNull();
-    await hook.start();
-    const port = browser.worklets[0].port;
-    port.onmessage?.(frame(0.25));
+    const port = await startWithFrame(hook, 0.25);
     expect(input()).toEqual({ inputLevel: 0.25, lastAudioAt: 1_000 });
     const published = browser.states[2].writes.length;
 
@@ -136,9 +148,7 @@ describe('live microphone telemetry', () => {
   it('clears activity immediately on stop while still delivering queued tail audio', async () => {
     const onFrame = vi.fn();
     const hook = useLiveStream({ onFrame });
-    await hook.start();
-    const port = browser.worklets[0].port;
-    port.onmessage?.(frame(0.5));
+    const port = await startWithFrame(hook, 0.5);
     vi.spyOn(port, 'postMessage').mockImplementation(() => {});
     const stopped = hook.stop();
     expect(browser.tracks[0].stopped).toBe(true);
@@ -157,9 +167,8 @@ describe('live microphone telemetry', () => {
     async (reason) => {
       const interrupted = vi.fn();
       const hook = useLiveStream({ onFrame: vi.fn(), onInterrupted: interrupted });
-      await hook.start();
+      await startWithFrame(hook, 0.5);
       const lateFrame = browser.worklets[0].port.onmessage;
-      lateFrame?.(frame(0.5));
       if (reason === 'context suspended') {
         browser.contexts[0].state = 'suspended';
         browser.contexts[0].dispatchEvent(new Event('statechange'));
@@ -177,11 +186,10 @@ describe('live microphone telemetry', () => {
 
   it('ignores old capture events after a fresh microphone starts', async () => {
     const hook = useLiveStream({ onFrame: vi.fn() });
-    await hook.start();
+    await startWithFrame(hook, 0);
     const oldFrame = browser.worklets[0].port.onmessage;
     await hook.stop();
-    await hook.start();
-    browser.worklets[1].port.onmessage?.(frame(0.25));
+    await startWithFrame(hook, 0.25);
     oldFrame?.(frame(1));
     browser.contexts[0].dispatchEvent(new Event('statechange'));
     expect(input()).toEqual({ inputLevel: 0.25, lastAudioAt: 1_000 });

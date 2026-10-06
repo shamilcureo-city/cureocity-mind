@@ -30,6 +30,7 @@ import { ReviewAndSign } from './ReviewAndSign';
 // (MedicalNoteView now renders inside ReviewAndSign)
 import { TurnoverBar } from './TurnoverBar';
 import { ScribeLiveWorkspace, ScribeInputMeter, scribeLiveStyles } from './ScribeLiveWorkspace';
+import { ScribeMicrophoneDialog } from './ScribeMicrophoneDialog';
 
 /**
  * Sprint DV4 (full) — the live copilot. Streams real mic audio to the
@@ -133,9 +134,7 @@ export function DoctorLiveEncounter({
   clientId?: string;
   specialty?: string | null;
   patient?: { name?: string | null; age?: number | null } | null;
-  // Sprint DS7 — the clinic flow arrives here already committed (queue →
-  // flash → live), so kick off the mic without a second tap. Best-effort:
-  // if the browser needs a gesture, the StartPanel button is the fallback.
+  // Legacy callers may request preparation on arrival, never automatic mic access.
   autoStart?: boolean;
   teleconsult?: ScribeTeleconsultCapture;
 }) {
@@ -153,6 +152,8 @@ export function DoctorLiveEncounter({
   // Sprint DS3 — suggestion ids we've already audited as SHOWN, so each fires once.
   const shownSuggestionsRef = useRef<Set<string>>(new Set());
   const [phase, setPhase] = useState<Phase>('idle');
+  const [microphoneDialog, setMicrophoneDialog] = useState<'start' | 'resume' | null>(null);
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState<string>();
   const [lastTranscriptAt, setLastTranscriptAt] = useState<number | null>(null);
   const [clockNow, setClockNow] = useState(Date.now);
   const [captureIncomplete, setCaptureIncomplete] = useState<string | null>(null);
@@ -547,6 +548,8 @@ export function DoctorLiveEncounter({
 
   const stream = useLiveStream({
     captureSource: teleconsult ? 'external' : 'microphone',
+    waitForMicrophoneFrames: true,
+    selectedDeviceId: selectedMicrophoneId,
     externalStream: teleconsult?.stream,
     externalReady: teleconsult?.ready,
     externalUnavailableReason: teleconsult?.unavailableReason,
@@ -644,16 +647,37 @@ export function DoctorLiveEncounter({
     };
   }, []);
 
-  // Sprint DS7 — auto-start the consult once when arriving via the clinic
-  // flow (queue → flash → here). Fires a single time from the idle phase.
-  // `start` is a stable hoisted closure, deliberately not a dep.
+  // A legacy autoStart request may open preparation, but must not open a mic
+  // or start a teleconsult's documentation without the doctor's explicit action.
   const autoStartedRef = useRef(false);
   useEffect(() => {
     if (autoStart && !autoStartedRef.current && phase === 'idle') {
       autoStartedRef.current = true;
-      void start();
+      if (!teleconsultRef.current) setMicrophoneDialog('start');
     }
   }, [autoStart, phase]);
+
+  function prepareCapture(action: 'start' | 'resume') {
+    if (teleconsultRef.current) {
+      // The call owns its media and its own readiness UI. Never acquire a
+      // second microphone or stop a call-owned track for this local check.
+      if (action === 'resume') resumeAuthorizedCapture();
+      else void start();
+      return;
+    }
+    setMicrophoneDialog(action);
+  }
+
+  function microphoneReady(deviceId: string) {
+    const action = microphoneDialog;
+    if (!action || unmountedRef.current) return;
+    setSelectedMicrophoneId(deviceId);
+    setMicrophoneDialog(null);
+    // The local probe has released all tracks. Normal Start/Resume still
+    // validates consent and access before reacquiring this selected device.
+    if (action === 'resume') resumeAuthorizedCapture();
+    else void start();
+  }
 
   async function start(): Promise<void> {
     if (
@@ -1622,7 +1646,7 @@ export function DoctorLiveEncounter({
             <>
               <Button
                 variant="secondary"
-                onClick={resumeAuthorizedCapture}
+                onClick={() => prepareCapture('resume')}
                 disabled={teleconsult && !teleconsult.ready}
               >
                 {teleconsult ? 'Resume AI documentation' : 'Resume recording'}
@@ -1648,7 +1672,7 @@ export function DoctorLiveEncounter({
             </>
           ) : (
             <Button
-              onClick={() => void start()}
+              onClick={() => prepareCapture('start')}
               disabled={phase === 'connecting' || (teleconsult && !teleconsult.ready)}
             >
               {phase === 'connecting'
@@ -1660,6 +1684,14 @@ export function DoctorLiveEncounter({
           )}
         </div>
       </div>
+
+      {microphoneDialog && !teleconsult && (
+        <ScribeMicrophoneDialog
+          action={microphoneDialog}
+          onCancel={() => setMicrophoneDialog(null)}
+          onContinue={microphoneReady}
+        />
+      )}
 
       {teleconsult && !teleconsult.ready && !finalNote && (
         <p role="status" className="text-sm text-[var(--color-ink-2)]">
