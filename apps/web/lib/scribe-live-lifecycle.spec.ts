@@ -15,6 +15,7 @@ const harness = vi.hoisted(() => ({
   sockets: [] as Socket[],
   onFrame: (_pcm: Uint8Array) => {},
   onInterrupted: (_message: string) => {},
+  selectedDeviceId: undefined as string | undefined,
   stream: {
     state: 'idle',
     error: null,
@@ -54,15 +55,20 @@ vi.mock('@/lib/audio/use-live-stream', () => ({
   useLiveStream: (opts: {
     onFrame: (pcm: Uint8Array) => void;
     onInterrupted: (message: string) => void;
+    selectedDeviceId?: string;
   }) => {
     harness.onFrame = opts.onFrame;
     harness.onInterrupted = opts.onInterrupted;
+    harness.selectedDeviceId = opts.selectedDeviceId;
     return harness.stream;
   },
 }));
 vi.mock('../components/app/GatewayMockBanner', () => ({ GatewayMockBanner: () => null }));
 vi.mock('../components/app/ReviewAndSign', () => ({ ReviewAndSign: 'review-and-sign' }));
 vi.mock('../components/app/TurnoverBar', () => ({ TurnoverBar: () => null }));
+vi.mock('../components/app/ScribeMicrophoneDialog', () => ({
+  ScribeMicrophoneDialog: 'microphone-dialog',
+}));
 vi.mock('../components/app/ScribeLiveWorkspace', () => ({
   ScribeLiveWorkspace: 'scribe-workspace',
   ScribeInputMeter: 'input-meter',
@@ -121,6 +127,8 @@ type ElementProps = {
   role?: string;
   transcript?: ReactElement<{ utterances: Utterance[] }>;
   captureSaveState?: string;
+  onContinue?: (deviceId: string) => void;
+  onCancel?: () => void;
 };
 function elements(node: ReactNode): Array<ReactElement<ElementProps>> {
   return Children.toArray(node).flatMap((child) =>
@@ -163,6 +171,15 @@ function click(label: string) {
   expect(button!.props.disabled).not.toBe(true);
   button!.props.onClick!();
 }
+function microphoneDialog() {
+  return elements(render()).find((element) => element.type === 'microphone-dialog');
+}
+function confirmMicrophone() {
+  const dialog = microphoneDialog();
+  expect(dialog, 'Microphone check must precede clinical capture').toBeDefined();
+  dialog!.props.onContinue!('checked-microphone');
+  render();
+}
 function displayedUtterances() {
   return elements(render()).find((element) => element.type === 'scribe-workspace')?.props.transcript
     ?.props.utterances;
@@ -203,6 +220,9 @@ const utterance: Utterance = {
 async function startCapture() {
   mount();
   click('● Start live consult');
+  expect(fetch).not.toHaveBeenCalled();
+  expect(harness.stream.start).not.toHaveBeenCalled();
+  confirmMicrophone();
   await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
   const socket = harness.sockets[0];
   expect(harness.stream.start).not.toHaveBeenCalled();
@@ -224,6 +244,7 @@ beforeEach(() => {
   harness.sockets = [];
   harness.registerEffects = true;
   harness.stream.state = 'idle';
+  harness.selectedDeviceId = undefined;
   harness.stream.start.mockImplementation(async () => {
     harness.stream.state = 'streaming';
   });
@@ -250,6 +271,22 @@ afterEach(() => {
 });
 
 describe('Scribe live consultation lifecycle', () => {
+  it('opens readiness without capture or session requests and allows cancellation', () => {
+    mount();
+    click('● Start live consult');
+    expect(microphoneDialog()).toBeDefined();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(harness.sockets).toHaveLength(0);
+    expect(harness.stream.start).not.toHaveBeenCalled();
+    microphoneDialog()!.props.onCancel!();
+    expect(microphoneDialog()).toBeUndefined();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('uses the checked microphone only after explicit readiness confirmation', async () => {
+    await startCapture();
+    expect(harness.selectedDeviceId).toBe('checked-microphone');
+    expect(microphoneDialog()).toBeUndefined();
+  });
   it('does not label a consent or session conflict as a saved draft', async () => {
     const socket = await startCapture();
     socket.emit({ type: 'utterance', utterance });
@@ -295,6 +332,7 @@ describe('Scribe live consultation lifecycle', () => {
     };
     mount();
     click('Start AI documentation');
+    expect(microphoneDialog()).toBeUndefined();
     await vi.waitFor(() => expect(text(render())).toContain('Patient withdrew AI consent.'));
     expect(authorize).toHaveBeenCalledOnce();
     expect(fetch).not.toHaveBeenCalled();
@@ -341,6 +379,9 @@ describe('Scribe live consultation lifecycle', () => {
     expect(socket.close).toHaveBeenCalledOnce();
 
     click('Resume recording');
+    expect(harness.sockets).toHaveLength(1);
+    expect(displayedUtterances()).toEqual([utterance]);
+    confirmMicrophone();
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
     const resumed = harness.sockets[1];
     expect(harness.stream.start).toHaveBeenCalledOnce();

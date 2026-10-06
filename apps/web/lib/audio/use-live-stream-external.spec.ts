@@ -123,6 +123,7 @@ const options = (stream: Stream | null): LiveStreamOptions => ({
   onFrame: vi.fn(),
   onInterrupted: vi.fn(),
   captureSource: 'external',
+  waitForMicrophoneFrames: true, // Must not apply standalone warm-up to call-owned audio.
   externalStream: stream ? asMedia(stream) : null,
   externalReady: true,
 });
@@ -248,6 +249,38 @@ describe('live external call audio ownership and fail-closed input', () => {
     expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['original', 'mute'],
+    ['original', 'ended'],
+    ['clone', 'mute'],
+    ['clone', 'ended'],
+  ] as const)(
+    'keeps %s call-track %s fatal even before the first call frame',
+    async (owner, event) => {
+      const { track, stream } = input();
+      const config = options(stream);
+      const hook = render(config);
+      // External-call readiness is owned by the call, not local mic warm-up.
+      await hook.start();
+      const port = hooks.worklets[0].port;
+      const lateFrame = port.onmessage;
+      const failed = owner === 'original' ? track : track.copies[0];
+      if (event === 'mute') failed.muted = true;
+      else failed.readyState = 'ended';
+      failed.dispatchEvent(new Event(event));
+      expect(config.onInterrupted).toHaveBeenCalledOnce();
+      expect(track.copies[0].stop).toHaveBeenCalled();
+      expect(track.stop).not.toHaveBeenCalled();
+      failed.muted = false;
+      failed.dispatchEvent(new Event('unmute'));
+      lateFrame?.(frame());
+      expect(config.onFrame).not.toHaveBeenCalled();
+      expect(hooks.worklets).toHaveLength(1);
+      expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled();
+      await hook.stop();
+    },
+  );
+
   it('detects an original track stopped without an ended event before accepting another frame', async () => {
     const { track, stream } = input();
     const config = options(stream);
@@ -271,7 +304,9 @@ describe('live external call audio ownership and fail-closed input', () => {
       const config = options(stream);
       const hook = render(config);
       const started = hook.start();
-      const rejected = expect(started).rejects.toThrow('cancelled');
+      const rejected = expect(started).rejects.toThrow(
+        action === 'source gap' ? 'Call audio changed or was interrupted' : 'cancelled',
+      );
       await vi.waitFor(() => expect(resolve).toBeDefined());
       if (action === 'stop') await hook.stop();
       else if (action === 'source gap')

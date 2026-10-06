@@ -78,9 +78,13 @@ const chunk = (index = 0, attempts = 0) => ({
   attempts,
 });
 class Track extends EventTarget {
+  readyState = 'live';
+  enabled = true;
+  muted = false;
   stopped = false;
   stop() {
     this.stopped = true;
+    this.readyState = 'ended';
   }
 }
 class Port extends EventTarget {
@@ -123,6 +127,15 @@ class AudioContextMock extends EventTarget {
   async decodeAudioData() {
     return { duration: 1 };
   }
+}
+
+async function startLive(hook: { start: () => Promise<void> }) {
+  const oldWorklet = data.worklet;
+  const started = hook.start();
+  for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+  expect(data.worklet).not.toBe(oldWorklet);
+  data.worklet.port.onmessage({ data: { type: 'frames', samples: new Float32Array(480) } });
+  await started;
 }
 
 beforeEach(() => {
@@ -208,11 +221,14 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
         });
       const hook = makeHook();
       const first = hook.start();
-      const rejected = expect(first).rejects.toThrow('old module failed');
+      const rejected = expect(first).rejects.toThrow(
+        name === 'live' ? 'cancelled' : 'old module failed',
+      );
       await vi.waitFor(() => expect(rejectModule).toBeDefined());
       await hook.stop();
       data.addModule = null;
-      await hook.start();
+      if (name === 'live') await startLive(hook);
+      else await hook.start();
       rejectModule(new Error('old module failed'));
       await rejected;
       expect(data.tracks[0].stopped).toBe(true);
@@ -268,7 +284,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
   it('live context suspension is surfaced instead of continuing a false streaming state', async () => {
     const interrupted = vi.fn();
     const hook = useLiveStream({ onFrame: vi.fn(), onInterrupted: interrupted });
-    await hook.start();
+    await startLive(hook);
     data.contexts[0].state = 'suspended';
     data.contexts[0].dispatchEvent(new Event('statechange'));
     expect(interrupted).toHaveBeenCalledWith(expect.stringContaining('interrupted'));
@@ -396,7 +412,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
   it('live microphone ending is reported and releases the track', async () => {
     const interrupted = vi.fn();
     const live = useLiveStream({ onFrame: vi.fn(), onInterrupted: interrupted });
-    await live.start();
+    await startLive(live);
     data.tracks[0].dispatchEvent(new Event('ended'));
     expect(interrupted).toHaveBeenCalledOnce();
     expect(data.tracks[0].stopped).toBe(true);
@@ -405,7 +421,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
   it('intentional live stop does not falsely report an interruption', async () => {
     const interrupted = vi.fn();
     const live = useLiveStream({ onFrame: vi.fn(), onInterrupted: interrupted });
-    await live.start();
+    await startLive(live);
     await live.stop();
     expect(interrupted).not.toHaveBeenCalled();
     expect(data.tracks[0].stopped).toBe(true);
@@ -416,7 +432,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     const onFrame = vi.fn();
     const interrupted = vi.fn();
     const live = useLiveStream({ onFrame, onInterrupted: interrupted });
-    await live.start();
+    await startLive(live);
     const oldContext = data.contexts[0];
     let rejectClose!: (error: Error) => void;
     const close = vi.spyOn(oldContext, 'close').mockImplementation(
@@ -433,7 +449,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     expect(data.tracks[0].stopped).toBe(true);
     // The physical mic is off, but the worklet tail must still be delivered in port order.
     lateFrame({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
-    expect(onFrame).toHaveBeenCalledOnce();
+    expect(onFrame).toHaveBeenCalledTimes(2); // Startup frame plus acknowledged tail.
     expect(close).not.toHaveBeenCalled();
     oldPort.dispatchEvent(new MessageEvent('message', { data: { type: 'stopped' } }));
     await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_CLOSE_TIMEOUT_MS - 1);
@@ -442,7 +458,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     await stopping;
     expect(stopped).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
-    await live.start();
+    await startLive(live);
     rejectClose(new Error('old browser release failed late'));
     oldContext.state = 'suspended';
     oldContext.dispatchEvent(new Event('statechange'));
@@ -450,7 +466,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     await vi.advanceTimersByTimeAsync(0);
     expect(data.tracks[1].stopped).toBe(false);
     expect(interrupted).not.toHaveBeenCalled();
-    expect(onFrame).toHaveBeenCalledOnce();
+    expect(onFrame).toHaveBeenCalledTimes(3); // New startup frame, but no late old frame.
     await live.stop();
   });
 
@@ -458,7 +474,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     vi.useFakeTimers();
     const onFrame = vi.fn();
     const live = useLiveStream({ onFrame });
-    await live.start();
+    await startLive(live);
     vi.spyOn(data.contexts[0], 'close').mockImplementation(() => new Promise(() => {}));
     const port = data.worklet.port;
     const lateFrame = port.onmessage;
@@ -470,7 +486,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     // A delayed acknowledgement/frame cannot revise the rejected stop or deliver new speech.
     port.dispatchEvent(new MessageEvent('message', { data: { type: 'stopped' } }));
     lateFrame({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
-    expect(onFrame).not.toHaveBeenCalled();
+    expect(onFrame).toHaveBeenCalledOnce(); // Only the accepted startup frame.
   });
 
   it('unmount detaches live input immediately despite a context that never closes', async () => {
@@ -478,13 +494,13 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     const onFrame = vi.fn();
     const live = useLiveStream({ onFrame });
     const unmount = data.effects.at(-1)!();
-    await live.start();
+    await startLive(live);
     vi.spyOn(data.contexts[0], 'close').mockImplementation(() => new Promise(() => {}));
     const lateFrame = data.worklet.port.onmessage;
     unmount?.();
     expect(data.tracks[0].stopped).toBe(true);
     lateFrame({ data: { type: 'frames', samples: new Float32Array(480).fill(0.2) } });
-    expect(onFrame).not.toHaveBeenCalled();
+    expect(onFrame).toHaveBeenCalledOnce(); // Only the accepted startup frame.
     await expect(live.start()).rejects.toThrow('no longer available');
     await vi.advanceTimersByTimeAsync(AUDIO_CONTEXT_CLOSE_TIMEOUT_MS);
     expect(vi.getTimerCount()).toBe(0);
