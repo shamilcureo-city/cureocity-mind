@@ -4,6 +4,8 @@ import { requireCapability } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import { lockActiveClientForSession } from '@/lib/phi-write-lock';
+import { scribeErrorResponse } from '@/lib/scribe-workspace-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -106,29 +108,40 @@ export async function POST(
     });
   }
 
-  // Re-submitting replaces this session's manual readings (a doctor
-  // correcting a typo), and never touches the transcript-derived rows.
-  await prisma.$transaction(async (tx) => {
-    await tx.clinicalReading.deleteMany({ where: { sessionId, source: 'MANUAL_ENTRY' } });
-    if (rows.length > 0) await tx.clinicalReading.createMany({ data: rows });
-    await writeAudit(
-      {
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId: auth.value.psychologistId,
-        action: 'CLINICAL_READING_RECORDED',
-        targetType: 'Session',
-        targetId: sessionId,
-        metadata: {
-          ...auditMetadataFromRequest(req),
+  // Replace only explicitly submitted measures. A blank field is not a
+  // deletion request; a later weight entry must not erase earlier manual BP.
+  try {
+    await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      await tx.clinicalReading.deleteMany({
+        where: {
           sessionId,
-          clientId: session.clientId,
           source: 'MANUAL_ENTRY',
-          count: rows.length,
+          measure: { in: rows.map((row) => row.measure) },
         },
-      },
-      tx,
-    );
-  });
+      });
+      if (rows.length > 0) await tx.clinicalReading.createMany({ data: rows });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: auth.value.psychologistId,
+          action: 'CLINICAL_READING_RECORDED',
+          targetType: 'Session',
+          targetId: sessionId,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            sessionId,
+            clientId: session.clientId,
+            source: 'MANUAL_ENTRY',
+            count: rows.length,
+          },
+        },
+        tx,
+      );
+    });
+  } catch (error) {
+    return scribeErrorResponse(error);
+  }
 
   return NextResponse.json({ recorded: rows.length }, { status: 201 });
 }

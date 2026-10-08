@@ -215,7 +215,11 @@ describe('Scribe scheduled live-consent handoff', () => {
     expect(url).toBe(`/api/v1/sessions/${SESSION_ID}/consent`);
     expect(init.method).toBe('POST');
     expect(new Headers(init.headers).get('content-type')).toBe('application/json');
-    expect(JSON.parse(init.body)).toEqual({ scopes: SCOPES, scriptVersion: 'v1.0' });
+    expect(JSON.parse(init.body)).toEqual({
+      scopes: SCOPES,
+      scriptVersion: 'v1.0',
+      captureMode: 'LIVE',
+    });
     expect(live()).toBeUndefined();
     const pendingButtons = elements(render()).filter((element) => element.type === 'button');
     expect(pendingButtons).toHaveLength(2);

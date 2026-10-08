@@ -7,6 +7,7 @@ import { SCRIBE_CONSENT_SCOPES } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 import { assertScribeTeleconsultDocumentationConsent } from '@/lib/scribe-teleconsult';
+import { authorizeScribeCapturePreparation } from '@/lib/scribe-capture-activation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,26 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const parsed = await parseJson(req, LiveAuthorityRequestSchema);
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
+
+  // Additive gateway handshake. The existing capture/output verifier below is
+  // unchanged. This helper has its own locked consent, ownership, deletion,
+  // capability, expiry and expected-state checks; only first PCM activates.
+  if (body.purpose === 'preflight' || body.purpose === 'capture-activation') {
+    try {
+      const capabilities = await authorizeScribeCapturePreparation(body);
+      return NextResponse.json({ authorized: true, capabilities });
+    } catch {
+      await writeAudit({
+        actorType: 'PSYCHOLOGIST',
+        actorPsychologistId: body.psychologistId,
+        action: 'CAPABILITY_ACCESS_DENIED',
+        targetType: 'LiveAuthority',
+        targetId: 'DENIED',
+        metadata: { source: 'liveGatewayRevalidation', sessionId: body.sessionId },
+      }).catch(() => {});
+      return NextResponse.json({ authorized: false, capabilities: [] }, { status: 403 });
+    }
+  }
 
   const { session, currentConsentScopes, teleconsultAuthorized } = await prisma.$transaction(
     async (tx) => {
@@ -51,7 +72,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             tx,
             body.sessionId,
             currentSession.psychologistId,
-            body.purpose ?? 'capture',
+            body.purpose === 'queued-finalization' ? 'queued-finalization' : 'capture',
           );
         } catch {
           teleconsultAuthorized = false;
@@ -82,6 +103,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   );
   const actorPsychologistId = session?.psychologistId ?? body.psychologistId;
   try {
+    // The gateway may announce readiness before its first audio frame. It may
+    // not ingest PCM under this purpose; first PCM requires capture-activation.
+    if (
+      body.vertical === 'DOCTOR' &&
+      body.purpose === 'queued-finalization' &&
+      session?.status === 'SCHEDULED'
+    ) {
+      const capabilities = await authorizeScribeCapturePreparation({
+        ...body,
+        purpose: 'preflight',
+      });
+      return NextResponse.json({ authorized: true, capabilities });
+    }
     if (
       !session ||
       !teleconsultAuthorized ||

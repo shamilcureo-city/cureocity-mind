@@ -30,13 +30,14 @@ describe('Sprint 1 Mind reliable session journey integration', () => {
     }
   });
 
-  it('keeps the doctor encounter start outside Mind preflight and preserves token-is-start', () => {
+  it('keeps doctor start outside Mind preflight and waits for gateway capture activation', () => {
     const doctor = webSource('components/app/StartEncounterButton.tsx');
     expect(doctor).not.toContain('MindSessionPreflight');
     expect(doctor).not.toContain('coordinateMindSessionStart');
 
     const liveToken = webSource('app/api/v1/sessions/[id]/live-token/route.ts');
-    expect(liveToken).toContain('captureActivationTransitionData(');
+    expect(liveToken).not.toContain("status: 'IN_PROGRESS'");
+    expect(liveToken).toContain("data: { captureMode: 'LIVE' }");
     expect(liveToken).toContain('session.psychologist.vertical');
   });
 

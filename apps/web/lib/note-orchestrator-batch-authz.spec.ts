@@ -297,14 +297,14 @@ describe('runNoteGeneration medical optional-output authorization', () => {
     expect(mocks.clinicalReadingCreateMany).not.toHaveBeenCalled();
   });
 
-  it('persists only vitals for chronic-care-only authority', async () => {
+  it('does not publish unreviewed AI vitals even with chronic-care authority', async () => {
     await expect(runWith(['MEDICAL_DOCUMENTATION', 'CHRONIC_CARE'])).resolves.toMatchObject({
       status: 'COMPLETED',
     });
 
     expect(mocks.medicationCreateMany).not.toHaveBeenCalled();
     expect(mocks.clinicalOrderCreateMany).not.toHaveBeenCalled();
-    expect(mocks.clinicalReadingCreateMany).toHaveBeenCalledOnce();
+    expect(mocks.clinicalReadingCreateMany).not.toHaveBeenCalled();
   });
 });
 

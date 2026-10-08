@@ -171,6 +171,7 @@ async function buildRxPad(
         m.dose,
         m.frequency,
         m.timing,
+        m.route ? `Route: ${m.route}` : null,
         m.durationDays ? `for ${m.durationDays} days` : null,
       ]
         .filter((p): p is string => !!p && p.length > 0)
@@ -252,6 +253,8 @@ async function buildAfterVisitSummary(
             m.strength,
             m.dose,
             m.frequency,
+            m.timing,
+            m.route ? `Route: ${m.route}` : null,
             m.durationDays ? `for ${m.durationDays} days` : null,
           ].filter((part): part is string => !!part && part.length > 0);
           return parts.join(' · ');

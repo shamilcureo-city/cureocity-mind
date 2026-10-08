@@ -90,6 +90,8 @@ export const SessionConsentAckInputSchema = z.object({
     .max(8),
   scriptVersion: ScriptVersionSchema,
   notes: z.string().max(1000).optional(),
+  /** Scribe records permission for one capture workflow, not every recording mode. */
+  captureMode: z.enum(['LIVE', 'DICTATE', 'UPLOAD']).optional(),
 });
 
 export const SessionConsentSnapshotEntrySchema = z.object({
@@ -101,6 +103,8 @@ export const SessionConsentSnapshotEntrySchema = z.object({
 export const SessionConsentSnapshotSchema = z.object({
   entries: z.array(SessionConsentSnapshotEntrySchema),
   notes: z.string().nullable(),
+  captureMode: z.enum(['LIVE', 'DICTATE', 'UPLOAD']).optional(),
+  ambientCaptureDeclined: z.boolean().optional(),
 });
 
 export const SessionSchema = z.object({

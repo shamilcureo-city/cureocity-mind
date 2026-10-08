@@ -77,6 +77,7 @@ export function LiveEncounterFlow({
         body: JSON.stringify({
           scopes: CONSENT_OPTIONS.map(([scope]) => scope),
           scriptVersion: SCRIPT_VERSION,
+          captureMode: 'LIVE',
         }),
         signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15_000)]),
       });

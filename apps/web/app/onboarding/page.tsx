@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { Container } from '@/components/ui/Container';
 import { OnboardingForm } from '@/components/app/OnboardingForm';
 import { AuthedFetchProvider } from '@/components/app/AuthedFetchProvider';
-import { requireActivePagePsychologist } from '@/lib/auth-page';
+import { requireOnboardingPagePsychologist } from '@/lib/auth-page';
 import { isAuthBypassed } from '@/lib/auth-server';
 import { practitionerProductCopy, productFromHost } from '@/lib/product';
 
@@ -20,9 +20,9 @@ export async function generateMetadata(): Promise<Metadata> {
 /**
  * Sprint 31 — onboarding gate.
  *
- * Uses `requireActivePagePsychologist` (NOT `requireOnboardedPsychologist`)
- * to avoid an infinite redirect: if the user is already onboarded we
- * bounce to /app explicitly.
+ * Uses a profile-only guard: incomplete pending Scribe accounts may submit
+ * registration, but remain blocked from clinical pages. Mind keeps its
+ * active-account requirement. Completed accounts bounce to /app.
  *
  * Three-products split: signing up on a product domain presets the
  * vertical (scribe → DOCTOR, mind → THERAPIST) — arriving via that
@@ -33,11 +33,10 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function OnboardingPage() {
   // Match the onboarding API's existing lifecycle restriction. Do not offer
   // a form which will inevitably fail with an inactive-account error.
-  const me = await requireActivePagePsychologist();
-  if (me.onboardingCompletedAt !== null) redirect('/app');
-
   const host = (await headers()).get('host');
   const product = productFromHost(host);
+  const me = await requireOnboardingPagePsychologist(product.key === 'scribe');
+  if (me.onboardingCompletedAt !== null) redirect('/app');
   const copy = practitionerProductCopy(product);
   const presetVertical = host && host.split(':')[0] === product.host ? product.vertical : null;
 
@@ -58,6 +57,7 @@ export default async function OnboardingPage() {
                 presetVertical={presetVertical}
                 initialFullName={me.fullName}
                 initialEmail={me.email}
+                awaitingApproval={me.status === 'PENDING_VERIFICATION'}
               />
             </AuthedFetchProvider>
           </Card>

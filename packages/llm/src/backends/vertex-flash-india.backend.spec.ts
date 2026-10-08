@@ -227,3 +227,128 @@ describe('Pass 1 rejects generated transcription artifacts', () => {
     expect(result.output).toEqual(output);
   });
 });
+
+describe('doctor transcription prompt-example quarantine', () => {
+  const legacyExample = 'BP 130/80, PR 88, SpO2 97%, HbA1c 7.2, FBS 140, creatinine 1.1.';
+  const segments = (texts: string[]) =>
+    texts.map((text, index) => ({
+      speaker: 'therapist',
+      text,
+      startMs: index * 1000,
+      endMs: (index + 1) * 1000,
+      language: 'en',
+    }));
+
+  it.each([
+    { name: 'transcript only', transcript: legacyExample, speakerSegments: [] },
+    {
+      name: 'segment only',
+      transcript: fictionalOutput.transcript,
+      speakerSegments: segments([legacyExample]),
+    },
+    {
+      name: 'split over segments',
+      transcript: '',
+      speakerSegments: segments([
+        'BP 130/80, PR 88, SpO2 97%',
+        'HbA1c 7.2, FBS 140, creatinine 1.1.',
+      ]),
+    },
+    {
+      name: 'nested JSON in transcript',
+      transcript: JSON.stringify({ findings: legacyExample }),
+      speakerSegments: [],
+    },
+  ])(
+    'quarantines a $name echo before returning any clinical text',
+    async ({ transcript, speakerSegments }) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const { backend, generateContent } = setup(
+          'gemini-2.5-flash',
+          JSON.stringify({ ...fictionalOutput, transcript, speakerSegments }),
+        );
+        const result = await backend.run({ ...input, vertical: 'DOCTOR' });
+        expect(generateContent).toHaveBeenCalledTimes(1);
+        expect(result.output).toEqual({
+          transcript: '',
+          speakerSegments: [],
+          affectFeatures: [],
+          detectedLanguages: [],
+        });
+        expect(result.callLog).toMatchObject({
+          status: 'ERROR',
+          errorMessage: 'MEDICAL_TRANSCRIPTION_EXAMPLE',
+          promptVersion: 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V4',
+          inputTokens: 10,
+          outputTokens: 20,
+        });
+        expect(result.callLog.costInr).toBeGreaterThan(0);
+        expect(JSON.stringify(result)).not.toContain('130/80');
+        expect(warn).not.toHaveBeenCalled();
+        expect(generateContent.mock.calls[0]![0].config.systemInstruction).not.toContain('130/80');
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    'BP 130/80, PR 88, SpO2 97%.',
+    'HbA1c 7.2, FBS 140, creatinine 1.1.',
+    'BP 130/80 aanu, sugar high hai, metformin badha do.',
+    'Glycomet 500 mg BD x5 days.',
+    'എനിക്ക് പനി ഉണ്ട്. BP 120/80.',
+    '[inaudible]',
+  ])('preserves ordinary doctor speech and uncertainty: %s', async (text) => {
+    const output = { ...fictionalOutput, transcript: text, speakerSegments: segments([text]) };
+    const { backend } = setup('gemini-2.5-flash', JSON.stringify(output));
+    const result = await backend.run({ ...input, vertical: 'DOCTOR' });
+    expect(result.callLog.status).toBe('SUCCESS');
+    expect(result.output).toEqual(output);
+  });
+
+  it('preserves the provider no-speech result without filling in dialogue', async () => {
+    const output = {
+      transcript: '',
+      speakerSegments: [],
+      affectFeatures: [],
+      detectedLanguages: [],
+    };
+    const { backend } = setup('gemini-2.5-flash', JSON.stringify(output));
+    const result = await backend.run({ ...input, vertical: 'DOCTOR' });
+    expect(result.callLog.status).toBe('SUCCESS');
+    expect(result.output).toEqual(output);
+  });
+
+  it.each(['gemini-2.0-flash', 'gemini-3-flash-preview', 'custom-asr-model'])(
+    'does not bypass the doctor quarantine with the model override %s',
+    async (model) => {
+      const { backend } = setup(
+        model,
+        JSON.stringify({ ...fictionalOutput, transcript: legacyExample }),
+      );
+      const result = await backend.run({ ...input, vertical: 'DOCTOR' });
+      expect(result.callLog.status).toBe('ERROR');
+      expect(result.callLog.errorMessage).toBe('MEDICAL_TRANSCRIPTION_EXAMPLE');
+      expect(result.output.transcript).toBe('');
+      expect(result.output.speakerSegments).toEqual([]);
+    },
+  );
+
+  it.each(['THERAPIST', undefined] as const)(
+    'does not change transcription policy for the Mind vertical %s',
+    async (vertical) => {
+      const output = {
+        ...fictionalOutput,
+        transcript: legacyExample,
+        speakerSegments: segments([legacyExample]),
+      };
+      const { backend } = setup('gemini-2.5-flash', JSON.stringify(output));
+      const result = await backend.run({ ...input, vertical });
+      expect(result.callLog.status).toBe('SUCCESS');
+      expect(result.callLog.promptVersion).toBe('TRANSCRIBE_AND_ANALYSE_SYSTEM_PROMPT_V4');
+      expect(result.output).toEqual(output);
+    },
+  );
+});

@@ -359,7 +359,6 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       const clinicalOrders = effective.capabilities.has('CLINICAL_ORDERS')
         ? pass2.output.orders
         : [];
-      const vitals = effective.capabilities.has('CHRONIC_CARE') ? encounterNote.vitals : undefined;
       recordGeminiCall({
         pass: pass2.callLog.pass,
         status: pass2.callLog.status,
@@ -409,15 +408,8 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
       // Sprint DV5 — persist the drafted Rx + clinical orders (the
       // interaction-check runs server-side inside the helper).
       await persistDraftedOrders(sessionId, session.psychologistId, medications, clinicalOrders);
-      // Sprint DV7 — capture the note's vitals into the chronic-reading
-      // time series so the per-patient control trajectory builds itself.
-      await persistVitalReadings(
-        sessionId,
-        session.clientId,
-        session.psychologistId,
-        session.scheduledAt,
-        vitals,
-      );
+      // Unreviewed draft vitals must not become patient measurements.
+      // Chronic trends derive note vitals from the current locked signature.
       return { draftId: draft.id, status: 'COMPLETED' };
     }
 

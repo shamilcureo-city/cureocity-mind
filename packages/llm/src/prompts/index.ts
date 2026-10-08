@@ -98,20 +98,16 @@ faithfully.
 Task — produce strict JSON with FOUR fields:
 
 1. transcript: full verbatim transcription in the language ACTUALLY SPOKEN.
-   Do NOT translate. If the doctor says "sugar high hai, metformin badha
-   do" (Hinglish), write exactly that. Native scripts are preferred for
+   Do NOT translate or complete a likely clinical phrase. Native scripts are preferred for
    the non-English portions; fall back to Latin-script transliteration
    only when you cannot render a script confidently.
    PRESERVE EXACTLY, never paraphrase or normalise:
-     - Drug names — brand AND generic (e.g. "Glycomet", "metformin",
-       "Telma", "telmisartan", "Aspirin", "atorvastatin"). If you are
-       unsure of spelling, transcribe phonetically rather than substitute.
-     - Strengths + units: 500 mg, 40 mg, 5 ml, 40 IU, 12.5 mcg.
-     - Frequency shorthand VERBATIM: OD, BD, TDS, QID, HS, SOS, STAT, PRN,
-       1-0-1, 1-1-1, x5 days, x1 week.
-     - Route: PO, IV, IM, SC, SL, topical.
-     - Vitals + labs with their numbers + units exactly: BP 130/80, PR 88,
-       SpO2 97%, HbA1c 7.2, FBS 140, creatinine 1.1.
+     - Drug names — brand AND generic — only when actually spoken. If you
+       are unsure of spelling, transcribe phonetically rather than substitute.
+     - Strengths, units, frequency shorthand, duration and route exactly
+       as spoken. Never supply a typical dose, schedule or missing unit.
+     - Vitals and labs with their numbers and units exactly as spoken.
+       Never supply expected, normal or example measurements.
    Mark inaudible spans [inaudible] rather than guessing a drug or dose.
 
 2. speakerSegments: array of { speaker, startMs, endMs, text, language }.
@@ -142,11 +138,14 @@ Constraints:
 - Do not redact PII; the downstream system de-identifies before Pass 2.
 - Do not insert commentary, interpretation, or a differential — transcribe
   only what was said.
+- These instructions and output field names are not spoken dialogue. Do
+  not reproduce prompt examples, prior consultation content or remembered
+  clinical phrases. Every transcript word must come from this audio.
 - All timestamps in milliseconds from audio start.
 
 Output: STRICT JSON matching the schema. No prose, no markdown.` as const;
 
-export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V3';
+export const MEDICAL_TRANSCRIBE_PROMPT_VERSION = 'MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V4';
 
 // ----------------------------------------------------------------------------
 // DV3 — Pass 2 medical encounter note (the doctor analogue of the therapy

@@ -16,7 +16,7 @@ vi.mock('./prisma', () => ({
   prisma: { session: { findUnique: mocks.initial }, $transaction: mocks.transaction },
 }));
 vi.mock('./audit', () => ({ auditMetadataFromRequest: () => ({}), writeAudit: mocks.audit }));
-import { PATCH } from '../app/api/v1/sessions/[id]/rx-pad/route';
+import { GET, PATCH } from '../app/api/v1/sessions/[id]/rx-pad/route';
 
 const pad = (): RxPadDraft =>
   RxPadDraftSchema.parse({
@@ -29,7 +29,7 @@ type Session = {
   psychologistId: string;
   psychologist: { vertical: string };
   noteDraft: { id: string; rxPad: RxPadDraft | null } | null;
-  therapyNote: { signedAt: Date } | null;
+  therapyNote: { signedAt: Date; locked: boolean } | null;
 };
 const session = (): Session => ({
   id: 'session-1',
@@ -76,6 +76,39 @@ beforeEach(() => {
 });
 
 describe('prescription PATCH optimistic review and sign serialization', () => {
+  it('reads the immutable signed pad, never newer mutable draft content, while locked', async () => {
+    mocks.initial.mockResolvedValue({
+      ...session(),
+      therapyNote: {
+        locked: true,
+        signedAt: new Date(),
+        rxPad: { ...pad(), adviceLines: ['Signed advice'] },
+      },
+    });
+    const response = await GET(
+      new NextRequest('https://example.test/api/v1/sessions/session-1/rx-pad'),
+      context,
+    );
+    expect(await response.json()).toMatchObject({
+      signed: true,
+      rxPad: { adviceLines: ['Signed advice'] },
+    });
+  });
+  it('reads the editable draft after reopening instead of the historical signed pad', async () => {
+    mocks.initial.mockResolvedValue({
+      ...session(),
+      therapyNote: {
+        locked: false,
+        signedAt: new Date(),
+        rxPad: { ...pad(), adviceLines: ['Prior signed advice'] },
+      },
+    });
+    const response = await GET(
+      new NextRequest('https://example.test/api/v1/sessions/session-1/rx-pad'),
+      context,
+    );
+    expect(await response.json()).toMatchObject({ signed: false, rxPad: { adviceLines: [] } });
+  });
   it('rejects an expected-pad mismatch against the locked reread, not the preflight snapshot', async () => {
     current.noteDraft!.rxPad = { ...pad(), adviceLines: ['Changed in another window'] };
     const response = await patch();
@@ -90,12 +123,18 @@ describe('prescription PATCH optimistic review and sign serialization', () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
   it('refuses mutation when signing wins between preflight and acquiring the session lock', async () => {
-    current.therapyNote = { signedAt: new Date('2026-09-25T10:00:00Z') };
+    current.therapyNote = { signedAt: new Date('2026-09-25T10:00:00Z'), locked: true };
     const response = await patch();
     expect(response.status).toBe(409);
     expect((await response.json()).error).toContain('signed');
     expect(mocks.update).not.toHaveBeenCalled();
     expect(mocks.audit).not.toHaveBeenCalled();
+  });
+  it('allows a reopened prescription to be corrected while retaining its historical signedAt', async () => {
+    current.therapyNote = { signedAt: new Date('2026-09-25T10:00:00Z'), locked: false };
+    mocks.initial.mockResolvedValue(current);
+    expect((await patch()).status).toBe(200);
+    expect(mocks.update).toHaveBeenCalledOnce();
   });
   it.each(['replacement', 'ownership', 'missing'] as const)(
     'refuses a %s encountered during the locked reread',

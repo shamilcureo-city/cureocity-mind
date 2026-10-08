@@ -147,6 +147,12 @@ describe('local microphone readiness check', () => {
       expect(contexts[0].audioWorklet.addModule).toHaveBeenCalledWith(
         '/microphone-check-worklet.js',
       );
+      expect(progress.mock.calls.map(([value]) => value.stage)).toEqual([
+        'requesting',
+        'loading-processor',
+        'starting-context',
+        'waiting-input',
+      ]);
       await vi.advanceTimersByTimeAsync(3_000);
       worklets[0].meter(144_000, level);
       await expect(promise).resolves.toEqual({
@@ -169,6 +175,24 @@ describe('local microphone readiness check', () => {
     const rejected = expect(promise).rejects.toMatchObject({ code: 'no-frames' });
     await flush();
     await vi.advanceTimersByTimeAsync(8_000);
+    await rejected;
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(contexts[0].state).toBe('closed');
+  });
+
+  it('keeps one bounded capture lifetime when processor setup uses most of the time', async () => {
+    const pending = deferred<void>();
+    moduleLoad = pending.promise;
+    const promise = begin();
+    const rejected = expect(promise).rejects.toMatchObject({ code: 'timeout' });
+    await flush();
+    await vi.advanceTimersByTimeAsync(7_000);
+    expect(progress.mock.calls.at(-1)?.[0].stage).toBe('loading-processor');
+    pending.resolve();
+    await flush();
+    expect(progress.mock.calls.at(-1)?.[0].stage).toBe('waiting-input');
+    worklets[0].meter(128);
+    await vi.advanceTimersByTimeAsync(1_000);
     await rejected;
     expect(track.stop).toHaveBeenCalledOnce();
     expect(contexts[0].state).toBe('closed');
@@ -310,7 +334,7 @@ describe('local microphone readiness check', () => {
 
   it('handles abort from the acquired callback before creating an audio context', async () => {
     progress.mockImplementation((value) => {
-      if (value.stage === 'checking') controller.abort();
+      if (value.stage === 'loading-processor') controller.abort();
     });
     await expect(begin()).rejects.toMatchObject({ code: 'cancelled' });
     expect(track.stop).toHaveBeenCalledOnce();
@@ -344,7 +368,7 @@ describe('local microphone readiness check', () => {
       moduleLoad = pending.promise;
       const promise = begin();
       const rejected = expect(promise).rejects.toMatchObject({
-        code: reason === 'abort' ? 'cancelled' : 'no-frames',
+        code: reason === 'abort' ? 'cancelled' : 'setup-timeout',
       });
       await flush();
       if (reason === 'abort') controller.abort();
@@ -356,6 +380,42 @@ describe('local microphone readiness check', () => {
       await flush();
       expect(worklets).toHaveLength(0);
       expect(contexts[0].resume).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reports stalled context startup as setup timeout rather than missing microphone frames', async () => {
+    initialContextState = 'suspended';
+    const pending = deferred<void>();
+    resumeResult = pending.promise;
+    const promise = begin();
+    const rejected = expect(promise).rejects.toMatchObject({
+      code: 'setup-timeout',
+      message: 'The browser audio context did not become ready in time.',
+    });
+    await flush();
+    expect(progress.mock.calls.at(-1)?.[0].stage).toBe('starting-context');
+    expect(contexts[0].resume).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(8_000);
+    await rejected;
+    expect(track.stop).toHaveBeenCalledOnce();
+    expect(contexts[0].state).toBe('closed');
+    pending.resolve();
+    await flush();
+    expect(worklets).toHaveLength(0);
+    expect(contexts[0].createMediaStreamSource).not.toHaveBeenCalled();
+  });
+
+  it.each(['starting-context', 'waiting-input'] as const)(
+    'cleans up cancellation from the %s progress callback without connecting input',
+    async (stage) => {
+      progress.mockImplementation((value) => {
+        if (value.stage === stage) controller.abort();
+      });
+      await expect(begin()).rejects.toMatchObject({ code: 'cancelled' });
+      expect(track.stop).toHaveBeenCalledOnce();
+      expect(contexts[0].source.connect).not.toHaveBeenCalled();
+      expect(contexts[0].state).toBe('closed');
+      expect(vi.getTimerCount()).toBe(0);
     },
   );
 

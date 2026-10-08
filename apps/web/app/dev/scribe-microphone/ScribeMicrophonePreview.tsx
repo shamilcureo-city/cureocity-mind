@@ -8,6 +8,7 @@ import {
 import { MicrophoneCheckError } from '@/lib/audio/microphone-check';
 import { Button } from '@/components/ui/Button';
 import { ScribeLogo } from '@/components/ui/ScribeLogo';
+import { MicrophoneSourceCheck } from './MicrophoneSourceCheck';
 
 type Scenario = 'prompt' | 'granted' | 'denied' | 'ended' | 'silent';
 
@@ -118,6 +119,7 @@ export function ScribeMicrophonePreview() {
             </p>
           )}
         </section>
+        <MicrophoneSourceCheck disabled={open} />
       </div>
       {open && (
         <ScribeMicrophoneDialog

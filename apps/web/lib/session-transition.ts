@@ -26,23 +26,22 @@ export function assertLiveTokenSessionStatus(status: SessionStatus): void {
 }
 
 export function shouldAdvanceSessionDuringLiveToken(
-  vertical: 'THERAPIST' | 'DOCTOR',
-  status: SessionStatus,
+  _vertical: 'THERAPIST' | 'DOCTOR',
+  _status: SessionStatus,
 ): boolean {
-  return vertical === 'DOCTOR' && status === 'SCHEDULED';
+  return false;
 }
 
 /**
- * Doctors retain their existing token-is-start behavior. Mind waits for the
- * browser to report active capture, so permission/device failures never make a
- * scheduled session look in progress.
+ * Both products wait for active capture, not a permission/token request.
+ * Scribe activation is acknowledged by the trusted gateway's first PCM frame.
  */
 export function captureActivationTransitionData(
-  vertical: 'THERAPIST' | 'DOCTOR',
+  _vertical: 'THERAPIST' | 'DOCTOR',
   captureMode: 'LIVE' | 'BATCH',
   captureActive: boolean,
 ): { status: 'IN_PROGRESS'; startedAt: Date; captureMode: 'LIVE' | null } | null {
-  if (vertical === 'THERAPIST' && !captureActive) return null;
+  if (!captureActive) return null;
   return {
     status: 'IN_PROGRESS',
     startedAt: new Date(),

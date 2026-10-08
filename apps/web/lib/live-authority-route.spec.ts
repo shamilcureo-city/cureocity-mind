@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getEffectiveCapabilities: vi.fn(),
   writeAudit: vi.fn(),
   teleconsult: vi.fn(),
+  prepareCapture: vi.fn(),
 }));
 vi.mock('@/lib/prisma', () => ({
   prisma: {
@@ -31,13 +32,19 @@ vi.mock('@/lib/audit', () => ({ writeAudit: mocks.writeAudit }));
 vi.mock('@/lib/scribe-teleconsult', () => ({
   assertScribeTeleconsultDocumentationConsent: mocks.teleconsult,
 }));
+vi.mock('@/lib/scribe-capture-activation', () => ({
+  authorizeScribeCapturePreparation: mocks.prepareCapture,
+}));
 
 import { POST } from '../app/api/v1/internal/live-authority/route';
 
 const SESSION_ID = 'c123456789012345678901234';
 const PSYCHOLOGIST_ID = 'cabcdefghijklmnopqrstuvwx';
 
-const request = (secret = 'service-secret', purpose?: 'capture' | 'queued-finalization') =>
+const request = (
+  secret = 'service-secret',
+  purpose?: 'capture' | 'queued-finalization' | 'preflight' | 'capture-activation',
+) =>
   new Request('https://web.internal/api/v1/internal/live-authority', {
     method: 'POST',
     headers: {
@@ -58,6 +65,8 @@ describe('internal live authority verifier', () => {
     vi.clearAllMocks();
     process.env['LIVE_GATEWAY_SECRET'] = 'service-secret';
     mocks.teleconsult.mockResolvedValue(undefined);
+    mocks.prepareCapture.mockResolvedValue(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION']);
+    mocks.writeAudit.mockResolvedValue(undefined);
     mocks.sessionFindUnique.mockResolvedValue({
       psychologistId: PSYCHOLOGIST_ID,
       status: 'IN_PROGRESS',
@@ -174,5 +183,64 @@ describe('internal live authority verifier', () => {
 
     expect((await POST(invalid)).status).toBe(400);
     expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
+  });
+
+  it.each(['preflight', 'capture-activation'] as const)(
+    'requires the service secret before the %s handshake',
+    async (purpose) => {
+      expect((await POST(request('wrong', purpose))).status).toBe(401);
+      expect(mocks.prepareCapture).not.toHaveBeenCalled();
+      expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['preflight', 'capture-activation'] as const)(
+    'routes %s through the locked consent and first-frame verifier',
+    async (purpose) => {
+      const response = await POST(request('service-secret', purpose));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        authorized: true,
+        capabilities: ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'],
+      });
+      expect(mocks.prepareCapture).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: SESSION_ID,
+          psychologistId: PSYCHOLOGIST_ID,
+          vertical: 'DOCTOR',
+          purpose,
+        }),
+      );
+      expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['preflight', 'capture-activation'] as const)(
+    'fails closed on rejected %s without falling back to the legacy verifier',
+    async (purpose) => {
+      mocks.prepareCapture.mockRejectedValue(new Error('Current consent or access denied'));
+      mocks.writeAudit.mockRejectedValue(new Error('Audit unavailable'));
+      const response = await POST(request('service-secret', purpose));
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ authorized: false, capabilities: [] });
+      expect(mocks.sessionFindUnique).not.toHaveBeenCalled();
+    },
+  );
+
+  it('permits readiness output for a scheduled Scribe session only through read-only preflight', async () => {
+    mocks.sessionFindUnique.mockResolvedValue({
+      psychologistId: PSYCHOLOGIST_ID,
+      status: 'SCHEDULED',
+      captureMode: 'LIVE',
+      clientId: 'c987654321098765432109876',
+      psychologist: { vertical: 'DOCTOR' },
+    });
+    expect((await POST(request('service-secret', 'queued-finalization'))).status).toBe(200);
+    expect(mocks.prepareCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'preflight' }),
+    );
+    mocks.prepareCapture.mockClear();
+    expect((await POST(request('service-secret', 'capture'))).status).toBe(403);
+    expect(mocks.prepareCapture).not.toHaveBeenCalled();
   });
 });

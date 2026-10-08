@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { LiveEncounterFlow } from '@/components/app/LiveEncounterFlow';
 import { requireOnboardedDoctor } from '@/lib/auth-page';
 import { decryptClientField } from '@/lib/client-pii';
@@ -34,6 +34,7 @@ export default async function LiveEncounterPage({
     select: {
       id: true,
       status: true,
+      captureMode: true,
       psychologistId: true,
       clientId: true,
       client: {
@@ -43,6 +44,12 @@ export default async function LiveEncounterPage({
   });
   if (!session || session.psychologistId !== doctor.id || session.clientId !== clientId) {
     notFound();
+  }
+  if (
+    (session.status === 'IN_PROGRESS' && session.captureMode !== 'LIVE') ||
+    !['SCHEDULED', 'IN_PROGRESS'].includes(session.status)
+  ) {
+    redirect(`/app/patients/${clientId}/encounters/${sessionId}`);
   }
 
   const name = await decryptClientField(session.psychologistId, session.client.fullNameEncrypted);

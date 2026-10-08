@@ -8,6 +8,7 @@ import { Card } from '../ui/Card';
 import { LiveRecorder } from './LiveRecorder';
 import { FileUploadPanel } from './FileUploadPanel';
 import { ReviewAndSign } from './ReviewAndSign';
+import { loadScribeEncounterReview } from '@/lib/scribe-encounter-review';
 
 /**
  * Sprint DV3 — the doctor encounter workspace body. Drives the record →
@@ -23,7 +24,7 @@ type State =
   | { kind: 'starting' } // consent + start in flight
   | { kind: 'recording' }
   | { kind: 'generating' } // draft PENDING / IN_PROGRESS, polling
-  | { kind: 'done'; note: MedicalEncounterNoteV1 }
+  | { kind: 'done'; note: MedicalEncounterNoteV1; signed: boolean }
   | { kind: 'failed'; message: string };
 
 // DPDP scopes the scribe pipeline needs; the patient granted them at
@@ -53,34 +54,40 @@ export function DoctorEncounterPanel({
     sessionStatus === 'IN_PROGRESS' ? { kind: 'recording' } : { kind: 'loading' },
   );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [consentChecks, setConsentChecks] = useState([false, false, false]);
+  const [startError, setStartError] = useState<string | null>(null);
+  const startInFlight = useRef(false);
   const reviewHref = `/app/patients/${clientId}/encounters/${sessionId}`;
 
   const fetchDraft = useCallback(async () => {
-    const res = await fetch(`/api/v1/sessions/${sessionId}/note-draft`);
-    if (res.status === 404) {
-      setState({ kind: 'idle' });
-      return;
-    }
-    if (!res.ok) {
-      setState({ kind: 'failed', message: `Could not load the note (${res.status}).` });
-      return;
-    }
-    const draft = (await res.json()) as {
-      status: string;
-      content: unknown;
-      errorMessage: string | null;
-    };
-    if (draft.status === 'COMPLETED') {
-      const parsed = MedicalEncounterNoteV1Schema.safeParse(draft.content);
-      setState(
-        parsed.success
-          ? { kind: 'done', note: parsed.data }
-          : { kind: 'failed', message: 'The note could not be read.' },
-      );
-    } else if (draft.status === 'FAILED') {
-      setState({ kind: 'failed', message: draft.errorMessage ?? 'Note generation failed.' });
-    } else {
-      setState({ kind: 'generating' });
+    try {
+      const review = await loadScribeEncounterReview(sessionId);
+      if (review.signedNote) {
+        setState({ kind: 'done', note: review.signedNote.content, signed: true });
+        return;
+      }
+      const draft = review.draft;
+      if (!draft) {
+        setState({ kind: 'idle' });
+        return;
+      }
+      if (draft.status === 'COMPLETED') {
+        const parsed = MedicalEncounterNoteV1Schema.safeParse(draft.content);
+        setState(
+          parsed.success
+            ? { kind: 'done', note: parsed.data, signed: false }
+            : { kind: 'failed', message: 'The note could not be read.' },
+        );
+      } else if (draft.status === 'FAILED') {
+        setState({ kind: 'failed', message: draft.errorMessage ?? 'Note generation failed.' });
+      } else {
+        setState({ kind: 'generating' });
+      }
+    } catch (error) {
+      setState({
+        kind: 'failed',
+        message: error instanceof Error ? error.message : 'Could not load the saved encounter.',
+      });
     }
   }, [sessionId]);
 
@@ -99,12 +106,23 @@ export function DoctorEncounterPanel({
   }, [state.kind, fetchDraft]);
 
   async function beginRecording(): Promise<void> {
+    if (startInFlight.current || !consentChecks.every(Boolean)) return;
+    startInFlight.current = true;
+    setStartError(null);
     setState({ kind: 'starting' });
     try {
       const consent = await fetch(`/api/v1/sessions/${sessionId}/consent`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ scopes: CONSENT_SCOPES, scriptVersion: 'v1.0' }),
+        body: JSON.stringify({
+          scopes: CONSENT_SCOPES,
+          scriptVersion: 'v1.0',
+          captureMode: mode === 'upload' ? 'UPLOAD' : 'DICTATE',
+          notes:
+            mode === 'upload'
+              ? 'Patient explicitly agreed to processing the supplied recording.'
+              : 'Clinician summary dictation only. This does not authorize ambient patient recording.',
+        }),
       });
       if (!consent.ok) throw new Error(await errorOf(consent, 'Could not record consent'));
       const started = await fetch(`/api/v1/sessions/${sessionId}/start`, {
@@ -115,18 +133,27 @@ export function DoctorEncounterPanel({
       if (!started.ok) throw new Error(await errorOf(started, 'Could not start the encounter'));
       setState({ kind: 'recording' });
     } catch (e) {
-      setState({ kind: 'failed', message: (e as Error).message });
+      setStartError((e as Error).message);
+      setState({ kind: 'idle' });
+    } finally {
+      startInFlight.current = false;
     }
   }
 
   async function regenerate(): Promise<void> {
     setState({ kind: 'generating' });
     try {
-      await fetch(`/api/v1/sessions/${sessionId}/generate-note`, { method: 'POST' });
-    } catch {
-      /* polling surfaces the outcome */
+      const response = await fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
+        method: 'POST',
+      });
+      if (!response.ok) throw new Error(await errorOf(response, 'Could not regenerate the note'));
+      await fetchDraft();
+    } catch (error) {
+      setState({
+        kind: 'failed',
+        message: error instanceof Error ? error.message : 'Could not regenerate the note.',
+      });
     }
-    void fetchDraft();
   }
 
   if (state.kind === 'loading' || state.kind === 'starting') {
@@ -152,14 +179,40 @@ export function DoctorEncounterPanel({
             ? 'Upload a recording of the visit — the medical note drafts itself from the audio; you confirm and sign it.'
             : 'Dictate the visit in your own words — symptoms, findings, diagnosis, and your plan. The note drafts itself; you confirm and sign it.'}
         </p>
+        <fieldset className="space-y-3 text-left text-sm">
+          <legend className="mb-3 font-medium">Confirm each permission before continuing</legend>
+          {[
+            mode === 'upload'
+              ? 'The patient agreed to use of this recording for this encounter.'
+              : 'I will dictate only my clinical summary after the conversation, not record the patient’s voice.',
+            'The patient agreed to AI processing of their information to draft the note.',
+            'The patient agreed to the disclosed cross-border processing of their information.',
+          ].map((label, index) => (
+            <label key={label} className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                checked={consentChecks[index] ?? false}
+                onChange={(event) =>
+                  setConsentChecks((checks) =>
+                    checks.map((checked, i) => (i === index ? event.target.checked : checked)),
+                  )
+                }
+                className="mt-1 h-4 w-4 shrink-0"
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </fieldset>
         <div className="flex justify-center">
-          <Button onClick={beginRecording}>
+          <Button onClick={beginRecording} disabled={!consentChecks.every(Boolean)}>
             {mode === 'upload' ? 'Choose a recording' : '● Begin dictation'}
           </Button>
         </div>
-        <p className="text-xs text-[var(--color-ink-3)]">
-          Confirms the patient&rsquo;s recording consent for this encounter, then starts.
-        </p>
+        {startError && (
+          <p role="alert" className="text-sm text-[var(--color-warn)]">
+            {startError}
+          </p>
+        )}
       </Card>
     );
   }
@@ -216,7 +269,13 @@ export function DoctorEncounterPanel({
 
   // done — the single shared review-and-sign surface (DS11.2).
   return (
-    <ReviewAndSign key={sessionId} sessionId={sessionId} clientId={clientId} note={state.note} />
+    <ReviewAndSign
+      key={`${sessionId}-${state.signed}`}
+      sessionId={sessionId}
+      clientId={clientId}
+      note={state.note}
+      initialSigned={state.signed}
+    />
   );
 }
 

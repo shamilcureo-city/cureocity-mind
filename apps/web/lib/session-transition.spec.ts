@@ -47,8 +47,9 @@ describe('conditional Session lifecycle transition', () => {
     });
   });
 
-  it('preserves the Doctor live-token transition contract', () => {
-    expect(captureActivationTransitionData('DOCTOR', 'LIVE', false)).toMatchObject({
+  it('starts Doctor lifecycle only after active capture', () => {
+    expect(captureActivationTransitionData('DOCTOR', 'LIVE', false)).toBeNull();
+    expect(captureActivationTransitionData('DOCTOR', 'LIVE', true)).toMatchObject({
       status: 'IN_PROGRESS',
       captureMode: 'LIVE',
     });
@@ -145,7 +146,7 @@ describe('conditional Session lifecycle transition', () => {
   );
 
   it('keeps Doctor live-token start unchanged but defers Mind lifecycle until capture is active', () => {
-    expect(shouldAdvanceSessionDuringLiveToken('DOCTOR', 'SCHEDULED')).toBe(true);
+    expect(shouldAdvanceSessionDuringLiveToken('DOCTOR', 'SCHEDULED')).toBe(false);
     expect(shouldAdvanceSessionDuringLiveToken('THERAPIST', 'SCHEDULED')).toBe(false);
     expect(shouldAdvanceSessionDuringLiveToken('DOCTOR', 'IN_PROGRESS')).toBe(false);
   });

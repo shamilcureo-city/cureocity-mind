@@ -69,10 +69,15 @@ const ERRORS: Record<MicrophoneCheckError['code'], { title: string; detail: stri
     title: 'The microphone is not sending audio',
     detail: 'Check the device mute control and system input settings, then retry.',
   },
+  'setup-timeout': {
+    title: 'Browser audio setup timed out',
+    detail:
+      'Microphone access opened, but the browser did not finish preparing its audio processor. No working audio input has been confirmed. Retry the test; if it repeats, reload this page when no consultation is active.',
+  },
   'no-frames': {
     title: 'The audio check could not complete',
     detail:
-      'The microphone opened, but audio frames did not arrive. Retry or choose another microphone. This is not caused by speaking too quietly.',
+      'Browser audio setup completed, but no microphone frames were received. Retry or choose another microphone. This is not caused by speaking too quietly.',
   },
   timeout: {
     title: 'The microphone check timed out',
@@ -86,6 +91,31 @@ const ERRORS: Record<MicrophoneCheckError['code'], { title: string; detail: stri
   cancelled: {
     title: 'Microphone check stopped',
     detail: 'Nothing was recorded or uploaded. Test the microphone again when you are ready.',
+  },
+};
+
+const CHECK_STAGES: Record<MicrophoneCheckProgress['stage'], { title: string; detail: string }> = {
+  requesting: {
+    title: 'Waiting for microphone access',
+    detail:
+      'Choose Allow in your browser if asked. If access was already allowed, no new permission popup is needed.',
+  },
+  'loading-processor': {
+    title: 'Preparing the audio check',
+    detail:
+      'Microphone access is open. Loading the local audio processor; input is not confirmed yet.',
+  },
+  'starting-context': {
+    title: 'Starting browser audio',
+    detail: 'Waiting for the browser audio engine to become ready. Keep this tab active.',
+  },
+  'waiting-input': {
+    title: 'Checking microphone input',
+    detail: 'Speak a few words if you like. This short check stops automatically; silence is OK.',
+  },
+  checking: {
+    title: 'Checking your microphone',
+    detail: 'Speak a few words if you like. This short check stops automatically; silence is OK.',
   },
 };
 
@@ -117,7 +147,7 @@ export function ScribeMicrophoneDialog({
   const [notice, setNotice] = useState<string | null>(null);
   const validResult = useRef<MicrophoneCheckResult | null>(null);
 
-  function invalidate(message?: string) {
+  function invalidate(message?: string, preserveIssue = false) {
     ++generation.current;
     request.current?.abort();
     request.current = null;
@@ -125,7 +155,7 @@ export function ScribeMicrophoneDialog({
     if (!mounted.current) return;
     setProgress(null);
     setResult(null);
-    setIssue(null);
+    setIssue((previous) => (preserveIssue ? previous : null));
     setNotice(message ?? null);
   }
 
@@ -166,7 +196,10 @@ export function ScribeMicrophoneDialog({
       // Granting permission can reveal devices and dispatch devicechange. The
       // active test watches its actual track; don't cancel that permission flow.
       if (!request.current)
-        invalidate('The available microphones changed. Choose a microphone and test again.');
+        // Device changes may concern a camera or speaker, or arrive just after
+        // cleanup. Keep the actionable failure visible, but always invalidate
+        // any successful check so it cannot authorize a changed input.
+        invalidate('The available microphones changed. Choose a microphone and test again.', true);
       refreshDevices();
     });
     const hidden = () => {
@@ -264,9 +297,7 @@ export function ScribeMicrophoneDialog({
     (result
       ? 'Microphone check passed'
       : progress
-        ? progress.stage === 'requesting'
-          ? 'Waiting for microphone access'
-          : 'Checking your microphone'
+        ? CHECK_STAGES[progress.stage].title
         : blocked
           ? 'Microphone access is blocked'
           : permission === 'granted'
@@ -278,15 +309,13 @@ export function ScribeMicrophoneDialog({
       ? result.heardSound
         ? `${result.label} received audio. The test is complete and the microphone is off.`
         : `${result.label} is sending audio frames. No sound was detected; silence does not mean the microphone is broken. The microphone is now off.`
-      : progress?.stage === 'requesting'
-        ? 'Choose Allow in your browser if asked. If access was already allowed, no new permission popup is needed.'
-        : progress
-          ? 'Speak a few words if you like. This short check stops automatically; silence is OK.'
-          : blocked
-            ? ERRORS['permission-denied'].detail
-            : permission === 'granted'
-              ? 'Your browser already allows microphone access, so it may not show another popup. Test whether the microphone is sending audio.'
-              : 'Run a short microphone test before live transcription. Opening this dialog does not turn on the microphone.');
+      : progress
+        ? CHECK_STAGES[progress.stage].detail
+        : blocked
+          ? ERRORS['permission-denied'].detail
+          : permission === 'granted'
+            ? 'Your browser already allows microphone access, so it may not show another popup. Test whether the microphone is sending audio.'
+            : 'Run a short microphone test before live transcription. Opening this dialog does not turn on the microphone.');
   const level = Math.min(100, Math.round(Math.sqrt(Math.max(0, progress?.level ?? 0)) * 100));
 
   return (
@@ -342,7 +371,7 @@ export function ScribeMicrophoneDialog({
           <h3>{title}</h3>
           <p>{detail}</p>
         </div>
-        {progress?.stage === 'checking' && (
+        {(progress?.stage === 'waiting-input' || progress?.stage === 'checking') && (
           <div className={styles.meterRow}>
             <meter min={0} max={100} value={level} aria-label="Local microphone input level" />
             <span>{level > 0 ? 'Input detected' : 'Listening for sound'}</span>

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   createSessionCookie: vi.fn(),
   psychologistFindUnique: vi.fn(),
   psychologistUpdate: vi.fn(),
+  psychologistCreate: vi.fn(),
   clientFindUnique: vi.fn(),
   executeRaw: vi.fn(),
 }));
@@ -37,7 +38,7 @@ vi.mock('./prisma', () => {
   const tx = {
     $executeRaw: mocks.executeRaw,
     client: { findUnique: mocks.clientFindUnique },
-    psychologist: { update: mocks.psychologistUpdate },
+    psychologist: { update: mocks.psychologistUpdate, create: mocks.psychologistCreate },
   };
   return {
     prisma: {
@@ -49,7 +50,7 @@ vi.mock('./prisma', () => {
 
 import { POST } from '../app/api/v1/auth/session/route';
 
-describe('practitioner phone relink audit minimization', () => {
+describe('practitioner phone identity preservation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.verifyIdToken.mockResolvedValue({
@@ -64,7 +65,7 @@ describe('practitioner phone relink audit minimization', () => {
     mocks.psychologistUpdate.mockResolvedValue({ id: 'psy-1' });
   });
 
-  it('records only categorical/internal relink provenance, never phone or Firebase UIDs', async () => {
+  it('refuses a different phone identity without replacing the original Google/email identity', async () => {
     const response = await POST(
       new Request('https://example.test/api/v1/auth/session', {
         method: 'POST',
@@ -77,17 +78,59 @@ describe('practitioner phone relink audit minimization', () => {
       }) as never,
     );
 
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'SIGNIN_METHOD_CONFLICT' });
+    expect(mocks.psychologistUpdate).not.toHaveBeenCalled();
+    expect(mocks.writeAudit).not.toHaveBeenCalled();
+    expect(mocks.createSessionCookie).not.toHaveBeenCalled();
+  });
+
+  it('keeps sign-in with the original canonical UID working', async () => {
+    mocks.psychologistFindUnique
+      .mockReset()
+      .mockResolvedValue({ id: 'psy-1', deletedAt: null, firebaseUid: 'firebase-old' });
+    mocks.verifyIdToken.mockResolvedValue({ uid: 'firebase-old', email: 'fictional@example.test' });
+    const response = await POST(
+      new Request('https://scribe.cureocity.in/api/v1/auth/session', {
+        method: 'POST',
+        headers: {
+          origin: 'https://scribe.cureocity.in',
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      }) as never,
+    );
     expect(response.status).toBe(200);
-    expect(mocks.writeAudit).toHaveBeenCalledTimes(1);
-    const audit = mocks.writeAudit.mock.calls[0]?.[0];
-    expect(audit).toMatchObject({
-      action: 'PSYCHOLOGIST_UPDATED',
-      targetId: 'psy-1',
-      metadata: { event: 'firebase-uid-relinked-via-phone-otp' },
+    expect(mocks.createSessionCookie).toHaveBeenCalledOnce();
+    expect(mocks.psychologistUpdate).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['scribe.cureocity.in', 'DOCTOR'],
+    ['mind.cureocity.in', undefined],
+  ])('keeps new %s registration in its own product without approval', async (host, vertical) => {
+    mocks.psychologistFindUnique.mockReset().mockResolvedValue(null);
+    mocks.verifyIdToken.mockResolvedValue({ uid: 'new-uid', email: 'fictional@example.test' });
+    mocks.psychologistCreate.mockResolvedValue({
+      id: 'new-owner',
+      deletedAt: null,
+      fullName: 'Fictional',
     });
-    expect(audit.metadata).toEqual({ event: 'firebase-uid-relinked-via-phone-otp' });
-    expect(JSON.stringify(audit.metadata)).not.toContain('+919999999999');
-    expect(JSON.stringify(audit.metadata)).not.toContain('firebase-old');
-    expect(JSON.stringify(audit.metadata)).not.toContain('firebase-new');
+    const response = await POST(
+      new Request(`https://${host}/api/v1/auth/session`, {
+        method: 'POST',
+        headers: {
+          origin: `https://${host}`,
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      }) as never,
+    );
+    expect(response.status).toBe(200);
+    const data = mocks.psychologistCreate.mock.calls[0]?.[0].data;
+    expect(data.vertical).toBe(vertical);
+    expect(data).not.toHaveProperty('status');
+    expect(data).not.toHaveProperty('credentialVerifiedAt');
   });
 });

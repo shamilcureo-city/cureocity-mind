@@ -45,6 +45,11 @@ vi.mock('./session-defaults', () => ({
   SessionDefaultsError: class extends Error {},
 }));
 vi.mock('./clinic-queue', () => ({
+  clinicTimezone: async () => 'Asia/Dubai',
+  clinicDayRange: () => ({
+    start: new Date('2099-09-07T00:00:00Z'),
+    end: new Date('2099-09-08T00:00:00Z'),
+  }),
   istDayRange: () => ({
     start: new Date('2099-09-07T00:00:00Z'),
     end: new Date('2099-09-08T00:00:00Z'),

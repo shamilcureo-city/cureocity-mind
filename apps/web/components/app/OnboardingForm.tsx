@@ -16,6 +16,7 @@ interface Props {
   presetVertical?: 'THERAPIST' | 'DOCTOR' | null;
   initialFullName?: string | null;
   initialEmail?: string | null;
+  awaitingApproval?: boolean;
 }
 
 const LANGUAGES: { value: string; label: string }[] = [
@@ -46,6 +47,7 @@ export function OnboardingForm({
   presetVertical = null,
   initialFullName = null,
   initialEmail = null,
+  awaitingApproval = false,
 }: Props) {
   const router = useRouter();
   const phoneIsPlaceholder = phone.startsWith('pending:');
@@ -104,7 +106,8 @@ export function OnboardingForm({
         throw new Error(errBody?.error ?? `Could not save (${res.status}).`);
       }
       setSaved(true);
-      router.replace(vertical === 'DOCTOR' ? '/app/clinic' : '/app/today');
+      if (awaitingApproval) router.replace('/account-status');
+      else router.replace(vertical === 'DOCTOR' ? '/app/clinic' : '/app/today');
       router.refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -115,6 +118,12 @@ export function OnboardingForm({
 
   return (
     <form onSubmit={submit} className="space-y-5">
+      {awaitingApproval && (
+        <p role="status" className="rounded-xl bg-[var(--color-accent-soft)] p-4 text-sm">
+          Submit your registration details for review. This does not approve your account or enable
+          clinical access.
+        </p>
+      )}
       <div>
         <Label htmlFor="vertical-toggle">
           I am a<span className="ml-1 text-[var(--color-accent)]">*</span>
@@ -134,6 +143,7 @@ export function OnboardingForm({
                 type="button"
                 role="radio"
                 aria-checked={selected}
+                disabled={awaitingApproval && v !== 'DOCTOR'}
                 onClick={() => {
                   setVertical(v);
                   setVerticalChosen(true);
@@ -305,7 +315,13 @@ export function OnboardingForm({
       </div>
 
       <Button type="submit" size="lg" disabled={busy || saved} className="w-full">
-        {busy ? 'Saving…' : saved ? 'Profile saved' : 'Finish setup'}
+        {busy
+          ? 'Saving…'
+          : saved
+            ? 'Profile saved'
+            : awaitingApproval
+              ? 'Submit for review'
+              : 'Finish setup'}
       </Button>
       {saved ? (
         <div
@@ -325,16 +341,18 @@ export function OnboardingForm({
           >
             <path d="M20 6 9 17l-5-5" />
           </svg>
-          Profile saved — taking you in…
+          {awaitingApproval
+            ? 'Registration submitted — awaiting administrator review.'
+            : 'Profile saved — taking you in…'}
         </div>
       ) : (
         <FieldError message={error} />
       )}
 
       <p className="text-xs text-[var(--color-ink-3)]">
-        We&rsquo;ll review your {vertical === 'DOCTOR' ? 'registration number' : 'RCI number'} out
-        of band and mark it verified on your profile. Recording and notes work right away —
-        verification just adds a badge.
+        {vertical === 'DOCTOR'
+          ? 'Your registration details are self-reported until reviewed. Clinical access requires account approval and the appropriate verified permissions.'
+          : 'We will review your RCI number out of band and mark it verified on your profile. Your clinical permissions are managed separately.'}
       </p>
     </form>
   );

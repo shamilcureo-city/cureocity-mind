@@ -94,6 +94,15 @@ export async function requireActivePagePsychologist(): Promise<Psychologist> {
   return psy;
 }
 
+/** Allow only pending Scribe profile submission; clinical guards remain active-only. */
+export async function requireOnboardingPagePsychologist(scribe: boolean): Promise<Psychologist> {
+  const psy = await requirePagePsychologist();
+  if (scribe && psy.status === 'PENDING_VERIFICATION' && psy.onboardingCompletedAt === null)
+    return psy;
+  if (psy.status !== 'ACTIVE') redirect('/account-status');
+  return psy;
+}
+
 /**
  * Sprint 31 — primary page guard for `/app/*`. Bounces signed-in but
  * not-yet-onboarded therapists to the onboarding form so the rest of

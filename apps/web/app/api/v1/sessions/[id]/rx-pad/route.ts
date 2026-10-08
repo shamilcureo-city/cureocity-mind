@@ -50,8 +50,10 @@ export async function GET(
   }
 
   const body: RxPadResponse = {
-    rxPad: parsePad(session.noteDraft?.rxPad),
-    signed: session.therapyNote?.signedAt != null,
+    rxPad: parsePad(
+      session.therapyNote?.locked ? session.therapyNote.rxPad : session.noteDraft?.rxPad,
+    ),
+    signed: session.therapyNote?.locked === true,
   };
   return NextResponse.json(body);
 }
@@ -76,7 +78,7 @@ export async function PATCH(
       { status: 409 },
     );
   }
-  if (session.therapyNote?.signedAt != null) {
+  if (session.therapyNote?.locked === true) {
     return NextResponse.json(
       { error: 'This note is signed — the prescription can no longer be edited.' },
       { status: 409 },
@@ -105,7 +107,7 @@ export async function PATCH(
       ) {
         throw new RxPadPatchError(409, 'The encounter draft changed. Reload before editing.');
       }
-      if (current.therapyNote?.signedAt != null) {
+      if (current.therapyNote?.locked === true) {
         throw new RxPadPatchError(
           409,
           'This note is signed — the prescription can no longer be edited.',
@@ -175,7 +177,7 @@ async function loadSession(
       psychologistId: true,
       psychologist: { select: { vertical: true } },
       noteDraft: { select: { id: true, rxPad: true } },
-      therapyNote: { select: { signedAt: true } },
+      therapyNote: { select: { signedAt: true, locked: true, rxPad: true } },
     },
   });
 }

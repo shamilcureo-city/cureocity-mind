@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   fetchAllergies: vi.fn(),
   assertValidScribeConsent: vi.fn(),
   withClientConsentLock: vi.fn(),
+  transition: vi.fn(),
 }));
 
 vi.mock('./auth-server', () => ({
@@ -26,12 +27,14 @@ vi.mock('./patient-context', () => ({
 vi.mock('./consent-gate', () => ({
   assertValidScribeConsent: mocks.assertValidScribeConsent,
   ConsentAuthorizationError: class ConsentAuthorizationError extends Error {},
-  consentAuthorizationResponse: vi.fn(() => null),
+  consentAuthorizationResponse: vi.fn(
+    (error: Error) => new Response(JSON.stringify({ error: error.message }), { status: 409 }),
+  ),
   withClientConsentLock: mocks.withClientConsentLock,
 }));
 vi.mock('./session-transition', () => ({
   assertLiveTokenSessionStatus: vi.fn(),
-  conditionalSessionTransition: vi.fn(),
+  conditionalSessionTransition: mocks.transition,
   sessionConcurrentModificationResponse: vi.fn(() => null),
 }));
 vi.mock('./audit', () => ({ auditMetadataFromRequest: vi.fn(() => ({})), writeAudit: vi.fn() }));
@@ -63,6 +66,7 @@ beforeEach(() => {
   mocks.findSession.mockResolvedValue({
     psychologistId: 'psy-1',
     status: 'IN_PROGRESS',
+    captureMode: 'LIVE',
     consentSnapshot: {},
     clientId: 'client-1',
     psychologist: { vertical: 'DOCTOR' },
@@ -83,6 +87,41 @@ const request = () =>
   );
 
 describe('live-token capability boundary', () => {
+  it('reserves live capture without advancing lifecycle or consuming a startup credit', async () => {
+    mocks.requireCapability.mockResolvedValue(auth);
+    mocks.findSession.mockResolvedValue({
+      psychologistId: 'psy-1',
+      clientId: 'client-1',
+      status: 'SCHEDULED',
+      captureMode: null,
+      consentSnapshot: { captureMode: 'LIVE' },
+      psychologist: { vertical: 'DOCTOR' },
+    });
+    expect((await request()).status).toBe(200);
+    expect(mocks.transition).toHaveBeenCalledWith(expect.anything(), {
+      sessionId: 'session-1',
+      expectedStatus: 'SCHEDULED',
+      data: { captureMode: 'LIVE' },
+    });
+    expect(mocks.transition.mock.calls[0]?.[1].data).not.toHaveProperty('startedAt');
+    expect(mocks.transition.mock.calls[0]?.[1].data).not.toHaveProperty('status');
+  });
+  it.each(['DICTATE', 'UPLOAD'])(
+    'rejects a live token for an in-progress %s encounter',
+    async (captureMode) => {
+      mocks.requireCapability.mockResolvedValue(auth);
+      mocks.findSession.mockResolvedValue({
+        psychologistId: 'psy-1',
+        clientId: 'client-1',
+        status: 'IN_PROGRESS',
+        captureMode,
+        consentSnapshot: {},
+        psychologist: { vertical: 'DOCTOR' },
+      });
+      expect((await request()).status).toBe(409);
+      expect(mocks.signLiveToken).not.toHaveBeenCalled();
+    },
+  );
   it.each(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'] as const)(
     'returns the audited 403 before minting when %s is absent or revoked',
     async (missing) => {

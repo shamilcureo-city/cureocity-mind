@@ -24,7 +24,10 @@ import {
   TherapyReasoningBackendError,
   type SpeakerSegment,
 } from '@cureocity/llm';
-import { containsTranscriptionArtifact } from '@cureocity/contracts';
+import {
+  containsMedicalTranscriptionExample,
+  containsTranscriptionArtifact,
+} from '@cureocity/contracts';
 import {
   checkAllergies,
   checkInteractions,
@@ -321,13 +324,15 @@ export class LiveSession {
     if (utterances.length === 0) return;
     let maxIndex = this.windowIndex;
     let maxEnd = this.timeOffsetMs;
-    for (const u of utterances) {
+    const medicalExampleIndices =
+      this.vertical === 'DOCTOR' ? medicalExampleUtteranceIndices(utterances) : new Set<number>();
+    for (const [index, u] of utterances.entries()) {
       const n = Number(/^u(\d+)$/.exec(u.id)?.[1] ?? 0);
       if (Number.isFinite(n) && n > maxIndex) maxIndex = n;
       if (u.tEndMs > maxEnd) maxEnd = u.tEndMs;
       // Old browser checkpoints may predate prompt hardening. Retain their
       // time/id boundary, but never reintroduce an artifact into model context.
-      if (containsTranscriptionArtifact(u.text)) {
+      if (containsTranscriptionArtifact(u.text) || medicalExampleIndices.has(index)) {
         this.warnTranscription(u.tStartMs, u.tEndMs);
         continue;
       }
@@ -437,6 +442,10 @@ export class LiveSession {
   handleStreamPartial(fragment: string): void {
     if (this.stopped || fragment.length === 0) return;
     this.partialText = (this.partialText + fragment).slice(-400);
+    if (this.vertical === 'DOCTOR' && containsMedicalTranscriptionExample(this.partialText)) {
+      this.warnTranscription(this.timeOffsetMs, this.elapsedMs());
+      return;
+    }
     const now = Date.now();
     if (now - this.lastPartialEmitMs < 400) return;
     this.lastPartialEmitMs = now;
@@ -591,7 +600,23 @@ export class LiveSession {
   private warnTranscription(startMs: number, endMs: number): void {
     this.transcriptionWarning = true;
     this.markCaptureIncomplete('audio_loss');
+    if (this.vertical === 'DOCTOR' && this.partialText !== '') {
+      this.partialText = '';
+      this.lastPartialEmitMs = 0;
+      this.emit({ type: 'partialTranscript', text: '' });
+    }
     this.emit({ type: 'transcriptionWarning', startMs, endMs });
+  }
+
+  /** Quarantine the whole response: transcript and diarization are alternative
+   * representations, so neither is safe if one echoes the retired example.
+   * Joining segments also catches an example split between speaker turns. */
+  private hasMedicalExample(transcript: string, segments: SpeakerSegment[]): boolean {
+    return (
+      this.vertical === 'DOCTOR' &&
+      (containsMedicalTranscriptionExample(transcript) ||
+        containsMedicalTranscriptionExample(segments.map((segment) => segment.text).join(' ')))
+    );
   }
 
   private markCaptureIncomplete(reason: 'audio_loss' | 'finalization_failed'): void {
@@ -661,7 +686,8 @@ export class LiveSession {
     if (
       pass1.callLog.status === 'ERROR' ||
       containsTranscriptionArtifact(pass1.output.transcript) ||
-      pass1.output.speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text))
+      pass1.output.speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text)) ||
+      this.hasMedicalExample(pass1.output.transcript, pass1.output.speakerSegments)
     ) {
       this.warnTranscription(tStartMs + this.timeOffsetMs, tEndMs + this.timeOffsetMs);
       this.emit({ type: 'meter', summary: this.meterSummary() });
@@ -1020,6 +1046,19 @@ export class LiveSession {
     // shift this window past the replayed tail to keep the timeline monotonic.
     const tStartMs = rawStartMs + this.timeOffsetMs;
     const tEndMs = rawEndMs + this.timeOffsetMs;
+    // The full transcript and diarization are two model outputs, not proof
+    // that either covers the other. Never silently replace recognized words
+    // with a partial speaker list. Preserve the full source without attribution
+    // and require review when Scribe's representations disagree.
+    if (
+      this.vertical === 'DOCTOR' &&
+      segments.some((segment) => segment.text.trim()) &&
+      normalizedSpeech(transcript) !==
+        normalizedSpeech(segments.map((segment) => segment.text).join(' '))
+    ) {
+      this.warnTranscription(tStartMs, tEndMs);
+      segments = [];
+    }
     for (const seg of segments) {
       this.segments.push({ ...seg, startMs: seg.startMs + tStartMs, endMs: seg.endMs + tStartMs });
     }
@@ -1119,7 +1158,11 @@ export class LiveSession {
       });
     this.meter.recordNote(pass2.callLog, Date.now() - t0);
     if (this.terminal || this.finalEmitted) return;
-    if (containsTranscriptionArtifact(JSON.stringify(pass2.output))) {
+    const noteText = JSON.stringify(pass2.output);
+    if (
+      containsTranscriptionArtifact(noteText) ||
+      (this.vertical === 'DOCTOR' && containsMedicalTranscriptionExample(noteText))
+    ) {
       this.warnTranscription(this.timeOffsetMs, transcriptEndMs + this.timeOffsetMs);
       if (isFinal) this.emitFinalFromLatest();
       return;
@@ -1443,7 +1486,10 @@ export class LiveSession {
       if (
         pass1.callLog.status === 'ERROR' ||
         containsTranscriptionArtifact(pass1.output.transcript) ||
-        pass1.output.speakerSegments.some((segment) => containsTranscriptionArtifact(segment.text))
+        pass1.output.speakerSegments.some((segment) =>
+          containsTranscriptionArtifact(segment.text),
+        ) ||
+        this.hasMedicalExample(pass1.output.transcript, pass1.output.speakerSegments)
       ) {
         this.warnTranscription(tStartMs + this.timeOffsetMs, tEndMs + this.timeOffsetMs);
         continue;
@@ -1612,6 +1658,44 @@ export class LiveSession {
   }
 }
 
+/** A legacy replay may split the retired example between turns. Quarantine
+ * the smallest contiguous implicated spans, retaining unrelated turns and
+ * leaving all original values untouched. Binary searches avoid checking every
+ * pair of turns in the bounded (up to 4,000 utterance) reconnect payload. */
+function medicalExampleUtteranceIndices(utterances: Utterance[]): Set<number> {
+  const rejected = new Set<number>();
+  const contains = (start: number, end: number) =>
+    containsMedicalTranscriptionExample(
+      utterances
+        .slice(start, end)
+        .map((utterance) => utterance.text)
+        .join(' '),
+    );
+  let cursor = 0;
+  while (cursor < utterances.length && contains(cursor, utterances.length)) {
+    // Find the earliest exclusive end containing a complete fingerprint.
+    let low = cursor + 1;
+    let high = utterances.length;
+    while (low < high) {
+      const mid = Math.floor((low + high) / 2);
+      if (contains(cursor, mid)) high = mid;
+      else low = mid + 1;
+    }
+    const end = low;
+    // Then trim any unaffected turns preceding that fingerprint.
+    low = cursor;
+    high = end - 1;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      if (contains(mid, end)) low = mid;
+      else high = mid - 1;
+    }
+    for (let index = low; index < end; index++) rejected.add(index);
+    cursor = end;
+  }
+  return rejected;
+}
+
 /** Map a note's recorded vitals to the template vital ids (bp / hr / weight). */
 function presentVitalIds(note: MedicalEncounterNoteV1 | null): string[] {
   const v = note?.vitals;
@@ -1621,6 +1705,14 @@ function presentVitalIds(note: MedicalEncounterNoteV1 | null): string[] {
   if (v.heartRateBpm) ids.push('hr');
   if (v.weightKg) ids.push('weight');
   return ids;
+}
+
+function normalizedSpeech(text: string): string {
+  return text
+    .normalize('NFKC')
+    .toLocaleLowerCase('en')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
 function mapSpeaker(speaker: SpeakerSegment['speaker'] | undefined): Utterance['speaker'] {

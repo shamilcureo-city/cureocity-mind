@@ -16,7 +16,7 @@ describe('transcribePromptFor (DOC-6)', () => {
     const picked = transcribePromptFor('DOCTOR');
     expect(picked.prompt).toBe(MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2);
     expect(picked.version).toBe(MEDICAL_TRANSCRIBE_PROMPT_VERSION);
-    expect(picked.version).toBe('MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V3');
+    expect(picked.version).toBe('MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V4');
   });
 
   // TS-fix — both prompts must instruct the model to return an EMPTY result on
@@ -45,13 +45,33 @@ describe('transcribePromptFor (DOC-6)', () => {
     expect(MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2.length).toBeGreaterThan(800);
   });
 
-  it('the medical prompt biases drug names + dosing shorthand', () => {
+  it('preserves actual drug names and dosing without supplying patient-like examples', () => {
     const p = MEDICAL_TRANSCRIBE_SYSTEM_PROMPT_V2;
     expect(p).toMatch(/drug names/i);
-    // Dosing frequency shorthand kept verbatim.
-    for (const token of ['OD', 'BD', 'TDS', 'SOS', 'PRN']) {
-      expect(p).toContain(token);
+    expect(p).toMatch(/frequency shorthand, duration and route exactly\s+as spoken/);
+    expect(p).toMatch(/Vitals and labs with their numbers and units exactly as spoken/);
+    for (const example of [
+      'sugar high hai',
+      'Glycomet',
+      'metformin',
+      'Telma',
+      'telmisartan',
+      'Aspirin',
+      'atorvastatin',
+      '500 mg',
+      '1-0-1',
+      'x5 days',
+      '130/80',
+      'PR 88',
+      'SpO2 97%',
+      'HbA1c 7.2',
+      'FBS 140',
+      'creatinine 1.1',
+    ]) {
+      expect(p).not.toContain(example);
     }
+    expect(p).toMatch(/Native scripts are preferred/);
+    expect(p).toMatch(/Every transcript word must come from this audio/);
   });
 
   it('the medical prompt skips affect features (empty array), unlike therapy', () => {

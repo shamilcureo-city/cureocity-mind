@@ -218,6 +218,58 @@ afterEach(() => {
 });
 
 describe('Scribe capture review actual control handlers', () => {
+  it('renders a reopened signed encounter read-only with its attested corrections', () => {
+    const corrected = { ...note, assessment: 'Attested clinician correction' };
+    props = { ...props, note: corrected, initialSigned: true };
+    expect(element('medical-note')?.props.note).toEqual(corrected);
+    expect(button('Edit note')).toBeUndefined();
+    expect(button('Confirm & sign')).toBeUndefined();
+  });
+
+  it('loads the actual signed winner on an already-signed conflict before displaying success', async () => {
+    incomplete = false;
+    const corrected = { ...note, assessment: 'Different correction signed in another tab' };
+    const original = h.request.getMockImplementation()!;
+    h.request.mockImplementation(async (url: string, init?: RequestInit) =>
+      url.endsWith('/review')
+        ? Response.json({
+            draft: { status: 'COMPLETED', content: note, errorMessage: null },
+            signedNote: { content: corrected, rxPad: null, signedAt: '2026-10-01T10:00:00Z' },
+          })
+        : original(url, init),
+    );
+    h.sign.mockResolvedValue(
+      Response.json({ error: 'Therapy note already signed for this session' }, { status: 409 }),
+    );
+    render();
+    await vi.waitFor(() => expect(button('Confirm & sign')?.props.disabled).toBe(false));
+    click('Confirm & sign');
+    await vi.waitFor(() => expect(h.signed).toHaveBeenCalledOnce());
+    expect(element('medical-note')?.props.note).toEqual(corrected);
+    expect(button('Confirm & sign')).toBeUndefined();
+  });
+
+  it('never labels the local draft signed when canonical conflict recovery fails', async () => {
+    incomplete = false;
+    const original = h.request.getMockImplementation()!;
+    h.request.mockImplementation(async (url: string, init?: RequestInit) =>
+      url.endsWith('/review')
+        ? Response.json({ error: 'unavailable' }, { status: 503 })
+        : original(url, init),
+    );
+    h.sign.mockResolvedValue(
+      Response.json({ error: 'Therapy note already signed for this session' }, { status: 409 }),
+    );
+    render();
+    await vi.waitFor(() => expect(button('Confirm & sign')?.props.disabled).toBe(false));
+    click('Confirm & sign');
+    await vi.waitFor(() =>
+      expect(text(render())).toContain('Could not verify the saved encounter'),
+    );
+    expect(h.signed).not.toHaveBeenCalled();
+    expect(element('medical-note')?.props.note).toEqual(note);
+  });
+
   it('blocks signing over unsaved coding edits without treating coding as capture review', async () => {
     await loadedIncomplete();
     const coding = element('coding-workspace');

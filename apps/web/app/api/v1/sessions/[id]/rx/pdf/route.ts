@@ -30,9 +30,13 @@ export async function GET(
   const session = await prisma.session.findUnique({
     where: { id: sessionId },
     include: {
-      client: { select: { fullNameEncrypted: true, dateOfBirth: true } },
+      client: {
+        select: { fullNameEncrypted: true, dateOfBirth: true, deletedAt: true, status: true },
+      },
       noteDraft: { select: { id: true, rxPad: true } },
-      therapyNote: { select: { id: true, rxPad: true, signedBy: true, signedAt: true } },
+      therapyNote: {
+        select: { id: true, rxPad: true, signedBy: true, signedAt: true, locked: true },
+      },
       psychologist: {
         select: {
           fullName: true,
@@ -47,7 +51,12 @@ export async function GET(
       },
     },
   });
-  if (!session || session.psychologistId !== auth.value.psychologistId) {
+  if (
+    !session ||
+    session.psychologistId !== auth.value.psychologistId ||
+    session.client.deletedAt !== null ||
+    session.client.status !== 'ACTIVE'
+  ) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
   if (session.psychologist.vertical !== 'DOCTOR') {
@@ -58,7 +67,7 @@ export async function GET(
   }
 
   // Prefer the signed pad; else the confirmed subset of the drafted pad.
-  const signedRx = parsePad(session.therapyNote?.rxPad);
+  const signedRx = session.therapyNote?.locked ? parsePad(session.therapyNote.rxPad) : null;
   const rx: RxPadV1 | null =
     signedRx ??
     (() => {

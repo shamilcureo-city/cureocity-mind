@@ -11,6 +11,7 @@ import {
 } from '@/lib/session-transition';
 import { withClientConsentLock } from '@/lib/consent-gate';
 import { parseJson } from '@/lib/validate';
+import { scribeAmbientCaptureDeclined } from '@/lib/scribe-consent-mode';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -37,17 +38,16 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   }
   const dto = await parseJson(req, SessionConsentAckInputSchema);
   if (!dto.ok) return dto.response;
+  if (auth.value.user.vertical === 'DOCTOR' && !dto.value.captureMode) {
+    return NextResponse.json(
+      { error: 'Select and explicitly confirm the Scribe capture mode.' },
+      { status: 400 },
+    );
+  }
 
   const now = new Date();
   const ackedAt = now.toISOString();
-  const snapshot: SessionConsentSnapshot = {
-    entries: dto.value.scopes.map((scope) => ({
-      scope,
-      scriptVersion: dto.value.scriptVersion,
-      ackedAt,
-    })),
-    notes: dto.value.notes ?? null,
-  };
+  const captureMode = dto.value.captureMode;
 
   // PROD5 — a scope acked here that the client has no standing consent for
   // (e.g. CROSS_BORDER_PROCESSING ticked in the pre-flight because it was
@@ -58,6 +58,28 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   try {
     updated = await prisma.$transaction((tx) =>
       withClientConsentLock(tx, existing.clientId, async () => {
+        // Read the latest decision after serialization; a stale dictation POST
+        // must not erase a refusal committed by a concurrent request.
+        const current = await tx.session.findUnique({
+          where: { id: sessionId },
+          select: { consentSnapshot: true },
+        });
+        const ambientCaptureDeclined =
+          scribeAmbientCaptureDeclined(current?.consentSnapshot) && captureMode !== 'LIVE';
+        const snapshot: SessionConsentSnapshot = {
+          entries: dto.value.scopes.map((scope) => ({
+            scope,
+            scriptVersion: dto.value.scriptVersion,
+            ackedAt,
+          })),
+          notes: ambientCaptureDeclined
+            ? ['Patient declined live ambient capture for this encounter.', dto.value.notes]
+                .filter(Boolean)
+                .join(' ')
+                .slice(0, 1000)
+            : (dto.value.notes ?? null),
+          ...(captureMode ? { captureMode, ambientCaptureDeclined } : {}),
+        };
         const standing = await tx.consent.findMany({
           where: {
             clientId: existing.clientId,
@@ -85,7 +107,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
               scriptVersion: dto.value.scriptVersion,
               capturedVia: 'IN_PERSON',
               grantedAt: now,
-              notes: `Captured in the pre-session consent step (session ${sessionId})`,
+              notes: `Captured in the pre-session consent step (session ${sessionId}${captureMode ? `; ${captureMode}` : ''})`,
             },
           });
           await writeAudit(
@@ -116,6 +138,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
               ...auditMetadataFromRequest(req),
               scopes: dto.value.scopes,
               scriptVersion: dto.value.scriptVersion,
+              ...(captureMode ? { captureMode, ambientCaptureDeclined } : {}),
             },
           },
           tx,
@@ -159,6 +182,8 @@ export async function DELETE(req: NextRequest, ctx: RouteContext): Promise<NextR
             consentSnapshot: {
               entries: [],
               notes: 'Patient declined live ambient capture for this encounter.',
+              captureMode: 'LIVE',
+              ambientCaptureDeclined: true,
             },
           },
         });

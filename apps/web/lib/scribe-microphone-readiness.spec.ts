@@ -277,6 +277,7 @@ describe('Scribe microphone readiness dialog', () => {
     ['permission-denied', /permission|blocked|allow/i],
     ['ended', /stopped|ended|unavailable/i],
     ['missing', /microphone|connect/i],
+    ['setup-timeout', /browser audio setup timed out/i],
     ['no-frames', /audio|frames|microphone/i],
     ['unsupported', /browser|supported/i],
   ] as const)(
@@ -293,6 +294,34 @@ describe('Scribe microphone readiness dialog', () => {
       expect(text(render())).toMatch(explanation);
       expect(button(/Retry microphone test/i)).toBeDefined();
       expect(currentProps.onContinue).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['loading-processor', /Preparing the audio check/, false],
+    ['starting-context', /Starting browser audio/, false],
+    ['waiting-input', /Checking microphone input/, true],
+  ] as const)(
+    'explains the %s phase without prematurely confirming input',
+    async (stage, title, meter) => {
+      const pending = deferred<{ deviceId: string; label: string; heardSound: boolean }>();
+      harness.check.mockReturnValueOnce(pending.promise);
+      render();
+      await settle();
+      click(/Enable microphone.*test/i);
+      harness.check.mock.calls[0]![0].onProgress({
+        stage,
+        level: 0,
+        frames: 0,
+        device: { deviceId: 'built-in', label: 'Built-in microphone' },
+      });
+      expect(text(render())).toMatch(title);
+      expect(elements(render()).some((element) => element.type === 'meter')).toBe(meter);
+      expect(button(/Start consultation/i)?.props.disabled).toBe(true);
+      expect(currentProps.onContinue).not.toHaveBeenCalled();
+      click(/^Cancel$/i);
+      pending.reject(new MicrophoneCheckError('cancelled'));
+      await settle();
     },
   );
 
@@ -465,6 +494,26 @@ describe('Scribe microphone readiness dialog', () => {
     expect(button(/Start consultation/i)?.props.disabled).toBe(true);
     expect(harness.check).toHaveBeenCalledTimes(1);
     expect(currentProps.onContinue).not.toHaveBeenCalled();
+  });
+
+  it('preserves an actionable failure when a later device-list change refreshes devices', async () => {
+    harness.check.mockRejectedValueOnce(new MicrophoneCheckError('ended'));
+    render();
+    await settle();
+    click(/Enable microphone.*test/i);
+    await settle();
+    expect(text(render())).toMatch(/The microphone stopped during the check/);
+    mediaDevices.dispatchEvent(new Event('devicechange'));
+    await settle();
+    expect(text(render())).toMatch(/The microphone stopped during the check/);
+    expect(button(/Retry microphone test/i)).toBeDefined();
+    expect(button(/Start consultation/i)?.props.disabled).toBe(true);
+    expect(harness.check).toHaveBeenCalledTimes(1);
+    expect(currentProps.onContinue).not.toHaveBeenCalled();
+    // An explicit new choice still clears the obsolete failure and needs a test.
+    selectDevice('headset');
+    expect(text(render())).not.toMatch(/The microphone stopped during the check/);
+    expect(button(/Start consultation/i)?.props.disabled).toBe(true);
   });
 
   it('invalidates readiness when permission is revoked', async () => {

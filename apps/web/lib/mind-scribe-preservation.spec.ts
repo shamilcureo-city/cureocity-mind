@@ -4,9 +4,10 @@ import { validateCreateClientForVertical } from './client-draft';
 import { mindStartEntryHref } from './mind-session-start';
 
 describe('Mind changes preserve Scribe behavior', () => {
-  it('keeps Scribe token-is-start semantics while Mind waits for active capture', () => {
+  it('does not start either product merely by minting a token', () => {
     expect(captureActivationTransitionData('THERAPIST', 'LIVE', false)).toBeNull();
-    expect(captureActivationTransitionData('DOCTOR', 'LIVE', false)).toMatchObject({
+    expect(captureActivationTransitionData('DOCTOR', 'LIVE', false)).toBeNull();
+    expect(captureActivationTransitionData('DOCTOR', 'LIVE', true)).toMatchObject({
       status: 'IN_PROGRESS',
       captureMode: 'LIVE',
     });
