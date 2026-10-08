@@ -30,6 +30,11 @@ import {
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
 import { lockActiveClientForSession } from '@/lib/phi-write-lock';
+import {
+  findLiveFinalizationReceipt,
+  liveFinalizationDigest,
+  LiveFinalizationConflict,
+} from '@/lib/live-note-finalization';
 import { assertScribeTeleconsultDraftPersistence } from '@/lib/scribe-teleconsult';
 import { consentAuthorizationResponse } from '@/lib/consent-gate';
 import {
@@ -113,7 +118,7 @@ export async function POST(
   // payload hash would no longer match the stored draft. A signed encounter
   // is closed; corrections go through the post-sign revision path
   // (/note/edit), which versions them and records who changed what.
-  if (session.therapyNote?.signedAt != null) {
+  if (session.therapyNote?.signedAt != null && session.psychologist.vertical !== 'THERAPIST') {
     return NextResponse.json(
       {
         error:
@@ -130,6 +135,39 @@ export async function POST(
   if (session.psychologist.vertical === 'THERAPIST') {
     const parsedT = await parseJson(req, TherapyLiveNoteInputSchema);
     if (!parsedT.ok) return parsedT.response;
+    const { finalizationId, ...finalizationPayload } = parsedT.value;
+    const receiptInput = finalizationId
+      ? {
+          sessionId,
+          psychologistId: auth.value.psychologistId,
+          operationId: finalizationId,
+          digest: liveFinalizationDigest(sessionId, auth.value.psychologistId, finalizationPayload),
+        }
+      : null;
+    // A response can be lost after commit. Return the saved operation before
+    // translation/encryption, even if the clinician has since signed its note.
+    if (receiptInput) {
+      try {
+        const replay = await prisma.$transaction(async (tx) => {
+          await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+          return findLiveFinalizationReceipt(tx, receiptInput);
+        });
+        if (replay)
+          return NextResponse.json({ draftId: replay.id, status: replay.status, replayed: true });
+      } catch (error) {
+        if (error instanceof LiveFinalizationConflict)
+          return NextResponse.json(
+            { error: error.message, code: 'FINALIZATION_CONFLICT' },
+            { status: 409 },
+          );
+        throw error;
+      }
+    }
+    if (session.therapyNote?.signedAt != null)
+      return NextResponse.json(
+        { error: 'This session is already signed. Open its record to make a correction.' },
+        { status: 409 },
+      );
     if (containsTranscriptionArtifact(JSON.stringify(parsedT.value))) {
       return NextResponse.json(
         {
@@ -187,20 +225,42 @@ export async function POST(
     const tWrite = tTranscriptEncrypted ? { transcriptEncrypted: tTranscriptEncrypted } : {};
     const riskSeverity = mapRiskSeverity(tnote.riskFlags.severity);
     let tDraft;
+    let replayed = false;
     try {
       tDraft = await prisma.$transaction(async (tx) => {
         await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+        if (receiptInput) {
+          const replay = await findLiveFinalizationReceipt(tx, receiptInput);
+          if (replay) {
+            replayed = true;
+            return replay;
+          }
+        }
         return finalizeLiveSession(tx, {
           sessionId,
           endedAt: new Date(),
           persistDraft: async () => {
+            const previousDraft = await tx.noteDraft.findUnique({
+              where: { sessionId },
+              select: { errorMessage: true },
+            });
+            const errorMessage = preserveScribeCaptureIntegrity(
+              [
+                previousDraft?.errorMessage,
+                transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
+              ]
+                .filter(Boolean)
+                .join('\n') || null,
+              parsedT.value.captureIncomplete,
+              parsedT.value.captureIncompleteReason,
+            );
             const draft = await tx.noteDraft.upsert({
               where: { sessionId },
               update: {
                 status: 'COMPLETED',
                 content: tnote as unknown as Prisma.InputJsonValue,
                 riskSeverity,
-                errorMessage: transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
+                errorMessage,
                 ...tWrite,
               },
               create: {
@@ -209,7 +269,7 @@ export async function POST(
                 content: tnote as unknown as Prisma.InputJsonValue,
                 riskSeverity,
                 ...tWrite,
-                errorMessage: transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
+                errorMessage,
               },
             });
             await writeAudit(
@@ -248,17 +308,33 @@ export async function POST(
                 action: 'SESSION_ENDED',
                 targetType: 'Session',
                 targetId: sessionId,
-                metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+                metadata: {
+                  ...auditMetadataFromRequest(req),
+                  source: 'LIVE',
+                  ...(receiptInput
+                    ? {
+                        liveFinalizationId: receiptInput.operationId,
+                        liveFinalizationDigest: receiptInput.digest,
+                      }
+                    : {}),
+                },
               },
               tx,
             ),
         });
       });
     } catch (error) {
+      if (error instanceof LiveFinalizationConflict)
+        return NextResponse.json(
+          { error: error.message, code: 'FINALIZATION_CONFLICT' },
+          { status: 409 },
+        );
       const response = sessionConcurrentModificationResponse(error);
       if (response) return response;
       throw error;
     }
+    if (replayed)
+      return NextResponse.json({ draftId: tDraft.id, status: tDraft.status, replayed: true });
     // The conditional live transition rejects replay before persistence. Emit
     // only after commit, never on an encryption/audit failure or lost transition.
     recordCommittedNoteRisk(riskSeverity);

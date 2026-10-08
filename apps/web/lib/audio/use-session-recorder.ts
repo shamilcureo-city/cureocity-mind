@@ -13,6 +13,8 @@ import { ChunkUploader } from './chunk-uploader';
 import { requestPersistentStorage } from './storage-buckets';
 import { AudioPersistenceQueue } from './persistence-queue';
 import { stopWorklet } from './stop-worklet';
+import { getRecordingCursor } from './recording-cursor';
+import { downloadPendingAudio } from './download-pending-audio';
 
 export type RecorderState =
   | 'idle'
@@ -60,6 +62,8 @@ export interface RecorderHandle {
   /** FLOW-2 — drain the IDB queue once more; resolves to the count still
    *  pending (0 = safe to generate the note). */
   drainPending: (retryExhausted?: boolean) => Promise<number>;
+  /** Includes bytes still held in memory after a local storage conflict/failure. */
+  downloadUnsavedAudio: () => Promise<void>;
 }
 
 const SUPPORTS_DISPLAY_MEDIA =
@@ -186,6 +190,8 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
         integrityErrorRef.current = integrityErrorRef.current ?? resume!.captureIntegrityError!;
         throw new Error(integrityErrorRef.current);
       }
+      const serverIndex = await getRecordingCursor(opts.sessionId, base, opts.getAuthToken);
+      assertCurrent();
 
       const stream = await acquireStream(opts.source, opts.externalStream, opts.selectedDeviceId);
       ownedStream = stream;
@@ -214,7 +220,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
       setStartedAt(sessionStartedAt);
       const chunker = new PcmChunker({
         sessionStartedAt,
-        initialChunkIndex: resume?.nextChunkIndex ?? 0,
+        initialChunkIndex: Math.max(serverIndex, resume?.nextChunkIndex ?? 0),
       });
       chunkerRef.current = chunker;
 
@@ -405,6 +411,10 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   // Stable wrapper for the consumer.
   const stop = useCallback(() => stopInternal(), [stopInternal]);
   const pause = useCallback(() => stopInternal(true), [stopInternal]);
+  const downloadUnsavedAudio = useCallback(
+    () => downloadPendingAudio(opts.sessionId, persistenceRef.current?.snapshot() ?? []),
+    [opts.sessionId],
+  );
 
   // FLOW-2 — drain the IndexedDB queue once more and report how many chunks
   // still failed to upload. The End flow calls this in a retry loop so it can
@@ -503,6 +513,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     stop,
     pause,
     drainPending,
+    downloadUnsavedAudio,
   };
 }
 

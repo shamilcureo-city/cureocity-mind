@@ -248,9 +248,16 @@ beforeEach(() => {
 afterAll(() => vi.useRealTimers());
 
 describe('medical signing route transaction behavior', () => {
-  it.each(['pending', 'reviewed_different_note', 'reviewed_changed_source', 'reviewed_exact_note'])(
-    'checks capture review under signing locks: %s',
-    async (scenario) => {
+  it.each(
+    ['DOCTOR', 'THERAPIST'].flatMap((vertical) =>
+      ['pending', 'reviewed_different_note', 'reviewed_changed_source', 'reviewed_exact_note'].map(
+        (scenario) => ({ vertical, scenario }),
+      ),
+    ),
+  )(
+    'checks $vertical capture review under signing locks: $scenario',
+    async ({ vertical, scenario }) => {
+      if (vertical === 'THERAPIST') mocks.signableKind = 'THERAPY';
       const draft = {
         id: 'draft-1',
         status: 'COMPLETED',
@@ -269,10 +276,14 @@ describe('medical signing route transaction behavior', () => {
       }
       if (scenario === 'reviewed_changed_source') draft.transcriptEncrypted = 'changed-source';
       const baseQuery = mocks.queryRaw.getMockImplementation()!;
-      mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
-        sqlText(strings).includes('FROM "note_drafts"')
-          ? Promise.resolve([draft])
-          : baseQuery(strings, ...values),
+      mocks.queryRaw.mockImplementation(
+        async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          if (sqlText(strings).includes('FROM "note_drafts"')) return [draft];
+          const rows = await baseQuery(strings, ...values);
+          return sqlText(strings).includes('FROM "sessions"')
+            ? rows.map((row: object) => ({ ...row, vertical }))
+            : rows;
+        },
       );
       const response = await POST(request() as never, {
         params: Promise.resolve({ id: 'session-1' }),

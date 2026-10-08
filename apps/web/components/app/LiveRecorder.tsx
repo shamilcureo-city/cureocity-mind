@@ -480,8 +480,23 @@ export function LiveRecorder({
             <Button onClick={() => void endSession(true)} disabled={ending}>
               Retry finalization
             </Button>
+            <Button
+              variant="secondary"
+              disabled={ending}
+              onClick={() =>
+                void recorder
+                  .downloadUnsavedAudio()
+                  .catch((error: Error) => setEndError(error.message))
+              }
+            >
+              Download unsaved audio
+            </Button>
             <p className="text-xs">Keep this page open until all captured audio is saved.</p>
           </div>
+          <p className="mt-2 text-xs">
+            The download preserves unsaved parts only, including audio held in this tab. It does not
+            clear the queue or include missing speech. Keep the file private.
+          </p>
         </div>
       )}
 
@@ -507,7 +522,23 @@ export function LiveRecorder({
             <Button onClick={() => void endSession(true)} disabled={ending}>
               Retry upload
             </Button>
+            <Button
+              variant="secondary"
+              disabled={ending}
+              onClick={() => {
+                void recorder
+                  .downloadUnsavedAudio()
+                  .catch((error: Error) => setEndError(error.message));
+              }}
+            >
+              Download unsaved audio
+            </Button>
           </div>
+          <p className="mt-2 text-xs">
+            The download contains only unsaved parts, not the full session. It does not clear this
+            queue. Keep the file private and review these parts before completing the clinical
+            record.
+          </p>
         </div>
       )}
 

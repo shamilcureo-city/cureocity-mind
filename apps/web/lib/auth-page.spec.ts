@@ -73,6 +73,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('practitioner page lifecycle boundary', () => {
+  it.each(['auth/session-cookie-revoked', 'auth/user-disabled'])(
+    'rejects %s before reading the practitioner record',
+    async (code) => {
+      h.verify.mockImplementation(async (_cookie, checkRevoked) => {
+        if (checkRevoked) throw { code };
+        return { uid: 'fixture-uid' };
+      });
+      await expect(requireOnboardedTherapist()).rejects.toThrow('REDIRECT:/login');
+      expect(h.verify).toHaveBeenCalledWith('fictional-cookie', true);
+      expect(h.practitioner).not.toHaveBeenCalled();
+    },
+  );
   it.each(['PENDING_VERIFICATION', 'SUSPENDED', 'OFFBOARDED'])(
     'blocks %s at every clinical guard before onboarding or role checks',
     async (status) => {

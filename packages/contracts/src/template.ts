@@ -50,10 +50,11 @@ export const UpdateNoteTemplateInputSchema = z
 export type UpdateNoteTemplateInput = z.infer<typeof UpdateNoteTemplateInputSchema>;
 
 /**
- * Sprint 70 — apply a template to a session (then the note is re-generated
- * into it). `null` = the built-in SOAP structure (clears the template).
+ * Apply a template to the version-checked current draft or a future note.
+ * `null` clears the optional template view and preserves clinical fields.
  */
 export const ApplyNoteTemplateInputSchema = z.object({
   templateId: z.string().min(1).nullable(),
+  expectedUpdatedAt: z.string().datetime().optional(),
 });
 export type ApplyNoteTemplateInput = z.infer<typeof ApplyNoteTemplateInputSchema>;

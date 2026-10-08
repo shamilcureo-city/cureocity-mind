@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
+import { telemetryRoute } from '@/lib/telemetry-redaction';
 
 /**
  * Route-level error boundary. Shows a recoverable message instead of the
@@ -21,11 +22,10 @@ export default function RootError({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        message: error.message,
-        stack: error.stack,
+        message: 'Client page failed',
         digest: error.digest,
         source: 'error-boundary',
-        url: typeof window !== 'undefined' ? window.location.href : undefined,
+        url: typeof window !== 'undefined' ? telemetryRoute(window.location.href) : undefined,
       }),
     }).catch(() => {});
   }, [error]);

@@ -622,10 +622,11 @@ The five existing passes are the template — pick the closest analogue.
   - **Deleting/wiping a `Psychologist` row invalidates that user's live
     cookie** — it verifies, but `findUnique` returns null → bounce to
     `/login`. Recovery: sign in again (re-provisions the row).
-  - `verifySessionCookie` is called **without** `checkRevoked` (no
-    per-request Firebase network call; no "sign out all devices"
-    feature) and wrapped in `verifyWithRetry` for transient key-fetch
-    races. Every redirect-to-login branch logs its cause
+  - Practitioner `verifySessionCookie` and `verifyIdToken` calls require
+    **`checkRevoked=true`**, including session exchange and client claims.
+    `verifyWithRetry` handles transient provider failures, while revoked or
+    disabled credentials fail closed. Page checks are deduplicated per request.
+    Every redirect-to-login branch logs its cause
     (`[auth-page] …` / `[auth-server] …`) — grep Vercel runtime logs to
     diagnose; don't guess.
 - **`prisma db seed` is NOT run on prod deploys** (removed from

@@ -13,6 +13,8 @@
  * become a second error on the request path.
  */
 
+import { telemetryRoute } from './telemetry-redaction';
+
 export interface CaptureContext {
   /** Where it came from: 'server' | 'client' | 'global-error' | route name. */
   source: string;
@@ -40,7 +42,7 @@ interface ErrorPayload {
 }
 
 function buildPayload(error: unknown, ctx: CaptureContext): ErrorPayload {
-  const err = error instanceof Error ? error : new Error(String(error));
+  const err = safeError(error);
   return {
     type: 'error',
     timestamp: new Date().toISOString(),
@@ -48,13 +50,14 @@ function buildPayload(error: unknown, ctx: CaptureContext): ErrorPayload {
     env: process.env['VERCEL_ENV'] ?? process.env['NODE_ENV'] ?? 'local',
     name: err.name,
     message: err.message.slice(0, 2000),
-    stack: err.stack?.slice(0, 8000),
-    source: ctx.source,
-    ...(ctx.route && { route: ctx.route }),
+    source: safeSource(ctx.source),
+    ...(ctx.route && { route: telemetryRoute(ctx.route) }),
     ...(ctx.method && { method: ctx.method }),
     ...(ctx.digest && { digest: ctx.digest }),
     ...(ctx.psychologistId && { psychologistId: ctx.psychologistId }),
-    ...(ctx.extra && { extra: ctx.extra }),
+    ...(typeof ctx.extra?.['url'] === 'string' && {
+      extra: { url: telemetryRoute(ctx.extra['url']) },
+    }),
   };
 }
 
@@ -70,17 +73,17 @@ export async function captureError(error: unknown, ctx: CaptureContext): Promise
   // a no-op so local dev stays silent.
   try {
     const Sentry = await import('@sentry/nextjs');
-    Sentry.captureException(error, {
+    Sentry.captureException(safeError(error), {
       tags: {
-        source: ctx.source,
-        ...(ctx.route && { route: ctx.route }),
+        source: payload.source,
+        ...(payload.route && { route: payload.route }),
         ...(ctx.method && { method: ctx.method }),
       },
       contexts: {
         capture: {
           digest: ctx.digest,
           psychologistId: ctx.psychologistId,
-          ...ctx.extra,
+          ...payload.extra,
         },
       },
     });
@@ -105,4 +108,28 @@ export async function captureError(error: unknown, ctx: CaptureContext): Promise
   } catch {
     // Swallow — the reporter must never throw.
   }
+}
+
+function safeSource(source: string): string {
+  return ['server', 'client', 'global-error', 'error-boundary', 'onRequestError'].includes(source)
+    ? source
+    : 'error';
+}
+
+function safeError(error: unknown): Error {
+  const safe = new Error('Error details withheld');
+  const name = error instanceof Error ? error.name : 'Error';
+  safe.name = [
+    'Error',
+    'TypeError',
+    'RangeError',
+    'SyntaxError',
+    'ReferenceError',
+    'URIError',
+  ].includes(name)
+    ? name
+    : 'Error';
+  // Caller-provided stacks may include the full error prose or bearer URLs.
+  safe.stack = undefined;
+  return safe;
 }
