@@ -95,11 +95,13 @@ export type FormulationSuggestion = z.infer<typeof FormulationSuggestionSchema>;
 export const SaveFormulationInputSchema = z.discriminatedUnion('action', [
   z.object({
     action: z.literal('accept'),
+    expectedVersion: z.number().int().nonnegative(),
     reportId: z.string().min(1),
     suggestionIndex: z.number().int().nonnegative(),
   }),
   z.object({
     action: z.literal('author'),
+    expectedVersion: z.number().int().nonnegative(),
     formulation: CaseFormulationV1Schema,
   }),
 ]);

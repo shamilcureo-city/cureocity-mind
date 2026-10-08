@@ -108,6 +108,7 @@ export interface CloseoutData {
   formulationSuggestions: FormulationSuggestion[];
   /** The active formulation body, used to hide already-applied suggestions. */
   formulationBody: CaseFormulationV1 | null;
+  formulationVersion: number;
 }
 
 interface Props {
@@ -423,13 +424,21 @@ export function CopilotDecisionBoard({
       const res = await fetch(`/api/v1/clients/${clientId}/formulation`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'accept', reportId: report.id, suggestionIndex }),
+        body: JSON.stringify({
+          action: 'accept',
+          expectedVersion: closeout.formulationVersion,
+          reportId: report.id,
+          suggestionIndex,
+        }),
       });
       const payload = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(payload.error ?? `HTTP ${res.status}`);
+      if (!res.ok) {
+        if (res.status === 409) router.refresh();
+        throw new Error(payload.error ?? `HTTP ${res.status}`);
+      }
       router.refresh();
     },
-    [report, clientId, router],
+    [report, clientId, closeout.formulationVersion, router],
   );
 
   const acceptIntakeCrisis = useCallback(async (): Promise<void> => {

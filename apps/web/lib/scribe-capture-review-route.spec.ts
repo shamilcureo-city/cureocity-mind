@@ -1,4 +1,4 @@
-import { MedicalEncounterNoteV1Schema } from '@cureocity/contracts';
+import { MedicalEncounterNoteV1Schema, TherapyNoteV1Schema } from '@cureocity/contracts';
 import { NextRequest } from 'next/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -95,6 +95,8 @@ describe('Scribe capture review route', () => {
       incomplete: true,
       reason: 'audio_loss',
       draftId: 'draft-1',
+      draftUpdatedAt: null,
+      reviewed: false,
       reviewToken: scribeCaptureReviewToken(draft),
     });
     expect(JSON.stringify(data)).not.toContain(note.chiefComplaint);
@@ -104,6 +106,30 @@ describe('Scribe capture review route', () => {
     expect(queries[2]).toContain('FROM "note_drafts"');
     expect(queries[3]).toContain('FROM "therapy_notes"');
     expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it('allows a therapist to reconcile a treatment capture against the current saved note', async () => {
+    session.vertical = 'THERAPIST';
+    const auth = { ok: true, value: { psychologistId: 'psy-1', user: { vertical: 'THERAPIST' } } };
+    mocks.auth.mockResolvedValue(auth);
+    const therapy = TherapyNoteV1Schema.parse({
+      version: 'V1',
+      modality: 'CBT',
+      subjective: 'Fictional statement',
+      objective: 'Fictional observations',
+      assessment: 'Clinician reviewed',
+      plan: 'Review next visit',
+      riskFlags: { severity: 'none', indicators: [], details: '' },
+    });
+    const response = await post({
+      resolution: 'reviewed_and_completed',
+      reviewedDraftId: draft.id,
+      reviewToken: scribeCaptureReviewToken(draft),
+      reviewedNote: therapy,
+    });
+    expect(response.status).toBe(200);
+    expect(mocks.capability.mock.calls[0]?.[1]).toBe('BEHAVIORAL_HEALTH_DOCUMENTATION');
+    expect(isScribeCaptureReviewedForNote(draft, therapy)).toBe(true);
   });
 
   it('records a review bound to the submitted corrected note but leaves capture incomplete until sign', async () => {

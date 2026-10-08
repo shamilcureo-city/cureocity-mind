@@ -114,12 +114,22 @@ export class ChunkUploader {
         if (chunk.attempts >= this.opts.maxAttempts) continue;
         const outcome = await this.uploadOne(chunk);
         if (outcome.status === 'ok') {
-          await ChunkStore.remove(sessionId, chunk.chunkIndex);
+          await ChunkStore.remove(sessionId, chunk.chunkIndex, chunk);
           done += 1;
         } else if (outcome.status === 'permanent') {
-          await ChunkStore.incrementAttempts(sessionId, chunk.chunkIndex, outcome.httpStatus);
+          await ChunkStore.incrementAttempts(
+            sessionId,
+            chunk.chunkIndex,
+            outcome.httpStatus,
+            chunk,
+          );
         } else {
-          await ChunkStore.incrementAttempts(sessionId, chunk.chunkIndex, outcome.httpStatus);
+          await ChunkStore.incrementAttempts(
+            sessionId,
+            chunk.chunkIndex,
+            outcome.httpStatus,
+            chunk,
+          );
           await sleep(backoffMs(chunk.attempts + 1));
         }
         onProgress?.(done, pending.length);

@@ -15,6 +15,11 @@ export class AudioPersistenceQueue {
     return this.pending.size;
   }
 
+  /** Snapshot includes the only copy of bytes rejected by browser storage. */
+  snapshot(): PersistedChunk[] {
+    return [...this.pending.values()];
+  }
+
   flush(): Promise<void> {
     if (this.inFlight) return this.inFlight.then(() => this.flush());
     const work = (async () => {

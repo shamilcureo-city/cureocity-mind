@@ -8,8 +8,8 @@ import { builtinTemplatesByCategory, resolveBuiltinTemplate } from '../../lib/bu
  * The "BASE" template menu on the note. A categorised dropdown (matching the
  * reference): the built-in catalog grouped by category + the therapist's own
  * templates, each row showing whether it's the active note or "Click to
- * generate". Choosing one applies it to the session and re-generates the note
- * into that structure (via `onApply`). Pre-sign only.
+ * generate". Choosing one reformats the version-checked current note without
+ * replacing its clinical fields; `onApply` reloads that saved revision.
  */
 
 interface CustomTemplate {
@@ -22,24 +22,36 @@ interface Props {
   sessionId: string;
   currentTemplateId: string | null;
   disabled?: boolean;
+  expectedUpdatedAt?: string;
+  onBusyChange?: (busy: boolean) => void;
   /** Sprint 72 — INTAKE relabels the no-template default row to "Initial
    *  assessment (standard)" (the standard eight-section intake) instead of
    *  "Built-in (SOAP)", which is meaningless for a first assessment. */
   kind?: 'INTAKE' | 'TREATMENT';
-  /** Applied → the parent re-generates the note (e.g. triggerGeneration). */
-  onApply: () => void | Promise<void>;
+  /** Reload the saved draft while competing actions remain blocked. */
+  onApply: (receipt: { updatedAt: string | null }) => void | Promise<void>;
 }
 
-export function TemplatePicker({ sessionId, currentTemplateId, disabled, kind, onApply }: Props) {
+export function TemplatePicker({
+  sessionId,
+  currentTemplateId,
+  disabled,
+  kind,
+  onApply,
+  expectedUpdatedAt,
+  onBusyChange,
+}: Props) {
   const router = useRouter();
   const [items, setItems] = useState<CustomTemplate[]>([]);
   const [applying, setApplying] = useState(false);
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [appliedId, setAppliedId] = useState<string | null | undefined>(undefined);
   const wrapRef = useRef<HTMLDivElement>(null);
   const disabledRef = useRef(disabled);
   disabledRef.current = disabled;
 
-  const activeId = currentTemplateId ?? '';
+  const activeId = (appliedId === undefined ? currentTemplateId : appliedId) ?? '';
   // The no-template default: the standard intake for INTAKE, plain SOAP else.
   const standardLabel = kind === 'INTAKE' ? 'Initial assessment (standard)' : 'Built-in (SOAP)';
 
@@ -87,17 +99,26 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, kind, o
     if (applying || disabledRef.current) return;
     setOpen(false);
     setApplying(true);
+    setError(null);
+    onBusyChange?.(true);
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/note-template`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateId }),
+        body: JSON.stringify({ templateId, expectedUpdatedAt }),
+        signal: AbortSignal.timeout(115_000),
       });
-      if (res.ok) await onApply();
-    } catch {
-      // surfaced by the note panel's own error states
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Could not change the note format.');
+      }
+      setAppliedId(templateId);
+      await onApply((await res.json()) as { updatedAt: string | null });
+    } catch (error) {
+      setError((error as Error).message);
     } finally {
       setApplying(false);
+      onBusyChange?.(false);
     }
   }
 
@@ -114,6 +135,11 @@ export function TemplatePicker({ sessionId, currentTemplateId, disabled, kind, o
           {applying ? '…' : '▾'}
         </span>
       </button>
+      {error && (
+        <p role="alert" className="mt-2 max-w-sm text-sm text-[var(--color-warn)]">
+          {error}
+        </p>
+      )}
 
       {open && !disabled && (
         <div className="absolute left-0 z-30 mt-1.5 max-h-[420px] w-80 overflow-y-auto rounded-xl border border-[var(--color-line)] bg-white p-1.5 shadow-[0_12px_30px_rgba(15,27,42,0.13)]">

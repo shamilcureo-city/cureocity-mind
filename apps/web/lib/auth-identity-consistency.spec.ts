@@ -31,7 +31,12 @@ vi.mock('./capabilities', () => ({
 vi.mock('./audit', () => ({ auditMetadataFromRequest: () => ({}), writeAudit: mocks.audit }));
 vi.mock('./mind-manual-boundary', () => ({ enforceManualSessionBoundary: mocks.manualBoundary }));
 
-import { requirePsychologistId, resolveClient, resolveFirebaseUidOnly } from './auth-server';
+import {
+  requirePsychologistId,
+  resolveClient,
+  resolveFirebaseUidOnly,
+  resolveFirebaseClaimIdentity,
+} from './auth-server';
 
 const doctorUid = 'fictional-doctor-uid';
 const therapistUid = 'fictional-therapist-uid';
@@ -98,6 +103,55 @@ afterEach(() => {
 });
 
 describe('verified request identity consistency', () => {
+  it.each(['auth/id-token-revoked', 'auth/user-disabled'])(
+    'rejects %s before practitioner lookup without retry or cookie fallback',
+    async (code) => {
+      mocks.verifyIdToken.mockImplementation(async (_token, checkRevoked) => {
+        if (checkRevoked) throw { code };
+        return { uid: doctorUid };
+      });
+      const result = await requirePsychologistId(
+        request({ bearer: 'Bearer revoked', cookie: 'valid' }),
+      );
+      expect(result.ok).toBe(false);
+      expect(mocks.verifyIdToken).toHaveBeenCalledOnce();
+      expect(mocks.verifyIdToken).toHaveBeenCalledWith('revoked', true);
+      expect(mocks.verifySessionCookie).not.toHaveBeenCalled();
+      expectNoAuthorityLookup();
+    },
+  );
+
+  it('rejects revoked cookies even when a matching bearer verifies', async () => {
+    mocks.verifySessionCookie.mockImplementation(async (_token, checkRevoked) => {
+      if (checkRevoked) throw { code: 'auth/session-cookie-revoked' };
+      return { uid: doctorUid };
+    });
+    const result = await requirePsychologistId(
+      request({ bearer: 'Bearer valid', cookie: 'revoked' }),
+    );
+    expect(result.ok).toBe(false);
+    expect(mocks.verifySessionCookie).toHaveBeenCalledOnce();
+    expectNoAuthorityLookup();
+  });
+
+  it('keeps revocation enabled through transient verification retries', async () => {
+    mocks.verifySessionCookie.mockRejectedValueOnce({ code: 'auth/internal-error' });
+    const result = await requirePsychologistId(request({ cookie: 'valid' }));
+    expect(result.ok).toBe(true);
+    expect(mocks.verifySessionCookie.mock.calls).toEqual([
+      ['valid', true],
+      ['valid', true],
+    ]);
+  });
+
+  it('also checks revocation before redeeming a client identity claim', async () => {
+    mocks.verifyIdToken.mockRejectedValue({ code: 'auth/user-disabled' });
+    const result = await resolveFirebaseClaimIdentity(request({ bearer: 'Bearer disabled' }));
+    expect(result.ok).toBe(false);
+    expect(mocks.verifyIdToken).toHaveBeenCalledWith('disabled', true);
+    expect(mocks.verifyIdToken).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ['scribe.cureocity.in', doctorUid, therapistUid],
     ['mind.cureocity.in', therapistUid, doctorUid],
@@ -114,8 +168,8 @@ describe('verified request identity consistency', () => {
       expect(result.response.status).toBe(401);
       expect(result.response.headers.get('cache-control')).toBe('private, no-store');
       expect(await result.response.json()).toEqual(mismatchBody);
-      expect(mocks.verifyIdToken).toHaveBeenCalledWith('private-bearer');
-      expect(mocks.verifySessionCookie).toHaveBeenCalledWith('private-cookie');
+      expect(mocks.verifyIdToken).toHaveBeenCalledWith('private-bearer', true);
+      expect(mocks.verifySessionCookie).toHaveBeenCalledWith('private-cookie', true);
       expectNoAuthorityLookup();
       expect(console.warn).not.toHaveBeenCalled();
     },

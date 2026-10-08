@@ -7,6 +7,7 @@ import type { PersistedChunk, PersistedSession } from './idb-chunk-store';
 const data = vi.hoisted(() => ({
   chunks: new Map<number, PersistedChunk>(),
   cursor: null as PersistedSession | null,
+  serverCursor: 0,
   failInsert: false,
   tracks: [] as Track[],
   worklet: undefined as unknown as Worklet,
@@ -26,6 +27,7 @@ vi.mock('react', () => ({
 vi.mock('./storage-buckets', () => ({
   requestPersistentStorage: vi.fn(async () => ({ persisted: true })),
 }));
+vi.mock('./recording-cursor', () => ({ getRecordingCursor: vi.fn(async () => data.serverCursor) }));
 vi.mock('./idb-chunk-store', () => ({
   ChunkStore: {
     insert: vi.fn(async (chunk: PersistedChunk) => {
@@ -142,6 +144,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   data.chunks.clear();
   data.cursor = null;
+  data.serverCursor = 0;
   data.failInsert = false;
   data.tracks = [];
   data.closed = 0;
@@ -261,6 +264,30 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     await hook.stop();
     expect(data.cursor?.nextChunkIndex).toBe(2);
     expect(vi.mocked(fetch).mock.calls.length).toBe(uploadsBefore + 1);
+  });
+
+  it('resumes after server audio when this browser has no local recording cursor', async () => {
+    data.serverCursor = 12;
+    const hook = useSessionRecorder({ sessionId: 's-1', source: 'mic' });
+    await hook.start();
+    data.worklet.port.onmessage({
+      data: { type: 'frames', samples: new Float32Array(4_800).fill(0.2) },
+    });
+    await hook.stop();
+    expect(data.cursor?.nextChunkIndex).toBe(13);
+    expect((vi.mocked(fetch).mock.calls[0][1] as RequestInit).headers).toMatchObject({
+      'x-chunk-index': '12',
+    });
+  });
+
+  it('retains different audio rejected as a server chunk collision', async () => {
+    data.chunks.set(0, chunk());
+    vi.mocked(fetch).mockResolvedValue(
+      new Response('{"code":"AUDIO_CHUNK_CONFLICT"}', { status: 409 }),
+    );
+    await new ChunkUploader({ scribeBase: '/api/v1' }).drainSession('s-1');
+    expect(data.chunks.get(0)?.bytes).toEqual(new Uint8Array([1, 2]));
+    expect(data.chunks.get(0)?.lastHttpStatus).toBe(409);
   });
 
   it('external capture pauses its cloned track without disconnecting the call', async () => {

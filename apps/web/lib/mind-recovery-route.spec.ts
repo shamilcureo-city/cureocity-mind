@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildRecoveryPrefix, mergeRecoveryPrefix } from './mind-recovery-prefix';
 import { decodeSavedTranscript, TRANSCRIPTION_REVIEW_WARNING } from './saved-transcript';
+import { scribeCaptureIntegrity } from './scribe-capture-integrity';
 
 const state = vi.hoisted(() => ({
   vertical: 'THERAPIST',
@@ -122,6 +123,28 @@ beforeEach(() => {
 });
 
 describe('recovery POST adapter', () => {
+  it('persists incomplete capture both in the draft warning and encrypted generation source', async () => {
+    const response = await run(
+      new NextRequest('https://mind.example/recovery-transcript', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'FINALIZE',
+          utterances,
+          captureIncomplete: true,
+          captureIncompleteReason: 'audio_loss',
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(scribeCaptureIntegrity(state.draft?.errorMessage as string)).toEqual({
+      incomplete: true,
+      reason: 'audio_loss',
+    });
+    expect(
+      JSON.parse(state.ciphertexts.get(state.draft?.recoveryTranscriptEncrypted as string)!),
+    ).toMatchObject({ captureIncomplete: true, captureIncompleteReason: 'audio_loss' });
+  });
   it('acknowledges encrypted prefix without completing a handoff session', async () => {
     const response = await run();
     expect(response.status).toBe(200);

@@ -1,4 +1,10 @@
-import { CaptureReviewInputSchema, containsTranscriptionArtifact } from '@cureocity/contracts';
+import {
+  CaptureReviewInputSchema,
+  containsTranscriptionArtifact,
+  MedicalEncounterNoteV1Schema,
+  TherapyNoteV1Schema,
+  IntakeNoteV1Schema,
+} from '@cureocity/contracts';
 import type { Prisma } from '@prisma/client';
 import { NextResponse, type NextRequest } from 'next/server';
 import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
@@ -7,6 +13,7 @@ import { ClientPhiWriteForbiddenError, lockActiveClientForSession } from '@/lib/
 import { prisma } from '@/lib/prisma';
 import {
   markScribeCaptureReviewed,
+  isScribeCaptureReviewedForNote,
   reviewedScribeNoteHash,
   scribeCaptureIntegrity,
   scribeCaptureReviewToken,
@@ -18,7 +25,13 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type Context = { params: Promise<{ id: string }> };
-type LockedSession = { id: string; psychologistId: string; vertical: string; status: string };
+type LockedSession = {
+  id: string;
+  psychologistId: string;
+  vertical: string;
+  status: string;
+  kind: string;
+};
 class CaptureReviewError extends Error {
   constructor(
     readonly status: number,
@@ -36,7 +49,7 @@ async function lockReviewState(
 ) {
   await lockActiveClientForSession(tx, sessionId, psychologistId);
   const sessions = await tx.$queryRaw<LockedSession[]>`
-    SELECT s."id", s."psychologistId", s."status", p."vertical"
+    SELECT s."id", s."psychologistId", s."status", s."kind", p."vertical"
     FROM "sessions" s
     INNER JOIN "psychologists" p ON p."id" = s."psychologistId"
     WHERE s."id" = ${sessionId}
@@ -45,10 +58,8 @@ async function lockReviewState(
   const session = sessions[0];
   if (!session || session.psychologistId !== psychologistId)
     throw new CaptureReviewError(404, 'Session not found');
-  if (session.vertical !== 'DOCTOR')
-    throw new CaptureReviewError(403, 'Capture review is available only for doctor encounters.');
-  const drafts = await tx.$queryRaw<ScribeCaptureReviewDraft[]>`
-    SELECT "id", "status", "content", "rxPad", "transcriptEncrypted", "errorMessage"
+  const drafts = await tx.$queryRaw<(ScribeCaptureReviewDraft & { updatedAt?: Date })[]>`
+    SELECT "id", "status", "content", "rxPad", "transcriptEncrypted", "errorMessage", "updatedAt"
     FROM "note_drafts"
     WHERE "sessionId" = ${sessionId}
     FOR UPDATE
@@ -59,10 +70,12 @@ async function lockReviewState(
   return { session, draft: drafts[0] ?? null, signed: notes.length > 0 };
 }
 
-function reviewResponse(draft: ScribeCaptureReviewDraft | null) {
+function reviewResponse(draft: (ScribeCaptureReviewDraft & { updatedAt?: Date }) | null) {
   return {
     ...scribeCaptureIntegrity(draft?.errorMessage),
     draftId: draft?.id ?? null,
+    draftUpdatedAt: draft?.updatedAt ?? null,
+    reviewed: draft ? isScribeCaptureReviewedForNote(draft, draft.content) : false,
     reviewToken: draft ? scribeCaptureReviewToken(draft) : null,
   };
 }
@@ -78,7 +91,13 @@ function errorResponse(error: unknown): NextResponse {
 export async function GET(req: NextRequest, { params }: Context): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
-  const capability = await requireCapability(req, 'MEDICAL_DOCUMENTATION', auth);
+  const capability = await requireCapability(
+    req,
+    auth.value.user.vertical === 'THERAPIST'
+      ? 'BEHAVIORAL_HEALTH_DOCUMENTATION'
+      : 'MEDICAL_DOCUMENTATION',
+    auth,
+  );
   if (!capability.ok) return capability.response;
   const { id: sessionId } = await params;
   try {
@@ -96,7 +115,13 @@ export async function GET(req: NextRequest, { params }: Context): Promise<NextRe
 export async function POST(req: NextRequest, { params }: Context): Promise<NextResponse> {
   const auth = await requirePsychologistId(req);
   if (!auth.ok) return auth.response;
-  const capability = await requireCapability(req, 'MEDICAL_DOCUMENTATION', auth);
+  const capability = await requireCapability(
+    req,
+    auth.value.user.vertical === 'THERAPIST'
+      ? 'BEHAVIORAL_HEALTH_DOCUMENTATION'
+      : 'MEDICAL_DOCUMENTATION',
+    auth,
+  );
   if (!capability.ok) return capability.response;
   const input = await parseJson(req, CaptureReviewInputSchema);
   if (!input.ok) return input.response;
@@ -109,6 +134,14 @@ export async function POST(req: NextRequest, { params }: Context): Promise<NextR
   try {
     const draft = await prisma.$transaction(async (tx) => {
       const state = await lockReviewState(tx, sessionId, auth.value.psychologistId);
+      const noteSchema =
+        state.session.vertical === 'DOCTOR'
+          ? MedicalEncounterNoteV1Schema
+          : state.session.kind === 'INTAKE'
+            ? IntakeNoteV1Schema
+            : TherapyNoteV1Schema;
+      if (!noteSchema.safeParse(input.value.reviewedNote).success)
+        throw new CaptureReviewError(400, 'The reviewed note does not match this session kind.');
       if (state.signed)
         throw new CaptureReviewError(
           409,
@@ -134,7 +167,11 @@ export async function POST(req: NextRequest, { params }: Context): Promise<NextR
         );
       if (!scribeCaptureIntegrity(current.errorMessage).incomplete) return current;
       const errorMessage = markScribeCaptureReviewed(current, input.value.reviewedNote);
-      await tx.noteDraft.update({ where: { id: current.id }, data: { errorMessage } });
+      const updated = await tx.noteDraft.update({
+        where: { id: current.id },
+        data: { errorMessage },
+        select: { updatedAt: true },
+      });
       await writeAudit(
         {
           actorType: 'PSYCHOLOGIST',
@@ -145,7 +182,10 @@ export async function POST(req: NextRequest, { params }: Context): Promise<NextR
           metadata: {
             ...auditMetadataFromRequest(req),
             sessionId,
-            source: 'SCRIBE_CAPTURE_REVIEW',
+            source:
+              state.session.vertical === 'THERAPIST'
+                ? 'MIND_CAPTURE_REVIEW'
+                : 'SCRIBE_CAPTURE_REVIEW',
             resolution: input.value.resolution,
             reviewedDraftHashHex: input.value.reviewToken,
             reviewedNoteHashHex: reviewedScribeNoteHash(input.value.reviewedNote),
@@ -154,7 +194,7 @@ export async function POST(req: NextRequest, { params }: Context): Promise<NextR
         },
         tx,
       );
-      return { ...current, errorMessage };
+      return { ...current, errorMessage, updatedAt: updated?.updatedAt ?? current.updatedAt };
     });
     return NextResponse.json(
       {
