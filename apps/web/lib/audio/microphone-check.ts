@@ -6,6 +6,7 @@ type MicrophoneCheckErrorCode =
   | 'unavailable'
   | 'ended'
   | 'muted'
+  | 'setup-timeout'
   | 'no-frames'
   | 'timeout'
   | 'unsupported'
@@ -22,7 +23,13 @@ export class MicrophoneCheckError extends Error {
 }
 
 export type MicrophoneCheckProgress = {
-  stage: 'requesting' | 'checking';
+  stage:
+    | 'requesting'
+    | 'loading-processor'
+    | 'starting-context'
+    | 'waiting-input'
+    /** Legacy simulated progress; real checks report the specific phase above. */
+    | 'checking';
   level: number;
   frames: number;
   device: { deviceId: string; label: string } | null;
@@ -82,6 +89,7 @@ export function checkMicrophone({
     let totalFrames = 0;
     let stableSince = 0;
     let heardSound = false;
+    let stage: MicrophoneCheckProgress['stage'] = 'requesting';
     let device: MicrophoneCheckProgress['device'] = null;
     const listeners: Array<() => void> = [];
 
@@ -98,8 +106,9 @@ export function checkMicrophone({
       target.addEventListener(name, callback);
       listeners.push(() => target.removeEventListener(name, callback));
     };
-    const progress = (stage: MicrophoneCheckProgress['stage'], level = 0) => {
+    const progress = (nextStage: MicrophoneCheckProgress['stage'], level = 0) => {
       if (settled) return;
+      stage = nextStage;
       try {
         onProgress({ stage, level, frames: totalFrames, device });
       } catch {
@@ -154,6 +163,15 @@ export function checkMicrophone({
           new MicrophoneCheckError(
             'muted',
             'The microphone remained unavailable during its check.',
+          ),
+        );
+      } else if (stage !== 'waiting-input' || !worklet || context?.state !== 'running') {
+        finish(
+          new MicrophoneCheckError(
+            'setup-timeout',
+            stage === 'loading-processor'
+              ? 'The browser audio processor did not finish loading in time.'
+              : 'The browser audio context did not become ready in time.',
           ),
         );
       } else if (totalFrames === 0) {
@@ -255,6 +273,9 @@ export function checkMicrophone({
         }
         stream = acquired;
         clearTimeout(timer);
+        // One bounded post-permission lifetime covers setup and frame checking.
+        // Diagnose the phase at expiry rather than blaming a microphone before
+        // the browser has even connected its audio graph.
         timer = setTimeout(deadline, CHECK_TIMEOUT_MS);
         track = acquired.getAudioTracks()[0];
         if (!track) {
@@ -285,10 +306,10 @@ export function checkMicrophone({
           } catch {
             unavailable();
           }
-          progress('checking');
+          progress(stage);
         });
         listen(track, 'unmute', connectIfReady);
-        progress('checking');
+        progress('loading-processor');
         if (settled) return;
 
         context = new AudioContext({ sampleRate: 48_000 });
@@ -302,6 +323,8 @@ export function checkMicrophone({
           return;
         }
         await context.audioWorklet.addModule('/microphone-check-worklet.js');
+        if (settled) return;
+        progress('starting-context');
         if (settled) return;
         if (context.state !== 'running') await context.resume();
         if (settled) return;
@@ -355,7 +378,7 @@ export function checkMicrophone({
           stableFrames = data.frames;
           const level = Math.max(0, Math.min(1, data.rms));
           heardSound ||= data.peak > 0.01;
-          progress('checking', level);
+          progress('waiting-input', level);
           if (
             stableFrames >= context.sampleRate * STABLE_SECONDS &&
             Date.now() - stableSince >= STABLE_SECONDS * 1_000
@@ -364,6 +387,8 @@ export function checkMicrophone({
           }
         };
         worklet.connect(context.destination);
+        progress('waiting-input');
+        if (settled) return;
         connectIfReady();
       })
       .catch((error: unknown) => finish(captureError(error)));

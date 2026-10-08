@@ -6,7 +6,8 @@ import {
   type LiveGatewayEvent,
   type SessionUsageCommand,
 } from '@cureocity/contracts';
-import { MockGeminiPass1Backend } from '@cureocity/llm';
+import { MockGeminiPass1Backend, MockGeminiPass2Backend } from '@cureocity/llm';
+import { LiveSession } from './live-session';
 
 const fixture = vi.hoisted(() => ({ server: null as unknown as EventEmitter }));
 vi.mock('node:http', () => ({ createServer: () => ({ listen: vi.fn(), close: vi.fn() }) }));
@@ -152,7 +153,7 @@ describe('actual gateway durable registration and socket lifecycle', () => {
       const initial = verifier.mock.calls
         .filter(([url]) => String(url).endsWith('/live-authority'))
         .map(([, options]) => JSON.parse(String(options?.body)) as { purpose: string });
-      expect(initial[0]?.purpose).toBe('capture');
+      expect(initial[0]?.purpose).toBe('preflight');
       verifier.mockClear();
       verifier.mockImplementation(async (_url, options) => {
         const { purpose } = JSON.parse(String(options?.body)) as { purpose: string };
@@ -179,6 +180,9 @@ describe('actual gateway durable registration and socket lifecycle', () => {
   it.each(['binary', 'refreshNote'] as const)(
     'requires capture permission for %s even while finalization is allowed',
     async (input) => {
+      const pushAudio = vi.spyOn(LiveSession.prototype, 'pushAudio');
+      const pass1 = vi.spyOn(MockGeminiPass1Backend.prototype, 'run');
+      const pass2 = vi.spyOn(MockGeminiPass2Backend.prototype, 'run');
       const { socket } = connect('DOCTOR');
       await vi.waitFor(() =>
         expect(socket.events).toContainEqual({ type: 'status', state: 'listening' }),
@@ -198,8 +202,13 @@ describe('actual gateway durable registration and socket lifecycle', () => {
       await vi.waitFor(() =>
         expect(socket.events).toContainEqual({ type: 'status', state: 'unauthorized' }),
       );
-      expect(JSON.parse(String(verifier.mock.calls[0]?.[1]?.body)).purpose).toBe('capture');
+      expect(JSON.parse(String(verifier.mock.calls[0]?.[1]?.body)).purpose).toBe(
+        input === 'binary' ? 'capture-activation' : 'capture',
+      );
       expect(socket.readyState).toBe(3);
+      expect(pushAudio).not.toHaveBeenCalled();
+      expect(pass1).not.toHaveBeenCalled();
+      expect(pass2).not.toHaveBeenCalled();
     },
   );
 

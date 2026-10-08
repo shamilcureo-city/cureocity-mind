@@ -204,6 +204,7 @@ export function RxPadPdf(props: RxPadPdfProps) {
                 </View>
                 <Text style={styles.cDose}>
                   {[m.strength, m.dose].filter(Boolean).join(' ') || '—'}
+                  {m.route ? `\nRoute: ${m.route}` : ''}
                 </Text>
                 <Text style={styles.cFreq}>
                   {[m.frequency, m.timing].filter(Boolean).join(' · ') || '—'}

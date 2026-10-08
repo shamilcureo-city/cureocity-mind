@@ -333,6 +333,8 @@ async function acknowledgeInitialConsent(
           ackedAt: now,
         })),
         notes: null,
+        captureMode: 'LIVE',
+        ambientCaptureDeclined: false,
       },
     },
   });

@@ -29,7 +29,9 @@ export const LiveAuthorityRequestSchema = z
     tokenExpiresAt: z.number().int().positive(),
     vertical: PractitionerVerticalSchema,
     // Older gateways must never inherit queued-processing authority for new audio.
-    purpose: z.enum(['capture', 'queued-finalization']).optional(),
+    purpose: z
+      .enum(['capture', 'queued-finalization', 'preflight', 'capture-activation'])
+      .optional(),
   })
   .strict();
 export type LiveAuthorityRequest = z.infer<typeof LiveAuthorityRequestSchema>;

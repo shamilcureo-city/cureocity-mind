@@ -81,3 +81,47 @@ function containsArtifactText(text: string): boolean {
 export function containsTranscriptionArtifact(text: string): boolean {
   return containsArtifactValue(text);
 }
+
+/**
+ * The former doctor transcription prompt contained this complete six-value
+ * example, which a model can echo as if it were speech. Match the whole
+ * ordered fingerprint only: an individual measurement is ordinary clinical
+ * content, not evidence of an artifact. This is a quarantine signal for
+ * DOCTOR callers, not proof that audio was silent or a general ASR validator.
+ * Do not add it to the shared artifact detector used by Mind.
+ */
+export function containsMedicalTranscriptionExample(text: string): boolean {
+  const clinicalStrings: string[] = [];
+  collectClinicalStrings(text, clinicalStrings);
+  const normalized = clinicalStrings
+    .join('\n')
+    .normalize('NFKC')
+    .replace(/^(?:Doctor|Patient|Speaker|therapist|client|unknown)\s*:\s*/gimu, '');
+  return /\bbp[\s\p{P}=]*130\s*\/\s*80(?!\d|\.\d)[\s\p{P}=]*pr[\s\p{P}=]*88(?!\d|\.\d)[\s\p{P}=]*spo2[\s\p{P}=]*97(?!\d|\.\d)[\s\p{P}=]*hba1c[\s\p{P}=]*7\s*\.\s*2(?!\d|\.\d)[\s\p{P}=]*fbs[\s\p{P}=]*140(?!\d|\.\d)[\s\p{P}=]*creatinine[\s\p{P}=]*1\s*\.\s*1(?!\d|\.\d)/iu.test(
+    normalized,
+  );
+}
+
+function collectClinicalStrings(value: unknown, strings: string[]): void {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        collectClinicalStrings(JSON.parse(trimmed), strings);
+        return;
+      } catch {
+        // Plain speech may start with a bracket; preserve it for matching.
+      }
+    }
+    strings.push(value);
+  } else if (Array.isArray(value)) {
+    for (const nested of value) collectClinicalStrings(nested, strings);
+  } else if (value && typeof value === 'object') {
+    // Speaker/id/language metadata must not interrupt an example split over
+    // diarized text segments. Only content values, never field names, match.
+    for (const [key, nested] of Object.entries(value)) {
+      if (['speaker', 'language', 'id', 'utteranceId', 'sessionId'].includes(key)) continue;
+      collectClinicalStrings(nested, strings);
+    }
+  }
+}

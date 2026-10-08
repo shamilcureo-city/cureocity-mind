@@ -18,7 +18,7 @@ import {
 } from '@/lib/session-defaults';
 import { parseJson } from '@/lib/validate';
 import { DEFAULT_BUILTIN_TEMPLATE_ID } from '@/lib/builtin-templates';
-import { istDayRange, nextClinicToken } from '@/lib/clinic-queue';
+import { clinicDayRange, clinicTimezone, istDayRange, nextClinicToken } from '@/lib/clinic-queue';
 import { MindPurposeConflict, selectMindSessionPurpose } from '@/lib/mind-session-purpose';
 import { ClientPhiWriteForbiddenError, lockActiveClient } from '@/lib/phi-write-lock';
 import {
@@ -186,7 +186,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ahead of the billing gate; the schedule-a-future-slot path (no startNow)
   // always falls through to mint below.
   if (dto.value.startNow) {
-    const range = istDayRange(new Date());
+    const range =
+      auth.value.user.vertical === 'DOCTOR'
+        ? clinicDayRange(new Date(), await clinicTimezone(auth.value.psychologistId))
+        : istDayRange(new Date());
     const candidates = await prisma.session.findMany({
       where: {
         clientId: dto.value.clientId,

@@ -145,6 +145,11 @@ export class MockGeminiPass1Backend implements IPass1Backend {
       ],
       detectedLanguages: manglish ? ['ml', 'en'] : hinglish ? ['hi', 'en'] : ['en'],
     };
+    // Scribe's integrity gate compares both representations. Keep this
+    // explicitly mock-only fixture internally consistent, as real output must be.
+    if (input.vertical === 'DOCTOR') {
+      output.transcript = output.speakerSegments.map((segment) => segment.text).join(' ');
+    }
     return {
       output,
       callLog: {

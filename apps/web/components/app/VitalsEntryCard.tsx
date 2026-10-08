@@ -31,6 +31,15 @@ export function VitalsEntryCard({ sessionId }: { sessionId: string }): React.JSX
       const n = Number(v.trim());
       return v.trim() !== '' && Number.isFinite(n) ? n : null;
     };
+    if (
+      [systolic, diastolic, weight].some(
+        (value) => value.trim() !== '' && !Number.isFinite(Number(value)),
+      )
+    ) {
+      setError('Enter numbers only. Previously recorded measurements have not been changed.');
+      setState('idle');
+      return;
+    }
     try {
       const res = await fetch(`/api/v1/sessions/${sessionId}/vitals`, {
         method: 'POST',
@@ -61,7 +70,7 @@ export function VitalsEntryCard({ sessionId }: { sessionId: string }): React.JSX
       </p>
       <p className="mt-1 text-sm text-[var(--color-ink-2)]">
         Anything measured at triage rather than said out loud. These feed the patient&rsquo;s BP and
-        weight trend.
+        weight trend. Leave a field blank to keep its previously recorded measurement.
       </p>
       <form onSubmit={save} className="mt-4 flex flex-wrap items-end gap-3">
         <div className="w-24">

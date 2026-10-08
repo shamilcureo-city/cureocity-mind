@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   upsert: vi.fn(),
   writeAudit: vi.fn(),
   encrypt: vi.fn(),
+  decrypt: vi.fn(),
   translate: vi.fn(),
   metric: vi.fn(),
   after: vi.fn(),
@@ -33,7 +34,10 @@ vi.mock('@/lib/audit', () => ({
   writeAudit: mocks.writeAudit,
   auditMetadataFromRequest: () => ({}),
 }));
-vi.mock('@/lib/tenant-crypto', () => ({ encryptForTenant: mocks.encrypt }));
+vi.mock('@/lib/tenant-crypto', () => ({
+  encryptForTenant: mocks.encrypt,
+  decryptForTenant: mocks.decrypt,
+}));
 vi.mock('@/lib/ensure-english-note', () => ({ ensureEnglishNote: mocks.translate }));
 vi.mock('@/lib/scribe-teleconsult', () => ({
   assertScribeTeleconsultDraftPersistence: mocks.teleconsultPersistence,
@@ -130,6 +134,7 @@ beforeEach(() => {
   mocks.requireCapability.mockResolvedValue(auth);
   mocks.sessionFindUnique.mockImplementation(async () => ({ ...session }));
   mocks.encrypt.mockResolvedValue('encrypted-transcript');
+  mocks.decrypt.mockResolvedValue(null);
   mocks.translate.mockImplementation(async (note) => note);
   mocks.metric.mockImplementation(() => events.push('metric'));
   mocks.upsert.mockImplementation(async ({ create, update }) => {
@@ -367,6 +372,50 @@ describe('Mind live risk persistence boundaries', () => {
     ).toBe(422);
     expect(mocks.upsert).not.toHaveBeenCalled();
   });
+  it.each(['transcript', 'note'] as const)(
+    'quarantines the known Scribe prompt example in %s before any clinical writes',
+    async (field) => {
+      session.psychologist = { vertical: 'DOCTOR', specialty: null };
+      mocks.requireCapability.mockResolvedValue({
+        ...auth,
+        value: {
+          ...auth.value,
+          user: { capabilities: ['PRESCRIPTION_DRAFTING', 'CLINICAL_ORDERS', 'CHRONIC_CARE'] },
+        },
+      });
+      const example = 'BP 130/80, PR 88, SpO2 97%, HbA1c 7.2, FBS 140, creatinine 1.1.';
+      const response = await post({
+        note: { version: 'V1', chiefComplaint: field === 'note' ? example : 'Fictional concern' },
+        transcript: field === 'transcript' ? `Doctor: ${example}` : 'Fictional speech.',
+      });
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ code: 'MEDICAL_TRANSCRIPTION_EXAMPLE' });
+      expect(mocks.encrypt).not.toHaveBeenCalled();
+      expect(mocks.transaction).not.toHaveBeenCalled();
+      expect(mocks.upsert).not.toHaveBeenCalled();
+      expect(mocks.persistDraftedOrders).not.toHaveBeenCalled();
+      expect(mocks.persistVitalReadings).not.toHaveBeenCalled();
+      expect(storedAudits).toEqual([]);
+      expect(session.status).toBe('IN_PROGRESS');
+    },
+  );
+  it('allows ordinary Scribe readings and code-mixed speech without a broad value blacklist', async () => {
+    session.psychologist = { vertical: 'DOCTOR', specialty: null };
+    const response = await post({
+      note: { version: 'V1', chiefComplaint: 'Fictional concern' },
+      transcript: 'Doctor: BP 130/80. Patient: ഇന്ന് എനിക്ക് ആശ്വാസമുണ്ട്. HbA1c 7.2.',
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.encrypt).toHaveBeenCalledOnce();
+    expect(mocks.upsert).toHaveBeenCalledOnce();
+  });
+  it('does not apply the Scribe-only example rule to Mind ingestion', async () => {
+    const response = await post({
+      ...payload(),
+      transcript: 'BP 130/80, PR 88, SpO2 97%, HbA1c 7.2, FBS 140, creatinine 1.1.',
+    });
+    expect(response.status).toBe(201);
+  });
   it('does not duplicate draft/crisis/lifecycle effects or metrics on replay', async () => {
     expect((await post(payload())).status).toBe(201);
     expect((await post(payload())).status).toBe(409);
@@ -523,5 +572,111 @@ describe('Mind live risk persistence boundaries', () => {
     expect(scribeCaptureIntegrity(storedDraft?.errorMessage as string | undefined).incomplete).toBe(
       true,
     );
+  });
+});
+
+describe('Scribe final source preserves acknowledged capture checkpoints', () => {
+  const note = { version: 'V1', chiefComplaint: 'Fictional concern' };
+  const source = 'Patient: First fictional turn.\nDoctor: Second fictional turn.';
+  const recovery = (captureIncomplete = false) => ({
+    version: 1,
+    captureIncomplete,
+    // The browser canonical transcript sorts by capture time and trims text.
+    utterances: [
+      {
+        id: 'u2',
+        speaker: 'doctor',
+        text: ' Second fictional turn. ',
+        tStartMs: 1000,
+        tEndMs: 2000,
+      },
+      { id: 'u1', speaker: 'patient', text: ' First fictional turn. ', tStartMs: 0, tEndMs: 1000 },
+    ],
+  });
+  beforeEach(() => {
+    session.psychologist = { vertical: 'DOCTOR', specialty: null };
+    storedDraft = {
+      id: 'draft-1',
+      status: 'PENDING',
+      recoveryTranscriptEncrypted: 'checkpoint',
+      errorMessage: null,
+    };
+    mocks.decrypt.mockResolvedValue(JSON.stringify(recovery()));
+  });
+
+  it.each([
+    undefined,
+    'Patient: First fictional turn.',
+    'Doctor: First fictional turn.\nDoctor: Second fictional turn.',
+    `${source} Changed second turn.`,
+  ])('refuses a final that omits or rewrites acknowledged words: %s', async (transcript) => {
+    const before = { ...storedDraft };
+    const response = await post({ note, ...(transcript === undefined ? {} : { transcript }) });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'SCRIBE_CHECKPOINT_SOURCE_CONFLICT' });
+    expect(storedDraft).toEqual(before);
+    expect(session.status).toBe('IN_PROGRESS');
+    expect(tx.session.updateMany).not.toHaveBeenCalled();
+    expect(mocks.upsert).not.toHaveBeenCalled();
+    expect(mocks.persistDraftedOrders).not.toHaveBeenCalled();
+  });
+
+  it.each([source, `${source}\nPatient: An additional captured turn.`])(
+    'allows a complete canonical source and preserves its encrypted checkpoint',
+    async (transcript) => {
+      expect((await post({ note, transcript })).status).toBe(201);
+      expect(storedDraft).toMatchObject({
+        status: 'COMPLETED',
+        transcriptEncrypted: 'encrypted-transcript',
+        recoveryTranscriptEncrypted: 'checkpoint',
+      });
+      expect(mocks.decrypt).toHaveBeenCalledWith('psy-1', 'checkpoint');
+      const statements = tx.$queryRaw.mock.calls.map(([sql]) =>
+        Array.from(sql as TemplateStringsArray).join('?'),
+      );
+      expect(statements[0]).toContain('FROM "clients"');
+      expect(statements[1]).toContain('FROM "sessions"');
+      expect(statements[1]).toContain('FOR UPDATE');
+    },
+  );
+
+  it('carries an acknowledged incomplete marker into final review even when an old tab omits it', async () => {
+    mocks.decrypt.mockResolvedValue(JSON.stringify(recovery(true)));
+    expect((await post({ note, transcript: source, captureIncomplete: false })).status).toBe(201);
+    expect(scribeCaptureIntegrity(storedDraft?.errorMessage as string)).toEqual({
+      incomplete: true,
+      reason: 'capture_interrupted',
+    });
+    expect(mocks.teleconsultPersistence).toHaveBeenCalledWith(tx, 'session-1', 'psy-1', true);
+  });
+
+  it.each([null, 'not json', JSON.stringify({ version: 99, utterances: [] })])(
+    'fails closed without lifecycle changes for unreadable recovery: %s',
+    async (decoded) => {
+      mocks.decrypt.mockResolvedValue(decoded);
+      const response = await post({ note, transcript: source });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ code: 'SCRIBE_CHECKPOINT_UNAVAILABLE' });
+      expect(session.status).toBe('IN_PROGRESS');
+      expect(tx.session.updateMany).not.toHaveBeenCalled();
+      expect(mocks.upsert).not.toHaveBeenCalled();
+    },
+  );
+
+  it('compares the checkpoint committed before acquiring its session lock, not an earlier read', async () => {
+    storedDraft = null;
+    tx.$queryRaw.mockImplementation(async (sql: TemplateStringsArray) => {
+      if (Array.from(sql).join('?').includes('FROM "sessions"'))
+        storedDraft = {
+          id: 'draft-1',
+          status: 'PENDING',
+          recoveryTranscriptEncrypted: 'newer-checkpoint',
+        };
+      return [{ id: 'client-1', psychologistId: 'psy-1' }];
+    });
+    const response = await post({ note, transcript: 'Patient: First fictional turn.' });
+    expect(response.status).toBe(409);
+    expect(mocks.decrypt).toHaveBeenCalledWith('psy-1', 'newer-checkpoint');
+    expect(tx.session.updateMany).not.toHaveBeenCalled();
   });
 });

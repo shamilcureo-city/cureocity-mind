@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { NextResponse, after, type NextRequest } from 'next/server';
 import { z } from 'zod';
 import { PractitionerVerticalSchema } from '@cureocity/contracts';
-import { requirePsychologistId } from '@/lib/auth-server';
+import { requireOnboardingIdentity } from '@/lib/onboarding-access';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { createDemoClient } from '@/lib/demo-client';
 import { toPsychologist } from '@/lib/mappers';
@@ -104,10 +104,20 @@ const OnboardingCompleteSchema = z
   });
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const auth = await requirePsychologistId(req);
+  const auth = await requireOnboardingIdentity(req);
   if (!auth.ok) return auth.response;
   const input = await parseJson(req, OnboardingCompleteSchema);
   if (!input.ok) return input.response;
+  if (
+    'pendingApproval' in auth.value &&
+    auth.value.pendingApproval &&
+    input.value.vertical !== 'DOCTOR'
+  ) {
+    return NextResponse.json(
+      { error: 'Scribe registration is for doctors. No clinical access is granted by this form.' },
+      { status: 400 },
+    );
+  }
 
   const me = await prisma.psychologist.findUnique({
     where: { id: auth.value.psychologistId },
@@ -129,7 +139,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     updated = await prisma.$transaction(async (tx) => {
       const row = await tx.psychologist.update({
-        where: { id: auth.value.psychologistId },
+        where: {
+          id: auth.value.psychologistId,
+          onboardingCompletedAt: null,
+          deletedAt: null,
+          status: {
+            in: [
+              'ACTIVE',
+              ...('pendingApproval' in auth.value && auth.value.pendingApproval
+                ? ['PENDING_VERIFICATION' as const]
+                : []),
+            ],
+          },
+        },
         data: {
           fullName: input.value.fullName,
           email: input.value.email.toLowerCase(),
@@ -175,6 +197,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return row;
     });
   } catch (e) {
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2025') {
+      return NextResponse.json(
+        { error: 'Account details or access changed. Reload before submitting again.' },
+        { status: 409 },
+      );
+    }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
       const target = (e.meta?.['target'] as string[] | undefined)?.[0] ?? 'field';
       const human =
@@ -218,7 +246,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Best-effort welcome email. A transient failure (or noop in dev)
   // must NOT roll back onboarding — log and move on.
   try {
-    const res = await sendWelcomeEmail({ to: updated.email, fullName: updated.fullName });
+    const res = await sendWelcomeEmail({
+      to: updated.email,
+      fullName: updated.fullName,
+      vertical: input.value.vertical,
+    });
     if (res.outcome !== 'sent') {
       console.warn(
         `[onboarding] welcome email outcome=${res.outcome} code=${res.errorCode ?? ''} for psy=${updated.id}`,

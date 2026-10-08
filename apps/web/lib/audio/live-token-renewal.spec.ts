@@ -12,12 +12,16 @@ function response(
   return new Response(JSON.stringify(body), { status });
 }
 
-function setup(overrides: Partial<{ requestedAtMs: number; expiresInSec: number }> = {}) {
+function setup(
+  overrides: Partial<{ requestedAtMs: number; expiresInSec: number }> = {},
+  reserveFinalizationWindow = false,
+) {
   const send = vi.fn<(command: LiveGatewayCommand) => void>();
   const onFailure = vi.fn();
   const renewal = new LiveTokenRenewal({
     sessionId: 'fictional-session',
     initialLease: { requestedAtMs: startTime, expiresInSec: 300, ...overrides },
+    reserveFinalizationWindow,
     send,
     onFailure,
   });
@@ -65,6 +69,62 @@ describe('live token renewal on an existing socket', () => {
     });
     renewal.dispose();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('reserves a fresh acknowledged lease before Scribe finalizes near expiry', async () => {
+    const { renewal, send } = setup();
+    renewal.start();
+    await vi.advanceTimersByTimeAsync(220_000);
+    let ready = false;
+    const wait = renewal.prepareFinalization().then(() => {
+      ready = true;
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(send).toHaveBeenCalledOnce();
+    expect(ready).toBe(false);
+    const cmd = send.mock.calls[0]![0];
+    if (cmd.type !== 'renewToken') throw new Error('Expected renewal');
+    renewal.handleEvent({
+      type: 'tokenRenewed',
+      requestId: cmd.requestId,
+      expiresAt: Math.floor(Date.now() / 1000) + 300,
+    });
+    await wait;
+    expect(ready).toBe(true);
+    renewal.dispose();
+  });
+
+  it('Scribe renews with a finalization reserve while the default Mind cadence remains unchanged', async () => {
+    const { renewal, send, onFailure } = setup({}, true);
+    renewal.start();
+    await vi.advanceTimersByTimeAsync(149_999);
+    expect(fetch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(send).toHaveBeenCalledOnce();
+    const command = send.mock.calls[0]![0];
+    if (command.type !== 'renewToken') throw new Error('Expected renewal');
+    // A slow acknowledgement still leaves over 90 seconds on the old lease.
+    await vi.advanceTimersByTimeAsync(19_000);
+    renewal.handleEvent({
+      type: 'tokenRenewed',
+      requestId: command.requestId,
+      expiresAt: Math.floor(Date.now() / 1000) + 281,
+    });
+    await expect(renewal.prepareFinalization()).resolves.toBeUndefined();
+    expect(onFailure).not.toHaveBeenCalled();
+    renewal.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('refuses finalization reservation when renewal fails or is cancelled', async () => {
+    const { renewal } = setup();
+    renewal.start();
+    await vi.advanceTimersByTimeAsync(220_000);
+    vi.mocked(fetch).mockResolvedValueOnce(response({}, 403));
+    const wait = renewal.prepareFinalization();
+    const rejected = expect(wait).rejects.toThrow('authorization ended');
+    await vi.advanceTimersByTimeAsync(0);
+    await rejected;
   });
 
   it('accounts for initial mint latency rather than starting a new TTL on listening', async () => {

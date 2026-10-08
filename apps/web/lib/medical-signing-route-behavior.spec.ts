@@ -34,11 +34,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@cureocity/contracts', async (importOriginal) => {
-  const { containsTranscriptionArtifact, SpeakerSegmentSchema } =
-    await importOriginal<typeof import('@cureocity/contracts')>();
+  const {
+    containsTranscriptionArtifact,
+    containsMedicalTranscriptionExample,
+    SpeakerSegmentSchema,
+  } = await importOriginal<typeof import('@cureocity/contracts')>();
   const passthrough = { safeParse: mocks.noteSafeParse };
   return {
     containsTranscriptionArtifact,
+    containsMedicalTranscriptionExample,
     SpeakerSegmentSchema,
     IntakeNoteV1Schema: passthrough,
     MedicalEncounterNoteV1Schema: passthrough,
@@ -248,6 +252,120 @@ beforeEach(() => {
 afterAll(() => vi.useRealTimers());
 
 describe('medical signing route transaction behavior', () => {
+  it.each(['transcript', 'segments', 'segments_without_ciphertext', 'note', 'unreadable'] as const)(
+    'refuses Scribe signing of the locked legacy prompt example: %s',
+    async (scenario) => {
+      const example = 'BP 130/80, PR 88, SpO2 97%, HbA1c 7.2, FBS 140, creatinine 1.1.';
+      const baseQuery = mocks.queryRaw.getMockImplementation()!;
+      mocks.queryRaw.mockImplementation(
+        async (strings: TemplateStringsArray, ...values: unknown[]) => {
+          const rows = await baseQuery(strings, ...values);
+          if (sqlText(strings).includes('FROM "note_drafts"')) {
+            return rows.map((row: object) => ({
+              ...row,
+              transcriptEncrypted:
+                scenario === 'segments_without_ciphertext' ? null : 'encrypted-source',
+              ...(scenario === 'note' ? { content: { ...finalNote, hpi: example } } : {}),
+              ...(scenario === 'segments' || scenario === 'segments_without_ciphertext'
+                ? {
+                    speakerSegments: [
+                      {
+                        speaker: 'therapist',
+                        text: 'BP 130/80, PR 88, SpO2 97%,',
+                        startMs: 0,
+                        endMs: 1000,
+                      },
+                      {
+                        speaker: 'therapist',
+                        text: 'HbA1c 7.2, FBS 140, creatinine 1.1.',
+                        startMs: 1000,
+                        endMs: 2000,
+                      },
+                    ],
+                  }
+                : {}),
+            }));
+          }
+          return rows;
+        },
+      );
+      mocks.resolveNoteTranscriptData.mockResolvedValue(
+        scenario === 'unreadable'
+          ? null
+          : {
+              transcript: scenario === 'transcript' ? example : 'Fictional reliable speech.',
+              speakerSegments: null,
+              transcriptionWarning: false,
+            },
+      );
+      const response = await POST(request() as never, {
+        params: Promise.resolve({ id: 'session-1' }),
+      });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: expect.stringContaining(
+          scenario === 'unreadable' ? 'could not be verified' : 'prompt example',
+        ),
+      });
+      expect(mocks.noteCreate).not.toHaveBeenCalled();
+      expect(mocks.noteUpdate).not.toHaveBeenCalled();
+      expect(mocks.draftUpdate).not.toHaveBeenCalled();
+      expect(mocks.writeAudit).not.toHaveBeenCalled();
+    },
+  );
+  it('allows normal Scribe vitals in a readable locked source', async () => {
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation(
+      async (strings: TemplateStringsArray, ...values: unknown[]) => {
+        const rows = await baseQuery(strings, ...values);
+        return sqlText(strings).includes('FROM "note_drafts"')
+          ? rows.map((row: object) => ({ ...row, transcriptEncrypted: 'encrypted-source' }))
+          : rows;
+      },
+    );
+    mocks.resolveNoteTranscriptData.mockResolvedValue({
+      transcript: 'Doctor: BP 130/80, PR 88. Patient: ഇന്ന് ആശ്വാസമുണ്ട്.',
+      speakerSegments: null,
+      transcriptionWarning: false,
+    });
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(201);
+    expect(mocks.noteCreate).toHaveBeenCalledOnce();
+  });
+  it('does not treat a capture-review acknowledgement as proof that a prompt echo was spoken', async () => {
+    const draft = {
+      id: 'draft-1',
+      status: 'COMPLETED',
+      content: finalNote,
+      rxPad: null,
+      transcriptEncrypted: 'encrypted-source',
+      errorMessage: preserveScribeCaptureIntegrity(null, true, 'audio_loss'),
+    };
+    draft.errorMessage = markScribeCaptureReviewed(draft, finalNote);
+    const baseQuery = mocks.queryRaw.getMockImplementation()!;
+    mocks.queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) =>
+      sqlText(strings).includes('FROM "note_drafts"')
+        ? Promise.resolve([draft])
+        : baseQuery(strings, ...values),
+    );
+    mocks.resolveNoteTranscriptData.mockResolvedValue({
+      transcript: 'BP 130/80, PR 88, SpO2 97%, HbA1c 7.2, FBS 140, creatinine 1.1.',
+      speakerSegments: null,
+      transcriptionWarning: false,
+    });
+    const response = await POST(request() as never, {
+      params: Promise.resolve({ id: 'session-1' }),
+    });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining('prompt example'),
+    });
+    expect(mocks.noteCreate).not.toHaveBeenCalled();
+    expect(mocks.noteUpdate).not.toHaveBeenCalled();
+    expect(mocks.draftUpdate).not.toHaveBeenCalled();
+  });
   it.each(['pending', 'reviewed_different_note', 'reviewed_changed_source', 'reviewed_exact_note'])(
     'checks capture review under signing locks: %s',
     async (scenario) => {

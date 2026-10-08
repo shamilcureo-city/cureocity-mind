@@ -4,6 +4,7 @@ import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { toSession } from '@/lib/mappers';
 import { fetchOwnedSession } from '@/lib/session-helpers';
+import { scribeConsentAllowsMode } from '@/lib/scribe-consent-mode';
 import {
   assertValidScribeConsent,
   ConsentAuthorizationError,
@@ -48,6 +49,12 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
     body?.captureMode === 'UPLOAD'
       ? body.captureMode
       : null;
+  if (auth.value.user.vertical === 'DOCTOR' && !captureMode) {
+    return NextResponse.json(
+      { error: 'A valid Scribe capture mode is required.' },
+      { status: 400 },
+    );
+  }
 
   let updated;
   try {
@@ -62,6 +69,11 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
             'This session is clinician-written. Audio and AI processing are disabled.',
           );
         await assertValidScribeConsent(current?.consentSnapshot ?? null, existing.clientId, tx);
+        if (captureMode && !scribeConsentAllowsMode(current?.consentSnapshot, captureMode)) {
+          throw new ConsentAuthorizationError(
+            'Confirm consent for this capture mode before starting the encounter.',
+          );
+        }
 
         const row = await conditionalSessionTransition(tx, {
           sessionId,

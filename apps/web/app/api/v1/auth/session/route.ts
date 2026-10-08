@@ -15,6 +15,7 @@ import { isPilotInviteRequired, redeemInviteCode } from '@/lib/invite';
 import { redeemReferralAtSignup } from '@/lib/referral';
 import { parseJson } from '@/lib/validate';
 import { prisma } from '@/lib/prisma';
+import { productFromHost } from '@/lib/product';
 
 export const dynamic = 'force-dynamic';
 
@@ -118,57 +119,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     select: { id: true, deletedAt: true },
   });
   let registered = false;
-  let linked = false;
+  const linked = false;
 
   if (psy?.deletedAt) {
     return NextResponse.json({ error: 'This account has been deleted' }, { status: 403 });
   }
 
-  // Phone-OTP account linking. If no Psychologist matches this Firebase
-  // uid but one DOES match the verified phone number in the id token,
-  // re-bind the row to this uid. Firebase has already verified phone
-  // ownership via SMS before issuing the token, so this is safe and
-  // lets a therapist whose account was originally created via Google /
-  // email sign in via phone OTP without colliding on the unique phone
-  // constraint at auto-provision time.
+  // A contact phone is not a provider link. Never replace the canonical UID:
+  // that disables the original login and can trust an unverified profile phone.
+  // Link the phone provider while signed in to the original Firebase identity.
   if (!psy && decoded.phone_number) {
     const byPhone = await prisma.psychologist.findUnique({
       where: { phone: decoded.phone_number },
       select: { id: true, deletedAt: true, firebaseUid: true },
     });
     if (byPhone && byPhone.deletedAt === null) {
-      const relinked = await prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`firebase-role:${decoded.uid}`}))`;
-        const clientRole = await tx.client.findUnique({
-          where: { clientFirebaseUid: decoded.uid },
-          select: { id: true },
-        });
-        if (clientRole) return false;
-        await tx.psychologist.update({
-          where: { id: byPhone.id },
-          data: { firebaseUid: decoded.uid },
-        });
-        await writeAudit(
-          {
-            actorType: 'PSYCHOLOGIST',
-            actorPsychologistId: byPhone.id,
-            action: 'PSYCHOLOGIST_UPDATED',
-            targetType: 'Psychologist',
-            targetId: byPhone.id,
-            metadata: { event: 'firebase-uid-relinked-via-phone-otp' },
-          },
-          tx,
-        );
-        return true;
-      });
-      if (!relinked) {
-        return NextResponse.json(
-          { error: 'Firebase identity is already a client' },
-          { status: 403 },
-        );
-      }
-      psy = { id: byPhone.id, deletedAt: byPhone.deletedAt };
-      linked = true;
+      return NextResponse.json(
+        {
+          error:
+            'This phone sign-in is not linked to your existing account. Sign in with your original Google or email method. In Scribe, link phone sign-in from Settings → Account. If the phone already has a separate sign-in, contact support for verified recovery.',
+          code: 'SIGNIN_METHOD_CONFLICT',
+        },
+        { status: 409 },
+      );
     }
   }
 
@@ -194,10 +167,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const row = await tx.psychologist.create({
           data: {
             firebaseUid: decoded.uid,
-            fullName: decoded.name ?? 'New therapist',
+            fullName:
+              decoded.name ??
+              (productFromHost(new URL(req.url).hostname).key === 'scribe'
+                ? 'New doctor'
+                : 'New therapist'),
             email: decoded.email ?? `${decoded.uid}@unclaimed.cureocity.app`,
             phone: decoded.phone_number ?? `pending:${decoded.uid}`,
             rciNumber: `PENDING-${decoded.uid}`,
+            ...(productFromHost(new URL(req.url).hostname).key === 'scribe' && {
+              vertical: 'DOCTOR' as const,
+            }),
             // Sprint 56 ops — auto-admin for bootstrap emails (env-gated).
             ...(bootstrapAdmin && { role: 'ADMIN' as const }),
             // Sprint 56 — only persist if at least one field is set, so a
@@ -283,10 +263,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
       // Unique-constraint collision on the auto-provision: a Psychologist
       // row with this phone or email is already bound to a different
-      // Firebase identity. Phone-OTP collisions are handled above by
-      // re-linking; this catches the email-collision case (e.g. Google
+      // Firebase identity. Phone-OTP collisions are rejected above;
+      // this catches the email-collision case (e.g. Google
       // sign-in for an email that was registered via password earlier)
-      // and any phone collision that wasn't covered by the link path.
+      // and any concurrent phone collision not seen by that lookup.
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         const target = (e.meta?.['target'] as string[] | undefined) ?? [];
         const conflictField = target.includes('phone')

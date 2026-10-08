@@ -53,6 +53,39 @@ describe('continuous live authority', () => {
     });
   }
 
+  it.each(['preflight', 'capture-activation'] as const)(
+    'supports older web schema for %s only through its full active-capture verifier',
+    async (purpose) => {
+      fetchImpl
+        .mockResolvedValueOnce(new Response('{}', { status: 400 }))
+        .mockResolvedValueOnce(response());
+      const auth = authority();
+      expect(await auth.revalidate(purpose)).toBe(true);
+      expect(
+        fetchImpl.mock.calls.map(([, options]) => JSON.parse(options!.body as string).purpose),
+      ).toEqual([purpose, 'capture']);
+      expect(close).not.toHaveBeenCalled();
+      auth.dispose();
+    },
+  );
+  it.each([401, 403, 409, 500])(
+    'does not fall back from capture activation authority denial %s',
+    async (status) => {
+      fetchImpl.mockResolvedValue(new Response('{}', { status }));
+      expect(await authority().authorizeCaptureActivation()).toBe(false);
+      expect(fetchImpl).toHaveBeenCalledOnce();
+      expect(close).toHaveBeenCalled();
+    },
+  );
+  it('cannot turn an unsupported purpose into permission for a scheduled session', async () => {
+    fetchImpl
+      .mockResolvedValueOnce(new Response('{}', { status: 400 }))
+      .mockResolvedValueOnce(response([], false));
+    expect(await authority().authorizeCaptureActivation()).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(close).toHaveBeenCalled();
+  });
+
   it.each(['revoked', 'inactive', 'deleted'])(
     'terminates post-connect output when authority is %s',
     async () => {

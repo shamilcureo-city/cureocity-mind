@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
   containsTranscriptionArtifact,
+  containsMedicalTranscriptionExample,
   IntakeNoteV1Schema,
   MedicalEncounterNoteV1Schema,
   SignNoteInputSchema,
@@ -215,6 +216,48 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           409,
           `Note draft is in ${draft.status} state — cannot sign until COMPLETED`,
         );
+      }
+      if (session.vertical === 'DOCTOR') {
+        // Recheck the locked original, not just the submitted note: a clean
+        // summary or a capture-review acknowledgement cannot validate a source
+        // containing the known legacy prompt example. Never rewrite that source.
+        if (
+          containsMedicalTranscriptionExample(
+            JSON.stringify({
+              draft: draft.content,
+              note: input.value.note,
+              rxPad: draft.rxPad,
+              speakerSegments: draft.speakerSegments,
+            }),
+          )
+        ) {
+          throw new SigningHttpError(
+            409,
+            'The note contains a suspected transcription prompt example. Review and correct it before signing. The original record has not been changed.',
+          );
+        }
+        if (typeof draft.transcriptEncrypted === 'string') {
+          const source = await resolveNoteTranscriptData(session.psychologistId, draft);
+          if (source === null) {
+            throw new SigningHttpError(
+              409,
+              'The saved transcript could not be verified. Retry when secure storage is available.',
+            );
+          }
+          if (
+            containsMedicalTranscriptionExample(
+              JSON.stringify({
+                transcript: source.transcript,
+                speakerSegments: source.speakerSegments ?? draft.speakerSegments,
+              }),
+            )
+          ) {
+            throw new SigningHttpError(
+              409,
+              'The saved source contains a suspected transcription prompt example. This draft cannot be signed until an accurate source is recovered. The original record has not been changed.',
+            );
+          }
+        }
       }
       if (session.vertical === 'THERAPIST' && typeof draft.transcriptEncrypted === 'string') {
         // Bind the check to the same locked source as the note. A clean-looking

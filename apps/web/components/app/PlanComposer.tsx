@@ -135,7 +135,7 @@ export function PlanComposer({
     return () => {
       cancelled = true;
     };
-  }, [sessionId, setPadAndNotify, request, loadAttempt]);
+  }, [sessionId, setPadAndNotify, request, loadAttempt, signedProp]);
 
   // Poll the differential until it completes (the differential panel below
   // triggers generation; we only read). Give up quietly after ~2 minutes —

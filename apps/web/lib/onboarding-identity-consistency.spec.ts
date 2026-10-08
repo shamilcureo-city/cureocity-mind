@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock('./auth-page', () => ({ requireActivePagePsychologist: mocks.account }));
+vi.mock('./auth-page', () => ({ requireOnboardingPagePsychologist: mocks.account }));
 vi.mock('./auth-server', () => ({ isAuthBypassed: mocks.bypassed }));
 vi.mock('next/headers', () => ({ headers: async () => new Headers({ host: mocks.host() }) }));
 vi.mock('next/navigation', () => ({
@@ -49,6 +49,13 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('onboarding account consistency', () => {
+  it('shows pending doctors a submission form without promising activation', async () => {
+    mocks.account.mockResolvedValue({ ...account, status: 'PENDING_VERIFICATION' });
+    const html = renderToStaticMarkup(await OnboardingPage());
+    expect(mocks.account).toHaveBeenCalledWith(true);
+    expect(html).toContain('Submit for review');
+    expect(html).toContain('does not approve');
+  });
   it.each([
     ['scribe.cureocity.in', 'Medical registration number', 'Specialty'],
     ['mind.cureocity.in', 'RCI registration number', 'RCI registration number'],

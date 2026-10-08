@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
+import { headers } from 'next/headers';
+import { productFromHost } from '@/lib/product';
 import { PractitionerAccountStatus } from '@/components/app/PractitionerAccountStatus';
 import { requirePagePsychologist } from '@/lib/auth-page';
 
@@ -13,5 +15,16 @@ export const metadata: Metadata = {
 export default async function AccountStatusPage() {
   const me = await requirePagePsychologist();
   if (me.status === 'ACTIVE') redirect('/app');
-  return <PractitionerAccountStatus status={me.status} vertical={me.vertical} email={me.email} />;
+  const pendingScribe =
+    me.status === 'PENDING_VERIFICATION' &&
+    me.onboardingCompletedAt === null &&
+    productFromHost((await headers()).get('host')).key === 'scribe';
+  return (
+    <PractitionerAccountStatus
+      status={me.status}
+      vertical={pendingScribe ? 'DOCTOR' : me.vertical}
+      email={me.email}
+      canSubmitRegistration={pendingScribe}
+    />
+  );
 }

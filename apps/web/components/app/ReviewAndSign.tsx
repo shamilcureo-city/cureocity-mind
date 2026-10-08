@@ -23,6 +23,7 @@ import { postSignNote } from '../../lib/sign-note';
 import { buildShareDeliveryInput } from '../../lib/share-delivery-input';
 import { TRANSCRIPT_UNAVAILABLE_MESSAGE } from '@/lib/note-transcript-view';
 import { TRANSCRIPTION_ARTIFACT_HIDDEN_MESSAGE } from '@/lib/saved-transcript';
+import { loadScribeEncounterReview } from '@/lib/scribe-encounter-review';
 
 /**
  * Sprint DS11.2 — the ONE review-and-sign surface.
@@ -45,6 +46,7 @@ export function ReviewAndSign({
   notExamined,
   onSigned,
   captureSaveState = 'saved',
+  initialSigned = false,
 }: {
   sessionId: string;
   /** Needed for patient shares; when absent the share buttons hide. */
@@ -63,8 +65,9 @@ export function ReviewAndSign({
   onSigned?: () => void;
   /** Live capture must finish saving its source and integrity marker before review. */
   captureSaveState?: 'idle' | 'saving' | 'saved' | 'error';
+  initialSigned?: boolean;
 }) {
-  const [signed, setSigned] = useState(false);
+  const [signed, setSigned] = useState(initialSigned);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -269,6 +272,16 @@ export function ReviewAndSign({
           (message === 'Therapy note already signed for this session' ||
             message === 'Note was signed concurrently; reload and review the saved signature')
         ) {
+          // Another tab may have signed a different correction. Never label
+          // our local draft signed until the attested record has been loaded.
+          const review = await loadScribeEncounterReview(sessionId);
+          if (!review.signedNote)
+            throw new Error(
+              'The encounter was reopened. Reload and review the current draft before signing.',
+            );
+          setWorking(review.signedNote.content);
+          setEdits([]);
+          setSignedRxPad(review.signedNote.rxPad);
           setSigned(true);
           onSigned?.();
           return;

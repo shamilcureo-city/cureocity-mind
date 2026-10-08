@@ -47,6 +47,7 @@ import {
   requireOnboardedDoctor,
   requireOnboardedTherapist,
   requirePageAdmin,
+  requireOnboardingPagePsychologist,
 } from './auth-page';
 import ClinicPage from '../app/app/clinic/page';
 import AppLayout from '../app/app/layout';
@@ -73,6 +74,19 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('practitioner page lifecycle boundary', () => {
+  it('allows only an incomplete pending Scribe profile form, never the clinical app', async () => {
+    h.practitioner.mockResolvedValue({
+      ...account,
+      status: 'PENDING_VERIFICATION',
+      onboardingCompletedAt: null,
+    });
+    expect((await requireOnboardingPagePsychologist(true)).id).toBe(account.id);
+    await expect(requireOnboardingPagePsychologist(false)).rejects.toThrow(
+      'REDIRECT:/account-status',
+    );
+    await expect(requireOnboardedDoctor()).rejects.toThrow('REDIRECT:/account-status');
+    expect(h.queue).not.toHaveBeenCalled();
+  });
   it.each(['PENDING_VERIFICATION', 'SUSPENDED', 'OFFBOARDED'])(
     'blocks %s at every clinical guard before onboarding or role checks',
     async (status) => {

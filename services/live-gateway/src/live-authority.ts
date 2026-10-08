@@ -6,7 +6,7 @@ import {
 import { extractVerifiedClaims } from './auth';
 
 export type LiveAuthorityCloseReason = 'live_authority_denied' | 'live_authority_unavailable';
-type AuthorityPurpose = 'capture' | 'queued-finalization';
+type AuthorityPurpose = 'preflight' | 'capture-activation' | 'capture' | 'queued-finalization';
 
 interface LiveAuthorityOptions {
   sessionId: string;
@@ -169,6 +169,12 @@ export class LiveAuthority {
     return this.revalidate('capture');
   }
 
+  /** Only the gateway's first valid PCM frame activates a reserved Scribe
+   * capture. A token, connection, or readiness response is not capture. */
+  authorizeCaptureActivation(): Promise<boolean> {
+    return this.revalidate(this.options.vertical === 'DOCTOR' ? 'capture-activation' : 'capture');
+  }
+
   /** Only the server's parsed pause/stop controls may use this drain authority. */
   authorizeQueuedControl(): Promise<boolean> {
     return this.revalidate('queued-finalization');
@@ -240,6 +246,13 @@ export class LiveAuthority {
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
+      // Gateway-first rolling release: the older web schema returns 400 for
+      // these new purposes. Its existing capture verifier still requires an
+      // active session and all current authority checks. A newer reserved
+      // SCHEDULED session fails that verifier, so this cannot skip activation.
+      // Never downgrade an authentication, consent, capability, or outage denial.
+      if (response.status === 400 && (purpose === 'preflight' || purpose === 'capture-activation'))
+        return this.fetchCapabilities(tokenExpiresAt, 'capture');
       if (!response.ok) {
         this.deny('live_authority_denied');
         return null;

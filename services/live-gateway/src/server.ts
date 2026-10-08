@@ -170,6 +170,8 @@ wss.on('connection', (ws, req) => {
   const connectionId = randomUUID(); // Actual socket identity, never a start-token identity.
   let usageReporter: LiveUsageReporter | null = null;
   let started = false;
+  let captureActivationRequired = false;
+  let acceptingPcm = true;
   let finalizationRequested = false;
   let renewalInFlight = false;
   let connectionDisposed = false;
@@ -216,6 +218,8 @@ wss.on('connection', (ws, req) => {
   const inputQueue = new OrderedSocketInput(() => ws.close());
   ws.on('message', (raw: RawData, isBinary: boolean) => {
     if (connectionDisposed) return;
+    // Empty/malformed PCM is not evidence that a microphone began capture.
+    if (isBinary && (toBuffer(raw).length === 0 || toBuffer(raw).length % 2 !== 0)) return;
     armIdle(started ? IDLE_TIMEOUT_MS : STARTUP_GRACE_MS);
     const rawCommand = isBinary ? null : safeJson(raw);
     const parsed = isBinary ? null : LiveGatewayCommandSchema.safeParse(rawCommand);
@@ -303,20 +307,31 @@ wss.on('connection', (ws, req) => {
       !isBinary && parsed?.success && ['pause', 'stop'].includes(parsed.data.type);
     const authorized = queuedControl
       ? inputAuthority?.authorizeQueuedControl()
-      : inputAuthority?.authorizeCurrentInput();
+      : isBinary && captureActivationRequired
+        ? undefined // Activation mutates lifecycle: only execute it in arrival order below.
+        : inputAuthority?.authorizeCurrentInput();
     const wasStarted = started;
     inputQueue.enqueue(async () => {
       if (inputAuthority && !inputAuthority.authorizeInput()) return;
       // Binary frames are streamed PCM audio for the active session.
       if (isBinary) {
+        if (!wasStarted || !started || !acceptingPcm || !session || authority !== inputAuthority)
+          return;
+        const mayCapture = inputAuthority
+          ? captureActivationRequired
+            ? await inputAuthority.authorizeCaptureActivation()
+            : await (authorized ?? inputAuthority.authorizeCurrentInput())
+          : true;
         if (
-          wasStarted &&
-          started &&
-          authority === inputAuthority &&
-          (!authorized || (await authorized))
-        ) {
-          session?.pushAudio(toBuffer(raw));
-        }
+          !mayCapture ||
+          connectionDisposed ||
+          !acceptingPcm ||
+          authority !== inputAuthority ||
+          ws.readyState !== ws.OPEN
+        )
+          return;
+        captureActivationRequired = false;
+        session.pushAudio(toBuffer(raw));
         return;
       }
       if (!parsed?.success) return;
@@ -446,7 +461,14 @@ wss.on('connection', (ws, req) => {
             });
         };
         const beginSession = (): void => {
-          if (session || ws.readyState !== ws.OPEN) return;
+          if (
+            session ||
+            connectionDisposed ||
+            draining ||
+            finalizationRequested ||
+            ws.readyState !== ws.OPEN
+          )
+            return;
           // Construct only after the immediate current-authority check, so
           // downgraded optional capabilities also scope patient context before
           // any model/store sees it.
@@ -489,6 +511,7 @@ wss.on('connection', (ws, req) => {
           session.start();
           liveSessions.add(session);
           started = true;
+          captureActivationRequired = vertical === 'DOCTOR' && authority !== null;
           armIdle(IDLE_TIMEOUT_MS);
         };
 
@@ -525,9 +548,17 @@ wss.on('connection', (ws, req) => {
           liveAuthorities.add(pendingAuthority);
           if (finalizationRequested) pendingAuthority.preventRenewal();
           void pendingAuthority
-            .revalidate()
+            .revalidate(vertical === 'DOCTOR' ? 'preflight' : 'capture')
             .then(async (authorized) => {
-              if (!authorized || authority !== pendingAuthority) return;
+              if (
+                !authorized ||
+                authority !== pendingAuthority ||
+                connectionDisposed ||
+                draining ||
+                finalizationRequested ||
+                ws.readyState !== ws.OPEN
+              )
+                return;
               if (reportUsage) {
                 try {
                   const reporter = new LiveUsageReporter({
@@ -595,9 +626,11 @@ wss.on('connection', (ws, req) => {
       } else if (authority !== inputAuthority || (authorized && !(await authorized))) {
         return;
       } else if (cmd.type === 'pause') {
+        acceptingPcm = false;
         tracePause('pause.processing', cmd.requestId);
         await session?.pause(cmd.requestId);
       } else if (cmd.type === 'stop') {
+        acceptingPcm = false;
         // A retained Pause tail can fail its bounded finalization wait. Leave
         // recovery to the client rather than silently dropping audio, emitting
         // a false final note, or leaking an unhandled rejection.

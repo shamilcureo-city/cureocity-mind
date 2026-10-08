@@ -1,4 +1,5 @@
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory } from '@google/genai';
+import { containsMedicalTranscriptionExample } from '@cureocity/contracts';
 import {
   type GeminiCallLogData,
   type IPass1Backend,
@@ -189,6 +190,18 @@ export class VertexGeminiFlashIndiaBackend implements IPass1Backend {
         throw new Error(validationErrorCode);
       }
       const output = validated.data;
+      if (
+        input.vertical === 'DOCTOR' &&
+        containsMedicalTranscriptionExample(
+          [output.transcript, ...output.speakerSegments.map((segment) => segment.text)].join('\n'),
+        )
+      ) {
+        // Reject the complete response before transcript, segments or clinical
+        // reasoning can consume a known prompt-example echo. Preserve usage
+        // accounting but never log or silently rewrite the rejected text.
+        validationErrorCode = 'MEDICAL_TRANSCRIPTION_EXAMPLE';
+        throw new Error(validationErrorCode);
+      }
       if (output.transcript.length === 0) {
         console.warn(
           `[vertex-flash] sessionId=${input.sessionId} EMPTY transcript on validated response. finishReason=${finishReason} blockReason=${blockReason} segmentCount=${output.speakerSegments.length}`,

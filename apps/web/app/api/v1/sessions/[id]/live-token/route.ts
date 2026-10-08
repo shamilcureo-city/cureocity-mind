@@ -12,9 +12,9 @@ import {
 } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
 import { assertScribeTeleconsultDocumentationConsent } from '@/lib/scribe-teleconsult';
+import { scribeConsentAllowsMode } from '@/lib/scribe-consent-mode';
 import {
   assertLiveTokenSessionStatus,
-  captureActivationTransitionData,
   conditionalSessionTransition,
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
@@ -29,13 +29,10 @@ export const dynamic = 'force-dynamic';
  * the standalone socket service can prove the caller is the authenticated
  * practitioner who owns this session. Tenant-checked.
  *
- * DS11.1 (session lifecycle truth): this call IS the live consult's
- * capture-start, so it now carries the same lifecycle side effects the
- * batch /consent + /start pair has. A SCHEDULED session with a complete,
- * currently-backed consent snapshot transitions to IN_PROGRESS — making the
- * clinic queue statuses truthful and unblocking the sign route (which
- * requires COMPLETED, set by /live-note). Reconnects (already
- * IN_PROGRESS) just mint; a COMPLETED session is never regressed.
+ * Minting prepares access, not billable capture. Scribe stays SCHEDULED until
+ * the trusted gateway acknowledges its first audio frame. Failed microphone,
+ * socket, provider-setup or authority checks do not consume a consultation.
+ * Deploy the gateway activation handshake before this web change.
  */
 
 const LIVE_SCOPED_CAPABILITIES = new Set<PractitionerCapability>([
@@ -90,7 +87,12 @@ export async function POST(
       withClientConsentLock(tx, session.clientId, async () => {
         const current = await tx.session.findUnique({
           where: { id: sessionId },
-          select: { status: true, consentSnapshot: true, mindDocumentationMode: true },
+          select: {
+            status: true,
+            captureMode: true,
+            consentSnapshot: true,
+            mindDocumentationMode: true,
+          },
         });
         if (!current) throw new ConsentAuthorizationError('Session changed during authorization');
         if (current.mindDocumentationMode === 'MANUAL')
@@ -101,6 +103,14 @@ export async function POST(
 
         await assertValidScribeConsent(current.consentSnapshot, session.clientId, tx);
         if (session.psychologist.vertical === 'DOCTOR') {
+          if (
+            !scribeConsentAllowsMode(current.consentSnapshot, 'LIVE') ||
+            (current.status === 'IN_PROGRESS' && current.captureMode !== 'LIVE')
+          ) {
+            throw new ConsentAuthorizationError(
+              'This encounter is not authorized for live capture. Finish its current capture mode or create a new encounter with explicit live consent.',
+            );
+          }
           await assertScribeTeleconsultDocumentationConsent(
             tx,
             sessionId,
@@ -108,33 +118,27 @@ export async function POST(
           );
         }
 
-        if (current.status === 'SCHEDULED') {
-          // Scribe keeps its established token-is-start contract. Mind mints a
-          // preflight token without changing lifecycle state; its browser posts
-          // /start only after the microphone worklet is actively capturing.
-          const transition = captureActivationTransitionData(
-            session.psychologist.vertical,
-            'LIVE',
-            false,
-          );
-          if (transition) {
-            await conditionalSessionTransition(tx, {
-              sessionId,
-              expectedStatus: 'SCHEDULED',
-              data: transition,
-            });
-            await writeAudit(
-              {
-                actorType: 'PSYCHOLOGIST',
-                actorPsychologistId: auth.value.psychologistId,
-                action: 'SESSION_STARTED',
-                targetType: 'Session',
-                targetId: sessionId,
-                metadata: { ...auditMetadataFromRequest(req), source: 'LIVE' },
+        if (current.status === 'SCHEDULED' && session.psychologist.vertical === 'DOCTOR') {
+          await conditionalSessionTransition(tx, {
+            sessionId,
+            expectedStatus: 'SCHEDULED',
+            data: { captureMode: 'LIVE' },
+          });
+          await writeAudit(
+            {
+              actorType: 'PSYCHOLOGIST',
+              actorPsychologistId: auth.value.psychologistId,
+              action: 'SESSION_PURPOSE_SELECTED',
+              targetType: 'Session',
+              targetId: sessionId,
+              metadata: {
+                ...auditMetadataFromRequest(req),
+                source: 'LIVE_PREFLIGHT',
+                captureMode: 'LIVE',
               },
-              tx,
-            );
-          }
+            },
+            tx,
+          );
         }
 
         return signLiveToken({

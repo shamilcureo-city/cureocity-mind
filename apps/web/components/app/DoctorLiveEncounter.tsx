@@ -22,6 +22,10 @@ import { useRouter } from 'next/navigation';
 import { useLiveStream } from '@/lib/audio/use-live-stream';
 import { waitForLiveCaptureStop } from '@/lib/audio/live-stream-cleanup';
 import { LiveTokenRenewal, type LiveTokenLease } from '@/lib/audio/live-token-renewal';
+import {
+  ScribeCaptureCheckpoint,
+  type CaptureCheckpointState,
+} from '@/lib/scribe-capture-recovery';
 import type { ScribeTeleconsultDocumentationState } from '@/lib/scribe-teleconsult-contracts';
 import { GatewayMockBanner } from './GatewayMockBanner';
 import { Button } from '../ui/Button';
@@ -82,6 +86,20 @@ const RECONNECT_DELAYS_MS = [400, 1_000, 2_000, 4_000, 6_000, 8_000, 8_000, 8_00
  * the gateway's graceful fallback note wins the race instead of this bail.
  */
 const FINALIZE_TIMEOUT_MS = 90_000;
+/**
+ * `final` is followed by the final meter and `done` in the ordered gateway
+ * output queue. Allow both default 2s authority checks plus transport slack,
+ * but never retain a finished live lease indefinitely if that tail is lost.
+ */
+const FINAL_EVENT_DRAIN_TIMEOUT_MS = 10_000;
+
+interface FinalSavePayload {
+  note: MedicalEncounterNoteV1;
+  medications: unknown[];
+  orders: unknown[];
+  rx: RxPadV1 | null;
+  transcript: string;
+}
 
 /** Live socket health, shown honestly on the capture bar. */
 type ConnState = 'ok' | 'reconnecting' | 'lost';
@@ -145,6 +163,13 @@ export function DoctorLiveEncounter({
   // Safety-net timer so "End" can never trap the doctor on "Finishing…" if
   // the gateway's `done` never arrives (e.g. a dropped socket).
   const finalizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalDrainTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingFinalRef = useRef<FinalSavePayload | null>(null);
+  const hasUnsavedFinalRef = useRef(false);
+  const checkpointRef = useRef<ScribeCaptureCheckpoint | null>(null);
+  const recoveryLoadRef = useRef<Promise<void> | null>(null);
+  const [checkpointState, setCheckpointState] = useState<CaptureCheckpointState>('loading');
+  const checkpointStateRef = useRef<CaptureCheckpointState>('loading');
   // Sprint DS0 — the gateway meters the consult and emits `meter` events;
   // we keep the latest and relay it once the consult is done.
   const latestMeterRef = useRef<MeterSummary | null>(null);
@@ -218,13 +243,8 @@ export function DoctorLiveEncounter({
   const [justSigned, setJustSigned] = useState(false);
   const [startingNew, setStartingNew] = useState(false);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const lastSavePayloadRef = useRef<{
-    note: MedicalEncounterNoteV1;
-    medications: unknown[];
-    orders: unknown[];
-    rx: RxPadV1 | null;
-    transcript: string;
-  } | null>(null);
+  const [saveIssue, setSaveIssue] = useState<string | null>(null);
+  const lastSavePayloadRef = useRef<FinalSavePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   // Batch A — socket health, surfaced on the capture bar instead of a screen
@@ -254,6 +274,59 @@ export function DoctorLiveEncounter({
   function flagIncomplete(reason: NonNullable<typeof captureIncompleteRef.current>): void {
     captureIncompleteRef.current ??= reason;
     setCaptureIncomplete(captureIncompleteRef.current);
+  }
+
+  function loadCaptureRecovery(): Promise<void> {
+    const checkpoint = checkpointRef.current;
+    if (!checkpoint) return Promise.reject(new Error('Capture recovery is unavailable.'));
+    const work = checkpoint.load().then((recovery) => {
+      if (unmountedRef.current || checkpointRef.current !== checkpoint) return;
+      if (recovery?.utterances.length) {
+        utterancesRef.current = recovery.utterances;
+        setUtterances(recovery.utterances);
+        flagIncomplete('capture_interrupted');
+        phaseRef.current = 'authorization-paused';
+        setPhase('authorization-paused');
+        setError(
+          'Recovered the last securely saved captured words. Any words not acknowledged before the interruption need review. Resume explicitly or end and review the draft.',
+        );
+      }
+    });
+    recoveryLoadRef.current = work;
+    void work.catch(() => {});
+    return work;
+  }
+
+  useEffect(() => {
+    const checkpoint = new ScribeCaptureCheckpoint({
+      sessionId,
+      fetch: (...args) => fetch(...args),
+      onState: (state) => {
+        checkpointStateRef.current = state;
+        if (!unmountedRef.current) setCheckpointState(state);
+      },
+      onFailure: () => {
+        if (!unmountedRef.current && !finalHandledRef.current)
+          stopForAuthorization(
+            'Captured words could not be saved securely. Capture is stopped. Keep this tab open and retry saving before continuing.',
+            true,
+          );
+      },
+    });
+    checkpointRef.current = checkpoint;
+    void loadCaptureRecovery().catch(() => {});
+    return () => checkpoint.close();
+  }, [sessionId]);
+
+  function checkpointCapturedWords(): void {
+    if (!utterancesRef.current.length || finalHandledRef.current) return;
+    void checkpointRef.current
+      ?.append({
+        version: 1,
+        utterances: utterancesRef.current,
+        captureIncomplete: captureIncompleteRef.current !== null,
+      })
+      .catch(() => {});
   }
 
   useEffect(() => {
@@ -385,8 +458,13 @@ export function DoctorLiveEncounter({
     transcript: string,
   ): Promise<void> {
     lastSavePayloadRef.current = { note, medications, orders, rx, transcript };
+    hasUnsavedFinalRef.current = true;
+    setSaveIssue(null);
     setSaveState('saving');
     try {
+      // Retire ordered checkpoints before the canonical final write. A failed
+      // checkpoint does not block this full-source final save or erase retry data.
+      await checkpointRef.current?.flush().catch(() => {});
       const res = await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -409,6 +487,24 @@ export function DoctorLiveEncounter({
       // A conflict may be consent loss or a stale session, not an existing saved note.
       // Only an acknowledged successful write may unlock closeout/navigation.
       const saved = res.ok;
+      if (saved) checkpointRef.current?.close();
+      hasUnsavedFinalRef.current = !saved;
+      if (!saved) {
+        const body = (await res.json().catch(() => ({}))) as { code?: string };
+        if (body.code === 'MEDICAL_TRANSCRIPTION_EXAMPLE') {
+          setSaveIssue(
+            'Draft not saved: the transcript contains suspected example text that may not have been spoken. Do not use or sign it. Contact support to review this consultation.',
+          );
+        } else if (body.code === 'SCRIBE_CHECKPOINT_SOURCE_CONFLICT') {
+          setSaveIssue(
+            'Draft not saved: another tab has saved additional or different captured words. Keep this tab open. Return to the original consultation tab to recover and review the complete source, or contact support before continuing. Retrying this shorter draft will not overwrite the saved source.',
+          );
+        } else if (body.code === 'SCRIBE_CHECKPOINT_UNAVAILABLE') {
+          setSaveIssue(
+            'Draft not saved: the securely saved captured words could not be checked. Keep this tab open and retry when secure recovery is available. Review and signing stay blocked.',
+          );
+        }
+      }
       setSaveState(saved ? 'saved' : 'error');
       // live-note is the lifecycle authority: only after it has finalized the
       // Session to COMPLETED may finalized telemetry pass the route guard.
@@ -580,6 +676,7 @@ export function DoctorLiveEncounter({
       if (open) flushAudioQueue(ws);
     },
     onInterrupted: (message) => {
+      if (finalHandledRef.current) return;
       flagIncomplete('capture_interrupted');
       stopForAuthorization(
         `${message} Capture is stopped. Review any missing words before signing.`,
@@ -623,6 +720,84 @@ export function DoctorLiveEncounter({
   const streamRef = useRef(stream);
   streamRef.current = stream;
   useEffect(() => {
+    let approvedNavigationUrl: string | null = null;
+    const unfinished = () =>
+      hasUnsavedFinalRef.current ||
+      (!finalHandledRef.current &&
+        (utterancesRef.current.length > 0 ||
+          [
+            'connecting',
+            'listening',
+            'pausing',
+            'paused',
+            'authorization-paused',
+            'finalizing',
+          ].includes(phaseRef.current)));
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!unfinished()) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const warnNavigation = (event: MouseEvent) => {
+      if (
+        !unfinished() ||
+        !(event.target instanceof Element) ||
+        !event.target.closest('a[href]') ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const anchor = event.target.closest('a[href]') as HTMLAnchorElement;
+      if (anchor.target === '_blank' || anchor.hasAttribute('download')) return;
+      // A final/save in flight must not be abandoned by same-document routing.
+      if (
+        hasUnsavedFinalRef.current ||
+        phaseRef.current === 'finalizing' ||
+        !window.confirm(
+          'This consultation is unfinished. End and review the note before leaving. Only acknowledged captured-word checkpoints can be recovered. Leave anyway?',
+        )
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+      } else approvedNavigationUrl = anchor.href;
+    };
+    const navigation = (window as Window & { navigation?: EventTarget }).navigation;
+    const warnHistoryNavigation = (event: Event) => {
+      const next = event as Event & {
+        canIntercept?: boolean;
+        hashChange?: boolean;
+        downloadRequest?: string | null;
+        destination?: { url: string };
+      };
+      if (approvedNavigationUrl) {
+        const allowed = approvedNavigationUrl === next.destination?.url;
+        approvedNavigationUrl = null;
+        if (allowed && !hasUnsavedFinalRef.current && phaseRef.current !== 'finalizing') return;
+      }
+      if (
+        !unfinished() ||
+        !next.cancelable ||
+        !next.canIntercept ||
+        next.hashChange ||
+        next.downloadRequest
+      )
+        return;
+      // Browser Back/Forward may not emit a link click. Keep unfinished work
+      // on screen; the explicit End action is the safe route out.
+      next.preventDefault();
+    };
+    window.addEventListener('beforeunload', warnBeforeUnload);
+    navigation?.addEventListener('navigate', warnHistoryNavigation);
+    document.addEventListener('click', warnNavigation, true);
+    return () => {
+      window.removeEventListener('beforeunload', warnBeforeUnload);
+      navigation?.removeEventListener('navigate', warnHistoryNavigation);
+      document.removeEventListener('click', warnNavigation, true);
+    };
+  }, []);
+  useEffect(() => {
     unmountedRef.current = false;
     return () => {
       unmountedRef.current = true;
@@ -635,6 +810,7 @@ export function DoctorLiveEncounter({
       renewalRef.current?.dispose();
       renewalRef.current = null;
       if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+      if (finalDrainTimerRef.current) clearTimeout(finalDrainTimerRef.current);
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       pauseReplyRef.current?.reject(new Error('Capture view closed.'));
       // Batch A — an unmount is a deliberate close, not a drop: suppress the
@@ -644,6 +820,10 @@ export function DoctorLiveEncounter({
       wsRef.current = null;
       socket?.close();
       void streamRef.current.stop().catch(() => {});
+      // Internal navigation during the brief terminal drain must not discard
+      // a final note that the gateway already delivered. Live ownership is
+      // retired above before this best-effort save starts.
+      finishAcceptedFinal();
     };
   }, []);
 
@@ -680,6 +860,19 @@ export function DoctorLiveEncounter({
   }
 
   async function start(): Promise<void> {
+    try {
+      await recoveryLoadRef.current;
+    } catch {
+      setError(
+        'Secure recovery is unavailable. Retry recovery before starting; existing captured words must not be overwritten.',
+      );
+      return;
+    }
+    if (checkpointStateRef.current === 'error') return;
+    if (utterancesRef.current.length && phaseRef.current === 'authorization-paused') {
+      resumeAuthorizedCapture();
+      return;
+    }
     if (
       unmountedRef.current ||
       ['connecting', 'listening', 'finalizing'].includes(phaseRef.current)
@@ -717,7 +910,10 @@ export function DoctorLiveEncounter({
     setFinalNote(null);
     setJustSigned(false);
     setSaveState('idle');
+    setSaveIssue(null);
     lastSavePayloadRef.current = null;
+    pendingFinalRef.current = null;
+    hasUnsavedFinalRef.current = false;
     setElapsed(0);
     setLastTranscriptAt(null);
     setCaptureIncomplete(null);
@@ -754,6 +950,9 @@ export function DoctorLiveEncounter({
 
   /** Authorization loss never restarts a microphone or clears captured clinical context. */
   function stopForAuthorization(message: string, canResume: boolean): void {
+    // A validated final has already ended capture. Late lease checks cannot
+    // turn its local save/review state back into a resumable recording.
+    if (finalHandledRef.current) return;
     if (['listening', 'pausing', 'finalizing'].includes(phaseRef.current)) {
       flagIncomplete('capture_interrupted');
     }
@@ -777,7 +976,38 @@ export function DoctorLiveEncounter({
     setError(message);
   }
 
+  /** Retire live ownership before live-note can mark the session COMPLETED. */
+  function finishAcceptedFinal(): void {
+    const payload = pendingFinalRef.current;
+    if (!payload) return;
+    pendingFinalRef.current = null;
+    if (finalDrainTimerRef.current) clearTimeout(finalDrainTimerRef.current);
+    finalDrainTimerRef.current = null;
+    if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+    finalizeTimerRef.current = null;
+    captureBlockedRef.current = true;
+    socketReadyRef.current = false;
+    intentionalCloseRef.current = true;
+    ++connectAttemptRef.current;
+    connectAbortRef.current?.abort();
+    renewalRef.current?.dispose();
+    renewalRef.current = null;
+    const socket = wsRef.current;
+    wsRef.current = null;
+    socket?.close();
+    phaseRef.current = 'done';
+    setPhase('done');
+    void persistLiveNote(
+      payload.note,
+      payload.medications,
+      payload.orders,
+      payload.rx,
+      payload.transcript,
+    );
+  }
+
   function resumeAuthorizedCapture(): void {
+    if (checkpointStateRef.current === 'error' || checkpointStateRef.current === 'loading') return;
     if (!['authorization-paused', 'paused'].includes(phaseRef.current) || unmountedRef.current)
       return;
     if (teleconsultRef.current && !teleconsultRef.current.ready) {
@@ -907,6 +1137,7 @@ export function DoctorLiveEncounter({
     const renewal = new LiveTokenRenewal({
       sessionId,
       initialLease,
+      reserveFinalizationWindow: true,
       send: (command) => {
         if (!ownsSocket() || ws.readyState !== WebSocket.OPEN)
           throw new Error('Live connection closed.');
@@ -964,6 +1195,10 @@ export function DoctorLiveEncounter({
       clearReadyTimer();
       renewal.dispose();
       if (!ownsSocket()) return;
+      if (pendingFinalRef.current) {
+        finishAcceptedFinal();
+        return;
+      }
       wsRef.current = null;
       socketReadyRef.current = false;
       // Expected closes: we asked for it, or the consult already finished.
@@ -1006,6 +1241,13 @@ export function DoctorLiveEncounter({
       const parsed = LiveGatewayEventSchema.safeParse(raw);
       if (!parsed.success) return;
       const event = parsed.data;
+      // Keep the short terminal drain alive for its meter, not for more
+      // clinical output, duplicate finals, or stale authorization callbacks.
+      if (finalHandledRef.current) {
+        if (event.type === 'meter') latestMeterRef.current = event.summary;
+        else if (event.type === 'status' && event.state === 'done') finishAcceptedFinal();
+        return;
+      }
       renewal.handleEvent(event);
       if (!ownsSocket()) return;
       switch (event.type) {
@@ -1055,7 +1297,6 @@ export function DoctorLiveEncounter({
           } else if (event.state === 'done') {
             renewal.dispose();
             if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
-            setPhase('done');
             // Batch A — `done` WITHOUT a preceding `final` used to be a dead
             // end: the doctor sat on a stopped screen with no note and no way
             // forward. The gateway only does this when it had nothing to
@@ -1112,6 +1353,11 @@ export function DoctorLiveEncounter({
           break;
         case 'transcriptionWarning':
           flagIncomplete('audio_loss');
+          checkpointCapturedWords();
+          setPartialText('');
+          setError(
+            'Some audio could not be transcribed reliably. Unreliable text was withheld. Check and complete the missing details before signing.',
+          );
           break;
         case 'partialTranscript':
           // Sprint DS13 — display-only; never enters utterances/persistence.
@@ -1119,13 +1365,13 @@ export function DoctorLiveEncounter({
           break;
         case 'utterance':
           setLastTranscriptAt(Date.now());
-          setUtterances((prev) => {
-            const next = prev.some((u) => u.id === event.utterance.id)
-              ? prev
-              : [...prev, event.utterance];
-            utterancesRef.current = next; // DOC-7 — keep the ref in lockstep
-            return next;
-          });
+          // Update the authoritative mirror synchronously. React may defer a
+          // state updater past the next WebSocket final/close event.
+          if (!utterancesRef.current.some((u) => u.id === event.utterance.id)) {
+            utterancesRef.current = [...utterancesRef.current, event.utterance];
+            setUtterances(utterancesRef.current);
+            checkpointCapturedWords();
+          }
           break;
         case 'meter':
           latestMeterRef.current = event.summary;
@@ -1195,6 +1441,14 @@ export function DoctorLiveEncounter({
           // Batch A — the consult is closed: a socket close from here on is
           // expected, so the reconnect loop must never arm.
           finalHandledRef.current = true;
+          hasUnsavedFinalRef.current = true;
+          phaseRef.current = 'finalizing';
+          setPhase('finalizing');
+          socketReadyRef.current = false;
+          clearReadyTimer();
+          // Earlier meters are interim. Only the post-final meter may be
+          // relayed for this completed draft; never race an earlier snapshot.
+          latestMeterRef.current = null;
           if (reconnectTimerRef.current) {
             clearTimeout(reconnectTimerRef.current);
             reconnectTimerRef.current = null;
@@ -1225,7 +1479,18 @@ export function DoctorLiveEncounter({
           // DOC-7 — read the utterances from the ref (this closure is stale)
           // so the persisted transcript includes the tail window.
           const transcript = buildTranscript(utterancesRef.current);
-          void persistLiveNote(merged, event.medications, event.orders, finalRx, transcript);
+          pendingFinalRef.current = {
+            note: merged,
+            medications: event.medications,
+            orders: event.orders,
+            rx: finalRx,
+            transcript,
+          };
+          setSaveState('saving');
+          finalDrainTimerRef.current = setTimeout(
+            finishAcceptedFinal,
+            FINAL_EVENT_DRAIN_TIMEOUT_MS,
+          );
           break;
         }
       }
@@ -1235,7 +1500,7 @@ export function DoctorLiveEncounter({
   // DS11.2 — "New consult" previously restarted the SAME session, silently
   // overwriting its note. Mint a fresh session row and chain to it instead.
   async function newConsult(): Promise<void> {
-    if (!clientId || startingNew) return;
+    if (!clientId || startingNew || saveState !== 'saved') return;
     setStartingNew(true);
     try {
       const res = await fetch('/api/v1/sessions', {
@@ -1318,6 +1583,7 @@ export function DoctorLiveEncounter({
     if (hasContent) {
       setFinalNote(salvaged);
       if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+      phaseRef.current = 'done';
       setPhase('done');
       setError(
         reason === 'dropped'
@@ -1326,6 +1592,7 @@ export function DoctorLiveEncounter({
       );
       await persistLiveNote(salvaged, [], [], rxFinalRef.current, transcript);
     } else {
+      phaseRef.current = 'error';
       setPhase('error');
       setError(
         reason === 'dropped'
@@ -1441,6 +1708,16 @@ export function DoctorLiveEncounter({
     }
     if (unmountedRef.current || finalHandledRef.current) return;
     captureBlockedRef.current = true;
+    try {
+      // End needs enough valid authorization to drain an in-flight window and
+      // generate its final note. This reserves a lease; it never resumes audio.
+      await renewalRef.current?.prepareFinalization();
+    } catch {
+      flagIncomplete('finalization_failed');
+      void salvageConsult('empty-final');
+      return;
+    }
+    if (unmountedRef.current || finalHandledRef.current) return;
     renewalRef.current?.dispose();
     renewalRef.current = null;
     connectAbortRef.current?.abort();
@@ -1638,7 +1915,11 @@ export function DoctorLiveEncounter({
           )}
           {finalNote || phase === 'done' ? (
             clientId && !teleconsult ? (
-              <Button onClick={() => void newConsult()} variant="secondary" disabled={startingNew}>
+              <Button
+                onClick={() => void newConsult()}
+                variant="secondary"
+                disabled={startingNew || saveState !== 'saved'}
+              >
                 {startingNew ? 'Starting…' : 'New consult'}
               </Button>
             ) : null
@@ -1691,6 +1972,32 @@ export function DoctorLiveEncounter({
           onCancel={() => setMicrophoneDialog(null)}
           onContinue={microphoneReady}
         />
+      )}
+
+      {!finalNote && (
+        <p role="status" className="text-sm text-[var(--color-ink-2)]">
+          {checkpointState === 'loading'
+            ? 'Checking securely saved captured words…'
+            : checkpointState === 'saving'
+              ? 'Saving captured words securely… Keep this tab open.'
+              : checkpointState === 'saved'
+                ? 'Captured words saved securely. The note still needs review and a confirmed save.'
+                : checkpointState === 'error'
+                  ? 'Secure capture recovery is unavailable. Keep this tab open; unacknowledged words are not yet saved.'
+                  : 'Captured words are checkpointed securely; audio is not stored.'}
+          {checkpointState === 'error' && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                if (utterancesRef.current.length) {
+                  void checkpointRef.current?.flush().catch(() => {});
+                } else void loadCaptureRecovery().catch(() => {});
+              }}
+            >
+              Retry secure recovery
+            </Button>
+          )}
+        </p>
       )}
 
       {teleconsult && !teleconsult.ready && !finalNote && (
@@ -1778,7 +2085,7 @@ export function DoctorLiveEncounter({
           ) : (
             <Card role="status" className="p-5 text-sm">
               {saveState === 'error'
-                ? 'Draft not saved. Retry saving before review or signing.'
+                ? (saveIssue ?? 'Draft not saved. Retry saving before review or signing.')
                 : 'Saving the note, prescription and captured transcript…'}
             </Card>
           )}

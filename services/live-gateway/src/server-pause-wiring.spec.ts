@@ -4,6 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { LiveGatewayEvent } from '@cureocity/contracts';
 import { MockGeminiPass1Backend } from '@cureocity/llm';
 import { LiveAuthority } from './live-authority';
+import { LiveSession } from './live-session';
 
 const fixture = vi.hoisted(() => ({ server: null as unknown as EventEmitter }));
 // Run the actual gateway handler and authority/session adapters. Only sockets,
@@ -141,6 +142,115 @@ async function connect() {
   );
   return { socket, exp };
 }
+
+describe('Scribe first PCM activation wiring', () => {
+  const doctorCapabilities = ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'];
+  const grant = () =>
+    new Response(JSON.stringify({ authorized: true, capabilities: doctorCapabilities }));
+  const purposes = () =>
+    verifier.mock.calls.map(([, options]) => JSON.parse(options!.body as string).purpose as string);
+  async function doctorSocket(holdPreflight = false) {
+    let release!: (response: Response) => void;
+    verifier.mockImplementation(async (_url, options) => {
+      if (holdPreflight && JSON.parse(options!.body as string).purpose === 'preflight')
+        return new Promise<Response>((resolve) => {
+          release = resolve;
+        });
+      return grant();
+    });
+    const socket = new Socket();
+    sockets.push(socket);
+    fixture.server.emit('connection', socket, {
+      headers: {},
+      socket: { remoteAddress: '127.0.0.1' },
+    });
+    socket.command({
+      type: 'start',
+      sessionId: 'fictional-session',
+      token: token(Math.floor(Date.now() / 1000) + 300, {
+        vertical: 'DOCTOR',
+        capabilities: doctorCapabilities,
+      }),
+      vertical: 'DOCTOR',
+    });
+    if (holdPreflight) await vi.waitFor(() => expect(purposes()).toContain('preflight'));
+    else
+      await vi.waitFor(() =>
+        expect(socket.events).toContainEqual({ type: 'status', state: 'listening' }),
+      );
+    return { socket, release: () => release(grant()) };
+  }
+  it('does not activate on connection, empty or malformed input; valid audio waits for activation and activates once', async () => {
+    const push = vi.spyOn(LiveSession.prototype, 'pushAudio');
+    const { socket } = await doctorSocket();
+    expect(purposes()).not.toContain('capture-activation');
+    socket.emit('message', Buffer.alloc(0), true);
+    socket.emit('message', Buffer.alloc(1), true);
+    await Promise.resolve();
+    expect(purposes()).not.toContain('capture-activation');
+    let release!: (response: Response) => void;
+    verifier.mockImplementation(async (_url, options) =>
+      JSON.parse(options!.body as string).purpose === 'capture-activation'
+        ? new Promise<Response>((resolve) => {
+            release = resolve;
+          })
+        : grant(),
+    );
+    socket.emit('message', audioFrame(), true);
+    socket.emit('message', audioFrame(), true);
+    await vi.waitFor(() => expect(purposes()).toContain('capture-activation'));
+    expect(push).not.toHaveBeenCalled();
+    release(grant());
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(2));
+    expect(purposes().filter((purpose) => purpose === 'capture-activation')).toHaveLength(1);
+  });
+  it('refused activation never processes audio or leaves an apparently live socket', async () => {
+    const push = vi.spyOn(LiveSession.prototype, 'pushAudio');
+    const { socket } = await doctorSocket();
+    verifier.mockImplementation(async (_url, options) =>
+      JSON.parse(options!.body as string).purpose === 'capture-activation'
+        ? new Response('{}', { status: 403 })
+        : grant(),
+    );
+    socket.emit('message', audioFrame(), true);
+    await vi.waitFor(() => expect(socket.readyState).toBe(3));
+    expect(push).not.toHaveBeenCalled();
+  });
+  it.each(['stop', 'pause'])('never activates discarded audio received after %s', async (type) => {
+    const push = vi.spyOn(LiveSession.prototype, 'pushAudio');
+    const { socket } = await doctorSocket();
+    socket.command(type === 'pause' ? { type, requestId } : { type });
+    socket.emit('message', audioFrame(), true);
+    await vi.waitFor(() =>
+      expect(
+        socket.events.some((event) =>
+          type === 'pause'
+            ? event.type === 'capturePaused'
+            : event.type === 'status' && event.state === 'done',
+        ),
+      ).toBe(true),
+    );
+    expect(purposes()).not.toContain('capture-activation');
+    expect(push).not.toHaveBeenCalled();
+  });
+  it('does not discard legitimate audio preceding Stop while activation is pending', async () => {
+    const push = vi.spyOn(LiveSession.prototype, 'pushAudio');
+    const { socket } = await doctorSocket();
+    socket.emit('message', audioFrame(), true);
+    socket.command({ type: 'stop' });
+    await vi.waitFor(() => expect(push).toHaveBeenCalledOnce());
+    expect(purposes()).toContain('capture-activation');
+  });
+  it('never begins or activates a session after Stop overtook preflight', async () => {
+    const start = vi.spyOn(LiveSession.prototype, 'start');
+    const { socket, release } = await doctorSocket(true);
+    socket.command({ type: 'stop' });
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(start).not.toHaveBeenCalled();
+    expect(purposes()).not.toContain('capture-activation');
+  });
+});
 
 describe('actual gateway pause command/authorization wiring', () => {
   it('uses the verified Mind vertical for the shorter window and realtime transcription hint', async () => {

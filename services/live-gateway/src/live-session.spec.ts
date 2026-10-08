@@ -94,6 +94,41 @@ async function commandEvents(
 const BLOCK = Buffer.concat([pcm(5_000, SPEECH), pcm(500, SILENCE)]);
 
 describe('LiveSession — per-segment diarized utterances (TS-B1)', () => {
+  it('preserves the full doctor source when partial diarization omits clinical words', async () => {
+    const backends = mockBackends();
+    const original = backends.pass1.run.bind(backends.pass1);
+    backends.pass1.run = async (input) => {
+      const result = await original(input);
+      return {
+        ...result,
+        output: {
+          ...result.output,
+          transcript: 'Hello. I am allergic to penicillin.',
+          speakerSegments: [{ speaker: 'client', startMs: 0, endMs: 1000, text: 'Hello.' }],
+        },
+      };
+    };
+    const events: LiveGatewayEvent[] = [];
+    const session = new LiveSession(
+      'fictional-partial-diarization',
+      null,
+      backends,
+      (event) => events.push(event),
+      OPTS,
+    );
+    session.pushAudio(BLOCK);
+    await session.pump();
+    expect(events.filter((event) => event.type === 'utterance')).toMatchObject([
+      { utterance: { speaker: 'unknown', text: 'Hello. I am allergic to penicillin.' } },
+    ]);
+    expect(events.some((event) => event.type === 'transcriptionWarning')).toBe(true);
+    await session.finalize();
+    expect(events.find((event) => event.type === 'final')).toMatchObject({
+      captureIncomplete: true,
+    });
+    session.dispose();
+  });
+
   it('splits a multi-speaker window into speaker-correct utterances', async () => {
     const events: LiveGatewayEvent[] = [];
     // The mock Pass 1 returns TWO diarized segments per window

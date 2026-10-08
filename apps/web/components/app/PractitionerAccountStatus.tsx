@@ -6,10 +6,12 @@ export function PractitionerAccountStatus({
   status,
   vertical,
   email,
+  canSubmitRegistration = false,
 }: {
   status: PsychologistStatus;
   vertical: 'DOCTOR' | 'THERAPIST';
   email: string;
+  canSubmitRegistration?: boolean;
 }) {
   const copy = practitionerAccountStatusCopy(status);
   const productName = vertical === 'DOCTOR' ? 'Cureocity Scribe' : 'Cureocity Mind';
@@ -56,6 +58,14 @@ export function PractitionerAccountStatus({
             </p>
           </div>
           <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+            {canSubmitRegistration && (
+              <a
+                href="/onboarding"
+                className={`inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--color-line)] px-5 py-3 text-sm font-medium ${focus}`}
+              >
+                Submit registration details
+              </a>
+            )}
             {/* A full navigation rechecks current database status, including
                 approval made while this page was open. No clinical API call. */}
             <a

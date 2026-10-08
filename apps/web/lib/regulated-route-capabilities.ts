@@ -40,6 +40,12 @@ const policy = (
  */
 export const REGULATED_ROUTE_CAPABILITIES = [
   policy(
+    'api/v1/scribe/encounters/[sessionId]/review',
+    ['GET'],
+    ['MEDICAL_DOCUMENTATION'],
+    'disclosure',
+  ),
+  policy(
     'api/v1/scribe/encounters/[sessionId]/teleconsult',
     ['GET', 'POST'],
     ['MEDICAL_DOCUMENTATION', 'LIVE_ENCOUNTER'],

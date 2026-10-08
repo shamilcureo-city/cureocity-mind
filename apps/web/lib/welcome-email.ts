@@ -16,16 +16,23 @@ import type { IEmailPort } from '@cureocity/notifications';
 
 declare global {
   var __cureocityWelcomeEmail: IEmailPort | undefined;
+  var __cureocityScribeWelcomeEmail: IEmailPort | undefined;
 }
 
-function client(): IEmailPort {
-  if (globalThis.__cureocityWelcomeEmail) return globalThis.__cureocityWelcomeEmail;
+function client(scribe: boolean): IEmailPort {
+  const cached = scribe
+    ? globalThis.__cureocityScribeWelcomeEmail
+    : globalThis.__cureocityWelcomeEmail;
+  if (cached) return cached;
   const apiKey = process.env['SENDGRID_API_KEY'];
   const fromEmail = process.env['SENDGRID_FROM_EMAIL'];
-  const fromName = process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity Mind';
+  const fromName = scribe
+    ? 'Cureocity Scribe'
+    : (process.env['SENDGRID_FROM_NAME'] ?? 'Cureocity Mind');
   const port: IEmailPort =
     apiKey && fromEmail ? new SendGridBackend({ apiKey, fromEmail, fromName }) : new NoopBackend();
-  globalThis.__cureocityWelcomeEmail = port;
+  if (scribe) globalThis.__cureocityScribeWelcomeEmail = port;
+  else globalThis.__cureocityWelcomeEmail = port;
   return port;
 }
 
@@ -87,11 +94,21 @@ export interface WelcomeEmailResult {
 export async function sendWelcomeEmail(opts: {
   to: string;
   fullName: string;
+  vertical?: 'DOCTOR' | 'THERAPIST';
 }): Promise<WelcomeEmailResult> {
-  const subject = process.env['WELCOME_EMAIL_SUBJECT'] ?? DEFAULT_SUBJECT;
-  const textBody = process.env['WELCOME_EMAIL_BODY_TEXT'] ?? DEFAULT_TEXT(opts.fullName);
-  const htmlBody = process.env['WELCOME_EMAIL_BODY_HTML'] ?? DEFAULT_HTML(opts.fullName);
-  const port = client();
+  const scribe = opts.vertical === 'DOCTOR';
+  const scribeMessage =
+    'Your registration details have been submitted to Cureocity Scribe. Submission does not approve your medical registration or activate clinical access. Your account status shows any remaining administrator review.';
+  const subject = scribe
+    ? 'Registration received | Cureocity Scribe'
+    : (process.env['WELCOME_EMAIL_SUBJECT'] ?? DEFAULT_SUBJECT);
+  const textBody = scribe
+    ? `Hi ${opts.fullName},\n\n${scribeMessage}\n\n— The Cureocity Scribe team`
+    : (process.env['WELCOME_EMAIL_BODY_TEXT'] ?? DEFAULT_TEXT(opts.fullName));
+  const htmlBody = scribe
+    ? `<p>Hi ${escapeHtml(opts.fullName)},</p><p>${scribeMessage}</p><p>&mdash; The Cureocity Scribe team</p>`
+    : (process.env['WELCOME_EMAIL_BODY_HTML'] ?? DEFAULT_HTML(opts.fullName));
+  const port = client(scribe);
   const res = await port.sendEmail({
     to: opts.to,
     subject,

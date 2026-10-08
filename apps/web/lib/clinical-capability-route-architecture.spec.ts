@@ -178,7 +178,9 @@ describe('regulated boundary coverage', () => {
 
   it('does not invoke optional live persistence when the refreshed scope is absent', () => {
     const liveNote = source('app/api/v1/sessions/[id]/live-note/route.ts');
-    expect(liveNote).toContain("capabilities?.includes('CHRONIC_CARE')");
+    // Draft vitals are no longer written as measurements at all. Trend reads
+    // are capability-gated and derive them from the current signed record.
+    expect(liveNote).not.toContain('persistVitalReadings(');
     expect(liveNote).toContain("capabilities?.includes('PRESCRIPTION_DRAFTING')");
     expect(liveNote).toContain("capabilities?.includes('CLINICAL_ORDERS')");
   });

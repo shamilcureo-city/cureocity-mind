@@ -3,6 +3,7 @@ import {
   LiveNoteInputSchema,
   TherapyLiveNoteInputSchema,
   containsTranscriptionArtifact,
+  containsMedicalTranscriptionExample,
   type ClinicalLocale,
   type ClinicalOrderV1,
   type IntakeNoteV1,
@@ -14,14 +15,14 @@ import { requireCapability, requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { ensureEnglishNote } from '@/lib/ensure-english-note';
 import { mapRiskSeverity, recordCommittedNoteRisk, writeNoteRiskAudit } from '@/lib/note-risk';
-import {
-  persistDraftedOrders,
-  persistVitalReadings,
-  runClinicalAnalysis,
-} from '@/lib/note-orchestrator';
+import { persistDraftedOrders, runClinicalAnalysis } from '@/lib/note-orchestrator';
 import { coverTranscriptWithSegments } from '@/lib/transcribe-segment';
 
-import { encryptForTenant } from '@/lib/tenant-crypto';
+import { decryptForTenant, encryptForTenant } from '@/lib/tenant-crypto';
+import {
+  ScribeCaptureRecoverySchema,
+  scribeRecoveryTranscript,
+} from '@/lib/scribe-capture-recovery';
 import {
   encodeSavedTranscript,
   matchingTranscriptSegments,
@@ -48,6 +49,9 @@ export const dynamic = 'force-dynamic';
 // that background pass. Doctor differential reasoning is clinician-triggered.
 export const maxDuration = 120;
 
+class ScribeCheckpointConflict extends Error {}
+class ScribeCheckpointUnavailable extends Error {}
+
 /**
  * Sprint DV9 — POST /api/v1/sessions/:id/live-note
  *
@@ -55,7 +59,7 @@ export const maxDuration = 120;
  * gateway can't write to the DB, so the browser relays it here). The note
  * is AI-drafted (real Pass 2 in the gateway) and becomes a DRAFT the
  * doctor reviews + signs — the same provenance as the batch path. Drafts
- * the Rx + clinical orders + vital readings too, so the live path reaches
+ * the Rx + clinical orders too; vitals join trends only after signing. The live path reaches
  * full parity (sign / orders / share / FHIR). Doctor-only, tenant-checked.
  */
 export async function POST(
@@ -302,6 +306,19 @@ export async function POST(
   // Doctor path — parse the medical live-note body + narrow. Behavior unchanged.
   const parsed = await parseJson(req, LiveNoteInputSchema);
   if (!parsed.ok) return parsed.response;
+  // Older gateways can still relay the legacy ASR prompt's example as if it
+  // were speech. Reject before encryption, lifecycle writes, orders or vitals.
+  // This is a narrow Scribe-only fingerprint, not acoustic verification.
+  if (containsMedicalTranscriptionExample(JSON.stringify(parsed.value))) {
+    return NextResponse.json(
+      {
+        error:
+          'This draft contains a suspected transcription prompt example. It has not been saved. Review the captured words and recover an accurate source before saving or signing.',
+        code: 'MEDICAL_TRANSCRIPTION_EXAMPLE',
+      },
+      { status: 422 },
+    );
+  }
   if (containsTranscriptionArtifact(JSON.stringify(parsed.value))) {
     return NextResponse.json(
       {
@@ -363,24 +380,48 @@ export async function POST(
   try {
     draft = await prisma.$transaction(async (tx) => {
       await lockActiveClientForSession(tx, sessionId, auth.value.psychologistId);
+      // The checkpoint writer takes these same Client → Session locks. Read
+      // its latest acknowledged source before closing the encounter so an
+      // older tab cannot strand newer captured words behind a completed note.
+      await tx.$queryRaw`SELECT "id" FROM "sessions" WHERE "id" = ${sessionId} FOR UPDATE`;
+      const previousDraft = await tx.noteDraft.findUnique({
+        where: { sessionId },
+        select: { errorMessage: true, recoveryTranscriptEncrypted: true },
+      });
+      let checkpointIncomplete = false;
+      if (previousDraft?.recoveryTranscriptEncrypted) {
+        let recovery;
+        try {
+          const decoded = await decryptForTenant(
+            auth.value.psychologistId,
+            previousDraft.recoveryTranscriptEncrypted,
+          );
+          if (!decoded) throw new Error('Checkpoint unavailable');
+          recovery = ScribeCaptureRecoverySchema.parse(JSON.parse(decoded));
+        } catch {
+          throw new ScribeCheckpointUnavailable();
+        }
+        const savedSource = scribeRecoveryTranscript(recovery);
+        if (savedSource && transcript !== savedSource && !transcript.startsWith(`${savedSource}\n`))
+          throw new ScribeCheckpointConflict();
+        checkpointIncomplete = recovery.captureIncomplete;
+      }
       teleconsultInterrupted = await assertScribeTeleconsultDraftPersistence(
         tx,
         sessionId,
         auth.value.psychologistId,
-        parsed.value.captureIncomplete,
+        checkpointIncomplete || parsed.value.captureIncomplete,
       );
       return finalizeLiveSession(tx, {
         sessionId,
         endedAt: new Date(),
         persistDraft: async () => {
-          const previousDraft = await tx.noteDraft.findUnique({
-            where: { sessionId },
-            select: { errorMessage: true },
-          });
           const errorMessage = preserveScribeCaptureIntegrity(
             previousDraft?.errorMessage,
-            teleconsultInterrupted || parsed.value.captureIncomplete,
-            teleconsultInterrupted ? 'capture_interrupted' : parsed.value.captureIncompleteReason,
+            checkpointIncomplete || teleconsultInterrupted || parsed.value.captureIncomplete,
+            checkpointIncomplete || teleconsultInterrupted
+              ? 'capture_interrupted'
+              : parsed.value.captureIncompleteReason,
           );
           const persisted = await tx.noteDraft.upsert({
             where: { sessionId },
@@ -440,6 +481,24 @@ export async function POST(
       });
     });
   } catch (error) {
+    if (error instanceof ScribeCheckpointConflict)
+      return NextResponse.json(
+        {
+          error:
+            'Newer captured words were saved for this consultation. Keep this tab open and recover the complete saved conversation before retrying. Nothing was replaced.',
+          code: 'SCRIBE_CHECKPOINT_SOURCE_CONFLICT',
+        },
+        { status: 409 },
+      );
+    if (error instanceof ScribeCheckpointUnavailable)
+      return NextResponse.json(
+        {
+          error:
+            'The securely saved captured words could not be verified. Keep this tab open and retry. Nothing was replaced.',
+          code: 'SCRIBE_CHECKPOINT_UNAVAILABLE',
+        },
+        { status: 503 },
+      );
     const response =
       consentAuthorizationResponse(error) ?? sessionConcurrentModificationResponse(error);
     if (response) return response;
@@ -447,22 +506,15 @@ export async function POST(
   }
 
   // Reuse the batch helpers: draft the Rx + clinical orders (interaction-
-  // checked server-side) and capture vitals into the chronic series.
+  // checked server-side). Draft vitals are not published into the chronic series.
   if (
     !teleconsultInterrupted &&
     (capabilities?.includes('PRESCRIPTION_DRAFTING') || capabilities?.includes('CLINICAL_ORDERS'))
   ) {
     await persistDraftedOrders(sessionId, auth.value.psychologistId, medications, orders);
   }
-  if (!teleconsultInterrupted && capabilities?.includes('CHRONIC_CARE')) {
-    await persistVitalReadings(
-      sessionId,
-      session.clientId,
-      auth.value.psychologistId,
-      session.scheduledAt,
-      note.vitals,
-    );
-  }
+  // AI draft vitals are not measurements. Chronic trends read the current
+  // signed note after clinician correction, never this unreviewed draft.
 
   return NextResponse.json({ draftId: draft.id, status: 'COMPLETED' }, { status: 201 });
 }

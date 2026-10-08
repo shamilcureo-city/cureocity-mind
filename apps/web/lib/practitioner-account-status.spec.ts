@@ -5,6 +5,7 @@ import { PractitionerAccountStatus } from '../components/app/PractitionerAccount
 import { Sidebar } from '../components/app/Sidebar';
 
 const h = vi.hoisted(() => ({
+  host: vi.fn(() => 'scribe.cureocity.in'),
   account: vi.fn(),
   notFound: vi.fn((): never => {
     throw new Error('NOT_FOUND');
@@ -14,6 +15,7 @@ const h = vi.hoisted(() => ({
   }),
 }));
 vi.mock('./auth-page', () => ({ requirePagePsychologist: h.account }));
+vi.mock('next/headers', () => ({ headers: async () => new Headers({ host: h.host() }) }));
 vi.mock('next/navigation', () => ({
   redirect: h.redirect,
   notFound: h.notFound,
@@ -37,6 +39,30 @@ afterEach(() => {
 });
 
 describe('account access explanation', () => {
+  it('lets a legacy pending Scribe signup submit registration with Scribe branding', async () => {
+    h.account.mockResolvedValue({
+      status: 'PENDING_VERIFICATION',
+      onboardingCompletedAt: null,
+      vertical: 'THERAPIST',
+      email: 'doctor@example.test',
+    });
+    const html = renderToStaticMarkup(await AccountStatusPage());
+    expect(html).toContain('Cureocity Scribe');
+    expect(html).toContain('Submit registration details');
+    expect(html).not.toContain('/app/clinic');
+  });
+  it('does not introduce the pending-registration exception on Mind', async () => {
+    h.host.mockReturnValueOnce('mind.cureocity.in');
+    h.account.mockResolvedValue({
+      status: 'PENDING_VERIFICATION',
+      onboardingCompletedAt: null,
+      vertical: 'THERAPIST',
+      email: 'therapist@example.test',
+    });
+    const html = renderToStaticMarkup(await AccountStatusPage());
+    expect(html).toContain('Cureocity Mind');
+    expect(html).not.toContain('Submit registration details');
+  });
   it.each([
     ['PENDING_VERIFICATION', 'Your account is awaiting approval'],
     ['SUSPENDED', 'Your account access is paused'],
