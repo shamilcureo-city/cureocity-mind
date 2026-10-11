@@ -98,7 +98,10 @@ export async function gatherInputs(
     prisma.session.findFirst({
       where: { clientId, kind: 'INTAKE' },
       orderBy: { scheduledAt: 'desc' },
-      select: { noteDraft: { select: { content: true } } },
+      select: {
+        noteDraft: { select: { content: true } },
+        therapyNote: { select: { content: true } },
+      },
     }),
     prisma.safetyPlan.findFirst({
       where: { clientId, supersededAt: null },
@@ -139,7 +142,9 @@ export async function gatherInputs(
     journey,
     openItems: openItemRows,
     presentingConcerns: client?.presentingConcerns ?? null,
-    intakeNote: parseIntake(latestIntakeDraft?.noteDraft?.content),
+    intakeNote: parseIntake(
+      latestIntakeDraft?.therapyNote?.content ?? latestIntakeDraft?.noteDraft?.content,
+    ),
     latestReportBody: latestReport?.body ?? null,
     hasSafetyPlan: safetyPlan !== null,
     clinicianDocumentedRisk,

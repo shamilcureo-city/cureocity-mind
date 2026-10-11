@@ -10,7 +10,6 @@ import { useSessionRecorder, type CaptureSource } from '@/lib/audio/use-session-
 import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import { InRoomDirection } from './InRoomDirection';
 import { coordinateMindSessionStart } from '@/lib/mind-session-start';
-import { SessionStore } from '@/lib/audio/idb-chunk-store';
 import { CaptureStatusBar } from './CaptureStatusBar';
 import { useCaptureViewClock } from '@/lib/use-capture-view-clock';
 import { useModalA11y } from '@/lib/use-modal-a11y';
@@ -264,7 +263,7 @@ export function LiveRecorder({
         throw new Error(body.error ?? `End failed (${res.status})`);
       }
       setFinalStage('generating-note');
-      await SessionStore.clear(sessionId);
+      await recorder.clearSavedCursor();
       // Kick off note generation; don't block the redirect. The session
       // detail page polls the draft status, so the user immediately sees
       // "Generating note…" and watches it flip to COMPLETED.
@@ -539,6 +538,37 @@ export function LiveRecorder({
             queue. Keep the file private and review these parts before completing the clinical
             record.
           </p>
+        </div>
+      )}
+
+      {(endError || incompleteLeft > 0 || recorder.error) && (
+        <div className="mx-6 mb-4 text-sm text-[var(--color-ink-2)]">
+          <p>
+            Newly saved recovery audio is encrypted here until it uploads or you discard it. Sign
+            back in to this account to recover it. We do not automatically delete your only recovery
+            copy. Downloaded audio is not encrypted by Mind; keep it private.
+          </p>
+          <Button
+            variant="secondary"
+            disabled={
+              ending ||
+              recorder.draining ||
+              ['recording', 'preparing', 'pausing', 'finishing'].includes(recorder.state)
+            }
+            onClick={() => {
+              if (
+                !window.confirm(
+                  'Discard unsaved audio from this device? Download and check your recovery file first. This cannot be undone; uploaded audio is not removed. Automatic completion from this device will stay blocked.',
+                )
+              )
+                return;
+              void recorder
+                .discardUnsavedAudio()
+                .catch((error: Error) => setEndError(error.message));
+            }}
+          >
+            Discard unsaved audio
+          </Button>
         </div>
       )}
 

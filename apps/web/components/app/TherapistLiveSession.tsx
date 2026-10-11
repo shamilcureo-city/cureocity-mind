@@ -1117,6 +1117,10 @@ export function TherapistLiveSession({
       },
       onFailure: () => {
         if (!ownsSocket()) return;
+        // Renewal failure invalidates this attempt before onclose can run its
+        // ordinary loss handler. Unless Pause was acknowledged, pending audio
+        // may never become transcript; recovery/reconnect must retain that gap.
+        if (phaseRef.current !== 'paused') flagTranscriptionWarning('connection_lost');
         audioDeliveryRef.current = 'off';
         ++liveAttemptRef.current;
         abort.abort();

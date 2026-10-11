@@ -189,6 +189,7 @@ export function RecordingShell({
   if (shell.kind === 'recording') {
     return (
       <LiveRecorder
+        key={shell.ready.sessionId}
         sessionId={shell.ready.sessionId}
         clientId={shell.ready.clientId}
         clientName={shell.ready.clientName}
@@ -204,6 +205,7 @@ export function RecordingShell({
   // uploading
   return (
     <FileUploadPanel
+      key={shell.ready.sessionId}
       sessionId={shell.ready.sessionId}
       clientName={shell.ready.clientName}
       modality={shell.ready.modality}

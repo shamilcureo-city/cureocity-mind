@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AudioStoreOwner } from '@/lib/audio/audio-store-owner';
+import { subscribeBrowserCaptureLock } from '@/lib/browser-capture-lock';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -23,6 +25,19 @@ interface Props {
 type Phase = 'pick' | 'uploading' | 'done' | 'error';
 
 export function FileUploadPanel({ sessionId, clientName, modality, onFinished }: Props) {
+  const owner = useMemo(() => new AudioStoreOwner(sessionId), [sessionId]);
+  const lifecycle = useRef(0);
+  useEffect(() => {
+    ++lifecycle.current;
+    const unsubscribe = subscribeBrowserCaptureLock(() => owner.close());
+    return () => {
+      unsubscribe();
+      const epoch = ++lifecycle.current;
+      queueMicrotask(() => {
+        if (lifecycle.current === epoch) owner.close();
+      });
+    };
+  }, [owner]);
   const [file, setFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<Phase>('pick');
   const [progress, setProgress] = useState({ decoded: 0, total: 1, chunksUploaded: 0 });
@@ -47,13 +62,16 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
     setError(null);
     setPhase('uploading');
     try {
+      const store = await owner.get();
       if (retryUpload) {
-        await retryAudioUpload(sessionId);
+        await retryAudioUpload(sessionId, store, owner.signal);
         setProgress((previous) => ({ ...previous, chunksUploaded: chunksTotal }));
       } else if (!audioUploaded) {
         const result = await uploadAudioFile({
           sessionId,
           file,
+          store,
+          signal: owner.signal,
           onProgress: setProgress,
         });
         setDurationMs(result.durationMs);
@@ -62,7 +80,12 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
       setAudioUploaded(true);
       setRetryUpload(false);
       setRetryPreparation(false);
-      const end = await fetch(`/api/v1/sessions/${sessionId}/end`, { method: 'POST' });
+      owner.signal.throwIfAborted();
+      const end = await fetch(`/api/v1/sessions/${sessionId}/end`, {
+        method: 'POST',
+        signal: owner.signal,
+      });
+      owner.signal.throwIfAborted();
       if (!end.ok) {
         const body = (await end.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `End failed (${end.status})`);
@@ -71,12 +94,14 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
       // PENDING -> IN_PROGRESS -> COMPLETED progression.
       void fetch(`/api/v1/sessions/${sessionId}/generate-note`, {
         method: 'POST',
+        signal: owner.signal,
         keepalive: true,
       }).catch(() => {
         /* swallow — the polling UI surfaces real failures */
       });
       setPhase('done');
     } catch (e) {
+      if (owner.signal.aborted) return;
       if (e instanceof IncompleteAudioUploadError) {
         setRetryUpload(true);
         if (e.prepared) {
@@ -193,6 +218,36 @@ export function FileUploadPanel({ sessionId, clientName, modality, onFinished }:
                     ? 'Retry finish'
                     : 'Choose audio again'}
             </Button>
+            {(retryUpload || retryPreparation) && (
+              <>
+                <p className="text-xs text-[var(--color-ink-2)]">
+                  Newly saved pending parts are encrypted until uploaded or discarded. Keep your
+                  original audio file for recovery; it is not changed by this upload.
+                </p>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    if (
+                      !window.confirm(
+                        'Discard unsaved parts from this device? Keep your original audio file. This cannot be undone and does not delete uploaded parts. Automatic completion from this device will stay blocked.',
+                      )
+                    )
+                      return;
+                    void owner
+                      .get()
+                      .then((store) => store.discardPending())
+                      .then(() => {
+                        setError(
+                          'Unsaved parts discarded. Keep the original file; this session cannot be finalized as complete.',
+                        );
+                      })
+                      .catch((error: Error) => setError(error.message));
+                  }}
+                >
+                  Discard unsaved parts
+                </Button>
+              </>
+            )}
           </div>
         )}
       </div>

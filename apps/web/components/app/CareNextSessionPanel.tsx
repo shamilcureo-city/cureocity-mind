@@ -274,6 +274,7 @@ function QuestionRow({
 interface BriefResponse {
   brief: PreSessionBrief;
   source: 'cache' | 'fresh';
+  stale: boolean;
 }
 
 function BriefSection({ clientId }: { clientId: string }) {
@@ -288,9 +289,16 @@ function BriefSection({ clientId }: { clientId: string }) {
       try {
         const res = await fetch(
           `/api/v1/clients/${clientId}/pre-session-brief${refresh ? '?refresh=1' : ''}`,
-          { cache: 'no-store' },
+          { method: refresh ? 'POST' : 'GET', cache: 'no-store' },
         );
-        const body = (await res.json().catch(() => ({}))) as BriefResponse & { error?: string };
+        const body = (await res.json().catch(() => ({}))) as BriefResponse & {
+          error?: string;
+          code?: string;
+        };
+        if (res.status === 404 && body.code === 'PRE_SESSION_BRIEF_NOT_CACHED') {
+          setData(null);
+          return;
+        }
         if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`);
         setData(body);
       } catch (e) {
@@ -315,15 +323,24 @@ function BriefSection({ clientId }: { clientId: string }) {
           Opens with · AI brief
         </p>
         <div className="flex items-center gap-2">
-          {data && <Badge tone={data.source === 'fresh' ? 'accent' : 'muted'}>{data.source}</Badge>}
+          {data && (
+            <Badge tone={data.stale ? 'warn' : 'muted'}>
+              {data.stale ? 'Out of date — review and refresh' : 'Saved brief'}
+            </Badge>
+          )}
           <Button variant="secondary" onClick={() => void load(true)} disabled={loading}>
-            {loading ? 'Generating…' : 'Regenerate'}
+            {loading ? 'Loading…' : data ? 'Regenerate' : 'Prepare brief'}
           </Button>
         </div>
       </div>
 
       {loading && !data && (
         <p className="mt-2 text-sm text-[var(--color-ink-3)]">Preparing the brief…</p>
+      )}
+      {!loading && !data && !error && (
+        <p className="mt-2 text-sm text-[var(--color-ink-3)]">
+          No saved brief yet. Prepare one when you need it.
+        </p>
       )}
       {error && (
         <p className="mt-2 rounded-xl border border-[var(--color-warn-border)] bg-[var(--color-warn-bg)] p-3 text-sm text-[var(--color-warn)]">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PcmChunker,
   PolyphaseDecimator,
@@ -8,7 +8,8 @@ import {
   TARGET_SAMPLE_RATE_HZ,
   type PcmChunk,
 } from '@cureocity/audio';
-import { ChunkStore, SessionStore } from './idb-chunk-store';
+import { AudioStoreOwner } from './audio-store-owner';
+import { subscribeBrowserCaptureLock } from '../browser-capture-lock';
 import { ChunkUploader } from './chunk-uploader';
 import { requestPersistentStorage } from './storage-buckets';
 import { AudioPersistenceQueue } from './persistence-queue';
@@ -64,6 +65,8 @@ export interface RecorderHandle {
   drainPending: (retryExhausted?: boolean) => Promise<number>;
   /** Includes bytes still held in memory after a local storage conflict/failure. */
   downloadUnsavedAudio: () => Promise<void>;
+  clearSavedCursor: () => Promise<void>;
+  discardUnsavedAudio: () => Promise<void>;
 }
 
 const SUPPORTS_DISPLAY_MEDIA =
@@ -86,6 +89,7 @@ const SUPPORTS_DISPLAY_MEDIA =
  * at that index and any IDB-queued chunks are re-drained on mount.
  */
 export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
+  const owner = useMemo(() => new AudioStoreOwner(opts.sessionId), [opts.sessionId]);
   const [state, setState] = useState<RecorderState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [lastChunkIndex, setLastChunkIndex] = useState(-1);
@@ -110,12 +114,14 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   const stopInFlightRef = useRef<Promise<void> | null>(null);
   const generationRef = useRef(0);
   const disposedRef = useRef(false);
+  const lifecycleRef = useRef(0);
   const integrityErrorRef = useRef<string | null>(null);
   const pendingCountRef = useRef(0);
   pendingCountRef.current = pendingCount;
   const persistenceRef = useRef<AudioPersistenceQueue | null>(null);
   if (!persistenceRef.current)
     persistenceRef.current = new AudioPersistenceQueue(async (chunk) => {
+      const { chunks: ChunkStore, cursor: SessionStore } = await owner.forPersistence();
       await ChunkStore.insert(chunk);
       const cursor = await SessionStore.getCursor(chunk.sessionId);
       await SessionStore.saveCursor({
@@ -133,10 +139,14 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   // Drain queued chunks on mount + on `online` event (recover from offline).
   useEffect(() => {
     const drain = async (): Promise<void> => {
+      const store = await owner.get();
+      const ChunkStore = store.chunks;
       // Lazy create an uploader if one isn't already attached.
       if (!uploaderRef.current) {
         uploaderRef.current = new ChunkUploader({
           scribeBase: base,
+          store,
+          signal: owner.signal,
           ...(opts.getAuthToken && { getAuthToken: opts.getAuthToken }),
         });
       }
@@ -159,10 +169,12 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     };
     window.addEventListener('online', onOnline);
     void drain().catch(() =>
-      setError('Local recording storage is unavailable. Do not start until it is restored.'),
+      setError(
+        'Secure recording recovery is unavailable. Check your sign-in and browser storage before starting.',
+      ),
     );
     return () => window.removeEventListener('online', onOnline);
-  }, [opts.sessionId, base, opts.getAuthToken]);
+  }, [opts.sessionId, base, opts.getAuthToken, owner]);
 
   const start = useCallback(async (): Promise<void> => {
     if (disposedRef.current) throw new Error('Capture is no longer available on this page.');
@@ -184,6 +196,8 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
       await persistenceRef.current!.flush();
       await requestPersistentStorage();
       assertCurrent();
+      const store = await owner.get();
+      const { chunks: ChunkStore, cursor: SessionStore } = store;
       const resume = await SessionStore.getCursor(opts.sessionId);
       assertCurrent();
       if (integrityErrorRef.current || resume?.captureIntegrityError) {
@@ -226,6 +240,8 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
 
       const uploader = new ChunkUploader({
         scribeBase: base,
+        store,
+        signal: owner.signal,
         ...(opts.getAuthToken && { getAuthToken: opts.getAuthToken }),
       });
       uploaderRef.current = uploader;
@@ -323,6 +339,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     opts.getAuthToken,
     opts.selectedDeviceId,
     base,
+    owner,
   ]);
 
   const stopInternal = useCallback(
@@ -357,6 +374,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
           // leave the microphone/device open for seconds or minutes.
           await teardown();
           await persistenceRef.current!.flush();
+          const { chunks: ChunkStore, cursor: SessionStore } = await owner.forPersistence();
           const cursor = await SessionStore.getCursor(opts.sessionId);
           const integrityError = integrityErrorRef.current ?? cursor?.captureIntegrityError;
           if (integrityError) {
@@ -368,7 +386,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
               captureIntegrityError: integrityError,
             });
           }
-          if (uploaderRef.current) {
+          if (uploaderRef.current && !owner.signal.aborted) {
             setDraining(true);
             await uploaderRef.current.drainSession(opts.sessionId);
             setDraining(false);
@@ -405,16 +423,43 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
       });
       return stopInFlightRef.current;
     },
-    [opts.sessionId],
+    [opts.sessionId, owner],
   );
 
   // Stable wrapper for the consumer.
   const stop = useCallback(() => stopInternal(), [stopInternal]);
   const pause = useCallback(() => stopInternal(true), [stopInternal]);
   const downloadUnsavedAudio = useCallback(
-    () => downloadPendingAudio(opts.sessionId, persistenceRef.current?.snapshot() ?? []),
-    [opts.sessionId],
+    async () =>
+      downloadPendingAudio(
+        opts.sessionId,
+        await owner.get(),
+        persistenceRef.current?.snapshot() ?? [],
+        owner.signal,
+      ),
+    [opts.sessionId, owner],
   );
+
+  const clearSavedCursor = useCallback(async () => {
+    await (await owner.get()).cursor.clear(opts.sessionId);
+  }, [owner, opts.sessionId]);
+
+  const discardUnsavedAudio = useCallback(async () => {
+    if (['preparing', 'recording', 'pausing', 'finishing'].includes(stateRef.current))
+      throw new Error('Stop recording before discarding unsaved audio.');
+    await stopInFlightRef.current?.catch(() => {});
+    const store = await owner.get();
+    // The sticky integrity marker is saved BEFORE deleting anything. It blocks
+    // retries from finalizing an apparently complete session after a discard.
+    await store.discardPending();
+    await persistenceRef.current!.discard();
+    integrityErrorRef.current =
+      'Unsaved audio was discarded. This recording cannot be finalized as complete.';
+    setPendingCount((await store.chunks.listForSession(opts.sessionId)).length);
+    setError(integrityErrorRef.current);
+    setState('error');
+    stateRef.current = 'error';
+  }, [owner, opts.sessionId]);
 
   // FLOW-2 — drain the IndexedDB queue once more and report how many chunks
   // still failed to upload. The End flow calls this in a retry loop so it can
@@ -422,6 +467,11 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
   // server, instead of generating a note from partial audio.
   const drainPending = useCallback(
     async (retryExhausted = false): Promise<number> => {
+      const store = await owner.get();
+      const { chunks: ChunkStore, cursor: SessionStore } = store;
+      const cursor = await SessionStore.getCursor(opts.sessionId);
+      if (integrityErrorRef.current || cursor?.captureIntegrityError)
+        throw new Error(integrityErrorRef.current ?? cursor!.captureIntegrityError);
       await persistenceRef.current!.flush();
       if (uploaderRef.current) {
         setDraining(true);
@@ -435,7 +485,7 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
       setPendingCount(remaining);
       return remaining;
     },
-    [opts.sessionId],
+    [opts.sessionId, owner],
   );
 
   // beforeunload warning while recording — discourage accidental refresh.
@@ -477,14 +527,36 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
 
   // Teardown on unmount.
   useEffect(() => {
+    ++lifecycleRef.current;
     disposedRef.current = false;
-    return () => {
+    const unsubscribe = subscribeBrowserCaptureLock(() => {
+      // Stop input immediately, seal the known tail, then drop the in-memory key.
+      // No subsequent decrypt/export/upload is allowed on this stale page.
       disposedRef.current = true;
+      owner.lock();
+      void stopInternal()
+        .catch(() => {})
+        .finally(() => owner.close());
+    });
+    return () => {
+      unsubscribe();
+      disposedRef.current = true;
+      ++generationRef.current;
+      if (stateRef.current === 'preparing') stateRef.current = 'idle';
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      const cleanupEpoch = ++lifecycleRef.current;
       // Invalidate pending permission requests synchronously. When navigating
       // inside the app, make a best-effort tail save before releasing capture.
-      void stopInternal().catch(() => {});
+      queueMicrotask(() => {
+        // React's development effect replay is not a real navigation/logout.
+        if (lifecycleRef.current !== cleanupEpoch) return;
+        owner.lock();
+        void stopInternal()
+          .catch(() => {})
+          .finally(() => owner.close());
+      });
     };
-  }, [stopInternal]);
+  }, [stopInternal, owner]);
 
   async function teardown(): Promise<void> {
     const worklet = workletRef.current;
@@ -514,6 +586,8 @@ export function useSessionRecorder(opts: RecorderOptions): RecorderHandle {
     pause,
     drainPending,
     downloadUnsavedAudio,
+    clearSavedCursor,
+    discardUnsavedAudio,
   };
 }
 

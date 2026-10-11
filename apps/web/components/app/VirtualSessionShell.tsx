@@ -274,6 +274,7 @@ export function VirtualSessionShell({
       {/* The scribe — same pipeline as walk-in, fed the mixed call audio. */}
       {mixedStream ? (
         <LiveRecorder
+          key={sessionId}
           sessionId={sessionId}
           clientId={clientId}
           clientName={clientName}

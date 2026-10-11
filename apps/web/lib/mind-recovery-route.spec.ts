@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { buildRecoveryPrefix, mergeRecoveryPrefix } from './mind-recovery-prefix';
 import { decodeSavedTranscript, TRANSCRIPTION_REVIEW_WARNING } from './saved-transcript';
-import { scribeCaptureIntegrity } from './scribe-capture-integrity';
+import {
+  isScribeCaptureReviewedForNote,
+  markScribeCaptureReviewed,
+  scribeCaptureIntegrity,
+} from './scribe-capture-integrity';
 
 const state = vi.hoisted(() => ({
   vertical: 'THERAPIST',
@@ -123,28 +127,48 @@ beforeEach(() => {
 });
 
 describe('recovery POST adapter', () => {
-  it('persists incomplete capture both in the draft warning and encrypted generation source', async () => {
-    const response = await run(
-      new NextRequest('https://mind.example/recovery-transcript', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          action: 'FINALIZE',
-          utterances,
-          captureIncomplete: true,
-          captureIncompleteReason: 'audio_loss',
+  it.each(['audio_loss', 'connection_lost'] as const)(
+    'persists %s in the draft and encrypted source, requiring exact-note review before signing',
+    async (reason) => {
+      const response = await run(
+        new NextRequest('https://mind.example/recovery-transcript', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            action: 'FINALIZE',
+            utterances,
+            captureIncomplete: true,
+            captureIncompleteReason: reason,
+          }),
         }),
-      }),
-    );
-    expect(response.status).toBe(200);
-    expect(scribeCaptureIntegrity(state.draft?.errorMessage as string)).toEqual({
-      incomplete: true,
-      reason: 'audio_loss',
-    });
-    expect(
-      JSON.parse(state.ciphertexts.get(state.draft?.recoveryTranscriptEncrypted as string)!),
-    ).toMatchObject({ captureIncomplete: true, captureIncompleteReason: 'audio_loss' });
-  });
+      );
+      expect(response.status).toBe(200);
+      expect(scribeCaptureIntegrity(state.draft?.errorMessage as string)).toEqual({
+        incomplete: true,
+        reason,
+      });
+      expect(
+        JSON.parse(state.ciphertexts.get(state.draft?.recoveryTranscriptEncrypted as string)!),
+      ).toMatchObject({ captureIncomplete: true, captureIncompleteReason: reason });
+      // This is the same exact-source/note predicate called by the signing route.
+      // Generation may create a draft, but cannot remove the recovery review gate.
+      const note = { version: 'V1', subjective: 'Fictional recovered note' };
+      const draft = {
+        id: state.draft!.id as string,
+        status: 'COMPLETED',
+        content: note,
+        rxPad: null,
+        transcriptEncrypted: state.draft!.transcriptEncrypted as string,
+        errorMessage: state.draft!.errorMessage as string,
+      };
+      expect(isScribeCaptureReviewedForNote(draft, note)).toBe(false);
+      const reviewed = { ...draft, errorMessage: markScribeCaptureReviewed(draft, note) };
+      expect(isScribeCaptureReviewedForNote(reviewed, note)).toBe(true);
+      expect(
+        isScribeCaptureReviewedForNote(reviewed, { ...note, subjective: 'Changed note' }),
+      ).toBe(false);
+    },
+  );
   it('acknowledges encrypted prefix without completing a handoff session', async () => {
     const response = await run();
     expect(response.status).toBe(200);

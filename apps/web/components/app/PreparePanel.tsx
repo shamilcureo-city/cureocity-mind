@@ -108,6 +108,7 @@ function PreparePanelForClient({
     setError(null);
     try {
       const res = await fetch(`/api/v1/clients/${clientId}/pre-session-brief?refresh=1`, {
+        method: 'POST',
         cache: 'no-store',
         signal: controller.signal,
       });
@@ -382,6 +383,12 @@ function PrepareBody({
         )}
         {cachedBrief ? (
           <div className="mt-2 space-y-2 rounded-xl border border-[var(--color-line-soft)] bg-white/40 p-3">
+            {briefIsStale && (
+              <p role="status" className="text-xs text-[var(--color-warn)]">
+                This saved brief no longer has verified current context. Refresh it before using its
+                suggested direction.
+              </p>
+            )}
             <p className="font-serif text-[var(--color-ink)]">{cachedBrief.contextLine}</p>
             <p className="text-xs leading-relaxed text-[var(--color-ink-2)]">
               {cachedBrief.todaysFocus}

@@ -20,6 +20,12 @@ export class AudioPersistenceQueue {
     return [...this.pending.values()];
   }
 
+  /** Explicit user discard only, after capture and its writes have stopped. */
+  async discard(): Promise<void> {
+    await this.inFlight?.catch(() => {});
+    this.pending.clear();
+  }
+
   flush(): Promise<void> {
     if (this.inFlight) return this.inFlight.then(() => this.flush());
     const work = (async () => {

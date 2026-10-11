@@ -1,14 +1,19 @@
-import { ChunkStore, sameAudioChunk, type PersistedChunk } from './idb-chunk-store';
+import { sameAudioChunk, type PersistedChunk } from './idb-chunk-store';
+import type { SessionAudioStore } from './session-audio-store';
 
 /** Export only the unsaved PCM parts, without deleting or acknowledging them. */
 export async function downloadPendingAudio(
   sessionId: string,
+  store: SessionAudioStore,
   memory: PersistedChunk[] = [],
+  signal?: AbortSignal,
 ): Promise<void> {
-  const stored = await ChunkStore.listForSession(sessionId).catch((error: unknown) => {
+  signal?.throwIfAborted();
+  const stored = await store.chunks.listForSession(sessionId).catch((error: unknown) => {
     if (!memory.length) throw error;
     return [];
   });
+  signal?.throwIfAborted();
   const byIndex = new Map(stored.map((chunk) => [chunk.chunkIndex, chunk]));
   const collision = memory.some((chunk) => {
     const previous = byIndex.get(chunk.chunkIndex);

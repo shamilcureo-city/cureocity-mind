@@ -169,6 +169,7 @@ export function DoctorEncounterPanel({
     // landing on the same generate-note pipeline + ReviewAndSign.
     return mode === 'upload' ? (
       <FileUploadPanel
+        key={sessionId}
         sessionId={sessionId}
         clientName={clientName}
         modality={null}
@@ -176,6 +177,7 @@ export function DoctorEncounterPanel({
       />
     ) : (
       <LiveRecorder
+        key={sessionId}
         sessionId={sessionId}
         clientName={clientName}
         modality={null}

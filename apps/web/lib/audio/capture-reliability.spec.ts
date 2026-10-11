@@ -18,6 +18,7 @@ const data = vi.hoisted(() => ({
 }));
 vi.mock('react', () => ({
   useCallback: <T>(fn: T) => fn,
+  useMemo: <T>(fn: () => T) => fn(),
   useRef: <T>(current: T) => ({ current }),
   useState: <T>(value: T) => [value, vi.fn()],
   useEffect: (effect: () => (() => void) | void) => {
@@ -68,6 +69,36 @@ import { ChunkUploader } from './chunk-uploader';
 import { useSessionRecorder } from './use-session-recorder';
 import { useLiveStream } from './use-live-stream';
 import { uploadAudioFile, IncompleteAudioUploadError, AudioFileStorageError } from './upload-file';
+import { ChunkStore, SessionStore } from './idb-chunk-store';
+import { emitBrowserCaptureLock } from '../browser-capture-lock';
+const scopedStore = {
+  chunks: ChunkStore,
+  cursor: SessionStore,
+  close: vi.fn(),
+  discardPending: vi.fn(),
+};
+vi.mock('./audio-store-owner', () => ({
+  AudioStoreOwner: class {
+    private abort = new AbortController();
+    get signal() {
+      return this.abort.signal;
+    }
+    async get() {
+      this.abort.signal.throwIfAborted();
+      return scopedStore;
+    }
+    async forPersistence() {
+      return scopedStore;
+    }
+    lock() {
+      this.abort.abort();
+    }
+    close() {
+      this.lock();
+      scopedStore.close();
+    }
+  },
+}));
 
 const chunk = (index = 0, attempts = 0) => ({
   sessionId: 's-1',
@@ -151,6 +182,16 @@ beforeEach(() => {
   data.effects = [];
   data.contexts = [];
   data.addModule = null;
+  scopedStore.discardPending.mockImplementation(async () => {
+    data.cursor = {
+      sessionId: 's-1',
+      startedAt: 0,
+      nextChunkIndex: 1,
+      captureIntegrityError:
+        'Unsaved audio was discarded. This recording cannot be finalized as complete.',
+    };
+    data.chunks.clear();
+  });
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => new Response('{}', { status: 200 })),
@@ -285,7 +326,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     vi.mocked(fetch).mockResolvedValue(
       new Response('{"code":"AUDIO_CHUNK_CONFLICT"}', { status: 409 }),
     );
-    await new ChunkUploader({ scribeBase: '/api/v1' }).drainSession('s-1');
+    await new ChunkUploader({ scribeBase: '/api/v1', store: scopedStore }).drainSession('s-1');
     expect(data.chunks.get(0)?.bytes).toEqual(new Uint8Array([1, 2]));
     expect(data.chunks.get(0)?.lastHttpStatus).toBe(409);
   });
@@ -389,7 +430,7 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
   });
 
-  it('internal navigation cleanup saves the tail on a best-effort basis', async () => {
+  it('internal navigation cleanup seals the tail locally without further authenticated uploads', async () => {
     const recorder = useSessionRecorder({ sessionId: 's-1', source: 'mic' });
     const unmount = data.effects.at(-1)!();
     if (!unmount) throw new Error('Missing hook cleanup');
@@ -400,7 +441,22 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     unmount();
     await vi.waitFor(() => expect(data.cursor?.nextChunkIndex).toBe(1));
     expect(data.tracks[0].stopped).toBe(true);
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(data.chunks.size).toBe(1);
+    await vi.waitFor(() => expect(scopedStore.close).toHaveBeenCalled());
+  });
+
+  it('effect replay does not close recovery or permanently disable capture', async () => {
+    const recorder = useSessionRecorder({ sessionId: 's-1', source: 'mic' });
+    const effect = data.effects.at(-1)!;
+    effect()?.();
+    const unmount = effect();
+    await Promise.resolve();
+    await recorder.start();
+    expect(data.tracks[0].stopped).toBe(false);
+    expect(scopedStore.close).not.toHaveBeenCalled();
+    unmount?.();
+    await vi.waitFor(() => expect(scopedStore.close).toHaveBeenCalled());
   });
 
   it('does not clear the resume cursor simply because captured parts uploaded', async () => {
@@ -414,9 +470,46 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     expect(data.cursor?.nextChunkIndex).toBe(1);
   });
 
+  it('locks capture immediately, seals the tail, and prevents retained recovery actions on logout', async () => {
+    vi.stubGlobal('window', new EventTarget());
+    const recorder = useSessionRecorder({ sessionId: 's-1', source: 'mic' });
+    const cleanup = data.effects.at(-1)!();
+    await recorder.start();
+    data.worklet.port.onmessage({
+      data: { type: 'frames', samples: new Float32Array(4800).fill(0.2) },
+    });
+    emitBrowserCaptureLock();
+    expect(data.tracks[0].stopped).toBe(true);
+    await vi.waitFor(() => expect(scopedStore.close).toHaveBeenCalled());
+    expect(data.chunks.size).toBe(1);
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(recorder.start()).rejects.toThrow('no longer available');
+    await expect(recorder.downloadUnsavedAudio()).rejects.toThrow();
+    await expect(recorder.drainPending()).rejects.toThrow();
+    cleanup?.();
+  });
+
+  it('explicit discard clears failed-memory bytes only after saving an incomplete marker', async () => {
+    const recorder = useSessionRecorder({ sessionId: 's-1', source: 'mic' });
+    await recorder.start();
+    data.worklet.port.onmessage({
+      data: { type: 'frames', samples: new Float32Array(4800).fill(0.2) },
+    });
+    data.failInsert = true;
+    await expect(recorder.stop()).rejects.toThrow();
+    scopedStore.discardPending.mockRejectedValueOnce(new Error('quota'));
+    await expect(recorder.discardUnsavedAudio()).rejects.toThrow('quota');
+    await recorder.discardUnsavedAudio();
+    data.failInsert = false;
+    await expect(recorder.drainPending()).rejects.toThrow('discarded');
+    await expect(recorder.start()).rejects.toThrow('discarded');
+    await expect(recorder.downloadUnsavedAudio()).rejects.toThrow('No unsaved audio');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('manual retry revives an exhausted transient upload, ordinary drains do not', async () => {
     data.chunks.set(0, chunk(0, 6));
-    const uploader = new ChunkUploader({ scribeBase: '/api/v1' });
+    const uploader = new ChunkUploader({ scribeBase: '/api/v1', store: scopedStore });
     await uploader.drainSession('s-1');
     expect(fetch).not.toHaveBeenCalled();
     const progress = vi.fn();
@@ -431,7 +524,10 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     data.chunks.set(0, chunk());
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 400 }));
     const progress = vi.fn();
-    await new ChunkUploader({ scribeBase: '/api/v1' }).drainSession('s-1', progress);
+    await new ChunkUploader({ scribeBase: '/api/v1', store: scopedStore }).drainSession(
+      's-1',
+      progress,
+    );
     expect(data.chunks.size).toBe(1);
     expect(progress).toHaveBeenCalledWith(0, 1);
   });
@@ -552,7 +648,11 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     prepareFileBoundaries();
     vi.mocked(fetch).mockResolvedValue(new Response('{}', { status: 400 }));
     await expect(
-      uploadAudioFile({ sessionId: 's-1', file: new File(['fixture'], 'fixture.wav') }),
+      uploadAudioFile({
+        sessionId: 's-1',
+        file: new File(['fixture'], 'fixture.wav'),
+        store: scopedStore,
+      }),
     ).rejects.toBeInstanceOf(IncompleteAudioUploadError);
     expect(data.chunks.size).toBe(1);
   });
@@ -560,7 +660,11 @@ describe('real capture/uploader adapters with controlled browser boundaries', ()
     prepareFileBoundaries();
     data.failInsert = true;
     await expect(
-      uploadAudioFile({ sessionId: 's-1', file: new File(['fixture'], 'fixture.wav') }),
+      uploadAudioFile({
+        sessionId: 's-1',
+        file: new File(['fixture'], 'fixture.wav'),
+        store: scopedStore,
+      }),
     ).rejects.toBeInstanceOf(AudioFileStorageError);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -588,5 +692,31 @@ describe('capture persistence and stop acknowledgement', () => {
     const rejection = expect(promise).rejects.toThrow('final audio frame');
     await vi.advanceTimersByTimeAsync(2100);
     await rejection;
+  });
+});
+
+describe('batch recorder auto-start effect replay', () => {
+  it('cancels the first pending start and allows the immediate replay to start capture', async () => {
+    const recorder = useSessionRecorder({ sessionId: 's-1', source: 'mic' });
+    const effect = data.effects.at(-1)!;
+    const cleanupFirstMount = effect();
+
+    // LiveRecorder starts from a mount effect. React StrictMode cleans up and
+    // replays it before the first asynchronous preparation can settle.
+    const firstStart = recorder.start();
+    const cancelledStart = expect(firstStart).rejects.toThrow('cancelled');
+    cleanupFirstMount?.();
+    const cleanupReplay = effect();
+    const replayedStart = recorder.start();
+
+    await cancelledStart;
+    await expect(replayedStart).resolves.toBeUndefined();
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledOnce();
+    expect(data.tracks[0].stopped).toBe(false);
+    expect(scopedStore.close).not.toHaveBeenCalled();
+
+    cleanupReplay?.();
+    await vi.waitFor(() => expect(scopedStore.close).toHaveBeenCalled());
+    expect(data.tracks[0].stopped).toBe(true);
   });
 });

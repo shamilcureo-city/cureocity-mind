@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { getFirebaseAuth, isFirebaseConfigured } from '@/lib/firebase-therapist';
 import { createSessionBoundFetch } from '@/lib/session-bound-fetch';
 import { recoverPractitionerSession } from '@/lib/session-recovery';
+import { emitBrowserCaptureLock } from '@/lib/browser-capture-lock';
 
 type SessionProblem = 'SESSION_IDENTITY_MISMATCH' | 'SESSION_REAUTH_REQUIRED';
 
@@ -39,6 +40,33 @@ function SessionBoundContent({ expectedUid, children }: Props) {
   const notice = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const onSubmit = (event: SubmitEvent) => {
+      if (event.defaultPrevented || !(event.target instanceof HTMLFormElement)) return;
+      const form = event.target;
+      const method = event.submitter?.getAttribute('formmethod') ?? form.method;
+      if (method.toUpperCase() !== 'POST') return;
+      const action = event.submitter?.getAttribute('formaction') ?? form.action;
+      let url: URL;
+      try {
+        url = new URL(action, window.location.origin);
+      } catch {
+        return;
+      }
+      if (
+        url.origin === window.location.origin &&
+        url.pathname === '/api/v1/auth/signout' &&
+        !url.search &&
+        !url.hash
+      )
+        emitBrowserCaptureLock();
+    };
+    // Observe accepted submissions, not links, clicks, GETs or prefetches.
+    // The existing POST sign-out action still owns authentication/navigation.
+    document.addEventListener('submit', onSubmit);
+    return () => document.removeEventListener('submit', onSubmit);
+  }, []);
+
+  useEffect(() => {
     // Only explicit non-production auth bypass supplies null.
     if (expectedUid === null) return;
     let mounted = true;
@@ -57,7 +85,10 @@ function SessionBoundContent({ expectedUid, children }: Props) {
     });
     window.fetch = guard.fetch;
     const unsubscribeProblem = guard.subscribe(() => {
-      if (mounted) setProblem(guard.getProblem());
+      if (!mounted) return;
+      const currentProblem = guard.getProblem();
+      if (currentProblem) emitBrowserCaptureLock();
+      setProblem(currentProblem);
     });
     void guard.checkIdentity().then(() => {
       if (mounted && !guard.getProblem()) setReady(true);
@@ -88,6 +119,7 @@ function SessionBoundContent({ expectedUid, children }: Props) {
 
   async function recover() {
     if (recovering || !originalFetch.current) return;
+    emitBrowserCaptureLock();
     setRecovering(true);
     setRecoveryError(null);
     try {

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import {
   CarriedQuestionSchema,
   CaseFormulationV1Schema,
+  ClinicalLocaleSchema,
   PreSessionBriefV1Schema,
   type PrepareHomeworkEntry,
   type PrepareSummaryV1,
@@ -16,6 +17,7 @@ import { computeClientJourney, JourneyError } from '@/lib/journey';
 import { privateJson, privateResponse } from '@/lib/private-response';
 import { prisma } from '@/lib/prisma';
 import { loadActiveSessionAgreements } from '@/lib/active-session-agreements';
+import { briefMatchesContext, loadPreSessionBriefContext } from '@/lib/pre-session-brief-context';
 
 /** TE2 — stored `Client.carriedQuestions` JSON, parsed defensively. */
 const CarriedQuestionsArraySchema = z.array(CarriedQuestionSchema).max(8);
@@ -121,8 +123,22 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<NextResp
     ? PreSessionBriefV1Schema.safeParse(cachedBriefRow.body)
     : null;
   const cachedBrief = briefParsed?.success ? briefParsed.data : null;
-  const briefIsStale =
-    cachedBrief !== null && cachedBriefRow?.lastSessionId !== (lastCompleted?.id ?? null);
+  let briefIsStale = cachedBrief !== null;
+  if (cachedBrief && canDiscloseWholeBrief) {
+    try {
+      const context = await loadPreSessionBriefContext(
+        clientId,
+        auth.value.psychologistId,
+        ClinicalLocaleSchema.safeParse(client.preferredLanguage).data ?? 'en',
+      );
+      briefIsStale =
+        cachedBriefRow?.lastSessionId !== context.lastSessionId ||
+        !briefMatchesContext(cachedBriefRow?.body, context.fingerprint);
+    } catch {
+      // A failed freshness read never certifies old guidance as current.
+      briefIsStale = true;
+    }
+  }
 
   const [assignments, openCrises, agreementRows, formulationRow, diagnosisRows, activeCommitments] =
     await Promise.all([
