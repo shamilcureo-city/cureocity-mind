@@ -1,6 +1,7 @@
 'use client';
 
-import { ChunkStore, type PersistedChunk } from './idb-chunk-store';
+import type { PersistedChunk } from './idb-chunk-store';
+import type { SessionAudioStore } from './session-audio-store';
 
 /**
  * Uploads persisted PCM chunks to the server's inline-storage endpoint
@@ -23,6 +24,9 @@ export interface UploaderOptions {
   getAuthToken?: () => Promise<string | null>;
   /** Max attempts per chunk before treating it as a dead letter. */
   maxAttempts?: number;
+  /** Required for queued uploads; direct uploadOne does not use persistence. */
+  store?: SessionAudioStore;
+  signal?: AbortSignal;
 }
 
 export type UploadOutcome =
@@ -31,8 +35,7 @@ export type UploadOutcome =
   | { status: 'permanent'; error: string; httpStatus: number };
 
 export class ChunkUploader {
-  private readonly opts: Required<Omit<UploaderOptions, 'getAuthToken'>> &
-    Pick<UploaderOptions, 'getAuthToken'>;
+  private readonly opts: UploaderOptions & { maxAttempts: number };
   /** The in-flight drain, so concurrent callers AWAIT it (see drainSession). */
   private drainInFlight: Promise<void> | null = null;
 
@@ -52,15 +55,19 @@ export class ChunkUploader {
       'x-sample-rate': String(chunk.sampleRate),
     };
     try {
+      this.opts.signal?.throwIfAborted();
       if (this.opts.getAuthToken) {
         const token = await this.opts.getAuthToken();
         if (token) headers.authorization = `Bearer ${token}`;
       }
+      this.opts.signal?.throwIfAborted();
       const res = await fetch(`${this.opts.scribeBase}/audio/chunks/upload`, {
         method: 'POST',
         headers,
         body: chunk.bytes as Uint8Array<ArrayBuffer>,
-        signal: AbortSignal.timeout(20_000),
+        signal: this.opts.signal
+          ? AbortSignal.any([this.opts.signal, AbortSignal.timeout(20_000)])
+          : AbortSignal.timeout(20_000),
       });
       if (res.ok) return { status: 'ok' };
       const errorBody = await res.text().catch(() => '');
@@ -105,14 +112,19 @@ export class ChunkUploader {
         : this.drainInFlight;
     }
     const run = (async (): Promise<void> => {
+      this.opts.signal?.throwIfAborted();
+      if (!this.opts.store) throw new Error('Secure recording storage is required.');
+      const ChunkStore = this.opts.store.chunks;
       if (retryExhausted) await ChunkStore.resetRetryableAttempts(sessionId);
       const pending = (await ChunkStore.listForSession(sessionId)).sort(
         (a, b) => a.chunkIndex - b.chunkIndex,
       );
       let done = 0;
       for (const chunk of pending) {
+        this.opts.signal?.throwIfAborted();
         if (chunk.attempts >= this.opts.maxAttempts) continue;
         const outcome = await this.uploadOne(chunk);
+        this.opts.signal?.throwIfAborted();
         if (outcome.status === 'ok') {
           await ChunkStore.remove(sessionId, chunk.chunkIndex, chunk);
           done += 1;

@@ -6,6 +6,8 @@ vi.mock('./idb-chunk-store', async (original) => ({
 }));
 import { downloadPendingAudio } from './download-pending-audio';
 import type { PersistedChunk } from './idb-chunk-store';
+import type { SessionAudioStore } from './session-audio-store';
+const scopedStore = { chunks: store } as unknown as SessionAudioStore;
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
@@ -29,7 +31,7 @@ describe('download unsaved audio', () => {
     const anchor = { href: '', download: '', click: vi.fn() };
     vi.stubGlobal('document', { createElement: () => anchor });
     const memory = [chunk(0, [9, 8]), chunk(1, [7, 6])];
-    await downloadPendingAudio('session-test', memory);
+    await downloadPendingAudio('session-test', scopedStore, memory);
     expect([
       ...new Uint8Array((await (create.mock.calls[0]![0] as Blob).arrayBuffer()).slice(44)),
     ]).toEqual([9, 8, 7, 6]);
@@ -42,7 +44,7 @@ describe('download unsaved audio', () => {
     store.listForSession.mockRejectedValue(new Error('storage unavailable'));
     const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:fixture');
     vi.stubGlobal('document', { createElement: () => ({ click: vi.fn() }) });
-    await downloadPendingAudio('session-test', [chunk(4, [5, 6])]);
+    await downloadPendingAudio('session-test', scopedStore, [chunk(4, [5, 6])]);
     expect([
       ...new Uint8Array((await (create.mock.calls[0]![0] as Blob).arrayBuffer()).slice(44)),
     ]).toEqual([5, 6]);
@@ -57,7 +59,7 @@ describe('download unsaved audio', () => {
     const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
     const anchor = { href: '', download: '', click: vi.fn() };
     vi.stubGlobal('document', { createElement: () => anchor });
-    await downloadPendingAudio('session-test');
+    await downloadPendingAudio('session-test', scopedStore);
     const blob = create.mock.calls[0]![0] as Blob;
     const bytes = await blob.arrayBuffer();
     expect(blob.type).toBe('audio/wav');
@@ -72,6 +74,20 @@ describe('download unsaved audio', () => {
   });
   it('does not create a false empty recording', async () => {
     store.listForSession.mockResolvedValue([]);
-    await expect(downloadPendingAudio('session-test')).rejects.toThrow('No unsaved audio');
+    await expect(downloadPendingAudio('session-test', scopedStore)).rejects.toThrow(
+      'No unsaved audio',
+    );
+  });
+  it('never falls back to a plaintext memory export after an authentication lock', async () => {
+    const abort = new AbortController();
+    store.listForSession.mockImplementation(async () => {
+      abort.abort();
+      throw new Error('closed');
+    });
+    const create = vi.spyOn(URL, 'createObjectURL');
+    await expect(
+      downloadPendingAudio('session-test', scopedStore, [chunk(0, [1, 2])], abort.signal),
+    ).rejects.toThrow();
+    expect(create).not.toHaveBeenCalled();
   });
 });

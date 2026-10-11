@@ -33,7 +33,10 @@ vi.mock('./crisis-flags', () => ({ fetchOpenCrises: vi.fn() }));
 vi.mock('./llm', () => ({ modelRouter: vi.fn() }));
 
 import { GET as getPrepare } from '../app/api/v1/clients/[id]/prepare/route';
-import { GET as getPreSessionBrief } from '../app/api/v1/clients/[id]/pre-session-brief/route';
+import {
+  GET as getPreSessionBrief,
+  POST as generatePreSessionBrief,
+} from '../app/api/v1/clients/[id]/pre-session-brief/route';
 
 const context = { params: Promise.resolve({ id: 'client-1' }) };
 const doctorAuth = {
@@ -53,6 +56,16 @@ beforeEach(() => {
 
 describe('Mind preparation API vertical boundary', () => {
   it.each([
+    [
+      'brief generation',
+      () =>
+        generatePreSessionBrief(
+          new Request('https://example.test/api/v1/clients/client-1/pre-session-brief', {
+            method: 'POST',
+          }) as never,
+          context,
+        ),
+    ],
     [
       'prepare',
       () =>

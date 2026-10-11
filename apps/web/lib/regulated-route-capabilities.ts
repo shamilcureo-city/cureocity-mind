@@ -247,7 +247,7 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   policy('api/v1/clinical-reports/[id]/intake-plan', ['POST'], ['CLINICAL_ANALYSIS'], 'write'),
   policy('api/v1/clinical-reports/[id]/intake-diagnosis', ['POST'], ['CLINICAL_ANALYSIS'], 'write'),
   policy('api/v1/clinical-reports/[id]/intake-crisis', ['POST'], ['CLINICAL_ANALYSIS'], 'write'),
-  policy('api/v1/clients/[id]/pre-session-brief', ['GET'], ['CLINICAL_ANALYSIS'], 'disclosure'),
+  policy('api/v1/clients/[id]/pre-session-brief', ['GET', 'POST'], ['CLINICAL_ANALYSIS'], 'write'),
   policy('api/v1/clients/[id]/case-briefing', ['GET', 'POST'], ['CLINICAL_ANALYSIS'], 'write'),
   policy('api/v1/clients/[id]/case-consult', ['GET', 'POST'], ['CLINICAL_ANALYSIS'], 'write'),
   policy('api/v1/clients/[id]/formulation', ['GET', 'POST'], ['CLINICAL_ANALYSIS'], 'write'),

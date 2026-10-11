@@ -15,6 +15,7 @@ import { modelRouter } from '@/lib/llm';
 import { prisma } from '@/lib/prisma';
 import { parseQuery } from '@/lib/validate';
 import { ClientPhiWriteForbiddenError, lockActiveClient } from '@/lib/phi-write-lock';
+import { summarizeMindSessionNote } from '@/lib/mind-session-note-summary';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -108,6 +109,7 @@ async function handleTherapyScript(
       orderBy: { endedAt: 'desc' },
       select: {
         id: true,
+        kind: true,
         noteDraft: { select: { content: true } },
         therapyNote: { select: { content: true } },
       },
@@ -124,7 +126,7 @@ async function handleTherapyScript(
       }
     : null;
 
-  const lastSummary = extractLastSummary(lastSession);
+  const lastSummary = summarizeMindSessionNote(lastSession);
 
   const cacheKey = computeCacheKey({
     therapy: query.value.therapy,
@@ -133,6 +135,7 @@ async function handleTherapyScript(
     primaryDx: primaryDx ? `${primaryDx.icd11Code}:${primaryDx.icd11Label}` : null,
     plan: planSummary,
     lastSummary,
+    presentingConcerns: client.presentingConcerns,
   });
 
   // GET remains a read even when a caller sends the legacy refresh parameter.
@@ -312,32 +315,6 @@ export async function POST(
 // Helpers.
 // ============================================================================
 
-function extractLastSummary(
-  session: {
-    noteDraft: { content: unknown } | null;
-    therapyNote: { content: unknown } | null;
-  } | null,
-): string | null {
-  const noteContent = session?.therapyNote?.content ?? session?.noteDraft?.content ?? null;
-  if (!noteContent || typeof noteContent !== 'object') return null;
-  const note = noteContent as Record<string, unknown>;
-  const subjective = typeof note['subjective'] === 'string' ? (note['subjective'] as string) : '';
-  const assessment = typeof note['assessment'] === 'string' ? (note['assessment'] as string) : '';
-  const plan = typeof note['plan'] === 'string' ? (note['plan'] as string) : '';
-  const summary = [
-    subjective && `S: ${truncate(subjective, 400)}`,
-    assessment && `A: ${truncate(assessment, 400)}`,
-    plan && `P: ${truncate(plan, 400)}`,
-  ]
-    .filter(Boolean)
-    .join(' | ');
-  return summary || null;
-}
-
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max)}…`;
-}
-
 interface CacheKeyInputs {
   therapy: string;
   language: ClinicalLocale;
@@ -351,6 +328,7 @@ interface CacheKeyInputs {
     expectedDurationSessions: number | null;
   } | null;
   lastSummary: string | null;
+  presentingConcerns: string | null;
 }
 
 /**
@@ -389,13 +367,14 @@ function computeCacheKey(input: CacheKeyInputs): string {
       }
     : null;
   const payload = JSON.stringify({
-    v: 2, // bumped in Sprint 16 — spokenLanguage now affects the script
+    v: 3, // Includes concerns and kind-aware canonical intake summaries.
     t: input.therapy.trim().toLowerCase(),
     l: input.language,
     sl: input.spokenLanguage,
     d: input.primaryDx,
     p: normalisedPlan,
     s: input.lastSummary,
+    c: input.presentingConcerns,
   });
   return createHash('sha256').update(payload).digest('hex');
 }

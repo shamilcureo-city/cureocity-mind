@@ -195,6 +195,47 @@ describe.each(['GET', 'POST'] as const)('therapy script %s authorization', (meth
   });
 });
 
+describe('therapy guide grounding regressions', () => {
+  it('passes the signed intake summary rather than an old draft to the model', async () => {
+    mocks.sessionFind.mockResolvedValue({
+      id: 'intake-1',
+      kind: 'INTAKE',
+      therapyNote: {
+        content: {
+          presentingConcerns: 'Saved concern',
+          historyOfPresentingIllness: 'Saved history',
+          workingHypothesis: 'Saved hypothesis',
+          immediatePlan: 'Reviewed next step',
+        },
+      },
+      noteDraft: { content: { subjective: 'Obsolete draft' } },
+    });
+    expect((await request('POST')).status).toBe(200);
+    expect(mocks.pass4.mock.calls[0]![0].lastSessionSummary).toContain(
+      'Working hypothesis: Saved hypothesis',
+    );
+    expect(mocks.pass4.mock.calls[0]![0].lastSessionSummary).toContain(
+      'Immediate plan: Reviewed next step',
+    );
+    expect(mocks.pass4.mock.calls[0]![0].lastSessionSummary).not.toContain('Obsolete draft');
+  });
+
+  it('cannot reuse a guide generated before a presenting-concern correction', async () => {
+    await request('POST');
+    const originalKey = mocks.upsert.mock.calls[0]![0].create.cacheKey;
+    mocks.cacheFind.mockImplementation(async ({ where }) =>
+      where.clientId_cacheKey.cacheKey === originalKey ? cached : null,
+    );
+    expect((await request('GET')).status).toBe(200);
+    mocks.clientFind.mockResolvedValue({ ...client, presentingConcerns: 'Corrected concern' });
+    expect((await request('GET')).status).toBe(404);
+    expect((await request('POST')).status).toBe(200);
+    expect(mocks.pass4).toHaveBeenCalledTimes(2);
+    expect(mocks.pass4.mock.calls[1]![0].presentingConcerns).toBe('Corrected concern');
+    expect(mocks.upsert.mock.calls[1]![0].create.cacheKey).not.toBe(originalKey);
+  });
+});
+
 describe('safe therapy-script GET', () => {
   it.each(['therapy=Grounding', 'therapy=Grounding&refresh=1'])(
     'returns only a cached script for %s',

@@ -689,6 +689,156 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
     };
   }
 
+  const renewalUtterance = {
+    id: 'before-renewal',
+    speaker: 'patient',
+    text: 'Fictional confirmed words before renewal.',
+    tStartMs: 0,
+    tEndMs: 1000,
+  };
+  function confirmedWords(socket: Socket) {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'utterance', utterance: renewalUtterance }),
+    });
+    render();
+  }
+  async function failRenewal(
+    mode: 'refused' | 'request-timeout' | 'ack-timeout' = 'refused',
+    advanceMs = 240_000,
+  ) {
+    if (mode === 'refused')
+      vi.mocked(fetch).mockResolvedValueOnce(new Response('{}', { status: 503 }));
+    else if (mode === 'request-timeout')
+      vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(() => {}));
+    await vi.advanceTimersByTimeAsync(advanceMs);
+    if (mode !== 'refused') await vi.advanceTimersByTimeAsync(20_001);
+  }
+  function finishWithOrdinaryFinal(socket: Socket) {
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'therapyFinal',
+        kind: 'TREATMENT',
+        transcript: renewalUtterance.text,
+        note: {
+          version: 'V1',
+          modality: 'CBT',
+          subjective: 'Fictional statement',
+          objective: 'Fictional observation',
+          assessment: 'Clinician review required',
+          plan: 'Clinician to review',
+          riskFlags: { severity: 'none', indicators: [], details: '' },
+        },
+      }),
+    });
+  }
+
+  it.each(['refused', 'request-timeout', 'ack-timeout'] as const)(
+    'preserves missing-capture review through transcript recovery when renewal is %s',
+    async (mode) => {
+      vi.useFakeTimers();
+      const socket = await listening();
+      confirmedWords(socket);
+      harness.onFrame(new Uint8Array([1, 2, 3, 4]));
+      await failRenewal(mode);
+      // Assert before close: the old socket is no longer owned, so its later
+      // onclose cannot be relied on to supply the missing-capture marker.
+      expect(text(render())).toContain('Transcript needs review');
+      expect(socket.close).toHaveBeenCalledOnce();
+      const starts = harness.stream.start.mock.calls.length;
+      socket.onclose?.();
+      click('Generate from captured transcript');
+      await vi.waitFor(() => expect(harness.push).toHaveBeenCalledWith('/app/sessions/s-1'));
+      const recovery = vi
+        .mocked(fetch)
+        .mock.calls.find(([url]) => String(url).endsWith('/recovery-transcript'));
+      expect(JSON.parse(recovery![1]!.body as string)).toMatchObject({
+        action: 'FINALIZE',
+        utterances: [renewalUtterance],
+        transcriptionWarning: true,
+        captureIncomplete: true,
+        captureIncompleteReason: 'connection_lost',
+      });
+      expect(harness.stream.start).toHaveBeenCalledTimes(starts);
+    },
+  );
+
+  it('keeps renewal loss flagged after reconnect and an otherwise successful final note', async () => {
+    vi.useFakeTimers();
+    const socket = await listening();
+    confirmedWords(socket);
+    await failRenewal();
+    socket.onclose?.();
+    click('Reconnect');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    const reconnected = harness.sockets[1];
+    reconnected.open();
+    await vi.waitFor(() => expect(reconnected.send).toHaveBeenCalledOnce());
+    expect(JSON.parse(reconnected.send.mock.calls[0][0] as string)).toMatchObject({
+      resume: { utterances: [renewalUtterance] },
+    });
+    reconnected.status('listening');
+    render();
+    finishWithOrdinaryFinal(reconnected);
+    await vi.waitFor(() => expect(harness.push).toHaveBeenCalledWith('/app/sessions/s-1'));
+    const save = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/live-note'));
+    expect(JSON.parse(save![1]!.body as string)).toMatchObject({
+      transcriptionWarning: true,
+      captureIncomplete: true,
+      captureIncompleteReason: 'connection_lost',
+    });
+  });
+
+  it('marks renewal failure during unconfirmed pause incomplete even if a late pause acknowledgement arrives', async () => {
+    vi.useFakeTimers();
+    const socket = await listening();
+    confirmedWords(socket);
+    await vi.advanceTimersByTimeAsync(239_000);
+    const command = await pause(socket);
+    await failRenewal('refused', 1_000);
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'capturePaused', requestId: command.requestId }),
+    });
+    expect(text(render())).toContain('Transcript needs review');
+    expect(text(render())).not.toContain('Resume recording');
+    click('Generate from captured transcript');
+    await vi.waitFor(() => expect(harness.push).toHaveBeenCalledWith('/app/sessions/s-1'));
+    const recovery = vi
+      .mocked(fetch)
+      .mock.calls.find(([url]) => String(url).endsWith('/recovery-transcript'));
+    expect(JSON.parse(recovery![1]!.body as string)).toMatchObject({
+      captureIncomplete: true,
+      captureIncompleteReason: 'connection_lost',
+    });
+  });
+
+  it('does not invent lost audio when renewal fails after a confirmed pause', async () => {
+    vi.useFakeTimers();
+    const socket = await listening();
+    confirmedWords(socket);
+    const command = await pause(socket);
+    socket.onmessage?.({
+      data: JSON.stringify({ type: 'capturePaused', requestId: command.requestId }),
+    });
+    await vi.waitFor(() => expect(text(render())).toContain('Resume recording'));
+    await failRenewal();
+    socket.onclose?.();
+    expect(text(render())).not.toContain('Transcript needs review');
+    click('Resume recording');
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    const reconnected = harness.sockets[1];
+    reconnected.open();
+    await vi.waitFor(() => expect(reconnected.send).toHaveBeenCalledOnce());
+    reconnected.status('listening');
+    render();
+    finishWithOrdinaryFinal(reconnected);
+    await vi.waitFor(() => expect(harness.push).toHaveBeenCalledWith('/app/sessions/s-1'));
+    const save = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/live-note'));
+    const payload = JSON.parse(save![1]!.body as string);
+    expect(payload.transcriptionWarning).toBe(false);
+    expect(payload.captureIncomplete).toBeUndefined();
+    expect(payload.captureIncompleteReason).toBeUndefined();
+  });
+
   it('shows rejected transcription as a separate quality warning, never a conversation utterance', async () => {
     const socket = await listening();
     const artifact =

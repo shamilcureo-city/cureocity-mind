@@ -23,6 +23,8 @@ const harness = vi.hoisted(() => ({
     pause: vi.fn(async () => {}),
     drainPending: vi.fn(async () => 0),
     downloadUnsavedAudio: vi.fn(async () => {}),
+    clearSavedCursor: vi.fn(async () => {}),
+    discardUnsavedAudio: vi.fn(async () => {}),
   },
 }));
 
@@ -115,6 +117,7 @@ beforeEach(() => {
   harness.recorder.pause.mockResolvedValue(undefined);
   harness.recorder.stop.mockResolvedValue(undefined);
   harness.recorder.drainPending.mockResolvedValue(0);
+  harness.recorder.clearSavedCursor.mockImplementation(harness.clear);
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => new Response('{}', { status: 200 })),

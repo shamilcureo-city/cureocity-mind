@@ -53,7 +53,7 @@ describe('one freshness-aware preparation journey', () => {
   });
 
   it('uses the same deterministic latest-completed ordering when Refresh generates a brief', () => {
-    const refreshRoute = read('app/api/v1/clients/[id]/pre-session-brief/route.ts');
+    const refreshRoute = read('lib/pre-session-brief-context.ts');
 
     expect(refreshRoute).toContain("{ endedAt: { sort: 'desc', nulls: 'last' } }");
     expect(refreshRoute).toContain("{ scheduledAt: 'desc' }");

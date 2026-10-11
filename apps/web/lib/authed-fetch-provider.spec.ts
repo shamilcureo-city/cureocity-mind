@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   ready: vi.fn(),
   observe: vi.fn(),
   signOut: vi.fn(),
+  captureLock: vi.fn(),
   observer: null as null | (() => void),
   user: null as null | { uid: string; getIdToken: () => Promise<string> },
 }));
@@ -80,12 +81,32 @@ vi.mock('@/lib/firebase-therapist', () => ({
   }),
 }));
 vi.mock('firebase/auth', () => ({ onAuthStateChanged: mocks.observe, signOut: mocks.signOut }));
+vi.mock('./browser-capture-lock', () => ({ emitBrowserCaptureLock: mocks.captureLock }));
 
 import { AuthedFetchProvider } from '../components/app/AuthedFetchProvider';
 
 let originalFetch: ReturnType<typeof vi.fn<typeof fetch>>;
 let unsubscribe: ReturnType<typeof vi.fn>;
 let boundaryKey: string | null;
+class Form {
+  method = 'POST';
+  action = '/api/v1/auth/signout';
+}
+function submit(
+  form = new Form(),
+  options: { cancel?: boolean; overrides?: Record<string, string> } = {},
+) {
+  const event = new Event('submit', { cancelable: true });
+  Object.defineProperty(event, 'target', { value: form });
+  Object.defineProperty(event, 'submitter', {
+    value: options.overrides
+      ? { getAttribute: (key: string) => options.overrides?.[key] ?? null }
+      : null,
+  });
+  if (options.cancel) event.preventDefault();
+  document.dispatchEvent(event);
+  return event;
+}
 
 function render(uid: string | null) {
   hooks.cursor = 0;
@@ -165,6 +186,8 @@ beforeEach(() => {
   });
   originalFetch = vi.fn<typeof fetch>(async () => new Response('{}'));
   vi.stubGlobal('React', React);
+  vi.stubGlobal('HTMLFormElement', Form);
+  vi.stubGlobal('document', new EventTarget());
   vi.stubGlobal('window', {
     fetch: originalFetch,
     location: { origin: 'https://scribe.cureocity.in', assign: vi.fn() },
@@ -236,6 +259,48 @@ describe('authenticated fetch provider lifecycle', () => {
     expect(containsText(tree, 'No failed action will be retried automatically')).toBe(true);
     expect((await window.fetch('/api/v1/sessions', { method: 'POST' })).status).toBe(401);
     expect(originalFetch).not.toHaveBeenCalled();
+    expect(mocks.captureLock).toHaveBeenCalledOnce();
+  });
+
+  it('signals capture lock on a server reauthentication rejection without retrying the request', async () => {
+    render('account-a');
+    flushEffects();
+    await settle();
+    originalFetch.mockResolvedValueOnce(new Response('{}', { status: 401 }));
+    await window.fetch('/api/v1/sessions/s-1/note-draft');
+    expect(mocks.captureLock).toHaveBeenCalledOnce();
+    expect(originalFetch).toHaveBeenCalledOnce();
+  });
+
+  it('signals accepted same-origin POST sign-out before navigation without altering its submission', async () => {
+    render('account-a');
+    flushEffects();
+    await settle();
+    const event = submit();
+    expect(mocks.captureLock).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(false);
+    expect(originalFetch).not.toHaveBeenCalled();
+    expect(mocks.signOut).not.toHaveBeenCalled();
+    expect(window.location.assign).not.toHaveBeenCalled();
+  });
+
+  it('never signals for GET/prefetch, unrelated/cancelled submissions or submitter overrides', async () => {
+    render('account-a');
+    flushEffects();
+    await settle();
+    await window.fetch('/api/v1/auth/signout');
+    submit(Object.assign(new Form(), { method: 'GET' }));
+    submit(Object.assign(new Form(), { action: 'https://other.example/api/v1/auth/signout' }));
+    submit(Object.assign(new Form(), { action: '/api/v1/auth/signout-lookalike' }));
+    submit(Object.assign(new Form(), { action: '/api/v1/auth/signout?next=/login' }));
+    submit(Object.assign(new Form(), { action: 'http://[' }));
+    submit(new Form(), { cancel: true });
+    submit(new Form(), { overrides: { formmethod: 'GET' } });
+    submit(new Form(), { overrides: { formaction: '/unrelated' } });
+    expect(mocks.captureLock).not.toHaveBeenCalled();
+    cleanup();
+    submit();
+    expect(mocks.captureLock).not.toHaveBeenCalled();
   });
 
   it('restores the exact original fetch and unsubscribes on unmount', () => {

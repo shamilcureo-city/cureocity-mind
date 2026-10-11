@@ -10,13 +10,15 @@ import {
   type PcmChunk,
   type SilenceTrimOptions,
 } from '@cureocity/audio';
-import { ChunkStore, SessionStore } from './idb-chunk-store';
+import type { SessionAudioStore } from './session-audio-store';
 import { ChunkUploader } from './chunk-uploader';
 import { requestPersistentStorage } from './storage-buckets';
 
 export interface FileUploadOptions {
   sessionId: string;
   file: File;
+  store: SessionAudioStore;
+  signal?: AbortSignal;
   scribeBase?: string;
   getAuthToken?: () => Promise<string | null>;
   onProgress?: (info: { decoded: number; total: number; chunksUploaded: number }) => void;
@@ -46,9 +48,19 @@ export class AudioFileStorageError extends Error {
   }
 }
 
-export async function retryAudioUpload(sessionId: string): Promise<void> {
-  await new ChunkUploader({ scribeBase: '/api/v1' }).drainSession(sessionId, undefined, true);
-  const remaining = (await ChunkStore.listForSession(sessionId)).length;
+export async function retryAudioUpload(
+  sessionId: string,
+  store: SessionAudioStore,
+  signal?: AbortSignal,
+): Promise<void> {
+  const cursor = await store.cursor.getCursor(sessionId);
+  if (cursor?.captureIntegrityError) throw new Error(cursor.captureIntegrityError);
+  await new ChunkUploader({ scribeBase: '/api/v1', store, ...(signal && { signal }) }).drainSession(
+    sessionId,
+    undefined,
+    true,
+  );
+  const remaining = (await store.chunks.listForSession(sessionId)).length;
   if (remaining) throw new IncompleteAudioUploadError(remaining);
 }
 
@@ -64,6 +76,8 @@ export async function retryAudioUpload(sessionId: string): Promise<void> {
  * the target context rate.
  */
 export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUploadResult> {
+  opts.signal?.throwIfAborted();
+  const { chunks: ChunkStore, cursor: SessionStore } = opts.store;
   const existingCursor = await SessionStore.getCursor(opts.sessionId);
   if (existingCursor?.captureIntegrityError) throw new Error(existingCursor.captureIntegrityError);
   if (opts.file.size > 100 * 1024 * 1024)
@@ -101,6 +115,7 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
   src.connect(offline.destination);
   src.start();
   const rendered = await offline.startRendering();
+  opts.signal?.throwIfAborted();
   const monoMid = rendered.getChannelData(0);
 
   const sessionStartedAt = Date.now();
@@ -119,6 +134,8 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
   const trimmer = resolveSilenceTrimmer();
   const uploader = new ChunkUploader({
     scribeBase: opts.scribeBase ?? '/api/v1',
+    store: opts.store,
+    ...(opts.signal && { signal: opts.signal }),
     ...(opts.getAuthToken && { getAuthToken: opts.getAuthToken }),
   });
 
@@ -130,6 +147,7 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
   const completedChunks: PcmChunk[] = [];
 
   while (cursor < monoMid.length) {
+    opts.signal?.throwIfAborted();
     const end = Math.min(cursor + SLICE, monoMid.length);
     const slice = monoMid.subarray(cursor, end);
     const decimated = decimator.process(slice);
@@ -165,6 +183,7 @@ export async function uploadAudioFile(opts: FileUploadOptions): Promise<FileUplo
   // int16 bytes directly per its contract).
   try {
     for (const chunk of completedChunks) {
+      opts.signal?.throwIfAborted();
       // PcmChunker emits 16-bit int LE PCM bytes per its type contract;
       // belt-and-braces re-encode in case a future change relaxes that.
       const bytes =
