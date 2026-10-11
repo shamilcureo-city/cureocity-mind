@@ -195,6 +195,12 @@ export class LiveSession {
   private therapyForceNoteRequested = false;
   private therapyAuthorityVersion = 0;
   private readonly therapyOutputVersions = new WeakMap<LiveGatewayEvent, number>();
+  /** Scribe's ordered audio must not wait for note/copilot model calls.
+   * One coalescing worker owns both passes so their results cannot race. */
+  private doctorAnalysis: Promise<void> | null = null;
+  private doctorNoteRequested = false;
+  private doctorForceNoteRequested = false;
+  private doctorAnalysisAuthorityVersion = 0;
   /** One-shot guard so `final` is emitted at most once (real note or fallback). */
   private finalEmitted = false;
   /** Never turn a rejected model response into speech or hide the resulting gap. */
@@ -365,6 +371,13 @@ export class LiveSession {
 
   /** Replace optional scopes after trusted server-side live reauthorization. */
   updateCapabilities(capabilities: ReadonlySet<PractitionerCapability>): void {
+    if (
+      this.vertical === 'DOCTOR' &&
+      this.has('CLINICAL_ANALYSIS') &&
+      !capabilities.has('CLINICAL_ANALYSIS')
+    ) {
+      this.doctorAnalysisAuthorityVersion += 1;
+    }
     const contextAuthorityLost = (
       ['CLINICAL_ANALYSIS', 'MEASUREMENT_BASED_CARE', 'THERAPY_WORKFLOWS'] as const
     ).some((capability) => this.has(capability) && !capabilities.has(capability));
@@ -493,6 +506,7 @@ export class LiveSession {
     // Also service coalesced reasoning during silence, without holding the
     // transcription lane or running extra notes on every timer tick.
     this.scheduleTherapyAnalysis();
+    this.scheduleDoctorAnalysis();
     // Sprint TS5 — advance the session arc even during silence, so the
     // pacing rail moves through opening → working → closing on its own. Only
     // emits when the arc PHASE changes (the change-key ignores the minute tick).
@@ -732,9 +746,7 @@ export class LiveSession {
       // a previous batch is still being analysed.
       this.scheduleTherapyAnalysis(true);
     } else {
-      const due = this.reasoningScheduler.takeDue();
-      if (due) await this.runReasoning(due);
-      await this.runNote(false);
+      this.scheduleDoctorAnalysis(true);
     }
     // DOC-2 — deterministic red-flag / interaction checks EVERY window (not
     // gated by the note-refresh debounce). Pure regex/table lookups, ~0 cost.
@@ -801,6 +813,65 @@ export class LiveSession {
     }
   }
 
+  /** One Scribe worker coalesces clinical work while audio remains ordered.
+   * Keep this separate from Mind's worker and its authority/context lifecycle. */
+  private scheduleDoctorAnalysis(noteRequested = false, forceNote = false): void {
+    if (this.vertical !== 'DOCTOR' || this.stopped || this.terminal || this.pausedAtMs !== null)
+      return;
+    this.doctorNoteRequested ||= noteRequested;
+    this.doctorForceNoteRequested ||= forceNote;
+    if (this.doctorAnalysis || (!this.doctorNoteRequested && !this.reasoningScheduler.hasPending)) {
+      return;
+    }
+    this.doctorAnalysis = this.drainDoctorAnalysis().finally(() => {
+      this.doctorAnalysis = null;
+      // Requests arriving as the drain finishes must not be lost. Not-yet-due
+      // reasoning is serviced by the ordinary pump tick, never a busy retry loop.
+      if (this.doctorNoteRequested) this.scheduleDoctorAnalysis();
+    });
+  }
+
+  private async drainDoctorAnalysis(): Promise<void> {
+    while (!this.stopped && !this.terminal && this.pausedAtMs === null) {
+      if (this.closeDoctorAnalysisOverBudget()) return;
+      const shouldNote = this.doctorNoteRequested;
+      const forceNote = this.doctorForceNoteRequested;
+      this.doctorNoteRequested = false;
+      this.doctorForceNoteRequested = false;
+      const due = this.reasoningScheduler.takeDue();
+      if (!due && !shouldNote) return;
+      try {
+        if (due) await this.runReasoning(due);
+        if (this.stopped || this.terminal || this.pausedAtMs !== null) return;
+        if (this.closeDoctorAnalysisOverBudget()) return;
+        if (shouldNote) {
+          if (forceNote) this.lastNoteTranscriptEndMs = Number.NEGATIVE_INFINITY;
+          await this.runNote(false);
+        }
+      } catch (err) {
+        // Notes can fail independently; accepted transcript stays usable and
+        // later speech/manual refresh may retry without stalling capture.
+        reportError('doctor background analysis failed', err);
+      }
+      if (this.terminal || this.finalEmitted) return;
+      // New note-derived medications must be checked even if no more speech
+      // arrives. Per-window checks still surface transcript flags immediately.
+      this.runDeterministicChecks();
+      this.emit({ type: 'meter', summary: this.meterSummary() });
+      if (this.stopped || this.pausedAtMs !== null) return;
+      if (this.closeDoctorAnalysisOverBudget()) return;
+    }
+  }
+
+  private closeDoctorAnalysisOverBudget(): boolean {
+    if (!this.overBudgetReason()) return false;
+    this.autoFinalizing = true;
+    // Do not await our own finalize join. The existing bounded finalization
+    // path will wait for this worker and report the captured source honestly.
+    void this.finalize();
+    return true;
+  }
+
   /** DOC-5 — reason the consult should auto-close (null = within budget). */
   private overBudgetReason(): string | null {
     if (this.elapsedMs() >= this.guards.maxConsultMs) {
@@ -826,21 +897,44 @@ export class LiveSession {
    */
   private async runReasoning(newUtterances: Utterance[]): Promise<void> {
     // Sprint TS1 — no live differential for therapy (TS5 adds a therapy rail).
-    if (this.vertical === 'THERAPIST' || !this.has('CLINICAL_ANALYSIS')) return;
+    if (
+      this.terminal ||
+      this.finalEmitted ||
+      this.vertical === 'THERAPIST' ||
+      !this.has('CLINICAL_ANALYSIS')
+    )
+      return;
     if (newUtterances.length === 0) return;
+    const authorityVersion = this.doctorAnalysisAuthorityVersion;
+    const caseState = this.caseStore.snapshot;
+    // Audio may advance while reasoning awaits its backend. An invented
+    // future citation must not become valid merely because it arrived later.
+    const knownUtteranceIds = new Set([
+      ...newUtterances.map((utterance) => utterance.id),
+      ...caseState.findings.flatMap((finding) => finding.utteranceIds),
+    ]);
     try {
       const res = await this.backends.reasoning.run({
         sessionId: this.sessionId,
-        caseState: this.caseStore.snapshot,
+        caseState,
         previousDifferential: this.caseStore.differential,
         openQuestions: this.caseStore.openQuestions,
         newUtterances,
         ...(this.specialty ? { specialty: this.specialty } : {}),
       });
       this.meter.recordReasoning(res.callLog);
+      if (
+        this.terminal ||
+        this.finalEmitted ||
+        !this.has('CLINICAL_ANALYSIS') ||
+        authorityVersion !== this.doctorAnalysisAuthorityVersion
+      )
+        return;
 
       const merged = this.caseStore.applyFindings(
-        res.output.findings,
+        res.output.findings.filter((finding) =>
+          finding.utteranceIds.every((id) => knownUtteranceIds.has(id)),
+        ),
         res.output.answeredQuestionIds,
       );
       if (merged.changed) {
@@ -940,8 +1034,8 @@ export class LiveSession {
    */
   /**
    * Sprint TS-B3 — "Update now": re-run the interim note immediately, bypassing
-   * the refresh debounce. Serialized behind the pump's `busy` guard so it can
-   * never overlap an in-flight window; a no-op if the consult has stopped. If
+   * the refresh debounce. Serialized with that vertical's analysis worker so it
+   * never overlaps another note; a no-op if the consult has stopped. If
    * the regenerated note is unchanged, no event is emitted (the client shows
    * its own "no changes" state).
    */
@@ -961,22 +1055,7 @@ export class LiveSession {
       this.scheduleTherapyAnalysis(true, true);
       return;
     }
-    void (async () => {
-      const deadline = Date.now() + 4_000;
-      while (this.busy && Date.now() < deadline)
-        await new Promise<void>((resolve) => setTimeout(resolve, 10));
-      if (this.busy || this.stopped) return;
-      this.busy = true;
-      try {
-        this.lastNoteTranscriptEndMs = Number.NEGATIVE_INFINITY;
-        await this.runNote(false);
-        this.emit({ type: 'meter', summary: this.meterSummary() });
-      } catch (err) {
-        reportError('note refresh failed', err);
-      } finally {
-        this.busy = false;
-      }
-    })();
+    this.scheduleDoctorAnalysis(true, true);
   }
 
   dismissQuestion(questionId: string): void {
@@ -1102,7 +1181,7 @@ export class LiveSession {
       .run({
         sessionId: this.sessionId,
         transcript,
-        // Transcription can append while Mind's backend is working. Keep the
+        // Transcription can append while either analysis worker is running. Keep the
         // note input and debounce cursor tied to this exact transcript snapshot.
         speakerSegments: [...this.segments],
         kind: this.vertical === 'DOCTOR' ? 'TREATMENT' : this.sessionKind,
@@ -1412,6 +1491,7 @@ export class LiveSession {
     // No new worker starts after stopAudio(); the remaining scheduler batch
     // is flushed below before the final note. Timeout invalidates late results.
     if (this.therapyAnalysis) await this.therapyAnalysis;
+    if (this.doctorAnalysis) await this.doctorAnalysis;
     if (this.terminal) return;
     // Transcribe whatever remains as the final window (may be short).
     while (this.pending.length > 0 && idle) {
@@ -1611,6 +1691,8 @@ export class LiveSession {
     this.streamTranscriber = null;
     this.therapyNoteRequested = false;
     this.therapyForceNoteRequested = false;
+    this.doctorNoteRequested = false;
+    this.doctorForceNoteRequested = false;
     this.pending = Buffer.alloc(0);
     this.totalBytes = 0;
   }
