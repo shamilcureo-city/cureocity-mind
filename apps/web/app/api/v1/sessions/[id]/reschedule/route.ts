@@ -17,6 +17,7 @@ import {
   sessionConcurrentModificationResponse,
 } from '@/lib/session-transition';
 import { transactionConflictResponse } from '@/lib/transaction-conflict';
+import { ClientPhiWriteForbiddenError, lockActiveClient } from '@/lib/phi-write-lock';
 import {
   assertReceptionCalendarAvailable,
   lockReceptionCalendarIfEnabled,
@@ -69,6 +70,9 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
   try {
     result = await prisma.$transaction(async (tx) => {
       const reception = await lockReceptionCalendarIfEnabled(tx, auth.value.psychologistId);
+      // Use the same client lock as closeout scheduling/reuse and purpose edits.
+      // This also revalidates ownership/erasure before moving dependent records.
+      await lockActiveClient(tx, existing.clientId, auth.value.psychologistId);
       const linkedAppt = await lockLinkedAppointmentForSession(tx, {
         sessionId,
         psychologistId: auth.value.psychologistId,
@@ -85,7 +89,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
           excludeSessionId: sessionId,
         });
       }
-      await conditionalSessionTransition(tx, {
+      const movedSession = await conditionalSessionTransition(tx, {
         sessionId,
         expectedStatus: 'SCHEDULED',
         data: { status: 'RESCHEDULED' },
@@ -94,12 +98,24 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         data: {
           clientId: existing.clientId,
           psychologistId: existing.psychologistId,
-          modality: existing.modality,
-          kind: existing.kind,
+          modality: movedSession.modality,
+          kind: movedSession.kind,
+          mindPurpose: movedSession.mindPurpose,
+          mindDocumentationMode: movedSession.mindDocumentationMode,
+          noteTemplateId: movedSession.noteTemplateId,
           status: 'SCHEDULED',
           scheduledAt: newScheduledAt,
-          language: existing.language,
+          language: movedSession.language,
         },
+      });
+      // Closeout receipts must follow the new visit, just as public appointments do.
+      // Keep the original session and its visit-bound clinical records as history.
+      await tx.mindSessionCloseoutState.updateMany({
+        where: {
+          followUpSessionId: sessionId,
+          session: { clientId: existing.clientId, psychologistId: auth.value.psychologistId },
+        },
+        data: { followUpSessionId: nextSession.id },
       });
       // A session minted from a public booking carries a linked Appointment.
       // Move it WITH the session: same new time, pointed at the new row, and
@@ -163,6 +179,8 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       return { created: nextSession, movedAppointmentId: linkedAppt?.id ?? null };
     });
   } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError)
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     if (error instanceof AppointmentReminderSubmissionInProgressError) {
       return NextResponse.json(
         { error: 'A reminder is currently being submitted; retry the reschedule shortly' },

@@ -48,11 +48,14 @@ import { useWakeLock } from '@/lib/audio/use-wake-lock';
 import {
   browserRecoveryStorage,
   clearRecoveryDraftAfterDurableSave,
+  fetchRecoveryContext,
   loadRecoveryDraft,
   saveRecoveryDraft,
   shouldResumeRecovery,
+  type RecoveryContext,
 } from '@/lib/live-recovery-draft';
 import { transcriptDownload } from '@/lib/mind-session-finalization';
+import type { ScribeCaptureIncompleteReason } from '@/lib/scribe-capture-integrity';
 import { coordinateMindSessionStart } from '@/lib/mind-session-start';
 import {
   markCopilotSuggestionShown,
@@ -297,7 +300,10 @@ export function TherapistLiveSession({
   const [utterances, setUtterances] = useState<Utterance[]>([]);
   const [transcriptionWarning, setTranscriptionWarning] = useState(false);
   const transcriptionWarningRef = useRef(false);
-  function flagTranscriptionWarning(): void {
+  function flagTranscriptionWarning(reason: ScribeCaptureIncompleteReason = 'audio_loss'): void {
+    if (finalIntegrityRef.current.captureIncompleteReason !== 'audio_loss') {
+      finalIntegrityRef.current = { captureIncomplete: true, captureIncompleteReason: reason };
+    }
     transcriptionWarningRef.current = true;
     setTranscriptionWarning(true);
   }
@@ -330,6 +336,12 @@ export function TherapistLiveSession({
   // must never silently redirect — it renders a retry card instead.
   const [saveFailed, setSaveFailed] = useState<string | null>(null);
   const [localRecoveryFailed, setLocalRecoveryFailed] = useState(false);
+  const [recoveryPending, setRecoveryPending] = useState(true);
+  const recoveryPendingRef = useRef(true);
+  const [recoveryExpired, setRecoveryExpired] = useState(false);
+  const [allowOlderRecovery, setAllowOlderRecovery] = useState(false);
+  const [recoveryRetry, setRecoveryRetry] = useState(0);
+  const recoveryContextRef = useRef<RecoveryContext | null>(null);
   const durableRef = useRef(false);
   const startingRef = useRef(false);
   const liveAttemptRef = useRef(0);
@@ -434,6 +446,11 @@ export function TherapistLiveSession({
   const meterRef = useRef<MeterSummary | null>(null);
   const meteredRef = useRef(false);
   const finalHandledRef = useRef(false);
+  const finalizationIdRef = useRef<string | null>(null);
+  const finalIntegrityRef = useRef<{
+    captureIncomplete?: boolean;
+    captureIncompleteReason?: ScribeCaptureIncompleteReason;
+  }>({});
   const lifecycleStartedRef = useRef(sessionStatus === 'IN_PROGRESS');
   const convoRef = useRef<HTMLDivElement | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -448,35 +465,110 @@ export function TherapistLiveSession({
   // is refreshed on every utterance and remains until the server acknowledges
   // the final durable note/transcript write.
   useEffect(() => {
-    const recovered = loadRecoveryDraft(browserRecoveryStorage(), sessionId);
-    if (
-      recovered &&
-      (recovered.transcriptionWarning ||
-        containsTranscriptionArtifact(recovered.transcript) ||
-        recovered.utterances.some((u) => containsTranscriptionArtifact(u.text)))
-    )
-      flagTranscriptionWarning();
-    if (!recovered || recovered.utterances.length === 0) return;
-    const restored = recovered.utterances as Utterance[];
-    utterancesRef.current = restored;
-    setUtterances(restored);
-    setRecoveryRestored(true);
-  }, [sessionId]);
+    const abort = new AbortController();
+    let activeContext: RecoveryContext | null = null;
+    recoveryContextRef.current = null;
+    recoveryPendingRef.current = true;
+    setRecoveryPending(true);
+    void (async () => {
+      try {
+        // Uses the app's account-bound authenticated fetch. The key never
+        // enters browser storage and a late response cannot cross a remount.
+        const context = await fetchRecoveryContext(sessionId, abort.signal);
+        activeContext = context;
+        if (abort.signal.aborted) {
+          context.closed = true;
+          return;
+        }
+        const result = await loadRecoveryDraft(browserRecoveryStorage(), context, {
+          allowExpired: allowOlderRecovery,
+        });
+        if (abort.signal.aborted) return;
+        recoveryContextRef.current = context;
+        // Recovering older words is not new permission to open a microphone.
+        if (result.status === 'expired') autoStartedRef.current = true;
+        setRecoveryExpired(result.status === 'expired');
+        setLocalRecoveryFailed(result.status === 'unavailable');
+        const recovered = result.draft;
+        if (!recovered) return;
+        finalIntegrityRef.current = {
+          captureIncomplete: recovered.captureIncomplete,
+          captureIncompleteReason: recovered.captureIncompleteReason,
+        };
+        if (
+          recovered.transcriptionWarning ||
+          recovered.captureIncomplete ||
+          containsTranscriptionArtifact(recovered.transcript) ||
+          recovered.utterances.some((u) => containsTranscriptionArtifact(u.text))
+        )
+          flagTranscriptionWarning(recovered.captureIncompleteReason ?? 'audio_loss');
+        if (recovered.utterances.length === 0 && !recovered.transcript.trim()) return;
+        const restored = (
+          recovered.utterances.length
+            ? recovered.utterances
+            : [
+                {
+                  id: `browser-recovery-${sessionId}`,
+                  speaker: 'unknown',
+                  text: recovered.transcript,
+                  tStartMs: 0,
+                  tEndMs: 0,
+                },
+              ]
+        ) as Utterance[];
+        utterancesRef.current = restored;
+        setUtterances(restored);
+        setRecoveryRestored(true);
+      } catch {
+        if (!abort.signal.aborted) setLocalRecoveryFailed(true);
+      } finally {
+        if (!abort.signal.aborted) {
+          recoveryPendingRef.current = false;
+          setRecoveryPending(false);
+        }
+      }
+    })();
+    return () => {
+      abort.abort();
+      if (activeContext) activeContext.closed = true;
+      recoveryContextRef.current = null;
+    };
+  }, [sessionId, allowOlderRecovery, recoveryRetry]);
   useEffect(() => {
+    if (recoveryPending || recoveryExpired || durableRef.current) return;
     if (utterances.length === 0 && !transcriptionWarning) return;
-    durableRef.current = false;
-    const saved = saveRecoveryDraft(browserRecoveryStorage(), {
+    const context = recoveryContextRef.current;
+    if (!context) {
+      setLocalRecoveryFailed(true);
+      return;
+    }
+    let current = true;
+    void saveRecoveryDraft(browserRecoveryStorage(), context, {
       version: 1,
       sessionId,
       savedAt: new Date().toISOString(),
       utterances,
       transcript: buildTranscript(utterances),
       transcriptionWarning,
+      ...finalIntegrityRef.current,
       captureMode: 'LIVE',
       durable: false,
+    }).then((saved) => {
+      if (current && recoveryContextRef.current === context) setLocalRecoveryFailed(!saved);
     });
-    setLocalRecoveryFailed(!saved);
-  }, [sessionId, utterances, transcriptionWarning]);
+    return () => {
+      current = false;
+    };
+  }, [
+    sessionId,
+    utterances,
+    transcriptionWarning,
+    recoveryPending,
+    recoveryExpired,
+    phase,
+    connectionLost,
+    noteFailed,
+  ]);
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       if (
@@ -520,6 +612,9 @@ export function TherapistLiveSession({
     transcript: string;
     utterances: Utterance[];
     transcriptionWarning: boolean;
+    captureIncomplete?: boolean;
+    captureIncompleteReason?: ScribeCaptureIncompleteReason;
+    finalizationId: string;
   } | null>(null);
 
   const stream = useLiveStream({
@@ -562,6 +657,7 @@ export function TherapistLiveSession({
         ws.send(pcm);
     },
     onInterrupted: (message) => {
+      flagTranscriptionWarning('capture_interrupted');
       audioDeliveryRef.current = 'off';
       setError(message);
       setConnectionLost(true);
@@ -607,11 +703,18 @@ export function TherapistLiveSession({
 
   const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (autoStart && !autoStartedRef.current && phase === 'idle') {
+    if (
+      autoStart &&
+      !recoveryPending &&
+      !recoveryPendingRef.current &&
+      !recoveryExpired &&
+      !autoStartedRef.current &&
+      phase === 'idle'
+    ) {
       autoStartedRef.current = true;
       void start({ resume: utterancesRef.current.length > 0 });
     }
-  }, [autoStart, phase]);
+  }, [autoStart, phase, recoveryPending, recoveryExpired]);
 
   // The rail reports disclosure, not model receipt: Quiet/collapsed cards
   // cannot inflate shown counts. Keep the existing once-per-session semantics.
@@ -664,15 +767,32 @@ export function TherapistLiveSession({
     transcript: string,
     finalUtterances = [...utterancesRef.current],
     finalWarning = transcriptionWarningRef.current,
+    identity?: {
+      finalizationId: string;
+      captureIncomplete?: boolean;
+      captureIncompleteReason?: ScribeCaptureIncompleteReason;
+    },
   ): Promise<void> {
     if (finalHandledRef.current) return;
     finalHandledRef.current = true;
+    finalizationIdRef.current ??= crypto.randomUUID();
+    const saveIdentity = identity
+      ? {
+          finalizationId: identity.finalizationId,
+          captureIncomplete: identity.captureIncomplete,
+          captureIncompleteReason: identity.captureIncompleteReason,
+        }
+      : {
+          finalizationId: finalizationIdRef.current,
+          ...finalIntegrityRef.current,
+        };
     finalPayloadRef.current = {
       kind: finalKind,
       note: finalNote,
       transcript,
       utterances: finalUtterances,
       transcriptionWarning: finalWarning,
+      ...saveIdentity,
     };
     setSaveFailed(null);
     setSaving(true);
@@ -681,12 +801,14 @@ export function TherapistLiveSession({
       const res = await fetch(`/api/v1/sessions/${sessionId}/live-note`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        signal: AbortSignal.timeout(30_000),
         body: JSON.stringify({
           kind: finalKind,
           note: finalNote,
           ...(transcript ? { transcript } : {}),
           utterances: finalUtterances,
           transcriptionWarning: finalWarning,
+          ...saveIdentity,
         }),
       });
       if (!res.ok) {
@@ -699,7 +821,12 @@ export function TherapistLiveSession({
       if (meterRef.current) void persistMeter(meterRef.current);
       setFinalStage('ready');
       durableRef.current = true;
-      clearRecoveryDraftAfterDurableSave(browserRecoveryStorage(), sessionId, true);
+      if (recoveryContextRef.current)
+        await clearRecoveryDraftAfterDurableSave(
+          browserRecoveryStorage(),
+          recoveryContextRef.current,
+          true,
+        );
       // The note is a COMPLETED NoteDraft now. Land on the copilot board —
       // review + sign live there, and no generation wait stands in the way.
       router.push(`/app/sessions/${sessionId}`);
@@ -715,7 +842,7 @@ export function TherapistLiveSession({
   function retrySave(): void {
     const p = finalPayloadRef.current;
     if (!p) return;
-    void persistAndFinish(p.kind, p.note, p.transcript, p.utterances, p.transcriptionWarning);
+    void persistAndFinish(p.kind, p.note, p.transcript, p.utterances, p.transcriptionWarning, p);
   }
 
   async function copyHeldTranscript(): Promise<void> {
@@ -787,6 +914,7 @@ export function TherapistLiveSession({
             action,
             utterances: utterancesRef.current,
             transcriptionWarning: transcriptionWarningRef.current,
+            ...finalIntegrityRef.current,
           }),
         });
         if (!response.ok) {
@@ -794,7 +922,12 @@ export function TherapistLiveSession({
           throw new Error(body.error ?? 'Captured words could not be saved. Keep this tab open.');
         }
         durableRef.current = true;
-        clearRecoveryDraftAfterDurableSave(browserRecoveryStorage(), sessionId, true);
+        if (recoveryContextRef.current)
+          await clearRecoveryDraftAfterDurableSave(
+            browserRecoveryStorage(),
+            recoveryContextRef.current,
+            true,
+          );
       } else if (action === 'FINALIZE') {
         throw new Error(
           'No captured words are available. Resume recording or open the session to document manually.',
@@ -827,6 +960,7 @@ export function TherapistLiveSession({
   }
 
   async function start(opts: { resume?: boolean } = {}): Promise<void> {
+    if (recoveryPendingRef.current || recoveryPending || recoveryExpired) return;
     if (unmountedRef.current || startingRef.current || saving || startupAudioDrainRef.current)
       return;
     if (captureIntegrityErrorRef.current) {
@@ -888,6 +1022,7 @@ export function TherapistLiveSession({
     }
     setRefreshingNote(false);
     finalHandledRef.current = false;
+    finalizationIdRef.current = null;
     setPhase('connecting');
     phaseRef.current = 'connecting';
     if (!preserveStartupAudioRef.current) {
@@ -1141,6 +1276,7 @@ export function TherapistLiveSession({
           'Microphone off. The paused connection has expired or disconnected. Resume explicitly to recheck consent and continue from the confirmed transcript.',
         );
       } else if (p === 'pausing' || p === 'pause-unconfirmed') {
+        flagTranscriptionWarning('connection_lost');
         phaseRef.current = 'pause-unconfirmed';
         setPhase('pause-unconfirmed');
         setPauseWarning(
@@ -1148,6 +1284,7 @@ export function TherapistLiveSession({
         );
         setConnectionLost(true);
       } else if (p === 'listening' || p === 'finalizing') {
+        flagTranscriptionWarning('connection_lost');
         setConnectionLost(true);
         setPhase('error');
       } else if (p === 'connecting') {
@@ -1240,7 +1377,10 @@ export function TherapistLiveSession({
             // The gateway always sends `done` after a therapyFinal. If we get
             // here without one, no note was generated (Pass 2 empty/blocked) —
             // surface a recovery panel instead of hanging on "Finishing…".
-            if (!finalHandledRef.current) setNoteFailed(true);
+            if (!finalHandledRef.current) {
+              flagTranscriptionWarning('finalization_failed');
+              setNoteFailed(true);
+            }
           } else if (event.state === 'unauthorized' || event.state === 'busy') {
             renewal.dispose();
             audioDeliveryRef.current = 'off';
@@ -1325,6 +1465,9 @@ export function TherapistLiveSession({
           break;
         case 'therapyFinal':
           renewal.dispose();
+          if (event.captureIncomplete || event.captureIncompleteReason) {
+            flagTranscriptionWarning(event.captureIncompleteReason ?? 'finalization_failed');
+          }
           if (event.transcriptionWarning || containsTranscriptionArtifact(JSON.stringify(event)))
             flagTranscriptionWarning();
           if (['pausing', 'paused', 'pause-unconfirmed'].includes(phaseRef.current)) {
@@ -1334,6 +1477,8 @@ export function TherapistLiveSession({
               transcript: event.transcript ?? buildTranscript(utterancesRef.current),
               utterances: [...utterancesRef.current],
               transcriptionWarning: transcriptionWarningRef.current,
+              ...finalIntegrityRef.current,
+              finalizationId: (finalizationIdRef.current ??= crypto.randomUUID()),
             };
             setSaveFailed(
               'The gateway finished while capture was paused. Review the captured transcript; use Retry save only if you intend to end this session.',
@@ -1397,6 +1542,7 @@ export function TherapistLiveSession({
       setPhase('error');
       if (!stopConfirmed) {
         captureIntegrityErrorRef.current = true;
+        flagTranscriptionWarning('audio_loss');
         ++liveAttemptRef.current;
         attemptAbortRef.current?.abort();
         wsRef.current = null;
@@ -1428,6 +1574,7 @@ export function TherapistLiveSession({
         if (!ownsAttempt()) return;
         stopFailed = true;
         captureIntegrityErrorRef.current = true;
+        flagTranscriptionWarning('audio_loss');
         throw new Error(
           'Microphone off, but the final audio frame was not confirmed. Known transcript words remain available; missing speech must be documented manually.',
         );
@@ -1907,6 +2054,22 @@ export function TherapistLiveSession({
         </Card>
       )}
 
+      {recoveryPending && (
+        <Card role="status" className="p-3 text-sm">
+          Checking secure transcript recovery before recording…
+        </Card>
+      )}
+      {recoveryExpired && !recoveryPending && (
+        <Card role="status" className="border-amber-300 p-4 text-sm">
+          <p>
+            This browser has captured words from more than seven days ago. Recording is paused until
+            you recover and review them. The encrypted copy has not been deleted.
+          </p>
+          <Button className="mt-3" onClick={() => setAllowOlderRecovery(true)}>
+            Recover older captured words
+          </Button>
+        </Card>
+      )}
       {recoveryRestored && (
         <Card className="border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3 text-sm">
           Restored the transcript held by this browser. Reconnect continues the same session without
@@ -2050,8 +2213,17 @@ export function TherapistLiveSession({
       )}
       {localRecoveryFailed && (
         <Card className="border-amber-300 p-4 text-sm">
-          Browser recovery storage is unavailable. Keep this tab open until the server confirms
-          saving, or save a transcript copy.
+          Secure browser recovery is unavailable. Any older recovery copy is kept unchanged. Keep
+          this tab open until the server confirms saving, or save a transcript copy.
+          {phase === 'idle' && !utterances.length && !recoveryPending && (
+            <Button
+              className="mt-3"
+              variant="secondary"
+              onClick={() => setRecoveryRetry((attempt) => attempt + 1)}
+            >
+              Retry secure recovery
+            </Button>
+          )}
         </Card>
       )}
 

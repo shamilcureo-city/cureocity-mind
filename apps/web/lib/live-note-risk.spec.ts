@@ -102,6 +102,7 @@ let tx: {
   $queryRaw: ReturnType<typeof vi.fn>;
   session: { updateMany: ReturnType<typeof vi.fn>; findUniqueOrThrow: ReturnType<typeof vi.fn> };
   noteDraft: { upsert: typeof mocks.upsert; findUnique: ReturnType<typeof vi.fn> };
+  auditLog: { findFirst: ReturnType<typeof vi.fn> };
 };
 
 beforeEach(() => {
@@ -154,6 +155,20 @@ beforeEach(() => {
       findUniqueOrThrow: vi.fn(async () => ({ ...session })),
     },
     noteDraft: { upsert: mocks.upsert, findUnique: vi.fn(async () => storedDraft) },
+    auditLog: {
+      findFirst: vi.fn(
+        async ({ where }) =>
+          storedAudits.find((row) => {
+            const metadata = row.metadata as Record<string, unknown>;
+            return (
+              row.action === where.action &&
+              row.targetId === where.targetId &&
+              row.actorPsychologistId === where.actorPsychologistId &&
+              metadata?.liveFinalizationId === where.metadata.equals
+            );
+          }) ?? null,
+      ),
+    },
   };
   mocks.transaction.mockImplementation(async (callback) => {
     const before = { session: { ...session }, draft: storedDraft, audits: [...storedAudits] };
@@ -186,6 +201,67 @@ function post(body: unknown) {
 function payload(kind: SessionKind = 'TREATMENT', severity: RiskSeverity = 'high') {
   return { kind, note: therapyNote(kind, severity), transcript: 'Synthetic transcript' };
 }
+
+describe('Mind final save replay and capture integrity', () => {
+  const finalizationId = 'dc064be0-02a7-4acf-8a56-38da08cb903a';
+  it('acknowledges the same committed save after a lost response without new writes or analysis', async () => {
+    const body = {
+      ...payload(),
+      finalizationId,
+      captureIncomplete: true,
+      captureIncompleteReason: 'audio_loss',
+    };
+    expect((await post(body)).status).toBe(201);
+    expect(scribeCaptureIntegrity(storedDraft?.errorMessage as string)).toEqual({
+      incomplete: true,
+      reason: 'audio_loss',
+    });
+    const counts = {
+      upserts: mocks.upsert.mock.calls.length,
+      audits: storedAudits.length,
+      translations: mocks.translate.mock.calls.length,
+      after: mocks.after.mock.calls.length,
+    };
+    expect(session.status).toBe('COMPLETED');
+    const replay = await post(body);
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ draftId: 'draft-1', replayed: true });
+    expect(mocks.upsert).toHaveBeenCalledTimes(counts.upserts);
+    expect(storedAudits).toHaveLength(counts.audits);
+    expect(mocks.translate).toHaveBeenCalledTimes(counts.translations);
+    expect(mocks.after).toHaveBeenCalledTimes(counts.after);
+  });
+  it('allows an exact receipt after signature without replacing signed or edited content', async () => {
+    const body = { ...payload(), finalizationId };
+    expect((await post(body)).status).toBe(201);
+    session.therapyNote = { signedAt: new Date() };
+    storedDraft = { ...storedDraft, content: { clinicianCorrection: 'Fictional reviewed note' } };
+    const before = storedDraft;
+    expect((await post(body)).status).toBe(200);
+    expect(storedDraft).toBe(before);
+    expect(mocks.upsert).toHaveBeenCalledOnce();
+  });
+  it('rejects a reused operation with different content and a new operation after completion', async () => {
+    const body = { ...payload(), finalizationId };
+    expect((await post(body)).status).toBe(201);
+    const conflict = await post({ ...body, transcript: 'Different fictional speech' });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: 'FINALIZATION_CONFLICT' });
+    expect(
+      (await post({ ...body, finalizationId: '1364495f-a8cb-4aa6-bc82-6cc48289da99' })).status,
+    ).toBe(409);
+    expect(mocks.upsert).toHaveBeenCalledOnce();
+  });
+  it('does not leave a replay receipt when the first transaction rolls back', async () => {
+    const body = { ...payload(), finalizationId };
+    failAudit = true;
+    await expect(post(body)).rejects.toThrow('audit unavailable');
+    expect(storedDraft).toBeNull();
+    expect(storedAudits).toEqual([]);
+    failAudit = false;
+    expect((await post(body)).status).toBe(201);
+  });
+});
 
 describe.each(['INTAKE', 'TREATMENT', 'REVIEW'] as const)('Mind live %s note risk', (kind) => {
   it.each(severityCases)(

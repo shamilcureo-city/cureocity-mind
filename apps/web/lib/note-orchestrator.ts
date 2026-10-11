@@ -31,6 +31,7 @@ import { CostCircuitOpenError, checkCostCircuit } from './cost-guard';
 import { clientIdForSession, fetchActiveMedications } from './patient-context';
 import { encryptForTenant, decryptForTenant } from './tenant-crypto';
 import { mergeRecoveryPrefix, type RecoveryPrefix } from './mind-recovery-prefix';
+import { preserveScribeCaptureIntegrity, scribeCaptureIntegrity } from './scribe-capture-integrity';
 import { ensureEnglishNote } from './ensure-english-note';
 import { mapRiskSeverity, recordCommittedNoteRisk, writeNoteRiskAudit } from './note-risk';
 import { modelRouter } from './llm';
@@ -116,7 +117,7 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
     async (tx) =>
       tx.noteDraft.upsert({
         where: { sessionId },
-        update: { status: 'IN_PROGRESS', errorMessage: null },
+        update: { status: 'IN_PROGRESS' },
         create: { sessionId, status: 'IN_PROGRESS' },
       }),
     { allowedStatuses: ['COMPLETED'] },
@@ -467,7 +468,11 @@ export async function runNoteGeneration(sessionId: string): Promise<Orchestrator
             content: pass2Body as unknown as Prisma.InputJsonValue,
             riskSeverity,
             status: 'COMPLETED',
-            errorMessage: prefix?.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
+            errorMessage: preserveScribeCaptureIntegrity(
+              prefix?.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
+              scribeCaptureIntegrity(draft.errorMessage).incomplete || prefix?.captureIncomplete,
+              scribeCaptureIntegrity(draft.errorMessage).reason ?? prefix?.captureIncompleteReason,
+            ),
             totalCostInr: pass1Cost.plus(pass2Cost),
           },
         });
@@ -868,9 +873,21 @@ async function markDraftFailed(
       sessionId,
       psychologistId,
       async (tx) => {
+        const previous = await tx.noteDraft.findUnique({
+          where: { id: draftId },
+          select: { errorMessage: true },
+        });
+        const integrity = scribeCaptureIntegrity(previous?.errorMessage);
         await tx.noteDraft.update({
           where: { id: draftId },
-          data: { status: 'FAILED', errorMessage: compactPassError(message) },
+          data: {
+            status: 'FAILED',
+            errorMessage: preserveScribeCaptureIntegrity(
+              compactPassError(message),
+              integrity.incomplete,
+              integrity.reason ?? undefined,
+            ),
+          },
         });
         if (cause instanceof CostCircuitOpenError) {
           await writeAudit(

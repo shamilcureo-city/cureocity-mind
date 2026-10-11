@@ -11,7 +11,13 @@ import type { NoteReview } from '@cureocity/contracts';
  * existing reviews and lets the therapist add one. (Full multi-account
  * supervisor routing / co-sign is a larger follow-up.)
  */
-export function NoteReviewPanel({ sessionId }: { sessionId: string }) {
+export function NoteReviewPanel({
+  sessionId,
+  signatureHash,
+}: {
+  sessionId: string;
+  signatureHash: string | null;
+}) {
   const [reviews, setReviews] = useState<NoteReview[]>([]);
   const [open, setOpen] = useState(false);
   const [reviewerName, setReviewerName] = useState('');
@@ -35,7 +41,7 @@ export function NoteReviewPanel({ sessionId }: { sessionId: string }) {
   }, [load]);
 
   async function submit(): Promise<void> {
-    if (reviewerName.trim().length === 0) return;
+    if (reviewerName.trim().length === 0 || !signatureHash) return;
     setPending(true);
     setError(null);
     try {
@@ -43,6 +49,7 @@ export function NoteReviewPanel({ sessionId }: { sessionId: string }) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
+          reviewedSignatureHash: signatureHash,
           reviewerName: reviewerName.trim(),
           reviewerNote: reviewerNote.trim() || undefined,
         }),
@@ -69,6 +76,7 @@ export function NoteReviewPanel({ sessionId }: { sessionId: string }) {
         {!open && (
           <button
             type="button"
+            disabled={!signatureHash}
             onClick={() => setOpen(true)}
             className="rounded-full border border-[var(--color-line)] bg-white px-3 py-1 text-xs font-medium text-[var(--color-ink-2)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
           >
@@ -93,6 +101,13 @@ export function NoteReviewPanel({ sessionId }: { sessionId: string }) {
                     year: 'numeric',
                   })}
                 </span>
+              </p>
+              <p className="mt-1 text-xs text-[var(--color-ink-3)]">
+                {!r.reviewedSignatureHash
+                  ? 'Historical review — signed version not recorded.'
+                  : r.reviewedSignatureHash === signatureHash
+                    ? 'Review of this signed version.'
+                    : 'Historical review of an earlier signed version; not the amended note.'}
               </p>
               {r.reviewerNote && <p className="mt-1 text-[var(--color-ink-2)]">{r.reviewerNote}</p>}
             </li>

@@ -97,6 +97,7 @@ vi.mock('@cureocity/observability/metrics', () => ({
 }));
 
 import { runNoteGeneration } from './note-orchestrator';
+import { preserveScribeCaptureIntegrity, scribeCaptureIntegrity } from './scribe-capture-integrity';
 
 const MEDICATION = { drug: 'Aspirin', strength: '75 mg' };
 const ORDER = { description: 'HbA1c', category: 'LAB' };
@@ -136,7 +137,11 @@ beforeEach(() => {
     callback({
       $queryRaw: mocks.queryRaw,
       session: { findUnique: mocks.sessionFindUnique, update: mocks.sessionUpdate },
-      noteDraft: { upsert: mocks.noteDraftUpsert, update: mocks.noteDraftUpdate },
+      noteDraft: {
+        upsert: mocks.noteDraftUpsert,
+        update: mocks.noteDraftUpdate,
+        findUnique: mocks.noteDraftFindUnique,
+      },
       geminiCallLog: { create: mocks.geminiCallLogCreate },
       medicationOrder: {
         deleteMany: mocks.medicationDeleteMany,
@@ -372,6 +377,44 @@ describe.each(['INTAKE', 'TREATMENT', 'REVIEW'] as const)('batch %s note risk pa
 });
 
 describe('batch therapy risk boundaries', () => {
+  it.each(['prefix', 'prior draft'])(
+    'retains incomplete capture after regeneration from %s',
+    async (source) => {
+      process.env['LLM_BACKEND'] = 'vertex';
+      setTherapyOutput('TREATMENT', 'none');
+      const draft = {
+        id: 'draft-1',
+        status: 'PENDING',
+        recoveryTranscriptEncrypted: 'sealed-prefix',
+        errorMessage:
+          source === 'prior draft'
+            ? preserveScribeCaptureIntegrity(null, true, 'audio_loss')
+            : null,
+      };
+      mocks.noteDraftFindUnique.mockResolvedValue(draft);
+      mocks.noteDraftUpsert.mockResolvedValue(draft);
+      mocks.decryptForTenant.mockResolvedValue(
+        JSON.stringify({
+          version: 1,
+          transcript: 'Client: Fictional words.',
+          speakerSegments: [],
+          ...(source === 'prefix'
+            ? { captureIncomplete: true, captureIncompleteReason: 'audio_loss' }
+            : {}),
+        }),
+      );
+      await expect(runWith(['BEHAVIORAL_HEALTH_DOCUMENTATION'])).resolves.toMatchObject({
+        status: 'COMPLETED',
+      });
+      const saved = mocks.noteDraftUpdate.mock.calls.find(
+        ([arg]) => arg.data.status === 'COMPLETED',
+      )![0];
+      expect(scribeCaptureIntegrity(saved.data.errorMessage)).toEqual({
+        incomplete: true,
+        reason: 'audio_loss',
+      });
+    },
+  );
   it('generates from an encrypted live prefix without reopening or retranscribing audio', async () => {
     process.env['LLM_BACKEND'] = 'vertex';
     setTherapyOutput('TREATMENT', 'none');

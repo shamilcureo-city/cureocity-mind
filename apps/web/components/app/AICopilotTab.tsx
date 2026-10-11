@@ -280,6 +280,7 @@ async function SessionSub({
     alliance: sessionRow?.allianceRating ?? null,
     formulationSuggestions,
     formulationBody: formulationParse?.success ? formulationParse.data : null,
+    formulationVersion: formulationRow?.version ?? 0,
   };
 
   return (

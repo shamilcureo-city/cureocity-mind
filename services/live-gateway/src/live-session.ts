@@ -199,7 +199,7 @@ export class LiveSession {
   private finalEmitted = false;
   /** Never turn a rejected model response into speech or hide the resulting gap. */
   private transcriptionWarning = false;
-  /** Doctor finals retain an incomplete capture even when a usable draft exists. */
+  /** Finals retain incomplete capture even when a usable interim draft exists. */
   private captureIncompleteReason: 'audio_loss' | 'finalization_failed' | null = null;
   private startedAtMs = 0;
   /** DOC-5 — runaway-consult guards (silence skip + duration/cost ceilings). */
@@ -595,7 +595,6 @@ export class LiveSession {
   }
 
   private markCaptureIncomplete(reason: 'audio_loss' | 'finalization_failed'): void {
-    if (this.vertical !== 'DOCTOR') return;
     // Missing audio remains the most concrete cause even if note generation
     // subsequently times out or fails as well.
     if (this.captureIncompleteReason !== 'audio_loss') this.captureIncompleteReason = reason;
@@ -1145,7 +1144,10 @@ export class LiveSession {
           `[live-gateway] therapist Pass 2 returned a non-therapy note (kind=${out.kind}) ` +
             `for sess=${this.sessionId}; ignoring. Check the Pass-2 backend vertical branch.`,
         );
-        if (isFinal) this.emitFinalFromLatest();
+        if (isFinal) {
+          this.markCaptureIncomplete('finalization_failed');
+          this.emitFinalFromLatest();
+        }
         return;
       }
       this.latestTherapyNote = tnote;
@@ -1160,6 +1162,7 @@ export class LiveSession {
           note: tnote,
           transcript: this.cumulativeTranscript(),
           transcriptionWarning: this.transcriptionWarning,
+          ...this.captureIntegrityFields(),
         });
         return;
       }
@@ -1402,7 +1405,7 @@ export class LiveSession {
    * That window OWNS `pending` (it slices its prefix off and advances
    * flushedBytes when its Pass-1 call returns), so transcribing the tail here
    * would re-transcribe its bytes and DUPLICATE them in the record. Skip the
-   * tail in that case and mark the doctor final incomplete for review.
+   * tail in that case and mark the final incomplete for clinician review.
    */
   private async finalizeWork(idle: boolean): Promise<void> {
     // Join already-owned analysis inside the existing finalize deadline.
@@ -1545,6 +1548,7 @@ export class LiveSession {
         note: this.latestTherapyNote,
         transcript: this.cumulativeTranscript(),
         transcriptionWarning: this.transcriptionWarning,
+        ...this.captureIntegrityFields(),
       });
       return;
     }

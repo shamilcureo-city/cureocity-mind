@@ -15,6 +15,10 @@ export const MindRecoveryInputSchema = z
     action: z.enum(['CONTINUE_RECORDING', 'FINALIZE']),
     utterances: z.array(MindRecoveryUtteranceSchema).min(1).max(2000),
     transcriptionWarning: z.boolean().optional(),
+    captureIncomplete: z.boolean().optional(),
+    captureIncompleteReason: z
+      .enum(['connection_lost', 'finalization_failed', 'audio_loss', 'capture_interrupted'])
+      .optional(),
   })
   .superRefine(({ utterances }, ctx) => {
     if (new Set(utterances.map((row) => row.id)).size !== utterances.length)

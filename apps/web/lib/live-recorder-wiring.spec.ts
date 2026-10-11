@@ -22,6 +22,7 @@ const harness = vi.hoisted(() => ({
     stop: vi.fn(async () => {}),
     pause: vi.fn(async () => {}),
     drainPending: vi.fn(async () => 0),
+    downloadUnsavedAudio: vi.fn(async () => {}),
   },
 }));
 
@@ -122,6 +123,17 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('real LiveRecorder finish/recovery action wiring', () => {
+  it('offers the recorder memory-aware audio export when final local storage fails', async () => {
+    harness.recorder.stop.mockRejectedValueOnce(
+      new Error('Another recording tab saved different audio'),
+    );
+    confirmEnd();
+    await vi.waitFor(() => expect(text(render())).toContain('Could not finish the session'));
+    click('Download unsaved audio');
+    expect(harness.recorder.downloadUnsavedAudio).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(harness.clear).not.toHaveBeenCalled();
+  });
   it('pause neither ends nor clears the cursor, and resume checks current authority before capture', async () => {
     click('Pause recording');
     await vi.waitFor(() => expect(harness.recorder.pause).toHaveBeenCalledOnce());

@@ -4,6 +4,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import type {
@@ -147,15 +148,15 @@ export class MeService {
     });
     if (!client) throw new NotFoundException('Client not found');
 
-    let contentEncrypted: string | null = null;
+    let contentEncrypted: string;
     try {
       contentEncrypted = await this.encryption.encryptForTenant(client.psychologistId, dto.content);
-    } catch (e) {
-      // Don't fail the journal write because the KMS path is unhealthy
-      // — the plaintext column is still authoritative during the
-      // transition window. Log loudly so the regression is visible.
-      this.logger.error(
-        `Encryption failed for journal entry; falling back to plaintext-only: ${(e as Error).message}`,
+    } catch {
+      // Never bypass the key-identity guard or a KMS failure by silently
+      // persisting only plaintext. Do not log provider details or journal text.
+      this.logger.error('Journal encryption unavailable; no journal entry was saved.');
+      throw new ServiceUnavailableException(
+        'Your journal could not be securely saved. Your entry was not saved; please try again.',
       );
     }
 

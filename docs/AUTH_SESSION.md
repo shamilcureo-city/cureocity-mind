@@ -125,24 +125,26 @@ missing/erased/transferred patient records or grant missing clinical authority.
 
 ---
 
-## 4. Verification: no revocation check, with transient-retry
+## 4. Verification: revocation checks with transient retry
 
 `verifyWithRetry()` in `auth-server.ts` wraps `verifyIdToken` /
 `verifySessionCookie` for both guards.
 
-- **`checkRevoked` is intentionally NOT passed.** That flag makes a
-  network call to Firebase Identity Platform on _every_ request to check
-  revocation. There is **no "sign out all devices" feature** in the app,
-  so it was pure overhead. (If you ever build sign-out-all-devices,
-  re-enable `checkRevoked` _and_ keep the retry.)
-- Even without `checkRevoked`, `verifySessionCookie` still fetches
+- **`checkRevoked=true` is required** for practitioner cookies, bearer
+  credentials, session exchange and client claim redemption. Firebase-side
+  disable/revocation and password-reset recovery must invalidate existing
+  credentials even while the application practitioner row remains ACTIVE.
+  React request-local caching deduplicates page/layout checks; no cross-request
+  revocation grace cache is used. This adds Firebase lookup latency, so measure
+  real sign-in/navigation latency before release, without disabling this gate.
+- `verifySessionCookie` also fetches
   Google's public signing keys over the network — **cached only after the
   first call**. On a cold function instance, concurrent requests race that
   first fetch, and a transient failure throws.
 - `verifyWithRetry` retries **transient** errors (network / internal /
   key-fetch) up to 3× with short backoff, and **fails fast** on genuine
   auth errors (`auth/session-cookie-expired`, `…-revoked`, `…-invalid`,
-  `auth/argument-error`, and the id-token equivalents) so real
+  `auth/argument-error`, disabled/deleted users, and the id-token equivalents) so real
   expiries/logouts still happen. The `GENUINE_TOKEN_FAILURES` set is the
   allowlist of "do not retry, log the user out".
 

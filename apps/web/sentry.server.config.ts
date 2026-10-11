@@ -6,6 +6,7 @@
  * dev stays silent so a test exception doesn't pollute the dashboard.
  */
 import * as Sentry from '@sentry/nextjs';
+import { scrubTelemetryEvent, scrubTelemetryBreadcrumb } from './lib/telemetry-redaction';
 
 const DEFAULT_DSN =
   'https://9882c32602cad4f86c9c4b85a160b246@o4511364925095936.ingest.us.sentry.io/4511581385392128';
@@ -21,4 +22,7 @@ Sentry.init({
   // request bodies on a route exception. Off until we have a DPDP
   // review of what Sentry retains.
   sendDefaultPii: false,
+  beforeSend: scrubTelemetryEvent,
+  beforeSendTransaction: scrubTelemetryEvent,
+  beforeBreadcrumb: scrubTelemetryBreadcrumb,
 });

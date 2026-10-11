@@ -8,8 +8,14 @@ const harness = vi.hoisted(() => ({
   refs: [] as Array<{ current: unknown }>,
   refIndex: 0,
   effects: [] as Array<() => (() => void) | void>,
+  effectIndex: 0,
+  dependencies: [] as Array<readonly unknown[] | undefined>,
+  pendingEffects: new Set<number>(),
+  cleanups: new Map<number, () => void>(),
+  mounted: false,
   registerEffects: true,
   push: vi.fn(),
+  refresh: vi.fn(),
   cueReview: vi.fn(),
   sockets: [] as Socket[],
   onFrame: (_pcm: Uint8Array) => {},
@@ -18,8 +24,18 @@ const harness = vi.hoisted(() => ({
 vi.mock('react', async (original) => ({
   ...(await original<typeof import('react')>()),
   useMemo: <T>(compute: () => T) => compute(),
-  useEffect: (effect: () => (() => void) | void) => {
-    if (harness.registerEffects) harness.effects.push(effect);
+  useEffect: (effect: () => (() => void) | void, dependencies?: readonly unknown[]) => {
+    const index = harness.effectIndex++;
+    const previous = harness.dependencies[index];
+    if (
+      !harness.effects[index] ||
+      !dependencies ||
+      !previous ||
+      dependencies.some((item, i) => !Object.is(item, previous[i]))
+    )
+      harness.pendingEffects.add(index);
+    harness.dependencies[index] = dependencies;
+    harness.effects[index] = effect;
   },
   useState: <T>(initial: T | (() => T)) => {
     const index = harness.stateIndex++;
@@ -40,7 +56,9 @@ vi.mock('react', async (original) => ({
     return harness.refs[index] ?? (harness.refs[index] = { current });
   },
 }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: harness.push }) }));
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: harness.push, refresh: harness.refresh }),
+}));
 vi.mock('next/link', () => ({ default: 'a' }));
 vi.mock('@/lib/audio/use-live-stream', () => ({
   useLiveStream: (opts: { onFrame: (pcm: Uint8Array) => void }) => {
@@ -49,6 +67,17 @@ vi.mock('@/lib/audio/use-live-stream', () => ({
   },
 }));
 vi.mock('@/lib/audio/use-wake-lock', () => ({ useWakeLock: () => {} }));
+// Key transport is tested independently. Keep lifecycle fetch assertions about
+// capture authorization while exercising real async restore/encryption here.
+vi.mock('@/lib/live-recovery-draft', async (original) => {
+  const actual = await original<typeof import('./live-recovery-draft')>();
+  return {
+    ...actual,
+    fetchRecoveryContext: vi.fn(async (sessionId: string) =>
+      actual.createRecoveryContext('psy-1', sessionId, Buffer.alloc(32, 4).toString('base64')),
+    ),
+  };
+});
 // Cue persistence and timestamp-clock hooks have dedicated behavior tests.
 vi.mock('@/lib/use-mind-cue-review', () => ({
   useMindCueReview: () => ({
@@ -76,6 +105,12 @@ import { CaptureStatusBar } from '../components/app/CaptureStatusBar';
 import { TherapyCopilotRail } from '../components/app/TherapyCopilotRail';
 import { MindConsentRecovery } from '../components/app/MindConsentRecovery';
 import { LIVE_CAPTURE_STOP_TIMEOUT_MS } from './audio/live-stream-cleanup';
+import {
+  createRecoveryContext,
+  fetchRecoveryContext,
+  loadRecoveryDraft,
+  recoveryDraftKey,
+} from './live-recovery-draft';
 
 class Socket {
   static OPEN = 1;
@@ -127,6 +162,7 @@ let priorRisk = false;
 function render() {
   harness.stateIndex = 0;
   harness.refIndex = 0;
+  harness.effectIndex = 0;
   const view = TherapistLiveSession({
     sessionId: 's-1',
     sessionStatus,
@@ -138,14 +174,31 @@ function render() {
     priorRisk,
   });
   harness.registerEffects = false;
+  if (harness.mounted) flushEffects();
   return view;
 }
-function mount() {
+function flushEffects() {
+  const pending = [...harness.pendingEffects];
+  harness.pendingEffects.clear();
+  for (const index of pending) {
+    harness.cleanups.get(index)?.();
+    const cleanup = harness.effects[index]();
+    if (typeof cleanup === 'function') harness.cleanups.set(index, cleanup);
+    else harness.cleanups.delete(index);
+  }
+}
+async function mount() {
   render();
-  const cleanups = harness.effects
-    .map((effect) => effect())
-    .filter((cleanup): cleanup is () => void => typeof cleanup === 'function');
-  return () => cleanups.forEach((cleanup) => cleanup());
+  harness.mounted = true;
+  flushEffects();
+  await vi.waitFor(() =>
+    expect(text(render())).not.toContain('Checking secure transcript recovery'),
+  );
+  return () => {
+    harness.mounted = false;
+    harness.cleanups.forEach((cleanup) => cleanup());
+    harness.cleanups.clear();
+  };
 }
 function click(label: string) {
   const button = elements(render()).find(
@@ -167,6 +220,10 @@ beforeEach(() => {
   harness.states = [];
   harness.refs = [];
   harness.effects = [];
+  harness.dependencies = [];
+  harness.pendingEffects.clear();
+  harness.cleanups.clear();
+  harness.mounted = false;
   harness.sockets = [];
   harness.registerEffects = true;
   sessionStatus = 'IN_PROGRESS';
@@ -192,13 +249,16 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  harness.mounted = false;
+  harness.cleanups.forEach((cleanup) => cleanup());
+  harness.cleanups.clear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
 
 describe('usage-registration startup failure', () => {
   async function failWithHeldAudio(beforeFailure?: () => void, waitForDrain = true) {
-    const unmount = mount();
+    const unmount = await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const socket = harness.sockets[0];
@@ -328,7 +388,7 @@ describe('usage-registration startup failure', () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const unmount = mount();
+    const unmount = await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const socket = harness.sockets[0];
@@ -410,7 +470,7 @@ describe('same-session consent recovery wiring', () => {
         status: 409,
       }),
     );
-    mount();
+    await mount();
     click('Start session');
     await vi.waitFor(() =>
       expect(elements(render()).some((element) => element.type === MindConsentRecovery)).toBe(true),
@@ -435,7 +495,7 @@ describe('same-session consent recovery wiring', () => {
     vi.mocked(fetch).mockResolvedValue(
       new Response('{"code":"SESSION_INVALID_STATE"}', { status: 409 }),
     );
-    mount();
+    await mount();
     click('Start session');
     await vi.waitFor(() => expect(text(render())).toContain('no longer open for recording'));
     expect(elements(render()).some((element) => element.type === MindConsentRecovery)).toBe(false);
@@ -443,7 +503,7 @@ describe('same-session consent recovery wiring', () => {
   });
 
   it('keeps the selected draft and transcript visible across consent recovery without implying or restarting capture', async () => {
-    const unmount = mount();
+    const unmount = await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const socket = harness.sockets[0];
@@ -528,8 +588,8 @@ describe('same-session consent recovery wiring', () => {
 });
 
 describe('real TherapistLiveSession attempt lifecycle wiring', () => {
-  it('links the draft disclosure only after its controlled region is mounted', () => {
-    mount();
+  it('links the draft disclosure only after its controlled region is mounted', async () => {
+    await mount();
     expect(action('Open draft')?.props['aria-expanded']).toBe(false);
     expect(action('Open draft')?.props['aria-controls']).toBeUndefined();
     expect(elements(render()).some((element) => element.props.id === 'mind-live-draft-s-1')).toBe(
@@ -547,7 +607,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
 
   it('a failed visibility receipt keeps the safety cue open and retries the actual review action, without audio', async () => {
     priorRisk = true;
-    mount();
+    await mount();
     type CueProps = {
       onResolve: (id: string, kind: 'RED_FLAG', event: 'acted', label: string) => Promise<void>;
       onRetry: () => void;
@@ -585,7 +645,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
     'requires a valid initial authorization lease before socket or mic ($expiresInSec)',
     async (lease) => {
       vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify(lease), { status: 200 }));
-      mount();
+      await mount();
       click('Start session');
       await vi.waitFor(() =>
         expect(text(render())).toContain('Could not verify live authorization'),
@@ -602,7 +662,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
       vi.setSystemTime(new Date('2026-09-08T00:00:06Z'));
       return new Response('{"token":"already-expired","expiresInSec":5}', { status: 200 });
     });
-    mount();
+    await mount();
     click('Start session');
     await vi.waitFor(() => expect(text(render())).toContain('Could not verify live authorization'));
     expect(harness.sockets).toHaveLength(0);
@@ -610,7 +670,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
   });
 
   async function listening() {
-    mount();
+    await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const socket = harness.sockets[0];
@@ -690,6 +750,8 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
         type: 'therapyFinal',
         kind: 'TREATMENT',
         transcriptionWarning: true,
+        captureIncomplete: true,
+        captureIncompleteReason: 'audio_loss',
         transcript: 'Fictional speech.',
         note: {
           version: 'V1',
@@ -714,26 +776,156 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
       transcript: 'Fictional speech.',
       utterances: [utterance],
       transcriptionWarning: true,
+      captureIncomplete: true,
+      captureIncompleteReason: 'audio_loss',
+      finalizationId: expect.any(String),
     });
   });
 
-  it('flags pre-fix browser recovery artifacts immediately without changing the stored record', () => {
+  it.each(['Fictional speech', ''])(
+    'retries the exact final payload and operation ID after a lost save response (%j)',
+    async (transcript) => {
+      const socket = await listening();
+      vi.mocked(fetch)
+        .mockRejectedValueOnce(new TypeError('response lost'))
+        .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: 'therapyFinal',
+          kind: 'TREATMENT',
+          captureIncomplete: true,
+          captureIncompleteReason: 'audio_loss',
+          transcript,
+          note: {
+            version: 'V1',
+            modality: 'CBT',
+            subjective: 'Fictional statement',
+            objective: 'Fictional observations',
+            assessment: 'Clinician review',
+            plan: 'Review',
+            riskFlags: { severity: 'none', indicators: [] },
+          },
+        }),
+      });
+      await vi.waitFor(() => expect(action('Retry finalization')).toBeDefined());
+      click('Retry finalization');
+      await vi.waitFor(() => expect(harness.push).toHaveBeenCalledWith('/app/sessions/s-1'));
+      const saves = vi
+        .mocked(fetch)
+        .mock.calls.filter(([url]) => String(url).endsWith('/live-note'));
+      expect(saves).toHaveLength(2);
+      expect(saves[1]![1]!.body).toBe(saves[0]![1]!.body);
+      expect(JSON.parse(saves[0]![1]!.body as string)).toMatchObject({
+        finalizationId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+        captureIncomplete: true,
+        captureIncompleteReason: 'audio_loss',
+      });
+    },
+  );
+
+  it('flags pre-fix browser recovery artifacts after secure restore without altering clinical content', async () => {
     const artifact =
       'PLACEHOLDER: Replace verbatim per PRD 22.1 Part 10.3 (pending Sharafath sign-off).';
     const stored = JSON.stringify({
       version: 1,
       sessionId: 's-1',
-      savedAt: '2026-09-12T08:00:00.000Z',
+      savedAt: new Date().toISOString(),
       captureMode: 'LIVE',
       durable: false,
       transcript: artifact,
       utterances: [{ id: 'old-u1', text: artifact, speaker: 'unknown', tStartMs: 0, tEndMs: 1000 }],
     });
-    window.localStorage.getItem = () => stored;
-    mount();
+    const values = new Map([[recoveryDraftKey('s-1'), stored]]);
+    window.localStorage.getItem = (key) => values.get(key) ?? null;
+    window.localStorage.setItem = (key, value) => {
+      values.set(key, value);
+    };
+    window.localStorage.removeItem = (key) => {
+      values.delete(key);
+    };
+    await mount();
     expect(text(render())).toContain('Transcript needs review');
-    expect(window.localStorage.getItem('any')).toBe(stored);
+    expect(window.localStorage.getItem(recoveryDraftKey('s-1'))).toBeNull();
+    const context = await createRecoveryContext(
+      'psy-1',
+      's-1',
+      Buffer.alloc(32, 4).toString('base64'),
+    );
+    await vi.waitFor(async () =>
+      expect(
+        (await loadRecoveryDraft(window.localStorage, context)).draft?.utterances[0]?.text,
+      ).toBe(artifact),
+    );
     expect(harness.stream.start).not.toHaveBeenCalled();
+  });
+
+  it('does not start a microphone or auto-start until secure recovery finishes', async () => {
+    autoStart = true;
+    let ready!: (context: Awaited<ReturnType<typeof createRecoveryContext>>) => void;
+    vi.mocked(fetchRecoveryContext).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          ready = resolve;
+        }),
+    );
+    const mounting = mount();
+    click('Start session');
+    expect(harness.stream.start).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    ready(await createRecoveryContext('psy-1', 's-1', Buffer.alloc(32, 4).toString('base64')));
+    const unmount = await mounting;
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    unmount();
+  });
+
+  it('requires explicit older-word recovery, keeps integrity flags and never starts capture as part of restoring', async () => {
+    autoStart = true;
+    const stored = JSON.stringify({
+      version: 1,
+      sessionId: 's-1',
+      savedAt: '2020-01-01T00:00:00Z',
+      captureMode: 'LIVE',
+      durable: false,
+      transcript: 'Fictional older words',
+      utterances: [
+        {
+          id: 'old-u1',
+          text: 'Fictional older words',
+          speaker: 'patient',
+          tStartMs: 0,
+          tEndMs: 1000,
+        },
+      ],
+      captureIncomplete: true,
+      captureIncompleteReason: 'finalization_failed',
+    });
+    const values = new Map([[recoveryDraftKey('s-1'), stored]]);
+    window.localStorage.getItem = (key) => values.get(key) ?? null;
+    window.localStorage.setItem = (key, value) => {
+      values.set(key, value);
+    };
+    window.localStorage.removeItem = (key) => {
+      values.delete(key);
+    };
+    const unmount = await mount();
+    expect(text(render())).toContain('more than seven days ago');
+    click('Start session');
+    expect(fetch).not.toHaveBeenCalled();
+    click('Recover older captured words');
+    await vi.waitFor(() => expect(text(render())).toContain('Restored the transcript'));
+    expect(harness.stream.start).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    const context = await createRecoveryContext(
+      'psy-1',
+      's-1',
+      Buffer.alloc(32, 4).toString('base64'),
+    );
+    await vi.waitFor(async () =>
+      expect(
+        (await loadRecoveryDraft(window.localStorage, context)).draft?.captureIncompleteReason,
+      ).toBe('finalization_failed'),
+    );
+    unmount();
   });
 
   it('clears displayed context-derived reasoning on revocation without removing deterministic safety or transcript', async () => {
@@ -834,7 +1026,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
   });
 
   it('Start stays in shared capture controls before the guide/rails and sends buffered audio only after listening', async () => {
-    mount();
+    await mount();
     const rendered = elements(render());
     const controlsIndex = rendered.findIndex((el) => el.type === CaptureStatusBar);
     expect(controlsIndex).toBeGreaterThan(-1);
@@ -1026,7 +1218,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
   });
 
   it('unmount during stop prevents late pause/finalization commands or state writes', async () => {
-    const unmount = mount();
+    const unmount = await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const socket = harness.sockets[0];
@@ -1070,30 +1262,39 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
     expect(text(render())).toContain('Resume recording');
     expect(harness.stream.start).toHaveBeenCalledOnce();
   });
-  it('effect cleanup/replay cancels the first auto-start and permits only its replacement', async () => {
+  it('effect cleanup/replay cancels pending recovery and permits only the replacement auto-start', async () => {
     autoStart = true;
-    let finishFirst!: (response: Response) => void;
-    vi.mocked(fetch).mockImplementationOnce(
+    let finishFirst!: (context: Awaited<ReturnType<typeof createRecoveryContext>>) => void;
+    vi.mocked(fetchRecoveryContext).mockImplementationOnce(
       () =>
         new Promise((resolve) => {
           finishFirst = resolve;
         }),
     );
-    const cleanup = mount();
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
-    cleanup();
-    // React StrictMode replays setup after cleanup with the same hook refs.
+    render();
+    harness.mounted = true;
+    flushEffects();
+    expect(fetch).not.toHaveBeenCalled();
+    harness.cleanups.forEach((cleanup) => cleanup());
+    harness.cleanups.clear();
+    // StrictMode's initial replay occurs before async recovery has completed.
     harness.effects.forEach((effect) => effect());
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-    finishFirst(new Response('{"token":"stale"}', { status: 200 }));
+    await vi.waitFor(() =>
+      expect(text(render())).not.toContain('Checking secure transcript recovery'),
+    );
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    finishFirst(
+      await createRecoveryContext('psy-1', 's-1', Buffer.alloc(32, 4).toString('base64')),
+    );
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const socket = harness.sockets[0];
     socket.open();
     await vi.waitFor(() => expect(socket.send).toHaveBeenCalledOnce());
     expect(harness.stream.start).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
   });
   it('late old close/error/status cannot stop or mutate a newer live capture', async () => {
-    mount();
+    await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const first = harness.sockets[0];
@@ -1127,7 +1328,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
           finish = resolve;
         }),
     );
-    const unmount = mount();
+    const unmount = await mount();
     click('Start session');
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
     unmount();
@@ -1147,7 +1348,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
           activate = resolve;
         }),
     );
-    const unmount = mount();
+    const unmount = await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const socket = harness.sockets[0];
@@ -1168,7 +1369,7 @@ describe('real TherapistLiveSession attempt lifecycle wiring', () => {
           rejectStart = reject;
         }),
     );
-    mount();
+    await mount();
     click('Start session');
     await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
     const first = harness.sockets[0];

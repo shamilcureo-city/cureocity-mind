@@ -57,25 +57,27 @@ enum PractitionerVertical {
 }
 
 model Psychologist {
-  receptionSettings       ReceptionSettings?
-  receptionRequests       ReceptionRequest[]
-  receptionEvents         ReceptionEvent[]
-  scribeWorkspaceRecords  ScribeWorkspaceRecord[]
-  sessionUsageConnections SessionUsageConnection[]
-  mindSessionPreparations MindSessionPreparation[]
-  mindCareRecords         ClientMindCareRecord[]
-  id                      String                   @id @default(cuid())
-  firebaseUid             String                   @unique
-  email                   String                   @unique
-  fullName                String
-  phone                   String                   @unique
-  rciNumber               String                   @unique
-  rciVerifiedAt           DateTime?
-  status                  PsychologistStatus       @default(PENDING_VERIFICATION)
-  role                    PsychologistRole         @default(THERAPIST)
+  /// Auth-gated browser recovery key, wrapped using the tenant encryption boundary.
+  browserRecoveryKeyEncrypted String?
+  receptionSettings           ReceptionSettings?
+  receptionRequests           ReceptionRequest[]
+  receptionEvents             ReceptionEvent[]
+  scribeWorkspaceRecords      ScribeWorkspaceRecord[]
+  sessionUsageConnections     SessionUsageConnection[]
+  mindSessionPreparations     MindSessionPreparation[]
+  mindCareRecords             ClientMindCareRecord[]
+  id                          String                   @id @default(cuid())
+  firebaseUid                 String                   @unique
+  email                       String                   @unique
+  fullName                    String
+  phone                       String                   @unique
+  rciNumber                   String                   @unique
+  rciVerifiedAt               DateTime?
+  status                      PsychologistStatus       @default(PENDING_VERIFICATION)
+  role                        PsychologistRole         @default(THERAPIST)
   /// Synthetic practitioners exist only for deterministic demos, load tests,
   /// and operator QA. Real business/clinical metrics must exclude them.
-  isSynthetic             Boolean                  @default(false)
+  isSynthetic                 Boolean                  @default(false)
 
   /// First-run welcome dismissed — durable, per-therapist replacement for
   /// the per-device localStorage flag. Set via POST /psychologists/me/welcome.
@@ -3036,13 +3038,16 @@ enum ProblemStatus {
 // ============================================================================
 
 model NoteReview {
-  id             String   @id @default(cuid())
-  sessionId      String
-  therapyNoteId  String
-  psychologistId String
-  reviewerName   String
-  reviewerNote   String?  @db.Text
-  reviewedAt     DateTime
+  id                    String    @id @default(cuid())
+  sessionId             String
+  therapyNoteId         String
+  psychologistId        String
+  reviewerName          String
+  reviewerNote          String?   @db.Text
+  reviewedAt            DateTime
+  // Null on legacy reviews: never infer a reviewed version retrospectively.
+  reviewedSignatureHash String?
+  reviewedSignedAt      DateTime?
 
   createdAt DateTime @default(now())
 

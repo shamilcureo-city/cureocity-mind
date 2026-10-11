@@ -50,6 +50,7 @@ import { NoteEditingLayout } from './NoteEditingLayout';
 import { SavedNoteProcessingDetails as NoteFooter } from './SavedNoteProcessingDetails';
 import { mindSessionDestination } from '../../lib/mind-session-start';
 import { NOTE_ARTIFACT_HIDDEN_MESSAGE, noteContainsArtifact } from '../../lib/note-artifact';
+import { MindCaptureReview, mindCaptureNeedsReview } from './MindCaptureReview';
 
 type SessionStatus =
   | 'SCHEDULED'
@@ -106,9 +107,8 @@ type Phase =
   | { kind: 'ready-to-generate' }
   | { kind: 'generating'; draft: NoteDraft }
   // `reopened` marks a signed note that's been unlocked for editing (Sprint
-  // 71). It edits in the "completed" state, but Template / Re-generate are
-  // hidden — re-drafting from audio would discard the signed content — and
-  // signing again re-locks rather than creating a fresh note.
+  // 71). It edits in the "completed" state. Audio regeneration is hidden;
+  // formatting uses current saved content, and signing again re-locks it.
   | { kind: 'completed'; draft: NoteDraft; reopened?: boolean }
   | { kind: 'signed'; note: TherapyNote }
   | { kind: 'failed'; draft: NoteDraft; error: string }
@@ -159,6 +159,11 @@ export function NotesTab({
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  const [captureReviewedVersion, setCaptureReviewedVersion] = useState<string | null>(null);
+  const captureBlocked =
+    phase.kind === 'completed' &&
+    mindCaptureNeedsReview(phase.draft.errorMessage) &&
+    captureReviewedVersion !== phase.draft.updatedAt;
   const [recoveryStatus, setRecoveryStatus] = useState<NoteRecoveryStatus>('loading');
   const [modifying, setModifying] = useState(false);
   // Claim the rewrite boundary immediately, before React publishes disabled
@@ -243,7 +248,11 @@ export function NotesTab({
       }
       const draft = (await res.json()) as NoteDraft;
       if (draft.status === 'COMPLETED' && draft.content) {
-        setPhase({ kind: 'completed', draft });
+        setPhase((previous) => ({
+          kind: 'completed',
+          draft,
+          ...(previous.kind === 'completed' && previous.reopened ? { reopened: true } : {}),
+        }));
         stopPolling();
       } else if (draft.status === 'FAILED') {
         setPhase({ kind: 'failed', draft, error: draft.errorMessage ?? 'Note generation failed.' });
@@ -371,6 +380,11 @@ export function NotesTab({
   }, [triggerGeneration]);
 
   const triggerSignOff = useCallback(async (): Promise<void> => {
+    if (captureBlocked) {
+      setPendingShare(false);
+      setSignError('Review incomplete capture and save any missing details before signing.');
+      return;
+    }
     if (
       phase.kind !== 'completed' ||
       modifyingRef.current ||
@@ -426,6 +440,7 @@ export function NotesTab({
     generating,
     editing,
     recoveryStatus,
+    captureBlocked,
   ]);
 
   // Share from an unsigned draft: sign first, then open the share modal once
@@ -646,12 +661,14 @@ export function NotesTab({
     },
     [unlocking, unlockNote],
   );
-  const signedApplyTemplate = useCallback(async (): Promise<void> => {
-    // TemplatePicker has already written the new session template; re-open
-    // the signed note and re-generate it into that format for review + re-sign.
-    await unlockNote();
-    await triggerGeneration();
-  }, [unlockNote, triggerGeneration]);
+  const templateApplied = useCallback(
+    async (receipt?: { updatedAt: string | null }): Promise<void> => {
+      if (!receipt) return;
+      await pollOnce();
+      router.refresh();
+    },
+    [pollOnce, router],
+  );
 
   // Short label for the AI panel's document chip ("Note (BASE)"). For a
   // standard intake (no template) the chip reads "Initial assessment"; a
@@ -802,13 +819,13 @@ export function NotesTab({
                   : {})}
                 leftControls={
                   <>
-                    <TemplatePicker
-                      sessionId={sessionId}
-                      currentTemplateId={noteTemplateId}
-                      kind="INTAKE"
+                    <Button
+                      variant="secondary"
                       disabled={unlocking || translating}
-                      onApply={signedApplyTemplate}
-                    />
+                      onClick={() => void unlockNote()}
+                    >
+                      Edit note to change format
+                    </Button>
                     <LanguagePicker
                       value={noteLang}
                       onChange={signedTranslate}
@@ -848,7 +865,11 @@ export function NotesTab({
                 transcriptChars={initialDraft?.transcript?.length ?? 0}
                 region="signed"
               />
-              <NoteReviewPanel sessionId={sessionId} />
+              <NoteReviewPanel
+                key={`${sessionId}:${phase.note.signChallengeHashHex}`}
+                sessionId={sessionId}
+                signatureHash={phase.note.signChallengeHashHex}
+              />
             </Card>
             <MindSessionNoteTools focused={focusedReview} signed>
               <ModifyPanel
@@ -883,13 +904,13 @@ export function NotesTab({
                 : {})}
               leftControls={
                 <>
-                  <TemplatePicker
-                    sessionId={sessionId}
-                    currentTemplateId={noteTemplateId}
-                    kind="TREATMENT"
+                  <Button
+                    variant="secondary"
                     disabled={unlocking || translating}
-                    onApply={signedApplyTemplate}
-                  />
+                    onClick={() => void unlockNote()}
+                  >
+                    Edit note to change format
+                  </Button>
                   <LanguagePicker
                     value={noteLang}
                     onChange={signedTranslate}
@@ -930,7 +951,11 @@ export function NotesTab({
               transcriptChars={initialDraft?.transcript?.length ?? 0}
               region="signed"
             />
-            <NoteReviewPanel sessionId={sessionId} />
+            <NoteReviewPanel
+              key={`${sessionId}:${phase.note.signChallengeHashHex}`}
+              sessionId={sessionId}
+              signatureHash={phase.note.signChallengeHashHex}
+            />
           </Card>
           <MindSessionNoteTools focused={focusedReview} signed>
             <ModifyPanel
@@ -945,8 +970,8 @@ export function NotesTab({
     );
   }
 
-  // completed — intake. Mirrors the treatment completed layout minus the
-  // template picker (intake is a fixed eight-section shape, no templates).
+  // Completed intake preserves its clinical fields when an optional template
+  // view is applied, including after reopening a previously signed note.
   if (isIntake) {
     const intakeNote = phase.draft.content as unknown as IntakeNoteV1;
     const reopened = phase.reopened ?? false;
@@ -966,9 +991,8 @@ export function NotesTab({
                 <>
                   {/* Templates are opt-in for intake — the standard
                       initial-assessment format is the null-template default.
-                      Hidden when re-opened (re-drafting would discard signed
-                      content), same as treatment. */}
-                  {!reopened && (
+                      Reformat the current saved note, not the older audio. */}
+                  {
                     <TemplatePicker
                       sessionId={sessionId}
                       currentTemplateId={noteTemplateId}
@@ -982,9 +1006,11 @@ export function NotesTab({
                         editing ||
                         recoveryStatus !== 'none'
                       }
-                      onApply={triggerGeneration}
+                      expectedUpdatedAt={phase.draft.updatedAt}
+                      onBusyChange={onModifyBusyChange}
+                      onApply={templateApplied}
                     />
-                  )}
+                  }
                   <LanguagePicker
                     value={noteLang}
                     onChange={translateTo}
@@ -1006,6 +1032,17 @@ export function NotesTab({
               <p className="mb-4 text-xs text-[var(--color-warn)]">{translateError}</p>
             )}
             <RiskBanner riskFlags={intakeNote.riskFlags} />
+            {mindCaptureNeedsReview(phase.draft.errorMessage) && (
+              <MindCaptureReview
+                sessionId={sessionId}
+                draft={phase.draft}
+                disabled={
+                  editing || savingEdit || modifying || translating || recoveryStatus !== 'none'
+                }
+                onVerified={setCaptureReviewedVersion}
+                onReload={pollOnce}
+              />
+            )}
             {editing ? (
               <NoteEditingLayout reference={<NoteTranscriptReference draft={phase.draft} />}>
                 <IntakeNoteEditor
@@ -1049,7 +1086,7 @@ export function NotesTab({
                 <NoteReadiness items={checkIntakeNoteReadiness(intakeNote)} />
                 <NoteActions
                   showSign={!focusedReview}
-                  recoveryBlocked={recoveryStatus !== 'none'}
+                  recoveryBlocked={recoveryStatus !== 'none' || captureBlocked}
                   signing={signing}
                   generating={generating}
                   translating={translating}
@@ -1090,7 +1127,13 @@ export function NotesTab({
         {(focusedReview || canShare) && !editing && (
           <SignAndSendBar
             focusedReview={focusedReview}
-            blocked={translating || modifying || generating || noteContainsArtifact(intakeNote)}
+            blocked={
+              captureBlocked ||
+              translating ||
+              modifying ||
+              generating ||
+              noteContainsArtifact(intakeNote)
+            }
             recoveryStatus={recoveryStatus}
             onReviewEdits={startEditing}
             signing={signing}
@@ -1122,9 +1165,9 @@ export function NotesTab({
             {...(canShare && !editing && !focusedReview ? { onShare: signAndShare } : {})}
             leftControls={
               <>
-                {/* Template / Re-generate re-draft from audio, which would
-                    discard a re-opened signed note — so hide the picker there. */}
-                {!reopened && (
+                {/* Formatting preserves the current saved clinical fields,
+                    including corrections to a reopened signed note. */}
+                {
                   <TemplatePicker
                     sessionId={sessionId}
                     currentTemplateId={noteTemplateId}
@@ -1137,9 +1180,11 @@ export function NotesTab({
                       editing ||
                       recoveryStatus !== 'none'
                     }
-                    onApply={triggerGeneration}
+                    expectedUpdatedAt={phase.draft.updatedAt}
+                    onBusyChange={onModifyBusyChange}
+                    onApply={templateApplied}
                   />
-                )}
+                }
                 <LanguagePicker
                   value={noteLang}
                   onChange={translateTo}
@@ -1161,6 +1206,17 @@ export function NotesTab({
             <p className="mb-4 text-xs text-[var(--color-warn)]">{translateError}</p>
           )}
           <RiskBanner riskFlags={note.riskFlags} />
+          {mindCaptureNeedsReview(phase.draft.errorMessage) && (
+            <MindCaptureReview
+              sessionId={sessionId}
+              draft={phase.draft}
+              disabled={
+                editing || savingEdit || modifying || translating || recoveryStatus !== 'none'
+              }
+              onVerified={setCaptureReviewedVersion}
+              onReload={pollOnce}
+            />
+          )}
           {editing ? (
             <NoteEditingLayout reference={<NoteTranscriptReference draft={phase.draft} />}>
               <NoteEditor
@@ -1204,7 +1260,7 @@ export function NotesTab({
               <NoteReadiness items={checkTreatmentNoteReadiness(note)} />
               <NoteActions
                 showSign={!focusedReview}
-                recoveryBlocked={recoveryStatus !== 'none'}
+                recoveryBlocked={recoveryStatus !== 'none' || captureBlocked}
                 signing={signing}
                 generating={generating}
                 translating={translating}
@@ -1243,7 +1299,9 @@ export function NotesTab({
       {(focusedReview || canShare) && !editing && (
         <SignAndSendBar
           focusedReview={focusedReview}
-          blocked={translating || modifying || generating || noteContainsArtifact(note)}
+          blocked={
+            captureBlocked || translating || modifying || generating || noteContainsArtifact(note)
+          }
           recoveryStatus={recoveryStatus}
           onReviewEdits={startEditing}
           signing={signing}

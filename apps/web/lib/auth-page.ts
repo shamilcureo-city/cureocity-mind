@@ -50,11 +50,10 @@ const resolvePsychologist = async (): Promise<Psychologist | null> => {
       return null;
     }
     try {
-      // checkRevoked is intentionally NOT passed (no per-request revocation
-      // network call). verifyWithRetry absorbs transient public-key-fetch
-      // failures so rapid concurrent navigation doesn't spuriously bounce a
-      // valid session to /login. Genuine expiry/invalid still throws.
-      const decoded = await verifyWithRetry(() => auth.verifySessionCookie(cookie));
+      // Request-local React cache deduplicates this check across page/layout
+      // guards. Honor revocation/disabled users without a cross-request grace
+      // period; transient Firebase failures retry, then fail closed.
+      const decoded = await verifyWithRetry(() => auth.verifySessionCookie(cookie, true));
       firebaseUid = decoded.uid;
     } catch (error) {
       const code = (error as { code?: string } | null)?.code ?? 'unknown';

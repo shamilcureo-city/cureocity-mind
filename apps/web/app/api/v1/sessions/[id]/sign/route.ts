@@ -306,7 +306,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       }
       const draftContent = parsedDraft.data as SignedNoteContent;
       const finalNote = parsedFinal.data as SignedNoteContent;
-      if (session.vertical === 'DOCTOR' && !isScribeCaptureReviewedForNote(draft, finalNote)) {
+      if (!isScribeCaptureReviewedForNote(draft, finalNote)) {
         throw new SigningHttpError(409, SCRIBE_CAPTURE_REVIEW_REQUIRED);
       }
       if (containsTranscriptionArtifact(JSON.stringify(finalNote))) {
@@ -481,8 +481,7 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
         ? await tx.therapyNote.update({ where: { id: existing.id }, data: noteData })
         : await tx.therapyNote.create({ data: { sessionId, draftId: draft.id, ...noteData } });
 
-      const captureReviewed =
-        session.vertical === 'DOCTOR' && scribeCaptureIntegrity(draft.errorMessage).incomplete;
+      const captureReviewed = scribeCaptureIntegrity(draft.errorMessage).incomplete;
       if (captureReviewed) {
         await tx.noteDraft.update({
           where: { id: draft.id },

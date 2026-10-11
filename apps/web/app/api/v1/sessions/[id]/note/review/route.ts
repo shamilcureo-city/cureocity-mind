@@ -4,6 +4,7 @@ import { requirePsychologistId } from '@/lib/auth-server';
 import { auditMetadataFromRequest, writeAudit } from '@/lib/audit';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
+import { ClientPhiWriteForbiddenError, lockActiveClientForSession } from '@/lib/phi-write-lock';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,8 @@ function toDto(row: {
   reviewerNote: string | null;
   reviewedAt: Date;
   createdAt: Date;
+  reviewedSignatureHash: string | null;
+  reviewedSignedAt: Date | null;
 }): NoteReview {
   return {
     id: row.id,
@@ -23,6 +26,8 @@ function toDto(row: {
     reviewerNote: row.reviewerNote,
     reviewedAt: row.reviewedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
+    reviewedSignatureHash: row.reviewedSignatureHash,
+    reviewedSignedAt: row.reviewedSignedAt?.toISOString() ?? null,
   };
 }
 
@@ -46,7 +51,6 @@ export async function GET(req: NextRequest, { params }: Ctx): Promise<NextRespon
   const rows = await prisma.noteReview.findMany({
     where: { sessionId, psychologistId: auth.value.psychologistId },
     orderBy: { reviewedAt: 'desc' },
-    select: { id: true, reviewerName: true, reviewerNote: true, reviewedAt: true, createdAt: true },
   });
   return NextResponse.json({ reviews: rows.map(toDto) });
 }
@@ -83,26 +87,71 @@ export async function POST(req: NextRequest, { params }: Ctx): Promise<NextRespo
 
   const reviewedAt = dto.value.reviewedAt ? new Date(dto.value.reviewedAt) : new Date();
 
-  const row = await prisma.noteReview.create({
-    data: {
-      sessionId,
-      therapyNoteId: session.therapyNote.id,
-      psychologistId,
-      reviewerName: dto.value.reviewerName,
-      reviewerNote: dto.value.reviewerNote ?? null,
-      reviewedAt,
-    },
-    select: { id: true, reviewerName: true, reviewerNote: true, reviewedAt: true, createdAt: true },
-  });
-
-  await writeAudit({
-    actorType: 'PSYCHOLOGIST',
-    actorPsychologistId: psychologistId,
-    action: 'NOTE_REVIEW_RECORDED',
-    targetType: 'NoteReview',
-    targetId: row.id,
-    metadata: { ...auditMetadataFromRequest(req), sessionId },
-  });
-
-  return NextResponse.json({ review: toDto(row) }, { status: 201 });
+  try {
+    const row = await prisma.$transaction(async (tx) => {
+      await lockActiveClientForSession(tx, sessionId, psychologistId);
+      const notes = await tx.$queryRaw<
+        {
+          id: string;
+          locked: boolean;
+          signPayload: string | null;
+          signChallengeHashHex: string | null;
+          signedAt: Date;
+        }[]
+      >`
+        SELECT n."id", n."locked", n."signPayload", n."signChallengeHashHex", n."signedAt"
+        FROM "therapy_notes" n JOIN "sessions" s ON s."id" = n."sessionId"
+        WHERE s."id" = ${sessionId} AND s."psychologistId" = ${psychologistId}
+        FOR UPDATE OF n
+      `;
+      const note = notes[0];
+      if (
+        !note?.locked ||
+        !note.signPayload ||
+        note.signChallengeHashHex !== dto.value.reviewedSignatureHash
+      )
+        return null;
+      const created = await tx.noteReview.create({
+        data: {
+          sessionId,
+          therapyNoteId: note.id,
+          psychologistId,
+          reviewerName: dto.value.reviewerName,
+          reviewerNote: dto.value.reviewerNote ?? null,
+          reviewedAt,
+          reviewedSignatureHash: note.signChallengeHashHex,
+          reviewedSignedAt: note.signedAt,
+        },
+      });
+      await writeAudit(
+        {
+          actorType: 'PSYCHOLOGIST',
+          actorPsychologistId: psychologistId,
+          action: 'NOTE_REVIEW_RECORDED',
+          targetType: 'NoteReview',
+          targetId: created.id,
+          metadata: {
+            ...auditMetadataFromRequest(req),
+            sessionId,
+            reviewedSignatureHash: note.signChallengeHashHex,
+          },
+        },
+        tx,
+      );
+      return created;
+    });
+    if (!row)
+      return NextResponse.json(
+        {
+          error:
+            'The signed note changed or was reopened. Reload and review the current signed version.',
+        },
+        { status: 409 },
+      );
+    return NextResponse.json({ review: toDto(row) }, { status: 201 });
+  } catch (error) {
+    if (error instanceof ClientPhiWriteForbiddenError)
+      return NextResponse.json({ error: 'Session not found' }, { status: 404 });
+    throw error;
+  }
 }

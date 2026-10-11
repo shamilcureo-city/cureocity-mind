@@ -11,6 +11,7 @@ import { z } from 'zod';
  */
 
 export const CreateNoteReviewInputSchema = z.object({
+  reviewedSignatureHash: z.string().regex(/^[0-9a-f]{64}$/),
   reviewerName: z.string().trim().min(1).max(160),
   reviewerNote: z.string().trim().max(2000).optional(),
   /** ISO date the review took place; defaults to now server-side. */
@@ -24,5 +25,7 @@ export const NoteReviewSchema = z.object({
   reviewerNote: z.string().nullable(),
   reviewedAt: z.string(),
   createdAt: z.string(),
+  reviewedSignatureHash: z.string().nullable(),
+  reviewedSignedAt: z.string().nullable(),
 });
 export type NoteReview = z.infer<typeof NoteReviewSchema>;

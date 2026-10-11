@@ -104,10 +104,31 @@ describe('session creation login-CSRF boundary', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.parseJson).toHaveBeenCalledOnce();
-    expect(mocks.verifyIdToken).toHaveBeenCalledWith('first-party-token');
+    expect(mocks.verifyIdToken).toHaveBeenCalledWith('first-party-token', true);
     expect(mocks.createSessionCookie).toHaveBeenCalledWith('first-party-token', {
       expiresIn: 3_600_000,
     });
     expect(response.headers.get('set-cookie')).toContain('__session=session-cookie');
   });
+
+  it.each(['auth/id-token-revoked', 'auth/user-disabled'])(
+    'does not exchange %s credentials for a fresh five-day cookie',
+    async (code) => {
+      mocks.verifyIdToken.mockImplementation(async (_token, checkRevoked) => {
+        if (checkRevoked) throw { code };
+        return { uid: 'uid-1' };
+      });
+      const response = await POST(
+        loginRequest({
+          origin: 'https://mind.cureocity.in',
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        }) as never,
+      );
+      expect(response.status).toBe(401);
+      expect(mocks.psychologistFindUnique).not.toHaveBeenCalled();
+      expect(mocks.createSessionCookie).not.toHaveBeenCalled();
+      expect(response.headers.get('set-cookie')).toBeNull();
+    },
+  );
 });

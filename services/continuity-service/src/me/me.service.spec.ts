@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { MeService } from './me.service';
 import type { PrismaService } from '../prisma/prisma.service';
 import type { AuditService } from '../audit/audit.service';
@@ -223,19 +228,25 @@ describe('MeService.createJournal', () => {
     );
   });
 
-  it('falls back to plaintext-only when encryption throws (transition safety)', async () => {
+  it.each([
+    'KMS unavailable',
+    'Tenant encryption writes paused: reader-compatible key identity is ambiguous.',
+  ])('does not create or audit a journal when encryption fails: %s', async (reason) => {
     const deps = makeDeps({});
     (deps.encryption.encryptForTenant as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new Error('KMS unavailable'),
+      new Error(reason),
     );
     const svc = new MeService(deps.prisma, deps.audit, deps.encryption);
-    const res = await svc.createJournal(CLIENT, { content: 'still works' }, {});
-    expect(res.content).toBe('still works');
-    expect(deps.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ contentEncrypted: null }),
-      }),
-    );
+    const error = await svc
+      .createJournal(CLIENT, { content: 'fictional unsaved journal' }, {})
+      .catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(ServiceUnavailableException);
+    expect((error as ServiceUnavailableException).getStatus()).toBe(503);
+    expect((error as ServiceUnavailableException).message).toContain('entry was not saved');
+    expect((error as ServiceUnavailableException).message).not.toContain(reason);
+    expect(deps.create).not.toHaveBeenCalled();
+    expect(deps.audit.log).not.toHaveBeenCalled();
+    expect(deps.prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it('honours sharedWithTherapist when set + propagates to audit metadata', async () => {

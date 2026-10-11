@@ -26,7 +26,8 @@ const MAX_CHUNKS_PER_SESSION = Number(process.env['MAX_CHUNKS_PER_SESSION'] ?? 5
  * Body:    raw PCM bytes (Content-Type: audio/pcm)
  * Headers: X-Session-Id, X-Chunk-Index, X-Duration-Ms, X-Sample-Rate
  *
- * Idempotent on (sessionId, chunkIndex) — duplicate uploads return 200.
+ * Idempotent on (sessionId, chunkIndex) only when bytes and audio metadata match.
+ * Conflicting audio returns 409 so the browser retains its local copy.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const auth = await requirePsychologistId(request);
@@ -175,6 +176,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
+      const existing = await prisma.audioChunk.findUnique({
+        where: { sessionId_chunkIndex: { sessionId, chunkIndex } },
+        select: { bytes: true, mimeType: true, sampleRate: true, durationMs: true },
+      });
+      // An ordinal collision is not an idempotent retry. Never acknowledge
+      // different speech and cause the uploader to delete its only local copy.
+      if (
+        !existing?.bytes ||
+        existing.mimeType !== VALID_MIME ||
+        existing.sampleRate !== sampleRate ||
+        existing.durationMs !== durationMs ||
+        !Buffer.from(existing.bytes).equals(bytes)
+      ) {
+        return NextResponse.json(
+          {
+            error:
+              'Different audio already occupies this recording position. Keep this tab open; the new audio has not been saved. Stop other recording tabs and recover these local audio parts before continuing.',
+            code: 'AUDIO_CHUNK_CONFLICT',
+          },
+          { status: 409 },
+        );
+      }
       console.info(
         `[audio-chunks-upload] duplicate (idempotent) sessionId=${sessionId} chunkIndex=${chunkIndex}`,
       );

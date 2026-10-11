@@ -2,6 +2,7 @@
 
 import * as Sentry from '@sentry/nextjs';
 import { useEffect } from 'react';
+import { telemetryRoute } from '@/lib/telemetry-redaction';
 
 /**
  * Sprint 40 — root error boundary.
@@ -27,11 +28,10 @@ export default function GlobalError({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        message: error.message,
-        stack: error.stack,
+        message: 'Client layout failed',
         digest: error.digest,
         source: 'global-error',
-        url: typeof window !== 'undefined' ? window.location.href : undefined,
+        url: typeof window !== 'undefined' ? telemetryRoute(window.location.href) : undefined,
       }),
     }).catch(() => {});
   }, [error]);

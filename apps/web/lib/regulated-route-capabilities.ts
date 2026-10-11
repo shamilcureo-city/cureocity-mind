@@ -134,7 +134,9 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   ),
 
   // Clinical documentation artifacts and disclosures.
+  policy('api/v1/auth/recovery-key', ['GET'], ['VERTICAL_DOCUMENTATION'], 'disclosure'),
   policy('api/v1/sessions', ['POST'], ['VERTICAL_DOCUMENTATION'], 'write'),
+  policy('api/v1/sessions/[id]/reschedule', ['POST'], ['VERTICAL_DOCUMENTATION'], 'write'),
   policy('api/v1/sessions/[id]', ['GET'], ['VERTICAL_DOCUMENTATION'], 'disclosure'),
   policy('api/v1/sessions/[id]/usage', ['GET'], ['VERTICAL_DOCUMENTATION'], 'read'),
   policy(
@@ -388,7 +390,7 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   policy(
     'api/v1/sessions/[id]/capture-review',
     ['GET', 'POST'],
-    ['MEDICAL_DOCUMENTATION'],
+    ['VERTICAL_DOCUMENTATION'],
     'write',
   ),
   policy('api/v1/sessions/[id]/mind-cue-review', ['GET', 'POST'], ['LIVE_ENCOUNTER'], 'live'),
@@ -400,6 +402,12 @@ export const REGULATED_ROUTE_CAPABILITIES = [
   ),
   policy('api/v1/sessions/[id]/live-metric', ['POST'], ['LIVE_ENCOUNTER'], 'live'),
   policy('api/v1/sessions/[id]/start', ['POST'], ['AMBIENT_CAPTURE'], 'write'),
+  policy(
+    'api/v1/sessions/[id]/audio-cursor',
+    ['GET'],
+    ['AMBIENT_CAPTURE', 'VERTICAL_DOCUMENTATION'],
+    'read',
+  ),
   policy(
     'api/v1/sessions/[id]/capture-resume',
     ['POST'],

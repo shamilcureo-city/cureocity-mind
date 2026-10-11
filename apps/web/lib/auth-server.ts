@@ -190,6 +190,8 @@ const GENUINE_TOKEN_FAILURES = new Set<string>([
   'auth/session-cookie-expired',
   'auth/session-cookie-revoked',
   'auth/invalid-session-cookie',
+  'auth/user-disabled',
+  'auth/user-not-found',
   'auth/argument-error',
 ]);
 
@@ -246,7 +248,7 @@ async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>
     }
     try {
       const decoded = await verifyWithRetry(() =>
-        auth.verifyIdToken(header.substring('Bearer '.length)),
+        auth.verifyIdToken(header.substring('Bearer '.length), true),
       );
       verifiedUid = decoded.uid;
     } catch (error) {
@@ -258,11 +260,9 @@ async function verifyRequestIdentity(req: NextRequest): Promise<Resolved<string>
 
   if (cookie !== undefined) {
     try {
-      // checkRevoked is intentionally NOT passed (no per-request
-      // revocation network call). verifyWithRetry absorbs transient
-      // public-key-fetch failures under concurrent requests so a brief
-      // blip doesn't 401 a valid session.
-      const decoded = await verifyWithRetry(() => auth.verifySessionCookie(cookie));
+      // Honor Firebase disable/revocation (including password-reset recovery).
+      // Retry transient provider failures; never bypass the revocation check.
+      const decoded = await verifyWithRetry(() => auth.verifySessionCookie(cookie, true));
       if (verifiedUid !== undefined && decoded.uid !== verifiedUid) {
         return identityMismatch();
       }
@@ -537,7 +537,7 @@ export async function resolveFirebaseClaimIdentity(
   }
   try {
     const decoded = await verifyWithRetry(() =>
-      auth.verifyIdToken(header.substring('Bearer '.length)),
+      auth.verifyIdToken(header.substring('Bearer '.length), true),
     );
     return {
       ok: true,

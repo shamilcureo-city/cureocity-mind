@@ -8,6 +8,7 @@
  * would round-trip that through Sentry. Off until a DPDP review.
  */
 import * as Sentry from '@sentry/nextjs';
+import { scrubTelemetryEvent, scrubTelemetryBreadcrumb } from './lib/telemetry-redaction';
 
 const DEFAULT_DSN =
   'https://9882c32602cad4f86c9c4b85a160b246@o4511364925095936.ingest.us.sentry.io/4511581385392128';
@@ -18,5 +19,8 @@ Sentry.init({
   environment: process.env['NEXT_PUBLIC_VERCEL_ENV'] ?? 'development',
   tracesSampleRate: process.env['NEXT_PUBLIC_VERCEL_ENV'] === 'production' ? 0.1 : 1.0,
   sendDefaultPii: false,
+  beforeSend: scrubTelemetryEvent,
+  beforeSendTransaction: scrubTelemetryEvent,
+  beforeBreadcrumb: scrubTelemetryBreadcrumb,
   // No replay integration on purpose — clinical content stays out of Sentry.
 });

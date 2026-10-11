@@ -105,7 +105,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let decoded: { uid: string; phone_number?: string; name?: string; email?: string };
   try {
-    decoded = await auth.verifyIdToken(input.value.idToken);
+    decoded = await auth.verifyIdToken(input.value.idToken, true);
   } catch {
     return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
   }

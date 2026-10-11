@@ -17,7 +17,7 @@ function speech(ms: number): Buffer {
 }
 
 const sessions: LiveSession[] = [];
-async function fixture() {
+async function fixture(vertical: 'DOCTOR' | 'THERAPIST' = 'DOCTOR') {
   const events: LiveGatewayEvent[] = [];
   const pass1 = new MockGeminiPass1Backend();
   const pass2Final = new MockGeminiPass2Backend();
@@ -36,11 +36,19 @@ async function fixture() {
       expect(LiveGatewayEventSchema.safeParse(event).success).toBe(true);
       events.push(event);
     },
+    undefined,
+    undefined,
+    undefined,
+    vertical,
   );
   sessions.push(session);
   session.pushAudio(speech(6_000));
   await session.pump();
-  expect(events.some((event) => event.type === 'note')).toBe(true);
+  await vi.waitFor(() =>
+    expect(
+      events.some((event) => event.type === (vertical === 'DOCTOR' ? 'note' : 'therapyNote')),
+    ).toBe(true),
+  );
   return { session, events, pass1, pass2Final };
 }
 
@@ -48,6 +56,55 @@ afterEach(() => {
   for (const session of sessions.splice(0)) session.dispose();
   vi.useRealTimers();
   vi.unstubAllEnvs();
+});
+
+describe('therapist final capture integrity', () => {
+  it('labels the interim fallback when the final note fails', async () => {
+    const { session, events, pass2Final } = await fixture('THERAPIST');
+    vi.spyOn(pass2Final, 'run').mockRejectedValueOnce(new Error('fictional note failure'));
+    await session.finalize();
+    expect(events.find((event) => event.type === 'therapyFinal')).toMatchObject({
+      captureIncomplete: true,
+      captureIncompleteReason: 'finalization_failed',
+    });
+  });
+
+  it('retains audio loss when the closing speech cannot be transcribed', async () => {
+    const { session, events, pass1 } = await fixture('THERAPIST');
+    vi.spyOn(pass1, 'run').mockRejectedValueOnce(new Error('fictional tail failure'));
+    session.pushAudio(speech(300));
+    await session.finalize();
+    expect(events.find((event) => event.type === 'therapyFinal')).toMatchObject({
+      captureIncomplete: true,
+      captureIncompleteReason: 'audio_loss',
+    });
+  });
+
+  it('labels a timed-out final and fences its late result', async () => {
+    vi.useFakeTimers();
+    vi.stubEnv('LIVE_FINALIZE_BUDGET_MS', '5000');
+    const { session, events, pass2Final } = await fixture('THERAPIST');
+    const mock = new MockGeminiPass2Backend();
+    let release!: () => void;
+    vi.spyOn(pass2Final, 'run').mockImplementationOnce(async (input: Pass2Input) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return mock.run(input);
+    });
+    const finalizing = session.finalize();
+    await vi.advanceTimersByTimeAsync(5_001);
+    await finalizing;
+    expect(events.filter((event) => event.type === 'therapyFinal')).toHaveLength(1);
+    expect(events.find((event) => event.type === 'therapyFinal')).toMatchObject({
+      captureIncomplete: true,
+      captureIncompleteReason: 'finalization_failed',
+    });
+    const count = events.length;
+    release();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(events).toHaveLength(count);
+  });
 });
 
 describe('doctor final capture integrity', () => {

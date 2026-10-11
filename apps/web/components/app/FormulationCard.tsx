@@ -89,6 +89,9 @@ export function FormulationCard({ data }: { data: FormulationCardData }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<CaseFormulationV1>(data.formulation?.body ?? EMPTY_BODY);
+  // Capture the displayed version when editing begins; prop refreshes must not
+  // make an old draft appear to have been authored against a newer version.
+  const [draftVersion, setDraftVersion] = useState(data.formulation?.version ?? 0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acceptedIdx, setAcceptedIdx] = useState<Set<number>>(new Set());
@@ -96,6 +99,7 @@ export function FormulationCard({ data }: { data: FormulationCardData }) {
 
   const startEdit = useCallback(() => {
     setDraft(structuredClone(data.formulation?.body ?? EMPTY_BODY));
+    setDraftVersion(data.formulation?.version ?? 0);
     setError(null);
     setEditing(true);
   }, [data.formulation]);
@@ -125,9 +129,14 @@ export function FormulationCard({ data }: { data: FormulationCardData }) {
       const res = await fetch(`/api/v1/clients/${data.clientId}/formulation`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action: 'author', formulation: clean }),
+        body: JSON.stringify({
+          action: 'author',
+          expectedVersion: draftVersion,
+          formulation: clean,
+        }),
       });
       if (!res.ok) {
+        if (res.status === 409) router.refresh();
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? `Could not save (${res.status})`);
       }
@@ -138,7 +147,7 @@ export function FormulationCard({ data }: { data: FormulationCardData }) {
     } finally {
       setBusy(false);
     }
-  }, [data.clientId, draft, router]);
+  }, [data.clientId, draft, draftVersion, router]);
 
   const acceptSuggestion = useCallback(
     async (index: number): Promise<void> => {
@@ -151,11 +160,13 @@ export function FormulationCard({ data }: { data: FormulationCardData }) {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             action: 'accept',
+            expectedVersion: data.formulation?.version ?? 0,
             reportId: data.reportId,
             suggestionIndex: index,
           }),
         });
         if (!res.ok) {
+          if (res.status === 409) router.refresh();
           const body = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(body.error ?? `Could not update (${res.status})`);
         }
@@ -167,7 +178,7 @@ export function FormulationCard({ data }: { data: FormulationCardData }) {
         setAcceptBusy(null);
       }
     },
-    [data.clientId, data.reportId, router],
+    [data.clientId, data.reportId, data.formulation?.version, router],
   );
 
   const pending = data.suggestions

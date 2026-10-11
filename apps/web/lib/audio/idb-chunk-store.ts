@@ -95,14 +95,35 @@ function tx<T>(
 
 export const ChunkStore = {
   async insert(chunk: PersistedChunk): Promise<void> {
-    await tx<IDBValidKey>(CHUNKS_STORE, 'readwrite', (s) => s.put(chunk));
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      // The read and insert share one read/write transaction, so two tabs
+      // cannot both inspect an empty ordinal and replace each other's speech.
+      const transaction = db.transaction(CHUNKS_STORE, 'readwrite');
+      const store = transaction.objectStore(CHUNKS_STORE);
+      const request = store.get([chunk.sessionId, chunk.chunkIndex]);
+      let conflict: Error | null = null;
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () =>
+        reject(conflict ?? transaction.error ?? new Error('Audio storage transaction aborted'));
+      request.onsuccess = () => {
+        const previous = request.result as PersistedChunk | undefined;
+        if (previous && !sameAudioChunk(previous, chunk)) {
+          conflict = new Error(
+            'Another recording tab already saved different audio at this position. Keep both tabs open and stop recording; unsaved audio is still held in this tab.',
+          );
+          transaction.abort();
+          return;
+        }
+        store.put(chunk);
+      };
+    });
   },
 
-  async remove(sessionId: string, chunkIndex: number): Promise<void> {
-    await tx<undefined>(
-      CHUNKS_STORE,
-      'readwrite',
-      (s) => s.delete([sessionId, chunkIndex]) as unknown as IDBRequest<undefined>,
+  async remove(sessionId: string, chunkIndex: number, acknowledged: PersistedChunk): Promise<void> {
+    await mutateMatchingChunk(sessionId, chunkIndex, acknowledged, (store) =>
+      store.delete([sessionId, chunkIndex]),
     );
   },
 
@@ -117,16 +138,11 @@ export const ChunkStore = {
     sessionId: string,
     chunkIndex: number,
     httpStatus?: number,
+    attempted?: PersistedChunk,
   ): Promise<void> {
-    const existing = await tx<PersistedChunk | undefined>(
-      CHUNKS_STORE,
-      'readonly',
-      (s) => s.get([sessionId, chunkIndex]) as IDBRequest<PersistedChunk | undefined>,
-    );
-    if (!existing) return;
-    existing.attempts += 1;
-    existing.lastHttpStatus = httpStatus;
-    await tx<IDBValidKey>(CHUNKS_STORE, 'readwrite', (s) => s.put(existing));
+    await mutateMatchingChunk(sessionId, chunkIndex, attempted, (store, existing) => {
+      store.put({ ...existing, attempts: existing.attempts + 1, lastHttpStatus: httpStatus });
+    });
   },
   async resetRetryableAttempts(sessionId: string): Promise<void> {
     for (const chunk of await this.listForSession(sessionId)) {
@@ -136,6 +152,39 @@ export const ChunkStore = {
     }
   },
 };
+
+/** A late uploader response must not delete or mutate a replacement recording. */
+async function mutateMatchingChunk(
+  sessionId: string,
+  chunkIndex: number,
+  expected: PersistedChunk | undefined,
+  change: (store: IDBObjectStore, current: PersistedChunk) => void,
+): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = db.transaction(CHUNKS_STORE, 'readwrite');
+    const store = transaction.objectStore(CHUNKS_STORE);
+    const request = store.get([sessionId, chunkIndex]);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () =>
+      reject(transaction.error ?? new Error('Audio storage transaction aborted'));
+    request.onsuccess = () => {
+      const current = request.result as PersistedChunk | undefined;
+      if (current && (!expected || sameAudioChunk(current, expected))) change(store, current);
+    };
+  });
+}
+
+export function sameAudioChunk(left: PersistedChunk, right: PersistedChunk): boolean {
+  return (
+    left.mimeType === right.mimeType &&
+    left.sampleRate === right.sampleRate &&
+    left.durationMs === right.durationMs &&
+    left.bytes.byteLength === right.bytes.byteLength &&
+    left.bytes.every((byte, index) => byte === right.bytes[index])
+  );
+}
 
 export const SessionStore = {
   async saveCursor(record: PersistedSession): Promise<void> {

@@ -414,6 +414,10 @@ export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
     note: z.union([TherapyNoteV1Schema, IntakeNoteV1Schema]),
     transcript: z.string().optional(),
     transcriptionWarning: z.boolean().optional(),
+    captureIncomplete: z.boolean().optional(),
+    captureIncompleteReason: z
+      .enum(['connection_lost', 'finalization_failed', 'audio_loss', 'capture_interrupted'])
+      .optional(),
   }),
 ]);
 export type LiveGatewayEvent = z.infer<typeof LiveGatewayEventSchema>;
@@ -448,7 +452,7 @@ export const CaptureReviewInputSchema = z.object({
   resolution: z.literal('reviewed_and_completed'),
   reviewedDraftId: z.string().min(1).max(128),
   reviewToken: z.string().regex(/^[a-f0-9]{64}$/),
-  reviewedNote: MedicalEncounterNoteV1Schema,
+  reviewedNote: z.union([TherapyNoteV1Schema, IntakeNoteV1Schema, MedicalEncounterNoteV1Schema]),
 });
 export type CaptureReviewInput = z.infer<typeof CaptureReviewInputSchema>;
 
@@ -466,6 +470,11 @@ export const TherapyLiveNoteInputSchema = z
     // Preserve only the actual finalized utterances, not display-only partials.
     utterances: z.array(MindRecoveryUtteranceSchema).max(4000).optional(),
     transcriptionWarning: z.boolean().optional(),
+    captureIncomplete: z.boolean().optional(),
+    captureIncompleteReason: z
+      .enum(['connection_lost', 'finalization_failed', 'audio_loss', 'capture_interrupted'])
+      .optional(),
+    finalizationId: z.string().uuid().optional(),
   })
   .superRefine(({ utterances }, ctx) => {
     if (!utterances) return;

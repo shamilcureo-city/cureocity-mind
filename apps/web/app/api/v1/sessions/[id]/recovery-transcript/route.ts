@@ -8,6 +8,7 @@ import { encryptForTenant, decryptForTenant } from '@/lib/tenant-crypto';
 import { lockActiveClientForSession, ClientPhiWriteForbiddenError } from '@/lib/phi-write-lock';
 import { assertValidScribeConsent, consentAuthorizationResponse } from '@/lib/consent-gate';
 import { writeAudit, auditMetadataFromRequest } from '@/lib/audit';
+import { preserveScribeCaptureIntegrity } from '@/lib/scribe-capture-integrity';
 import {
   buildRecoveryPrefix,
   canExtendRecoveryPrefix,
@@ -38,6 +39,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const { id: sessionId } = await params;
   const prefix = buildRecoveryPrefix(input.value.utterances);
   prefix.transcriptionWarning = input.value.transcriptionWarning === true;
+  prefix.captureIncomplete = input.value.captureIncomplete;
+  prefix.captureIncompleteReason = input.value.captureIncompleteReason;
   try {
     const encrypted = await encryptForTenant(auth.value.psychologistId, JSON.stringify(prefix));
     const transcriptEncrypted = await encryptForTenant(
@@ -77,6 +80,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           'Recorded audio already exists; cannot safely prepend an unrelated live transcript.',
         );
       }
+      const errorMessage = preserveScribeCaptureIntegrity(
+        [draft?.errorMessage, prefix.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null]
+          .filter(Boolean)
+          .join('\n') || null,
+        prefix.captureIncomplete,
+        prefix.captureIncompleteReason,
+      );
       const saved = await tx.noteDraft.upsert({
         where: { sessionId },
         create: {
@@ -84,13 +94,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           status: 'PENDING',
           recoveryTranscriptEncrypted: encrypted,
           transcriptEncrypted,
-          errorMessage: prefix.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
+          errorMessage,
         },
         update: {
           recoveryTranscriptEncrypted: encrypted,
           transcriptEncrypted,
           status: 'PENDING',
-          errorMessage: prefix.transcriptionWarning ? TRANSCRIPTION_REVIEW_WARNING : null,
+          errorMessage,
         },
       });
       await writeAudit(

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clearRecoveryDraftAfterDurableSave,
+  createRecoveryContext,
   hasUniqueUnsavedContent,
   loadRecoveryDraft,
   saveRecoveryDraft,
@@ -17,9 +18,12 @@ function memoryStorage(): RecoveryStorage {
 }
 
 describe('Mind session recovery behavior', () => {
-  it('restores unique words on reopen and clears only after durable save', () => {
+  it('restores unique words on reopen and clears only after durable save', async () => {
     const storage = memoryStorage();
-    saveRecoveryDraft(storage, {
+    const key = Buffer.alloc(32, 3).toString('base64');
+    const context = await createRecoveryContext('psy-1', 'session-1', key);
+    await loadRecoveryDraft(storage, context);
+    await saveRecoveryDraft(storage, context, {
       version: 1,
       sessionId: 'session-1',
       utterances: [
@@ -28,14 +32,18 @@ describe('Mind session recovery behavior', () => {
       transcript: 'Client: I need this preserved.',
       captureMode: 'LIVE',
       durable: false,
-      savedAt: '2026-08-29T21:00:00.000Z',
+      savedAt: new Date().toISOString(),
     });
 
-    const reopened = loadRecoveryDraft(storage, 'session-1');
+    const reopenedContext = await createRecoveryContext('psy-1', 'session-1', key);
+    const reopened = (await loadRecoveryDraft(storage, reopenedContext)).draft;
     expect(hasUniqueUnsavedContent(reopened)).toBe(true);
-    clearRecoveryDraftAfterDurableSave(storage, 'session-1', false);
-    expect(loadRecoveryDraft(storage, 'session-1')).toEqual(reopened);
-    clearRecoveryDraftAfterDurableSave(storage, 'session-1', true);
-    expect(loadRecoveryDraft(storage, 'session-1')).toBeNull();
+    await clearRecoveryDraftAfterDurableSave(storage, reopenedContext, false);
+    expect((await loadRecoveryDraft(storage, reopenedContext)).draft).toEqual(reopened);
+    await clearRecoveryDraftAfterDurableSave(storage, reopenedContext, true);
+    expect(
+      (await loadRecoveryDraft(storage, await createRecoveryContext('psy-1', 'session-1', key)))
+        .draft,
+    ).toBeNull();
   });
 });
