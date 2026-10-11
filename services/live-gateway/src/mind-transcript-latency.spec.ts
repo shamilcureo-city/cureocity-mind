@@ -330,7 +330,7 @@ describe('Mind transcription stays independent of ordered background analysis', 
     expect(events.some((e) => e.type === 'status' && e.state === 'done')).toBe(true);
   });
 
-  it('preserves the existing doctor scheduling path', async () => {
+  it('also keeps doctor transcription moving independently of its note worker', async () => {
     const b = backends();
     const gate = deferred();
     const inner = b.pass2.run;
@@ -344,7 +344,7 @@ describe('Mind transcription stays independent of ordered background analysis', 
     await settle();
     session.pushAudio(speech());
     await session.pump();
-    expect(transcripts(events)).toEqual(['chunk 1']);
+    expect(transcripts(events)).toEqual(['chunk 1', 'chunk 2']);
     gate.resolve();
     await pumping;
     expect(transcripts(events)).toEqual(['chunk 1', 'chunk 2']);

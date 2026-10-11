@@ -527,13 +527,16 @@ describe('LiveSession — interim-note debounce + final routing (Sprint 74)', ()
     expect(events.filter((e) => e.type === 'final')).toHaveLength(1);
   });
 
-  it('refreshMs=0 restores note-per-window (the old behaviour)', async () => {
+  it('refreshMs=0 permits a note for each separately completed audio window', async () => {
     const { session, interim } = build(0);
     session.start();
-    session.pushAudio(Buffer.concat([BLOCK, BLOCK, BLOCK]));
-    await session.pump();
-    // Every closed window re-ran the interim note.
-    expect(interim.calls).toBeGreaterThanOrEqual(3);
+    for (let count = 1; count <= 3; count++) {
+      session.pushAudio(BLOCK);
+      await session.pump();
+      // A burst can coalesce now; separate completed windows still bypass
+      // the speech-time debounce when the refresh interval is zero.
+      await vi.waitFor(() => expect(interim.calls).toBe(count));
+    }
     session.dispose();
   });
 
