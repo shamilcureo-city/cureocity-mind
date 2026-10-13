@@ -1,5 +1,27 @@
 /* Mind's psychologist workspace. All rules are scoped: Scribe and Care keep
    their existing visual system. Clinical status colours remain semantic. */
+/* Approved visual workspace: only Today, client overview and preparation opt in.
+   The stored practitioner vertical still owns the outer Mind-only boundary. */
+.mind-workspace-shell:has(.mind-visual-workspace) {
+  --color-bg: #f8f8f4;
+  --color-ink: #302b45;
+  --color-ink-2: #625b71;
+  --color-ink-3: #6c6579;
+  --color-accent: #6753ad;
+  --color-accent-hover: #55418f;
+  --color-accent-soft: #eae5f4;
+  --color-line: #ded8e9;
+  --color-line-soft: #e6e2ec;
+  --mind-sage-surface: #edf2ec;
+  --mind-sage-ink: #476752;
+  --grad-ink: linear-gradient(#6753ad, #6753ad);
+  --sh-glass: none;
+  --sh-glass-lg: none;
+  --sh-raise: 0 2px 4px rgb(48 43 69 / 4%);
+  --sh-3d: 0 2px 0 rgb(85 65 143 / 14%);
+  --sh-3d-hover: 0 3px 5px rgb(85 65 143 / 14%);
+  --sh-3d-press: none;
+}
 .mind-workspace-shell {
   --color-bg: #f4f5fc;
   --color-surface: #fff;

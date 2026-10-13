@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="320" viewBox="0 0 480 320" fill="none" role="img" aria-labelledby="room-title room-desc">
+  <title id="room-title">Room for a conversation</title>
+  <desc id="room-desc">Two softly sculpted chairs face a shared table beside a plant and a sunlit arched window.</desc>
+  <defs>
+    <linearGradient id="daylight" x1="319" y1="38" x2="220" y2="233" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8F8F4"/>
+      <stop offset="1" stop-color="#E7DAC2" stop-opacity=".38"/>
+    </linearGradient>
+    <linearGradient id="lilac-upholstery" x1="130" y1="134" x2="192" y2="256" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B6A5DC"/>
+      <stop offset="1" stop-color="#8B76BD"/>
+    </linearGradient>
+    <linearGradient id="sage-upholstery" x1="355" y1="130" x2="287" y2="259" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B1C4B7"/>
+      <stop offset="1" stop-color="#719386"/>
+    </linearGradient>
+    <pattern id="woven" width="7" height="7" patternUnits="userSpaceOnUse">
+      <path d="M1 1h1M5 4h1" stroke="#F8F8F4" stroke-opacity=".35" stroke-width=".7" stroke-linecap="round"/>
+    </pattern>
+    <clipPath id="window-cutout"><path d="M229 154V66a48 48 0 0 1 96 0v88Z"/></clipPath>
+  </defs>
+
+  <!-- The room is suggested by a single arch and a woven, oval rug. -->
+  <path d="M215 161V66a62 62 0 0 1 124 0v95" stroke="#E7DAC2" stroke-width="9"/>
+  <path d="M229 154V66a48 48 0 0 1 96 0v88Z" fill="url(#daylight)"/>
+  <g clip-path="url(#window-cutout)">
+    <circle cx="319" cy="47" r="30" fill="#E7DAC2" opacity=".72"/>
+    <path d="M226 141c24-32 37-24 53-45 21-26 42-18 58-30v105H226Z" fill="#D8E1D5" opacity=".55"/>
+    <path d="M280 18v140M229 100h97" stroke="#F8F8F4" stroke-width="5"/>
+  </g>
+  <path d="m278 158 59 0 99 112-212 8Z" fill="#E7DAC2" opacity=".18"/>
+  <path d="M210 166h134" stroke="#CDBFA7" stroke-width="3" stroke-linecap="round"/>
+  <ellipse cx="236" cy="268" rx="197" ry="35" fill="#E7DAC2" opacity=".38"/>
+  <ellipse cx="236" cy="267" rx="184" ry="28" stroke="#D6C8B1" stroke-opacity=".75"/>
+  <path d="M84 279c48 21 224 26 303-2M94 284c52 17 212 20 282-2" stroke="#D6C8B1" stroke-opacity=".55" stroke-linecap="round"/>
+
+  <!-- A small living plant, placed away from the conversation. -->
+  <path d="M91 238c-4-44-9-75 2-120m-3 66-18-33m17 51 22-38m-20-7 14-23" stroke="#506F62" stroke-width="2.2" stroke-linecap="round"/>
+  <path d="M94 126c-8-22-2-36 11-46 9 22 4 36-11 46Z" fill="#719386"/>
+  <path d="M84 153c-20-3-31-15-33-31 23-2 37 9 33 31Z" fill="#8EAA97"/>
+  <path d="M99 149c-1-18 9-29 27-34 1 21-10 32-27 34Z" fill="#A4BCA7"/>
+  <path d="M109 173c-1-20 10-30 25-34 5 19-5 33-25 34Z" fill="#719386"/>
+  <path d="M87 191c-23-4-32-16-30-31 22 0 35 12 30 31Z" fill="#A4BCA7"/>
+  <path d="m68 222 46 0-6 37c-1 9-32 9-34 0Z" fill="#E7DAC2"/>
+  <ellipse cx="91" cy="222" rx="23" ry="5" fill="#CBBBA0"/>
+  <path d="m80 231 3 24m9-23v26m11-26-3 24" stroke="#F8F8F4" stroke-opacity=".66" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- Left chair: an open, soft silhouette turned toward the table. -->
+  <path d="m130 248-5 29m66-32 6 28" stroke="#53435E" stroke-width="5" stroke-linecap="round"/>
+  <path d="M119 227c-7-14-12-53-7-77 3-15 16-23 29-20l42 10c17 4 20 21 16 37l-8 47Z" fill="url(#lilac-upholstery)"/>
+  <path d="M119 227c-7-14-12-53-7-77 3-15 16-23 29-20l42 10c17 4 20 21 16 37l-8 47Z" fill="url(#woven)"/>
+  <path d="M124 155c-1-9 5-14 14-12l38 9c8 2 12 7 10 17l-8 35-43-10Z" fill="#C8BAE5"/>
+  <path d="m136 151 39 9c4 1 6 4 5 9" stroke="#F8F8F4" stroke-opacity=".4" stroke-linecap="round"/>
+  <path d="m121 205 55-4 39 23c6 4 7 17-1 23-12 9-73 9-91-2-10-6-14-31-2-40Z" fill="#9982C7"/>
+  <path d="M124 207c15-9 63-2 83 10 8 4 10 8 6 12-8 9-64 9-83-1-8-4-11-14-6-21Z" fill="#B9A6DC"/>
+  <path d="M120 192c-10-7-21 0-20 12l3 30c1 16 12 24 22 20 8-3 10-10 7-20l-7-27c-1-8-2-12-5-15Z" fill="#A58BD1"/>
+  <path d="m108 203 7 33" stroke="#CFBFE7" stroke-width="2" stroke-linecap="round"/>
+  <path d="M189 190c5-7 16-5 19 3l13 37c4 12-4 22-12 17-5-3-7-11-9-20Z" fill="#8C74B8"/>
+
+  <!-- Right chair mirrors the invitation, not the exact shape. -->
+  <path d="m284 248-6 27m64-29 6 28" stroke="#405B4F" stroke-width="5" stroke-linecap="round"/>
+  <path d="M279 222c-3-11-10-48-8-64 1-13 8-21 22-25l34-9c16-4 28 7 30 23l2 73Z" fill="url(#sage-upholstery)"/>
+  <path d="M279 222c-3-11-10-48-8-64 1-13 8-21 22-25l34-9c16-4 28 7 30 23l2 73Z" fill="url(#woven)"/>
+  <path d="M285 158c-1-7 3-12 10-14l29-8c10-3 16 4 16 12l2 44-47 15Z" fill="#C0D0C1"/>
+  <path d="m293 153 34-9c4-1 6 2 6 6" stroke="#F8F8F4" stroke-opacity=".52" stroke-linecap="round"/>
+  <path d="m290 203 44-7 21 18c12 15 5 34-5 38-22 8-60 10-80 0-10-5-15-19-8-28Z" fill="#719386"/>
+  <path d="M265 223c17-12 55-20 76-15 10 3 15 10 9 16-14 11-56 18-77 11-8-2-13-6-8-12Z" fill="#AEC5B4"/>
+  <path d="M345 187c8-8 20-3 20 8l-1 41c0 13-10 22-19 17-7-4-9-11-5-21l2-29c0-8 0-13 3-16Z" fill="#86A694"/>
+  <path d="m352 197-2 34" stroke="#D4DFD2" stroke-width="2" stroke-linecap="round"/>
+  <path d="M277 188c-7-4-14 1-15 9l-9 36c-3 11 5 18 12 13 5-3 6-9 8-20Z" fill="#688E7D"/>
+
+  <!-- Shared table, a glass of water, and a closed notebook. -->
+  <ellipse cx="238" cy="271" rx="26" ry="6" fill="#302B45" opacity=".08"/>
+  <path d="m235 224-4 43c-1 4 12 5 12 0l-2-44Z" fill="#A99278"/>
+  <ellipse cx="238" cy="224" rx="40" ry="12" fill="#B5A087"/>
+  <ellipse cx="238" cy="219" rx="40" ry="12" fill="#E7DAC2"/>
+  <path d="M206 220c14 8 47 9 65 0" stroke="#F8F8F4" stroke-opacity=".64" stroke-linecap="round"/>
+  <path d="m224 213 17-4 14 6-18 4Z" fill="#6753AD"/>
+  <path d="m225 212 16-4 14 5-18 4Z" fill="#BBAADD"/>
+  <path d="m250 196 10 0-1 13c0 3-8 3-8 0Z" fill="#F8F8F4" fill-opacity=".65" stroke="#8E9E97" stroke-opacity=".5"/>
+  <path d="m252 204 6 0" stroke="#91ADAB" stroke-opacity=".6"/>
+</svg>

@@ -1,0 +1,237 @@
+.workspace.workspace {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  min-width: 0;
+}
+.header {
+  margin-block: 0.5rem 1.5rem;
+}
+.header h1 {
+  max-width: 28ch;
+  font-family: var(--font-serif);
+  font-size: clamp(2rem, 3.2vw, 2.8rem);
+  line-height: 1.15;
+  letter-spacing: -0.035em;
+  overflow-wrap: anywhere;
+}
+.header p {
+  color: var(--color-ink-2);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  margin-top: 0.6rem;
+}
+.layout {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 1.75rem;
+}
+.contextColumn {
+  display: grid;
+  gap: 1.5rem;
+  min-width: 0;
+}
+.continuity {
+  min-width: 0;
+}
+.continuity > h2,
+.focus > h2,
+.setup > h2 {
+  font-family: var(--font-serif);
+  font-size: 1.7rem;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+.continuity > p,
+.focus > p,
+.setup > p {
+  margin-top: 0.5rem;
+  color: var(--color-ink-2);
+  font-size: 0.875rem;
+  line-height: 1.7;
+  max-width: 76ch;
+}
+.focus {
+  padding: clamp(1.2rem, 3vw, 2rem);
+  border: 1px solid var(--color-line);
+  background: var(--color-accent-soft);
+  border-radius: 1.25rem;
+  min-width: 0;
+}
+.focus details {
+  background: var(--color-surface);
+}
+.panel {
+  margin-top: 1rem;
+}
+.briefGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-block: 1rem;
+}
+.briefCard {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.8rem;
+  padding: 1.5rem;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 1.1rem;
+  background: var(--color-surface);
+}
+.briefIcon {
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.75rem;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-size: 1.4rem;
+}
+.carryCard .briefIcon {
+  background: #f2ecdf;
+  color: #826d40;
+}
+.planCard .briefIcon {
+  background: var(--mind-sage-surface);
+  color: var(--mind-sage-ink);
+}
+.briefCard h3 {
+  font: 500 1.45rem/1.3 var(--font-serif);
+  letter-spacing: -0.03em;
+}
+.briefCard p {
+  font-size: 0.9rem;
+  line-height: 1.8;
+  color: var(--color-ink-2);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.briefCard small {
+  display: block;
+  font-size: 0.75rem;
+  line-height: 1.7;
+  color: var(--color-ink-2);
+}
+.briefCard a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--color-accent);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.briefCard ul {
+  display: grid;
+  gap: 0.8rem;
+}
+.briefCard .stale {
+  color: var(--color-warn);
+  font-size: 0.8rem;
+}
+.setup {
+  padding: clamp(1.2rem, 3vw, 2rem);
+  border: 1px solid var(--color-line-soft);
+  background: var(--color-surface);
+  border-radius: 1.25rem;
+  min-width: 0;
+}
+.setup :where(label, select, input, button) {
+  max-width: 100%;
+}
+.setup select {
+  text-overflow: ellipsis;
+}
+.setup :where(p, li) {
+  overflow-wrap: anywhere;
+}
+.setup :where(button) {
+  white-space: normal;
+  height: auto;
+  min-height: 2.75rem;
+}
+.support {
+  padding: 1.25rem;
+  border-radius: 1rem;
+  border: 1px solid var(--color-line);
+  background: var(--color-bg);
+  margin-top: 1.25rem;
+}
+.support h3 {
+  font-family: var(--font-serif);
+  font-size: 1.35rem;
+  margin-bottom: 0.65rem;
+}
+.readiness {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+.readiness li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 0.9rem;
+  font-size: 0.8rem;
+}
+.readiness strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.documentation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+.sessionFocus {
+  min-width: 0;
+  border-top: 1px solid var(--color-line);
+  padding-top: 1rem;
+}
+.sessionFocus :where(textarea) {
+  background: var(--color-surface);
+}
+.detailText :where(p, li) {
+  line-height: 1.7;
+}
+@media (max-width: 1000px) {
+  .briefGrid {
+    grid-template-columns: 1fr;
+  }
+  .briefCard {
+    display: grid;
+    grid-template-columns: 2.2rem minmax(0, 1fr);
+    column-gap: 0.9rem;
+  }
+  .briefIcon {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+  .briefCard > :not(.briefIcon) {
+    grid-column: 2;
+  }
+}
+@media (max-width: 680px) {
+  .readiness,
+  .documentation {
+    grid-template-columns: 1fr;
+  }
+  .briefCard {
+    padding: 1.2rem;
+  }
+  .focus,
+  .setup {
+    padding: 1.2rem;
+  }
+  .header h1 {
+    font-size: 2rem;
+  }
+}

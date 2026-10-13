@@ -29,7 +29,7 @@ vi.mock('../components/app/SessionPreparationPanel', () => ({
 }));
 vi.mock('../components/app/RescheduleModal', () => ({ RescheduleModal: 'div' }));
 
-import { TodaySessionCard } from '../components/app/TodaySessionCard';
+import { TodaySessionCard, type TodaySessionCardProps } from '../components/app/TodaySessionCard';
 
 type ElementProps = {
   children?: ReactNode;
@@ -39,6 +39,9 @@ type ElementProps = {
   'aria-label'?: string;
   'aria-expanded'?: boolean;
   'aria-describedby'?: string;
+  sessionId?: string;
+  open?: boolean;
+  onToggle?: (event: { currentTarget: { open: boolean } }) => void;
 };
 
 const all = (node: ReactNode): ReactElement<ElementProps>[] =>
@@ -70,6 +73,7 @@ function render(input?: {
   dirty?: boolean;
   variant?: 'hero' | 'row';
   capture?: MindCaptureMode;
+  session?: Partial<TodaySessionCardProps['session']>;
 }) {
   h.states = [
     null,
@@ -83,7 +87,7 @@ function render(input?: {
   ];
   h.stateIndex = 0;
   return TodaySessionCard({
-    session,
+    session: { ...session, ...input?.session },
     defaultCapture: input?.capture ?? 'LIVE',
     variant: input?.variant ?? 'hero',
     sessionPreparationEnabled: true,
@@ -168,5 +172,78 @@ describe('Today preparation entry CTA', () => {
     ).toBe(false);
     expect(text(rendered)).toContain('Save or discard your preparation edits before you continue.');
     expect(status).toBeDefined();
+  });
+
+  it('adds client overview alongside preparation without losing the exact client destination', () => {
+    const action = exactControl(render(), 'Client overview');
+    expect(action?.type).toBe('a');
+    expect(action?.props.href).toBe(`/app/clients/${session.clientId}`);
+  });
+
+  it('keeps optional visit focus mounted inside a native collapsed disclosure', () => {
+    const rendered = render();
+    const disclosure = all(rendered).find(
+      (element) =>
+        element.type === 'details' &&
+        text(element.props.children).includes('Visit focus (optional)'),
+    );
+    expect(disclosure).toBeDefined();
+    expect(disclosure?.props.open).toBeUndefined();
+    expect(
+      all(disclosure?.props.children).some((element) => element.props.sessionId === session.id),
+    ).toBe(true);
+  });
+
+  it.each([{ dirty: true }, { pending: true }])(
+    'does not collapse away preparation that needs attention: %j',
+    (state) => {
+      const disclosure = all(render(state)).find((element) => element.type === 'details');
+      const target = { open: false };
+      disclosure?.props.onToggle?.({ currentTarget: target });
+      expect(target.open).toBe(true);
+    },
+  );
+
+  it.each([{ dirty: true }, { pending: true }])(
+    'keeps the new overview control from bypassing preparation protection: %j',
+    (state) => {
+      const action = exactControl(render(state), 'Client overview');
+      expect(action?.type).toBe('button');
+      expect(action?.props.disabled).toBe(true);
+      expect(action?.props['aria-describedby']).toBe(
+        'session-fictional-session-prepare-start-status',
+      );
+    },
+  );
+
+  it('shows the actual unfinished-session date and resume route rather than an unsupported recording state', () => {
+    const rendered = render({
+      session: {
+        status: 'IN_PROGRESS',
+        startedAt: '2026-09-17T09:15:00.000Z',
+        captureMode: 'LIVE',
+      },
+    });
+    expect(text(rendered)).toContain('Unfinished session');
+    expect(text(rendered)).toContain('17 Sept');
+    expect(text(rendered)).toContain('Recording activity is not verified on this page.');
+    expect(exactControl(rendered, 'Review or resume session')?.props.href).toBe(
+      '/app/sessions/fictional-session/live',
+    );
+    expect(exactControl(rendered, 'Prepare & start')).toBeUndefined();
+  });
+
+  it.each([
+    [{ status: 'COMPLETED' as const, hasSignedNote: true }, '✓ Signed record'],
+    [{ status: 'COMPLETED' as const, draftStatus: 'COMPLETED' }, 'Review & finish'],
+    [{ status: 'COMPLETED' as const, draftStatus: 'PENDING' }, 'Note generating…'],
+    [{ status: 'COMPLETED' as const, draftStatus: 'FAILED' }, 'Open'],
+    [{ status: 'NO_SHOW' as const }, 'no show'],
+    [{ status: 'CANCELLED' as const }, 'cancelled'],
+    [{ status: 'RESCHEDULED' as const }, 'rescheduled'],
+  ])('preserves the agenda state for %j', (overrides, label) => {
+    const rendered = render({ variant: 'row', session: overrides });
+    expect(text(rendered)).toContain(label);
+    expect(exactControl(rendered, 'Prepare & start')).toBeUndefined();
   });
 });

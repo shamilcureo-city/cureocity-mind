@@ -26,26 +26,30 @@ describe('Mind longitudinal client workspace architecture', () => {
 
   it('makes Overview an operational client home rather than a historical-session index', () => {
     const overview = read('app/app/clients/[id]/page.tsx');
+    const view = read('components/app/MindClientOverview.tsx');
 
     expect(overview).toContain('<ClientWorkspaceNav');
     const summary = read('lib/mind-client-overview.ts');
-    expect(overview).toContain('nextAppointment');
-    expect(overview).toContain('latestCompletedSession');
-    expect(overview).toContain('Record-based suggestion');
-    expect(overview).toContain('not a confirmed clinical outcome');
+    expect(overview).toContain('<MindClientOverview');
+    expect(view).toContain('nextAppointment');
+    expect(view).toContain('latestCompletedSession');
+    expect(view).toContain('Record-based suggestion');
+    expect(view).toContain('confirmed clinical outcome');
     expect(overview).toContain('<PreparePanel clientId={client.id} summaryVisible />');
-    expect(overview.indexOf('<h1')).toBeLessThan(overview.indexOf('<PreparePanel'));
-    expect(overview.match(/>\s+Start session\s+</g)).toHaveLength(1);
-    expect(overview).toContain('captureMode: defaultCapture');
-    expect(overview).toContain('Start session');
+    expect(view.indexOf('<h1')).toBeLessThan(view.indexOf('{preparationPanel}'));
+    expect(view).toContain('<ButtonLink href={entryHref}');
+    expect(view).toContain('captureMode: defaultCapture');
+    expect(view).toContain('Prepare session');
     expect(overview).toContain('Schedule follow-up');
-    expect(overview).toContain('buildMindClientOverview(client.sessions)');
+    expect(overview).toContain('sessions={client.sessions}');
+    expect(view).toContain('buildMindClientOverview(sessions, now)');
     expect(summary).toContain("session.status === 'COMPLETED'");
     expect(summary).toContain('.slice(0, 3)');
-    expect(overview).toContain('recentSessions.map');
-    expect(overview).toContain('/sessions`');
+    expect(view).toContain('recentSessions.map');
+    expect(view).toContain('/sessions`');
     expect(overview).toContain('<DataRightsCard');
     expect(overview.indexOf('<PageCrisisBanner')).toBeLessThan(overview.indexOf('<PreparePanel'));
+    expect(view.indexOf('{safetyBanner}')).toBeLessThan(view.indexOf('<header'));
     expect(overview).not.toContain('client.sessions[0]?.scheduledAt');
     expect(overview).not.toContain('?tab=copilot&sub=progress');
   });

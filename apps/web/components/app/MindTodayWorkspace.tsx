@@ -42,14 +42,14 @@ export function MindTodayWorkspace({
   sessionPreparationEnabled = false,
 }: MindTodayWorkspaceProps) {
   return (
-    <Container className={styles.studio}>
+    <Container className={`mind-visual-workspace ${styles.studio}`}>
       <header className={styles.header}>
         <div>
-          <p className={styles.date}>{dateLabel}</p>
-          <h1 className={styles.title}>Today</h1>
-          <p className={styles.intro}>
-            Prepare for the person in front of you. Keep the next step clear.
+          <p className={styles.date}>
+            {dateLabel} <span>India time</span>
           </p>
+          <h1 className={styles.title}>A little space for today.</h1>
+          <p className={styles.intro}>Your next client, your day, and the notes to finish.</p>
         </div>
         <div className={styles.actions}>{actions}</div>
       </header>
@@ -59,20 +59,13 @@ export function MindTodayWorkspace({
 
       <div className={styles.layout}>
         <div className={styles.mainColumn}>
-          <section aria-labelledby="next-session-heading">
-            <div className={styles.sectionHeading}>
+          <section className={styles.nextSession} aria-labelledby="next-session-heading">
+            <div className="sr-only">
               <h2 id="next-session-heading">
                 {hero?.status === 'IN_PROGRESS'
                   ? 'Return to your unfinished session'
                   : 'Your next appointment'}
               </h2>
-              {hero && (
-                <span>
-                  {hero.status === 'IN_PROGRESS'
-                    ? 'Review or resume saved work'
-                    : 'A moment to prepare'}
-                </span>
-              )}
             </div>
             {hero ? (
               <TodaySessionCard
@@ -117,7 +110,7 @@ export function MindTodayWorkspace({
                 ))}
               </ul>
             ) : (
-              <p className={styles.intro}>No other sessions on today’s agenda.</p>
+              <p className={styles.agendaEmpty}>No other sessions on today’s agenda.</p>
             )}
           </section>
         </div>

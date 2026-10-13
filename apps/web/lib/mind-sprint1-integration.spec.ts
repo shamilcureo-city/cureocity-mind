@@ -24,7 +24,7 @@ describe('Sprint 1 Mind reliable session journey integration', () => {
     for (const path of [
       'components/app/TodaySessionCard.tsx',
       'components/app/WalkInSheet.tsx',
-      'app/app/clients/[id]/page.tsx',
+      'components/app/MindClientOverview.tsx',
     ]) {
       expect(webSource(path), path).toContain('mindStartEntryHref');
     }

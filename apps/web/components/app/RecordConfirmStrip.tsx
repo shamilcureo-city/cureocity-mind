@@ -36,6 +36,7 @@ import {
   type SelectedMindVisit,
 } from '@/lib/mind-visit-selection';
 import { SessionPreparationPanel } from './SessionPreparationPanel';
+import studio from './MindPreparationStudio.module.css';
 
 type ConfirmMode = 'live-capture' | 'dictation' | 'upload';
 
@@ -533,7 +534,7 @@ export function RecordConfirmStrip({
       : 'New visit · exact time is set when the visit is selected';
 
   return (
-    <Card className="p-5 sm:p-7">
+    <Card className={`mind-visual-workspace ${studio.workspace}`}>
       <MindSessionPhaseRail active="prepare" />
       <button
         type="button"
@@ -550,14 +551,10 @@ export function RecordConfirmStrip({
         ← Back
       </button>
 
-      <header className="border-b border-[var(--color-line-soft)] pb-5">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--color-accent)]">
-          Before the session
-        </p>
-        <h1 className="mt-2 font-serif text-3xl leading-tight sm:text-4xl">
-          Prepare for {clientName}
-        </h1>
+      <header className={studio.header}>
+        <h1>Prepare for {clientName}</h1>
         <p className="mt-2 text-sm text-[var(--color-ink-2)]">{visitIdentity}</p>
+        <p>A short brief. Your judgment. Space for the client’s priorities.</p>
       </header>
       {loading && <p className="mt-2 text-sm text-[var(--color-ink-3)]">Loading their context…</p>}
       {loadError && <FieldError message={loadError} />}
@@ -575,32 +572,9 @@ export function RecordConfirmStrip({
               : KIND_SUBLINE[defaults.kind](defaults)}
           </p>
 
-          <div className="mt-7 grid gap-7 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)] lg:items-start">
-            <div className="min-w-0 space-y-6">
-              {mode === 'live-capture' && (
-                <section
-                  aria-labelledby="prepare-continuity-title"
-                  className="rounded-2xl border border-[var(--color-line-soft)] bg-[var(--color-surface-soft)] p-4 sm:p-5"
-                >
-                  <h2
-                    id="prepare-continuity-title"
-                    className="font-serif text-xl text-[var(--color-ink)]"
-                  >
-                    Where we left off
-                  </h2>
-                  <p className="mt-1 text-xs leading-relaxed text-[var(--color-ink-3)]">
-                    Safety context stays visible. The recap and deeper clinical history are
-                    reference material, not new session evidence.
-                  </p>
-                  <PreparePanel
-                    clientId={clientId}
-                    summaryVisible
-                    hideDeviceScratch={sessionPreparationEnabled}
-                  />
-                </section>
-              )}
-
-              <section aria-labelledby="prepare-focus-title" className="min-w-0">
+          <div className={studio.layout}>
+            <div className={studio.contextColumn}>
+              <section aria-labelledby="prepare-focus-title" className={studio.focus}>
                 <h2 id="prepare-focus-title" className="font-serif text-xl text-[var(--color-ink)]">
                   Today’s focus
                 </h2>
@@ -674,12 +648,24 @@ export function RecordConfirmStrip({
                   </p>
                 </details>
               </section>
+              {mode === 'live-capture' && (
+                <section aria-labelledby="prepare-continuity-title" className={studio.continuity}>
+                  <h2 id="prepare-continuity-title">Where we left off</h2>
+                  <p>
+                    Safety context stays visible. The recap and deeper clinical history are
+                    reference material, not new session evidence.
+                  </p>
+                  <PreparePanel
+                    clientId={clientId}
+                    summaryVisible
+                    presentation="briefing"
+                    hideDeviceScratch={sessionPreparationEnabled}
+                  />
+                </section>
+              )}
             </div>
 
-            <aside
-              aria-labelledby="ready-to-start-title"
-              className="rounded-2xl border border-[var(--color-line)] bg-white p-4 shadow-[var(--sh-raise)] sm:p-5 lg:sticky lg:top-5"
-            >
+            <aside aria-labelledby="ready-to-start-title" className={studio.setup}>
               <h2 id="ready-to-start-title" className="font-serif text-xl text-[var(--color-ink)]">
                 Ready to start
               </h2>
@@ -687,10 +673,7 @@ export function RecordConfirmStrip({
                 Choose how to document, then complete only the checks required for that choice.
               </p>
 
-              <ul
-                className="mt-5 divide-y divide-[var(--color-line-soft)] rounded-xl border border-[var(--color-line-soft)] px-3"
-                aria-label="Start readiness"
-              >
+              <ul className={studio.readiness} aria-label="Start readiness">
                 <li className="flex min-h-14 items-center justify-between gap-3 py-2 text-xs">
                   <span>
                     <strong className="block text-[var(--color-ink)]">Documentation</strong>
@@ -738,7 +721,7 @@ export function RecordConfirmStrip({
 
               {mode === 'live-capture' && (
                 <div
-                  className="mt-5 grid gap-3"
+                  className={studio.documentation}
                   role="group"
                   aria-label="How to document this session"
                 >
@@ -848,51 +831,55 @@ export function RecordConfirmStrip({
                       </div>
                     </div>
                   )}
-
-                  {mode === 'live-capture' && method === 'mic' && capture === 'live' && (
-                    <section className="mt-5 space-y-2" aria-label="Optional session support">
-                      <Label htmlFor="rcs-guide">Session support (optional)</Label>
-                      <Select
-                        id="rcs-guide"
-                        value={guideId}
-                        onChange={(event) => setGuideId(event.target.value)}
-                        disabled={guideLoading || guideError}
-                      >
-                        <option value="">Quiet focus — no guide selected</option>
-                        {guideLoading && guideId && (
-                          <option value={guideId}>
-                            Selected prepared guide — checking availability
-                          </option>
-                        )}
-                        {preparedGuides.map((guide) => (
-                          <option key={guide.id} value={guide.id}>
-                            {guide.name} ·{' '}
-                            {new Date(guide.updatedAt).toLocaleDateString('en-IN', {
-                              timeZone: 'Asia/Kolkata',
-                              day: 'numeric',
-                              month: 'short',
-                            })}
-                          </option>
-                        ))}
-                      </Select>
-                      <p className="text-xs text-[var(--color-ink-3)]" role="status">
-                        {guideLoading
-                          ? 'Checking previously prepared guides…'
-                          : guideError
-                            ? 'Prepared guides could not be loaded. You can continue in quiet focus.'
-                            : guideId
-                              ? 'The draft guide opens with your session. Review its fit before using it; this does not confirm treatment.'
-                              : 'Stay with the client, or choose a previously prepared guide. This does not generate new advice.'}
-                      </p>
-                      <Link
-                        href={`/app/clients/${clientId}/plan#session-guides`}
-                        className="inline-flex min-h-11 items-center text-xs text-[var(--color-accent)] underline"
-                      >
-                        Prepare a guide before recording
-                      </Link>
-                    </section>
-                  )}
                 </details>
+              )}
+
+              {!manual && mode === 'live-capture' && method === 'mic' && capture === 'live' && (
+                <section className={studio.support} aria-label="Optional session support">
+                  <h3>How would you like to work?</h3>
+                  <Label htmlFor="rcs-guide">Session support (optional)</Label>
+                  <Select
+                    id="rcs-guide"
+                    value={guideId}
+                    onChange={(event) => setGuideId(event.target.value)}
+                    disabled={guideLoading || guideError}
+                  >
+                    <option value="">Quiet focus — no guide selected</option>
+                    {guideLoading && guideId && (
+                      <option value={guideId}>
+                        Selected prepared guide — checking availability
+                      </option>
+                    )}
+                    {preparedGuides.map((guide) => (
+                      <option key={guide.id} value={guide.id}>
+                        {guide.name} ·{' '}
+                        {new Date(guide.updatedAt).toLocaleDateString('en-IN', {
+                          timeZone: 'Asia/Kolkata',
+                          day: 'numeric',
+                          month: 'short',
+                        })}
+                      </option>
+                    ))}
+                  </Select>
+                  <p
+                    className="mt-3 text-sm leading-relaxed text-[var(--color-ink-2)]"
+                    role="status"
+                  >
+                    {guideLoading
+                      ? 'Checking previously prepared guides…'
+                      : guideError
+                        ? 'Prepared guides could not be loaded. You can continue in quiet focus.'
+                        : guideId
+                          ? 'The draft guide opens with your session. Review its fit before using it; this does not confirm treatment.'
+                          : 'Stay with the client, or choose a previously prepared guide. This does not generate new advice.'}
+                  </p>
+                  <Link
+                    href={`/app/clients/${clientId}/plan#session-guides`}
+                    className="inline-flex min-h-11 items-center text-sm text-[var(--color-accent)] underline"
+                  >
+                    Prepare a guide before recording
+                  </Link>
+                </section>
               )}
 
               {!manual && (

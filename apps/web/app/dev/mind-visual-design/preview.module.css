@@ -1,0 +1,71 @@
+.shell {
+  display: flex;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+.main {
+  flex: 1;
+  min-width: 0;
+}
+.previewBar {
+  padding: 12px 24px;
+  background: #f7f1df;
+  border-bottom: 1px solid #dfd4b8;
+  color: #554a33;
+}
+.previewBar p {
+  font-size: 12px;
+  line-height: 1.6;
+}
+.previewBar nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.previewBar button {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.previewBar button[aria-current='page'] {
+  background: white;
+  color: #574297;
+  box-shadow: 0 1px 3px #332a4312;
+}
+.previewBar button:focus-visible {
+  outline: 3px solid #6753ad;
+  outline-offset: 3px;
+}
+.notice {
+  margin: 20px 24px;
+  padding: 16px;
+  border: 1px solid #d6c4a0;
+  border-radius: 12px;
+  background: #fff9e9;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.prepare {
+  margin: 0 auto;
+  max-width: 1180px;
+  padding: 32px;
+}
+@media (max-width: 680px) {
+  .previewBar {
+    padding: 10px 16px;
+  }
+  .prepare {
+    padding: 20px 16px;
+  }
+  .previewBar button {
+    padding: 8px 10px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell {
+    scroll-behavior: auto;
+  }
+}
