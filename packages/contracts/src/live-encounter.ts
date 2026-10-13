@@ -318,7 +318,13 @@ export type LiveGatewayState = z.infer<typeof LiveGatewayStateSchema>;
 /// Gateway → client events: the three rails + lifecycle status + (DV6.4)
 /// recognised voice commands.
 export const LiveGatewayEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('status'), state: LiveGatewayStateSchema }),
+  z.object({
+    type: z.literal('status'),
+    state: LiveGatewayStateSchema,
+    // Additive detail on `unauthorized`: old clients still stop capture.
+    // Unavailability never grants access or permits automatic microphone resume.
+    authorizationReason: z.enum(['denied', 'unavailable']).optional().catch(undefined),
+  }),
   // Operational start failure only; no provider work has been allowed to begin.
   z.object({ type: z.literal('usageUnavailable') }).strict(),
   z.object({

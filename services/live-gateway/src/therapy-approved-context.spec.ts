@@ -18,7 +18,7 @@ import {
 } from '@cureocity/llm';
 import { LiveSession } from './live-session';
 import { LiveAuthority } from './live-authority';
-import { authorizeLiveSessionOutput } from './live-output-authority';
+import { authorizeLiveSessionOutput, forwardLiveSessionOutputBatch } from './live-output-authority';
 
 const id = 'a433f7e1-06fb-41aa-afb7-a9e19c20d85b';
 const basic: PractitionerCapability[] = [
@@ -254,6 +254,42 @@ const historicalOutput = TherapyReasoningModelOutputSchema.parse({
 });
 
 describe('reviewed-context output queue and derived prompt invalidation', () => {
+  it('rechecks every entry in the production batch at send time after a new review during verification', async () => {
+    const { session, events } = setup();
+    session.reviewTherapyContext(id, context);
+    const oldAck = events.find((event) => event.type === 'therapyContextReviewed')!;
+    const note = { type: 'note', partial: {} } as const;
+    const pause = { type: 'capturePaused', requestId: id } as const;
+    let release!: (response: Response) => void;
+    const verification = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const authority = new LiveAuthority({
+      sessionId: 'fictional',
+      psychologistId: 'fictional',
+      vertical: 'THERAPIST',
+      tokenExpiresAt: Math.floor(Date.now() / 1000) + 300,
+      requiredCapabilities: new Set(['LIVE_ENCOUNTER', 'BEHAVIORAL_HEALTH_DOCUMENTATION']),
+      verifierUrl: 'https://fictional.internal/authority',
+      serviceSecret: 'fictional-secret',
+      fetchImpl: vi.fn(() => verification),
+      close: vi.fn(),
+      updateCapabilities: (current) => session.updateCapabilities(current),
+    });
+    const send = vi.fn();
+    const pending = forwardLiveSessionOutputBatch(
+      [oldAck, note, pause].map((event) => ({ event, origin: session })),
+      authority,
+      send,
+    );
+    session.reviewTherapyContext('81d3f5f8-8691-4ad8-a111-6e62dd00d7af', null);
+    release(new Response(JSON.stringify({ authorized: true, capabilities: all })));
+    await pending;
+    expect(send.mock.calls.map(([event]) => event)).toEqual([note, pause]);
+    authority.dispose();
+    session.dispose();
+  });
+
   it.each(['CLINICAL_ANALYSIS', 'MEASUREMENT_BASED_CARE', 'THERAPY_WORKFLOWS'] as const)(
     'delivers the clear receipt when %s is lost and regained before the output queue drains',
     async (missing) => {
@@ -375,7 +411,11 @@ describe('reviewed-context output queue and derived prompt invalidation', () => 
     });
     const pending = authorizeLiveSessionOutput(
       oldAck,
-      { authorizeEvent: () => authorized },
+      {
+        authorizeEventBatch: async (_events, send) => {
+          send(await authorized, 0);
+        },
+      },
       session,
     );
     session.reviewTherapyContext('81d3f5f8-8691-4ad8-a111-6e62dd00d7af', null);

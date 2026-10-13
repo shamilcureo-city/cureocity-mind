@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   fetchAllergies: vi.fn(),
   assertValidScribeConsent: vi.fn(),
   withClientConsentLock: vi.fn(),
+  teleconsult: vi.fn(),
 }));
 
 vi.mock('./auth-server', () => ({
@@ -18,7 +19,9 @@ vi.mock('./auth-server', () => ({
   requireCapability: mocks.requireCapability,
 }));
 vi.mock('./live-token', () => ({ signLiveToken: mocks.signLiveToken }));
-vi.mock('./scribe-teleconsult', () => ({ assertScribeTeleconsultDocumentationConsent: vi.fn() }));
+vi.mock('./scribe-teleconsult', () => ({
+  assertScribeTeleconsultDocumentationConsent: mocks.teleconsult,
+}));
 vi.mock('./patient-context', () => ({
   fetchActiveMedications: mocks.fetchActiveMedications,
   fetchAllergies: mocks.fetchAllergies,
@@ -56,6 +59,7 @@ const auth = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requirePsychologistId.mockResolvedValue(auth);
+  mocks.teleconsult.mockResolvedValue(undefined);
   mocks.transaction.mockImplementation(async (callback) =>
     callback({ session: { findUnique: mocks.findSession } }),
   );
@@ -83,6 +87,18 @@ const request = () =>
   );
 
 describe('live-token capability boundary', () => {
+  it('does not mint or release context when teleconsult authorization is unavailable', async () => {
+    mocks.requireCapability.mockResolvedValue(auth);
+    const failure = new Error('temporary teleconsult dependency failure');
+    mocks.teleconsult.mockRejectedValueOnce(failure);
+
+    await expect(request()).rejects.toBe(failure);
+
+    expect(mocks.signLiveToken).not.toHaveBeenCalled();
+    expect(mocks.fetchActiveMedications).not.toHaveBeenCalled();
+    expect(mocks.fetchAllergies).not.toHaveBeenCalled();
+  });
+
   it.each(['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'] as const)(
     'returns the audited 403 before minting when %s is absent or revoked',
     async (missing) => {
