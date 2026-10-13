@@ -426,6 +426,134 @@ describe('Scribe live consultation lifecycle', () => {
     expect(savedDrafts()).toEqual([]);
   });
 
+  it('stops on a temporary access-check failure without automatic capture or renewal retries', async () => {
+    vi.useFakeTimers();
+    const socket = await startCapture();
+    socket.emit({ type: 'utterance', utterance });
+    socket.emit({ type: 'status', state: 'unauthorized', authorizationReason: 'unavailable' });
+    expect(text(render())).toContain('The access check is temporarily unavailable.');
+    expect(text(render())).toContain('Capture stopped · microphone off');
+    expect(text(render())).toContain('Some words may be missing.');
+    expect(displayedUtterances()).toEqual([utterance]);
+    expect(harness.stream.stop).toHaveBeenCalledOnce();
+    expect(socket.close).toHaveBeenCalledOnce();
+    const laterFrame = new Uint8Array([9, 10]);
+    harness.onFrame(laterFrame);
+    socket.status('listening'); // A stale event must not revive the old socket.
+    socket.disconnect();
+    await vi.advanceTimersByTimeAsync(310_000);
+    expect(socket.send).not.toHaveBeenCalledWith(laterFrame);
+    expect(harness.sockets).toHaveLength(1);
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(action('Resume recording')).toBeDefined();
+    expect(action('Review captured note')).toBeDefined();
+  });
+
+  it('requires fresh authority on explicit retry and never replays unverified audio', async () => {
+    const socket = await startCapture();
+    socket.emit({ type: 'utterance', utterance });
+    socket.bufferedAmount = 2_000_001;
+    const unsent = new Uint8Array([1, 3, 5, 7]);
+    harness.onFrame(unsent);
+    expect(socket.send).not.toHaveBeenCalledWith(unsent);
+    socket.emit({ type: 'status', state: 'unauthorized', authorizationReason: 'unavailable' });
+    const stoppedFrame = new Uint8Array([2, 4, 6, 8]);
+    harness.onFrame(stoppedFrame);
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({ token: 'fresh-token', expiresInSec: 300 }),
+    );
+
+    click('Resume recording');
+    expect(fetch).toHaveBeenCalledOnce();
+    confirmMicrophone();
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const resumed = harness.sockets[1];
+    resumed.open();
+    expect(commands(resumed)[0]).toMatchObject({
+      type: 'start',
+      token: 'fresh-token',
+      resume: { utterances: [utterance] },
+    });
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    resumed.status('listening');
+    expect(harness.stream.start).toHaveBeenCalledTimes(2);
+    expect(resumed.send).not.toHaveBeenCalledWith(unsent);
+    expect(resumed.send).not.toHaveBeenCalledWith(stoppedFrame);
+    const freshFrame = new Uint8Array([11, 12]);
+    harness.onFrame(freshFrame);
+    expect(resumed.send).toHaveBeenLastCalledWith(freshFrame);
+    expect(displayedUtterances()).toEqual([utterance]);
+    expect(text(render())).toContain('Some words may be missing.');
+  });
+
+  it('cannot resume after consent is denied on the fresh token request', async () => {
+    const socket = await startCapture();
+    socket.emit({ type: 'utterance', utterance });
+    socket.emit({ type: 'status', state: 'unauthorized', authorizationReason: 'unavailable' });
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({ error: 'Patient consent was withdrawn.' }, { status: 403 }),
+    );
+    click('Resume recording');
+    confirmMicrophone();
+    await vi.waitFor(() => expect(text(render())).toContain('Patient consent was withdrawn.'));
+    expect(harness.sockets).toHaveLength(1);
+    expect(harness.stream.start).toHaveBeenCalledOnce();
+    expect(displayedUtterances()).toEqual([utterance]);
+    expect(text(render())).toContain('Capture stopped · microphone off');
+  });
+
+  it.each([undefined, 'denied', 'future-reason'] as const)(
+    'keeps real or legacy denial distinct from an outage (%s)',
+    async (authorizationReason) => {
+      const socket = await startCapture();
+      socket.emit({ type: 'status', state: 'unauthorized', authorizationReason });
+      expect(text(render())).toContain('Check access and consent before resuming.');
+      expect(text(render())).not.toContain('temporarily unavailable');
+      expect(harness.stream.stop).toHaveBeenCalledOnce();
+      expect(harness.stream.start).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('does not start the microphone if the initial gateway access check is unavailable', async () => {
+    mount();
+    click('● Start live consult');
+    confirmMicrophone();
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(1));
+    const socket = harness.sockets[0];
+    socket.open();
+    socket.emit({ type: 'status', state: 'unauthorized', authorizationReason: 'unavailable' });
+    expect(harness.stream.start).not.toHaveBeenCalled();
+    expect(text(render())).toContain('The access check is temporarily unavailable.');
+    expect(action('● Start live consult')).toBeDefined();
+    socket.status('listening');
+    expect(harness.stream.start).not.toHaveBeenCalled();
+  });
+
+  it('retires the old End timeout before resuming from a finalization access-check outage', async () => {
+    vi.useFakeTimers();
+    const socket = await startCapture();
+    socket.emit({ type: 'utterance', utterance });
+    click('End & review note');
+    await vi.waitFor(() => expect(commands(socket).some(({ type }) => type === 'stop')).toBe(true));
+    socket.emit({ type: 'status', state: 'unauthorized', authorizationReason: 'unavailable' });
+    expect(action('Resume recording')).toBeDefined();
+    click('Resume recording');
+    confirmMicrophone();
+    await vi.waitFor(() => expect(harness.sockets).toHaveLength(2));
+    const resumed = harness.sockets[1];
+    resumed.open();
+    resumed.status('listening');
+    const stopCalls = harness.stream.stop.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(91_000);
+    expect(savedDrafts()).toEqual([]);
+    expect(resumed.close).not.toHaveBeenCalled();
+    expect(harness.stream.stop).toHaveBeenCalledTimes(stopCalls);
+    expect(action('Pause recording')).toBeDefined();
+    expect(displayedUtterances()).toEqual([utterance]);
+  });
+
   it('does not renew capture during a deliberate teleconsult pause and resumes with a fresh authorization', async () => {
     vi.useFakeTimers();
     teleconsult = {

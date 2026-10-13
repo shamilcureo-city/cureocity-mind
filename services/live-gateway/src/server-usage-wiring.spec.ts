@@ -196,7 +196,11 @@ describe('actual gateway durable registration and socket lifecycle', () => {
       if (input === 'binary') socket.emit('message', Buffer.alloc(320), true);
       else socket.command({ type: input });
       await vi.waitFor(() =>
-        expect(socket.events).toContainEqual({ type: 'status', state: 'unauthorized' }),
+        expect(socket.events).toContainEqual({
+          type: 'status',
+          state: 'unauthorized',
+          authorizationReason: 'denied',
+        }),
       );
       expect(JSON.parse(String(verifier.mock.calls[0]?.[1]?.body)).purpose).toBe('capture');
       expect(socket.readyState).toBe(3);

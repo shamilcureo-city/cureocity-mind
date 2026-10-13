@@ -16,8 +16,9 @@ import {
 import { buildBackends } from './llm';
 import { LiveAuthority } from './live-authority';
 import { LiveSession } from './live-session';
-import { authorizeLiveSessionOutput } from './live-output-authority';
+import { forwardLiveSessionOutputBatch } from './live-output-authority';
 import { OrderedSocketInput } from './ordered-socket-input';
+import { OrderedSocketOutput } from './ordered-socket-output';
 import { GatewayPool, maxSessionsFromEnv } from './pool';
 import { initSentry } from './sentry';
 import { makeStreamTranscriber } from './stream-transcript';
@@ -64,7 +65,7 @@ const LIVE_AUTHZ_INTERVAL_MS = boundedPositiveInteger(
 const LIVE_AUTHZ_TIMEOUT_MS = boundedPositiveInteger(
   'LIVE_AUTHZ_TIMEOUT_MS',
   process.env['LIVE_AUTHZ_TIMEOUT_MS'],
-  2_000,
+  Math.min(4_000, LIVE_AUTHZ_INTERVAL_MS - 1),
   100,
   LIVE_AUTHZ_INTERVAL_MS - 1,
 );
@@ -173,6 +174,10 @@ wss.on('connection', (ws, req) => {
   let finalizationRequested = false;
   let renewalInFlight = false;
   let connectionDisposed = false;
+  let outputQueue: OrderedSocketOutput<{
+    event: LiveGatewayEvent;
+    origin: LiveSession | null;
+  }> | null = null;
   // Control-only timing: validated request IDs are safe correlation handles;
   // never include the command object, token, session, identity, or clinical data.
   const pauseReceivedAt = new Map<string, number>();
@@ -274,7 +279,10 @@ wss.on('connection', (ws, req) => {
         renewingAuthority.authorizeInput();
       renewalInFlight = true;
       void (async () => {
-        if (!(await renewingAuthority.authorizeCurrentInput()) || !mayRenew()) return;
+        // renewToken settles existing checks, verifies the replacement claims,
+        // and fetches fresh capture authority while the old deadline stays live.
+        // A second pre-renewal request would duplicate that verification.
+        if (!mayRenew()) return;
         const expiresAt = await renewingAuthority.renewToken(cmd.token);
         if (expiresAt === null || !mayRenew()) return;
         send(ws, { type: 'tokenRenewed', requestId: cmd.requestId, expiresAt });
@@ -378,7 +386,40 @@ wss.on('connection', (ws, req) => {
         // cumulative per consult, so only the delta since the last event is
         // added.
         let lastMeterInr = 0;
-        let outputQueue = Promise.resolve();
+        outputQueue = new OrderedSocketOutput(
+          async (batch) => {
+            const batchAuthority = authority;
+            const forwardAuthorized = (authorized: LiveGatewayEvent, index: number): void => {
+              const entry = batch[index];
+              if (
+                !entry ||
+                connectionDisposed ||
+                authority !== batchAuthority ||
+                session !== entry.origin ||
+                ws.readyState !== ws.OPEN ||
+                (batchAuthority && !batchAuthority.authorizeInput())
+              )
+                return;
+              // No await between the local expiry/private-epoch gate and send.
+              if (tenantId && authorized.type === 'meter') {
+                tenantSpend.add(tenantId, authorized.summary.costInr - lastMeterInr);
+                lastMeterInr = Math.max(lastMeterInr, authorized.summary.costInr);
+              }
+              send(ws, authorized);
+              if (
+                ws.readyState === ws.OPEN &&
+                (authorized.type === 'capturePaused' || authorized.type === 'capturePauseFailed')
+              ) {
+                tracePause(`${authorized.type}.sent`, authorized.requestId, true);
+              }
+            };
+            await forwardLiveSessionOutputBatch(batch, batchAuthority, forwardAuthorized);
+          },
+          () => {
+            send(ws, { type: 'status', state: 'unauthorized', authorizationReason: 'unavailable' });
+            ws.close();
+          },
+        );
         const forward = (event: LiveGatewayEvent): void => {
           const eventOrigin = session;
           if (event.type === 'capturePaused' || event.type === 'capturePauseFailed') {
@@ -413,37 +454,7 @@ wss.on('connection', (ws, req) => {
             finalizationRequested = true;
             authority?.preventRenewal();
           }
-          outputQueue = outputQueue
-            .then(async () => {
-              const authorized = await authorizeLiveSessionOutput(event, authority, eventOrigin);
-              // The await above adds one microtask turn after the helper's
-              // check. Recheck synchronously here; no await may follow before send.
-              if (
-                !authorized ||
-                connectionDisposed ||
-                session !== eventOrigin ||
-                ws.readyState !== ws.OPEN ||
-                (eventOrigin && !eventOrigin.isTherapyOutputCurrent(event))
-              )
-                return;
-              if (tenantId && authorized.type === 'meter') {
-                tenantSpend.add(tenantId, authorized.summary.costInr - lastMeterInr);
-                lastMeterInr = Math.max(lastMeterInr, authorized.summary.costInr);
-              }
-              send(ws, authorized);
-              if (
-                ws.readyState === ws.OPEN &&
-                (authorized.type === 'capturePaused' || authorized.type === 'capturePauseFailed')
-              ) {
-                tracePause(`${authorized.type}.sent`, authorized.requestId, true);
-              }
-            })
-            .catch(() => {
-              // Keep the queue usable and fail closed if an unexpected verifier
-              // or callback failure escapes LiveAuthority.
-              send(ws, { type: 'status', state: 'unauthorized' });
-              ws.close();
-            });
+          outputQueue?.enqueue({ event, origin: eventOrigin });
         };
         const beginSession = (): void => {
           if (session || ws.readyState !== ws.OPEN) return;
@@ -516,8 +527,19 @@ wss.on('connection', (ws, req) => {
               capabilities = updated;
               session?.updateCapabilities(updated);
             },
-            close: () => {
-              send(ws, { type: 'status', state: 'unauthorized' });
+            diagnostic: (diagnostic) => {
+              console.info('[live-authority]', JSON.stringify({ connectionId, ...diagnostic }));
+            },
+            close: (reason) => {
+              console.info(
+                '[live-authority]',
+                JSON.stringify({ connectionId, event: 'closed', reason }),
+              );
+              send(ws, {
+                type: 'status',
+                state: 'unauthorized',
+                authorizationReason: reason === 'live_authority_denied' ? 'denied' : 'unavailable',
+              });
               ws.close();
             },
           });
@@ -618,6 +640,7 @@ wss.on('connection', (ws, req) => {
     if (connectionDisposed) return;
     connectionDisposed = true;
     inputQueue.dispose();
+    outputQueue?.dispose();
     for (const requestId of pauseReceivedAt.keys()) tracePause('pause.closed', requestId, true);
     clearTimeout(idleTimer);
     if (authority) liveAuthorities.delete(authority);

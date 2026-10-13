@@ -759,12 +759,19 @@ export function DoctorLiveEncounter({
     }
     pauseReplyRef.current?.reject(new Error(message));
     captureBlockedRef.current = true;
+    // Unsent audio has not crossed the current authority gate. Never replay it
+    // under a later grant after an outage or denial; keep confirmed words only.
+    if (audioQueueRef.current.length > 0) flagIncomplete('audio_loss');
+    audioQueueRef.current = [];
+    audioQueueBytesRef.current = 0;
     socketReadyRef.current = false;
     intentionalCloseRef.current = true;
     ++connectAttemptRef.current;
     connectAbortRef.current?.abort();
     renewalRef.current?.dispose();
     renewalRef.current = null;
+    if (finalizeTimerRef.current) clearTimeout(finalizeTimerRef.current);
+    finalizeTimerRef.current = null;
     if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = null;
     const socket = wsRef.current;
@@ -1074,7 +1081,9 @@ export function DoctorLiveEncounter({
               return;
             }
             stopForAuthorization(
-              'The live session could not be authorised. Microphone stopped. Check access and consent before resuming.',
+              event.authorizationReason === 'unavailable'
+                ? 'The access check is temporarily unavailable. Microphone stopped. Captured words remain on this page. Wait a moment, then resume to recheck access and consent, or review the captured note.'
+                : 'The live session could not be authorised. Microphone stopped. Check access and consent before resuming.',
               resume || listeningHandled,
             );
           } else if (event.state === 'busy') {

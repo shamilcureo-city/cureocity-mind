@@ -1,9 +1,13 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
-import { LiveAuthorityRequestSchema } from '@cureocity/contracts';
-import { getEffectiveCapabilities, serializeCapabilities } from '@/lib/capabilities';
+import { LiveAuthorityRequestSchema, type LiveAuthorityRequest } from '@cureocity/contracts';
+import {
+  getEffectiveCapabilities,
+  PractitionerInactiveAuthorizationError,
+  serializeCapabilities,
+} from '@/lib/capabilities';
 import { writeAudit } from '@/lib/audit';
-import { SCRIBE_CONSENT_SCOPES } from '@/lib/consent-gate';
+import { ConsentAuthorizationError, SCRIBE_CONSENT_SCOPES } from '@/lib/consent-gate';
 import { prisma } from '@/lib/prisma';
 import { parseJson } from '@/lib/validate';
 import { assertScribeTeleconsultDocumentationConsent } from '@/lib/scribe-teleconsult';
@@ -25,7 +29,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!parsed.ok) return parsed.response;
   const body = parsed.value;
 
-  const { session, currentConsentScopes, teleconsultAuthorized } = await prisma.$transaction(
+  let snapshot: Awaited<ReturnType<typeof readAuthoritySnapshot>>;
+  try {
+    snapshot = await readAuthoritySnapshot(body);
+  } catch {
+    return unavailable('session_snapshot');
+  }
+  const { session, currentConsentScopes, teleconsultAuthorized } = snapshot;
+  const actorPsychologistId = session?.psychologistId ?? body.psychologistId;
+  if (
+    !session ||
+    !teleconsultAuthorized ||
+    session.psychologistId !== body.psychologistId ||
+    session.psychologist.vertical !== body.vertical ||
+    body.tokenExpiresAt <= Math.floor(Date.now() / 1_000) ||
+    session.status !== 'IN_PROGRESS' ||
+    session.captureMode !== 'LIVE' ||
+    session.mindDocumentationMode === 'MANUAL' ||
+    SCRIBE_CONSENT_SCOPES.some((scope) => !currentConsentScopes.has(scope))
+  ) {
+    return denied(actorPsychologistId, body.sessionId);
+  }
+
+  try {
+    const effective = await getEffectiveCapabilities(session.psychologistId);
+    return NextResponse.json({
+      authorized: true,
+      capabilities: serializeCapabilities(effective),
+    });
+  } catch (error) {
+    if (error instanceof PractitionerInactiveAuthorizationError) {
+      return denied(actorPsychologistId, body.sessionId);
+    }
+    // A failed dependency cannot establish that consent or access was revoked.
+    // Return no authority, but let the gateway distinguish an outage from denial.
+    return unavailable('capabilities');
+  }
+}
+
+async function readAuthoritySnapshot(body: LiveAuthorityRequest) {
+  return prisma.$transaction(
     async (tx) => {
       const currentSession = await tx.session.findUnique({
         where: { id: body.sessionId },
@@ -53,7 +96,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             currentSession.psychologistId,
             body.purpose ?? 'capture',
           );
-        } catch {
+        } catch (error) {
+          if (!(error instanceof ConsentAuthorizationError)) throw error;
           teleconsultAuthorized = false;
         }
       }
@@ -80,42 +124,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     },
     { isolationLevel: 'Serializable' },
   );
-  const actorPsychologistId = session?.psychologistId ?? body.psychologistId;
+}
+
+async function denied(actorPsychologistId: string, sessionId: string): Promise<NextResponse> {
   try {
-    if (
-      !session ||
-      !teleconsultAuthorized ||
-      session.psychologistId !== body.psychologistId ||
-      session.psychologist.vertical !== body.vertical ||
-      body.tokenExpiresAt <= Math.floor(Date.now() / 1_000) ||
-      session.status !== 'IN_PROGRESS' ||
-      session.captureMode !== 'LIVE' ||
-      session.mindDocumentationMode === 'MANUAL' ||
-      SCRIBE_CONSENT_SCOPES.some((scope) => !currentConsentScopes.has(scope))
-    ) {
-      throw new Error('denied');
-    }
-    const effective = await getEffectiveCapabilities(session.psychologistId);
-    return NextResponse.json({
-      authorized: true,
-      capabilities: serializeCapabilities(effective),
+    await writeAudit({
+      actorType: 'PSYCHOLOGIST',
+      actorPsychologistId,
+      action: 'CAPABILITY_ACCESS_DENIED',
+      targetType: 'LiveAuthority',
+      targetId: 'DENIED',
+      metadata: { source: 'liveGatewayRevalidation', sessionId },
     });
   } catch {
-    try {
-      await writeAudit({
-        actorType: 'PSYCHOLOGIST',
-        actorPsychologistId,
-        action: 'CAPABILITY_ACCESS_DENIED',
-        targetType: 'LiveAuthority',
-        targetId: 'DENIED',
-        metadata: { source: 'liveGatewayRevalidation', sessionId: body.sessionId },
-      });
-    } catch {
-      // Authority denial is mandatory; audit persistence is best effort.
-      console.error('[live-authority] Failed to persist authority-denial audit event.');
-    }
-    return NextResponse.json({ authorized: false, capabilities: [] }, { status: 403 });
+    // Authority denial is mandatory; audit persistence is best effort.
+    console.error('[live-authority] Failed to persist authority-denial audit event.');
   }
+  return NextResponse.json({ authorized: false, capabilities: [] }, { status: 403 });
+}
+
+function unavailable(stage: 'session_snapshot' | 'capabilities'): NextResponse {
+  // Closed-set diagnostics only: no database errors, clinical content, IDs or tokens.
+  console.warn('[live-authority] Verification unavailable.', { stage });
+  return NextResponse.json({ authorized: false, capabilities: [] }, { status: 503 });
 }
 
 function hasServiceSecret(req: NextRequest): boolean {

@@ -631,7 +631,12 @@ export async function assertScribeTeleconsultDocumentationConsent(
         'Teleconsult documentation is paused or patient consent is no longer valid.',
       );
     }
-  } catch {
+  } catch (error) {
+    // Keep known lifecycle/consent denials distinct from unavailable storage,
+    // decryption or configuration. Every caller still fails closed, but the
+    // live verifier can identify a temporary dependency failure as unavailable.
+    if (error instanceof ConsentAuthorizationError) throw error;
+    if (!(error instanceof ScribeWorkspaceError) || error.status >= 500) throw error;
     throw new ConsentAuthorizationError(
       'Teleconsult documentation authorization could not be confirmed. Stop capture and refresh the call.',
     );

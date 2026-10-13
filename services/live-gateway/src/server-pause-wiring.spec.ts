@@ -60,7 +60,8 @@ const sockets: Socket[] = [];
 const signals = new Map(
   (['SIGTERM', 'SIGINT'] as const).map((signal) => [signal, process.listeners(signal)]),
 );
-const authorized = () => new Response(JSON.stringify({ authorized: true, capabilities }));
+const authorized = (current = capabilities) =>
+  new Response(JSON.stringify({ authorized: true, capabilities: current }));
 function token(exp: number, overrides: object = {}) {
   const body = Buffer.from(
     JSON.stringify({
@@ -95,6 +96,9 @@ function holdTranscription(afterCalls = 0) {
 
 beforeAll(async () => {
   vi.stubEnv('LIVE_GATEWAY_SECRET', secret);
+  // Existing sub-four-second interval configurations must still boot when
+  // the optional verifier timeout is omitted.
+  vi.stubEnv('LIVE_AUTHZ_INTERVAL_MS', '3000');
   vi.stubEnv(
     'LIVE_AUTHZ_REVALIDATE_URL',
     'http://fictional.internal/api/v1/internal/live-authority',
@@ -121,8 +125,10 @@ afterAll(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
 });
-async function connect() {
-  verifier.mockImplementation(async () => authorized());
+async function connect(vertical: 'DOCTOR' | 'THERAPIST' = 'THERAPIST') {
+  const current =
+    vertical === 'THERAPIST' ? capabilities : ['LIVE_ENCOUNTER', 'MEDICAL_DOCUMENTATION'];
+  verifier.mockImplementation(async () => authorized(current));
   const socket = new Socket();
   sockets.push(socket);
   fixture.server.emit('connection', socket, {
@@ -133,8 +139,8 @@ async function connect() {
   socket.command({
     type: 'start',
     sessionId: 'fictional-session',
-    token: token(exp),
-    vertical: 'THERAPIST',
+    token: token(exp, { vertical, capabilities: current }),
+    vertical,
   });
   await vi.waitFor(() =>
     expect(socket.events).toContainEqual({ type: 'status', state: 'listening' }),
@@ -143,6 +149,79 @@ async function connect() {
 }
 
 describe('actual gateway pause command/authorization wiring', () => {
+  it('keeps the verifier timeout below an existing three-second interval override', async () => {
+    const timeout = vi.spyOn(AbortSignal, 'timeout');
+    await connect();
+    expect(timeout).toHaveBeenCalledWith(2_999);
+  });
+
+  it.each(['DOCTOR', 'THERAPIST'] as const)(
+    'propagates typed denial/outage and sanitized diagnostics for %s',
+    async (vertical) => {
+      for (const status of [403, 503]) {
+        const { socket } = await connect(vertical);
+        vi.mocked(console.info).mockClear();
+        verifier.mockImplementation(
+          async () => new Response('DO-NOT-LOG-provider-details', { status }),
+        );
+        socket.emit('message', audioFrame(), true);
+        await vi.waitFor(() => expect(socket.readyState).toBe(3));
+        expect(socket.events).toContainEqual({
+          type: 'status',
+          state: 'unauthorized',
+          authorizationReason: status === 403 ? 'denied' : 'unavailable',
+        });
+        const logs = vi
+          .mocked(console.info)
+          .mock.calls.filter(([tag]) => tag === '[live-authority]')
+          .map(([, data]) => JSON.parse(String(data)));
+        expect(logs).toHaveLength(2);
+        expect(logs[0]).toMatchObject({
+          httpStatus: status,
+          purpose: 'capture',
+          category: status === 403 ? 'http_denied' : 'http_unavailable',
+        });
+        expect(logs[0].connectionId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(Object.keys(logs[0]).sort()).toEqual([
+          'category',
+          'connectionId',
+          'elapsedMs',
+          'httpStatus',
+          'purpose',
+          'reason',
+        ]);
+        expect(JSON.stringify(logs)).not.toMatch(
+          /fictional-session|fictional-owner|DO-NOT-LOG|fictional-local-pause-secret/,
+        );
+        expect(socket.events.some((event) => event.type === 'utterance')).toBe(false);
+      }
+    },
+  );
+
+  it.each(['DOCTOR', 'THERAPIST'] as const)(
+    'batches actual synchronous transcript outputs and leaves Pause behind words for %s',
+    async (vertical) => {
+      const batches = vi.spyOn(LiveAuthority.prototype, 'authorizeEventBatch');
+      const { socket } = await connect(vertical);
+      batches.mockClear();
+      socket.emit('message', audioFrame(), true);
+      socket.command({ type: 'pause', requestId });
+      await vi.waitFor(() =>
+        expect(socket.events).toContainEqual({ type: 'capturePaused', requestId }),
+      );
+      expect(
+        batches.mock.calls.some(
+          ([events]) =>
+            events.some((event) => event.type === 'transcript') &&
+            events.some((event) => event.type === 'utterance'),
+        ),
+      ).toBe(true);
+      expect(socket.events.findIndex((event) => event.type === 'capturePaused')).toBeGreaterThan(
+        socket.events.findIndex((event) => event.type === 'utterance'),
+      );
+    },
+  );
+
   it('uses the verified Mind vertical for the shorter window and realtime transcription hint', async () => {
     vi.useFakeTimers();
     const pass1 = vi.spyOn(MockGeminiPass1Backend.prototype, 'run');
@@ -242,7 +321,11 @@ describe('actual gateway pause command/authorization wiring', () => {
     socket.emit('message', Buffer.alloc(9600), true);
     socket.command({ type: 'pause', requestId });
     await vi.waitFor(() => expect(socket.readyState).toBe(3));
-    expect(socket.events).toContainEqual({ type: 'status', state: 'unauthorized' });
+    expect(socket.events).toContainEqual({
+      type: 'status',
+      state: 'unauthorized',
+      authorizationReason: 'denied',
+    });
     expect(socket.events.some((e) => e.type === 'utterance' || e.type === 'capturePaused')).toBe(
       false,
     );
@@ -288,6 +371,7 @@ describe('actual gateway pause command/authorization wiring', () => {
       vi.useFakeTimers();
       const { pass1, release } = holdTranscription(1);
       const authorizeEvent = LiveAuthority.prototype.authorizeEvent;
+      const authorizeEventBatch = LiveAuthority.prototype.authorizeEventBatch;
       let releaseOutput!: () => void;
       const output = new Promise<void>((resolve) => (releaseOutput = resolve));
       let outputBlocked = false;
@@ -298,14 +382,24 @@ describe('actual gateway pause command/authorization wiring', () => {
         event,
       ) {
         if (event.type === 'capturePauseFailed') failureChecking = true;
-        const authorizedEvent = await authorizeEvent.call(this, event);
-        if (event.type === 'utterance') {
+        return authorizeEvent.call(this, event);
+      });
+      vi.spyOn(LiveAuthority.prototype, 'authorizeEventBatch').mockImplementation(async function (
+        this: LiveAuthority,
+        events,
+        send,
+      ) {
+        const held: Array<[LiveGatewayEvent, number]> = [];
+        await authorizeEventBatch.call(this, events, (event, index) => {
+          held.push([event, index]);
+        });
+        if (events.some((event) => event.type === 'utterance')) {
           outputBlocked = true;
           // Hold the clinical queue after its real authority check. Failure
           // status must use its own real check, not this output's FIFO slot.
           await output;
         }
-        return authorizedEvent;
+        held.forEach(([event, index]) => send(event, index));
       });
       const { socket } = await connect();
       verifier.mockImplementation(async () => {
@@ -588,7 +682,11 @@ describe('actual gateway in-place token renewal wiring', () => {
     const { socket, exp } = await connect();
     socket.command({ type: 'renewToken', requestId, token: makeToken(exp) });
     await vi.waitFor(() => expect(socket.readyState).toBe(3));
-    expect(socket.events).toContainEqual({ type: 'status', state: 'unauthorized' });
+    expect(socket.events).toContainEqual({
+      type: 'status',
+      state: 'unauthorized',
+      authorizationReason: 'denied',
+    });
     expect(socket.events.some((event) => event.type === 'tokenRenewed')).toBe(false);
   });
 

@@ -7,6 +7,19 @@ import { extractVerifiedClaims } from './auth';
 
 export type LiveAuthorityCloseReason = 'live_authority_denied' | 'live_authority_unavailable';
 type AuthorityPurpose = 'capture' | 'queued-finalization';
+export interface LiveAuthorityDiagnostic {
+  reason: LiveAuthorityCloseReason;
+  category:
+    | 'http_denied'
+    | 'http_unavailable'
+    | 'invalid_response'
+    | 'mandatory_capability'
+    | 'timeout'
+    | 'network';
+  purpose: AuthorityPurpose;
+  elapsedMs: number;
+  httpStatus?: number;
+}
 
 interface LiveAuthorityOptions {
   sessionId: string;
@@ -21,6 +34,7 @@ interface LiveAuthorityOptions {
   intervalMs?: number;
   now?: () => number;
   close: (reason: LiveAuthorityCloseReason) => void;
+  diagnostic?: (diagnostic: LiveAuthorityDiagnostic) => void;
   updateCapabilities: (capabilities: ReadonlySet<PractitionerCapability>) => void;
 }
 
@@ -75,7 +89,7 @@ export class LiveAuthority {
 
   constructor(private readonly options: LiveAuthorityOptions) {
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.timeoutMs = options.timeoutMs ?? 2_000;
+    this.timeoutMs = options.timeoutMs ?? 4_000;
     this.intervalMs = options.intervalMs ?? 5_000;
     this.now = options.now ?? Date.now;
     this.tokenExpiresAt = options.tokenExpiresAt;
@@ -179,6 +193,28 @@ export class LiveAuthority {
     if (this.closed) return null;
     if (!(await this.revalidate('queued-finalization'))) return null;
 
+    return this.filterCurrentEvent(event);
+  }
+
+  /**
+   * One fresh check covers only outputs already queued at the drain head. No
+   * grant is retained for later arrivals, and no await separates event gates
+   * from their sends. Capture never uses a queued-finalization approval.
+   */
+  async authorizeEventBatch(
+    events: readonly LiveGatewayEvent[],
+    send: (event: LiveGatewayEvent, index: number) => void,
+  ): Promise<void> {
+    const batch = [...events];
+    if (!batch.length || !(await this.revalidate('queued-finalization', true))) return;
+    for (const [index, event] of batch.entries()) {
+      const authorized = this.filterCurrentEvent(event);
+      if (authorized) send(authorized, index);
+    }
+  }
+
+  private filterCurrentEvent(event: LiveGatewayEvent): LiveGatewayEvent | null {
+    if (!this.authorizeInput()) return null;
     const required = optionalEventCapability(event);
     if (required && !this.capabilities.has(required)) return null;
     if (event.type === 'final') {
@@ -192,7 +228,7 @@ export class LiveAuthority {
     return event;
   }
 
-  async revalidate(purpose: AuthorityPurpose = 'capture'): Promise<boolean> {
+  async revalidate(purpose: AuthorityPurpose = 'capture', fresh = false): Promise<boolean> {
     if (!this.authorizeInput()) return false;
     while (this.renewal) {
       const pending = this.renewal;
@@ -201,7 +237,14 @@ export class LiveAuthority {
       if (this.renewal === pending) this.renewal = null;
     }
     const existing = this.inFlight.get(purpose);
-    if (existing) return existing;
+    if (existing) {
+      if (!fresh) return existing;
+      // An earlier periodic/output request may have started before this batch
+      // existed. Its result cannot authorize the later queued events.
+      if (!(await existing)) return false;
+      if (this.inFlight.get(purpose) === existing) this.inFlight.delete(purpose);
+      return this.revalidate(purpose, true);
+    }
     const check = this.performRevalidation(purpose);
     this.inFlight.set(purpose, check);
     try {
@@ -223,6 +266,25 @@ export class LiveAuthority {
     tokenExpiresAt: number,
     purpose: AuthorityPurpose,
   ): Promise<Set<PractitionerCapability> | null> {
+    const startedAt = this.now();
+    let httpStatus: number | undefined;
+    const fail = (
+      reason: LiveAuthorityCloseReason,
+      category: LiveAuthorityDiagnostic['category'],
+    ): null => {
+      // Allow-listed diagnostics only: never log an exception, URL, token,
+      // request body, patient/session identifier, or clinical content.
+      this.options.diagnostic?.({
+        reason,
+        category,
+        purpose,
+        elapsedMs: Math.max(0, this.now() - startedAt),
+        ...(httpStatus === undefined ? {} : { httpStatus }),
+      });
+      this.deny(reason);
+      return null;
+    };
+    const signal = AbortSignal.timeout(this.timeoutMs);
     try {
       const response = await this.fetchImpl(this.options.verifierUrl, {
         method: 'POST',
@@ -238,38 +300,47 @@ export class LiveAuthority {
           vertical: this.options.vertical,
           purpose,
         }),
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal,
       });
+      httpStatus = response.status;
+      if (signal.aborted) return fail('live_authority_unavailable', 'timeout');
       if (!response.ok) {
-        this.deny('live_authority_denied');
-        return null;
+        return response.status === 401 || response.status === 403
+          ? fail('live_authority_denied', 'http_denied')
+          : fail('live_authority_unavailable', 'http_unavailable');
       }
-      const body = (await response.json()) as { authorized?: unknown; capabilities?: unknown };
-      if (body.authorized !== true || !Array.isArray(body.capabilities)) {
-        this.deny('live_authority_denied');
-        return null;
+      const body = (await response.json()) as {
+        authorized?: unknown;
+        capabilities?: unknown;
+      } | null;
+      if (signal.aborted) return fail('live_authority_unavailable', 'timeout');
+      if (body?.authorized === false) {
+        return fail('live_authority_denied', 'http_denied');
+      }
+      if (body?.authorized !== true || !Array.isArray(body.capabilities)) {
+        return fail('live_authority_unavailable', 'invalid_response');
       }
       const parsed = body.capabilities.map((capability) =>
         PractitionerCapabilitySchema.safeParse(capability),
       );
       if (parsed.some((capability) => !capability.success)) {
-        this.deny('live_authority_denied');
-        return null;
+        return fail('live_authority_unavailable', 'invalid_response');
       }
       const capabilities = new Set(
         parsed.flatMap((capability) => (capability.success ? [capability.data] : [])),
       );
       if ([...this.options.requiredCapabilities].some((required) => !capabilities.has(required))) {
-        this.deny('live_authority_denied');
-        return null;
+        return fail('live_authority_denied', 'mandatory_capability');
       }
       // Another mandatory denial may have fired while the verifier request was
       // in flight. Never publish that now-stale successful result.
       if (!this.authorizeInput()) return null;
       return capabilities;
     } catch {
-      this.deny('live_authority_unavailable');
-      return null;
+      return fail(
+        'live_authority_unavailable',
+        signal.aborted ? 'timeout' : httpStatus === undefined ? 'network' : 'invalid_response',
+      );
     }
   }
 

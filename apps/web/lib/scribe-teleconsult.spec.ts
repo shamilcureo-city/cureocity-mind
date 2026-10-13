@@ -526,6 +526,59 @@ describe('separate patient and doctor documentation authorization', () => {
       assertScribeTeleconsultDocumentationConsent(tx, sessionId, owner),
     ).resolves.toBeUndefined();
   });
+  it.each(['storage discovery', 'record lookup'] as const)(
+    'propagates unavailable %s without mislabelling it as withdrawn consent',
+    async (stage) => {
+      const failure = new Error('temporary dependency failure');
+      const unavailableTx = {
+        ...tx,
+        ...(stage === 'storage discovery'
+          ? { $queryRaw: vi.fn().mockRejectedValue(failure) }
+          : { scribeWorkspaceRecord: { findFirst: vi.fn().mockRejectedValue(failure) } }),
+      } as unknown as Prisma.TransactionClient;
+      await expect(
+        assertScribeTeleconsultDocumentationConsent(unavailableTx, sessionId, owner),
+      ).rejects.toBe(failure);
+      expect(h.findSession).not.toHaveBeenCalled();
+    },
+  );
+  it('propagates unavailable session lookup and still blocks active retained-AI authority', async () => {
+    h.record = fixture({
+      patientConsent: 'granted',
+      documentationState: 'recording',
+      documentationHeartbeatAt: now.toISOString(),
+      documentationStartedAt: now.toISOString(),
+    });
+    const failure = new Error('temporary session lookup failure');
+    h.findSession.mockRejectedValueOnce(failure);
+    await expect(assertScribeTeleconsultRetainedAiConsent(tx, sessionId, owner, true)).rejects.toBe(
+      failure,
+    );
+  });
+  it('preserves unavailable teleconsult configuration as 503 rather than consent denial', async () => {
+    vi.stubEnv('LIVEKIT_API_KEY', '');
+    await expect(
+      assertScribeTeleconsultDocumentationConsent(tx, sessionId, owner),
+    ).rejects.toMatchObject({ name: 'ScribeWorkspaceError', status: 503 });
+    expect(h.findSession).not.toHaveBeenCalled();
+  });
+  it('preserves unreadable teleconsult state as unavailable rather than consent denial', async () => {
+    const unreadableTx = {
+      ...tx,
+      scribeWorkspaceRecord: {
+        findFirst: async () => ({
+          ...h.record!,
+          bodyEncrypted: 'invalid stored ciphertext',
+          createdAt: now,
+          updatedAt: now,
+        }),
+      },
+    } as unknown as Prisma.TransactionClient;
+    await expect(
+      assertScribeTeleconsultDocumentationConsent(unreadableTx, sessionId, owner),
+    ).rejects.toMatchObject({ name: 'ScribeWorkspaceError', status: 503 });
+    expect(h.findSession).not.toHaveBeenCalled();
+  });
   it('permits explicitly incomplete pre-withdrawal draft salvage, not a normal complete save', async () => {
     h.record = fixture({
       patientConsent: 'withdrawn',

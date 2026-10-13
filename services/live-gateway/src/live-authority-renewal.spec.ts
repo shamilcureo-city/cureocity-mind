@@ -113,13 +113,13 @@ describe('secure in-place authorization renewal', () => {
   });
 
   it.each([
-    ['revoked consent', () => new Response('{}', { status: 403 })],
-    ['revoked capability', () => grant(['LIVE_ENCOUNTER'])],
-    ['invalid verifier response', () => new Response('{}')],
-  ])('requires current server authority: %s', async (_label, response) => {
+    ['revoked consent', () => new Response('{}', { status: 403 }), 'live_authority_denied'],
+    ['revoked capability', () => grant(['LIVE_ENCOUNTER']), 'live_authority_denied'],
+    ['invalid verifier response', () => new Response('{}'), 'live_authority_unavailable'],
+  ] as const)('requires current server authority: %s', async (_label, response, reason) => {
     fetchImpl.mockImplementation(async () => response());
     await expect(authority().renewToken(token(BASE + 600))).resolves.toBeNull();
-    expect(close).toHaveBeenCalledWith('live_authority_denied');
+    expect(close).toHaveBeenCalledWith(reason);
     expect(updateCapabilities).not.toHaveBeenCalled();
   });
 

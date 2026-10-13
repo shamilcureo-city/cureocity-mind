@@ -74,14 +74,32 @@ Authenticated sessions also require
 `LIVE_AUTHZ_REVALIDATE_URL=https://<app-host>/api/v1/internal/live-authority`.
 The app and gateway share `LIVE_GATEWAY_SECRET` for this service call. The
 gateway verifies current practitioner status and capabilities before starting,
-every five seconds, and immediately before regulated output. A denial, timeout,
+every five seconds, before audio input, and immediately before each batch of already-queued regulated output. A denial, timeout,
 or verifier outage closes the socket rather than continuing from stale token
 claims. Tune only with `LIVE_AUTHZ_INTERVAL_MS` (default 5000) and
-`LIVE_AUTHZ_TIMEOUT_MS` (default 2000).
+`LIVE_AUTHZ_TIMEOUT_MS` (default 4000).
 Production accepts only an HTTPS verifier URL with the exact internal endpoint
 path and refuses redirects. Keep the timeout shorter than the interval. Set the
 same secret on Vercel (`apps/web`) and Cloud Run (`live-gateway`), never in a
 `NEXT_PUBLIC_*` variable.
+
+Output batching retains FIFO order (including Pause acknowledgements after the
+words they cover). Only events waiting when a batch begins share its fresh
+queued-finalization check; later events require another check. Each event is
+filtered again against current capabilities, token expiry and the originating
+session's private review epoch immediately before sending. There is no cached
+grant, grace period, automatic retry, or sharing of output authority with audio
+capture.
+
+Both denial and temporary verifier failure still send `status: unauthorized`
+and close the socket. The additive `authorizationReason` is `denied` for explicit
+401/403, a valid denial or a missing mandatory capability; it is `unavailable`
+for timeouts, network failures, other unsuccessful HTTP responses or malformed
+responses. Older clients remain fail-closed. Recovery requires an explicit user
+action with a fresh token/consent check; it never restarts the microphone itself.
+`[live-authority]` diagnostics contain a synthetic socket correlation ID and
+allow-listed failure category, HTTP status and duration only, never tokens,
+identity/session identifiers, clinical content, raw exceptions or verifier URLs.
 
 ## Wire protocol
 
