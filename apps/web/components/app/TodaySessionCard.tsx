@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Card } from '../ui/Card';
 import { Badge } from '../ui/Badge';
@@ -66,6 +67,7 @@ export function TodaySessionCard({
   const [error, setError] = useState<string | null>(null);
   const [preparationPending, setPreparationPending] = useState(false);
   const [preparationDirty, setPreparationDirty] = useState(false);
+  const preparationDisclosureRef = useRef<HTMLDetailsElement>(null);
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [startMenuOpen, setStartMenuOpen] = useState(false);
   const [rowMenuOpen, setRowMenuOpen] = useState(false);
@@ -124,6 +126,12 @@ export function TodaySessionCard({
   useEffect(() => {
     if (startBlocked) setStartMenuOpen(false);
   }, [startBlocked]);
+
+  useEffect(() => {
+    if ((preparationDirty || preparationPending) && preparationDisclosureRef.current) {
+      preparationDisclosureRef.current.open = true;
+    }
+  }, [preparationDirty, preparationPending]);
 
   async function markNoShow() {
     if (busy || preparationPending || preparationDirty) return;
@@ -197,170 +205,198 @@ export function TodaySessionCard({
     return (
       <>
         <Card className={styles.hero}>
-          <div className={styles.heroHeader}>
-            <div className={styles.clientIdentity}>
-              <span className={styles.avatar} aria-hidden="true">
-                {session.clientName.trim().charAt(0) || 'C'}
-              </span>
-              <div className="min-w-0">
-                <Link href={`/app/clients/${session.clientId}`} className={styles.clientName}>
-                  {session.clientName}
-                </Link>
-                <p className={styles.sessionMeta}>
-                  <span>{session.kind.toLowerCase()}</span>
-                  {session.modality && <span>{session.modality}</span>}
-                  {session.clientIsDemo && <Badge tone="warn">Example</Badge>}
-                </p>
+          <div className={styles.heroMain}>
+            <div className={styles.heroContent}>
+              <p className={styles.appointmentLabel}>
+                {session.status === 'IN_PROGRESS' ? 'Unfinished session' : 'Next appointment'}
+              </p>
+              <div className={styles.heroHeader}>
+                <div className={styles.clientIdentity}>
+                  <span className={styles.avatar} aria-hidden="true">
+                    {clientInitials(session.clientName)}
+                  </span>
+                  <div className="min-w-0">
+                    <Link href={`/app/clients/${session.clientId}`} className={styles.clientName}>
+                      {session.clientName}
+                    </Link>
+                    <p className={styles.sessionMeta}>
+                      <span>{session.kind.toLowerCase()}</span>
+                      {session.modality && <span>{session.modality}</span>}
+                      {session.clientIsDemo && <Badge tone="warn">Example</Badge>}
+                    </p>
+                  </div>
+                </div>
+                <time
+                  className={styles.time}
+                  dateTime={
+                    session.status === 'IN_PROGRESS' && session.startedAt
+                      ? session.startedAt
+                      : session.scheduledAt
+                  }
+                >
+                  <small>
+                    {session.status === 'IN_PROGRESS' && session.startedAt ? 'Started' : 'Booked'}
+                  </small>
+                  {formatTime(
+                    session.status === 'IN_PROGRESS' && session.startedAt
+                      ? session.startedAt
+                      : session.scheduledAt,
+                  )}
+                  <small>
+                    {new Date(
+                      session.status === 'IN_PROGRESS' && session.startedAt
+                        ? session.startedAt
+                        : session.scheduledAt,
+                    ).toLocaleDateString('en-IN', {
+                      day: 'numeric',
+                      month: 'short',
+                      timeZone: 'Asia/Kolkata',
+                    })}{' '}
+                    · IST
+                  </small>
+                </time>
               </div>
-            </div>
-            <time
-              className={styles.time}
-              dateTime={
-                session.status === 'IN_PROGRESS' && session.startedAt
-                  ? session.startedAt
-                  : session.scheduledAt
-              }
-            >
-              <small>
-                {session.status === 'IN_PROGRESS' && session.startedAt ? 'Started' : 'Booked'}
-              </small>
-              {formatTime(
-                session.status === 'IN_PROGRESS' && session.startedAt
-                  ? session.startedAt
-                  : session.scheduledAt,
-              )}
-              <small>
-                {new Date(
-                  session.status === 'IN_PROGRESS' && session.startedAt
-                    ? session.startedAt
-                    : session.scheduledAt,
-                ).toLocaleDateString('en-IN', {
-                  day: 'numeric',
-                  month: 'short',
-                  timeZone: 'Asia/Kolkata',
-                })}{' '}
-                · IST
-              </small>
-            </time>
-          </div>
-          <ol className={styles.journey} aria-label="Session workflow">
-            <li aria-current={session.status === 'SCHEDULED' ? 'step' : undefined}>
-              <span aria-hidden="true">1</span>Prepare
-            </li>
-            <li aria-current={session.status === 'IN_PROGRESS' ? 'step' : undefined}>
-              <span aria-hidden="true">2</span>Session
-            </li>
-            <li>
-              <span aria-hidden="true">3</span>Review &amp; finish
-            </li>
-          </ol>
+              <ol className={styles.journey} aria-label="Session workflow">
+                <li aria-current={session.status === 'SCHEDULED' ? 'step' : undefined}>
+                  <span aria-hidden="true">1</span>Prepare
+                </li>
+                <li aria-current={session.status === 'IN_PROGRESS' ? 'step' : undefined}>
+                  <span aria-hidden="true">2</span>Session
+                </li>
+                <li>
+                  <span aria-hidden="true">3</span>Review &amp; finish
+                </li>
+              </ol>
 
-          {session.status === 'IN_PROGRESS' && (
-            <p className="mt-3 text-sm text-[var(--color-ink-2)]">
-              This session has not ended. Recording activity is not verified on this page.
-            </p>
-          )}
-          {session.status === 'IN_PROGRESS' ? (
-            <Link
-              href={resumeHref}
-              className="mt-4 block rounded-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white hover:bg-[var(--color-accent-hover)]"
-            >
-              Review or resume session
-            </Link>
-          ) : (
-            <div className="relative mt-4">
-              <div className="flex items-stretch">
+              {session.status === 'IN_PROGRESS' && (
+                <p className="mt-3 text-sm text-[var(--color-ink-2)]">
+                  This session has not ended. Recording activity is not verified on this page.
+                </p>
+              )}
+              <div className={styles.heroActions}>
+                {session.status === 'IN_PROGRESS' ? (
+                  <Link href={resumeHref} className={styles.resumeAction}>
+                    Review or resume session
+                  </Link>
+                ) : (
+                  <div className={styles.startControl}>
+                    <div className="flex items-stretch">
+                      {startBlocked ? (
+                        <button
+                          type="button"
+                          disabled
+                          aria-describedby={startStatusId}
+                          className="flex-1 cursor-not-allowed rounded-l-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white opacity-45"
+                        >
+                          {primaryStart.primaryLabel}
+                        </button>
+                      ) : (
+                        <Link
+                          href={primaryStart.href}
+                          className="flex-1 rounded-l-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+                        >
+                          {primaryStart.primaryLabel}
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        aria-label="More ways to start"
+                        aria-expanded={!startBlocked && startMenuOpen}
+                        aria-describedby={startBlocked ? startStatusId : undefined}
+                        disabled={startBlocked}
+                        onClick={() => setStartMenuOpen((o) => !o)}
+                        className="rounded-r-full border-l border-white/25 bg-[var(--color-accent)] px-4 text-base font-medium text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        ▾
+                      </button>
+                    </div>
+                    {startBlockedMessage && (
+                      <p
+                        id={startStatusId}
+                        className="mt-2 text-center text-xs leading-relaxed text-[var(--color-ink-3)]"
+                        role="status"
+                      >
+                        {startBlockedMessage}
+                      </p>
+                    )}
+                    {startMenuOpen && !startBlocked && (
+                      <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-xl border border-[var(--color-line)] bg-white shadow-lg">
+                        <Link
+                          href={secondaryStart.href}
+                          className="block w-full px-4 py-3 text-left hover:bg-[var(--color-surface-soft)]"
+                          onClick={() => setStartMenuOpen(false)}
+                        >
+                          <span className="block text-sm font-medium text-[var(--color-ink)]">
+                            {secondaryStart.menuLabel}
+                          </span>
+                          <span className="block text-xs text-[var(--color-ink-3)]">
+                            {secondaryStart.menuDesc}
+                          </span>
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {startBlocked ? (
                   <button
                     type="button"
                     disabled
                     aria-describedby={startStatusId}
-                    className="flex-1 cursor-not-allowed rounded-l-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white opacity-45"
+                    className={styles.clientOverviewLink}
                   >
-                    {primaryStart.primaryLabel}
+                    Client overview
                   </button>
                 ) : (
                   <Link
-                    href={primaryStart.href}
-                    className="flex-1 rounded-l-full bg-[var(--color-accent)] px-4 py-3.5 text-center text-base font-semibold text-white hover:bg-[var(--color-accent-hover)]"
+                    href={`/app/clients/${session.clientId}`}
+                    className={styles.clientOverviewLink}
                   >
-                    {primaryStart.primaryLabel}
+                    Client overview
                   </Link>
                 )}
-                <button
-                  type="button"
-                  aria-label="More ways to start"
-                  aria-expanded={!startBlocked && startMenuOpen}
-                  aria-describedby={startBlocked ? startStatusId : undefined}
-                  disabled={startBlocked}
-                  onClick={() => setStartMenuOpen((o) => !o)}
-                  className="rounded-r-full border-l border-white/25 bg-[var(--color-accent)] px-4 text-base font-medium text-white hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  ▾
-                </button>
               </div>
-              {startBlockedMessage && (
-                <p
-                  id={startStatusId}
-                  className="mt-2 text-center text-xs leading-relaxed text-[var(--color-ink-3)]"
-                  role="status"
-                >
-                  {startBlockedMessage}
-                </p>
-              )}
-              {startMenuOpen && !startBlocked && (
-                <div className="absolute right-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-xl border border-[var(--color-line)] bg-white shadow-lg">
-                  <Link
-                    href={secondaryStart.href}
-                    className="block w-full px-4 py-3 text-left hover:bg-[var(--color-surface-soft)]"
-                    onClick={() => setStartMenuOpen(false)}
-                  >
-                    <span className="block text-sm font-medium text-[var(--color-ink)]">
-                      {secondaryStart.menuLabel}
-                    </span>
-                    <span className="block text-xs text-[var(--color-ink-3)]">
-                      {secondaryStart.menuDesc}
-                    </span>
-                  </Link>
+
+              {session.status === 'SCHEDULED' && (
+                <div className={styles.appointmentActions}>
+                  {undoOffer ? (
+                    undoPill
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setRescheduleOpen(true)}
+                        disabled={busy !== null || preparationPending || preparationDirty}
+                        className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
+                      >
+                        Reschedule
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void markNoShow()}
+                        disabled={busy !== null || preparationPending || preparationDirty}
+                        className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
+                      >
+                        {busy === 'no-show' ? 'Marking…' : 'No-show'}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
-            </div>
-          )}
-
-          {session.status === 'SCHEDULED' && (
-            <div className="mt-2 flex items-center justify-center gap-1">
-              {undoOffer ? (
-                undoPill
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setRescheduleOpen(true)}
-                    disabled={busy !== null || preparationPending || preparationDirty}
-                    className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
-                  >
-                    Reschedule
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void markNoShow()}
-                    disabled={busy !== null || preparationPending || preparationDirty}
-                    className="rounded-full px-3 py-1.5 text-xs text-[var(--color-ink-2)] hover:bg-[var(--color-surface-soft)]"
-                  >
-                    {busy === 'no-show' ? 'Marking…' : 'No-show'}
-                  </button>
-                </>
+              {error && (
+                <p className="mt-2 text-xs text-[var(--color-warn)]" role="alert">
+                  {error}
+                </p>
               )}
             </div>
-          )}
-          {error && (
-            <p className="mt-2 text-xs text-[var(--color-warn)]" role="alert">
-              {error}
-            </p>
-          )}
+            <div className={styles.roomArt} aria-hidden="true">
+              <Image src="/mind/conversation-room.svg" alt="" width={480} height={320} priority />
+              <p>A moment to prepare. More room to listen.</p>
+            </div>
+          </div>
 
           {/* Safety and a short brief stay visible; full preparation is optional. */}
-          <div className="mt-4">
+          <div className={styles.preparationSummary}>
             {preparation ?? (
               <PreparePanel
                 clientId={session.clientId}
@@ -369,17 +405,28 @@ export function TodaySessionCard({
               />
             )}
             {sessionPreparationEnabled && (
-              <SessionPreparationPanel
-                key={session.id}
-                sessionId={session.id}
-                clientId={session.clientId}
-                clientName={session.clientName}
-                readOnly={
-                  session.status !== 'SCHEDULED' || rescheduleOpen || busy !== null || undoOffer
-                }
-                onPendingChange={setPreparationPending}
-                onDirtyChange={setPreparationDirty}
-              />
+              <details
+                className={styles.focusDisclosure}
+                ref={preparationDisclosureRef}
+                onToggle={(event) => {
+                  if ((preparationDirty || preparationPending) && !event.currentTarget.open) {
+                    event.currentTarget.open = true;
+                  }
+                }}
+              >
+                <summary>Visit focus (optional)</summary>
+                <SessionPreparationPanel
+                  key={session.id}
+                  sessionId={session.id}
+                  clientId={session.clientId}
+                  clientName={session.clientName}
+                  readOnly={
+                    session.status !== 'SCHEDULED' || rescheduleOpen || busy !== null || undoOffer
+                  }
+                  onPendingChange={setPreparationPending}
+                  onDirtyChange={setPreparationDirty}
+                />
+              </details>
             )}
           </div>
         </Card>
@@ -409,21 +456,28 @@ export function TodaySessionCard({
           <time className={styles.rowTime} dateTime={session.scheduledAt}>
             {formatTime(session.scheduledAt)}
           </time>
-          <Link href={`/app/clients/${session.clientId}`} className={styles.rowName}>
-            {session.clientName}
-          </Link>
-          <Badge tone={kindTone(session.kind)}>{session.kind.toLowerCase()}</Badge>
-          {session.clientIsDemo && <Badge tone="warn">Example</Badge>}
-          {dueMeasure && (
-            // TS7.4 — measurement debt is visible where the day happens; the
-            // link lands on the Journey card's one-tap send.
-            <Link
-              href={`/app/clients/${session.clientId}/journey#measure-${dueMeasure.toLowerCase().replace('-', '')}`}
-              className="rounded-full bg-[var(--color-warn-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-warn)] hover:underline"
-            >
-              {dueMeasure} due ▸
+          <span className={styles.rowAvatar} aria-hidden="true">
+            {clientInitials(session.clientName)}
+          </span>
+          <div className={styles.rowClient}>
+            <Link href={`/app/clients/${session.clientId}`} className={styles.rowName}>
+              {session.clientName}
             </Link>
-          )}
+            <div className={styles.rowMeta}>
+              <Badge tone={kindTone(session.kind)}>{session.kind.toLowerCase()}</Badge>
+              {session.clientIsDemo && <Badge tone="warn">Example</Badge>}
+              {dueMeasure && (
+                // TS7.4 — measurement debt is visible where the day happens; the
+                // link lands on the Journey card's one-tap send.
+                <Link
+                  href={`/app/clients/${session.clientId}/journey#measure-${dueMeasure.toLowerCase().replace('-', '')}`}
+                  className="rounded-full bg-[var(--color-warn-soft)] px-2.5 py-1 text-xs font-medium text-[var(--color-warn)] hover:underline"
+                >
+                  {dueMeasure} due ▸
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="relative flex shrink-0 items-center gap-1.5">
@@ -564,4 +618,16 @@ function kindTone(kind: 'INTAKE' | 'TREATMENT' | 'REVIEW'): 'accent' | 'muted' |
   if (kind === 'INTAKE') return 'accent';
   if (kind === 'REVIEW') return 'muted';
   return 'default';
+}
+
+function clientInitials(name: string): string {
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part.charAt(0))
+      .join('') || 'C'
+  );
 }

@@ -75,9 +75,56 @@ export function TodayAttentionQueue({ items }: { items: readonly TodayAttentionI
     <section className={styles.attention} aria-label="Needs your attention">
       <div className={styles.sectionHeading}>
         <h2>Needs action</h2>
-        <span>{actionCount} items shown</span>
+        <span>
+          {actionCount} {actionCount === 1 ? 'item' : 'items'} shown
+        </span>
       </div>
-      <Card className={styles.attentionCard}>
+      <Card className={`${styles.attentionCard} ${styles.actionQueue}`}>
+        <div className={styles.queueIntroduction}>
+          <span className={styles.queueIllustration} aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none">
+              <rect
+                x="11"
+                y="9"
+                width="33"
+                height="44"
+                rx="5"
+                transform="rotate(-9 11 9)"
+                fill="currentColor"
+                opacity=".15"
+              />
+              <path
+                d="M24 7h22a5 5 0 0 1 5 5v39a5 5 0 0 1-5 5H22a5 5 0 0 1-5-5V14a7 7 0 0 1 7-7Z"
+                fill="white"
+                stroke="currentColor"
+                strokeOpacity=".25"
+              />
+              <path
+                d="M26 19h16M26 26h16M26 33h12M26 40h8"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                opacity=".6"
+              />
+              <circle cx="49" cy="49" r="10" fill="currentColor" />
+              <path
+                d="m45 49 3 3 6-7"
+                stroke="white"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </span>
+          <h3>
+            {actionCount === 0 ? 'A little space between sessions.' : 'A little time to finish.'}
+          </h3>
+          <p>
+            {actionCount === 0
+              ? 'No actions in this view. Your full notes and client history are always available below.'
+              : 'Review the work that needs you. Nothing is signed or shared automatically.'}
+          </p>
+        </div>
         {failures.length > 0 && (
           <div aria-label="Failures to resolve">
             <QueueRows items={failures} />
@@ -90,7 +137,6 @@ export function TodayAttentionQueue({ items }: { items: readonly TodayAttentionI
             <QueueRows items={remaining} />
           </details>
         )}
-        {actionCount === 0 && <p className={styles.attentionItem}>No actions in this view.</p>}
         <p className={styles.queueFooter}>
           Responses cover the last 7 days; failures and unfinished work are retained.{' '}
           <Link href="/app/notes-due">All unsigned notes</Link> ·{' '}

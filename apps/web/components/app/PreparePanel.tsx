@@ -20,6 +20,8 @@ import {
 } from '@/lib/agreement-follow-up-save';
 import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
 import { MindCareContinuitySummary } from './MindCareContinuitySummary';
+import { MindPreparationBriefing } from './MindPreparationBriefing';
+import studio from './MindPreparationStudio.module.css';
 
 /**
  * Sprint 50 — Prepare panel on the Today screen.
@@ -42,6 +44,8 @@ interface Props {
   summaryVisible?: boolean;
   /** Legacy scratch remains on device but is not silently adopted into a visit. */
   hideDeviceScratch?: boolean;
+  /** A readable three-part briefing on the session preparation screen. */
+  presentation?: 'compact' | 'briefing';
 }
 
 export function PreparePanel(props: Props) {
@@ -53,6 +57,7 @@ function PreparePanelForClient({
   defaultOpen = false,
   summaryVisible = false,
   hideDeviceScratch = false,
+  presentation = 'compact',
 }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [data, setData] = useState<PrepareSummaryV1 | null>(null);
@@ -126,13 +131,23 @@ function PreparePanelForClient({
   }
 
   return (
-    <div className="mt-3 border-t border-[var(--color-line-soft)] pt-3">
+    <div
+      className={
+        presentation === 'briefing'
+          ? studio.panel
+          : 'mt-3 border-t border-[var(--color-line-soft)] pt-3'
+      }
+    >
       {summaryVisible && data && (
         <div className="mb-3 space-y-3">
           <PrepareSafety openCrises={data.openCrises} />
-          <p className="line-clamp-3 text-sm leading-relaxed text-[var(--color-ink-2)]">
-            {data.cachedBrief?.lastSessionRecap || 'No previous session recap is available.'}
-          </p>
+          {presentation === 'briefing' ? (
+            <MindPreparationBriefing data={data} />
+          ) : (
+            <p className="line-clamp-3 text-sm leading-relaxed text-[var(--color-ink-2)]">
+              {data.cachedBrief?.lastSessionRecap || 'No previous session recap is available.'}
+            </p>
+          )}
           <p className="text-xs text-[var(--color-ink-3)]">
             {preparationFreshness(data.briefGeneratedAt, data.briefIsStale).label} · Full context is
             available below.
@@ -155,7 +170,7 @@ function PreparePanelForClient({
           setOpen((v) => !v);
         }}
         aria-expanded={open}
-        className="flex min-h-11 items-center gap-2 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-3)] hover:text-[var(--color-ink)]"
+        className="flex min-h-11 items-center gap-2 text-sm font-medium text-[var(--color-accent)] hover:text-[var(--color-ink)]"
       >
         <span aria-hidden>{open ? '▾' : '▸'}</span>
         {open ? 'Hide full preparation' : 'Full preparation (optional)'}

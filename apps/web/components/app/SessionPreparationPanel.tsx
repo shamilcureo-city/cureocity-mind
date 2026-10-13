@@ -8,6 +8,7 @@ import {
 import { formatMindWorkDate } from '@/lib/mind-session-work';
 import { useUnsavedWorkGuard } from '@/lib/use-unsaved-work-guard';
 import { Button } from '../ui/Button';
+import studio from './MindPreparationStudio.module.css';
 
 export type SessionPreparationPanelProps = {
   sessionId: string;
@@ -106,10 +107,7 @@ function BoundSessionPreparationPanel({
     !sameScheduledTime(state.snapshot.scheduledAt, state.snapshot.preparation.body.scheduledAt);
   const error = ['ambiguous', 'conflict', 'unavailable'].includes(state.phase);
   return (
-    <section
-      aria-labelledby={`${id}-title`}
-      className="min-w-0 border-t border-[var(--color-line-soft)] pt-4"
-    >
+    <section aria-labelledby={`${id}-title`} className={studio.sessionFocus}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h3 id={`${id}-title`} className="font-serif text-xl text-[var(--color-ink)]">
           Focus for this visit
